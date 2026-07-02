@@ -17,7 +17,7 @@
 */
 
 import { Logger } from "@utils/Logger";
-import type { Channel, CustomEmoji, Message } from "@vencord/discord-types";
+import type { Channel, CloudUpload, CustomEmoji, Message } from "@vencord/discord-types";
 import { MessageStore } from "@webpack/common";
 import type { Promisable } from "type-fest";
 
@@ -30,7 +30,21 @@ export interface MessageObject {
     tts: boolean;
 }
 
-export interface SendMessageOptions {
+export interface MessageContentOptions {
+    content: string;
+    channelId: string;
+    command: unknown | null;
+    isGif?: boolean;
+    stickers?: string[];
+    uploads?: CloudUpload[];
+    alsoForwardToChannelId?: string;
+
+    // If you end up using these, update their type
+    scheduledTimestamp?: unknown;
+    mediaMention?: unknown;
+}
+
+export interface SendMessageOptions extends MessageContentOptions {
     messageReference?: Message["messageReference"];
     allowedMentions?: {
         parse: string[];
@@ -38,11 +52,6 @@ export interface SendMessageOptions {
     };
     location: string;
     stickerIds?: string[];
-    alsoForwardToChannelId?: string;
-
-    // If you end up using these, update their type
-    scheduledTimestamp?: unknown;
-    mediaMention?: unknown;
 }
 
 export interface SendMessageProps {
@@ -60,7 +69,9 @@ export type MessageEditListener = (channelId: string, messageId: string, message
 const sendListeners = new Set<MessageSendListener>();
 const editListeners = new Set<MessageEditListener>();
 
-export async function _handlePreSend(channelId: string, messageObj: MessageObject, options: SendMessageOptions, props: SendMessageProps) {
+export async function _handlePreSend(channelId: string, messageObj: MessageObject, options: SendMessageOptions, props: SendMessageProps, contentOptions: MessageContentOptions) {
+    options = { ...contentOptions, ...options };
+
     for (const listener of sendListeners) {
         try {
             const result = await listener(channelId, messageObj, options, props);
