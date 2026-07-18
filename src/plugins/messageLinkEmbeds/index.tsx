@@ -24,8 +24,6 @@ import { definePluginSettings } from "@api/Settings";
 import { getUserSettingLazy } from "@api/UserSettings";
 import { BaseText } from "@components/BaseText";
 import { Devs } from "@utils/constants.js";
-import { classNameFactory } from "@utils/css";
-import { classes } from "@utils/misc";
 import { Queue } from "@utils/Queue";
 import definePlugin, { OptionType } from "@utils/types";
 import { Channel, Message } from "@vencord/discord-types";
@@ -45,7 +43,6 @@ import {
 } from "@webpack/common";
 import { ComponentType, JSX } from "react";
 
-const cl = classNameFactory("vc-message-link-embeds-");
 const messageCache = new Map<string, {
     message?: Message;
     fetched: boolean;
@@ -306,7 +303,12 @@ function ChannelMessageEmbedAccessory({ message, channel }: MessageEmbedProps): 
                 }
             }}
             renderDescription={() => (
-                <div key={message.id} className={classes(cl("message"), settings.store.messageBackgroundColor && cl("search-result"))}>
+                <div key={message.id} style={!settings.store.messageBackgroundColor ? undefined : {
+                    backgroundColor: "var(--background-base-lower)",
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: "8px",
+                    paddingBottom: "8px",
+                }}>
                     <ChannelMessage
                         id={`message-link-embeds-${message.id}`}
                         message={message}
