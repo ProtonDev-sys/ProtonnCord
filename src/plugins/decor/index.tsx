@@ -122,7 +122,7 @@ export default definePlugin({
             find: '("UserProfileModalV2EditingPanel")',
             replacement: [
                 {
-                    match: /"inline"===.{0,100}#{intl::Zenogr::raw}\)/,
+                    match: /"inline"===.{0,100}bannerErrorMessage:\i\}\)/,
                     replace: "$self.ExperimentDecorSection(),$&"
                 }
             ]
