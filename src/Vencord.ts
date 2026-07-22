@@ -140,7 +140,10 @@ async function runUpdateCheck() {
         if (!isOutdated) return;
 
         if (Settings.autoUpdate) {
-            await update();
+            const didUpdate = await update();
+            if (!didUpdate) return;
+
+            if (IS_DISCORD_DESKTOP) VencordNative.tray.setUpdateState(false);
             if (Settings.autoUpdateNotification) {
                 if (notifiedForUpdatesThisSession) return;
                 notifiedForUpdatesThisSession = true;

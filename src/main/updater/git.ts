@@ -58,7 +58,7 @@ async function calculateGitChanges() {
     const existsOnOrigin = (await git("ls-remote", "origin", branch)).stdout.length > 0;
     if (!existsOnOrigin) return [];
 
-    const res = await git("log", `HEAD...origin/${branch}`, "--pretty=format:%an/%h/%s");
+    const res = await git("log", `HEAD...origin/${branch}`, "--pretty=format:%an/%H/%s");
 
     const commits = res.stdout.trim();
     return commits ? commits.split("\n").map(line => {
@@ -71,8 +71,11 @@ async function calculateGitChanges() {
 }
 
 async function pull() {
-    const res = await git("pull");
-    return res.stdout.includes("Fast-forward");
+    const before = (await git("rev-parse", "HEAD")).stdout.trim();
+    await git("pull", "--ff-only");
+    const after = (await git("rev-parse", "HEAD")).stdout.trim();
+
+    return before !== after;
 }
 
 async function build() {
