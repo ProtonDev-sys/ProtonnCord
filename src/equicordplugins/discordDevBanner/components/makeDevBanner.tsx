@@ -40,26 +40,36 @@ export function makeDevBanner(state?: string): string | JSX.Element {
         return replaced;
     }
 
-    const parts = replaced.split(/({.*?}|__NEWLINE__)/).filter(Boolean).map((part, i) => {
+    const parts: React.ReactNode[] = [];
+    for (const part of replaced.split(/({.*?}|__NEWLINE__)/)) {
+        if (!part) continue;
+        const i = parts.length;
         switch (part) {
             case "{discordIcon}":
-                return <span key={`icon-discord-${i}`} className="vc-discord-dev-banner-icons"><DiscordIcon /></span>;
+                parts.push(<span key={`icon-discord-${i}`} className="vc-discord-dev-banner-icons"><DiscordIcon /></span>);
+                break;
             case "{equicordIcon}":
-                return <span key={`icon-equicord-${i}`} className="vc-discord-dev-banner-icons"><EquicordIcon /></span>;
+                parts.push(<span key={`icon-equicord-${i}`} className="vc-discord-dev-banner-icons"><EquicordIcon /></span>);
+                break;
             case "{electronIcon}":
-                return <span key={`icon-electron-${i}`} className="vc-discord-dev-banner-icons"><ElectronIcon /></span>;
+                parts.push(<span key={`icon-electron-${i}`} className="vc-discord-dev-banner-icons"><ElectronIcon /></span>);
+                break;
             case "{chromiumIcon}":
-                return <span key={`icon-chromium-${i}`} className="vc-discord-dev-banner-icons"><ChromiumIcon /></span>;
+                parts.push(<span key={`icon-chromium-${i}`} className="vc-discord-dev-banner-icons"><ChromiumIcon /></span>);
+                break;
             case "{devbannerIcon}":
-                return <span key={`icon-dev-${i}`} className="vc-discord-dev-banner-icons"><DevBannerIcon /></span>;
+                parts.push(<span key={`icon-dev-${i}`} className="vc-discord-dev-banner-icons"><DevBannerIcon /></span>);
+                break;
             case "{clientIcon}":
-                return <span key={`icon-dev-${i}`} className="vc-discord-dev-banner-icons"><ClientIcon /></span>;
+                parts.push(<span key={`icon-dev-${i}`} className="vc-discord-dev-banner-icons"><ClientIcon /></span>);
+                break;
             case "__NEWLINE__":
-                return <br key={`br-${i}`} />;
+                parts.push(<br key={`br-${i}`} />);
+                break;
             default:
-                return <React.Fragment key={`text-${i}`}>{part}</React.Fragment>;
+                parts.push(<React.Fragment key={`text-${i}`}>{part}</React.Fragment>);
         }
-    });
+    }
 
     return <div style={{ display: "inline" }}>{parts}</div>;
 }

@@ -91,6 +91,10 @@ interface NotificationObject {
 
 const notificationsShouldNotify = findByCodeLazy(".SUPPRESS_NOTIFICATIONS))return!1");
 const logger = new Logger("XSOverlay");
+const EMOTE_MENTION_REGEX = /<a?:\w+:\d+>/g;
+const CHANNEL_MENTION_REGEX = /<#(\d+)>/g;
+const MAX_AVATAR_ICON_CACHE_SIZE = 64;
+const avatarIconCache = new Map<string, Promise<string>>();
 
 const settings = definePluginSettings({
     webSocketPort: {
@@ -174,16 +178,64 @@ const settings = definePluginSettings({
     },
 });
 
-let socket: WebSocket;
+let socket: WebSocket | null = null;
+let socketGeneration = 0;
+
+async function connectSocket() {
+    const generation = ++socketGeneration;
+    const previousSocket = socket;
+    const nextSocket = new WebSocket(`ws://127.0.0.1:${settings.store.webSocketPort ?? 42070}/?client=ProtonnCord`);
+    socket = nextSocket;
+    previousSocket?.close();
+
+    return new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            if (socket === nextSocket && generation === socketGeneration) {
+                socket = null;
+                nextSocket.close();
+            }
+
+            reject(new Error("Timed out connecting to XSOverlay"));
+        }, 3000);
+
+        const cleanup = () => {
+            clearTimeout(timeout);
+            nextSocket.onopen = null;
+            nextSocket.onerror = null;
+            nextSocket.onclose = null;
+        };
+
+        nextSocket.onopen = () => {
+            cleanup();
+
+            if (socket !== nextSocket || generation !== socketGeneration) {
+                nextSocket.close();
+                return;
+            }
+
+            resolve();
+        };
+        nextSocket.onerror = () => {
+            cleanup();
+            if (socket === nextSocket && generation === socketGeneration) socket = null;
+            reject(new Error("Failed to connect to XSOverlay"));
+        };
+        nextSocket.onclose = () => {
+            cleanup();
+            if (socket === nextSocket && generation === socketGeneration) socket = null;
+            reject(new Error("XSOverlay socket closed before connecting"));
+        };
+    });
+}
 
 async function start() {
-    if (socket) socket.close();
-    socket = new WebSocket(`ws://127.0.0.1:${settings.store.webSocketPort ?? 42070}/?client=Equicord`);
-    return new Promise((resolve, reject) => {
-        socket.onopen = resolve;
-        socket.onerror = reject;
-        setTimeout(reject, 3000);
-    });
+    await connectSocket().catch(error => logger.error("Failed to connect to XSOverlay", error));
+}
+
+function stopSocket() {
+    socketGeneration++;
+    socket?.close();
+    socket = null;
 }
 
 const Native = VencordNative.pluginHelpers.XSOverlay as PluginNative<typeof import("./native")>;
@@ -199,14 +251,16 @@ export default definePlugin({
 
     flux: {
         CALL_UPDATE({ call }: { call: Call; }) {
-            if (call?.ringing?.includes(UserStore.getCurrentUser().id) && settings.store.callNotifications) {
+            const currentUserId = UserStore.getCurrentUser()?.id;
+            if (currentUserId && call?.ringing?.includes(currentUserId) && settings.store.callNotifications) {
                 const channel = ChannelStore.getChannel(call.channel_id);
-                sendOtherNotif("Incoming call", `${channel.name} is calling you...`);
+                sendOtherNotif("Incoming call", `${channel?.name ?? "Unknown channel"} is calling you...`);
             }
         },
         MESSAGE_CREATE({ message, optimistic }: { message: Message; optimistic: boolean; }) {
             if (optimistic) return;
             const channel = ChannelStore.getChannel(message.channel_id);
+            if (!channel) return;
             if (!shouldNotify(message, message.channel_id)) return;
 
             const pingColor = settings.store.pingColor.replaceAll("#", "").trim();
@@ -224,7 +278,13 @@ export default definePlugin({
                     titleString = message.author.username.trim();
                     break;
                 case ChannelTypes.GROUP_DM:
-                    const channelName = channel.name.trim() ?? channel.rawRecipients.map(e => e.username).join(", ");
+                    let fallbackName = "";
+                    for (const recipient of channel.rawRecipients) {
+                        if (fallbackName) fallbackName += ", ";
+                        fallbackName += recipient.username;
+                    }
+
+                    const channelName = channel.name.trim() || fallbackName;
                     titleString = `${message.author.username} (${channelName})`;
                     break;
             }
@@ -271,28 +331,16 @@ export default definePlugin({
                     const role = GuildRoleStore.getRole(channel.guild_id, roleId);
                     if (!role) continue;
                     const roleColor = role.colorString ?? `#${pingColor}`;
-                    finalMsg = finalMsg.replace(`<@&${roleId}>`, `<b><color=${roleColor}>@${role.name}</color></b>`);
+                    finalMsg = finalMsg.split(`<@&${roleId}>`).join(`<b><color=${roleColor}>@${role.name}</color></b>`);
                 }
             }
 
             // make emotes and channel mentions readable
-            const emoteMatches = finalMsg.match(new RegExp("(<a?:\\w+:\\d+>)", "g"));
-            const channelMatches = finalMsg.match(new RegExp("<(#\\d+)>", "g"));
-
-            if (emoteMatches) {
-                for (const eMatch of emoteMatches) {
-                    finalMsg = finalMsg.replace(new RegExp(`${eMatch}`, "g"), `:${eMatch.split(":")[1]}:`);
-                }
-            }
-
-            // color channel mentions
-            if (channelMatches) {
-                for (const cMatch of channelMatches) {
-                    let channelId = cMatch.split("<#")[1];
-                    channelId = channelId.substring(0, channelId.length - 1);
-                    finalMsg = finalMsg.replace(new RegExp(`${cMatch}`, "g"), `<b><color=#${channelPingColor}>#${ChannelStore.getChannel(channelId).name}</color></b>`);
-                }
-            }
+            finalMsg = finalMsg.replace(EMOTE_MENTION_REGEX, match => `:${match.split(":")[1]}:`);
+            finalMsg = finalMsg.replace(CHANNEL_MENTION_REGEX, (_, channelId) => {
+                const mentionedChannel = ChannelStore.getChannel(channelId);
+                return `<b><color=#${channelPingColor}>#${mentionedChannel?.name ?? "unknown-channel"}</color></b>`;
+            });
 
             if (shouldIgnoreForChannelType(channel)) return;
             sendMsgNotif(titleString, finalMsg, message);
@@ -302,7 +350,8 @@ export default definePlugin({
     start,
 
     stop() {
-        socket.close();
+        stopSocket();
+        avatarIconCache.clear();
     },
 
     settingsAboutComponent: () => (
@@ -320,14 +369,35 @@ function shouldIgnoreForChannelType(channel: Channel) {
     else return !settings.store.serverNotifications;
 }
 
-function sendMsgNotif(titleString: string, content: string, message: Message) {
-    fetch(`https://cdn.discordapp.com/avatars/${message.author.id}/${message.author.avatar}.png?size=128`)
+function getCachedAvatarIcon(userId: string, avatar: string) {
+    const cacheKey = `${userId}:${avatar}`;
+    const cached = avatarIconCache.get(cacheKey);
+    if (cached) return cached;
+
+    if (avatarIconCache.size >= MAX_AVATAR_ICON_CACHE_SIZE) {
+        const oldestKey = avatarIconCache.keys().next().value;
+        if (oldestKey != null) avatarIconCache.delete(oldestKey);
+    }
+
+    const promise = fetch(`https://cdn.discordapp.com/avatars/${userId}/${avatar}.png?size=128`)
         .then(response => response.blob())
         .then(blob => new Promise<string>(resolve => {
             const r = new FileReader();
             r.onload = () => resolve((r.result as string).split(",")[1]);
             r.readAsDataURL(blob);
-        })).then(result => {
+        }))
+        .catch(error => {
+            avatarIconCache.delete(cacheKey);
+            throw error;
+        });
+
+    avatarIconCache.set(cacheKey, promise);
+    return promise;
+}
+
+function sendMsgNotif(titleString: string, content: string, message: Message) {
+    getCachedAvatarIcon(message.author.id, message.author.avatar)
+        .then(result => {
             const msgData: NotificationObject = {
                 type: 1,
                 timeout: settings.store.lengthBasedTimeout ? calculateTimeout(content) : settings.store.timeout,
@@ -342,8 +412,9 @@ function sendMsgNotif(titleString: string, content: string, message: Message) {
                 sourceApp: "Vencord"
             };
 
-            sendToOverlay(msgData);
-        });
+            void sendToOverlay(msgData).catch(error => logger.error("Failed to send XSOverlay message notification", error));
+        })
+        .catch(error => logger.error("Failed to load XSOverlay notification avatar", error));
 }
 
 function sendOtherNotif(content: string, titleString: string) {
@@ -358,9 +429,9 @@ function sendOtherNotif(content: string, titleString: string) {
         content: content,
         useBase64Icon: false,
         icon: "default",
-        sourceApp: "Equicord"
+        sourceApp: "Protonn Cord"
     };
-    sendToOverlay(msgData);
+    void sendToOverlay(msgData).catch(error => logger.error("Failed to send XSOverlay notification", error));
 }
 
 async function sendToOverlay(notif: NotificationObject) {
@@ -375,13 +446,14 @@ async function sendToOverlay(notif: NotificationObject) {
         jsonData: JSON.stringify(notif),
         rawData: null
     };
-    if (socket.readyState !== socket.OPEN) await start();
+    if (socket?.readyState !== WebSocket.OPEN) await connectSocket();
+    if (socket?.readyState !== WebSocket.OPEN) throw new Error("XSOverlay socket is not open");
     socket.send(JSON.stringify(apiObject));
 }
 
 function shouldNotify(message: Message, channel: string) {
     const currentUser = UserStore.getCurrentUser();
-    if (message.author.id === currentUser.id) return false;
+    if (!currentUser || message.author.id === currentUser.id) return false;
     if (message.author.bot && !settings.store.botNotifications) return false;
     return notificationsShouldNotify(message, channel);
 }

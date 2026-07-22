@@ -6,20 +6,26 @@
 
 import { Logger } from "@utils/Logger";
 import { Activity } from "@vencord/discord-types";
-import { ApplicationAssetUtils, FluxDispatcher, showToast } from "@webpack/common";
+import { FluxDispatcher, showToast } from "@webpack/common";
 
 import { settings } from "../settings";
 import { AbsMediaData, AbsSession } from "../types/audiobookshelf";
+import { getCachedApplicationAsset } from "./assetCache";
 
 const APPLICATION_ID = "1381423044907503636";
 const SOCKET_ID = "RichPresence_ABS";
+const AUTH_FAILURE_COOLDOWN_MS = 60_000;
 const logger = new Logger("RichPresence:AudioBookShelf");
 
 let authToken: string | null = null;
 let updateInterval: NodeJS.Timeout | undefined;
+let hasShownConfigError = false;
+let isUpdating = false;
+let lastAuthFailureAt = 0;
+let updateGeneration = 0;
 
 async function getAsset(key: string): Promise<string> {
-    return (await ApplicationAssetUtils.fetchAssetIds(APPLICATION_ID, [key]))[0];
+    return getCachedApplicationAsset(APPLICATION_ID, key);
 }
 
 function setActivity(activity: Activity | null) {
@@ -29,8 +35,12 @@ function setActivity(activity: Activity | null) {
 async function authenticate(): Promise<boolean> {
     const { abs_serverUrl, abs_username, abs_password } = settings.store;
     if (!abs_serverUrl || !abs_username || !abs_password) {
-        logger.warn("AudioBookShelf server URL, username, or password is not set.");
-        showToast("AudioBookShelf RPC is not configured.", "failure", { duration: 15000 });
+        if (!hasShownConfigError) {
+            logger.warn("AudioBookShelf server URL, username, or password is not set.");
+            showToast("AudioBookShelf RPC is not configured.", "failure", { duration: 15000 });
+            hasShownConfigError = true;
+        }
+        lastAuthFailureAt = Date.now();
         return false;
     }
 
@@ -45,15 +55,21 @@ async function authenticate(): Promise<boolean> {
         if (!res.ok) throw `${res.status} ${res.statusText}`;
         const data = await res.json();
         authToken = data.user?.token;
+        if (authToken) {
+            hasShownConfigError = false;
+            lastAuthFailureAt = 0;
+        }
         return !!authToken;
     } catch (e) {
         logger.error("Failed to authenticate with AudioBookShelf", e);
         authToken = null;
+        lastAuthFailureAt = Date.now();
         return false;
     }
 }
 
 async function fetchMediaData(): Promise<AbsMediaData | null> {
+    if (!authToken && lastAuthFailureAt && Date.now() - lastAuthFailureAt < AUTH_FAILURE_COOLDOWN_MS) return null;
     if (!authToken && !(await authenticate())) return null;
 
     try {
@@ -126,23 +142,38 @@ async function getActivity(): Promise<Activity | null> {
 }
 
 async function updatePresence() {
+    if (isUpdating) return;
+
+    const generation = updateGeneration;
+    isUpdating = true;
     try {
-        setActivity(await getActivity());
+        const activity = await getActivity();
+        if (generation === updateGeneration) setActivity(activity);
     } catch (e) {
         logger.error("Failed to update presence", e);
-        setActivity(null);
+        if (generation === updateGeneration) setActivity(null);
+    } finally {
+        if (generation === updateGeneration) isUpdating = false;
     }
 }
 
 export function start() {
+    if (updateInterval) return;
+
+    updateGeneration++;
     authToken = null;
-    updatePresence();
+    hasShownConfigError = false;
+    lastAuthFailureAt = 0;
+    void updatePresence();
     updateInterval = setInterval(updatePresence, 10000);
 }
 
 export function stop() {
+    updateGeneration++;
     clearInterval(updateInterval);
     updateInterval = undefined;
+    isUpdating = false;
     authToken = null;
+    lastAuthFailureAt = 0;
     setActivity(null);
 }

@@ -29,6 +29,15 @@ import {
     showInstallFinishedAlert,
 } from "../misc/constants";
 
+function countEnabledUserPlugins(plugins: Array<{ name: string; }>): number {
+    let count = 0;
+    for (const plugin of plugins) {
+        if (Vencord.Settings.plugins[plugin.name]?.enabled) count++;
+    }
+
+    return count;
+}
+
 function UserPluginsTab() {
     const rs = useSettings(["plugins.*"]);
     const [pluginsLoaded, loadPlugins] = useState(false);
@@ -79,7 +88,7 @@ function UserPluginsTab() {
     return (
         <STab
             // @ts-ignore
-            title={`UserPlugins${pluginsLoaded ? ` (${plugins.length}, ${plugins.filter(p => Vencord.Settings.plugins[p.name].enabled).length} enabled)` : ""}`}
+            title={`UserPlugins${pluginsLoaded ? ` (${plugins.length}, ${countEnabledUserPlugins(plugins)} enabled)` : ""}`}
         >
             <div className={cl("update-check-container")}>
                 {isObjectEmpty(pluginsWithUpdates) ? (

@@ -38,7 +38,7 @@ export async function getPayload(message: Message): Promise<ApiMessage[] | null>
     const prevMessages = getPreviousMessages(message, settings.store.context);
     const allMessages = [...prevMessages, message];
 
-    const currentUserId = UserStore.getCurrentUser().id;
+    const currentUserId = UserStore.getCurrentUser()?.id;
 
     const payload: ApiMessage[] = [];
 
@@ -46,7 +46,7 @@ export async function getPayload(message: Message): Promise<ApiMessage[] | null>
         const parsed = parseMessageContent(msg);
         if (!parsed) continue;
 
-        const isOwn = msg.author?.id === currentUserId;
+        const isOwn = currentUserId != null && msg.author?.id === currentUserId;
         const isTargetMessage = msg.id === message.id;
         const role = (isOwn && !isTargetMessage && settings.store.treatSelfAsAssistant) ? "assistant" : "user";
 
@@ -93,9 +93,19 @@ export async function getPayload(message: Message): Promise<ApiMessage[] | null>
 }
 
 export function getPreviousMessages(message: Message, count: number): Message[] {
-    const allMessages: Message[] = MessageStore.getMessages(message.channel_id)._array;
-    const idx = allMessages.findIndex(m => m.id === message.id);
-    if (idx <= 0 || count === 0) return [];
+    if (count <= 0) return [];
+
+    const allMessages: Message[] | undefined = MessageStore.getMessages(message.channel_id)?._array;
+    if (!allMessages?.length) return [];
+
+    let idx = -1;
+    for (let i = allMessages.length - 1; i >= 0; i--) {
+        if (allMessages[i].id !== message.id) continue;
+        idx = i;
+        break;
+    }
+
+    if (idx <= 0) return [];
     return allMessages.slice(Math.max(0, idx - count), idx);
 }
 
@@ -194,6 +204,8 @@ async function toBase64Image(part: ImagePart): Promise<ImagePart | null> {
 }
 
 export async function handleResponse(message: Message, response: string): Promise<string> {
+    if (!response.trim()) return "";
+
     switch (settings.store.mode) {
         case "autoreply":
             sendMessage(

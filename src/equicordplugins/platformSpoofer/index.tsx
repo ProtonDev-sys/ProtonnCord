@@ -77,8 +77,9 @@ export default definePlugin({
     ],
     getPlatform(bypass, userId?: any) {
         const platform = settings.store.platform ?? "desktop";
+        const currentUserId = UserStore.getCurrentUser()?.id;
 
-        if (bypass || userId === UserStore.getCurrentUser().id) {
+        if (bypass || (currentUserId != null && userId === currentUserId)) {
             switch (platform) {
                 case "desktop":
                     return { browser: "Discord Client" };

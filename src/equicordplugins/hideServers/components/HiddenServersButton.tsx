@@ -17,7 +17,11 @@ const cl = classNameFactory("vc-hideservers-");
 function HiddenServersButton() {
     const hiddenGuilds = useStateFromStores([HiddenServersStore], () => HiddenServersStore.hiddenGuilds, undefined, (old, newer) => old.size === newer.size);
     // if youve left a server dont show it in the count
-    const actuallyHidden = Array.from(hiddenGuilds).filter(x => GuildStore.getGuild(x)).length;
+    let actuallyHidden = 0;
+    for (const guildId of hiddenGuilds) {
+        if (GuildStore.getGuild(guildId)) actuallyHidden++;
+    }
+
     return (
         <div className={cl("button-wrapper")}>
             {actuallyHidden > 0 ? (

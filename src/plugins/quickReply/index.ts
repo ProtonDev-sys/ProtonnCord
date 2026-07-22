@@ -133,12 +133,14 @@ function jumpIfOffScreen(channelId: string, messageId: string) {
 }
 
 function getNextMessage(isUp: boolean, isReply: boolean) {
-    let messages: Message[] = MessageStore.getMessages(SelectedChannelStore.getChannelId())._array;
+    const messages: Message[] = MessageStore.getMessages(SelectedChannelStore.getChannelId())?._array ?? [];
 
-    const meId = UserStore.getCurrentUser().id;
+    const meId = UserStore.getCurrentUser()?.id;
+    if (!meId) return null;
+
     const hasNoBlockedMessages = isPluginEnabled(NoBlockedMessagesPlugin.name);
 
-    messages = messages.filter(m => {
+    const isEligibleMessage = (m: Message) => {
         if (m.deleted) return false;
         if (!isReply && m.author.id !== meId) return false; // editing only own messages
         if (!MessageTypeSets.REPLYABLE.has(m.type) || m.hasFlag(MessageFlags.EPHEMERAL)) return false;
@@ -146,16 +148,29 @@ function getNextMessage(isUp: boolean, isReply: boolean) {
         if (hasNoBlockedMessages && NoBlockedMessagesPlugin.isSuppressed(m).suppressed) return false;
 
         return true;
-    });
+    };
 
     const findNextNonDeleted = (id: string | null) => {
-        if (id === null) return messages[messages.length - 1];
+        if (id === null) {
+            for (let i = messages.length - 1; i >= 0; i--) {
+                if (isEligibleMessage(messages[i])) return messages[i];
+            }
+            return null;
+        }
 
         const idx = messages.findIndex(m => m.id === id);
-        if (idx === -1) return messages[messages.length - 1];
+        if (idx === -1) {
+            for (let i = messages.length - 1; i >= 0; i--) {
+                if (isEligibleMessage(messages[i])) return messages[i];
+            }
+            return null;
+        }
 
-        const i = isUp ? idx - 1 : idx + 1;
-        return messages[i] ?? null;
+        const step = isUp ? -1 : 1;
+        for (let i = idx + step; i >= 0 && i < messages.length; i += step) {
+            if (isEligibleMessage(messages[i])) return messages[i];
+        }
+        return null;
     };
 
     if (isReply) {
@@ -184,6 +199,7 @@ function shouldMention(message: Message) {
 // handle next/prev reply
 function nextReply(isUp: boolean) {
     const currChannel = ChannelStore.getChannel(SelectedChannelStore.getChannelId());
+    if (!currChannel) return;
     if (currChannel.guild_id && !PermissionStore.can(PermissionsBits.SEND_MESSAGES, currChannel)) return;
 
     const message = getNextMessage(isUp, true);
@@ -196,7 +212,8 @@ function nextReply(isUp: boolean) {
     }
 
     const channel = ChannelStore.getChannel(message.channel_id);
-    const meId = UserStore.getCurrentUser().id;
+    const meId = UserStore.getCurrentUser()?.id;
+    if (!channel || !meId) return;
 
     Dispatcher.dispatch({
         type: "CREATE_PENDING_REPLY",
@@ -214,6 +231,7 @@ function nextReply(isUp: boolean) {
 // handle next/prev edit
 function nextEdit(isUp: boolean) {
     const currChannel = ChannelStore.getChannel(SelectedChannelStore.getChannelId());
+    if (!currChannel) return;
     if (currChannel.guild_id && !PermissionStore.can(PermissionsBits.SEND_MESSAGES, currChannel)) return;
     const message = getNextMessage(isUp, false);
 

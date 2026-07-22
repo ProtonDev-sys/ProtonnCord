@@ -31,10 +31,29 @@ const settings = definePluginSettings({
     },
 });
 
+function isVoiceChannelAtLimit(channel: Channel): boolean {
+    const userLimit = channel.userLimit ?? 0;
+    if (!userLimit) return false;
+
+    let count = 0;
+    const voiceStates = VoiceStateStore.getVoiceStatesForChannel(channel.id) ?? {};
+    for (const _userId in voiceStates) {
+        if (++count >= userLimit) return true;
+    }
+
+    return false;
+}
+
+function shouldWaitForSlot(channel: Channel | null | undefined): channel is Channel {
+    return !!channel
+        && channel.type === ChannelType.GUILD_VOICE
+        && !!channel.userLimit
+        && !PermissionStore.can(PermissionsBits.MOVE_MEMBERS, channel)
+        && isVoiceChannelAtLimit(channel);
+}
+
 const ChannelContext: NavContextMenuPatchCallback = (children, { channel }) => {
-    if (channel?.type !== ChannelType.GUILD_VOICE || !channel.userLimit) return;
-    if (PermissionStore.can(PermissionsBits.MOVE_MEMBERS, channel)) return;
-    if (Object.keys(VoiceStateStore.getVoiceStatesForChannel(channel.id)).length < channel.userLimit) return;
+    if (!shouldWaitForSlot(channel)) return;
 
     const isWaiting = waitingChannelId === channel.id;
 
@@ -48,9 +67,7 @@ const ChannelContext: NavContextMenuPatchCallback = (children, { channel }) => {
 };
 
 function promptVoiceChannel(channel: Channel | null | undefined): boolean {
-    if (!channel || channel.type !== ChannelType.GUILD_VOICE || !channel.userLimit) return false;
-    if (PermissionStore.can(PermissionsBits.MOVE_MEMBERS, channel)) return false;
-    if (Object.keys(VoiceStateStore.getVoiceStatesForChannel(channel.id)).length < channel.userLimit) return false;
+    if (!shouldWaitForSlot(channel)) return false;
     if (waitingChannelId === channel.id) return true;
 
     showNotice(`Voice channel ${channel.name} is full. Wait for a slot?`, "Wait", () => {
@@ -87,12 +104,12 @@ export default definePlugin({
             if (!waitingChannelId) return;
 
             const channel = ChannelStore.getChannel(waitingChannelId);
-            if (!channel?.userLimit) {
+            if (!channel || channel.type !== ChannelType.GUILD_VOICE || !channel.userLimit) {
                 waitingChannelId = null;
                 return;
             }
 
-            if (Object.keys(VoiceStateStore.getVoiceStatesForChannel(waitingChannelId)).length < channel.userLimit) {
+            if (PermissionStore.can(PermissionsBits.MOVE_MEMBERS, channel) || !isVoiceChannelAtLimit(channel)) {
                 const channelId = waitingChannelId;
                 waitingChannelId = null;
                 if (settings.store.notificationSound) { playAudio(NOTIFICATION_AUDIO_URL); }

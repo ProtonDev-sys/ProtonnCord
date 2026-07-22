@@ -119,19 +119,30 @@ export default definePlugin({
         const [query, setQuery] = React.useState<string | undefined>();
         const [stickerPackMetas, setStickerPackMetas] = React.useState<StickerPackMeta[]>([]);
         const [stickerPacks, setStickerPacks] = React.useState<StickerPack[]>([]);
-        const [counter, setCounter] = React.useState(0);
         const [selectedStickerPackId, setSelectedStickerPackId] = React.useState<string | null>(null);
 
         const ffmpegLoaded = React.useState(false);
         const ffmpeg = React.useState<FFmpeg>(new FFmpeg());
 
-        const getMetasSignature = (m: StickerPackMeta[]) => m.map(x => x.id).sort().join(",");
+        const getMetasSignature = (m: StickerPackMeta[]) => {
+            const ids: string[] = [];
+            for (const meta of m) {
+                ids.push(meta.id);
+            }
+
+            ids.sort();
+
+            let signature = "";
+            for (const id of ids) {
+                if (signature) signature += ",";
+                signature += id;
+            }
+
+            return signature;
+        };
 
         React.useEffect(() => {
             (async () => {
-                console.log("Updating sticker packs...", counter);
-                setCounter(counter + 1);
-
                 const sps = (await Promise.all(
                     stickerPackMetas.map(meta => getStickerPack(meta.id))
                 ))

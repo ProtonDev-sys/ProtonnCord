@@ -213,11 +213,17 @@ function splitTemplate(template: string) {
 function parseTemplateItem(entry: string) {
     const [prefix, suffix] = entry.split(templatePattern);
     const names = entry.replace(prefix, "").replace(suffix, "").trim().replaceAll(/{|}/g, "").split(/,\s*/);
+    const targetProcessedNames: string[] = [];
+
+    for (const rawName of names) {
+        const name = rawName.trim();
+        if (name) targetProcessedNames.push(name);
+    }
 
     return {
         prefix: prefix ? prefix.trim() : "",
         suffix: suffix ? suffix.trim() : "",
-        targetProcessedNames: names.map(name => name.trim()).filter(name => name.length > 0)
+        targetProcessedNames
     };
 }
 
@@ -612,7 +618,14 @@ function renderUsername(
         return [null, null, null];
     }
 
-    const prioritizeUsername = (new Set([first, second, third, fourth, fifth].filter(Boolean).map(pos => pos.name.toLowerCase())).size > 1);
+    const uniqueNames = new Set<string>();
+    if (first) uniqueNames.add(first.name.toLowerCase());
+    if (second) uniqueNames.add(second.name.toLowerCase());
+    if (third) uniqueNames.add(third.name.toLowerCase());
+    if (fourth) uniqueNames.add(fourth.name.toLowerCase());
+    if (fifth) uniqueNames.add(fifth.name.toLowerCase());
+
+    const prioritizeUsername = uniqueNames.size > 1;
 
     if (removeDuplicates) {
         // Remove duplicates from back to front. Prioritize the earlier name, unless it's the username and there's more than one unique option, then prioritize it.
@@ -628,13 +641,31 @@ function renderUsername(
         second && first && second.name.toLowerCase() === first.name.toLowerCase() ? second.type === "user" && prioritizeUsername ? first = null : second = null : null;
     }
 
-    const remainingNames = [first, second, third, fourth, fifth].filter(Boolean);
+    let compactedFirst: typeof first = null;
+    let compactedSecond: typeof first = null;
+    let compactedThird: typeof first = null;
+    let compactedFourth: typeof first = null;
+    let compactedFifth: typeof first = null;
+    const appendRemainingName = (position: typeof first) => {
+        if (!position) return;
+        if (!compactedFirst) compactedFirst = position;
+        else if (!compactedSecond) compactedSecond = position;
+        else if (!compactedThird) compactedThird = position;
+        else if (!compactedFourth) compactedFourth = position;
+        else compactedFifth = position;
+    };
 
-    first = remainingNames.shift();
-    second = remainingNames.shift();
-    third = remainingNames.shift();
-    fourth = remainingNames.shift();
-    fifth = remainingNames.shift();
+    appendRemainingName(first);
+    appendRemainingName(second);
+    appendRemainingName(third);
+    appendRemainingName(fourth);
+    appendRemainingName(fifth);
+
+    first = compactedFirst;
+    second = compactedSecond;
+    third = compactedThird;
+    fourth = compactedFourth;
+    fifth = compactedFifth;
 
     const shouldGradientGlow = isHovering && hasGradient;
     const shouldAnimateGradients = shouldGradientGlow && !AccessibilityStore.useReducedMotion;
@@ -645,7 +676,12 @@ function renderUsername(
     const thirdDataText = third && shouldAnimateSecondaryNames ? third.name : "";
     const fourthDataText = fourth && shouldAnimateSecondaryNames ? fourth.name : "";
     const fifthDataText = fifth && shouldAnimateSecondaryNames ? fifth.name : "";
-    const allDataText = [firstDataText, secondDataText, thirdDataText, fourthDataText, fifthDataText].filter(Boolean).join(nameSeparator).trim();
+    let allDataText = firstDataText;
+    if (secondDataText) allDataText += nameSeparator + secondDataText;
+    if (thirdDataText) allDataText += nameSeparator + thirdDataText;
+    if (fourthDataText) allDataText += nameSeparator + fourthDataText;
+    if (fifthDataText) allDataText += nameSeparator + fifthDataText;
+    allDataText = allDataText.trim();
 
     // Only mentions and reactions popouts should patch in the gradient glow or else a double glow will appear on messages.
     const hoveringClass = (isHovering ? " smyn-gradient-hovered" : "");

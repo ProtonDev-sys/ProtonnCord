@@ -26,22 +26,47 @@ function showNotif(title: string, body: string) {
 export const TidalLrcStore = proxyLazyWebpack(() => {
     let lyrics: EnhancedLyric[] | null = null;
     let lastTrackId: string | null = null;
+    let fetchGeneration = 0;
 
     class TidalLrcStore extends Flux.Store {
         init() { }
         get lyrics() {
             return lyrics;
         }
+
+        destroy() {
+            fetchGeneration++;
+            lastTrackId = null;
+            lyrics = null;
+            TidalStore.removeChangeListener(handleTidalStoreChange);
+        }
     }
 
     const store = new TidalLrcStore(FluxDispatcher);
     function handleTidalStoreChange() {
         const { track } = TidalStore;
-        if (!track?.id || lastTrackId === track.id) return;
+        if (!track?.id) {
+            fetchGeneration++;
+            lastTrackId = null;
+            lyrics = null;
+            store.emitChange();
+            return;
+        }
+
+        if (lastTrackId === track.id) return;
+
         lastTrackId = track.id;
+        const generation = ++fetchGeneration;
         getLyrics(track)
-            .then(l => { lyrics = l; store.emitChange(); })
+            .then(l => {
+                if (generation !== fetchGeneration || TidalStore.track?.id !== track.id) return;
+
+                lyrics = l;
+                store.emitChange();
+            })
             .catch(() => {
+                if (generation !== fetchGeneration || TidalStore.track?.id !== track.id) return;
+
                 lyrics = null;
                 showNotif("Tidal Lyrics", "Failed to fetch lyrics");
                 store.emitChange();

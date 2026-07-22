@@ -14,10 +14,10 @@ import { OptionType } from "@utils/types";
 import { React, Select, showToast, TextArea, TextInput, Toasts } from "@webpack/common";
 
 import { CORS_PROXY } from "./constants";
-import { fallbackServiceOrder, serviceLabels, ServiceType } from "./types";
+import { formatFallbackServiceOrder, parseFallbackServiceOrder, serviceLabels, ServiceType } from "./types";
 import { parseShareXConfig } from "./utils/sharex";
 
-const defaultFallbackOrder = fallbackServiceOrder.join(",");
+const defaultFallbackOrder = formatFallbackServiceOrder();
 const cl = classNameFactory("vc-file-upload-settings-");
 
 const serviceOptions = [
@@ -451,20 +451,11 @@ function FallbackOrderSettings() {
     const update = useForceUpdater();
     const { store } = settings;
     const [dragIndex, setDragIndex] = React.useState<number | null>(null);
-    const [order, setOrder] = React.useState<ServiceType[]>(() => {
-        const configured = (store.fallbackOrder || defaultFallbackOrder)
-            .split(/[\n,]/)
-            .map(entry => entry.trim())
-            .filter((entry): entry is ServiceType => Object.values(ServiceType).includes(entry as ServiceType));
-
-        return configured.length === fallbackServiceOrder.length && new Set(configured).size === fallbackServiceOrder.length
-            ? configured
-            : fallbackServiceOrder;
-    });
+    const [order, setOrder] = React.useState<ServiceType[]>(() => parseFallbackServiceOrder(store.fallbackOrder || defaultFallbackOrder));
 
     const commitOrder = (nextOrder: ServiceType[]) => {
         setOrder(nextOrder);
-        store.fallbackOrder = nextOrder.join(",");
+        store.fallbackOrder = formatFallbackServiceOrder(nextOrder);
         update();
     };
 
@@ -505,7 +496,7 @@ function FallbackOrderSettings() {
                 ))}
             </div>
             <div className={cl("fallback-order-actions")}>
-                <Button size="small" onClick={() => commitOrder(fallbackServiceOrder)}>
+                <Button size="small" onClick={() => commitOrder(parseFallbackServiceOrder(defaultFallbackOrder))}>
                     Reset to default
                 </Button>
             </div>

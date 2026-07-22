@@ -130,14 +130,17 @@ function updateStatuses(type: string, { deaf, mute, selfDeaf, selfMute, userId, 
 
 function playSample(type: string) {
     const currentUser = UserStore.getCurrentUser();
+    if (!currentUser) return;
+
     const myGuildId = SelectedGuildStore.getGuildId();
+    const displayName = currentUser.globalName ?? currentUser.username;
 
     speak(formatText(
         settings.store[type + "Message"],
         currentUser.username,
         "general",
-        currentUser.globalName ?? currentUser.username,
-        GuildMemberStore.getNick(myGuildId!, currentUser.id) ?? currentUser.username
+        displayName,
+        (myGuildId ? GuildMemberStore.getNick(myGuildId, currentUser.id) : null) ?? displayName
     ));
 }
 
@@ -155,14 +158,18 @@ export default definePlugin({
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceStateChangeEvent[]; }) {
             const myGuildId = SelectedGuildStore.getGuildId();
             const myChanId = SelectedChannelStore.getVoiceChannelId();
-            const myId = UserStore.getCurrentUser().id;
+            const myId = UserStore.getCurrentUser()?.id;
+            if (!myId) return;
 
-            if (ChannelStore.getChannel(myChanId!)?.type === 13 /* Stage Channel */) return;
+            if (myChanId && ChannelStore.getChannel(myChanId)?.type === 13 /* Stage Channel */) return;
+
+            const sessionId = AuthenticationStore.getSessionId();
+            const { sayOwnName } = settings.store;
 
             for (const state of voiceStates) {
                 const { userId, channelId, oldChannelId } = state;
                 const isMe = userId === myId;
-                if (isMe && state.sessionId !== AuthenticationStore.getSessionId()) continue;
+                if (isMe && state.sessionId !== sessionId) continue;
                 if (!isMe) {
                     if (!myChanId) continue;
                     if (channelId !== myChanId && oldChannelId !== myChanId) continue;
@@ -172,10 +179,12 @@ export default definePlugin({
                 if (!type) continue;
 
                 const template = settings.store[type + "Message"];
-                const user = isMe && !settings.store.sayOwnName ? "" : UserStore.getUser(userId).username;
-                const displayName = user && ((UserStore.getUser(userId) as any).globalName ?? user);
-                const nickname = user && (GuildMemberStore.getNick(myGuildId!, userId) ?? displayName);
-                const channel = ChannelStore.getChannel(id).name;
+                const shouldSayUser = !isMe || sayOwnName;
+                const userObj = shouldSayUser ? UserStore.getUser(userId) : null;
+                const user = shouldSayUser ? userObj?.username ?? "Someone" : "";
+                const displayName = user && ((userObj as any)?.globalName ?? user);
+                const nickname = user && ((myGuildId ? GuildMemberStore.getNick(myGuildId, userId) : null) ?? displayName);
+                const channel = ChannelStore.getChannel(id)?.name ?? "channel";
 
                 speak(formatText(template, user, channel, displayName, nickname));
 
@@ -184,21 +193,27 @@ export default definePlugin({
         },
 
         AUDIO_TOGGLE_SELF_MUTE() {
-            const chanId = SelectedChannelStore.getVoiceChannelId()!;
+            const chanId = SelectedChannelStore.getVoiceChannelId();
+            if (!chanId) return;
+
             const s = VoiceStateStore.getVoiceStateForChannel(chanId);
             if (!s) return;
 
             const event = s.mute || s.selfMute ? "unmute" : "mute";
-            speak(formatText(settings.store[event + "Message"], "", ChannelStore.getChannel(chanId).name, "", ""));
+            const channelName = ChannelStore.getChannel(chanId)?.name ?? "channel";
+            speak(formatText(settings.store[event + "Message"], "", channelName, "", ""));
         },
 
         AUDIO_TOGGLE_SELF_DEAF() {
-            const chanId = SelectedChannelStore.getVoiceChannelId()!;
+            const chanId = SelectedChannelStore.getVoiceChannelId();
+            if (!chanId) return;
+
             const s = VoiceStateStore.getVoiceStateForChannel(chanId);
             if (!s) return;
 
             const event = s.deaf || s.selfDeaf ? "undeafen" : "deafen";
-            speak(formatText(settings.store[event + "Message"], "", ChannelStore.getChannel(chanId).name, "", ""));
+            const channelName = ChannelStore.getChannel(chanId)?.name ?? "channel";
+            speak(formatText(settings.store[event + "Message"], "", channelName, "", ""));
         }
     },
 
@@ -212,16 +227,25 @@ export default definePlugin({
 
     },
 
+    stop() {
+        myLastChannelId = undefined;
+    },
+
     settingsAboutComponent() {
         const [hasVoices, hasEnglishVoices] = useMemo(() => {
             const voices = speechSynthesis.getVoices();
             return [voices.length !== 0, voices.some(v => v.lang.startsWith("en"))];
         }, []);
 
-        const types = useMemo(
-            () => Object.keys(settings.def).filter(k => k.endsWith("Message")).map(k => k.slice(0, -7)),
-            [],
-        );
+        const types = useMemo(() => {
+            const messageTypes: string[] = [];
+
+            for (const key of Object.keys(settings.def)) {
+                if (key.endsWith("Message")) messageTypes.push(key.slice(0, -7));
+            }
+
+            return messageTypes;
+        }, []);
 
         let errorComponent: ReactElement<any> | null = null;
         if (!hasVoices) {

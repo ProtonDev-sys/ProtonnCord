@@ -11,7 +11,6 @@ import { Card } from "@components/Card";
 import { HeadingPrimary } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import type { Theme, ThemeLikeProps } from "@equicordplugins/themeLibrary/types";
-import { proxyLazy } from "@utils/lazy";
 import { Margins } from "@utils/margins";
 import { User } from "@vencord/discord-types";
 import { FluxDispatcher, Modal, openModal, Parser, React, UserStore, UserUtils } from "@webpack/common";
@@ -30,15 +29,18 @@ interface ThemeCardProps {
     removeButtons?: boolean;
 }
 
-const UserRecord: Constructor<Partial<User>> = proxyLazy(() => UserStore.getCurrentUser().constructor) as any;
-
 function makeDummyUser(user: { username: string; id?: string; avatar?: string; }) {
-    const newUser = new UserRecord({
+    const UserRecord = UserStore.getCurrentUser()?.constructor as Constructor<Partial<User>> | undefined;
+    const fallbackUser = {
         username: user.username,
         id: user.id ?? generateId(),
         avatar: user.avatar,
         bot: true,
-    });
+    };
+
+    if (!UserRecord) return fallbackUser as Partial<User> as User;
+
+    const newUser = new UserRecord(fallbackUser);
     FluxDispatcher.dispatch({
         type: "USER_UPDATE",
         user: newUser,

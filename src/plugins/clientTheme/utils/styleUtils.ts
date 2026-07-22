@@ -61,7 +61,14 @@ async function getDiscordStyles(): Promise<string> {
         return fetch(node.href).then(res => res.text());
     }));
 
-    return cssTexts.filter(Boolean).join("\n");
+    let styles = "";
+    for (const cssText of cssTexts) {
+        if (!cssText) continue;
+        if (styles) styles += "\n";
+        styles += cssText;
+    }
+
+    return styles;
 }
 
 const VISUAL_REFRESH_COLORS_VARIABLES_REGEX = /(--neutral-\d{1,3}?-hsl):.+?([\d.]+?)%;/g;
@@ -83,10 +90,15 @@ function createColorsOverrides(styles: string) {
 }
 
 function generateNewColorVars(colorsLightess: Record<string, number>, baseLightness: number) {
-    return Object.entries(colorsLightess).map(([colorVariableName, lightness]) => {
+    let css = "";
+
+    for (const [colorVariableName, lightness] of Object.entries(colorsLightess)) {
         const lightnessOffset = lightness - baseLightness;
         const plusOrMinus = lightnessOffset >= 0 ? "+" : "-";
 
-        return `${colorVariableName}: var(--theme-h) var(--theme-s) calc(var(--theme-l) ${plusOrMinus} ${Math.abs(lightnessOffset).toFixed(2)}%);`;
-    }).join("\n");
+        if (css) css += "\n";
+        css += `${colorVariableName}: var(--theme-h) var(--theme-s) calc(var(--theme-l) ${plusOrMinus} ${Math.abs(lightnessOffset).toFixed(2)}%);`;
+    }
+
+    return css;
 }

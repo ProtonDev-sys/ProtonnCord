@@ -105,17 +105,24 @@ interface ProfileModalProps {
 const ProfileModal = findComponentByCodeLazy<ProfileModalProps>("isTryItOut:", "pendingThemeColors:", "pendingAvatarDecoration:", "EDIT_PROFILE_BANNER");
 
 function SettingsAboutComponentWrapper() {
-    const [, , userProfileLoading] = useAwaiter(() => fetchUserProfile(UserStore.getCurrentUser().id));
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    const [, , userProfileLoading] = useAwaiter(
+        () => currentUserId ? fetchUserProfile(currentUserId) : Promise.resolve(null),
+        { fallbackValue: null, deps: [currentUserId] }
+    );
 
     return !userProfileLoading && <SettingsAboutComponent />;
 }
 
 function SettingsAboutComponent() {
+    const currentUser = UserStore.getCurrentUser();
     const existingColors = decode(
-        UserProfileStore.getUserProfile(UserStore.getCurrentUser().id)?.bio ?? ""
+        currentUser ? UserProfileStore.getUserProfile(currentUser.id)?.bio ?? "" : ""
     ) ?? [0, 0];
     const [color1, setColor1] = useState(existingColors[0]);
     const [color2, setColor2] = useState(existingColors[1]);
+
+    if (!currentUser) return <BaseText>Log in to configure fake profile theme colors.</BaseText>;
 
     return (
         <section>
@@ -182,7 +189,7 @@ function SettingsAboutComponent() {
                 <HeadingSecondary>Preview</HeadingSecondary>
                 <div className="vc-fpt-preview">
                     <ProfileModal
-                        user={UserStore.getCurrentUser()}
+                        user={currentUser}
                         pendingThemeColors={[color1, color2]}
                         onAvatarChange={() => { }}
                         onBannerChange={() => { }}

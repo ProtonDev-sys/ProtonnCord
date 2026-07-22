@@ -97,15 +97,18 @@ interface MessageContextMenuArgs {
 }
 
 const DATA_KEY = "emoji-aliases";
+const ALIAS_TOKEN_REGEX = /:([a-z0-9_]{2,32}):/gi;
 const logger = new Logger("EmojiAlias");
 const EmojiQueryService = findByPropsLazy("queryEmojiResults");
 const cl = classNameFactory("vc-emoji-alias-");
 
 let aliasMap: AliasMap = {};
+let aliasEntries: Array<[string, StoredEmojiRef]> = [];
 const aliasListeners = new Set<() => void>();
 let globalContextPatch: GlobalContextMenuPatchCallback | null = null;
 const unicodeSurrogateCache = new Map<string, string | null>();
 const aliasResultCache = new Map<string, EmojiResult | null>();
+const maxAliasResultCacheSize = 500;
 
 const settings = definePluginSettings({
     aliases: {
@@ -131,6 +134,11 @@ function notifyAliasesChanged() {
     for (const listener of aliasListeners) {
         listener();
     }
+}
+
+function setAliasMap(nextMap: AliasMap) {
+    aliasMap = nextMap;
+    aliasEntries = Object.entries(aliasMap).sort(([left], [right]) => left.localeCompare(right));
 }
 
 function normalizeAlias(input: string): string {
@@ -196,9 +204,9 @@ function parseAliasMap(value: unknown): AliasMap {
 
 async function loadAliases() {
     try {
-        aliasMap = parseAliasMap(await DataStore.get(DATA_KEY));
+        setAliasMap(parseAliasMap(await DataStore.get(DATA_KEY)));
     } catch (error) {
-        aliasMap = {};
+        setAliasMap({});
         logger.error("Failed to load emoji aliases.", error);
     }
     unicodeSurrogateCache.clear();
@@ -207,7 +215,7 @@ async function loadAliases() {
 }
 
 async function persistAliases(nextMap: AliasMap) {
-    aliasMap = nextMap;
+    setAliasMap(nextMap);
     await DataStore.set(DATA_KEY, aliasMap);
     aliasResultCache.clear();
     notifyAliasesChanged();
@@ -550,21 +558,36 @@ function normalizeContextKey(value: unknown): string {
     if (typeof value !== "object") return typeof value;
 
     const record = value as Record<string, unknown>;
-    const priorityValues = [record.id, record.channelId, record.guildId, record.type, record.emojiIntention, record.name]
-        .filter((candidate): candidate is string | number => typeof candidate === "string" || typeof candidate === "number");
-    if (priorityValues.length) return priorityValues.map(String).join(":");
+    let priorityKey = "";
+    const appendPriorityCandidate = (candidate: unknown) => {
+        if (typeof candidate !== "string" && typeof candidate !== "number") return;
+        if (priorityKey) priorityKey += ":";
+        priorityKey += String(candidate);
+    };
 
-    const entries = Object.keys(record)
-        .sort()
-        .slice(0, 6)
-        .map(key => {
-            const candidate = record[key];
-            if (typeof candidate === "string" || typeof candidate === "number" || typeof candidate === "boolean") {
-                return `${key}:${String(candidate)}`;
-            }
-            return `${key}:${typeof candidate}`;
-        });
-    return entries.join("|");
+    appendPriorityCandidate(record.id);
+    appendPriorityCandidate(record.channelId);
+    appendPriorityCandidate(record.guildId);
+    appendPriorityCandidate(record.type);
+    appendPriorityCandidate(record.emojiIntention);
+    appendPriorityCandidate(record.name);
+
+    if (priorityKey) return priorityKey;
+
+    const keys = Object.keys(record).sort();
+    let key = "";
+    for (let i = 0; i < Math.min(keys.length, 6); i++) {
+        const entryKey = keys[i];
+        const candidate = record[entryKey];
+        const value = typeof candidate === "string" || typeof candidate === "number" || typeof candidate === "boolean"
+            ? String(candidate)
+            : typeof candidate;
+
+        if (key) key += "|";
+        key += `${entryKey}:${value}`;
+    }
+
+    return key;
 }
 
 function resolveTargetFromArgs(args: unknown[]): HTMLElement | null {
@@ -642,11 +665,11 @@ function resolveContextPropsFromArgs(args: unknown[]): MessageContextMenuArgs | 
 }
 
 function getAliasMapEntries(): Array<[string, StoredEmojiRef]> {
-    return Object.entries(aliasMap).sort(([left], [right]) => left.localeCompare(right));
+    return aliasEntries;
 }
 
 function getExistingAliasForEmoji(ref: StoredEmojiRef): string {
-    for (const [alias, current] of Object.entries(aliasMap)) {
+    for (const [alias, current] of aliasEntries) {
         if (isSameEmoji(current, ref)) return alias;
     }
     return "";
@@ -716,7 +739,7 @@ async function removeAlias(alias: string) {
 }
 
 async function clearAliases() {
-    if (!Object.keys(aliasMap).length) return;
+    if (!aliasEntries.length) return;
 
     try {
         await persistAliases({});
@@ -775,7 +798,7 @@ function queryAliasEmojiResult(aliasEmoji: StoredEmojiRef, channel: unknown, int
 
     const baseQuery = getUnicodeSurrogate(aliasEmoji) ?? resolveUnicodeSurrogateByName(aliasEmoji.name) ?? aliasEmoji.name;
     if (!baseQuery.length) {
-        aliasResultCache.set(cacheKey, null);
+        setAliasResultCache(cacheKey, null);
         return null;
     }
 
@@ -816,13 +839,22 @@ function queryAliasEmojiResult(aliasEmoji: StoredEmojiRef, channel: unknown, int
             return !!refName && refName === resultName;
         }) ?? null;
         if (resolved) {
-            aliasResultCache.set(cacheKey, resolved);
+            setAliasResultCache(cacheKey, resolved);
             return resolved;
         }
     }
 
-    aliasResultCache.set(cacheKey, null);
+    setAliasResultCache(cacheKey, null);
     return null;
+}
+
+function setAliasResultCache(cacheKey: string, value: EmojiResult | null) {
+    if (!aliasResultCache.has(cacheKey) && aliasResultCache.size >= maxAliasResultCacheSize) {
+        const oldestKey = aliasResultCache.keys().next().value;
+        if (oldestKey !== undefined) aliasResultCache.delete(oldestKey);
+    }
+
+    aliasResultCache.set(cacheKey, value);
 }
 
 function fallbackAliasEmojiResult(aliasEmoji: StoredEmojiRef, template: EmojiResult | undefined): EmojiResult | null {
@@ -873,7 +905,7 @@ function injectAliasResults(emojis: EmojiResult[], queryText: string, channel: u
     const exactMatches: EmojiResult[] = [];
     const prefixMatches: EmojiResult[] = [];
 
-    for (const [alias, ref] of Object.entries(aliasMap)) {
+    for (const [alias, ref] of aliasEntries) {
         if (!alias.startsWith(query)) continue;
 
         const identity = emojiIdentityFromRef(ref);
@@ -1050,7 +1082,7 @@ function ClearAllAliasesSetting() {
 
     useEffect(() => subscribeAliases(() => setVersion(version => version + 1)), []);
 
-    const disabled = !Object.keys(aliasMap).length;
+    const disabled = !aliasEntries.length;
 
     return (
         <Button variant="dangerPrimary" size="small" disabled={disabled} onClick={openClearAliasesConfirmModal}>
@@ -1084,9 +1116,11 @@ const messageContextMenuPatch: NavContextMenuPatchCallback = (children, ...args:
 };
 
 const messageSendListener = (_channelId: string, messageObj: { content: string; }) => {
-    if (!messageObj.content || !Object.keys(aliasMap).length) return;
+    if (!messageObj.content || !aliasEntries.length) return;
+    if (!messageObj.content.includes(":")) return;
 
-    messageObj.content = messageObj.content.replace(/:([a-z0-9_]{2,32}):/gi, (match, aliasName) => {
+    ALIAS_TOKEN_REGEX.lastIndex = 0;
+    messageObj.content = messageObj.content.replace(ALIAS_TOKEN_REGEX, (match, aliasName) => {
         const ref = aliasMap[aliasName.toLowerCase()];
         if (!ref) return match;
 
@@ -1195,7 +1229,7 @@ export default definePlugin({
         const priorities = new Map<string, number>();
         const refsByIdentity = new Map<string, StoredEmojiRef>();
 
-        for (const [alias, ref] of Object.entries(aliasMap)) {
+        for (const [alias, ref] of aliasEntries) {
             if (!alias.startsWith(query)) continue;
 
             const priority = alias === query ? 2 : 1;

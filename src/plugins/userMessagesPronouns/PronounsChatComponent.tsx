@@ -35,7 +35,7 @@ const AUTO_MODERATION_ACTION = 24;
 function shouldShow(message: Message): boolean {
     if (message.author.bot || message.author.system || message.type === AUTO_MODERATION_ACTION)
         return false;
-    if (!settings.store.showSelf && message.author.id === UserStore.getCurrentUser().id)
+    if (!settings.store.showSelf && message.author.id === UserStore.getCurrentUser()?.id)
         return false;
 
     return true;

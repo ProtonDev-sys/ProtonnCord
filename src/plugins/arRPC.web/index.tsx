@@ -25,18 +25,57 @@ import { Devs } from "@utils/constants";
 import definePlugin, { ReporterTestable } from "@utils/types";
 import { ApplicationAssetUtils, fetchApplicationsRPC, FluxDispatcher, Toasts } from "@webpack/common";
 
+const MAX_CACHE_SIZE = 100;
+const assetCache = new Map<string, Promise<string>>();
+const applicationCache = new Map<string, Promise<{ name?: string; } | undefined>>();
+
+function pruneOldestCacheEntry(cache: Pick<Map<string, unknown>, "delete" | "keys">) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey !== undefined) cache.delete(oldestKey);
+}
+
 async function lookupAsset(applicationId: string, key: string): Promise<string> {
-    return (await ApplicationAssetUtils.fetchAssetIds(applicationId, [key]))[0];
+    const cacheKey = `${applicationId}:${key}`;
+    const cachedAsset = assetCache.get(cacheKey);
+    if (cachedAsset) return cachedAsset;
+
+    if (assetCache.size >= MAX_CACHE_SIZE) pruneOldestCacheEntry(assetCache);
+
+    const assetPromise = ApplicationAssetUtils.fetchAssetIds(applicationId, [key])
+        .then(assetIds => assetIds[0]!)
+        .catch(error => {
+            assetCache.delete(cacheKey);
+            throw error;
+        });
+
+    assetCache.set(cacheKey, assetPromise);
+    return assetPromise;
 }
 
-const apps: any = {};
-async function lookupApp(applicationId: string): Promise<string> {
+async function lookupApp(applicationId: string): Promise<{ name?: string; } | undefined> {
+    const cachedApplication = applicationCache.get(applicationId);
+    if (cachedApplication) return cachedApplication;
+
+    if (applicationCache.size >= MAX_CACHE_SIZE) pruneOldestCacheEntry(applicationCache);
+
     const socket: any = {};
-    await fetchApplicationsRPC(socket, applicationId);
-    return socket.application;
+    const applicationPromise = fetchApplicationsRPC(socket, applicationId)
+        .then(() => socket.application as { name?: string; } | undefined)
+        .catch(error => {
+            applicationCache.delete(applicationId);
+            throw error;
+        });
+
+    applicationCache.set(applicationId, applicationPromise);
+    return applicationPromise;
 }
 
-let ws: WebSocket;
+function resolveOptional<T>(promise: Promise<T> | undefined): Promise<T | undefined> {
+    return promise?.catch(() => undefined) ?? Promise.resolve(undefined);
+}
+
+let ws: WebSocket | undefined;
+let connectionGeneration = 0;
 
 migratePluginSettings("WebRichPresence", "WebRichPresence (arRPC)");
 export default definePlugin({
@@ -56,33 +95,50 @@ export default definePlugin({
         </>
     ),
 
-    async handleEvent(e: MessageEvent<any>) {
-        const data = JSON.parse(e.data);
+    async handleEvent(e: MessageEvent<any>, generation = connectionGeneration) {
+        if (generation !== connectionGeneration) return;
+
+        let data;
+        try {
+            data = JSON.parse(e.data);
+        } catch {
+            return;
+        }
 
         const { activity } = data;
         const assets = activity?.assets;
+        const appId = activity?.application_id;
 
-        if (assets?.large_image) assets.large_image = await lookupAsset(activity.application_id, assets.large_image);
-        if (assets?.small_image) assets.small_image = await lookupAsset(activity.application_id, assets.small_image);
+        const [largeImage, smallImage] = await Promise.all([
+            resolveOptional(appId && assets?.large_image ? lookupAsset(appId, assets.large_image) : undefined),
+            resolveOptional(appId && assets?.small_image ? lookupAsset(appId, assets.small_image) : undefined),
+        ]);
+        if (generation !== connectionGeneration) return;
+
+        if (largeImage) assets.large_image = largeImage;
+        if (smallImage) assets.small_image = smallImage;
 
         if (activity) {
-            const appId = activity.application_id;
-            apps[appId] ||= await lookupApp(appId);
+            const app = await resolveOptional(appId ? lookupApp(appId) : undefined);
+            if (generation !== connectionGeneration) return;
 
-            const app = apps[appId];
-            activity.name ||= app.name;
+            activity.name ||= app?.name;
         }
 
         FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", ...data });
     },
 
     async start() {
+        const generation = ++connectionGeneration;
         if (ws) ws.close();
-        ws = new WebSocket("ws://127.0.0.1:1337"); // try to open WebSocket
+        const socket = new WebSocket("ws://127.0.0.1:1337"); // try to open WebSocket
+        ws = socket;
 
-        ws.onmessage = this.handleEvent;
+        socket.onmessage = event => void this.handleEvent(event, generation);
 
-        const connectionSuccessful = await new Promise(res => setTimeout(() => res(ws.readyState === WebSocket.OPEN), 5000)); // check if open after 5s
+        const connectionSuccessful = await new Promise(res => setTimeout(() => res(socket.readyState === WebSocket.OPEN), 5000)); // check if open after 5s
+        if (generation !== connectionGeneration || socket !== ws) return;
+
         if (!connectionSuccessful) {
             showNotice("Failed to connect to arRPC, is it running?", "Retry", () => {
                 // show notice about failure to connect, with retry/ignore
@@ -105,7 +161,11 @@ export default definePlugin({
     },
 
     stop() {
+        connectionGeneration++;
         FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity: null }); // clear status
         ws?.close(); // close WebSocket
+        ws = undefined;
+        assetCache.clear();
+        applicationCache.clear();
     }
 });

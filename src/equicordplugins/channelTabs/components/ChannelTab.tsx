@@ -99,7 +99,12 @@ export const NotificationDot = ({ channelIds }: { channelIds: string[]; }) => {
         [ActiveJoinedThreadsStore, ReadStateStore],
         () => channelIds.map(getChannelUnreadState)
     );
-    const stateSignature = channelStates.map(state => `${state.channelId}:${Number(state.hasUnread)}:${state.mentionCount}:${state.unreadCount}`).join("|");
+    let stateSignature = "";
+    for (const state of channelStates) {
+        if (stateSignature) stateSignature += "|";
+        stateSignature += `${state.channelId}:${Number(state.hasUnread)}:${state.mentionCount}:${state.unreadCount}`;
+    }
+
     const { badgeText, hasMention, shouldShow } = getNotificationDotState(
         channelStates,
         userId ? getUnreadFallbackCounts(userId) : {},
@@ -182,9 +187,17 @@ function ChannelTabContent(props: ChannelTabsProps & {
         [TypingStore, PresenceStore],
         () => {
             const recipientId = recipients?.[0] ?? "";
+            let hasOtherTypingUser = false;
+
+            for (const id in TypingStore.getTypingUsers(props.channelId)) {
+                if (id !== userId) {
+                    hasOtherTypingUser = true;
+                    break;
+                }
+            }
 
             return [
-                !!((Object.keys(TypingStore.getTypingUsers(props.channelId)) as string[]).filter(id => id !== userId).length),
+                hasOtherTypingUser,
                 PresenceStore.getStatus(recipientId),
                 PresenceStore.isMobileOnline(recipientId)
             ];
@@ -337,12 +350,26 @@ export default function ChannelTab(props: ChannelTabsProps & { index: number; })
     }, [isDropTarget, isDragging]);
 
     const ref = useRef<HTMLDivElement>(null);
+    const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const resizeCleanupRef = useRef<(() => void) | null>(null);
     const lastSwapTimeRef = useRef(0);
     const SWAP_THROTTLE_MS = 100;
+
+    useEffect(() => {
+        return () => {
+            if (closeTimeoutRef.current) {
+                clearTimeout(closeTimeoutRef.current);
+                closeTimeoutRef.current = null;
+            }
+
+            resizeCleanupRef.current?.();
+        };
+    }, []);
 
     const handleResizeStart = (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
+        resizeCleanupRef.current?.();
 
         const startX = e.clientX;
         const startWidth = ref.current?.getBoundingClientRect().width || 0;
@@ -367,21 +394,27 @@ export default function ChannelTab(props: ChannelTabsProps & { index: number; })
             }
         };
 
-        const handleMouseUp = () => {
+        function cleanupResize() {
             document.removeEventListener("mousemove", handleMouseMove);
             document.removeEventListener("mouseup", handleMouseUp);
             document.body.style.cursor = "";
             document.body.style.userSelect = "";
 
-            settings.store.tabWidthScale = pendingScale;
-
             if (ref.current) {
                 ref.current.style.removeProperty("--tab-width-scale");
             }
-        };
+
+            resizeCleanupRef.current = null;
+        }
+
+        function handleMouseUp() {
+            settings.store.tabWidthScale = pendingScale;
+            cleanupResize();
+        }
 
         document.addEventListener("mousemove", handleMouseMove);
         document.addEventListener("mouseup", handleMouseUp);
+        resizeCleanupRef.current = cleanupResize;
     };
 
     const [, drag] = useDrag(() => ({
@@ -527,8 +560,13 @@ export default function ChannelTab(props: ChannelTabsProps & { index: number; })
         {openedTabs.length > 1 && <button
             className={cl("button", "close-button", { "close-button-compact": compact, "hoverable": !compact })}
             onClick={() => {
+                if (closeTimeoutRef.current) return;
+
                 setIsClosing(true);
-                setTimeout(() => closeTab(id), 150);
+                closeTimeoutRef.current = setTimeout(() => {
+                    closeTimeoutRef.current = null;
+                    closeTab(id);
+                }, 150);
             }}
         >
             <XIcon size={16} fill="var(--interactive-icon-default)" />

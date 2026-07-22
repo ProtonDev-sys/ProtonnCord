@@ -92,8 +92,26 @@ export const themes = {
 };
 
 export const themeCache = new Map<string, IShikiTheme>();
+const themePromises = new Map<string, Promise<IShikiTheme>>();
 
 export const getTheme = (url: string): Promise<IShikiTheme> => {
     if (themeCache.has(url)) return Promise.resolve(themeCache.get(url)!);
-    return fetch(url).then(res => res.json());
+
+    const cachedPromise = themePromises.get(url);
+    if (cachedPromise) return cachedPromise;
+
+    const themePromise = fetch(url)
+        .then(res => res.json())
+        .then(theme => {
+            themeCache.set(url, theme);
+            themePromises.delete(url);
+            return theme;
+        })
+        .catch(error => {
+            themePromises.delete(url);
+            throw error;
+        });
+
+    themePromises.set(url, themePromise);
+    return themePromise;
 };

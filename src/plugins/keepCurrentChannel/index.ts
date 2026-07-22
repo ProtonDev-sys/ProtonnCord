@@ -39,6 +39,30 @@ interface PreviousChannel {
 
 let isSwitchingAccount = false;
 let previousCache: PreviousChannel | undefined;
+let previousSaveTimeout: ReturnType<typeof setTimeout> | undefined;
+
+function hasSamePreviousChannel(previous: PreviousChannel | undefined, next: PreviousChannel) {
+    return previous?.guildId === next.guildId && previous.channelId === next.channelId;
+}
+
+function clearPreviousSaveTimeout() {
+    if (previousSaveTimeout === undefined) return;
+
+    clearTimeout(previousSaveTimeout);
+    previousSaveTimeout = undefined;
+}
+
+async function savePreviousChannelNow() {
+    clearPreviousSaveTimeout();
+    if (!previousCache) return;
+
+    await DataStore.set("KeepCurrentChannel_previousData", previousCache);
+}
+
+function schedulePreviousChannelSave() {
+    clearPreviousSaveTimeout();
+    previousSaveTimeout = setTimeout(() => void savePreviousChannelNow(), 500);
+}
 
 export default definePlugin({
     name: "KeepCurrentChannel",
@@ -59,6 +83,7 @@ export default definePlugin({
     flux: {
         LOGOUT(e: LogoutEvent) {
             ({ isSwitchingAccount } = e);
+            void savePreviousChannelNow();
         },
 
         CONNECTION_OPEN() {
@@ -74,14 +99,18 @@ export default definePlugin({
             }
         },
 
-        async CHANNEL_SELECT({ guildId, channelId }: ChannelSelectEvent) {
+        CHANNEL_SELECT({ guildId, channelId }: ChannelSelectEvent) {
             if (isSwitchingAccount) return;
 
-            previousCache = {
+            const nextPrevious: PreviousChannel = {
                 guildId,
                 channelId
             };
-            await DataStore.set("KeepCurrentChannel_previousData", previousCache);
+
+            if (hasSamePreviousChannel(previousCache, nextPrevious)) return;
+
+            previousCache = nextPrevious;
+            schedulePreviousChannelSave();
         }
     },
 
@@ -97,5 +126,9 @@ export default definePlugin({
         } else if (previousCache.channelId) {
             ChannelRouter.transitionToChannel(previousCache.channelId);
         }
+    },
+
+    stop() {
+        void savePreviousChannelNow();
     }
 });

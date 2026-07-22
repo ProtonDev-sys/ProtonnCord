@@ -26,9 +26,14 @@ import type { JSX, PropsWithChildren } from "react";
 
 type IconProps = JSX.IntrinsicElements["svg"];
 type KeywordEntry = { regex: string, listIds: Array<string>, listType: ListType, ignoreCase: boolean; };
+type CompiledKeywordEntry = { entry: KeywordEntry, regex: RegExp, listIds: Set<string>, whitelistMode: boolean; };
+type KeywordEmbed = { description?: string, title?: string, fields?: Array<{ name?: string, value?: string; }>; };
 
 let keywordEntries: Array<KeywordEntry> = [];
+let compiledKeywordEntries: Array<CompiledKeywordEntry> = [];
 let keywordLog: Array<any> = [];
+let storedKeywordLog: string[] = [];
+const storedKeywordLogIds = new Set<string>();
 let interceptor: (e: any) => void;
 
 const recentMentionsPopoutClass = findCssClassesLazy("recentMentionsPopout", "scroller");
@@ -40,24 +45,67 @@ const KEYWORD_LOG_KEY = "KeywordNotify_log";
 
 const cl = classNameFactory("vc-keywordnotify-");
 
+function rebuildKeywordMatchers() {
+    const nextCompiledEntries: Array<CompiledKeywordEntry> = [];
+
+    for (const entry of keywordEntries) {
+        if (!entry.regex) continue;
+
+        try {
+            const listIds = new Set<string>();
+            for (const rawId of entry.listIds) {
+                const id = rawId.trim();
+                if (id) listIds.add(id);
+            }
+
+            nextCompiledEntries.push({
+                entry,
+                regex: new RegExp(entry.regex, entry.ignoreCase ? "i" : ""),
+                listIds,
+                whitelistMode: entry.listType === ListType.Whitelist
+            });
+        } catch {
+        }
+    }
+
+    compiledKeywordEntries = nextCompiledEntries;
+}
+
+async function persistKeywordEntries() {
+    rebuildKeywordMatchers();
+    await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+}
+
+function getStoredKeywordLogId(raw: string) {
+    try {
+        return JSON.parse(raw)?.id as string | undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function trimStoredKeywordLog() {
+    const limit = Math.max(0, settings.store.amountToKeep);
+    while (storedKeywordLog.length > limit) {
+        const removedId = getStoredKeywordLogId(storedKeywordLog.shift()!);
+        if (removedId) storedKeywordLogIds.delete(removedId);
+    }
+}
+
 async function addKeywordEntry(forceUpdate: () => void) {
     keywordEntries.push({ regex: "", listIds: [], listType: ListType.BlackList, ignoreCase: false });
-    await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+    await persistKeywordEntries();
     forceUpdate();
 }
 
 async function removeKeywordEntry(idx: number, forceUpdate: () => void) {
     keywordEntries.splice(idx, 1);
-    await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+    await persistKeywordEntries();
     forceUpdate();
 }
 
-function safeMatchesRegex(str: string, regex: string, flags: string) {
-    try {
-        return str.match(new RegExp(regex, flags));
-    } catch {
-        return false;
-    }
+function matchesRegex(str: unknown, regex: RegExp) {
+    return typeof str === "string" && regex.test(str);
 }
 
 enum ListType {
@@ -69,26 +117,22 @@ interface BaseIconProps extends IconProps {
     viewBox: string;
 }
 
-function highlightKeywords(str: string, entries: Array<KeywordEntry>) {
-    let regexes: Array<RegExp>;
-    try {
-        regexes = entries.map(e => new RegExp(e.regex, "g" + (e.ignoreCase ? "i" : "")));
-    } catch (err) {
-        return [str];
+function highlightKeywords(str: string) {
+    let match: string | undefined;
+    for (const { regex } of compiledKeywordEntries) {
+        match = str.match(regex)?.[0];
+        if (match) break;
     }
 
-    const matches = regexes.map(r => str.match(r)).flat().filter(e => e !== null) as Array<string>;
-    if (matches.length === 0) {
-        return [str];
-    }
+    if (!match) return [str];
 
-    const idx = str.indexOf(matches[0]);
+    const idx = str.indexOf(match);
 
     return (
         <>
             <span>{str.substring(0, idx)}</span>
-            <span className="highlight">{matches[0]}</span>
-            <span>{str.substring(idx + matches[0].length)}</span>
+            <span className="highlight">{match}</span>
+            <span>{str.substring(idx + match.length)}</span>
         </>
     );
 }
@@ -180,25 +224,25 @@ function KeywordEntries() {
 
     async function setRegex(index: number, value: string) {
         keywordEntries[index].regex = value;
-        await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+        await persistKeywordEntries();
         update();
     }
 
     async function setListType(index: number, value: ListType) {
         keywordEntries[index].listType = value;
-        await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+        await persistKeywordEntries();
         update();
     }
 
     async function setListIds(index: number, value: Array<string>) {
         keywordEntries[index].listIds = value ?? [];
-        await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+        await persistKeywordEntries();
         update();
     }
 
     async function setIgnoreCase(index: number, value: boolean) {
         keywordEntries[index].ignoreCase = value;
-        await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+        await persistKeywordEntries();
         update();
     }
 
@@ -357,10 +401,16 @@ export default definePlugin({
     async start() {
         this.onUpdate = () => null;
         keywordEntries = await DataStore.get(KEYWORD_ENTRIES_KEY) ?? [];
+        rebuildKeywordMatchers();
         await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
-        (await DataStore.get(KEYWORD_LOG_KEY) ?? []).map(e => JSON.parse(e)).forEach(e => {
+
+        storedKeywordLog = await DataStore.get(KEYWORD_LOG_KEY) ?? [];
+        storedKeywordLogIds.clear();
+        storedKeywordLog.forEach(raw => {
             try {
-                this.addToLog(e);
+                const message = JSON.parse(raw);
+                if (message?.id) storedKeywordLogIds.add(message.id);
+                this.addToLog(message);
             } catch (err) {
                 console.error(err);
             }
@@ -381,45 +431,40 @@ export default definePlugin({
     },
 
     applyKeywordEntries(m: Message) {
+        if (!compiledKeywordEntries.length) return;
+
         let matches = false;
 
-        for (const entry of keywordEntries) {
-            if (entry.regex === "") {
-                continue;
-            }
-
-            let listed = entry.listIds.some(id => id.trim() === m.channel_id || id === m.author.id);
+        for (const entry of compiledKeywordEntries) {
+            let listed = entry.listIds.has(m.channel_id) || entry.listIds.has(m.author.id);
             if (!listed) {
                 const channel = ChannelStore.getChannel(m.channel_id);
-                if (channel != null) {
-                    listed = entry.listIds.some(id => id.trim() === channel.guild_id);
+                if (channel?.guild_id != null) {
+                    listed = entry.listIds.has(channel.guild_id);
                 }
             }
 
-            const whitelistMode = entry.listType === ListType.Whitelist;
-
-            if (!whitelistMode && listed) {
+            if (!entry.whitelistMode && listed) {
                 continue;
             }
-            if (whitelistMode && !listed) {
-                continue;
-            }
-
-            if (settings.store.ignoreBots && m.author.bot && (!whitelistMode || !entry.listIds.includes(m.author.id))) {
+            if (entry.whitelistMode && !listed) {
                 continue;
             }
 
-            const flags = entry.ignoreCase ? "i" : "";
-            if (safeMatchesRegex(m.content, entry.regex, flags)) {
+            if (settings.store.ignoreBots && m.author.bot && (!entry.whitelistMode || !entry.listIds.has(m.author.id))) {
+                continue;
+            }
+
+            if (matchesRegex(m.content, entry.regex)) {
                 matches = true;
             } else {
-                for (const embed of m.embeds as any) {
-                    if (safeMatchesRegex(embed.description, entry.regex, flags) || safeMatchesRegex(embed.title, entry.regex, flags)) {
+                for (const embed of (m.embeds as KeywordEmbed[] | undefined) ?? []) {
+                    if (matchesRegex(embed.description, entry.regex) || matchesRegex(embed.title, entry.regex)) {
                         matches = true;
                         break;
                     } else if (embed.fields != null) {
-                        for (const field of embed.fields as Array<{ name: string, value: string; }>) {
-                            if (safeMatchesRegex(field.value, entry.regex, flags) || safeMatchesRegex(field.name, entry.regex, flags)) {
+                        for (const field of embed.fields) {
+                            if (matchesRegex(field.value, entry.regex) || matchesRegex(field.name, entry.regex)) {
                                 matches = true;
                                 break;
                             }
@@ -427,11 +472,13 @@ export default definePlugin({
                     }
                 }
             }
+
+            if (matches) break;
         }
 
         if (matches) {
             const id = UserStore.getCurrentUser()?.id;
-            if (id !== null) {
+            if (id != null) {
                 // @ts-ignore
                 m.mentions.push({ id: id });
             }
@@ -446,25 +493,19 @@ export default definePlugin({
         if (m == null)
             return;
 
-        DataStore.get(KEYWORD_LOG_KEY).then(log => {
-            log = log ? log.map((e: string) => JSON.parse(e)) : [];
+        if (storedKeywordLogIds.has(m.id)) return;
 
-            log.push(m);
-            if (log.length > settings.store.amountToKeep) {
-                log = log.slice(-settings.store.amountToKeep);
-            }
+        storedKeywordLog.push(JSON.stringify(m));
+        storedKeywordLogIds.add(m.id);
+        trimStoredKeywordLog();
 
-            DataStore.set(KEYWORD_LOG_KEY, log.map(e => JSON.stringify(e)));
-        });
+        DataStore.set(KEYWORD_LOG_KEY, storedKeywordLog);
     },
     discardMessage(id: string) {
-        DataStore.get(KEYWORD_LOG_KEY).then((log: string[]) => {
-            let parsed_logs: Message[] = log ? log.map(e => JSON.parse(e)) : [];
+        storedKeywordLog = storedKeywordLog.filter(raw => getStoredKeywordLogId(raw) !== id);
+        storedKeywordLogIds.delete(id);
 
-            parsed_logs = parsed_logs.filter(msg => msg.id !== id);
-
-            DataStore.set(KEYWORD_LOG_KEY, parsed_logs.map(e => JSON.stringify(e)));
-        });
+        DataStore.set(KEYWORD_LOG_KEY, storedKeywordLog);
     },
     addToLog(m: Message) {
         if (m == null || keywordLog.some(e => e.id === m.id))
@@ -481,7 +522,8 @@ export default definePlugin({
         keywordLog.push(messageRecord);
         keywordLog.sort((a, b) => b.timestamp - a.timestamp);
 
-        while (keywordLog.length > settings.store.amountToKeep) {
+        const limit = Math.max(0, settings.store.amountToKeep);
+        while (keywordLog.length > limit) {
             keywordLog.pop();
         }
 
@@ -512,7 +554,9 @@ export default definePlugin({
                         onMouseEnter={onMouseEnter}
                         onClick={() => {
                             keywordLog = [];
-                            DataStore.set(KEYWORD_LOG_KEY, []);
+                            storedKeywordLog = [];
+                            storedKeywordLogIds.clear();
+                            DataStore.set(KEYWORD_LOG_KEY, storedKeywordLog);
                             this.onUpdate();
                         }}>
                         <DoubleCheckmarkIcon />
@@ -535,7 +579,7 @@ export default definePlugin({
             e._keyword = true;
 
             e.customRenderedContent = {
-                content: highlightKeywords(e.content, keywordEntries)
+                content: highlightKeywords(e.content)
             };
 
             const msg = this.renderMsg({

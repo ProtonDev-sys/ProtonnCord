@@ -23,6 +23,15 @@ import { onChannelDelete, onGuildDelete, onRelationshipRemove, removeFriend, rem
 import settings from "./settings";
 import { syncAndRunChecks, syncFriends, syncGroups, syncGuilds } from "./utils";
 
+let startupSyncTimeout: ReturnType<typeof setTimeout> | undefined;
+
+function clearStartupSyncTimeout() {
+    if (startupSyncTimeout === undefined) return;
+
+    clearTimeout(startupSyncTimeout);
+    startupSyncTimeout = undefined;
+}
+
 export default definePlugin({
     name: "RelationshipNotifier",
     description: "Notifies you when a friend, group chat, or server removes you.",
@@ -68,10 +77,16 @@ export default definePlugin({
         CONNECTION_OPEN: syncAndRunChecks
     },
 
-    async start() {
-        setTimeout(() => {
-            syncAndRunChecks();
+    start() {
+        clearStartupSyncTimeout();
+        startupSyncTimeout = setTimeout(() => {
+            startupSyncTimeout = undefined;
+            void syncAndRunChecks();
         }, 5000);
+    },
+
+    stop() {
+        clearStartupSyncTimeout();
     },
 
     removeFriend,

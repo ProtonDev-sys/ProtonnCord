@@ -135,7 +135,6 @@ export async function migrate() {
         await DataStore.del(RECENT_STICKERS_KEY_OLD);
     }
 
-    console.log("Migration complete");
     Toasts.show({
         message: "Sticker Pack Migration Complete",
         type: Toasts.Type.SUCCESS,

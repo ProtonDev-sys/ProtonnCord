@@ -9,29 +9,52 @@ import { definePluginSettings } from "@api/Settings";
 import { Devs, EquicordDevs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 
+let blockedWordPrefixes: string[] = [];
+
+function parseBlockedWords(value: string): string[] {
+    const words = new Set<string>();
+
+    for (const rawWord of value.split(",")) {
+        const word = rawWord.trim().toLowerCase();
+        if (word) words.add(word);
+    }
+
+    return Array.from(words);
+}
+
 const settings = definePluginSettings(
     {
         blockedWords: {
             type: OptionType.STRING,
-            description: "Strings not to capitilise (seperate with a comma)",
+            description: "Strings not to capitalise, separated with commas.",
+            onChange: value => { blockedWordPrefixes = parseBlockedWords(value); },
             default: "http, https, ok"
         }
     }
 );
 
 const presendObject: MessageSendListener = (_, msg) => {
-    const blockedWordsArray: string[] = settings.store.blockedWords.split(", ");
+    if (!msg.content) return;
+
     const sentences = msg.content.split(/(?<=[.!?]+['")\]]*)(\s+)/);
+    let content = "";
 
-    msg.content = sentences.map((element, i) => {
-        if (i % 2 === 1) return element;
-
-        if (!blockedWordsArray.some(word => element.toLowerCase().startsWith(word.toLocaleLowerCase()))) {
-            return element.charAt(0).toUpperCase() + element.slice(1);
-        } else {
-            return element;
+    for (let i = 0; i < sentences.length; i++) {
+        const element = sentences[i];
+        if (i % 2 === 1) {
+            content += element;
+            continue;
         }
-    }).join("");
+
+        const lowerElement = element.toLowerCase();
+        if (!blockedWordPrefixes.some(word => lowerElement.startsWith(word))) {
+            content += element.charAt(0).toUpperCase() + element.slice(1);
+        } else {
+            content += element;
+        }
+    }
+
+    msg.content = content;
 };
 
 export default definePlugin({
@@ -42,9 +65,11 @@ export default definePlugin({
     settings,
 
     start() {
+        blockedWordPrefixes = parseBlockedWords(settings.store.blockedWords);
         addMessagePreSendListener(presendObject);
     },
     stop() {
         removeMessagePreSendListener(presendObject);
+        blockedWordPrefixes = [];
     }
 });

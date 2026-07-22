@@ -5,37 +5,68 @@
  */
 
 import { get, set } from "@api/DataStore";
+import { Logger } from "@utils/Logger";
 
 const STORAGE_KEY = "ScattrdCustomSounds";
+export const MAX_AUDIO_FILE_BYTES = 8 * 1024 * 1024;
+export const MAX_AUDIO_FILE_MIB = MAX_AUDIO_FILE_BYTES / 1024 / 1024;
+
+const logger = new Logger("CustomSounds");
 
 export interface StoredAudioFile {
     id: string;
     name: string;
-    buffer: ArrayBuffer;
+    buffer?: ArrayBuffer;
     type: string;
     dataUri?: string;
 }
 
+let cachedAudioFiles: Record<string, StoredAudioFile> | null = null;
+let audioFilesLoadPromise: Promise<Record<string, StoredAudioFile>> | null = null;
+
+async function loadAudioFiles(): Promise<Record<string, StoredAudioFile>> {
+    if (cachedAudioFiles) return cachedAudioFiles;
+
+    audioFilesLoadPromise ??= get<Record<string, StoredAudioFile>>(STORAGE_KEY)
+        .then(files => {
+            cachedAudioFiles = files ?? {};
+            return cachedAudioFiles;
+        })
+        .finally(() => {
+            audioFilesLoadPromise = null;
+        });
+
+    return audioFilesLoadPromise;
+}
+
+async function persistAudioFiles(files: Record<string, StoredAudioFile>) {
+    cachedAudioFiles = files;
+    await set(STORAGE_KEY, files);
+}
+
 export async function saveAudio(file: File): Promise<string> {
+    if (file.size > MAX_AUDIO_FILE_BYTES) {
+        throw new Error(`Audio file is larger than ${MAX_AUDIO_FILE_MIB} MiB.`);
+    }
+
     const id = crypto.randomUUID();
     const buffer = await file.arrayBuffer();
 
     const dataUri = await generateDataURI(buffer, file.type, file.name);
 
-    const current = (await get(STORAGE_KEY)) ?? {};
+    const current = { ...await loadAudioFiles() };
     current[id] = {
         id,
         name: file.name,
-        buffer,
         type: file.type,
         dataUri
     };
-    await set(STORAGE_KEY, current);
+    await persistAudioFiles(current);
     return id;
 }
 
 export async function getAllAudio(): Promise<Record<string, StoredAudioFile>> {
-    return (await get(STORAGE_KEY)) ?? {};
+    return { ...await loadAudioFiles() };
 }
 
 async function generateDataURI(buffer: ArrayBuffer, type: string, name: string): Promise<string> {
@@ -70,7 +101,7 @@ async function generateDataURI(buffer: ArrayBuffer, type: string, name: string):
             reader.readAsDataURL(blob);
         });
     } catch (error) {
-        console.error("[CustomSounds] Error generating data URI:", error);
+        logger.error("Error generating data URI:", error);
 
         const uint8Array = new Uint8Array(buffer);
         let binary = "";
@@ -92,21 +123,34 @@ export async function getAudioDataURI(id: string): Promise<string | undefined> {
     if (!entry) return undefined;
 
     if (entry.dataUri) {
+        if (entry.buffer) {
+            const current = { ...await loadAudioFiles() };
+            if (current[id]?.buffer) {
+                const { buffer: _, ...entryWithoutBuffer } = current[id];
+                current[id] = entryWithoutBuffer;
+                await persistAudioFiles(current);
+            }
+        }
+
         return entry.dataUri;
     }
 
-    console.log(`[CustomSounds] No cached data URI for ${id}, generating...`);
+    if (!entry.buffer) return undefined;
+
     const dataUri = await generateDataURI(entry.buffer, entry.type, entry.name);
 
-    const current = await getAllAudio();
-    current[id].dataUri = dataUri;
-    await set(STORAGE_KEY, current);
+    const current = { ...await loadAudioFiles() };
+    if (current[id]) {
+        const { buffer: _, ...entryWithoutBuffer } = current[id];
+        current[id] = { ...entryWithoutBuffer, dataUri };
+        await persistAudioFiles(current);
+    }
 
     return dataUri;
 }
 
 export async function deleteAudio(id: string): Promise<void> {
-    const all = await getAllAudio();
+    const all = { ...await loadAudioFiles() };
     delete all[id];
-    await set(STORAGE_KEY, all);
+    await persistAudioFiles(all);
 }

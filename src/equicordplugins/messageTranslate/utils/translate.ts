@@ -58,7 +58,11 @@ export async function translate(messageId: string, text: string): Promise<Cached
             return null;
         }
 
-        const translatedText = response.sentences.map(s => s.trans).filter(Boolean).join("");
+        let translatedText = "";
+        for (const sentence of response.sentences) {
+            if (sentence.trans) translatedText += sentence.trans;
+        }
+
         if (!translatedText || translatedText === text) {
             failed.set(messageId, text);
             return null;

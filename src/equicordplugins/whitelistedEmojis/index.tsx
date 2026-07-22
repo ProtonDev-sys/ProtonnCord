@@ -21,10 +21,19 @@ import { ContextMenuEmoji, SavedEmoji, Target } from "./types";
 const DATA_COLLECTION_NAME = "whitelisted-emojis";
 
 let cache_allowedList: ContextMenuEmoji[] = [];
+const allowedEmojiNames = new Set<string>();
 const cacheListeners = new Set<() => void>();
 let writeChain: Promise<unknown> = Promise.resolve();
 
 const getAllowedList = async (): Promise<ContextMenuEmoji[]> => (await DataStore.get<ContextMenuEmoji[]>(DATA_COLLECTION_NAME)) ?? [];
+
+function setCachedAllowedList(list: ContextMenuEmoji[]) {
+    cache_allowedList = list;
+    allowedEmojiNames.clear();
+    for (const emoji of list) {
+        if (emoji.name) allowedEmojiNames.add(emoji.name);
+    }
+}
 
 function notifyCacheChange() {
     for (const listener of cacheListeners) listener();
@@ -38,19 +47,16 @@ function withWriteLock<T>(fn: () => T | Promise<T>): Promise<T> {
 
 async function setAllowedList(newList: ContextMenuEmoji[]) {
     await DataStore.set(DATA_COLLECTION_NAME, newList);
-    cache_allowedList = newList;
+    setCachedAllowedList(newList);
     notifyCacheChange();
 }
 
 function isItemAllowed(item: (CustomEmoji | UnicodeEmoji)) {
-    if ("uniqueName" in item) {
-        return cache_allowedList.some(emoji => emoji.name === item.uniqueName);
-    }
-    return cache_allowedList.some(emoji => emoji.name === item.name);
+    return allowedEmojiNames.has("uniqueName" in item ? item.uniqueName : item.name);
 }
 
 function itemAlreadyInList(item: ContextMenuEmoji) {
-    return cache_allowedList.some(emoji => emoji.name === item.name);
+    return allowedEmojiNames.has(item.name);
 }
 
 function buildSaveData(item: ContextMenuEmoji): SavedEmoji {
@@ -85,7 +91,11 @@ function showToast(message: string, type = Toasts.Type.SUCCESS) {
 
 function addBulkToAllowedList(items: ContextMenuEmoji[]) {
     return withWriteLock(async () => {
-        const validItemsToAdd = items.filter(item => !itemAlreadyInList(item)).map(buildSaveData);
+        const validItemsToAdd: SavedEmoji[] = [];
+        for (const item of items) {
+            if (!itemAlreadyInList(item)) validItemsToAdd.push(buildSaveData(item));
+        }
+
         await setAllowedList([...cache_allowedList, ...validItemsToAdd]);
 
         showToast(`Added ${validItemsToAdd.length} emojis to the list, ${items.length - validItemsToAdd.length} already in the list`);
@@ -94,10 +104,18 @@ function addBulkToAllowedList(items: ContextMenuEmoji[]) {
 
 function removeBulkFromAllowedList(items: ContextMenuEmoji[]) {
     return withWriteLock(async () => {
-        const itemsToRemove = items.filter(item => itemAlreadyInList(item));
-        await setAllowedList(cache_allowedList.filter(emoji => !itemsToRemove.some(item => item.name === emoji.name)));
+        const namesToRemove = new Set<string>();
+        let removedCount = 0;
+        for (const item of items) {
+            if (itemAlreadyInList(item)) {
+                namesToRemove.add(item.name);
+                removedCount++;
+            }
+        }
 
-        showToast(`Removed ${itemsToRemove.length} emojis from the list`);
+        await setAllowedList(cache_allowedList.filter(emoji => !namesToRemove.has(emoji.name)));
+
+        showToast(`Removed ${removedCount} emojis from the list`);
     });
 }
 
@@ -415,7 +433,7 @@ export default definePlugin({
     ],
     settings: settings,
     async start() {
-        cache_allowedList = await getAllowedList();
+        setCachedAllowedList(await getAllowedList());
         notifyCacheChange();
         addContextMenuPatch("expression-picker", expressionPickerPatch);
         addContextMenuPatch("guild-context", guildContextPatch);
@@ -423,6 +441,7 @@ export default definePlugin({
     stop() {
         removeContextMenuPatch("expression-picker", expressionPickerPatch);
         removeContextMenuPatch("guild-context", guildContextPatch);
+        setCachedAllowedList([]);
     },
     filterEmojis(emojis: (CustomEmoji | UnicodeEmoji)[]): (CustomEmoji | UnicodeEmoji)[] {
         let result = emojis;

@@ -21,7 +21,7 @@ interface ParsedColorInfo {
     text: string;
 }
 
-const requiredFirstCharacters = ["r", "h", "#"].flatMap(v => [v, v.toUpperCase()]);
+const requiredFirstCharacters = ["r", "R", "h", "H", "#"];
 
 export default definePlugin({
     authors: [EquicordDevs.Hen],
@@ -78,7 +78,12 @@ export default definePlugin({
     // Needed to load all regex before patching
     startAt: StartAt.Init,
     getColor(order: number) {
-        const source = regex.map(r => r.reg.source).join("|");
+        let source = "";
+        for (const item of regex) {
+            if (source) source += "|";
+            source += item.reg.source;
+        }
+
         const matchAllRegExp = new RegExp(`^(${source})`, "i");
 
         return {
@@ -180,7 +185,12 @@ const isColorDark = (color: string, type: ColorType): boolean => {
         case ColorType.HEX: {
             color = color.substring(1);
             if (color.length === 3) {
-                color = color.split("").flatMap(v => [v, v]).join("");
+                let expanded = "";
+                for (const char of color) {
+                    expanded += char + char;
+                }
+
+                color = expanded;
             }
 
             const rgb = parseInt(color, 16);

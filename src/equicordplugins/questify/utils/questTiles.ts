@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import type { Quest, QuestTaskWatchVideo, QuestTaskWatchVideoOnMobile } from "@vencord/discord-types";
-import { QuestTaskType } from "@vencord/discord-types/enums";
+import type { Quest } from "@vencord/discord-types";
 
 import { getQuestifySettings, useQuestifySettings } from "../settings/access";
 import { defaultClaimedSubsort, defaultExpiredSubsort, defaultIgnoredSubsort, defaultQuestOrder, defaultUnclaimedSubsort, type QuestOrderStatus, type QuestSubsort, type QuestTileColorSetting, type QuestTileGradient } from "../settings/def";
@@ -209,35 +208,6 @@ function getValidQuestOrder(value: unknown): QuestOrderStatus[] {
     return order;
 }
 
-function injectDesktopVideoQuestTasks(quests: Quest[]): void {
-    for (const quest of quests) {
-        const tasks = quest.config.taskConfigV2?.tasks;
-        const mobileVideoTask = tasks?.[QuestTaskType.WATCH_VIDEO_ON_MOBILE] as QuestTaskWatchVideoOnMobile | undefined;
-
-        if (!tasks || !mobileVideoTask || tasks[QuestTaskType.WATCH_VIDEO]) {
-            continue;
-        }
-
-        const desktopVideoTask: QuestTaskWatchVideo = {
-            ...mobileVideoTask,
-            type: QuestTaskType.WATCH_VIDEO,
-        };
-
-        const reorderedTasks: typeof tasks = {};
-
-        for (const [taskType, task] of Object.entries(tasks) as [QuestTaskType, typeof tasks[QuestTaskType]][]) {
-            if (taskType === QuestTaskType.WATCH_VIDEO_ON_MOBILE) {
-                reorderedTasks[QuestTaskType.WATCH_VIDEO] = desktopVideoTask;
-            }
-
-            reorderedTasks[taskType] = task;
-        }
-
-        quest.config.taskConfigV2.tasks = reorderedTasks;
-        desktopVideoCompatibilityQuestIds.add(quest.id);
-    }
-}
-
 export function hasInjectedDesktopVideoCompatibility(quest?: Quest | string | null): boolean {
     return !quest ? false : desktopVideoCompatibilityQuestIds.has(typeof quest === "string" ? quest : quest.id);
 }
@@ -246,22 +216,15 @@ export function sortQuests(quests: Quest[], skip?: boolean): Quest[] {
     const questSorting = useQuestifySettings([
         "disableQuestsEverything",
         "ignoredQuestIDs",
-        "makeMobileVideoQuestsDesktopCompatible",
-        "completeVideoQuestsQuicker",
         "questOrder",
         "unclaimedSubsort",
         "claimedSubsort",
         "ignoredSubsort",
         "expiredSubsort",
-        "autoCompleteQuestTypes",
     ]);
 
     if (questSorting.disableQuestsEverything) {
         return quests;
-    }
-
-    if (questSorting.makeMobileVideoQuestsDesktopCompatible || !!questSorting.autoCompleteQuestTypes.WATCH_VIDEO_ON_MOBILE) {
-        injectDesktopVideoQuestTasks(quests);
     }
 
     if (skip) {

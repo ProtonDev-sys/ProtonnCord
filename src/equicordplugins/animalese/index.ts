@@ -54,16 +54,22 @@ const settings = definePluginSettings({
             {
                 label: "Low",
                 value: "low"
-            },
-            {
-                label: "Lowest",
-                value: "low"
             }
-        ]
+        ],
+        onChange: () => {
+            if (audioContext) void initSoundBuffers(true);
+            else clearSoundBuffers();
+        }
     }
 });
 
 let audioContext: AudioContext | null = null;
+let loadedSoundQuality: string | null = null;
+let initSoundBuffersPromise: Promise<void> | null = null;
+const urlPattern = /https?:\/\/[^\s]+/;
+const LETTER_SLOT_SECONDS = 0.09;
+const MIN_PLAYBACK_SPEED = 0.1;
+const MIN_PITCH_SHIFT = 0.1;
 
 // better than my old hardcoded garbage
 const highSounds = Array.from(
@@ -74,27 +80,55 @@ const soundBuffers: Record<string, AudioBuffer> = {};
 
 const BASE_URL_HIGH = "https://raw.githubusercontent.com/Equicord/Equibored/main/sounds/animalese";
 
-async function initSoundBuffers() {
-    if (!audioContext) audioContext = new AudioContext();
-    const quality = settings.store.soundQuality;
-    for (const file of highSounds) {
-        const nameWithoutExt = file.replace(".wav", "");
-        soundBuffers[nameWithoutExt] = await loadSound(
-            `${BASE_URL_HIGH}/${quality}/${file}`
-        );
-    }
+function getAudioContext() {
+    return audioContext ??= new AudioContext();
 }
 
-async function loadSound(url: string): Promise<AudioBuffer> {
-    if (!audioContext) audioContext = new AudioContext();
+function clearSoundBuffers() {
+    for (const key of Object.keys(soundBuffers)) {
+        delete soundBuffers[key];
+    }
+    loadedSoundQuality = null;
+}
+
+async function initSoundBuffers(force = false) {
+    const context = getAudioContext();
+    const quality = settings.store.soundQuality;
+    if (!force && loadedSoundQuality === quality) return;
+    if (initSoundBuffersPromise) return initSoundBuffersPromise;
+
+    initSoundBuffersPromise = Promise.all(
+        highSounds.map(async file => {
+            const nameWithoutExt = file.replace(".wav", "");
+            const buffer = await loadSound(context, `${BASE_URL_HIGH}/${quality}/${file}`);
+            return [nameWithoutExt, buffer] as const;
+        })
+    ).then(entries => {
+        if (audioContext !== context) return;
+
+        clearSoundBuffers();
+        for (const [name, buffer] of entries) {
+            soundBuffers[name] = buffer;
+        }
+        loadedSoundQuality = quality;
+    }).finally(() => {
+        initSoundBuffersPromise = null;
+    });
+
+    return initSoundBuffersPromise;
+}
+
+async function loadSound(context: AudioContext, url: string): Promise<AudioBuffer> {
     const response = await fetch(url);
     if (!response.ok) throw new Error("Network response was not OK");
     const arrayBuffer = await response.arrayBuffer();
-    return audioContext.decodeAudioData(arrayBuffer);
+    return context.decodeAudioData(arrayBuffer);
 }
 
 async function generateAnimalese(text: string): Promise<AudioBuffer | null> {
-    if (!audioContext) audioContext = new AudioContext();
+    const context = getAudioContext();
+    const speed = Math.max(settings.store.speed ?? 1, MIN_PLAYBACK_SPEED);
+    const pitch = settings.store.pitch ?? 1;
 
     const soundIndices: string[] = [];
     const text_lower = text.toLowerCase();
@@ -116,7 +150,10 @@ async function generateAnimalese(text: string): Promise<AudioBuffer | null> {
             soundIndices.push("sound30");
         } else if (char === text_lower[i - 1]) {
             continue;
-        } else if (char.match(/[a-z]/)) {
+        } else {
+            const charCode = char.charCodeAt(0);
+            if (charCode < 97 || charCode > 122) continue;
+
             const index = char.charCodeAt(0) - 96;
             soundIndices.push(`sound${String(index).padStart(2, "0")}`);
         }
@@ -127,26 +164,29 @@ async function generateAnimalese(text: string): Promise<AudioBuffer | null> {
         return null;
     }
 
-    const totalDuration = soundIndices.length * 0.1;
-    const frameCount = Math.max(1, Math.floor(audioContext.sampleRate * totalDuration));
+    const baseLetterDuration = Math.floor(context.sampleRate * (LETTER_SLOT_SECONDS / speed));
+    const minPitchShift = Math.max(2.8 * pitch, MIN_PITCH_SHIFT);
+    const maxSoundFrames = soundIndices.reduce((maxFrames, soundIndex) => {
+        const buffer = soundBuffers[soundIndex];
+        return buffer ? Math.max(maxFrames, Math.ceil(buffer.length / minPitchShift)) : maxFrames;
+    }, 0);
+    const frameCount = Math.max(1, ((soundIndices.length - 1) * baseLetterDuration) + maxSoundFrames);
 
-    const outputBuffer = audioContext.createBuffer(
+    const outputBuffer = context.createBuffer(
         1,
         frameCount,
-        audioContext.sampleRate
+        context.sampleRate
     );
     const outputData = outputBuffer.getChannelData(0);
 
     let offset = 0;
-    const baseLetterDuration = audioContext.sampleRate * (0.09 / settings.store.speed);
-    // ~90ms per letter at 1x speed (tweakable!)
 
     for (let i = 0; i < soundIndices.length; i++) {
         const buffer = soundBuffers[soundIndices[i]];
         if (!buffer) continue;
 
         const variation = 0.15;
-        let pitchShift = (2.8 * settings.store.pitch) + (Math.random() * variation);
+        let pitchShift = (2.8 * pitch) + (Math.random() * variation);
 
         const isQuestion = text_lower.endsWith("?");
         if (isQuestion && i >= soundIndices.length * 0.8) {
@@ -175,17 +215,17 @@ async function generateAnimalese(text: string): Promise<AudioBuffer | null> {
     return outputBuffer;
 }
 
-async function playSound(buffer: AudioBuffer, volume: number) {
-    if (!audioContext) audioContext = new AudioContext();
-    const source = audioContext.createBufferSource();
-    const gainNode = audioContext.createGain();
+function playSound(buffer: AudioBuffer, volume: number) {
+    const context = getAudioContext();
+    const source = context.createBufferSource();
+    const gainNode = context.createGain();
 
     source.buffer = buffer;
-    source.playbackRate.value = settings.store.pitch;
-    gainNode.gain.value = volume;
+    source.playbackRate.value = settings.store.pitch ?? 1;
+    gainNode.gain.value = Math.min(Math.max(volume, 0), 1);
 
     source.connect(gainNode);
-    gainNode.connect(audioContext.destination);
+    gainNode.connect(context.destination);
 
     source.start();
 }
@@ -201,22 +241,27 @@ export default definePlugin({
         async MESSAGE_CREATE({ optimistic, type, message, channelId }) {
             if (optimistic || type !== "MESSAGE_CREATE") return;
             if (message.state === "SENDING") return;
-            if (!message.content || message.author?.bot || channelId !== SelectedChannelStore.getChannelId()) return;
+            const { content } = message;
+            if (!content || message.author?.bot || channelId !== SelectedChannelStore.getChannelId()) return;
 
-            const urlPattern = /https?:\/\/[^\s]+/;
             const maxLength = settings.store.messageLengthLimit || 100;
             const processOwnMessages = settings.store.processOwnMessages ?? true;
+            const authorId = message.author?.id;
 
             if (
-                urlPattern.test(message.content)
-                || message.content.length > maxLength
-                || !processOwnMessages
-                && String(message.author.id) === String(UserStore.getCurrentUser().id)
+                urlPattern.test(content)
+                || content.length > maxLength
             ) return;
 
+            if (!processOwnMessages) {
+                const currentUserId = UserStore.getCurrentUser()?.id;
+                if (!currentUserId || authorId === currentUserId) return;
+            }
+
             try {
-                const buffer = await generateAnimalese(message.content);
-                if (buffer) await playSound(buffer, settings.store.volume);
+                await initSoundBuffers();
+                const buffer = await generateAnimalese(content);
+                if (buffer) playSound(buffer, settings.store.volume);
             } catch (err) {
                 console.error("[Animalese]", err);
             }
@@ -225,7 +270,7 @@ export default definePlugin({
 
     async start() {
         if (!audioContext) {
-            audioContext = new AudioContext();
+            getAudioContext();
             await initSoundBuffers();
         }
     },
@@ -235,5 +280,6 @@ export default definePlugin({
             audioContext.close();
             audioContext = null;
         }
+        clearSoundBuffers();
     },
 });

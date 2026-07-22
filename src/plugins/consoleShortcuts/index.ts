@@ -174,7 +174,7 @@ function makeShortcuts() {
         guild: { getter: () => getCurrentGuild(), preload: false },
         guildId: { getter: () => Common.SelectedGuildStore.getGuildId(), preload: false },
         me: { getter: () => Common.UserStore.getCurrentUser(), preload: false },
-        meId: { getter: () => Common.UserStore.getCurrentUser().id, preload: false },
+        meId: { getter: () => Common.UserStore.getCurrentUser()?.id, preload: false },
         messages: { getter: () => Common.MessageStore.getMessages(Common.SelectedChannelStore.getChannelId()), preload: false },
         openModal: { getter: () => Common.openModal },
         openModalLazy: { getter: () => Common.openModalLazy },

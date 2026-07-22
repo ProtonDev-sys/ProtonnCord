@@ -17,6 +17,7 @@ import React, { ReactNode } from "react";
 
 const CodeContainerClasses = findCssClassesLazy("markup", "codeContainer");
 const MessageContentClasses = findCssClassesLazy("messageContent", "messageContentTrailingIcon");
+let blockedStickerIds = new Set<string>();
 
 const settings = definePluginSettings({
     showGif: {
@@ -40,9 +41,27 @@ const settings = definePluginSettings({
     blockedStickers: {
         type: OptionType.STRING,
         description: "The list of blocked sticker IDs (don't edit unless you know what you're doing)",
+        onChange: value => { blockedStickerIds = parseStickerIds(value); },
         default: ""
     }
 });
+
+function parseStickerIds(value: string | null | undefined): Set<string> {
+    if (!value) return new Set();
+
+    const ids = new Set<string>();
+    for (const rawId of value.split(",")) {
+        const id = rawId.trim();
+        if (id) ids.add(id);
+    }
+
+    return ids;
+}
+
+function updateBlockedStickers(nextBlockedStickerIds: Set<string>) {
+    blockedStickerIds = nextBlockedStickerIds;
+    settings.store.blockedStickers = [...nextBlockedStickerIds].join(", ");
+}
 
 function blockedComponentRender(sticker) {
     const { showGif, showMessage, showButton } = settings.store;
@@ -109,22 +128,20 @@ function buildMenuItem(name) {
 }
 
 function toggleBlock(name) {
-    if (settings.store.blockedStickers === undefined || settings.store.blockedStickers == null) {
-        return;
-    }
-    const excepted = isStickerBlocked(name);
+    const nextBlockedStickerIds = new Set(blockedStickerIds);
+    const excepted = nextBlockedStickerIds.has(name);
+
     if (excepted) {
-        settings.store.blockedStickers = settings.store.blockedStickers.split(", ").filter(item => item !== name).join(", ");
+        nextBlockedStickerIds.delete(name);
     } else {
-        settings.store.blockedStickers = settings.store.blockedStickers.split(", ").concat(name).join(", ");
+        nextBlockedStickerIds.add(name);
     }
+
+    updateBlockedStickers(nextBlockedStickerIds);
 }
 
 function isStickerBlocked(name) {
-    if (settings.store.blockedStickers === undefined || settings.store.blockedStickers == null) {
-        return;
-    }
-    return settings.store.blockedStickers.split(", ").includes(name);
+    return blockedStickerIds.has(name);
 }
 
 export default definePlugin({
@@ -147,13 +164,10 @@ export default definePlugin({
     },
     start() {
         DataStore.createStore("StickerBlocker", "data");
+        blockedStickerIds = parseStickerIds(settings.store.blockedStickers);
     },
     isBlocked(stickerId) {
-        if (settings.store.blockedStickers.split(", ").includes(stickerId)) {
-            return true;
-        }
-
-        return false;
+        return blockedStickerIds.has(stickerId);
     },
     blockedComponent: ErrorBoundary.wrap(blockedComponentRender, { fallback: () => <p style={{ color: "red" }}>Failed to render :(</p> }),
     settings,

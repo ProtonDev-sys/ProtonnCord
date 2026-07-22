@@ -18,15 +18,21 @@
 
 export function hex2Rgb(hex: string) {
     hex = hex.slice(1);
-    if (hex.length < 6)
-        hex = hex
-            .split("")
-            .map(c => c + c)
-            .join("");
+    if (hex.length < 6) {
+        let expanded = "";
+        for (const char of hex) {
+            expanded += char + char;
+        }
+
+        hex = expanded;
+    }
+
     if (hex.length === 6) hex += "ff";
     if (hex.length > 6) hex = hex.slice(0, 6);
-    return hex
-        .split(/(..)/)
-        .filter(Boolean)
-        .map(c => parseInt(c, 16));
+    const rgb: number[] = [];
+    for (let i = 0; i < hex.length; i += 2) {
+        rgb.push(parseInt(hex.slice(i, i + 2), 16));
+    }
+
+    return rgb;
 }

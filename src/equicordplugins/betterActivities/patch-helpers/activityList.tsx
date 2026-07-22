@@ -86,7 +86,7 @@ export function patchActivityList({ activities: rawActivities, user, hideTooltip
     } else {
         // Show default icon when there are no custom icons
         // We need to filter out custom statuses
-        const shouldShow = activities.filter(a => a.type !== 4).length !== icons.length;
+        const shouldShow = activities.some(a => a.type !== 4);
         if (shouldShow) {
             return <DefaultActivityIcon size="xs" />;
         }

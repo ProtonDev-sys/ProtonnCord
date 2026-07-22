@@ -8,7 +8,16 @@ import { DataStore } from "@api/index";
 
 import plugins from "~plugins";
 
-export type KnownPluginSettingsMap = Map<string, Set<string>>;
+import {
+    getNewSettings as getNewSettingsFromSnapshots,
+    isNotifiablePlugin,
+    isSerializedKnownSettings,
+    KnownPluginSettingsMap,
+    normalizeKnownSettings,
+    serializeKnownSettings,
+} from "./knownSettingsData";
+
+export type { KnownPluginSettingsMap } from "./knownSettingsData";
 
 export const KNOWN_PLUGINS_LEGACY_DATA_KEY = "NewPluginsManager_KnownPlugins";
 export const KNOWN_SETTINGS_DATA_KEY = "NewPluginsManager_KnownSettings";
@@ -25,35 +34,47 @@ function getCurrentSettings(pluginList: string[]): KnownPluginSettingsMap {
     ]));
 }
 
-export async function getKnownSettings(): Promise<Map<string, Set<string>>> {
-    const raw = await DataStore.get(KNOWN_SETTINGS_DATA_KEY);
-    let map: Map<string, Set<string>>;
+async function persistKnownSettings(settings: KnownPluginSettingsMap): Promise<void> {
+    await DataStore.set(KNOWN_SETTINGS_DATA_KEY, serializeKnownSettings(settings));
+}
 
-    if (!raw) {
-        const knownPlugins = await DataStore.get(KNOWN_PLUGINS_LEGACY_DATA_KEY) ?? [] as string[];
-        const Plugins = [...Object.keys(plugins), ...knownPlugins];
-        map = getCurrentSettings(Plugins);
-        await DataStore.set(KNOWN_SETTINGS_DATA_KEY, [...map.entries()].map(
-            ([plugin, settings]) => [plugin, [...settings]]
-        ));
-    } else {
-        map = raw instanceof Map
-            ? raw
-            : new Map(raw.map(([plugin, settings]: [string, string[]]) => [plugin, new Set(settings)]));
+export async function getKnownSettings(): Promise<KnownPluginSettingsMap> {
+    const raw = await DataStore.get<unknown>(KNOWN_SETTINGS_DATA_KEY);
+
+    if (raw == null) {
+        const legacyData = await DataStore.get<unknown>(KNOWN_PLUGINS_LEGACY_DATA_KEY);
+        const knownPlugins = Array.isArray(legacyData)
+            ? legacyData.filter((plugin): plugin is string => typeof plugin === "string")
+            : [];
+        const settings = getCurrentSettings([...new Set([...Object.keys(plugins), ...knownPlugins])]);
+        await persistKnownSettings(settings);
+        return settings;
     }
 
-    return map;
+    const settings = normalizeKnownSettings(raw);
+    if (!isSerializedKnownSettings(raw)) await persistKnownSettings(settings);
+    return settings;
+}
+
+export async function getNewPluginChanges(): Promise<{
+    newPlugins: Set<string>;
+    newSettings: KnownPluginSettingsMap;
+}> {
+    const currentSettings = getCurrentSettings(Object.keys(plugins));
+    const knownSettings = await getKnownSettings();
+    const knownPlugins = new Set(knownSettings.keys());
+    const newPlugins = new Set(Object.keys(plugins).filter(plugin => (
+        !knownPlugins.has(plugin) && isNotifiablePlugin(plugins[plugin])
+    )));
+
+    return {
+        newPlugins,
+        newSettings: getNewSettingsFromSnapshots(currentSettings, knownSettings),
+    };
 }
 
 export async function getNewSettings(): Promise<KnownPluginSettingsMap> {
-    const map = getCurrentSettings(Object.keys(plugins));
-    const knownSettings = await getKnownSettings();
-    map.forEach((settings, plugin) => {
-        const filteredSettings = [...settings].filter(setting => !knownSettings.get(plugin)?.has(setting));
-        if (!filteredSettings.length) return map.delete(plugin);
-        map.set(plugin, new Set(filteredSettings));
-    });
-    return map;
+    return (await getNewPluginChanges()).newSettings;
 }
 
 export async function getKnownPlugins(): Promise<Set<string>> {
@@ -62,39 +83,20 @@ export async function getKnownPlugins(): Promise<Set<string>> {
 }
 
 export async function getNewPlugins(): Promise<Set<string>> {
-    const currentPlugins = Object.keys(plugins);
-    const knownPlugins = await getKnownPlugins();
-    return new Set(currentPlugins.filter(p => !knownPlugins.has(p)));
+    return (await getNewPluginChanges()).newPlugins;
 }
 
-export async function writeKnownSettings() {
-    const currentSettings = getCurrentSettings(Object.keys(plugins));
-    const knownSettings = await getKnownSettings();
-    const allSettings = new Map();
-    new Set([...currentSettings.keys(), ...knownSettings.keys()]).forEach(plugin => {
-        allSettings.set(plugin, new Set([
-            ...(currentSettings.get(plugin) || []),
-            ...(knownSettings.get(plugin) || [])
-        ]));
-    });
-    await DataStore.set(KNOWN_SETTINGS_DATA_KEY, allSettings);
+export async function writeKnownSettings(): Promise<void> {
+    await persistKnownSettings(getCurrentSettings(Object.keys(plugins)));
 }
 
-export async function debugWipeSomeData() {
+export async function editRawData(
+    patcher: (data: KnownPluginSettingsMap) => Promise<void> | void,
+): Promise<void> {
     const settings = await getKnownSettings();
-    settings.forEach((value, key) => {
-        if (Math.random() > 0.8) {
-            if (Math.random() > 0.5) return settings.set(key, new Set([...value].filter(() => Math.random() > 0.5)));
-            return settings.delete(key);
-        }
-    });
-    await DataStore.set(KNOWN_SETTINGS_DATA_KEY, settings);
-}
-
-export async function editRawData(patcher: (data: KnownPluginSettingsMap) => (Promise<any> | any)) {
-    if (!patcher) return;
-    const map = await DataStore.get(KNOWN_SETTINGS_DATA_KEY) as KnownPluginSettingsMap;
-    const newMap = new Map(map);
-    await patcher(newMap);
-    await DataStore.set(KNOWN_SETTINGS_DATA_KEY, newMap ?? map);
+    const patchedSettings = new Map(
+        Array.from(settings, ([plugin, pluginSettings]) => [plugin, new Set(pluginSettings)]),
+    );
+    await patcher(patchedSettings);
+    await persistKnownSettings(patchedSettings);
 }

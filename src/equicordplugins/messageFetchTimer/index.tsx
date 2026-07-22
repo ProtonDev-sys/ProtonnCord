@@ -22,6 +22,8 @@ interface FetchTiming {
 let currentFetch: FetchTiming | null = null;
 let currentChannelId: string | null = null;
 const channelTimings: Map<string, { time: number; timestamp: Date; }> = new Map();
+const MAX_CHANNEL_TIMINGS = 50;
+const MAX_FETCH_DURATION_MS = 60_000;
 
 const settings = definePluginSettings({
     showIcon: {
@@ -42,9 +44,9 @@ const settings = definePluginSettings({
 });
 
 const FetchTimeButton: ChatBarButtonFactory = ({ isMainChat }) => {
-    const { showMs, iconColor } = settings.use(["showMs", "iconColor"]);
+    const { showIcon, showMs, iconColor } = settings.use(["showIcon", "showMs", "iconColor"]);
 
-    if (!isMainChat || !settings.store.showIcon || !currentChannelId) {
+    if (!isMainChat || !showIcon || !currentChannelId) {
         return null;
     }
 
@@ -118,28 +120,48 @@ function formatTimeAgo(timestamp: Date): string {
 }
 
 function handleChannelSelect(data: any) {
-    if (data.channelId && data.channelId !== currentChannelId) {
-        currentChannelId = data.channelId;
-        currentFetch = {
-            channelId: data.channelId,
-            startTime: performance.now()
-        };
+    const channelId = data.channelId as string | null | undefined;
+
+    if (!channelId) {
+        currentChannelId = null;
+        currentFetch = null;
+        return;
     }
+
+    if (channelId === currentChannelId) return;
+
+    currentChannelId = channelId;
+    currentFetch = {
+        channelId,
+        startTime: performance.now()
+    };
 }
 
 function handleMessageLoad(data: any) {
     if (!currentFetch || data.channelId !== currentFetch.channelId) return;
 
-    const existing = channelTimings.get(currentFetch.channelId);
-    if (existing) return;
-
     const endTime = performance.now();
+    if (endTime - currentFetch.startTime > MAX_FETCH_DURATION_MS) {
+        currentFetch = null;
+        return;
+    }
+
+    const existing = channelTimings.get(currentFetch.channelId);
+    if (existing) {
+        currentFetch = null;
+        return;
+    }
+
     const duration = endTime - currentFetch.startTime;
 
     channelTimings.set(currentFetch.channelId, {
         time: duration,
         timestamp: new Date()
     });
+    if (channelTimings.size > MAX_CHANNEL_TIMINGS) {
+        const oldestChannelId = channelTimings.keys().next().value;
+        if (oldestChannelId) channelTimings.delete(oldestChannelId);
+    }
 
     currentFetch = null;
 }

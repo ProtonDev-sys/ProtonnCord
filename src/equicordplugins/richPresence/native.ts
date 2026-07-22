@@ -7,14 +7,25 @@
 import type { GrTrackData } from "./types/gensokyoRadio";
 
 export async function fetchTrackData(): Promise<GrTrackData | null> {
-    const song = await (await fetch("https://gensokyoradio.net/api/station/playing/")).json();
+    const response = await fetch("https://gensokyoradio.net/api/station/playing/");
+    if (!response.ok) throw `${response.status} ${response.statusText}`;
 
+    const song = await response.json();
+    const songInfo = song?.SONGINFO;
+    const songTimes = song?.SONGTIMES;
+    if (!songInfo || !songTimes) return null;
+
+    const position = Number(songTimes.SONGSTART);
+    const duration = Number(songTimes.SONGEND);
+    if (!Number.isFinite(position) || !Number.isFinite(duration)) return null;
+
+    const artwork = song?.MISC?.ALBUMART;
     return {
-        title: song.SONGINFO.TITLE,
-        album: song.SONGINFO.ALBUM,
-        artist: song.SONGINFO.ARTIST,
-        position: song.SONGTIMES.SONGSTART,
-        duration: song.SONGTIMES.SONGEND,
-        artwork: song.MISC.ALBUMART ? `https://gensokyoradio.net/images/albums/500/${song.MISC.ALBUMART}` : "",
+        title: songInfo.TITLE || "Unknown",
+        album: songInfo.ALBUM || "Unknown",
+        artist: songInfo.ARTIST || "Unknown",
+        position,
+        duration,
+        artwork: artwork ? `https://gensokyoradio.net/images/albums/500/${artwork}` : "",
     };
 }

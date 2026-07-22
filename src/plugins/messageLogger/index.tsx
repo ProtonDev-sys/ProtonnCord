@@ -221,6 +221,45 @@ function clearCustomRenderedContent(message: Message) {
     });
 }
 
+type IgnoreListSetting = "ignoreUsers" | "ignoreChannels" | "ignoreGuilds";
+
+interface IgnoreIdCache {
+    raw: string;
+    ids: Set<string>;
+}
+
+const ignoreIdCaches: Record<IgnoreListSetting, IgnoreIdCache> = {
+    ignoreUsers: { raw: "", ids: new Set<string>() },
+    ignoreChannels: { raw: "", ids: new Set<string>() },
+    ignoreGuilds: { raw: "", ids: new Set<string>() }
+};
+
+function parseIgnoreIdSet(raw: string) {
+    const ids = new Set<string>();
+
+    for (const rawId of raw.split(/[,\s]+/)) {
+        const id = rawId.trim();
+        if (id) ids.add(id);
+    }
+
+    return ids;
+}
+
+function getIgnoreIdSet(setting: IgnoreListSetting) {
+    const raw = settings.store[setting] ?? "";
+    const cache = ignoreIdCaches[setting];
+    if (cache.raw !== raw) {
+        cache.raw = raw;
+        cache.ids = parseIgnoreIdSet(raw);
+    }
+
+    return cache.ids;
+}
+
+function hasIgnoredId(ids: ReadonlySet<string>, id?: string) {
+    return id != null && ids.has(id);
+}
+
 function createDiffSegment(part: DiffPart, message: Message, key: React.Key, highlightType?: "removed" | "added") {
     const parsedContent = Parser.parse(part.text, true, {
         channelId: message.channel_id,
@@ -624,28 +663,28 @@ export default definePlugin({
                 ignoreBots,
                 ignoreSelf,
                 ignoreSelfEdits,
-                ignoreUsers,
-                ignoreChannels,
-                ignoreGuilds,
                 logEdits,
                 logDeletes,
             } = settings.store;
-            const myId = UserStore.getCurrentUser().id;
+            const authorId = message.author?.id;
+            const channel = ChannelStore.getChannel(message.channel_id);
+            const currentUserId = UserStore.getCurrentUser()?.id;
+            const ignoredUserIds = getIgnoreIdSet("ignoreUsers");
+            const ignoredChannelIds = getIgnoreIdSet("ignoreChannels");
+            const ignoredGuildIds = getIgnoreIdSet("ignoreGuilds");
 
             return (
                 (ignoreBots && message.author?.bot) ||
-                (ignoreSelf && message.author?.id === myId) ||
-                (ignoreSelfEdits && isEdit && message.author?.id === myId) ||
-                ignoreUsers.includes(message.author?.id) ||
-                ignoreChannels.includes(message.channel_id) ||
-                ignoreChannels.includes(
-                    ChannelStore.getChannel(message.channel_id)?.parent_id,
-                ) ||
+                (ignoreSelf && currentUserId != null && authorId === currentUserId) ||
+                (ignoreSelfEdits && isEdit && currentUserId != null && authorId === currentUserId) ||
+                hasIgnoredId(ignoredUserIds, authorId) ||
+                hasIgnoredId(ignoredChannelIds, message.channel_id) ||
+                hasIgnoredId(ignoredChannelIds, channel?.parent_id) ||
                 (isEdit ? !logEdits : !logDeletes) ||
-                ignoreGuilds.includes(ChannelStore.getChannel(message.channel_id)?.guild_id) ||
+                hasIgnoredId(ignoredGuildIds, channel?.guild_id) ||
                 // Ignore Venbot in the support channels (love you venbot!!!)
-                (message.author?.id === VENBOT_USER_ID && ChannelStore.getChannel(message.channel_id)?.parent_id === VC_SUPPORT_CATEGORY_ID) ||
-                (message.author?.id === EQUIBOT_USER_ID && ChannelStore.getChannel(message.channel_id)?.id === SUPPORT_CHANNEL_ID));
+                (authorId === VENBOT_USER_ID && channel?.parent_id === VC_SUPPORT_CATEGORY_ID) ||
+                (authorId === EQUIBOT_USER_ID && channel?.id === SUPPORT_CHANNEL_ID));
         } catch (e) {
             return false;
         }

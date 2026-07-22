@@ -22,7 +22,7 @@ import { ReactNode } from "react";
 
 import Plugins from "~plugins";
 
-import { getNewPlugins, getNewSettings, KnownPluginSettingsMap, writeKnownSettings } from "./knownSettings";
+import { getNewPluginChanges, KnownPluginSettingsMap, writeKnownSettings } from "./knownSettings";
 
 const cl = classNameFactory("vc-new-plugins-");
 
@@ -76,7 +76,7 @@ function NewPluginsModal({ modalProps, newPlugins, newSettings }: ModalComponent
 
         if (isRequired) {
             const tooltipText = p.required
-                ? "This plugin is required for Equicord to function."
+                ? "This plugin is required for Protonn Cord to function."
                 : <PluginDependencyList deps={depMap[p.name]?.filter(d => settings.plugins[d].enabled)} />;
 
             requiredPluginCards.push(
@@ -108,8 +108,7 @@ function NewPluginsModal({ modalProps, newPlugins, newSettings }: ModalComponent
 
     const totalCount = pluginCards.length + requiredPluginCards.length;
 
-    const handleContinue = async () => {
-        await writeKnownSettings();
+    const handleContinue = () => {
         if (changes.hasChanges) {
             location.reload();
         } else {
@@ -163,10 +162,10 @@ function NewPluginsModal({ modalProps, newPlugins, newSettings }: ModalComponent
 }
 
 export async function openNewPluginsModal() {
-    const newPlugins = await getNewPlugins();
-    const newSettings = await getNewSettings();
+    const { newPlugins, newSettings } = await getNewPluginChanges();
     if ((newPlugins.size || newSettings.size) && !hasSeen) {
         hasSeen = true;
+        await writeKnownSettings();
         const modalKey = openModal(modalProps => (
             <ErrorBoundary noop onError={() => closeModal(modalKey)}>
                 <NewPluginsModal

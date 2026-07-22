@@ -23,7 +23,10 @@ import { UserStore } from "@webpack/common";
 import { ChromeIcon, DiscordIcon, EdgeIcon, FirefoxIcon, IEIcon, MobileIcon, OperaIcon, SafariIcon, UnknownIcon } from "./components/icons";
 import { SessionInfo } from "./types";
 
-const getDataKey = () => `BetterSessions_savedSessions_${UserStore.getCurrentUser().id}`;
+const getDataKey = () => {
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    return currentUserId ? `BetterSessions_savedSessions_${currentUserId}` : undefined;
+};
 
 export const cl = classNameFactory("vc-betterSessions-");
 export const savedSessionsCache: Map<string, { name: string, isNew: boolean; }> = new Map();
@@ -33,11 +36,22 @@ export function getDefaultName(clientInfo: SessionInfo["session"]["client_info"]
 }
 
 export function saveSessionsToDataStore() {
-    return DataStore.set(getDataKey(), savedSessionsCache);
+    const dataKey = getDataKey();
+    if (!dataKey) return Promise.resolve();
+
+    return DataStore.set(dataKey, savedSessionsCache);
 }
 
-export async function fetchNamesFromDataStore() {
-    const savedSessions = await DataStore.get<Map<string, { name: string, isNew: boolean; }>>(getDataKey()) || new Map();
+export async function fetchNamesFromDataStore(shouldApply = () => true) {
+    savedSessionsCache.clear();
+
+    const dataKey = getDataKey();
+    if (!dataKey) return;
+
+    const savedSessions = await DataStore.get<Map<string, { name: string, isNew: boolean; }>>(dataKey) || new Map();
+    if (!shouldApply()) return;
+
+    savedSessionsCache.clear();
     savedSessions.forEach((data, idHash) => {
         savedSessionsCache.set(idHash, data);
     });

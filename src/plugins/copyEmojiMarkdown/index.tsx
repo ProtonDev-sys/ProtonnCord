@@ -21,7 +21,18 @@ interface Emoji {
 
 interface Target {
     dataset: Emoji;
-    firstChild: HTMLImageElement;
+    firstChild?: HTMLImageElement;
+}
+
+function isEmojiAnimated(src?: string): boolean {
+    if (!src) return false;
+
+    try {
+        const url = new URL(src);
+        return url.searchParams.get("animated") === "true" || url.pathname.endsWith(".gif");
+    } catch {
+        return src.includes(".gif");
+    }
 }
 
 function getEmojiMarkdown(target: Target, copyUnicode: boolean): string {
@@ -33,11 +44,20 @@ function getEmojiMarkdown(target: Target, copyUnicode: boolean): string {
             : `:${emojiName}:`;
     }
 
-    const url = new URL(target.firstChild.src);
-    const hasParam = url.searchParams.get("animated") === "true";
-    const isGif = url.pathname.endsWith(".gif");
+    const animated = isEmojiAnimated(target.firstChild?.src);
+    return `<${animated ? "a" : ""}:${emojiName.replace(/~\d+$/, "")}:${emojiId}>`;
+}
 
-    return `<${(hasParam || isGif) ? "a" : ""}:${emojiName.replace(/~\d+$/, "")}:${emojiId}>`;
+function getEmojiImageUrl(target: Target): string | null {
+    const src = target.firstChild?.src;
+    if (!src) return null;
+
+    try {
+        const url = new URL(src);
+        return url.toString();
+    } catch {
+        return src;
+    }
 }
 
 const settings = definePluginSettings({
@@ -59,17 +79,28 @@ export default definePlugin({
         "expression-picker"(children, { target }: { target: Target; }) {
             if (target.dataset.type !== "emoji") return;
 
+            const emojiImageUrl = getEmojiImageUrl(target);
+
             children.push(
-                <Menu.MenuItem
-                    id="vc-copy-emoji-markdown"
-                    label="Copy Emoji Markdown"
-                    action={() => {
-                        copyWithToast(
-                            getEmojiMarkdown(target, settings.store.copyUnicode),
-                            "Success! Copied emoji markdown."
-                        );
-                    }}
-                />
+                <Menu.MenuGroup>
+                    <Menu.MenuItem
+                        id="vc-copy-emoji-markdown"
+                        label="Copy Emoji Markdown"
+                        action={() => {
+                            copyWithToast(
+                                getEmojiMarkdown(target, settings.store.copyUnicode),
+                                "Success! Copied emoji markdown."
+                            );
+                        }}
+                    />
+                    {emojiImageUrl && (
+                        <Menu.MenuItem
+                            id="vc-copy-emoji-url"
+                            label="Copy Emoji URL"
+                            action={() => copyWithToast(emojiImageUrl, "Success! Copied emoji URL.")}
+                        />
+                    )}
+                </Menu.MenuGroup>
             );
         },
     },

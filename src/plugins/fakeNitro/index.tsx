@@ -622,10 +622,16 @@ export default definePlugin({
         const itemsToMaybePush: Array<string> = [];
 
         const contentItems = message.content.split(/\s/);
-        if (settings.store.transformCompoundSentence) itemsToMaybePush.push(...contentItems);
+        if (settings.store.transformCompoundSentence) {
+            for (const contentItem of contentItems) {
+                itemsToMaybePush.push(contentItem);
+            }
+        }
         else if (contentItems.length === 1) itemsToMaybePush.push(contentItems[0]);
 
-        itemsToMaybePush.push(...message.attachments.filter(attachment => attachment.content_type === "image/gif").map(attachment => attachment.url));
+        for (const attachment of message.attachments) {
+            if (attachment.content_type === "image/gif") itemsToMaybePush.push(attachment.url);
+        }
 
         for (const item of itemsToMaybePush) {
             if (!settings.store.transformCompoundSentence && !item.startsWith("http") && !hyperLinkRegex.test(item)) continue;

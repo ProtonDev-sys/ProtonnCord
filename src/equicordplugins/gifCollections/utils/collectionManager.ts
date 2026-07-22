@@ -15,16 +15,33 @@ import { logger } from "./misc";
 export const DATA_COLLECTION_NAME = "gif-collections-collections";
 
 export let cache_collections: Collection[] = [];
+const collectionNameByGifId = new Map<string, string>();
+const gifById = new Map<string, Gif>();
+
+function rebuildLookupCaches(collections: Collection[]) {
+    collectionNameByGifId.clear();
+    gifById.clear();
+
+    for (const collection of collections) {
+        for (const gif of collection.gifs) {
+            collectionNameByGifId.set(gif.id, collection.name);
+            gifById.set(gif.id, gif);
+        }
+    }
+}
 
 export const getCollections = async (): Promise<Collection[]> => (await DataStore.get<Collection[]>(DATA_COLLECTION_NAME)) ?? [];
 
 async function saveCollections(collections: Collection[]) {
     cache_collections = collections;
+    rebuildLookupCaches(collections);
     await DataStore.set(DATA_COLLECTION_NAME, collections);
 }
 
 export const refreshCacheCollection = async (): Promise<void> => {
-    cache_collections = await getCollections();
+    const collections = await getCollections();
+    cache_collections = collections;
+    rebuildLookupCaches(collections);
 };
 
 export async function createCollection(name: string, gifs: Gif[]): Promise<void> {
@@ -138,9 +155,9 @@ export async function updateGif(gifId: string, updatedGif: Gif): Promise<void> {
 }
 
 export function getItemCollectionNameFromId(id: string): string | undefined {
-    return cache_collections.find(c => c.gifs.some(g => g.id === id))?.name;
+    return collectionNameByGifId.get(id);
 }
 
 export function getGifById(id: string): Gif | undefined {
-    return cache_collections.flatMap(c => c.gifs).find(g => g.id === id);
+    return gifById.get(id);
 }

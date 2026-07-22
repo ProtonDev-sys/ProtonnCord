@@ -19,15 +19,30 @@ import { EmbeddedActivityEvent, PreviousVoiceState, SoundEvent, VoiceChannelLogE
 
 const { fetchApplication } = findByPropsLazy("fetchApplication");
 
-const loggedActivities = new Set<string>();
+const loggedActivityUsersByApp = new Map<string, Set<string>>();
 const previousStates = new Map<string, PreviousVoiceState>();
 const existingUsers = new Set<string>();
+const activityNameCache = new Map<string, Promise<string>>();
+const MAX_ACTIVITY_NAME_CACHE_SIZE = 64;
 
 let clientOldChannelId: string | undefined;
 let clientJoinedAt = 0;
 
+type VoiceStateSnapshotInput = Omit<PreviousVoiceState, "selfStream" | "channelId"> & {
+    channelId?: string | null;
+    selfStream?: boolean;
+};
+
+function getSelectedVoiceChannelId(): string | undefined {
+    return SelectedChannelStore?.getVoiceChannelId?.();
+}
+
 function isMyChannel(channelId?: string): boolean {
-    return !!channelId && SelectedChannelStore.getVoiceChannelId() === channelId;
+    return !!channelId && getSelectedVoiceChannelId() === channelId;
+}
+
+function getCurrentUserId(): string | undefined {
+    return UserStore.getCurrentUser()?.id;
 }
 
 function shouldLog(userId: string): boolean {
@@ -38,10 +53,51 @@ function log(entry: Omit<VoiceChannelLogEntry, "timestamp">) {
     addLogEntry({ ...entry, timestamp: new Date() });
 }
 
+function cacheActivityName(appId: string, promise: Promise<string>) {
+    if (activityNameCache.size >= MAX_ACTIVITY_NAME_CACHE_SIZE) {
+        const oldestKey = activityNameCache.keys().next().value;
+        if (oldestKey != null) activityNameCache.delete(oldestKey);
+    }
+
+    activityNameCache.set(appId, promise);
+    return promise;
+}
+
+function getActivityName(appId: string) {
+    const app = ApplicationStore.getApplication(appId);
+    if (app) return Promise.resolve(app.name);
+
+    return activityNameCache.get(appId) ?? cacheActivityName(
+        appId,
+        fetchApplication(appId)
+            .then(fetched => fetched?.name ?? "Unknown activity")
+            .catch(() => "Unknown activity")
+    );
+}
+
+function rememberPreviousState(userId: string, state: VoiceStateSnapshotInput) {
+    previousStates.set(userId, {
+        mute: state.mute,
+        deaf: state.deaf,
+        selfVideo: state.selfVideo,
+        selfStream: state.selfStream ?? false,
+        channelId: state.channelId ?? undefined
+    });
+}
+
+function clearSessionState() {
+    previousStates.clear();
+    loggedActivityUsersByApp.clear();
+    existingUsers.clear();
+    clientOldChannelId = undefined;
+    clientJoinedAt = 0;
+    setCallStartTime(null);
+}
+
 const VOICE_CHANNEL_TYPES = new Set([ChannelType.GUILD_VOICE, ChannelType.GUILD_STAGE_VOICE, ChannelType.DM, ChannelType.GROUP_DM]);
 
 const patchChannelContextMenu: NavContextMenuPatchCallback = (children, { channel }) => {
-    if (!VOICE_CHANNEL_TYPES.has(channel.type)) return;
+    if (!channel || !VOICE_CHANNEL_TYPES.has(channel.type)) return;
     children.push(
         <Menu.MenuItem
             id="vc-view-voice-channel-logs"
@@ -64,7 +120,7 @@ export default definePlugin({
 
     toolboxActions: {
         "Voice Channel Logs"() {
-            const channelId = SelectedChannelStore.getVoiceChannelId();
+            const channelId = getSelectedVoiceChannelId();
             if (!channelId) return;
             const channel = ChannelStore.getChannel(channelId);
             if (channel) openVoiceChannelLog(channel);
@@ -85,24 +141,36 @@ export default definePlugin({
             clientOldChannelId = channelId ?? undefined;
 
             if (leaving && oldChannel) {
-                const userId = UserStore.getCurrentUser().id;
+                const userId = getCurrentUserId();
+                if (!userId) return;
+
                 if (settings.store.logJoinLeave) {
                     log({ type: "leave", userId, channelId: oldChannel });
                 }
-                setCallStartTime(null);
-                loggedActivities.clear();
+                clearSessionState();
             } else if (joining && channelId && channelId !== oldChannel) {
+                const userId = getCurrentUserId();
+                if (!userId) return;
+
+                previousStates.clear();
+                loggedActivityUsersByApp.clear();
+                existingUsers.clear();
                 clientJoinedAt = Date.now();
                 setCallStartTime(new Date());
                 if (settings.store.logJoinLeave) {
-                    log({ type: "join", userId: UserStore.getCurrentUser().id, channelId });
+                    log({ type: "join", userId, channelId });
                 }
             }
         },
 
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
-            const clientUserId = UserStore.getCurrentUser().id;
+            const clientUserId = getCurrentUserId();
+            if (!clientUserId) return;
+
+            const selectedVoiceChannelId = getSelectedVoiceChannelId();
             const suppressJoins = Date.now() - clientJoinedAt < 5000;
+            const isSelectedChannel = (channelId?: string | null) => !!channelId && selectedVoiceChannelId === channelId;
+            const { logJoinLeave, logMuteDeafen, logVideo, logStream } = settings.store;
 
             for (const state of voiceStates) {
                 const { userId } = state;
@@ -112,35 +180,29 @@ export default definePlugin({
                 if (!shouldLog(userId)) continue;
 
                 if (oldChannelId === channelId && !previousStates.has(userId)) {
-                    previousStates.set(userId, {
-                        mute: state.mute,
-                        deaf: state.deaf,
-                        selfVideo: state.selfVideo,
-                        selfStream: state.selfStream ?? false,
-                        channelId
-                    });
+                    rememberPreviousState(userId, state);
                     continue;
                 }
 
                 const prev = previousStates.get(userId);
-                const inMyChannel = isMyChannel(channelId) || isMyChannel(oldChannelId);
+                const inMyChannel = isSelectedChannel(channelId) || isSelectedChannel(oldChannelId);
 
                 if (oldChannelId !== channelId) {
                     if (!oldChannelId && channelId) {
                         const skipJoin = suppressJoins || existingUsers.delete(userId);
-                        if (!skipJoin && settings.store.logJoinLeave && isMyChannel(channelId)) {
+                        if (!skipJoin && logJoinLeave && isSelectedChannel(channelId)) {
                             log({ type: "join", userId, channelId });
                         }
                     } else if (oldChannelId && !channelId) {
-                        if (settings.store.logJoinLeave && isMyChannel(oldChannelId)) {
+                        if (logJoinLeave && isSelectedChannel(oldChannelId)) {
                             log({ type: "leave", userId, channelId: oldChannelId });
                         }
                     } else if (oldChannelId && channelId) {
-                        if (settings.store.logJoinLeave) {
-                            if (isMyChannel(oldChannelId)) {
+                        if (logJoinLeave) {
+                            if (isSelectedChannel(oldChannelId)) {
                                 log({ type: "move", userId, channelId: oldChannelId, oldChannelId, newChannelId: channelId });
                             }
-                            if (isMyChannel(channelId)) {
+                            if (isSelectedChannel(channelId)) {
                                 log({ type: "move", userId, channelId, oldChannelId, newChannelId: channelId });
                             }
                         }
@@ -148,7 +210,7 @@ export default definePlugin({
                 }
 
                 if (prev && channelId && inMyChannel) {
-                    if (settings.store.logMuteDeafen) {
+                    if (logMuteDeafen) {
                         if (state.mute !== prev.mute) {
                             log({ type: "server_mute", userId, channelId, enabled: state.mute });
                         }
@@ -157,22 +219,16 @@ export default definePlugin({
                         }
                     }
 
-                    if (settings.store.logVideo && state.selfVideo !== prev.selfVideo) {
+                    if (logVideo && state.selfVideo !== prev.selfVideo) {
                         log({ type: "self_video", userId, channelId, enabled: state.selfVideo });
                     }
 
-                    if (settings.store.logStream && (state.selfStream ?? false) !== prev.selfStream) {
+                    if (logStream && (state.selfStream ?? false) !== prev.selfStream) {
                         log({ type: "self_stream", userId, channelId, enabled: state.selfStream ?? false });
                     }
                 }
 
-                previousStates.set(userId, {
-                    mute: state.mute,
-                    deaf: state.deaf,
-                    selfVideo: state.selfVideo,
-                    selfStream: state.selfStream ?? false,
-                    channelId
-                });
+                rememberPreviousState(userId, state);
 
                 if (!channelId) {
                     previousStates.delete(userId);
@@ -188,29 +244,34 @@ export default definePlugin({
 
             const appId = event.applicationId;
             const currentUserIds = new Set((event.participants ?? []).map(p => p.user_id));
+            let loggedUsers = loggedActivityUsersByApp.get(appId);
+            if (!loggedUsers) {
+                loggedUsers = new Set();
+                loggedActivityUsersByApp.set(appId, loggedUsers);
+            }
 
             const joined: string[] = [];
             for (const p of event.participants ?? []) {
                 if (!shouldLog(p.user_id)) continue;
-                const dedupKey = `${p.user_id}-${appId}`;
-                if (loggedActivities.has(dedupKey)) continue;
-                loggedActivities.add(dedupKey);
+                if (loggedUsers.has(p.user_id)) continue;
+                loggedUsers.add(p.user_id);
                 joined.push(p.user_id);
             }
 
             const left: string[] = [];
-            for (const key of loggedActivities) {
-                if (!key.endsWith(`-${appId}`)) continue;
-                const userId = key.slice(0, -(appId.length + 1));
+            for (const userId of loggedUsers) {
                 if (!currentUserIds.has(userId)) {
-                    loggedActivities.delete(key);
+                    loggedUsers.delete(userId);
                     left.push(userId);
                 }
             }
 
+            if (loggedUsers.size === 0) {
+                loggedActivityUsersByApp.delete(appId);
+            }
+
             if (!joined.length && !left.length) return;
 
-            const app = ApplicationStore.getApplication(appId);
             const logWithName = (activityName: string) => {
                 for (const userId of joined)
                     log({ type: "activity", userId, channelId, activityName, applicationId: appId });
@@ -218,11 +279,7 @@ export default definePlugin({
                     log({ type: "activity_stop", userId, channelId, activityName, applicationId: appId });
             };
 
-            if (app) {
-                logWithName(app.name);
-            } else {
-                fetchApplication(appId).then(fetched => logWithName(fetched?.name ?? "Unknown activity")).catch(() => logWithName("Unknown activity"));
-            }
+            void getActivityName(appId).then(logWithName);
         },
 
         VOICE_CHANNEL_EFFECT_SEND(event: SoundEvent) {
@@ -242,31 +299,28 @@ export default definePlugin({
     },
 
     start() {
-        clientOldChannelId = SelectedChannelStore.getVoiceChannelId() ?? undefined;
+        const userId = getCurrentUserId();
+        if (!userId) return;
+
+        clientOldChannelId = getSelectedVoiceChannelId() ?? undefined;
         if (clientOldChannelId) {
             clientJoinedAt = Date.now();
             setCallStartTime(new Date());
             if (settings.store.logJoinLeave) {
-                log({ type: "join", userId: UserStore.getCurrentUser().id, channelId: clientOldChannelId });
+                log({ type: "join", userId, channelId: clientOldChannelId });
             }
             const states = VoiceStateStore.getVoiceStatesForChannel(clientOldChannelId);
+            if (!states) return;
+
             for (const [userId, s] of Object.entries(states)) {
                 existingUsers.add(userId);
-                previousStates.set(userId, {
-                    mute: s.mute,
-                    deaf: s.deaf,
-                    selfVideo: s.selfVideo,
-                    selfStream: s.selfStream ?? false,
-                    channelId: clientOldChannelId
-                });
+                rememberPreviousState(userId, s);
             }
         }
     },
 
     stop() {
-        previousStates.clear();
-        loggedActivities.clear();
-        existingUsers.clear();
-        setCallStartTime(null);
+        clearSessionState();
+        activityNameCache.clear();
     }
 });

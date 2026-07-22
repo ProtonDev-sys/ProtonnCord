@@ -12,6 +12,12 @@ import { wreq } from "@webpack";
 import { AnyModuleFactory } from "@webpack/types";
 import pLimit from "p-limit";
 
+import { withTimeout } from "./promiseTimeout";
+
+const CHUNK_OPERATION_TIMEOUT_MS = 15_000;
+const CHUNK_SEARCH_TIMEOUT_MS = 90_000;
+const REMAINING_CHUNKS_TIMEOUT_MS = 60_000;
+
 function getWebpackChunkMap() {
     const sym = Symbol();
     let chunksMap: unknown;
@@ -93,11 +99,13 @@ export async function loadLazyChunks() {
 
                     if (wreq.u(id) == null || wreq.u(id) === "undefined.js") continue;
 
-                    const isWorkerAsset = await queue(() =>
+                    const isWorkerAsset = await queue(() => withTimeout(
                         fetch(wreq.p + wreq.u(id))
                             .then(r => r.text())
-                            .then(t => /importScripts\(|self\.postMessage/.test(t))
-                    );
+                            .then(t => /importScripts\(|self\.postMessage/.test(t)),
+                        CHUNK_OPERATION_TIMEOUT_MS,
+                        `Timed out inspecting chunk ${String(id)}`,
+                    ));
 
                     if (isWorkerAsset) {
                         invalidChunks.add(id);
@@ -118,7 +126,11 @@ export async function loadLazyChunks() {
             await Promise.all(
                 Array.from(validChunkGroups)
                     .map(([chunkIds]) =>
-                        Promise.all(chunkIds.map(id => wreq.e(id)))
+                        Promise.all(chunkIds.map(id => withTimeout(
+                            wreq.e(id),
+                            CHUNK_OPERATION_TIMEOUT_MS,
+                            `Timed out loading chunk ${String(id)}`,
+                        )))
                     )
             );
 
@@ -172,8 +184,17 @@ export async function loadLazyChunks() {
             factoryListener(wreq.m[moduleId]);
         }
 
-        await chunksSearchingDone;
-        Webpack.factoryListeners.delete(factoryListener);
+        try {
+            await withTimeout(
+                chunksSearchingDone,
+                CHUNK_SEARCH_TIMEOUT_MS,
+                "Timed out searching for lazy chunks",
+            );
+        } catch (error) {
+            LazyChunkLoaderLogger.warn(error);
+        } finally {
+            Webpack.factoryListeners.delete(factoryListener);
+        }
 
         // Require deferred entry points
         for (const deferredRequire of deferredRequires) {
@@ -193,16 +214,39 @@ export async function loadLazyChunks() {
             return !(validChunks.has(id) || invalidChunks.has(id));
         });
 
-        await Promise.all(chunksLeft.map(async id => queue(async () => {
-            const isWorkerAsset = await fetch(wreq.p + wreq.u(id))
-                .then(r => r.text())
-                .then(t => /importScripts\(|self\.postMessage/.test(t));
+        const remainingChunksPromise = Promise.all(chunksLeft.map(async id => queue(async () => {
+            try {
+                const isWorkerAsset = await withTimeout(
+                    fetch(wreq.p + wreq.u(id))
+                        .then(r => r.text())
+                        .then(t => /importScripts\(|self\.postMessage/.test(t)),
+                    CHUNK_OPERATION_TIMEOUT_MS,
+                    `Timed out inspecting remaining chunk ${String(id)}`,
+                );
 
-            // Loads the chunk. Currently this only happens with the language packs which are loaded differently
-            if (!isWorkerAsset) {
-                await wreq.e(id);
+                // Loads the chunk. Currently this only happens with the language packs which are loaded differently
+                if (!isWorkerAsset) {
+                    await withTimeout(
+                        wreq.e(id),
+                        CHUNK_OPERATION_TIMEOUT_MS,
+                        `Timed out loading remaining chunk ${String(id)}`,
+                    );
+                }
+            } catch (error) {
+                LazyChunkLoaderLogger.warn(error);
             }
         })));
+
+        try {
+            await withTimeout(
+                remainingChunksPromise,
+                REMAINING_CHUNKS_TIMEOUT_MS,
+                "Timed out loading remaining chunks",
+            );
+        } catch (error) {
+            queue.clearQueue();
+            LazyChunkLoaderLogger.warn(error);
+        }
 
         LazyChunkLoaderLogger.log("Finished loading all chunks!");
     } catch (e) {

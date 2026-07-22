@@ -22,7 +22,7 @@ import { definePluginSettings } from "@api/Settings";
 import { Devs, EquicordDevs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 
-import { VoiceChannelIndicator } from "./components";
+import { clearVoiceChannelIndicatorTimers, VoiceChannelIndicator } from "./components";
 
 const settings = definePluginSettings({
     showInUserProfileModal: {
@@ -66,6 +66,9 @@ export default definePlugin({
     renderMessageDecoration({ message }) {
         if (!settings.store.showInMessages) return null;
         return message?.author == null ? null : <VoiceChannelIndicator userId={message.author.id} isMessageIndicator />;
+    },
+    stop() {
+        clearVoiceChannelIndicatorTimers();
     },
     patches: [
         // Friends List

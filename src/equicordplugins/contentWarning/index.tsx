@@ -22,14 +22,31 @@ const cl = classNameFactory("vc-content-warning-");
 const WORDS_KEY = "ContentWarning_words";
 
 let triggerWords = [""];
+let triggerWordRegex: RegExp | null = null;
 
-function safeMatchesRegex(s: string, r: string) {
-    if (r === "") return false;
-    try {
-        return s.match(new RegExp(r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    } catch {
-        return false;
+function escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function compileTriggerWords() {
+    const escapedWords: string[] = [];
+    for (const rawWord of triggerWords) {
+        const word = rawWord.trim();
+        if (word) escapedWords.push(escapeRegExp(word));
     }
+
+    triggerWordRegex = escapedWords.length
+        ? new RegExp(escapedWords.join("|"))
+        : null;
+}
+
+function saveTriggerWords() {
+    compileTriggerWords();
+    void DataStore.set(WORDS_KEY, triggerWords);
+}
+
+function hasTriggerWord(content: string) {
+    return triggerWordRegex?.test(content) ?? false;
 }
 
 function TriggerContainer({ child }) {
@@ -74,12 +91,13 @@ function FlaggedInput({ index, forceUpdate }) {
     const updateValue = v => {
         triggerWords[index] = v;
         setValue(v);
-        DataStore.set(WORDS_KEY, triggerWords);
 
         if (isLast) {
             triggerWords.push("");
             forceUpdate();
         }
+
+        saveTriggerWords();
     };
 
     const removeSelf = () => {
@@ -87,6 +105,7 @@ function FlaggedInput({ index, forceUpdate }) {
             return;
         }
         triggerWords = triggerWords.slice(0, index).concat(triggerWords.slice(index + 1));
+        saveTriggerWords();
         forceUpdate();
     };
 
@@ -165,7 +184,7 @@ export default definePlugin({
     ],
 
     modify(message, child) {
-        if (triggerWords.some(w => safeMatchesRegex(message.content, w))) {
+        if (hasTriggerWord(message.content)) {
             return <TriggerContainer child={child} />;
         } else {
             return child;
@@ -174,5 +193,6 @@ export default definePlugin({
 
     async start() {
         triggerWords = await DataStore.get(WORDS_KEY) ?? [""];
+        compileTriggerWords();
     }
 });

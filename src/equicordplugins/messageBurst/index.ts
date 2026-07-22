@@ -10,8 +10,13 @@ import definePlugin, { OptionType } from "@utils/types";
 import { Channel, Message } from "@vencord/discord-types";
 import { ChannelStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
 
-function shouldEdit(channel: Channel, message: Message, timePeriod: number, shouldMergeWithAttachment: boolean) {
+function shouldEdit(channel: Channel | undefined, message: Message | undefined, timePeriod: number, shouldMergeWithAttachment: boolean) {
     let should = true;
+
+    if (!channel || !message) return { should: false, content: "" };
+
+    const currentUser = UserStore.getCurrentUser();
+    if (!currentUser) return { should: false, content: "" };
 
     if (channel.isGroupDM()) {
         if (channel.name === message.content) {
@@ -19,7 +24,7 @@ function shouldEdit(channel: Channel, message: Message, timePeriod: number, shou
         }
     }
 
-    if (message.author.id !== UserStore.getCurrentUser().id) {
+    if (message.author.id !== currentUser.id) {
         should = false;
     }
 
@@ -27,11 +32,10 @@ function shouldEdit(channel: Channel, message: Message, timePeriod: number, shou
         should = false;
     }
 
-    if (message.attachments.length > 0 && !shouldMergeWithAttachment) {
+    if ((message.attachments?.length ?? 0) > 0 && !shouldMergeWithAttachment) {
         should = false;
     }
 
-    // @ts-ignore
     const timestamp = new Date(message.timestamp);
     const now = new Date();
 
@@ -71,24 +75,17 @@ export default definePlugin({
     authors: [EquicordDevs.port22exposed],
     settings,
     onBeforeMessageSend(channelId, message) {
-        const messages = MessageStore.getMessages(channelId)._map;
-
-        if (!messages) {
-            return;
-        }
-
-        const entries = Object.entries(messages);
-        const [lastMessageId, lastMessage] = entries[entries.length - 1];
-
+        if (!message.content) return;
+        const lastMessage = MessageStore.getMessages(channelId)?.last?.() as Message | undefined;
         const channel = ChannelStore.getChannel(channelId);
 
-        const { should, content } = shouldEdit(channel, lastMessage as Message, this.settings.store.timePeriod, this.settings.store.shouldMergeWithAttachment);
+        const { should, content } = shouldEdit(channel, lastMessage, settings.store.timePeriod, settings.store.shouldMergeWithAttachment);
 
-        if (should) {
+        if (should && lastMessage) {
             const separator = settings.store.useSpace ? " " : "\n";
             const newContent = content + separator + message.content;
 
-            MessageActions.editMessage(channelId, lastMessageId, {
+            MessageActions.editMessage(channelId, lastMessage.id, {
                 content: newContent,
             });
 

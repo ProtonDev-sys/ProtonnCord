@@ -26,6 +26,7 @@ import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
 import { Devs } from "@utils/constants";
 import { isTruthy } from "@utils/guards";
+import { Logger } from "@utils/Logger";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
 import { useAwaiter } from "@utils/react";
@@ -39,11 +40,33 @@ import { RPCSettings } from "./RpcSettings";
 
 const useProfileThemeStyle = findByCodeLazy("profileThemeStyle:", "--profile-gradient-primary-color");
 const ActivityView = findComponentByCodeLazy(".party?(0", "USER_PROFILE_ACTIVITY");
+const logger = new Logger("CustomRPC");
 
 const ShowCurrentGame = getUserSettingLazy<boolean>("status", "showCurrentGame")!;
 
+const maxAssetCacheSize = 100;
+const assetCache = new Map<string, Promise<string>>();
+
 async function getApplicationAsset(key: string): Promise<string> {
-    return (await ApplicationAssetUtils.fetchAssetIds(settings.store.appID!, [key]))[0];
+    const appId = settings.store.appID || "0";
+    const cacheKey = `${appId}:${key}`;
+    const cached = assetCache.get(cacheKey);
+    if (cached) return await cached;
+
+    if (assetCache.size >= maxAssetCacheSize) {
+        const oldestKey = assetCache.keys().next().value;
+        if (oldestKey !== undefined) assetCache.delete(oldestKey);
+    }
+
+    const promise = ApplicationAssetUtils.fetchAssetIds(appId, [key])
+        .then(ids => ids[0]!)
+        .catch(error => {
+            assetCache.delete(cacheKey);
+            throw error;
+        });
+    assetCache.set(cacheKey, promise);
+
+    return await promise;
 }
 
 export const enum TimestampMode {
@@ -175,9 +198,14 @@ async function createActivity(): Promise<Activity | undefined> {
         };
     }
 
+    const [largeImageAsset, smallImageAsset] = await Promise.all([
+        imageBig ? getApplicationAsset(imageBig) : undefined,
+        imageSmall ? getApplicationAsset(imageSmall) : undefined
+    ]);
+
     if (imageBig) {
         activity.assets = {
-            large_image: await getApplicationAsset(imageBig),
+            large_image: largeImageAsset,
             large_text: imageBigTooltip || undefined,
             large_url: imageBigURL || undefined
         };
@@ -186,7 +214,7 @@ async function createActivity(): Promise<Activity | undefined> {
     if (imageSmall) {
         activity.assets = {
             ...activity.assets,
-            small_image: await getApplicationAsset(imageSmall),
+            small_image: smallImageAsset,
             small_text: imageSmallTooltip || undefined,
             small_url: imageSmallURL || undefined
         };
@@ -209,7 +237,9 @@ async function createActivity(): Promise<Activity | undefined> {
 }
 
 export async function setRpc(disable?: boolean) {
-    const activity: Activity | undefined = await createActivity();
+    const generation = disable ? ++rpcGeneration : rpcGeneration;
+    const activity: Activity | undefined = disable ? undefined : await createActivity();
+    if (!disable && (!pluginActive || generation !== rpcGeneration)) return;
 
     FluxDispatcher.dispatch({
         type: "LOCAL_ACTIVITY_UPDATE",
@@ -218,8 +248,16 @@ export async function setRpc(disable?: boolean) {
     });
 }
 
-let loopInterval: ReturnType<typeof setInterval> | undefined;
+export function queueSetRpc(disable?: boolean) {
+    void setRpc(disable).catch(error => logger.error("Failed to update custom RPC", error));
+}
+
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+let loopTimeout: ReturnType<typeof setTimeout> | undefined;
 let loopAnchor = 0;
+let rpcGeneration = 0;
+let pluginActive = false;
 
 function getLoopAnchor() {
     return loopAnchor;
@@ -233,20 +271,29 @@ function startTimestampLoop() {
 
     stopTimestampLoop();
     loopAnchor = Date.now();
+    scheduleTimestampLoop(duration);
+}
 
-    loopInterval = setInterval(() => {
+function scheduleTimestampLoop(duration: number) {
+    if (!pluginActive) return;
+    const delay = Math.min(Math.max(loopAnchor + duration - Date.now(), 0), MAX_TIMEOUT_MS);
+
+    loopTimeout = setTimeout(() => {
+        loopTimeout = undefined;
+        if (!pluginActive) return;
 
         if (Date.now() >= loopAnchor + duration) {
             loopAnchor = Date.now();
-            setRpc();
+            queueSetRpc();
         }
-    }, 1000);
+        scheduleTimestampLoop(duration);
+    }, delay);
 }
 
 function stopTimestampLoop() {
-    if (loopInterval !== undefined) {
-        clearInterval(loopInterval);
-        loopInterval = undefined;
+    if (loopTimeout !== undefined) {
+        clearTimeout(loopTimeout);
+        loopTimeout = undefined;
     }
     loopAnchor = 0;
 }
@@ -262,12 +309,16 @@ export default definePlugin({
     settings,
 
     start() {
+        pluginActive = true;
+        rpcGeneration++;
         startTimestampLoop();
-        setRpc();
+        queueSetRpc();
     },
     stop() {
-        setRpc(true);
+        pluginActive = false;
+        queueSetRpc(true);
         stopTimestampLoop();
+        assetCache.clear();
     },
 
     // Discord hides buttons on your own Rich Presence for some reason. This patch disables that behaviour

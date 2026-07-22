@@ -15,13 +15,18 @@ import { ChannelStore, MediaEngineStore, PermissionsBits, PermissionStore, Selec
 
 import { getCurrentMedia, settings } from "./utils";
 
-let hasStreamed, isStreaming, streamKey;
+let hasStreamed = false;
+let isStreaming = false;
+let streamKey: string | null = null;
 const startStream = findByCodeLazy('type:"STREAM_START"');
 const stopStream = findByCodeLazy('type:"STREAM_STOP"');
 const StreamPreviewSettings = getUserSettingLazy("voiceAndVideo", "disableStreamPreviews")!;
 const ApplicationStreamingSettingsStore = findStoreLazy("ApplicationStreamingSettingsStore");
 
 async function autoStartStream(instant = true) {
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    if (!currentUserId) return;
+
     if (!instant && !WindowStore.isFocused() && settings.store.focusDiscord) return;
     const selected = SelectedChannelStore.getVoiceChannelId();
     if (!selected) return;
@@ -40,12 +45,14 @@ async function autoStartStream(instant = true) {
     }
 
     const streamMedia = await getCurrentMedia();
+    if (!streamMedia) return;
+
     const preview = StreamPreviewSettings.getSetting();
     const { soundshareEnabled } = ApplicationStreamingSettingsStore.getState();
     let sourceId = streamMedia.id;
     if (streamMedia.type === "video_device") sourceId = `camera:${streamMedia.id}`;
 
-    if (isStreaming && streamKey.endsWith(UserStore.getCurrentUser().id)) {
+    if (isStreaming && streamKey?.endsWith(currentUserId)) {
         stopStream(streamKey);
     } else {
         startStream(channel.guild_id ?? null, selected, {
@@ -64,7 +71,7 @@ export default definePlugin({
     description: "Instantly screenshare when joining a voice channel with support for desktop sources, windows, and video input devices (cameras, capture cards)",
     tags: ["Media", "Voice"],
     authors: [Devs.HAHALOSAH, Devs.thororen, EquicordDevs.mart],
-    dependencies: ["EquicordToolbox"],
+    dependencies: ["ProtonnCordToolbox"],
     searchTerms: ["ScreenshareKeybind"],
     autoStartStream,
     settings,
@@ -112,29 +119,27 @@ export default definePlugin({
     flux: {
         async VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
             if (!settings.store.toolboxManagement || !settings.store.instantScreenshare) return;
-            const myId = UserStore.getCurrentUser().id;
-            for (const state of voiceStates) {
-                const { userId, channelId } = state;
-                if (userId !== myId) continue;
+            const myId = UserStore.getCurrentUser()?.id;
+            if (!myId) return;
 
-                if (channelId && !hasStreamed) {
-                    hasStreamed = true;
-                    await autoStartStream();
-                }
+            const myState = voiceStates.find(state => state.userId === myId);
+            if (!myState) return;
 
-                if (!channelId) {
-                    hasStreamed = false;
-                }
+            if (myState.channelId && !hasStreamed) {
+                hasStreamed = true;
+                await autoStartStream();
+            }
 
-                break;
+            if (!myState.channelId) {
+                hasStreamed = false;
             }
         },
-        STREAM_CREATE: d => {
+        STREAM_CREATE: (d: string) => {
             streamKey = d;
             isStreaming = true;
         },
-        STREAM_DELETE: d => {
-            streamKey = d;
+        STREAM_DELETE: () => {
+            streamKey = null;
             isStreaming = false;
         }
     },
@@ -144,5 +149,11 @@ export default definePlugin({
             settings.store.toolboxManagement = !settings.store.toolboxManagement;
             showToast(`Instant Screenshare ${settings.store.toolboxManagement ? "Enabled" : "Disabled"}`, Toasts.Type.SUCCESS);
         }
+    },
+
+    stop() {
+        hasStreamed = false;
+        isStreaming = false;
+        streamKey = null;
     }
 });

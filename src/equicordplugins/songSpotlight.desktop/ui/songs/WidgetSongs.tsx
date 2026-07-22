@@ -35,7 +35,7 @@ export default function WidgetSongs({ user }: WidgetSongsProps) {
         if (isAuthorized() && !data) listData(user.id).catch(() => setFailed(true));
     }, [isAuthorized()]);
 
-    const owned = UserStore.getCurrentUser().id === user.id;
+    const owned = UserStore.getCurrentUser()?.id === user.id;
 
     let full: JSX.Element | undefined;
     if (failed) {

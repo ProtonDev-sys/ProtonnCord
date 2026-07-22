@@ -31,11 +31,23 @@ import { ChannelStore } from "@webpack/common";
 const KEY = "HideMedia_HiddenIds";
 
 let hiddenMessages = new Set<string>();
+let hiddenMessagesLoaded = false;
+let hiddenMessagesLoad: Promise<Set<string>> | null = null;
 
 async function getHiddenMessages() {
-    const stored = await get(KEY);
-    hiddenMessages = new Set(stored ?? []);
-    return hiddenMessages;
+    if (hiddenMessagesLoaded) return hiddenMessages;
+
+    hiddenMessagesLoad ??= get(KEY)
+        .then(stored => {
+            hiddenMessages = new Set(Array.isArray(stored) ? stored : []);
+            hiddenMessagesLoaded = true;
+            return hiddenMessages;
+        })
+        .finally(() => {
+            hiddenMessagesLoad = null;
+        });
+
+    return hiddenMessagesLoad;
 }
 
 const saveHiddenMessages = (ids: Set<string>) => set(KEY, [...ids]);
@@ -101,6 +113,8 @@ export default definePlugin({
 
     stop() {
         hiddenMessages.clear();
+        hiddenMessagesLoaded = false;
+        hiddenMessagesLoad = null;
     },
 
     shouldHide(messageId: string) {

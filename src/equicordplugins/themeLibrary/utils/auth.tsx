@@ -9,6 +9,34 @@ import { showNotification } from "@api/Notifications";
 import { logger, themeRequest } from "@equicordplugins/themeLibrary/components/ThemeTab";
 import { OAuth2AuthorizeModal, openModal,Toasts, UserStore } from "@webpack/common";
 
+const TOKEN_KEY = "ThemeLibrary_uniqueToken";
+
+let tokenCache: string | null | undefined;
+let tokenLoadPromise: Promise<string | null> | null = null;
+
+export async function getThemeLibraryToken(): Promise<string | null> {
+    if (tokenCache !== undefined) return tokenCache;
+
+    tokenLoadPromise ??= DataStore.get<string>(TOKEN_KEY)
+        .then(token => token ?? null)
+        .finally(() => {
+            tokenLoadPromise = null;
+        });
+
+    tokenCache = await tokenLoadPromise;
+    return tokenCache;
+}
+
+async function setThemeLibraryToken(token: string) {
+    await DataStore.set(TOKEN_KEY, token);
+    tokenCache = token;
+}
+
+async function deleteThemeLibraryToken() {
+    await DataStore.del(TOKEN_KEY);
+    tokenCache = null;
+}
+
 export async function authorizeUser(triggerModal: boolean = true) {
     const isAuthorized = await getAuthorization();
 
@@ -33,14 +61,12 @@ export async function authorizeUser(triggerModal: boolean = true) {
                     const { token } = await response.json();
 
                     if (token) {
-                        logger.debug("Authorized via OAuth2, got token");
-                        await DataStore.set("ThemeLibrary_uniqueToken", token);
+                        await setThemeLibraryToken(token);
                         showNotification({
                             title: "ThemeLibrary",
                             body: "Successfully authorized with ThemeLibrary!"
                         });
                     } else {
-                        logger.debug("Tried to authorize via OAuth2, but no token returned");
                         showNotification({
                             title: "ThemeLibrary",
                             body: "Failed to authorize, check console"
@@ -62,10 +88,21 @@ export async function authorizeUser(triggerModal: boolean = true) {
 }
 
 export async function deauthorizeUser() {
-    const uniqueToken = await DataStore.get<Record<string, string>>("ThemeLibrary_uniqueToken");
+    const uniqueToken = await getThemeLibraryToken();
 
     if (!uniqueToken) return Toasts.show({
         message: "No uniqueToken present, try authorizing first!",
+        id: Toasts.genId(),
+        type: Toasts.Type.FAILURE,
+        options: {
+            duration: 2e3,
+            position: Toasts.Position.BOTTOM
+        }
+    });
+
+    const currentUser = UserStore.getCurrentUser();
+    if (!currentUser) return Toasts.show({
+        message: "Unable to deauthorize while logged out.",
         id: Toasts.genId(),
         type: Toasts.Type.FAILURE,
         options: {
@@ -80,11 +117,11 @@ export async function deauthorizeUser() {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${uniqueToken}`
         },
-        body: JSON.stringify({ userId: UserStore.getCurrentUser().id })
+        body: JSON.stringify({ userId: currentUser.id })
     });
 
     if (res.ok) {
-        await DataStore.del("ThemeLibrary_uniqueToken");
+        await deleteThemeLibraryToken();
         showNotification({
             title: "ThemeLibrary",
             body: "Successfully deauthorized from ThemeLibrary!"
@@ -92,7 +129,7 @@ export async function deauthorizeUser() {
     } else {
         // try to delete anyway
         try {
-            await DataStore.del("ThemeLibrary_uniqueToken");
+            await deleteThemeLibraryToken();
         } catch (e) {
             logger.error("Failed to delete token", e);
             showNotification({
@@ -104,7 +141,7 @@ export async function deauthorizeUser() {
 }
 
 export async function getAuthorization() {
-    const uniqueToken = await DataStore.get<Record<string, string>>("ThemeLibrary_uniqueToken");
+    const uniqueToken = await getThemeLibraryToken();
 
     if (!uniqueToken) {
         return false;
@@ -120,7 +157,6 @@ export async function getAuthorization() {
         if (res.status === 400 || res.status === 500) {
             return false;
         } else {
-            logger.debug("User is already authorized, skipping");
             return uniqueToken;
         }
     }
@@ -128,12 +164,12 @@ export async function getAuthorization() {
 }
 
 export async function isAuthorized(triggerModal: boolean = true) {
-    const isAuthorized = await getAuthorization();
-    const token = await DataStore.get("ThemeLibrary_uniqueToken");
+    const authorization = await getAuthorization();
 
-    if (isAuthorized === false || !token) {
+    if (authorization === false) {
         await authorizeUser(triggerModal);
-    } else {
-        return true;
+        return false;
     }
+
+    return true;
 }

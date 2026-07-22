@@ -13,6 +13,7 @@ const Native = VencordNative?.pluginHelpers?.ZipPreview as PluginNative<typeof i
 export const MAX_ZIP_BYTES = 50 * 1024 * 1024;
 export const MAX_ENTRIES = 1000;
 export const MAX_PREVIEW_BYTES = 10 * 1024 * 1024;
+const MAX_CACHE_ENTRIES = 20;
 
 const CANCELLED_PREVIEW_MESSAGE = "ZIP preview was cancelled.";
 const NATIVE_UNAVAILABLE_MESSAGE = "Native helper is unavailable.";
@@ -92,27 +93,46 @@ export function getAttachmentUrl(props: ZipPreviewAttachmentProps): string | und
 
 export function getCachedZip(url: string): ZipPreviewCacheState {
     const cached = zipCache.get(url);
-    if (cached) return cached;
+    if (cached) {
+        zipCache.delete(url);
+        zipCache.set(url, cached);
+        return cached;
+    }
 
     const promise = loadZip(url)
         .then(result => {
             zipCache.set(url, { status: "resolved", result });
+            trimZipCache();
             return result;
         })
         .catch(error => {
             const message = error instanceof Error ? error.message : "Failed to preview ZIP.";
             if (message === CANCELLED_PREVIEW_MESSAGE || message === NATIVE_UNAVAILABLE_MESSAGE) zipCache.delete(url);
-            else zipCache.set(url, { status: "rejected", message });
+            else {
+                zipCache.set(url, { status: "rejected", message });
+                trimZipCache();
+            }
             throw error;
         });
 
     const pending = { status: "pending" as const, promise };
     zipCache.set(url, pending);
+    trimZipCache();
     return pending;
 }
 
 export function clearZipPreviewCache() {
     zipCache.clear();
+}
+
+function trimZipCache() {
+    if (zipCache.size <= MAX_CACHE_ENTRIES) return;
+
+    for (const [key, state] of zipCache) {
+        if (zipCache.size <= MAX_CACHE_ENTRIES) return;
+        if (state.status === "pending") continue;
+        zipCache.delete(key);
+    }
 }
 
 export function makeDownload(entry: ZipEntry) {

@@ -20,6 +20,14 @@ interface DynamicDropdownSettingOption {
     selected: boolean;
 }
 
+function getSelectedAnimationValues(options: DynamicDropdownSettingOption[]) {
+    const values: string[] = [];
+    for (const option of options) {
+        if (option.selected) values.push(option.value);
+    }
+    return values;
+}
+
 function AnimationSettings(): JSX.Element {
     const animationOptions: DynamicDropdownSettingOption[] = [
         { label: "Tab Hover Effects (lift + scale)", value: "hover", selected: settings.store.animationHover },
@@ -39,7 +47,7 @@ function AnimationSettings(): JSX.Element {
         { label: "Active Quests Gradient", value: "quests-active", selected: settings.store.animationQuestsActive }
     ];
 
-    const [currentValue, setCurrentValue] = useState(animationOptions.filter(option => option.selected).map(option => option.value));
+    const [currentValue, setCurrentValue] = useState(getSelectedAnimationValues(animationOptions));
 
     function updateSettingsTruthy(enabledValues: string[]) {
         animationOptions.forEach(option => {

@@ -82,9 +82,30 @@ const settings = definePluginSettings({
         type: OptionType.STRING,
         description: "Comma separated list of user IDs which will be hidden or collapsed instead of the default behavior selected above.",
         restartNeeded: false,
-        default: ""
+        default: "",
+        onChange: rebuildOverrideUserCache
     },
 });
+
+let cachedOverrideUsers = "";
+let overrideUserIds = new Set<string>();
+
+function rebuildOverrideUserCache(value = settings.store.overrideUsers ?? "") {
+    cachedOverrideUsers = value;
+    const nextOverrideUserIds = new Set<string>();
+
+    for (const rawId of value.split(",")) {
+        const id = rawId.trim();
+        if (id) nextOverrideUserIds.add(id);
+    }
+
+    overrideUserIds = nextOverrideUserIds;
+}
+
+function ensureOverrideUserCache() {
+    const value = settings.store.overrideUsers ?? "";
+    if (cachedOverrideUsers !== value) rebuildOverrideUserCache(value);
+}
 
 export default definePlugin({
     name: "NoBlockedMessages",
@@ -126,15 +147,20 @@ export default definePlugin({
     // true = keep message
     // false = hide message
     keepSuppressedMessage(userId: string) {
-        const overrideUsers = settings.store.overrideUsers.split(",").map(id => id.trim()).filter(id => id.length > 0);
+        ensureOverrideUserCache();
+        const isOverridden = overrideUserIds.has(userId);
 
         if (settings.store.defaultHideUsers) {
             // If hidden by default, overriding shows messages as collapsed.
-            return overrideUsers.includes(userId);
+            return isOverridden;
         } else {
             // If collapsed by default, overriding hides messages.
-            return !overrideUsers.includes(userId);
+            return !isOverridden;
         }
+    },
+
+    start() {
+        rebuildOverrideUserCache();
     },
 
     shouldKeepMessage(message: Message) {

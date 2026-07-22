@@ -27,24 +27,33 @@ import { ActiveJoinedThreadsStore, FluxDispatcher, GuildChannelStore, GuildStore
 
 function onClick() {
     const channels: Array<any> = [];
+    const ackChannel = (c: { channel: { id: string; }; }) => {
+        if (!ReadStateStore.hasUnread(c.channel.id)) return;
 
-    Object.values(GuildStore.getGuilds()).forEach(guild => {
-        GuildChannelStore.getChannels(guild.id).SELECTABLE
-            .concat(GuildChannelStore.getChannels(guild.id).VOCAL)
-            .concat(
-                Object.values(ActiveJoinedThreadsStore.getActiveJoinedThreadsForGuild(guild.id))
-                    .flatMap(threadChannels => Object.values(threadChannels))
-            )
-            .forEach((c: { channel: { id: string; }; }) => {
-                if (!ReadStateStore.hasUnread(c.channel.id)) return;
+        channels.push({
+            channelId: c.channel.id,
+            messageId: ReadStateStore.lastMessageId(c.channel.id),
+            readStateType: 0
+        });
+    };
 
-                channels.push({
-                    channelId: c.channel.id,
-                    messageId: ReadStateStore.lastMessageId(c.channel.id),
-                    readStateType: 0
-                });
-            });
-    });
+    for (const guild of Object.values(GuildStore.getGuilds())) {
+        const guildChannels = GuildChannelStore.getChannels(guild.id);
+
+        for (const c of guildChannels.SELECTABLE) {
+            ackChannel(c);
+        }
+
+        for (const c of guildChannels.VOCAL) {
+            ackChannel(c);
+        }
+
+        for (const threadChannels of Object.values(ActiveJoinedThreadsStore.getActiveJoinedThreadsForGuild(guild.id))) {
+            for (const c of Object.values(threadChannels) as Array<{ channel: { id: string; }; }>) {
+                ackChannel(c);
+            }
+        }
+    }
 
     FluxDispatcher.dispatch({
         type: "BULK_ACK",

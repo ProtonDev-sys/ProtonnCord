@@ -8,7 +8,7 @@ import { ApplicationCommandInputType, sendBotMessage } from "@api/Commands";
 import { HeaderBarButton } from "@api/HeaderBar";
 import { addMessagePreSendListener, removeMessagePreSendListener } from "@api/MessageEvents";
 import { isPluginEnabled } from "@api/PluginManager";
-import { definePluginSettings, migratePluginToSettings, Settings } from "@api/Settings";
+import { definePluginSettings, migratePluginSettings, migratePluginToSettings, Settings } from "@api/Settings";
 import { ShieldIcon, WarningIcon } from "@components/Icons";
 import customRPC from "@plugins/customRPC";
 import { Devs, EquicordDevs, GUILD_ID, SUPPORT_CHANNEL_ID, SUPPORT_CHANNEL_IDS, VC_SUPPORT_CHANNEL_IDS } from "@utils/constants";
@@ -22,9 +22,10 @@ import { ComponentType } from "react";
 import { PluginButtons } from "./pluginButtons";
 import { PluginCards } from "./pluginCards";
 
-migratePluginToSettings(true, "EquicordHelper", "NoBulletPoints", "noBulletPoints");
-migratePluginToSettings(true, "EquicordHelper", "NoModalAnimation", "noModalAnimation");
-migratePluginToSettings(true, "EquicordHelper", "GuildTagSettings", "disableAdoptTagPrompt");
+migratePluginSettings("ProtonnCordHelper", "EquicordHelper");
+migratePluginToSettings(true, "ProtonnCordHelper", "NoBulletPoints", "noBulletPoints");
+migratePluginToSettings(true, "ProtonnCordHelper", "NoModalAnimation", "noModalAnimation");
+migratePluginToSettings(true, "ProtonnCordHelper", "GuildTagSettings", "disableAdoptTagPrompt");
 
 let clicked = false;
 
@@ -142,7 +143,7 @@ const settings = definePluginSettings({
 });
 
 export default definePlugin({
-    name: "EquicordHelper",
+    name: "ProtonnCordHelper",
     description: "Used to provide support, fix discord caused crashes, and other misc features.",
     tags: ["Appearance", "Commands", "Utility"],
     dependencies: ["CommandsAPI", "HeaderBarAPI", "MessageAccessoriesAPI"],
@@ -379,8 +380,8 @@ export default definePlugin({
             if (VC_SUPPORT_CHANNEL_IDS.includes(channelId) && !clicked) {
                 return Alerts.show({
                     title: "Vencord Support Channel Warning",
-                    body: "Before asking for help. Check updates and if this issue is actually caused by Equicord!",
-                    confirmText: "Equicord Support",
+                    body: "Before asking for help. Check updates and if this issue is actually caused by Protonn Cord!",
+                    confirmText: "Protonn Cord Support",
                     onConfirm() {
                         NavigationRouter.transitionTo(`/channels/${GUILD_ID}/${SUPPORT_CHANNEL_ID}`);
                     },

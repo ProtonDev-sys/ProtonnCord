@@ -24,7 +24,7 @@ import { RendererSettings } from "./settings";
 import { patchTrayMenu } from "./trayMenu";
 import { IS_VANILLA } from "./utils/constants";
 
-console.log("[Equicord] Starting up...");
+console.log("[Protonn Cord] Starting up...");
 
 // Our injector file at app/index.js
 const injectorPath = require.main!.filename;
@@ -39,8 +39,78 @@ if (IS_VESKTOP || IS_EQUIBOP) require.main!.filename = join(dirname(injectorPath
 // @ts-expect-error Untyped method? Dies from cringe
 app.setAppPath(asarPath);
 
+function isDiscordOrigin(value?: string) {
+    return /^https:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com(?:\/|$)/.test(value ?? "");
+}
+
+function getPermissionOrigin(webContents: Electron.WebContents | null | undefined, details?: any, requestingOrigin?: string) {
+    return details?.requestingUrl
+        ?? details?.embeddingOrigin
+        ?? details?.securityOrigin
+        ?? requestingOrigin
+        ?? webContents?.getURL?.();
+}
+
+function isDiscordMediaPermission(webContents: Electron.WebContents | null | undefined, permission: string, details?: any, requestingOrigin?: string) {
+    if (!isDiscordOrigin(getPermissionOrigin(webContents, details, requestingOrigin))) return false;
+
+    if (permission === "microphone" || permission === "camera" || permission === "audioCapture" || permission === "videoCapture") return true;
+    if (permission !== "media") return false;
+
+    const mediaTypes = details?.mediaTypes;
+    return !Array.isArray(mediaTypes)
+        || mediaTypes.includes("audio")
+        || mediaTypes.includes("video");
+}
+
+function installDiscordMediaPermissionBypass() {
+    const defaultSession = electron.session?.defaultSession;
+    if (!defaultSession) return;
+
+    const originalSetPermissionRequestHandler = defaultSession.setPermissionRequestHandler.bind(defaultSession);
+    const originalSetPermissionCheckHandler = defaultSession.setPermissionCheckHandler?.bind(defaultSession);
+
+    const wrapRequestHandler = (handler?: any) => (
+        webContents: Electron.WebContents,
+        permission: string,
+        callback: (permissionGranted: boolean) => void,
+        details: any
+    ) => {
+        if (isDiscordMediaPermission(webContents, permission, details)) {
+            callback(true);
+            return;
+        }
+
+        if (handler) return handler(webContents, permission, callback, details);
+
+        callback(false);
+    };
+
+    defaultSession.setPermissionRequestHandler = handler => originalSetPermissionRequestHandler(wrapRequestHandler(handler));
+    originalSetPermissionRequestHandler(wrapRequestHandler());
+
+    if (originalSetPermissionCheckHandler) {
+        const wrapCheckHandler = (handler?: any) => (
+            webContents: Electron.WebContents | null,
+            permission: string,
+            requestingOrigin: string,
+            details: any
+        ) => {
+            if (isDiscordMediaPermission(webContents, permission, details, requestingOrigin)) return true;
+            return handler?.(webContents, permission, requestingOrigin, details) ?? false;
+        };
+
+        defaultSession.setPermissionCheckHandler = handler => originalSetPermissionCheckHandler(wrapCheckHandler(handler));
+        originalSetPermissionCheckHandler(wrapCheckHandler());
+    }
+}
+
 if (!IS_VANILLA) {
     const settings = RendererSettings.store;
+
+    app.whenReady().then(installDiscordMediaPermissionBypass).catch(err => {
+        console.error("[Protonn Cord] Failed to install Discord media permission bypass", err);
+    });
 
     patchTrayMenu();
 
@@ -52,7 +122,7 @@ if (!IS_VANILLA) {
         try {
             require("./hostUpdateHook").installHostUpdateHook();
         } catch (err) {
-            console.error("[Equicord] Failed to install host update hook", err);
+            console.error("[Protonn Cord] Failed to install host update hook", err);
         }
     }
 
@@ -153,7 +223,7 @@ if (!IS_VANILLA) {
         s.set("DANGEROUS_ENABLE_DEVTOOLS_ONLY_ENABLE_IF_YOU_KNOW_WHAT_YOURE_DOING", true);
     });
 
-    process.env.DATA_DIR = join(app.getPath("userData"), "..", "Equicord");
+    process.env.DATA_DIR = join(app.getPath("userData"), "..", "ProtonnCord");
 
     // Monkey patch commandLine to:
     // - disable WidgetLayering: Fix DevTools context menus https://github.com/electron/electron/issues/38790
@@ -177,9 +247,10 @@ if (!IS_VANILLA) {
     app.commandLine.appendSwitch("disable-renderer-backgrounding");
     app.commandLine.appendSwitch("disable-background-timer-throttling");
     app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+    app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 } else {
-    console.log("[Equicord] Running in vanilla mode. Not loading Equicord");
+    console.log("[Protonn Cord] Running in vanilla mode. Not loading Protonn Cord");
 }
 
-console.log("[Equicord] Loading original Discord app.asar");
+console.log("[Protonn Cord] Loading original Discord app.asar");
 require(require.main!.filename);

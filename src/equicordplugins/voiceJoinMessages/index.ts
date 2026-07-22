@@ -10,24 +10,28 @@ import { humanFriendlyJoin } from "@utils/text";
 import definePlugin, { OptionType } from "@utils/types";
 import { Message, User } from "@vencord/discord-types";
 import { findByCodeLazy } from "@webpack";
-import { ChannelStore, FluxDispatcher, MessageActions, MessageStore, PermissionsBits, PermissionStore, RelationshipStore, SelectedChannelStore, UserStore } from "@webpack/common";
+import { ChannelStore, FluxDispatcher, MessageActions, MessageStore, PermissionsBits, PermissionStore, RelationshipStore, SelectedChannelStore, UserStore, VoiceStateStore } from "@webpack/common";
 
 const createBotMessage = findByCodeLazy('username:"Clyde"');
+const USER_ID_REGEX = /^\d{17,20}$/;
+
+let allowedFriendIds = new Set<string>();
+let ignoredFriendIds = new Set<string>();
 
 const settings = definePluginSettings({
     friendDirectMessages: {
         type: OptionType.BOOLEAN,
-        description: "Recieve notifications in your friends' DMs when they join a voice channel",
+        description: "Receive notifications in your friends' DMs when they join a voice channel",
         default: true
     },
     friendDirectMessagesShowMembers: {
         type: OptionType.BOOLEAN,
-        description: "Show a list of other members in the voice channel when recieving a DM notification of your friend joining a voice channel",
+        description: "Show a list of other members in the voice channel when receiving a DM notification of your friend joining a voice channel",
         default: true
     },
     friendDirectMessagesShowMemberCount: {
         type: OptionType.BOOLEAN,
-        description: "Show the count of other members in the voice channel when recieving a DM notification of your friend joining a voice channel",
+        description: "Show the count of other members in the voice channel when receiving a DM notification of your friend joining a voice channel",
         default: false
     },
     friendDirectMessagesSelf: {
@@ -42,12 +46,14 @@ const settings = definePluginSettings({
     },
     allowedFriends: {
         type: OptionType.STRING,
-        description: "Comma or space separated list of friends' user IDs you want to recieve join messages from",
+        description: "Comma or space separated list of friends' user IDs you want to receive join messages from",
+        onChange: value => { allowedFriendIds = parseUserIdSet(value); },
         default: ""
     },
     ignoredFriends: {
         type: OptionType.STRING,
-        description: "Comma or space separated list of friends' user IDs you do NOT want to recieve join messages from",
+        description: "Comma or space separated list of friends' user IDs you do NOT want to receive join messages from",
+        onChange: value => { ignoredFriendIds = parseUserIdSet(value); },
         default: ""
     },
     ignoreBlockedUsers: {
@@ -92,13 +98,20 @@ function sendVoiceStatusMessage(channelId: string, content: string, userId: stri
     return message;
 }
 
+function parseUserIdSet(value: string): Set<string> {
+    const ids = new Set<string>();
+
+    for (const id of value.split(/[,\s]+/)) {
+        if (USER_ID_REGEX.test(id)) ids.add(id);
+    }
+
+    return ids;
+}
+
 function isFriendAllowlisted(friendId: string) {
     if (!RelationshipStore.isFriend(friendId)) return false;
-    const ignoreList = settings.store.ignoredFriends.split(",").join(" ").split(" ").filter(i => i.length > 0);
-    if (ignoreList.includes(friendId)) return false;
-    const allowList = settings.store.allowedFriends.split(",").join(" ").split(" ").filter(i => i.length > 0);
-    if (allowList.join(" ").length < 1) return true;
-    return allowList.includes(friendId);
+    if (ignoredFriendIds.has(friendId)) return false;
+    return allowedFriendIds.size === 0 || allowedFriendIds.has(friendId);
 }
 
 // Blatantly stolen from VcNarrator plugin
@@ -110,13 +123,15 @@ let clientOldChannelId: string | undefined;
 
 export default definePlugin({
     name: "VoiceJoinMessages",
-    description: "Recieve client-side ephemeral messages when your friends join voice channels",
+    description: "Receive client-side ephemeral messages when your friends join voice channels",
     tags: ["Servers", "Utility", "Voice"],
     authors: [Devs.Sqaaakoi, Devs.thororen],
     settings,
     flux: {
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
-            const clientUserId = UserStore.getCurrentUser().id;
+            const clientUserId = UserStore.getCurrentUser()?.id;
+            if (!clientUserId) return;
+
             for (const state of voiceStates) {
                 // mmmm hacky workaround
                 const { userId, channelId } = state;
@@ -137,21 +152,26 @@ export default definePlugin({
                     const selfInChannel = SelectedChannelStore.getVoiceChannelId() === channelId;
                     let memberListContent = "";
                     if (settings.store.friendDirectMessagesShowMembers || settings.store.friendDirectMessagesShowMemberCount) {
-                        const users = Object.values<any>(voiceStates)
-                            .filter(vs => vs.channelId === channelId)
-                            .map(vs => UserStore.getUser(vs.userId))
-                            .filter(user => user != null);
+                        const otherMemberMentions: string[] = [];
+                        const voiceStates = VoiceStateStore.getVoiceStatesForChannel(channelId) ?? {};
 
-                        const otherMembers = users.filter(s => s.id !== userId);
-                        const otherMembersCount = otherMembers.length;
+                        for (const key in voiceStates) {
+                            const voiceState = voiceStates[key];
+                            if (!voiceState?.userId || voiceState.userId === userId) continue;
+
+                            const user = UserStore.getUser(voiceState.userId);
+                            if (user) otherMemberMentions.push(`<@${user.id}>`);
+                        }
+
+                        const otherMembersCount = otherMemberMentions.length;
                         if (otherMembersCount <= 0) {
                             memberListContent += ", nobody else is in the voice channel";
                         } else if (settings.store.friendDirectMessagesShowMemberCount) {
-                            memberListContent += ` with ${otherMembersCount} other member${otherMembersCount === 1 ? "s" : ""}`;
+                            memberListContent += ` with ${otherMembersCount} other member${otherMembersCount === 1 ? "" : "s"}`;
                         }
                         if (settings.store.friendDirectMessagesShowMembers && otherMembersCount > 0) {
                             memberListContent += settings.store.friendDirectMessagesShowMemberCount ? ", " : " with ";
-                            memberListContent += humanFriendlyJoin(otherMembers.map(s => `<@${s.id}>`));
+                            memberListContent += humanFriendlyJoin(otherMemberMentions);
                         }
                     }
                     const dmChannelId = ChannelStore.getDMFromUserId(userId);
@@ -159,5 +179,17 @@ export default definePlugin({
                 }
             }
         },
+    },
+
+    start() {
+        allowedFriendIds = parseUserIdSet(settings.store.allowedFriends);
+        ignoredFriendIds = parseUserIdSet(settings.store.ignoredFriends);
+        clientOldChannelId = SelectedChannelStore.getVoiceChannelId?.();
+    },
+
+    stop() {
+        allowedFriendIds = new Set();
+        ignoredFriendIds = new Set();
+        clientOldChannelId = undefined;
     },
 });

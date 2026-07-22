@@ -53,6 +53,7 @@ interface IVoiceChannelEffectSendEvent {
 const MOYAI = "🗿";
 const MOYAI_URL = "https://github.com/Equicord/Equibored/raw/main/sounds/moyai/moyai.mp3";
 const MOYAI_URL_HD = "https://github.com/Equicord/Equibored/raw/main/sounds/moyai/moyai.wav";
+const customMoyaiRe = /<a?:\w*moy?ai\w*:\d{17,20}>/gi;
 
 const settings = definePluginSettings({
     volume: {
@@ -98,12 +99,16 @@ export default definePlugin({
         async MESSAGE_CREATE({ optimistic, type, message, channelId }: IMessageCreate) {
             if (optimistic || type !== "MESSAGE_CREATE") return;
             if (message.state === "SENDING") return;
-            if (settings.store.ignoreBots && message.author?.bot) return;
-            if (settings.store.ignoreBlocked && RelationshipStore.isBlocked(message.author?.id)) return;
-            if (!message.content) return;
             if (channelId !== SelectedChannelStore.getChannelId()) return;
 
-            const moyaiCount = getMoyaiCount(message.content);
+            const { content } = message;
+            if (!content) return;
+
+            const authorId = message.author?.id;
+            if (settings.store.ignoreBots && message.author?.bot) return;
+            if (settings.store.ignoreBlocked && authorId && RelationshipStore.isBlocked(authorId)) return;
+
+            const moyaiCount = getMoyaiCount(content);
 
             for (let i = 0; i < moyaiCount; i++) {
                 boom();
@@ -113,12 +118,13 @@ export default definePlugin({
 
         MESSAGE_REACTION_ADD({ optimistic, type, channelId, userId, messageAuthorId, emoji }: IReactionAdd) {
             if (optimistic || type !== "MESSAGE_REACTION_ADD") return;
-            if (settings.store.ignoreBots && UserStore.getUser(userId)?.bot) return;
-            if (settings.store.ignoreBlocked && RelationshipStore.isBlocked(messageAuthorId)) return;
             if (channelId !== SelectedChannelStore.getChannelId()) return;
 
-            const name = emoji.name.toLowerCase();
+            const name = emoji.name?.toLowerCase();
+            if (!name) return;
             if (name !== MOYAI && !name.includes("moyai") && !name.includes("moai")) return;
+            if (settings.store.ignoreBots && UserStore.getUser(userId)?.bot) return;
+            if (settings.store.ignoreBlocked && RelationshipStore.isBlocked(messageAuthorId)) return;
 
             boom();
         },
@@ -146,14 +152,14 @@ function countMatches(sourceString: string, pattern: RegExp) {
     if (!pattern.global)
         throw new Error("pattern must be global");
 
+    pattern.lastIndex = 0;
     let i = 0;
     while (pattern.test(sourceString))
         i++;
+    pattern.lastIndex = 0;
 
     return i;
 }
-
-const customMoyaiRe = /<a?:\w*moy?ai\w*:\d{17,20}>/gi;
 
 function getMoyaiCount(message: string) {
     const count = countOccurrences(message, MOYAI)
@@ -171,5 +177,5 @@ function boom() {
         : MOYAI_URL;
 
     audioElement.volume = settings.store.volume;
-    audioElement.play();
+    void audioElement.play();
 }

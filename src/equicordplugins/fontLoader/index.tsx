@@ -32,15 +32,29 @@ interface GoogleFontMetadata {
     }>;
 }
 
+const MAX_FONT_SEARCH_CACHE_SIZE = 25;
+const fontSearchCache = new Map<string, GoogleFontMetadata[]>();
+
 const createGoogleFontUrl = (family: string, options = "") =>
     `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}${options}&display=swap`;
 
 const loadFontStyle = (url: string) => {
-    document.head.insertAdjacentHTML("beforeend", `<link rel="stylesheet" href="${url}">`);
-    return document.createElement("style");
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = url;
+    document.head.appendChild(link);
+
+    return link;
 };
 
 async function searchGoogleFonts(query: string) {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) return [];
+
+    const cacheKey = normalizedQuery.toLowerCase();
+    const cachedResults = fontSearchCache.get(cacheKey);
+    if (cachedResults) return cachedResults;
+
     try {
         const response = await fetch("https://fonts.google.com/$rpc/fonts.fe.catalog.actions.metadata.MetadataService/FontSearch", {
             method: "POST",
@@ -48,12 +62,12 @@ async function searchGoogleFonts(query: string) {
                 "content-type": "application/json+protobuf",
                 "x-user-agent": "grpc-web-javascript/0.1"
             },
-            body: JSON.stringify([[query, null, null, null, null, null, 1], [5], null, 16])
+            body: JSON.stringify([[normalizedQuery, null, null, null, null, null, 1], [5], null, 16])
         });
 
         const data = await response.json();
         if (!data?.[1]) return [];
-        return data[1].map(([_, fontData]: [string, any[]]) => ({
+        const fonts = data[1].map(([_, fontData]: [string, any[]]) => ({
             family: fontData[0],
             displayName: fontData[1],
             authors: fontData[2],
@@ -64,6 +78,14 @@ async function searchGoogleFonts(query: string) {
                 }))
             }))
         }));
+
+        fontSearchCache.set(cacheKey, fonts);
+        if (fontSearchCache.size > MAX_FONT_SEARCH_CACHE_SIZE) {
+            const oldestKey = fontSearchCache.keys().next().value;
+            if (oldestKey) fontSearchCache.delete(oldestKey);
+        }
+
+        return fonts;
     } catch (err) {
         console.error("Failed to fetch fonts:", err);
         return [];
@@ -74,11 +96,16 @@ const preloadFont = (family: string) =>
     loadFontStyle(createGoogleFontUrl(family, ":wght@400;700"));
 
 let styleElement: HTMLStyleElement | null = null;
+let fontLinkElement: HTMLLinkElement | null = null;
+let fontLinkUrl: string | null = null;
 
 const applyFont = async (fontFamily: string) => {
     if (!fontFamily) {
         styleElement?.remove();
         styleElement = null;
+        fontLinkElement?.remove();
+        fontLinkElement = null;
+        fontLinkUrl = null;
         return;
     }
 
@@ -88,7 +115,13 @@ const applyFont = async (fontFamily: string) => {
             document.head.appendChild(styleElement);
         }
 
-        loadFontStyle(createGoogleFontUrl(fontFamily, ":wght@300;400;500;600;700"));
+        const nextFontLinkUrl = createGoogleFontUrl(fontFamily, ":wght@300;400;500;600;700");
+        if (fontLinkUrl !== nextFontLinkUrl) {
+            fontLinkElement?.remove();
+            fontLinkElement = loadFontStyle(nextFontLinkUrl);
+            fontLinkUrl = nextFontLinkUrl;
+        }
+
         styleElement.textContent = `
             * {
                 --font-primary: '${fontFamily}', sans-serif !important;
@@ -106,26 +139,42 @@ function GoogleFontSearch({ onSelect }: { onSelect: (font: GoogleFontMetadata) =
     const [query, setQuery] = React.useState("");
     const [results, setResults] = React.useState<GoogleFontMetadata[]>([]);
     const [loading, setLoading] = React.useState(false);
-    const previewStyles = React.useRef<HTMLStyleElement[]>([]);
+    const previewLinks = React.useRef<HTMLLinkElement[]>([]);
+    const searchGeneration = React.useRef(0);
+    const mounted = React.useRef(true);
 
-    React.useEffect(() => () => {
-        previewStyles.current.forEach(style => style.remove());
+    const clearPreviewLinks = React.useCallback(() => {
+        previewLinks.current.forEach(link => link.remove());
+        previewLinks.current = [];
     }, []);
 
-    const debouncedSearch = debounce(async (value: string) => {
+    React.useEffect(() => () => {
+        mounted.current = false;
+        searchGeneration.current++;
+        clearPreviewLinks();
+    }, [clearPreviewLinks]);
+
+    const debouncedSearch = React.useMemo(() => debounce(async (value: string) => {
+        const generation = ++searchGeneration.current;
+        if (!mounted.current) return;
+
         setLoading(true);
+
         if (!value) {
+            clearPreviewLinks();
             setResults([]);
             setLoading(false);
             return;
         }
 
         const fonts = await searchGoogleFonts(value);
-        previewStyles.current.forEach(style => style.remove());
-        previewStyles.current = await Promise.all(fonts.map(f => preloadFont(f.family)));
+        if (!mounted.current || generation !== searchGeneration.current) return;
+
+        clearPreviewLinks();
+        previewLinks.current = fonts.map(f => preloadFont(f.family));
         setResults(fonts);
         setLoading(false);
-    }, 300);
+    }, 300), [clearPreviewLinks]);
 
     const handleSearch = (e: string) => {
         setQuery(e);
@@ -192,7 +241,8 @@ const settings = definePluginSettings({
     applyOnCodeBlocks: {
         type: OptionType.BOOLEAN,
         description: "Apply the font to code blocks",
-        default: false
+        default: false,
+        onChange: () => void applyFont(settings.store.selectedFont)
     }
 });
 
@@ -211,9 +261,10 @@ export default definePlugin({
     },
 
     stop() {
-        if (styleElement) {
-            styleElement.remove();
-            styleElement = null;
-        }
+        styleElement?.remove();
+        styleElement = null;
+        fontLinkElement?.remove();
+        fontLinkElement = null;
+        fontLinkUrl = null;
     }
 });

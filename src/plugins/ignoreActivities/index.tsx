@@ -33,6 +33,43 @@ const enum FilterMode {
 }
 
 const ShowCurrentGame = getUserSettingLazy("status", "showCurrentGame")!;
+let filteredActivityIds = new Set<string>();
+let ignoredActivityIds = new Set<string>();
+
+function parseActivityIds(value: string) {
+    const ids = new Set<string>();
+
+    for (const rawId of value.split(",")) {
+        const id = rawId.trim();
+        if (id) ids.add(id);
+    }
+
+    return ids;
+}
+
+function formatActivityIds(ids: Iterable<string>): string {
+    let output = "";
+    for (const id of ids) {
+        if (output) output += ", ";
+        output += id;
+    }
+
+    return output;
+}
+
+function rebuildFilteredActivityIds(value = settings.store.idsList) {
+    filteredActivityIds = parseActivityIds(value ?? "");
+}
+
+function rebuildIgnoredActivityCache() {
+    const nextIgnoredActivityIds = new Set<string>();
+
+    for (const activity of settings.store.ignoredActivities) {
+        nextIgnoredActivityIds.add(activity.id);
+    }
+
+    ignoredActivityIds = nextIgnoredActivityIds;
+}
 
 function ToggleIcon(activity: IgnoredActivity, tooltipText: string, path: string, fill: string) {
     return (
@@ -73,6 +110,9 @@ function handleActivityToggle(e: React.MouseEvent<HTMLButtonElement, MouseEvent>
     const ignoredActivityIndex = settings.store.ignoredActivities.findIndex(act => act.id === activity.id);
     if (ignoredActivityIndex === -1) settings.store.ignoredActivities.push(activity);
     else settings.store.ignoredActivities.splice(ignoredActivityIndex, 1);
+
+    rebuildIgnoredActivityCache();
+    recalculateActivities();
 }
 
 function recalculateActivities() {
@@ -110,11 +150,11 @@ function IdsListComponent(props: { setValue: (value: string) => void; }) {
     const [idsList, setIdsList] = useState<string>(settings.store.idsList ?? "");
 
     idsListPushID = (id: string) => {
-        const currentIds = new Set(idsList.split(",").map(id => id.trim()).filter(Boolean));
+        const currentIds = parseActivityIds(idsList);
 
         const isAlreadyAdded = currentIds.has(id) || (currentIds.add(id), false);
 
-        const ids = Array.from(currentIds).join(", ");
+        const ids = formatActivityIds(currentIds);
         setIdsList(ids);
         props.setValue(ids);
 
@@ -169,8 +209,9 @@ const settings = definePluginSettings({
         type: OptionType.COMPONENT,
         default: "",
         onChange(newValue: string) {
-            const ids = new Set(newValue.split(",").map(id => id.trim()).filter(Boolean));
-            settings.store.idsList = Array.from(ids).join(", ");
+            const ids = parseActivityIds(newValue);
+            settings.store.idsList = formatActivityIds(ids);
+            rebuildFilteredActivityIds(settings.store.idsList);
             recalculateActivities();
         },
         component: props => <IdsListComponent setValue={props.setValue} />
@@ -208,13 +249,16 @@ const settings = definePluginSettings({
     ignoredActivities: {
         type: OptionType.CUSTOM,
         default: [] as IgnoredActivity[],
-        onChange: recalculateActivities,
+        onChange() {
+            rebuildIgnoredActivityCache();
+            recalculateActivities();
+        },
         description: "",
     }
 });
 
 function isActivityTypeIgnored(type: number, id?: string) {
-    if (id && settings.store.idsList.includes(id)) {
+    if (id && filteredActivityIds.has(id)) {
         return settings.store.listMode === FilterMode.Blacklist;
     }
 
@@ -274,28 +318,34 @@ export default definePlugin({
     ],
 
     async start() {
+        rebuildFilteredActivityIds();
+
         if (settings.store.ignoredActivities.length !== 0) {
             const gamesSeen = RunningGameStore.getGamesSeen() as { id?: string; exePath: string; }[];
+            const knownGameIds = new Set<string>();
 
-            for (const [index, ignoredActivity] of settings.store.ignoredActivities.entries()) {
-                if (ignoredActivity.type !== ActivitiesTypes.Game) continue;
-
-                if (!gamesSeen.some(game => game.id === ignoredActivity.id || game.exePath === ignoredActivity.id)) {
-                    settings.store.ignoredActivities.splice(index, 1);
-                }
+            for (const game of gamesSeen) {
+                if (game.id) knownGameIds.add(game.id);
+                knownGameIds.add(game.exePath);
             }
+
+            settings.store.ignoredActivities = settings.store.ignoredActivities.filter(ignoredActivity => (
+                ignoredActivity.type !== ActivitiesTypes.Game || knownGameIds.has(ignoredActivity.id)
+            ));
         }
+
+        rebuildIgnoredActivityCache();
     },
 
     isActivityNotIgnored(props: { type: number; application_id?: string; name?: string; }) {
         if (isActivityTypeIgnored(props.type, props.application_id)) return false;
 
         if (props.application_id != null) {
-            return !settings.store.ignoredActivities.some(activity => activity.id === props.application_id) || (settings.store.listMode === FilterMode.Whitelist && settings.store.idsList.includes(props.application_id));
+            return !ignoredActivityIds.has(props.application_id) || (settings.store.listMode === FilterMode.Whitelist && filteredActivityIds.has(props.application_id));
         } else {
             const exePath = RunningGameStore.getRunningGames().find(game => game.name === props.name)?.exePath;
             if (exePath) {
-                return !settings.store.ignoredActivities.some(activity => activity.id === exePath);
+                return !ignoredActivityIds.has(exePath);
             }
         }
 

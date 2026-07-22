@@ -21,6 +21,10 @@ interface PatternEntry {
     color: string;
 }
 
+interface CompiledPatternEntry extends PatternEntry {
+    regex: RegExp;
+}
+
 const DEFAULT_COLOR = "#eb7396";
 
 const cl = classNameFactory("vc-url-hl-");
@@ -30,6 +34,13 @@ const PlusIcon = findComponentByCodeLazy("0v-5h5a1");
 
 const hexToInt = (hex: string): number => parseInt(hex.replace("#", ""), 16);
 const intToHex = (n: number): string => "#" + n.toString(16).padStart(6, "0");
+let compiledPatternsKey = "";
+let compiledPatterns: CompiledPatternEntry[] = [];
+
+function updatePatterns(patterns: PatternEntry[]) {
+    compiledPatternsKey = "";
+    settings.store.patterns = patterns;
+}
 
 const PatternsComponent = ErrorBoundary.wrap(() => {
     const { patterns } = settings.store;
@@ -42,8 +53,9 @@ const PatternsComponent = ErrorBoundary.wrap(() => {
                     <TextInput
                         value={entry.pattern}
                         onChange={v => {
-                            patterns[i].pattern = v;
-                            settings.store.patterns = patterns;
+                            const nextPatterns = [...patterns];
+                            nextPatterns[i] = { ...entry, pattern: v };
+                            updatePatterns(nextPatterns);
                         }}
                         placeholder="*.example.com"
                     />
@@ -51,8 +63,9 @@ const PatternsComponent = ErrorBoundary.wrap(() => {
                         <ColorPicker
                             color={hexToInt(entry.color)}
                             onChange={(c: number) => {
-                                patterns[i].color = intToHex(c);
-                                settings.store.patterns = patterns;
+                                const nextPatterns = [...patterns];
+                                nextPatterns[i] = { ...entry, color: intToHex(c) };
+                                updatePatterns(nextPatterns);
                             }}
                             showEyeDropper={false}
                         />
@@ -62,8 +75,7 @@ const PatternsComponent = ErrorBoundary.wrap(() => {
                         variant="secondary"
                         size="small"
                         onClick={() => {
-                            patterns.splice(i, 1);
-                            settings.store.patterns = patterns;
+                            updatePatterns(patterns.filter((_, index) => index !== i));
                         }}
                     >
                         <TrashIcon className={cl("icon")} />
@@ -71,7 +83,7 @@ const PatternsComponent = ErrorBoundary.wrap(() => {
                 </div>
             ))}
             <Button
-                onClick={() => settings.store.patterns.push({ pattern: "", color: DEFAULT_COLOR })}
+                onClick={() => updatePatterns([...patterns, { pattern: "", color: DEFAULT_COLOR }])}
                 className={cl("add-button")}
                 variant="secondary"
                 size="small"
@@ -109,11 +121,28 @@ function globToRegex(glob: string): RegExp {
     return new RegExp(escaped, "i");
 }
 
-function getMatchingPattern(url: string): PatternEntry | null {
-    for (const entry of settings.store.patterns) {
+function getCompiledPatterns() {
+    const { patterns } = settings.store;
+    const cacheKey = patterns
+        .map(({ pattern, color }) => `${pattern}\u0000${color}`)
+        .join("\u0001");
+
+    if (compiledPatternsKey === cacheKey) return compiledPatterns;
+
+    compiledPatternsKey = cacheKey;
+    compiledPatterns = patterns.flatMap(entry => {
         const pattern = entry.pattern.trim();
-        if (!pattern) continue;
-        if (globToRegex(pattern).test(url)) return entry;
+        if (!pattern) return [];
+
+        return [{ ...entry, regex: globToRegex(pattern) }];
+    });
+
+    return compiledPatterns;
+}
+
+function getMatchingPattern(url: string): PatternEntry | null {
+    for (const entry of getCompiledPatterns()) {
+        if (entry.regex.test(url)) return entry;
     }
     return null;
 }

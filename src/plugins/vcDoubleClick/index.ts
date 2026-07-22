@@ -21,9 +21,16 @@ import definePlugin from "@utils/types";
 import { ChannelRouter, ChannelStore, SelectedChannelStore } from "@webpack/common";
 
 const timers = {} as Record<string, {
-    timeout?: NodeJS.Timeout;
+    timeout?: ReturnType<typeof setTimeout>;
     i: number;
 }>;
+
+function clearVoiceClickTimers() {
+    for (const id of Object.keys(timers)) {
+        clearTimeout(timers[id].timeout);
+        delete timers[id];
+    }
+}
 
 export default definePlugin({
     name: "VoiceChatDoubleClick",
@@ -79,6 +86,10 @@ export default definePlugin({
         const channel = ChannelStore.getChannel(channelId);
         if (!channel || ![2, 13].includes(channel.type)) return true;
         return e.detail >= 2;
+    },
+
+    stop() {
+        clearVoiceClickTimers();
     },
 
     schedule(cb: () => void, e: any) {

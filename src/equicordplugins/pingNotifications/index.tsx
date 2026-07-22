@@ -11,7 +11,6 @@ import definePlugin, { OptionType } from "@utils/types";
 import { findStoreLazy } from "@webpack";
 import {
     ChannelStore,
-    GuildStore,
     NavigationRouter,
     PresenceStore,
     RelationshipStore,
@@ -52,9 +51,12 @@ const settings = definePluginSettings({
 function formatContent(message) {
     let content = message.content || "";
     message.mentions?.forEach(user => {
-        content = content.replace(new RegExp(`<@!?${user.id}>`, "g"), `@${user.username}`);
+        content = content
+            .split(`<@${user.id}>`).join(`@${user.username}`)
+            .split(`<@!${user.id}>`).join(`@${user.username}`);
     });
-    return content.slice(0, 200) + (content.length > 200 ? "..." : "");
+
+    return content.length > 200 ? `${content.slice(0, 200)}...` : content;
 }
 
 function checkIfMuted(channel) {
@@ -74,9 +76,6 @@ function checkIfMuted(channel) {
     }
 
     if (channel.guild_id) {
-        const guild = GuildStore.getGuild(channel.guild_id);
-        if (UserGuildSettingsStore.isMuted(channel.guild_id)) return true;
-
         if (UserGuildSettingsStore?.isMuted?.(channel.guild_id)) return true;
         if (UserGuildSettingsStore?.isChannelMuted?.(channel.guild_id, channel.id)) return true;
         if (UserGuildSettingsStore?.isCategoryMuted?.(channel.guild_id, channel.id)) return true;
@@ -114,10 +113,6 @@ export default definePlugin({
                 if (!settings.store.showInActive && channel.id === SelectedChannelStore.getChannelId()) return;
                 if (PresenceStore.getStatus(currentUser.id) === "dnd") return;
 
-                const author = UserStore.getUser(message.author.id) || { username: "Unknown" };
-                const channelName = channel.name || (isDM ? "DM" : "Group");
-                const body = formatContent(message);
-
                 let shouldNotify = false;
 
                 if (settings.store.mentions && message.mentions?.some(u => u.id === currentUser.id)) {
@@ -129,9 +124,12 @@ export default definePlugin({
                 }
 
                 if (shouldNotify) {
+                    const author = UserStore.getUser(message.author.id) || { username: "Unknown" };
+                    const channelName = channel.name || (isDM ? "DM" : "Group");
+
                     showNotification({
                         title: `${author.username} in ${channelName}`,
-                        body,
+                        body: formatContent(message),
                         icon: author.getAvatarURL?.(undefined, 128),
                         onClick: () => NavigationRouter.transitionTo(
                             `/channels/${channel.guild_id || "@me"}/${channel.id}/${message.id}`

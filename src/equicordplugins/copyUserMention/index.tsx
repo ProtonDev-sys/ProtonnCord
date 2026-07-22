@@ -50,6 +50,7 @@ export default definePlugin({
     description: "Adds a button to copy user's mention on the user context menu, works best with ValidUser.",
     tags: ["Chat", "Utility"],
     contextMenus: {
-        "user-context": UserContextMenuPatch
+        "user-context": UserContextMenuPatch,
+        "user-profile-actions": UserContextMenuPatch
     }
 });

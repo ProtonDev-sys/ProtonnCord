@@ -14,17 +14,21 @@ import { AuthenticationStore, SnowflakeUtils, Tooltip } from "@webpack/common";
 
 type FillValue = ("status-danger" | "status-warning" | "status-positive" | "text-muted");
 type Fill = [FillValue, FillValue, FillValue];
-type DiffKey = keyof Diff;
-
-interface Diff {
-    days: number,
-    hours: number,
-    minutes: number,
-    seconds: number;
-    milliseconds: number;
-}
 
 const DISCORD_KT_DELAY = 1471228928;
+const DISCORD_KT_GRACE_MS = 86400000;
+const TROLL_LIMIT = 2 * 60 * 1000;
+const DISCORD_KT_FILL: Fill = ["status-positive", "status-positive", "text-muted"];
+const MUTED_FILL: Fill = ["text-muted", "text-muted", "text-muted"];
+const DANGER_FILL: Fill = ["status-danger", "text-muted", "text-muted"];
+const WARNING_FILL: Fill = ["status-warning", "status-warning", "text-muted"];
+const DURATION_UNITS = [
+    { singular: "day", plural: "days", millis: 60 * 60 * 24 * 1000 },
+    { singular: "hour", plural: "hours", millis: 60 * 60 * 1000, modulo: 24 },
+    { singular: "minute", plural: "minutes", millis: 60 * 1000, modulo: 60 },
+    { singular: "second", plural: "seconds", millis: 1000, modulo: 60 },
+    { singular: "millisecond", plural: "milliseconds", millis: 1, modulo: 1000 },
+] as const;
 
 export default definePlugin({
     name: "MessageLatency",
@@ -66,32 +70,21 @@ export default definePlugin({
     ],
 
     stringDelta(delta: number, showMillis: boolean) {
-        const diff: Diff = {
-            days: Math.floor(delta / (60 * 60 * 24 * 1000)),
-            hours: Math.floor((delta / (60 * 60 * 1000)) % 24),
-            minutes: Math.floor((delta / (60 * 1000)) % 60),
-            seconds: Math.floor(delta / 1000 % 60),
-            milliseconds: Math.floor(delta % 1000)
-        };
+        let text = "";
+        const andBefore = showMillis ? "millisecond" : "second";
 
-        const str = (k: DiffKey) => diff[k] > 0 ? `${diff[k]} ${diff[k] > 1 ? k : k.substring(0, k.length - 1)}` : null;
-        const keys = Object.keys(diff) as DiffKey[];
+        for (const unit of DURATION_UNITS) {
+            if (!showMillis && unit.singular === "millisecond") continue;
 
-        const ts = keys.reduce((prev, k) => {
-            const s = str(k);
+            const rawValue = Math.floor(delta / unit.millis);
+            const value = "modulo" in unit ? rawValue % unit.modulo : rawValue;
+            if (value <= 0) continue;
 
-            return prev + (
-                isNonNullish(s)
-                    ? (prev !== ""
-                        ? (showMillis ? k === "milliseconds" : k === "seconds")
-                            ? " and "
-                            : " "
-                        : "") + s
-                    : ""
-            );
-        }, "");
+            if (text) text += unit.singular === andBefore ? " and " : " ";
+            text += `${value} ${value === 1 ? unit.singular : unit.plural}`;
+        }
 
-        return ts || "0 seconds";
+        return text || "0 seconds";
     },
 
     latencyTooltipData(message: Message) {
@@ -114,7 +107,7 @@ export default definePlugin({
 
         // Old Discord Android clients have a delay of around 17 days
         // This is a workaround for that
-        if (-delta >= DISCORD_KT_DELAY - 86400000) {
+        if (-delta >= DISCORD_KT_DELAY - DISCORD_KT_GRACE_MS) {
             // One day of padding for good measure
             isDiscordKotlin = detectDiscordKotlin;
             delta += DISCORD_KT_DELAY;
@@ -129,17 +122,13 @@ export default definePlugin({
 
         const stringDelta = abs >= latencyMillis ? this.stringDelta(abs, showMillis) : null;
 
-        // Also thanks dziurwa
-        // 2 minutes
-        const TROLL_LIMIT = 2 * 60 * 1000;
-
         const fill: Fill = isDiscordKotlin
-            ? ["status-positive", "status-positive", "text-muted"]
+            ? DISCORD_KT_FILL
             : delta >= TROLL_LIMIT || ahead
-                ? ["text-muted", "text-muted", "text-muted"]
+                ? MUTED_FILL
                 : delta >= (latencyMillis * 2)
-                    ? ["status-danger", "text-muted", "text-muted"]
-                    : ["status-warning", "status-warning", "text-muted"];
+                    ? DANGER_FILL
+                    : WARNING_FILL;
 
         return (abs >= latencyMillis || isDiscordKotlin) ? { delta: stringDelta, ahead, fill, isDiscordKotlin } : null;
     },

@@ -8,53 +8,75 @@ import { Logger } from "@utils/Logger";
 import { Activity, ActivityButton } from "@vencord/discord-types";
 import { ActivityFlags, ActivityType } from "@vencord/discord-types/enums";
 import { findByPropsLazy } from "@webpack";
-import { ApplicationAssetUtils, FluxDispatcher } from "@webpack/common";
+import { FluxDispatcher } from "@webpack/common";
 
 import { settings } from "../settings";
 import { NameFormat } from "../types";
 import { SfmResponse, SfmTrackData } from "../types/statsfm";
+import { getCachedApplicationAsset } from "./assetCache";
 
 const APPLICATION_ID = "1325126169179197500";
 const PLACEHOLDER_ID = "2a96cbd8b46e442fc41c2b86b821562f";
 const SOCKET_ID = "RichPresence_SFM";
+const API_ERROR_COOLDOWN_MS = 60_000;
 const logger = new Logger("RichPresence:StatsFm");
 const PresenceStore = findByPropsLazy("getLocalPresence");
 
 let updateInterval: NodeJS.Timeout | undefined;
+let isUpdating = false;
+let lastApiErrorAt = 0;
+let updateGeneration = 0;
 
 async function getAsset(key: string): Promise<string> {
-    return (await ApplicationAssetUtils.fetchAssetIds(APPLICATION_ID, [key]))[0];
+    return getCachedApplicationAsset(APPLICATION_ID, key);
 }
 
 function setActivity(activity: Activity | null) {
     FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity, socketId: SOCKET_ID });
 }
 
+function reportApiError(message: string, details: unknown) {
+    const now = Date.now();
+    if (lastApiErrorAt && now - lastApiErrorAt < API_ERROR_COOLDOWN_MS) return;
+
+    lastApiErrorAt = now;
+    logger.error(message, details);
+}
+
 async function fetchTrackData(): Promise<SfmTrackData | null> {
-    if (!settings.store.sfm_username) return null;
+    const username = settings.store.sfm_username?.trim();
+    if (!username) {
+        lastApiErrorAt = 0;
+        return null;
+    }
 
     try {
-        const res = await fetch(`https://api.stats.fm/api/v1/users/${settings.store.sfm_username}/streams/current`);
+        const res = await fetch(`https://api.stats.fm/api/v1/users/${encodeURIComponent(username)}/streams/current`);
         if (!res.ok) throw `${res.status} ${res.statusText}`;
 
-        const json = await res.json() as SfmResponse;
-        if (!json.item) {
-            logger.error("Error from Stats.fm API", json);
-            return null;
-        }
+        const json = await res.json() as Partial<SfmResponse>;
+        lastApiErrorAt = 0;
 
-        const trackData = json.item.track;
+        const trackData = json.item?.track;
         if (!trackData) return null;
+
+        const albums = trackData.albums ?? [];
+        const artists = trackData.artists ?? [];
+        let albumNames = "";
+        for (const album of albums) {
+            if (albumNames) albumNames += ", ";
+            albumNames += album.name;
+        }
 
         return {
             name: trackData.name || "Unknown",
-            albums: trackData.albums.map(a => a.name).join(", ") || "Unknown",
-            artists: trackData.artists[0]?.name ?? "Unknown",
+            albums: albumNames || "Unknown",
+            artists: artists[0]?.name ?? "Unknown",
             url: `https://stats.fm/track/${trackData.id}`,
-            imageUrl: trackData.albums[0]?.image,
+            imageUrl: albums[0]?.image,
         };
     } catch (e) {
-        logger.error("Failed to query Stats.fm API", e);
+        reportApiError("Failed to query Stats.fm API", e);
         return null;
     }
 }
@@ -123,21 +145,35 @@ async function getActivity(): Promise<Activity | null> {
 }
 
 async function updatePresence() {
+    if (isUpdating) return;
+
+    const generation = updateGeneration;
+    isUpdating = true;
     try {
-        setActivity(await getActivity());
+        const activity = await getActivity();
+        if (generation === updateGeneration) setActivity(activity);
     } catch (e) {
         logger.error("Failed to update presence", e);
-        setActivity(null);
+        if (generation === updateGeneration) setActivity(null);
+    } finally {
+        if (generation === updateGeneration) isUpdating = false;
     }
 }
 
 export function start() {
-    updatePresence();
+    if (updateInterval) return;
+
+    updateGeneration++;
+    lastApiErrorAt = 0;
+    void updatePresence();
     updateInterval = setInterval(updatePresence, 16000);
 }
 
 export function stop() {
+    updateGeneration++;
     clearInterval(updateInterval);
     updateInterval = undefined;
+    isUpdating = false;
+    lastApiErrorAt = 0;
     setActivity(null);
 }

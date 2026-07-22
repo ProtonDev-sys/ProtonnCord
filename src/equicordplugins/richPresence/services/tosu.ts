@@ -6,9 +6,10 @@
 
 import { Activity } from "@vencord/discord-types";
 import { ActivityType } from "@vencord/discord-types/enums";
-import { ApplicationAssetUtils, FluxDispatcher } from "@webpack/common";
+import { FluxDispatcher } from "@webpack/common";
 
 import { BanchoStatusEnum, GameState, Modes, TosuApi } from "../types/tosu";
+import { getCachedApplicationAsset } from "./assetCache";
 
 const OSU_APP_ID = "367827983903490050";
 const OSU_LARGE_IMAGE = "373344233077211136";
@@ -17,41 +18,110 @@ const OSU_MANIA_SMALL_IMAGE = "373370588703621136";
 const OSU_TAIKO_SMALL_IMAGE = "373370519891738624";
 const OSU_CATCH_SMALL_IMAGE = "373370543161999361";
 const SOCKET_ID = "RichPresence_Tosu";
+const MAX_BEATMAP_COVER_CACHE_SIZE = 75;
+const MESSAGE_THROTTLE_MS = 3000;
 
-let ws: WebSocket;
-let wsReconnect: NodeJS.Timeout;
+let ws: WebSocket | undefined;
+let wsReconnect: ReturnType<typeof setTimeout> | undefined;
 let shouldReconnect = false;
+let connectionGeneration = 0;
+let inMessageThrottle = false;
+let messageThrottleTimeout: ReturnType<typeof setTimeout> | undefined;
+let clearActivityTimeout: ReturnType<typeof setTimeout> | undefined;
+const beatmapCoverCache = new Map<number, Promise<string | undefined>>();
 
-function throttle<T extends (...args: never[]) => void>(func: T, limit: number, timedOutCallback?: () => void): T {
-    let inThrottle: boolean;
-    let callbackTimeout: NodeJS.Timeout;
-    return function (...args: Parameters<T>) {
-        if (!inThrottle) {
-            func(...args);
-            inThrottle = true;
-            setTimeout(() => inThrottle = false, limit);
-            if (timedOutCallback) {
-                clearTimeout(callbackTimeout);
-                callbackTimeout = setTimeout(timedOutCallback, limit * 2);
-            }
-        }
-    } as T;
+function joinStateParts(...parts: string[]): string {
+    let state = "";
+    for (const part of parts) {
+        if (!part) continue;
+        if (state) state += " | ";
+        state += part;
+    }
+
+    return state;
+}
+
+function clearActivity() {
+    FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity: null, socketId: SOCKET_ID });
+}
+
+function clearRuntimeTimeouts() {
+    if (wsReconnect) {
+        clearTimeout(wsReconnect);
+        wsReconnect = undefined;
+    }
+    if (messageThrottleTimeout) {
+        clearTimeout(messageThrottleTimeout);
+        messageThrottleTimeout = undefined;
+    }
+    if (clearActivityTimeout) {
+        clearTimeout(clearActivityTimeout);
+        clearActivityTimeout = undefined;
+    }
+    inMessageThrottle = false;
+}
+
+function throttledOnMessage(data: string, generation: number) {
+    if (!shouldReconnect || generation !== connectionGeneration || inMessageThrottle) return;
+
+    void onMessage(data, generation);
+    inMessageThrottle = true;
+
+    messageThrottleTimeout = setTimeout(() => {
+        messageThrottleTimeout = undefined;
+        inMessageThrottle = false;
+    }, MESSAGE_THROTTLE_MS);
+
+    if (clearActivityTimeout) clearTimeout(clearActivityTimeout);
+    clearActivityTimeout = setTimeout(() => {
+        clearActivityTimeout = undefined;
+        if (shouldReconnect && generation === connectionGeneration) clearActivity();
+    }, MESSAGE_THROTTLE_MS * 2);
 }
 
 async function getAsset(key: string): Promise<string> {
     if (/https?:\/\/(cdn|media)\.discordapp\.(com|net)\/attachments\//.test(key))
         return "mp:" + key.replace(/https?:\/\/(cdn|media)\.discordapp\.(com|net)\//, "");
-    return (await ApplicationAssetUtils.fetchAssetIds(OSU_APP_ID, [key]))[0];
+    return getCachedApplicationAsset(OSU_APP_ID, key);
 }
 
-const throttledOnMessage = throttle(onMessage, 3000, () =>
-    FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity: null, socketId: SOCKET_ID })
-);
+function pruneOldestBeatmapCover() {
+    const oldestKey = beatmapCoverCache.keys().next().value;
+    if (oldestKey !== undefined) beatmapCoverCache.delete(oldestKey);
+}
 
-async function onMessage(data: string) {
+function getBeatmapCover(setId: number): Promise<string | undefined> {
+    const cachedCover = beatmapCoverCache.get(setId);
+    if (cachedCover) return cachedCover;
+
+    if (beatmapCoverCache.size >= MAX_BEATMAP_COVER_CACHE_SIZE) pruneOldestBeatmapCover();
+
+    const coverPromise = (async () => {
+        const mapBg = await getAsset(`https://assets.ppy.sh/beatmaps/${setId}/covers/list@2x.jpg`);
+        if (!mapBg) return undefined;
+
+        const res = await fetch(mapBg.replace(/^mp:/, "https://media.discordapp.net/"), { method: "HEAD" });
+        if (!res.ok) {
+            beatmapCoverCache.delete(setId);
+            return undefined;
+        }
+
+        return mapBg;
+    })().catch(() => {
+        beatmapCoverCache.delete(setId);
+        return undefined;
+    });
+
+    beatmapCoverCache.set(setId, coverPromise);
+    return coverPromise;
+}
+
+async function onMessage(data: string, generation: number) {
+    if (!shouldReconnect || generation !== connectionGeneration) return;
+
     const json: TosuApi = JSON.parse(data);
     // @ts-ignore
-    if (json.error) return FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity: null, socketId: SOCKET_ID });
+    if (json.error) return clearActivity();
 
     const { state, session, profile, beatmap, play, resultsScreen } = json;
 
@@ -115,7 +185,7 @@ async function onMessage(data: string) {
             h50 = play.hits[50] > 0 ? `${play.hits[50]}x50` : "";
             h0 = play.hits[0] > 0 ? `${play.hits[0]}xMiss` : "";
             sb = play.hits.sliderBreaks > 0 ? `${play.hits.sliderBreaks}xSB` : "";
-            activity.state = [h100, h50, h0, sb].filter(Boolean).join(" | ");
+            activity.state = joinStateParts(h100, h50, h0, sb);
 
             const playRank = await getAsset(`https://raw.githubusercontent.com/AutumnVN/gosu-rich-presence/main/grade/${play.rank.current.toLowerCase().replace("x", "ss")}.png`);
             assets.small_image = playRank;
@@ -139,7 +209,7 @@ async function onMessage(data: string) {
             h50 = resultsScreen.hits[50] > 0 ? `${resultsScreen.hits[50]}x50` : "";
             h0 = resultsScreen.hits[0] > 0 ? `${resultsScreen.hits[0]}xMiss` : "";
             sb = play.hits.sliderBreaks > 0 ? `${play.hits.sliderBreaks}xSB` : "";
-            activity.state = [h100, h50, h0].filter(Boolean).join(" | ");
+            activity.state = joinStateParts(h100, h50, h0);
 
             const resultRank = await getAsset(`https://raw.githubusercontent.com/AutumnVN/gosu-rich-presence/main/grade/${resultsScreen.rank.toLowerCase().replace("x", "ss")}.png`);
             assets.small_image = resultRank;
@@ -194,30 +264,42 @@ async function onMessage(data: string) {
     }
 
     if (beatmap.set > 0) {
-        const mapBg = await getAsset(`https://assets.ppy.sh/beatmaps/${beatmap.set}/covers/list@2x.jpg`);
-        const res = await fetch(mapBg.replace(/^mp:/, "https://media.discordapp.net/"), { method: "HEAD" });
-        if (res.ok) assets.large_image = mapBg;
+        const mapBg = await getBeatmapCover(beatmap.set);
+        if (!shouldReconnect || generation !== connectionGeneration) return;
+        if (mapBg) assets.large_image = mapBg;
     }
 
-    FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity, socketId: SOCKET_ID });
+    if (shouldReconnect && generation === connectionGeneration) {
+        FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity, socketId: SOCKET_ID });
+    }
 }
 
 export function start() {
+    stop();
     shouldReconnect = true;
+    const generation = ++connectionGeneration;
+
     (function connect() {
-        ws = new WebSocket("ws://127.0.0.1:24050/websocket/v2");
-        ws.addEventListener("error", () => ws.close());
-        ws.addEventListener("close", () => {
-            if (!shouldReconnect) return;
+        if (!shouldReconnect || generation !== connectionGeneration) return;
+
+        const socket = new WebSocket("ws://127.0.0.1:24050/websocket/v2");
+        ws = socket;
+
+        socket.addEventListener("error", () => socket.close());
+        socket.addEventListener("close", () => {
+            if (!shouldReconnect || generation !== connectionGeneration) return;
             wsReconnect = setTimeout(connect, 5000);
         });
-        ws.addEventListener("message", ({ data }) => throttledOnMessage(data));
+        socket.addEventListener("message", ({ data }) => throttledOnMessage(data, generation));
     })();
 }
 
 export function stop() {
     shouldReconnect = false;
-    if (wsReconnect) clearTimeout(wsReconnect);
-    if (ws) ws.close();
-    FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity: null, socketId: SOCKET_ID });
+    connectionGeneration++;
+    clearRuntimeTimeouts();
+    ws?.close();
+    ws = undefined;
+    beatmapCoverCache.clear();
+    clearActivity();
 }

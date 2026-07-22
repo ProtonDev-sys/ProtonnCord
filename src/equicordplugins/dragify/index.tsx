@@ -37,6 +37,8 @@ type DragifyRuntime = {
 
 let pluginInstance: DragifyRuntime | null = null;
 let transparentDragImage: HTMLCanvasElement | null = null;
+let dragEndCleanupTimer: number | null = null;
+let dragGeneration = 0;
 
 function getTransparentDragImage(): HTMLCanvasElement | null {
     if (typeof document === "undefined") return null;
@@ -52,6 +54,12 @@ function suppressDefaultDragPreview(event: DragEvent) {
     const image = getTransparentDragImage();
     if (!image || !event.dataTransfer?.setDragImage) return;
     event.dataTransfer.setDragImage(image, 0, 0);
+}
+
+function clearDragEndCleanupTimer() {
+    if (dragEndCleanupTimer === null) return;
+    clearTimeout(dragEndCleanupTimer);
+    dragEndCleanupTimer = null;
 }
 
 function setDragifyDataTransfer(dataTransfer: DataTransfer | null, entity: DropEntity) {
@@ -339,9 +347,12 @@ export default definePlugin({
 
     beginDrag(event: DragEvent, entity: DropEntity, options?: { effectAllowed?: DataTransfer["effectAllowed"]; }) {
         if (!event.dataTransfer) return;
+        dragGeneration++;
+        clearDragEndCleanupTimer();
         suppressDefaultDragPreview(event);
         if (options?.effectAllowed) event.dataTransfer.effectAllowed = options.effectAllowed;
         beginSessionDrag(entity);
+        startDragWatchdog(hideDragGhost);
         this.showGhost(entity, event);
         setDragifyDataTransfer(event.dataTransfer, entity);
         if (entity.kind === "user") event.dataTransfer.setData("data-user-id", entity.id);
@@ -425,10 +436,11 @@ export default definePlugin({
         window.addEventListener("drag", this.globalDragMove, true);
         window.addEventListener("dragover", this.globalDragMove, true);
         window.addEventListener("dragend", this.globalDragEnd, true);
-        startDragWatchdog(hideDragGhost);
     },
 
     stop() {
+        dragGeneration++;
+        clearDragEndCleanupTimer();
         window.removeEventListener("dragover", this.globalDragOver, true);
         window.removeEventListener("drop", this.globalDrop, true);
         window.removeEventListener("dragstart", this.globalDragStart, true);
@@ -537,7 +549,11 @@ export default definePlugin({
     },
 
     globalDragEnd: (_event: DragEvent) => {
-        setTimeout(() => {
+        const generation = dragGeneration;
+        clearDragEndCleanupTimer();
+        dragEndCleanupTimer = window.setTimeout(() => {
+            dragEndCleanupTimer = null;
+            if (generation !== dragGeneration) return;
             if (Date.now() - getLastDropAt() < 100) return;
             clearDragState();
             hideDragGhost();

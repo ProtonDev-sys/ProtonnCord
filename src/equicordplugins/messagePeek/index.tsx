@@ -31,6 +31,10 @@ const hasRelevantActivity: (props: ActivityCheckProps) => boolean = findByCodeLa
 const ActivityText: React.ComponentType<ActivityTextProps> = findComponentByCodeLazy('"ActivityStatus"');
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
+const STARTUP_FETCH_BATCH_SIZE = 5;
+const STARTUP_FETCH_DELAY_MS = 3000;
+
+let startupFetchGeneration = 0;
 
 const settings = definePluginSettings({
     hideMuted: {
@@ -257,12 +261,13 @@ export default definePlugin({
     ],
 
     async start() {
+        const generation = ++startupFetchGeneration;
         const channels = ChannelStore.getSortedPrivateChannels()
             .slice(0, 25)
             .filter(c => !MessageStore.getLastMessage(c.id));
 
-        for (let i = 0; i < channels.length; i += 5) {
-            const batch = channels.slice(i, i + 5);
+        for (let i = 0; i < channels.length && generation === startupFetchGeneration; i += STARTUP_FETCH_BATCH_SIZE) {
+            const batch = channels.slice(i, i + STARTUP_FETCH_BATCH_SIZE);
 
             await Promise.allSettled(
                 batch.map(channel =>
@@ -273,10 +278,16 @@ export default definePlugin({
                 )
             );
 
-            if (i + 5 < channels.length) {
-                await new Promise(r => setTimeout(r, 3000));
+            if (generation !== startupFetchGeneration) break;
+
+            if (i + STARTUP_FETCH_BATCH_SIZE < channels.length) {
+                await new Promise(r => setTimeout(r, STARTUP_FETCH_DELAY_MS));
             }
         }
+    },
+
+    stop() {
+        startupFetchGeneration++;
     },
 
     renderMemberListDecorator({ channel }: DecoratorProps) {

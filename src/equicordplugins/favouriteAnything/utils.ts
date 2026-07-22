@@ -125,13 +125,14 @@ export async function getThumbnailUrl(data: string, width: number, height: numbe
 
 export const isAllowedHost = proxyLazy(() => {
     // GLOBAL_ENV is not initialized immediately
-    const allowedHosts = new Set<string>([
-        window.GLOBAL_ENV.CDN_HOST,
-        ...[window.GLOBAL_ENV.IMAGE_PROXY_ENDPOINTS, window.GLOBAL_ENV.MEDIA_PROXY_ENDPOINT]
-            .flatMap(endpoint => endpoint.split(","))
-            .map(endpoint => URL.parse(`https://${endpoint}`)?.hostname)
-            .filter(Boolean)
-    ]);
+    const allowedHosts = new Set<string>([window.GLOBAL_ENV.CDN_HOST]);
+    for (const endpoints of [window.GLOBAL_ENV.IMAGE_PROXY_ENDPOINTS, window.GLOBAL_ENV.MEDIA_PROXY_ENDPOINT]) {
+        for (const endpoint of endpoints.split(",")) {
+            const host = URL.parse(`https://${endpoint}`)?.hostname;
+            if (host) allowedHosts.add(host);
+        }
+    }
+
     return (value: string) => allowedHosts.has(value);
 });
 

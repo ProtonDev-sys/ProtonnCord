@@ -17,6 +17,24 @@
 */
 
 export function waitFor(condition: () => boolean, cb: () => void) {
-    if (condition()) cb();
-    else requestAnimationFrame(() => waitFor(condition, cb));
+    let animationFrame = 0;
+    let cancelled = false;
+
+    const tick = () => {
+        if (cancelled) return;
+
+        if (condition()) {
+            cb();
+            return;
+        }
+
+        animationFrame = requestAnimationFrame(tick);
+    };
+
+    tick();
+
+    return () => {
+        cancelled = true;
+        if (animationFrame) cancelAnimationFrame(animationFrame);
+    };
 }

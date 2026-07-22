@@ -39,6 +39,7 @@ const settings = definePluginSettings({
 });
 
 const DATASTORE_KEY = "bannersEverywhere";
+const MAX_PNG_CACHE_SIZE = 100;
 
 export default definePlugin({
     name: "BannersEverywhere",
@@ -73,13 +74,29 @@ export default definePlugin({
 
     data: {},
     managedStyle: style,
+    pngCache: new Map<string, Promise<string>>(),
+    persistTimeout: undefined as ReturnType<typeof setTimeout> | undefined,
 
     async start() {
         this.data = await DataStore.get(DATASTORE_KEY) || {};
     },
 
     stop() {
-        DataStore.set(DATASTORE_KEY, this.data);
+        if (this.persistTimeout) {
+            clearTimeout(this.persistTimeout);
+            this.persistTimeout = undefined;
+        }
+        this.pngCache.clear();
+        void DataStore.set(DATASTORE_KEY, this.data);
+    },
+
+    queuePersist() {
+        if (this.persistTimeout) return;
+
+        this.persistTimeout = setTimeout(() => {
+            this.persistTimeout = undefined;
+            void DataStore.set(DATASTORE_KEY, this.data);
+        }, 2_000);
     },
 
     nameplate(nameplate: Nameplate | undefined) {
@@ -110,7 +127,10 @@ export default definePlugin({
     },
 
     async gifToPng(url: string): Promise<string> {
-        return new Promise((resolve, reject) => {
+        const cached = this.pngCache.get(url);
+        if (cached) return cached;
+
+        const promise = new Promise<string>((resolve, reject) => {
             const img = new Image();
             img.crossOrigin = "anonymous";
             img.onload = () => {
@@ -128,6 +148,14 @@ export default definePlugin({
             img.onerror = () => resolve("");
             img.src = url;
         });
+        this.pngCache.set(url, promise);
+
+        if (this.pngCache.size > MAX_PNG_CACHE_SIZE) {
+            const oldestKey = this.pngCache.keys().next().value;
+            if (oldestKey) this.pngCache.delete(oldestKey);
+        }
+
+        return promise;
     },
 
     getBanner(userId: string): string | undefined {
@@ -138,8 +166,11 @@ export default definePlugin({
         }
         const userProfile = UserProfileStore.getUserProfile(userId);
         if (userProfile?.banner) {
-            this.data[userId] = `https://cdn.discordapp.com/banners/${userId}/${userProfile.banner}.${userProfile.banner.startsWith("a_") ? "gif" : "png"}`;
-            DataStore.set(DATASTORE_KEY, this.data);
+            const banner = `https://cdn.discordapp.com/banners/${userId}/${userProfile.banner}.${userProfile.banner.startsWith("a_") ? "gif" : "png"}`;
+            if (this.data[userId] !== banner) {
+                this.data[userId] = banner;
+                this.queuePersist();
+            }
         }
         return this.data[userId];
     },

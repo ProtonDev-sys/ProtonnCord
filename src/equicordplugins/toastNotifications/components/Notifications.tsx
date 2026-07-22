@@ -12,10 +12,21 @@ import type { Root } from "react-dom/client";
 
 import NotificationComponent from "./NotificationComponent";
 
-let NotificationQueue: JSX.Element[] = [];
+interface QueuedNotification {
+    key: string;
+    element: JSX.Element;
+    resolve(): void;
+    onClose?(): void;
+}
+
+let NotificationQueue: QueuedNotification[] = [];
 let notificationID = 0;
 let RootContainer: Root | undefined;
 let ToastContainer: HTMLDivElement | undefined;
+
+function renderQueue(root: Root) {
+    root.render(<>{NotificationQueue.map(n => n.element)}</>);
+}
 
 function getNotificationContainer() {
     // If the root container doesn't exist, create it.
@@ -61,29 +72,41 @@ export type NotificationData = MessageNotification | SystemNotification;
 
 export async function showNotification(notification: NotificationData) {
     const root = getNotificationContainer();
-    const thisNotificationID = notificationID++;
+    const notificationKey = (notificationID++).toString();
 
     return new Promise<void>(resolve => {
         const ToastNotification = (
             <NotificationComponent
-                key={thisNotificationID.toString()}
+                key={notificationKey}
                 {...notification}
                 onClose={() => {
-                    NotificationQueue = NotificationQueue.filter(n => n.key !== thisNotificationID.toString());
+                    const oldLength = NotificationQueue.length;
+                    NotificationQueue = NotificationQueue.filter(n => n.key !== notificationKey);
+                    if (NotificationQueue.length === oldLength) return;
+
                     notification.onClose?.();
-                    root.render(<>{NotificationQueue}</>);
+                    renderQueue(root);
                     resolve();
                 }}
             />
         );
 
         // Push this notification into the stack.
-        NotificationQueue.push(ToastNotification);
+        NotificationQueue.push({
+            key: notificationKey,
+            element: ToastNotification,
+            resolve,
+            onClose: notification.onClose
+        });
 
         // If the queue exceeds the maximum number of notifications, remove the oldest one.
-        if (NotificationQueue.length > PluginSettings.store.maxNotifications) NotificationQueue.shift();
+        if (NotificationQueue.length > (PluginSettings.store.maxNotifications ?? 3)) {
+            const removed = NotificationQueue.shift();
+            removed?.onClose?.();
+            removed?.resolve();
+        }
 
-        root.render(<>{NotificationQueue}</>);
+        renderQueue(root);
     });
 }
 

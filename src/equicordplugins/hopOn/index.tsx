@@ -6,6 +6,7 @@
 
 import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
+import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { Message } from "@vencord/discord-types";
 import { RelationshipStore, SelectedChannelStore } from "@webpack/common";
@@ -17,10 +18,31 @@ interface IMessageCreate {
     message: Message;
 }
 
+const logger = new Logger("HopOn");
+let triggerRegex: RegExp | null = null;
+
+function compileTriggerRegex(value = settings.store.regex) {
+    try {
+        triggerRegex = value.trim() ? new RegExp(value, "i") : null;
+    } catch (error) {
+        triggerRegex = null;
+        logger.error("Invalid trigger regex", error);
+    }
+}
+
 const settings = definePluginSettings({
     regex: {
         type: OptionType.STRING,
         description: "Regex to trigger on",
+        onChange: compileTriggerRegex,
+        isValid(value: string) {
+            try {
+                if (value.trim()) new RegExp(value, "i");
+                return true;
+            } catch (error) {
+                return error instanceof Error ? error.message : "Invalid regex";
+            }
+        },
         default: "hop on (?:fortnite|fn)"
     },
     url: {
@@ -35,15 +57,22 @@ export default definePlugin({
     tags: ["Fun"],
     authors: [Devs.ImLvna],
     settings,
+    start() {
+        compileTriggerRegex();
+    },
+    stop() {
+        triggerRegex = null;
+    },
     flux: {
         async MESSAGE_CREATE({ optimistic, type, message, channelId }: IMessageCreate) {
             if (optimistic || type !== "MESSAGE_CREATE") return;
             if (message.state === "SENDING") return;
-            if (RelationshipStore.isBlocked(message.author?.id)) return;
+            if (message.author?.id && RelationshipStore.isBlocked(message.author.id)) return;
             if (channelId !== SelectedChannelStore.getChannelId()) return;
-            if (!message.content?.match(new RegExp(settings.store.regex, "i"))) return;
+            if (!triggerRegex?.test(message.content ?? "")) return;
 
-            VencordNative.native.openExternal(settings.store.url);
+            const url = settings.store.url.trim();
+            if (url) VencordNative.native.openExternal(url);
         }
     }
 });

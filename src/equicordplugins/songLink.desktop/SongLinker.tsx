@@ -21,18 +21,35 @@ export default function SongLinker({ url, onResolved }: SongLinkerProps) {
     const [songData, setSongData] = useState<SongLinkResult>();
 
     useEffect(() => {
-        async function doStuff() {
-            let sd: SongLinkResult;
-            if (pl.cache[url]) {
-                sd = pl.cache[url];
-            } else {
-                sd = await Native.getTrackData(url);
-                pl.addToCache(url, sd);
+        let cancelled = false;
+
+        async function loadSongData() {
+            const cached = pl.getFromCache(url);
+            if (cached) {
+                setSongData(cached);
+                onResolved?.(url, cached);
+                return;
             }
-            setSongData(sd);
-            onResolved?.(url, sd);
+
+            setSongData(undefined);
+
+            try {
+                const sd = await Native.getTrackData(url);
+                if (cancelled) return;
+
+                pl.addToCache(url, sd);
+                setSongData(sd);
+                onResolved?.(url, sd);
+            } catch (error) {
+                if (!cancelled) console.error("Failed to fetch song link", error);
+            }
         }
-        doStuff();
+
+        void loadSongData();
+
+        return () => {
+            cancelled = true;
+        };
     }, [url]);
 
     return <BaseText>
@@ -46,7 +63,7 @@ export default function SongLinker({ url, onResolved }: SongLinkerProps) {
                     </BaseText>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", marginTop: "10px" }}>
                         {
-                            Object.keys(songData.links).map(service => settings.store.servicesSettings[service].enabled && <Button key={`${service}-${url}`} style={{
+                            Object.keys(songData.links).map(service => settings.store.servicesSettings[service]?.enabled && Providers[service] && <Button key={`${service}-${url}`} style={{
                                 width: "20px !important"
                                 // @ts-ignore
                             }} variant="secondary" onClick={() => {
@@ -56,7 +73,7 @@ export default function SongLinker({ url, onResolved }: SongLinkerProps) {
                             }}>
                                 <img
                                     src={Providers[service].logo}
-                                    alt={`${Providers[service]} logo`}
+                                    alt={`${Providers[service].name} logo`}
                                     style={{ width: 16, height: 16, objectFit: "contain", display: "block" }}
                                 />
                             </Button>)

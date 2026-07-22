@@ -14,7 +14,21 @@ import { ChannelStore, FluxDispatcher, UserStore, VoiceStateStore } from "@webpa
 
 const DATASTORE_KEY = "VCLastVoiceChannel";
 const DATASTORE_SESSION_KEY = "VCLastVoiceChannelSession";
+const PERSIST_THROTTLE_MS = 15_000;
 const logger = new Logger("VoiceRejoin");
+
+type SavedVoiceChannel = {
+    guildId: string | null;
+    channelId: string;
+    timestamp: number;
+};
+
+let reconnectTimeoutId: ReturnType<typeof setTimeout> | undefined;
+let reconnectGeneration = 0;
+let lastPersistedChannelId: string | null = null;
+let lastPersistedGuildId: string | null = null;
+let lastPersistedSessionState: boolean | null = null;
+let lastPersistedAt = 0;
 
 const settings = definePluginSettings({
     rejoinDelay: {
@@ -48,6 +62,81 @@ const settings = definePluginSettings({
     }
 });
 
+function cancelReconnectAttempt() {
+    reconnectGeneration++;
+    if (!reconnectTimeoutId) return;
+
+    clearTimeout(reconnectTimeoutId);
+    reconnectTimeoutId = undefined;
+}
+
+function resetPersistCache() {
+    lastPersistedChannelId = null;
+    lastPersistedGuildId = null;
+    lastPersistedSessionState = null;
+    lastPersistedAt = 0;
+}
+
+function cachePersistedState(saved: SavedVoiceChannel | null, sessionState: boolean) {
+    lastPersistedChannelId = saved?.channelId ?? null;
+    lastPersistedGuildId = saved?.guildId ?? null;
+    lastPersistedSessionState = sessionState;
+    lastPersistedAt = saved?.timestamp ?? Date.now();
+}
+
+function shouldPersistActiveState(saved: SavedVoiceChannel) {
+    return lastPersistedSessionState !== true
+        || lastPersistedChannelId !== saved.channelId
+        || lastPersistedGuildId !== saved.guildId
+        || saved.timestamp - lastPersistedAt >= PERSIST_THROTTLE_MS;
+}
+
+async function persistActiveState(state: VoiceState) {
+    const { channelId } = state;
+    if (!channelId) return;
+
+    const saved: SavedVoiceChannel = {
+        guildId: state.guildId ?? null,
+        channelId,
+        timestamp: Date.now(),
+    };
+
+    if (!shouldPersistActiveState(saved)) return;
+
+    await Promise.all([
+        DataStore.set(DATASTORE_KEY, saved),
+        DataStore.set(DATASTORE_SESSION_KEY, true)
+    ]);
+    cachePersistedState(saved, true);
+}
+
+async function persistInactiveState() {
+    if (lastPersistedSessionState === false) return;
+
+    await DataStore.set(DATASTORE_SESSION_KEY, false);
+    cachePersistedState(null, false);
+}
+
+async function waitForChannel(channelId: string) {
+    let channel = ChannelStore.getChannel(channelId);
+    for (let i = 0; i < 20 && !channel; i++) {
+        await new Promise(resolve => setTimeout(resolve, 250));
+        channel = ChannelStore.getChannel(channelId);
+    }
+    return channel;
+}
+
+function hasOtherUsersInChannel(channelId: string, myUserId: string) {
+    const connectedUsers = VoiceStateStore.getVoiceStatesForChannel(channelId) as Record<string, VoiceState> | undefined;
+    if (!connectedUsers) return false;
+
+    for (const voiceState of Object.values(connectedUsers)) {
+        if (voiceState.userId !== myUserId) return true;
+    }
+
+    return false;
+}
+
 export default definePlugin({
     name: "VoiceRejoin",
     description: "Rejoins DM/Server call automatically when restarting Discord.",
@@ -61,45 +150,49 @@ export default definePlugin({
             if (!currentUser) return;
 
             const myUserId = currentUser.id;
-            const myState = voiceStates.find(s => s.userId === myUserId);
+            let myState: VoiceState | undefined;
+            for (const voiceState of voiceStates) {
+                if (voiceState.userId !== myUserId) continue;
+                myState = voiceState;
+                break;
+            }
             if (!myState) return;
 
             if (myState.channelId) {
-                const saved = {
-                    guildId: myState.guildId ?? null,
-                    channelId: myState.channelId,
-                    timestamp: Date.now(),
-                };
-                void Promise.all([
-                    DataStore.set(DATASTORE_KEY, saved),
-                    DataStore.set(DATASTORE_SESSION_KEY, true)
-                ]).catch(err => logger.error("Failed to persist last voice channel", err));
+                void persistActiveState(myState)
+                    .catch(err => logger.error("Failed to persist last voice channel", err));
             } else {
-                void DataStore.set(DATASTORE_SESSION_KEY, false)
+                void persistInactiveState()
                     .catch(err => logger.error("Failed to persist voice session state", err));
             }
         },
 
         async CONNECTION_OPEN() {
+            cancelReconnectAttempt();
+            const scheduledGeneration = reconnectGeneration;
+
             const wasInVC = await DataStore.get(DATASTORE_SESSION_KEY);
+            if (scheduledGeneration !== reconnectGeneration) return;
+
             if (wasInVC === false) {
                 await DataStore.del(DATASTORE_KEY);
+                resetPersistCache();
                 return;
             }
 
-            setTimeout(async () => {
+            reconnectTimeoutId = setTimeout(async () => {
+                reconnectTimeoutId = undefined;
+                if (scheduledGeneration !== reconnectGeneration) return;
+
                 try {
-                    const saved = await DataStore.get(DATASTORE_KEY);
+                    const saved = await DataStore.get<SavedVoiceChannel>(DATASTORE_KEY);
                     if (!saved?.channelId) return;
 
-                    let channel = ChannelStore.getChannel(saved.channelId);
-                    for (let i = 0; i < 20 && !channel; i++) {
-                        await new Promise(resolve => setTimeout(resolve, 250));
-                        channel = ChannelStore.getChannel(saved.channelId);
-                    }
+                    const channel = await waitForChannel(saved.channelId);
+                    if (scheduledGeneration !== reconnectGeneration) return;
 
                     if (!channel) {
-                        await DataStore.set(DATASTORE_SESSION_KEY, false);
+                        await persistInactiveState();
                         return;
                     }
 
@@ -113,12 +206,12 @@ export default definePlugin({
                     const timeoutMs = settings.store.rejoinTimeout * 1000;
 
                     if (saved.timestamp && Date.now() - saved.timestamp > timeoutMs) {
-                        await DataStore.set(DATASTORE_SESSION_KEY, false);
+                        await persistInactiveState();
                         return;
                     }
 
                     if (settings.store.applyOnlyToDms && !isDM) {
-                        await DataStore.set(DATASTORE_SESSION_KEY, false);
+                        await persistInactiveState();
                         return;
                     }
 
@@ -129,20 +222,15 @@ export default definePlugin({
                             (preventionMode === "servers" && !isDM);
 
                         if (shouldPrevent) {
-                            const connectedUsers = VoiceStateStore.getVoiceStatesForChannel(saved.channelId) as Record<string, VoiceState>;
-                            const othersInCall = Object.values(connectedUsers).filter(
-                                vs => vs.userId !== myUserId
-                            );
-
-                            if (othersInCall.length === 0) {
-                                await DataStore.set(DATASTORE_SESSION_KEY, false);
+                            if (!hasOtherUsersInChannel(saved.channelId, myUserId)) {
+                                await persistInactiveState();
                                 return;
                             }
                         }
                     }
 
                     if (myVoiceState?.channelId) {
-                        await DataStore.set(DATASTORE_SESSION_KEY, false);
+                        await persistInactiveState();
                         return;
                     }
 
@@ -153,10 +241,16 @@ export default definePlugin({
                     });
 
                     await DataStore.set(DATASTORE_SESSION_KEY, true);
+                    cachePersistedState(saved, true);
                 } catch (err) {
                     logger.error("Failed to run voice rejoin", err);
                 }
             }, settings.store.rejoinDelay * 1000);
         },
+    },
+
+    stop() {
+        cancelReconnectAttempt();
+        resetPersistCache();
     },
 });

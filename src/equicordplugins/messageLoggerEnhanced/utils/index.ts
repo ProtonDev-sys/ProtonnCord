@@ -80,6 +80,77 @@ const EPHEMERAL = 64;
 
 const UserGuildSettingsStore = findStoreLazy("UserGuildSettingsStore");
 
+export type ListType = "blacklistedIds" | "whitelistedIds";
+
+interface IdSetCache {
+    raw: string;
+    ids: Set<string>;
+}
+
+const configuredIdSetCaches: Partial<Record<ListType, IdSetCache>> = {};
+let messageLoggerIgnoreCache = {
+    ignoreUsers: "",
+    ignoreChannels: "",
+    ignoreGuilds: "",
+    ids: new Set<string>()
+};
+
+function parseIdSet(...rawLists: Array<string | null | undefined>) {
+    const ids = new Set<string>();
+
+    for (const rawList of rawLists) {
+        if (!rawList) continue;
+
+        for (const rawId of rawList.split(/[,\s]+/)) {
+            const id = rawId.trim();
+            if (id) ids.add(id);
+        }
+    }
+
+    return ids;
+}
+
+function getConfiguredIdSet(list: ListType) {
+    const raw = settings.store[list] ?? "";
+    const cache = configuredIdSetCaches[list];
+    if (cache?.raw === raw) return cache.ids;
+
+    const ids = parseIdSet(raw);
+    configuredIdSetCaches[list] = { raw, ids };
+    return ids;
+}
+
+function getMessageLoggerIgnoreSet() {
+    const { ignoreUsers = "", ignoreChannels = "", ignoreGuilds = "" } = Settings.plugins.MessageLogger;
+    if (
+        messageLoggerIgnoreCache.ignoreUsers === ignoreUsers
+        && messageLoggerIgnoreCache.ignoreChannels === ignoreChannels
+        && messageLoggerIgnoreCache.ignoreGuilds === ignoreGuilds
+    ) {
+        return messageLoggerIgnoreCache.ids;
+    }
+
+    const ids = parseIdSet(ignoreUsers, ignoreChannels, ignoreGuilds);
+    messageLoggerIgnoreCache = { ignoreUsers, ignoreChannels, ignoreGuilds, ids };
+    return ids;
+}
+
+function hasId(ids: ReadonlySet<string>, id?: string) {
+    return id != null && ids.has(id);
+}
+
+function hasAnyId(idSet: ReadonlySet<string>, ids: readonly (string | undefined)[]) {
+    return ids.some(id => hasId(idSet, id));
+}
+
+export function hasListId(list: ListType, id?: string) {
+    return hasId(getConfiguredIdSet(list), id);
+}
+
+export function hasWhitelistedId(ids: readonly (string | undefined)[]) {
+    return hasAnyId(getConfiguredIdSet("whitelistedIds"), ids);
+}
+
 /**
   * the function `shouldIgnore` evaluates whether a message should be ignored or kept, following a priority hierarchy: User > Channel > Server.
   * In this hierarchy, whitelisting takes priority; if any element (User, Channel, or Server) is whitelisted, the message is kept.
@@ -94,11 +165,10 @@ export function shouldIgnore({ channelId, authorId, guildId, flags, bot, ghostPi
     if (channelId && guildId == null)
         guildId = getGuildIdByChannel(channelId);
 
-    const myId = UserStore.getCurrentUser().id;
-    const { ignoreUsers, ignoreChannels, ignoreGuilds } = Settings.plugins.MessageLogger;
+    const myId = UserStore.getCurrentUser()?.id;
     const { ignoreBots, ignoreSelf, ignoreWebhooks } = settings.store;
 
-    if (ignoreSelf && authorId === myId)
+    if (ignoreSelf && myId != null && authorId === myId)
         return true; // ignore
     if (settings.store.alwaysLogDirectMessages && ChannelStore.getChannel(channelId ?? "-1")?.isDM?.())
         return false; // keep
@@ -107,23 +177,18 @@ export function shouldIgnore({ channelId, authorId, guildId, flags, bot, ghostPi
 
     const ids = [authorId, channelId, guildId];
 
-    const whitelistedIds = settings.store.whitelistedIds.split(",");
+    const whitelistedIds = getConfiguredIdSet("whitelistedIds");
+    const blacklistedIds = getConfiguredIdSet("blacklistedIds");
+    const messageLoggerIgnoredIds = getMessageLoggerIgnoreSet();
 
-    const isWhitelisted = settings.store.whitelistedIds.split(",").some(e => ids.includes(e));
-    const isAuthorWhitelisted = whitelistedIds.includes(authorId!);
-    const isChannelWhitelisted = whitelistedIds.includes(channelId!);
-    const isGuildWhitelisted = whitelistedIds.includes(guildId!);
+    const isWhitelisted = hasAnyId(whitelistedIds, ids);
+    const isAuthorWhitelisted = hasId(whitelistedIds, authorId);
+    const isChannelWhitelisted = hasId(whitelistedIds, channelId);
+    const isGuildWhitelisted = hasId(whitelistedIds, guildId);
 
-    const blacklistedIds = [
-        ...settings.store.blacklistedIds.split(","),
-        ...(ignoreUsers ?? []).split(","),
-        ...(ignoreChannels ?? []).split(","),
-        ...(ignoreGuilds ?? []).split(",")
-    ];
-
-    const isBlacklisted = blacklistedIds.some(e => ids.includes(e));
-    const isAuthorBlacklisted = blacklistedIds.includes(authorId);
-    const isChannelBlacklisted = blacklistedIds.includes(channelId);
+    const isBlacklisted = hasAnyId(blacklistedIds, ids) || hasAnyId(messageLoggerIgnoredIds, ids);
+    const isAuthorBlacklisted = hasId(blacklistedIds, authorId) || hasId(messageLoggerIgnoredIds, authorId);
+    const isChannelBlacklisted = hasId(blacklistedIds, channelId) || hasId(messageLoggerIgnoredIds, channelId);
 
     const shouldIgnoreMutedGuilds = settings.store.ignoreMutedGuilds;
     const shouldIgnoreMutedCategories = settings.store.ignoreMutedCategories;
@@ -157,8 +222,6 @@ export function shouldIgnore({ channelId, authorId, guildId, flags, bot, ghostPi
     return false; // keep;
 }
 
-export type ListType = "blacklistedIds" | "whitelistedIds";
-
 export function addToXAndRemoveFromOpposite(list: ListType, id: string) {
     const oppositeListType = list === "blacklistedIds" ? "whitelistedIds" : "blacklistedIds";
     removeFromX(oppositeListType, id);
@@ -167,7 +230,9 @@ export function addToXAndRemoveFromOpposite(list: ListType, id: string) {
 }
 
 export function addToX(list: ListType, id: string) {
-    const items = settings.store[list] ? settings.store[list].split(",") : [];
+    if (!id) return;
+
+    const items = Array.from(getConfiguredIdSet(list));
 
     if (!items.includes(id)) {
         items.push(id);
@@ -176,7 +241,9 @@ export function addToX(list: ListType, id: string) {
 }
 
 export function removeFromX(list: ListType, id: string) {
-    const items = settings.store[list] ? settings.store[list].split(",") : [];
+    if (!id) return;
+
+    const items = Array.from(getConfiguredIdSet(list));
     const index = items.indexOf(id);
     if (index !== -1) {
         items.splice(index, 1);

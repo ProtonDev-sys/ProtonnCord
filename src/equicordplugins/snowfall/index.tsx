@@ -100,6 +100,7 @@ const settings = definePluginSettings({
     typeOfSnow: {
         description: "Change the type of snow displayed (Affects performance).",
         type: OptionType.SELECT,
+        onChange: updateActiveSnowOptions,
         options: [
             { label: "Solid (Highest Performance)", value: "solid" },
             { label: "Text (Medium Performance)", value: "text", default: true },
@@ -110,6 +111,7 @@ const settings = definePluginSettings({
         description: "Maximum snowflake size",
         type: OptionType.SLIDER,
         default: 30,
+        onChange: updateActiveSnowOptions,
         markers: [10, 20, 30, 40, 50]
     },
     speed: {
@@ -125,6 +127,7 @@ const settings = definePluginSettings({
         markers: [1, 5, 10, 20, 40, 60],
         min: 1,
         max: 60,
+        onChange: updateActiveSnowOptions,
     }
 });
 
@@ -188,6 +191,11 @@ class CopleSnow {
     private queue: HTMLElement[] = [];
     private $snowfield: HTMLDivElement;
     private timer: number | null = null;
+    private disposed = false;
+    private readonly pendingAnimationTimeouts = new Set<ReturnType<typeof setTimeout>>();
+    private readonly resizeHandler: () => void;
+    private readonly transitionEndHandler: (event: Event) => void;
+    private readonly visibilityHandler: () => void;
     public playing = false;
 
     constructor(newOptions: Partial<typeof CopleSnow.defaultOptions> = {}) {
@@ -197,27 +205,32 @@ class CopleSnow {
         this.$snowfield.id = "snowfield";
         document.body.appendChild(this.$snowfield);
 
-        const updateSize = () => {
+        this.resizeHandler = () => {
             CopleSnow.winHeight = window.innerHeight;
             CopleSnow.winWidth = window.innerWidth;
         };
-        window.addEventListener("resize", updateSize);
-        (this as any)._resizeHandler = updateSize;
+        window.addEventListener("resize", this.resizeHandler);
 
-        this.$snowfield.addEventListener(CopleSnow.transitionEndEvent, e => {
+        this.transitionEndHandler = e => {
+            if (this.disposed) return;
+
             const snowflake = e.target as HTMLElement;
             if (snowflake.classList.contains("snowflake")) {
-                this.$snowfield.removeChild(snowflake);
+                if (snowflake.parentNode === this.$snowfield) {
+                    this.$snowfield.removeChild(snowflake);
+                }
                 this.queue.push(snowflake);
             }
-        });
+        };
+        this.$snowfield.addEventListener(CopleSnow.transitionEndEvent, this.transitionEndHandler);
 
-        const handleVisibilityChange = () => {
+        this.visibilityHandler = () => {
+            if (this.disposed) return;
+
             if (document.hidden) this.stop();
             else this.play();
         };
-        document.addEventListener("visibilitychange", handleVisibilityChange);
-        (this as any)._visibilityHandler = handleVisibilityChange;
+        document.addEventListener("visibilitychange", this.visibilityHandler);
 
         if (this.options.autoplay) this.play();
     }
@@ -253,6 +266,8 @@ class CopleSnow {
     }
 
     private animateSnowflake() {
+        if (this.disposed || !this.playing) return;
+
         const { winWidth, winHeight } = CopleSnow;
         const size = CopleSnow.random(this.options.minSize, this.options.maxSize);
         const top = -2 * size;
@@ -310,16 +325,20 @@ class CopleSnow {
         CopleSnow.setStyle(snowflake, styleRules);
         this.$snowfield.appendChild(snowflake);
 
-        setTimeout(() => {
+        const animationTimeout = setTimeout(() => {
+            this.pendingAnimationTimeouts.delete(animationTimeout);
+            if (this.disposed || snowflake.parentNode !== this.$snowfield) return;
+
             CopleSnow.setStyle(snowflake, {
                 transform: `translate(${translateX}px, ${translateY}px) rotate(${angle}deg)`,
                 opacity: this.options.fadeOut ? 0 : opacity
             });
         }, 100);
+        this.pendingAnimationTimeouts.add(animationTimeout);
     }
 
     play() {
-        if (this.playing) return;
+        if (this.disposed || this.playing) return;
         this.timer = window.setInterval(() => this.animateSnowflake(), this.options.interval);
         this.playing = true;
     }
@@ -334,17 +353,55 @@ class CopleSnow {
     }
 
     destroy() {
+        if (this.disposed) return;
+
+        this.disposed = true;
         this.stop();
+        for (const timeout of this.pendingAnimationTimeouts) {
+            clearTimeout(timeout);
+        }
+        this.pendingAnimationTimeouts.clear();
+        this.queue = [];
         if (this.$snowfield.parentNode) {
             this.$snowfield.remove();
         }
-        window.removeEventListener("resize", (this as any)._resizeHandler);
-        document.removeEventListener("visibilitychange", (this as any)._visibilityHandler);
+        this.$snowfield.removeEventListener(CopleSnow.transitionEndEvent, this.transitionEndHandler);
+        window.removeEventListener("resize", this.resizeHandler);
+        document.removeEventListener("visibilitychange", this.visibilityHandler);
     }
 
     updateOptions(newOptions: Partial<typeof CopleSnow.defaultOptions>) {
+        if (this.disposed) return;
+
+        const shouldRestart = this.playing && newOptions.interval !== undefined && newOptions.interval !== this.options.interval;
+
         Object.assign(this.options, newOptions);
+
+        if (shouldRestart) {
+            this.stop();
+            this.play();
+        }
     }
+}
+
+let activeSnow: CopleSnow | null = null;
+
+function getCurrentSnowOptions(): Partial<typeof CopleSnow.defaultOptions> {
+    const snowType = settings.store.typeOfSnow as "text" | "solid" | "image";
+    const snowOptions: Partial<typeof CopleSnow.defaultOptions> = {
+        type: snowType,
+        maxSize: settings.store.maxSize,
+        interval: 1000 / settings.store.flakesPerSecond
+    };
+
+    if (snowType === "image") snowOptions.content = SNOWFLAKE_SVGS;
+    else if (snowType === "text") snowOptions.content = "❄";
+
+    return snowOptions;
+}
+
+function updateActiveSnowOptions() {
+    activeSnow?.updateOptions(getCurrentSnowOptions());
 }
 
 const SnowfallManager: React.FC = () => {
@@ -359,25 +416,15 @@ const SnowfallManager: React.FC = () => {
         document.head.appendChild(styleEl);
         styleRef.current = styleEl;
 
-        // Get initial snow type from settings
-        const snowType = settings.store.typeOfSnow as "text" | "solid" | "image";
         const snowOptions: Partial<typeof CopleSnow.defaultOptions> = {
             autoplay: false,
-            type: snowType,
-            maxSize: settings.store.maxSize,
-            interval: 1000 / settings.store.flakesPerSecond
+            ...getCurrentSnowOptions()
         };
-
-        snowOptions.interval = settings.store.speed;
-
-        // Set content based on type
-        if (snowType === "image") {
-            snowOptions.content = SNOWFLAKE_SVGS;
-        }
 
         // Create snow instance with settings
         const snow = new CopleSnow(snowOptions);
         snowRef.current = snow;
+        activeSnow = snow;
 
         const blurHandler = () => snow.stop();
         const focusHandler = () => {
@@ -391,46 +438,13 @@ const SnowfallManager: React.FC = () => {
             snow.play();
         }
 
-        // Custom listener for settings changes (we don't have a built-in one)
-        let lastSettings = {
-            type: settings.store.typeOfSnow as "text" | "solid" | "image",
-            maxSize: settings.store.maxSize,
-            speed: settings.store.speed,
-            flakesPerSecond: settings.store.flakesPerSecond
-        };
-
-        const settingsInterval = setInterval(() => {
-            const newSettings = {
-                type: settings.store.typeOfSnow as "text" | "solid" | "image",
-                maxSize: settings.store.maxSize,
-                speed: settings.store.speed,
-                flakesPerSecond: settings.store.flakesPerSecond
-            };
-
-            if (Object.keys(newSettings).some(k => newSettings[k as keyof typeof newSettings] !== lastSettings[k as keyof typeof lastSettings])) {
-                lastSettings = newSettings;
-
-                const updateOptions: Partial<typeof CopleSnow.defaultOptions> = {
-                    type: newSettings.type,
-                    maxSize: newSettings.maxSize,
-                    interval: 1000 / newSettings.flakesPerSecond
-                };
-
-                if (newSettings.type === "image") updateOptions.content = SNOWFLAKE_SVGS;
-                else if (newSettings.type === "text") updateOptions.content = "❄";
-
-                snow.updateOptions(updateOptions);
-            }
-        }, 5000);
-
         return () => {
             snow.destroy();
             snowRef.current = null;
+            if (activeSnow === snow) activeSnow = null;
 
             window.removeEventListener("blur", blurHandler);
             window.removeEventListener("focus", focusHandler);
-
-            clearInterval(settingsInterval);
 
             if (styleEl.parentNode) {
                 styleEl.remove();
@@ -461,7 +475,7 @@ export default definePlugin({
                 This plugin adds a christmas-y snowfall effect on top of Discord's interface.
                 You can change the type of snow in the settings below.
                 <br /><br />
-                NOTE: While on most computers this plugin will not impact performance any more than your average Equicord extension,
+                NOTE: While on most computers this plugin will not impact performance any more than your average Protonn Cord extension,
                 it may cause some lag on lower end systems.
             </Paragraph>
         </>

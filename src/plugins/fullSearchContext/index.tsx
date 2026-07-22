@@ -37,8 +37,13 @@ let CopyIdMenuItem: (props: CopyIdMenuItemProps) => React.ReactElement | null = 
 waitFor(filters.componentByCode('"cannot copy null text"'), m => CopyIdMenuItem = m);
 
 function MessageMenu({ message, channel, onHeightUpdate }) {
-    const canReport = message.author &&
-        !(message.author.id === UserStore.getCurrentUser().id || message.author.system);
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    const canReport = Boolean(
+        message.author &&
+        currentUserId &&
+        message.author.id !== currentUserId &&
+        !message.author.system
+    );
 
     return useMessageMenu({
         navId: "message-actions",
@@ -70,10 +75,12 @@ interface MessageActionsProps {
 
 const contextMenuPatch: NavContextMenuPatchCallback = (children, props: MessageActionsProps) => {
     if (props?.isFullSearchContextMenu == null) return;
+    const { author } = props.message;
+    if (!author) return;
 
     const group = findGroupChildrenByChildId("devmode-copy-id", children, true);
     group?.push(
-        CopyIdMenuItem({ id: props.message.author.id, label: getIntlMessage("COPY_ID_AUTHOR") })
+        CopyIdMenuItem({ id: author.id, label: getIntlMessage("COPY_ID_AUTHOR") })
     );
 };
 

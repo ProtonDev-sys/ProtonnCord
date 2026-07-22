@@ -11,7 +11,7 @@ import { LoggedMessageJSON } from "./types";
 import { getMessageStatus } from "./utils";
 import { stripTransientRenderState } from "./utils/cleanUp";
 import { DB_NAME, DB_VERSION } from "./utils/constants";
-import { getAttachmentBlobUrl } from "./utils/saveImage";
+import { clearAttachmentBlobUrlCache, getAttachmentBlobUrl } from "./utils/saveImage";
 
 export enum DBMessageStatus {
     DELETED = "DELETED",
@@ -176,7 +176,6 @@ export async function getDateStortedMessagesByStatusIDB(newest: boolean, limit: 
     const cursor = await index.openCursor(IDBKeyRange.only(status), direction);
 
     if (!cursor) {
-        console.log("No messages found");
         return [];
     }
 
@@ -197,7 +196,6 @@ export async function getMessagesByChannelAndAfterTimestampIDB(channel_id: strin
     const cursor = await index.openCursor(IDBKeyRange.bound([channel_id, start], [channel_id, "\uffff"]));
 
     if (!cursor) {
-        console.log("No messages found in range");
         return [];
     }
 
@@ -258,6 +256,7 @@ export async function deleteMessagesBulkIDB(message_ids: string[]) {
 
 export async function clearMessagesIDB(showToast = true) {
     cachedMessages.clear();
+    clearAttachmentBlobUrlCache();
     await db.clear("messages");
     if (!showToast) return;
 

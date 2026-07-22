@@ -11,6 +11,32 @@ import { MessageJSON } from "@vencord/discord-types";
 import { ChannelType } from "@vencord/discord-types/enums";
 import { ChannelStore, ReadStateStore, UserStore } from "@webpack/common";
 
+const USER_ID_REGEX = /^\d{17,20}$/;
+let ignoredUserIds = new Set<string>();
+
+function parseUserIdSet(value: string): Set<string> {
+    const ids = new Set<string>();
+
+    for (const rawId of value.split(",")) {
+        const id = rawId.trim();
+        if (USER_ID_REGEX.test(id)) ids.add(id);
+    }
+
+    return ids;
+}
+
+function validateUserIdList(value: string) {
+    if (!value) return true;
+
+    for (const rawId of value.split(",")) {
+        const id = rawId.trim();
+        if (!id) continue;
+        if (!USER_ID_REGEX.test(id)) return `${id} isn't a valid user id`;
+    }
+
+    return true;
+}
+
 const settings = definePluginSettings({
     channelToAffect: {
         type: OptionType.SELECT,
@@ -34,7 +60,8 @@ const settings = definePluginSettings({
     ignoreUsers: {
         type: OptionType.STRING,
         description: "User IDs (comma + space) whose pings should NEVER be throttled",
-        restartNeeded: true,
+        onChange: value => { ignoredUserIds = parseUserIdSet(value); },
+        isValid: validateUserIdList,
         default: ""
     },
     alwaysPlaySound: {
@@ -70,19 +97,27 @@ export default definePlugin({
     playSound() {
         return settings.store.alwaysPlaySound;
     },
-    isPrivateChannelRead(message: MessageJSON) {
-        const ignoreList = settings.store.ignoreUsers.split(", ").filter(Boolean);
-        if (ignoreList.includes(message.author.id)) return true;
+    isPrivateChannelRead(message?: MessageJSON) {
+        if (!message?.author?.id) return true;
+        if (ignoredUserIds.has(message.author.id)) return true;
+
+        const currentUser = UserStore.getCurrentUser();
         const channelType = ChannelStore.getChannel(message.channel_id)?.type;
         if (
             (channelType !== ChannelType.DM && channelType !== ChannelType.GROUP_DM) ||
             (channelType === ChannelType.DM && settings.store.channelToAffect === "group_dm") ||
             (channelType === ChannelType.GROUP_DM && settings.store.channelToAffect === "user_dm") ||
-            (settings.store.allowMentions && message.mentions.some(m => m.id === UserStore.getCurrentUser().id)) ||
+            (settings.store.allowMentions && currentUser != null && message.mentions?.some(m => m.id === currentUser.id)) ||
             (settings.store.allowEveryone && message.mention_everyone)
         ) {
             return true;
         }
         return ReadStateStore.getOldestUnreadMessageId(message.channel_id) === message.id;
+    },
+    start() {
+        ignoredUserIds = parseUserIdSet(settings.store.ignoreUsers);
+    },
+    stop() {
+        ignoredUserIds = new Set();
     },
 });

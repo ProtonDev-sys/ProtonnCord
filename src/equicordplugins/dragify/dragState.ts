@@ -49,6 +49,8 @@ export function clearDragState() {
     state.activeGuildId = null;
     state.dragSourceIsInput = false;
     state.active = false;
+    cancelGuildCleanup();
+    stopDragWatchdog();
 }
 
 export function markInputDragSource() {
@@ -115,7 +117,12 @@ export function stopDragWatchdog() {
 export function scheduleGuildCleanup(onExpire: () => void) {
     cancelGuildCleanup();
     state.guildCleanupTimer = window.setTimeout(() => {
-        if (Date.now() - state.lastDragEventAt < 200) return;
+        state.guildCleanupTimer = null;
+        if (Date.now() - state.lastDragEventAt < 200) {
+            scheduleGuildCleanup(onExpire);
+            return;
+        }
+
         clearDragState();
         onExpire();
     }, 300);

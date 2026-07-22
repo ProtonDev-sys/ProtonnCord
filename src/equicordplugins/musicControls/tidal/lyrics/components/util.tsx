@@ -24,10 +24,33 @@ export function NoteSvg(className: string) {
     );
 }
 
-const calculateIndexes = (lyrics: EnhancedLyric[], position: number, delay: number) => {
-    const posInSec = position / 1000;
-    const currentIndex = lyrics.findIndex(l => l.time - (delay / 1000) > posInSec && l.time < posInSec + 8) - 1;
-    const nextLyric = lyrics.findIndex(l => l.time >= posInSec);
+const calculateIndexes = (lyrics: EnhancedLyric[], position: number, delay: number): [number | null, number | null] => {
+    const posInSec = (position + delay) / 1000;
+    let left = 0;
+    let right = lyrics.length - 1;
+    let currentIndex: number | null = null;
+
+    while (left <= right) {
+        const mid = Math.floor((left + right) / 2);
+        const curr = lyrics[mid];
+        const next = lyrics[mid + 1];
+
+        if (curr.time <= posInSec && (!next || next.time > posInSec)) {
+            currentIndex = mid;
+            break;
+        }
+
+        if (curr.time > posInSec) right = mid - 1;
+        else left = mid + 1;
+    }
+
+    const nextIdx = currentIndex !== null ? currentIndex + 1 : left;
+    const nextLyric = nextIdx < lyrics.length ? nextIdx : null;
+
+    if (currentIndex !== null && posInSec - lyrics[currentIndex].time > 8) {
+        return [null, nextLyric];
+    }
+
     return [currentIndex, nextLyric];
 };
 
@@ -48,42 +71,48 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
     const [lyricRefs, setLyricRefs] = useState<React.RefObject<HTMLDivElement | null>[]>([]);
 
     const currentLyrics = lyrics || null;
+    const duration = track?.songDuration ? track.songDuration * 1000 : Number.POSITIVE_INFINITY;
 
     useEffect(() => {
-        if (currentLyrics) {
-            setLyricRefs(currentLyrics.map(() => React.createRef()));
-        }
+        setLyricRefs(currentLyrics?.map(() => React.createRef()) ?? []);
     }, [currentLyrics]);
 
     useEffect(() => {
-        if (currentLyrics && position) {
+        setPosition(Math.min(storePosition, duration));
+    }, [duration, storePosition]);
+
+    useEffect(() => {
+        if (currentLyrics && position != null) {
             const [currentIndex, nextLyric] = calculateIndexes(currentLyrics, position, lyricDelay);
             setCurrLrcIndex(currentIndex);
             setNextLyric(nextLyric);
+        } else {
+            setCurrLrcIndex(null);
+            setNextLyric(null);
         }
-    }, [currentLyrics, position]);
+    }, [currentLyrics, position, lyricDelay]);
 
     useEffect(() => {
         if (scroll && currLrcIndex !== null) {
             if (currLrcIndex >= 0) {
-                lyricRefs[currLrcIndex].current?.scrollIntoView({ behavior: "smooth", block: "center" });
+                lyricRefs[currLrcIndex]?.current?.scrollIntoView({ behavior: "smooth", block: "center" });
             }
             if (currLrcIndex < 0 && nextLyric !== null) {
                 lyricRefs[nextLyric]?.current?.scrollIntoView({ behavior: "smooth", block: "center" });
             }
         }
-    }, [currLrcIndex, nextLyric, scroll]);
+    }, [currLrcIndex, nextLyric, scroll, lyricRefs]);
 
     useEffect(() => {
         if (isPlaying) {
             setPosition(TidalStore.position);
             const interval = setInterval(() => {
-                setPosition(p => p + 1000);
+                setPosition(p => Math.min(p + 1000, duration));
             }, 1000);
 
             return () => clearInterval(interval);
         }
-    }, [storePosition, isPlaying]);
+    }, [duration, storePosition, isPlaying]);
 
     return { track, lyrics, lyricRefs, currLrcIndex, nextLyric };
 }

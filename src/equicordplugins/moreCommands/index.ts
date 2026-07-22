@@ -422,7 +422,10 @@ export default definePlugin({
             }],
             execute: opts => {
                 const victim = findOption(opts, "victim") as string;
-                return { content: `<@${UserStore.getCurrentUser().id}> slaps ${victim} around a bit with a large trout` };
+                const currentUser = UserStore.getCurrentUser();
+                if (!currentUser) return { content: "Unable to slap while logged out." };
+
+                return { content: `<@${currentUser.id}> slaps ${victim} around a bit with a large trout` };
             }
         },
         {
@@ -521,8 +524,13 @@ export default definePlugin({
                         });
                     }
 
-                    const minAffinity = Math.min(...users.map(u => u.affinity));
-                    const maxAffinity = Math.max(...users.map(u => u.affinity));
+                    let minAffinity = Infinity;
+                    let maxAffinity = -Infinity;
+                    for (const user of users) {
+                        minAffinity = Math.min(minAffinity, user.affinity);
+                        maxAffinity = Math.max(maxAffinity, user.affinity);
+                    }
+
                     const minSize = 120;
                     const maxSize = 240;
 

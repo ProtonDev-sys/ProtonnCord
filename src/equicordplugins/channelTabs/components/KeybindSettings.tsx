@@ -26,6 +26,24 @@ function KeybindInput({ label, description, settingKey, enabledKey }: KeybindInp
     const [isListening, setIsListening] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const buttonRef = useRef<HTMLButtonElement>(null);
+    const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const clearError = () => {
+        if (errorTimeoutRef.current) {
+            clearTimeout(errorTimeoutRef.current);
+            errorTimeoutRef.current = null;
+        }
+
+        setError(null);
+    };
+
+    useEffect(() => {
+        return () => {
+            if (errorTimeoutRef.current) {
+                clearTimeout(errorTimeoutRef.current);
+            }
+        };
+    }, []);
 
     useEffect(() => {
         if (!isListening) return;
@@ -74,13 +92,17 @@ function KeybindInput({ label, description, settingKey, enabledKey }: KeybindInp
 
             if (conflictKey) {
                 setError(`This keybind is already used by: ${conflictKey[0]}`);
-                setTimeout(() => setError(null), 3000);
+                if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+                errorTimeoutRef.current = setTimeout(() => {
+                    setError(null);
+                    errorTimeoutRef.current = null;
+                }, 3000);
                 setIsListening(false);
                 return;
             }
 
             settings.store[settingKey] = keybindString;
-            setError(null);
+            clearError();
             setIsListening(false);
         };
 
@@ -107,7 +129,7 @@ function KeybindInput({ label, description, settingKey, enabledKey }: KeybindInp
             cycleTabBackwardKeybind: "CTRL+SHIFT+TAB"
         };
         settings.store[settingKey] = defaults[settingKey];
-        setError(null);
+        clearError();
     };
 
     const isEnabled = enabledKey ? settings.use([enabledKey])[enabledKey] : true;

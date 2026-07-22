@@ -42,6 +42,7 @@ export function snakeToCamel(obj: any): any {
 export const fetchAndDispatchQuests = findByCodeLazy("QUESTS_FETCH_CURRENT_QUESTS_BEGIN");
 const parseQuestConfig = findByCodeLazy("config).with({config_version:");
 const formatQuestData = findByCodeLazy("config),userStatus:null==");
+let fetchAndAlertQuestsPromise: Promise<Quest[] | null> | undefined;
 
 async function fetchQuestById(questId: string): Promise<Quest | null> {
     try {
@@ -113,7 +114,7 @@ function getQuestNotificationText(quests: Quest[], excluded: boolean): { title: 
     return {
         title: excluded ? "New Excluded Quests Detected!" : "New Quests Detected!",
         body: excluded
-            ? `${quests.length} new excluded Quests were detected. Check the console for their Quest IDs.`
+            ? `${quests.length} new excluded Quests were detected. Review your Questify excluded quest settings.`
             : `${quests.length} new Quests are now available.`
     };
 }
@@ -133,11 +134,9 @@ function notifyNewQuests(quests: Quest[], excluded: boolean): void {
         dismissOnClick: true,
         onClick
     });
-
-    QL.log("NOTIFY_NEW_QUESTS", { excluded, quests });
 }
 
-export async function fetchAndAlertQuests(source: string): Promise<Quest[] | null> {
+async function doFetchAndAlertQuests(): Promise<Quest[] | null> {
     const settings = getQuestifySettings();
     const alertSound = settings.newQuestAlertSound;
     const alertVolume = settings.newQuestAlertVolume;
@@ -176,22 +175,6 @@ export async function fetchAndAlertQuests(source: string): Promise<Quest[] | nul
     const shouldNotify = settings.notifyOnNewQuests && newIncludedQuests.length > 0;
     const shouldNotifyExcluded = settings.notifyOnNewExcludedQuests && newIncludedExcludedQuests.length > 0;
 
-    QL.info("FETCH_AND_ALERT_QUESTS_NEW_QUESTS", {
-        source,
-        newQuestCount: newQuests.length,
-        newQuests: newIncludedQuests,
-        matchedQuestCount: newIncludedQuests.length + newIncludedExcludedQuests.length,
-        ...(shouldFetchExcludedQuests ? {
-            newExcludedQuestCount: newExcludedQuestIds.length,
-            newExcludedQuests: newIncludedExcludedQuests,
-            matchedExcludedQuestCount: newIncludedExcludedQuests.length,
-        } : {}),
-        shouldAlert,
-        shouldAlertExcluded,
-        shouldNotify,
-        shouldNotifyExcluded,
-    });
-
     if (shouldAlert) {
         playAudio(
             alertSound!,
@@ -215,4 +198,18 @@ export async function fetchAndAlertQuests(source: string): Promise<Quest[] | nul
     }
 
     return nextQuests;
+}
+
+export async function fetchAndAlertQuests(_source: string): Promise<Quest[] | null> {
+    if (fetchAndAlertQuestsPromise) {
+        return fetchAndAlertQuestsPromise;
+    }
+
+    fetchAndAlertQuestsPromise = doFetchAndAlertQuests();
+
+    try {
+        return await fetchAndAlertQuestsPromise;
+    } finally {
+        fetchAndAlertQuestsPromise = undefined;
+    }
 }

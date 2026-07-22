@@ -133,11 +133,15 @@ export async function sendSticker({ channelId, sticker, ctrlKey, shiftKey, ffmpe
         const res = await corsFetch(sticker.image);
         if (!res.ok) throw new Error("Failed to fetch sticker image");
         const blobUrl = URL.createObjectURL(await res.blob());
-        const processed = await resizeImage(blobUrl);
-        const filename = sticker.filename ?? new URL(sticker.image).pathname.split("/").pop()!;
-        const mimeType = getMimeFromExtension(filename.split(".").pop());
+        try {
+            const processed = await resizeImage(blobUrl);
+            const filename = sticker.filename ?? new URL(sticker.image).pathname.split("/").pop()!;
+            const mimeType = getMimeFromExtension(filename.split(".").pop());
 
-        file = new File([processed], filename, { type: mimeType });
+            file = new File([processed], filename, { type: mimeType });
+        } finally {
+            URL.revokeObjectURL(blobUrl);
+        }
     }
 
     if (settings.store.promptToUpload || content) return UploadHandler.promptToUpload([file], ChannelStore.getChannel(channelId), 0);

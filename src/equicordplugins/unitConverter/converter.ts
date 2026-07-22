@@ -20,11 +20,10 @@ interface regexes {
         };
     };
 }
-// TODO: add grams, kilograms, ounces, and pounds
 const regexes: regexes = {
     // matches imperial units, converts them to metric
     imperial: {
-        farenheight: {
+        fahrenheit: {
             regex: /(-?\d+(?:\.\d+)?)°?(f)(?!\w)/ig,
             convert(...groups) {
                 const c = ((parseFloat(groups[1]) - 32) * (5 / 9)).toFixed(2);
@@ -49,7 +48,7 @@ const regexes: regexes = {
         inchesWord: {
             regex: /(?<!\d+ *(?:f(?:ee|oo)?t) *)(\d+(?:\.\d+)?) *(in(?:ches?)?)/ig,
             convert(...groups) {
-                const inches = (parseFloat(groups[1]) / 2.54).toFixed(2);
+                const inches = (parseFloat(groups[1]) * 2.54).toFixed(2);
                 return `${inches}cm`;
             },
         },
@@ -71,13 +70,13 @@ const regexes: regexes = {
         poundOunceWord: {
             regex: /(\d+(?:\.\d+)?) *(lbs?|pounds?) *(\d+(?:\.\d+)?) *(ozs?|ounces?)/ig,
             convert(...groups) {
-                let lbs = (parseInt(groups[1]) / 2.205);
-                lbs += (parseFloat(groups[2]) / 35.274);
+                let lbs = parseFloat(groups[1]) / 2.205;
+                lbs += parseFloat(groups[3]) / 35.274;
                 return `${lbs.toFixed(2)}kg`;
             }
         },
         ounceWord: {
-            regex: /(\d+(?:\.\d+)?) ?(ounces?|oz)/gi,
+            regex: /(\d+(?:\.\d+)?) ?(ounces?|oz)(?!\w)/gi,
             convert(...groups) {
                 const ozs = (parseFloat(groups[1]) * 28.35).toFixed(2);
                 return `${ozs}g`;
@@ -94,7 +93,7 @@ const regexes: regexes = {
     // matches metric untis, converts them into imperial
     metric: {
         // i dont think people ever write metric units as 1m3cm or something like that
-        celcius: {
+        celsius: {
             regex: /(-?\d+(?:\.\d+)?)\s?°?c(?!\w)/ig,
             convert(...groups) {
                 const f = ((parseFloat(groups[1]) * (9 / 5)) + 32).toFixed(2);
@@ -113,13 +112,15 @@ const regexes: regexes = {
         meters: {
             regex: /(\d+(?:\.\d+)?) ?(m|meters?)(?!\w)/gi,
             convert(...groups) {
-                const m = parseFloat((parseFloat(groups[1]) * 3.821).toFixed(2));
-                if (Number.isInteger(m))
-                    return `${m}ft`;
-                return `${m.toFixed(0)}ft${((m % 1) * 12).toFixed(2)}in`;
+                const totalInches = parseFloat(groups[1]) * 39.3701;
+                const feet = Math.floor(totalInches / 12);
+                const inches = totalInches % 12;
+                if (feet === 0) return `${inches.toFixed(2)}in`;
+                if (inches < 0.005) return `${feet}ft`;
+                return `${feet}ft ${inches.toFixed(2)}in`;
             },
         },
-        // covnert to miles
+        // convert to miles
         kilometers: {
             regex: /(\d+(?:\.\d+)?) ?(km|kilometers?|kms?)(?!\w)/gi,
             convert(...groups) {
@@ -128,17 +129,17 @@ const regexes: regexes = {
             },
         },
         grams: {
-            regex: /(\d+(?:\.\d+)?) ?(grams?|g)/gi,
+            regex: /(\d+(?:\.\d+)?) ?(grams?|g)(?!\w)/gi,
             convert(...groups) {
                 const g = (parseFloat(groups[1]) / 28.35).toFixed(2);
-                return `${g}oz(s)`;
+                return `${g}oz`;
             },
         },
         kilograms: {
-            regex: /(\d+(?:\.\d+)?) ?(kg|kilo(?:gram)?s?)/gi,
+            regex: /(\d+(?:\.\d+)?) ?(kg|kilo(?:gram)?s?)(?!\w)/gi,
             convert(...groups) {
                 const kg = (parseFloat(groups[1]) * 2.205).toFixed(2);
-                return `${kg}lb(s)`;
+                return `${kg}lb`;
             },
         },
         kilometersPerHour: {

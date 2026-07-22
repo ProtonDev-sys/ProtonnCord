@@ -15,7 +15,7 @@ import { classNameFactory } from "@utils/css";
 import { ActivityType } from "@vencord/discord-types/enums";
 import { Select, Text, TextInput, useState } from "@webpack/common";
 
-import CustomRPCPlugin, { setRpc, settings, TimestampMode } from ".";
+import CustomRPCPlugin, { queueSetRpc, settings, TimestampMode } from ".";
 
 const cl = classNameFactory("vc-customRPC-settings-");
 
@@ -50,8 +50,8 @@ function isAppIdValid(value: string) {
 }
 
 const updateRPC = debounce(() => {
-    setRpc(true);
-    if (isPluginEnabled(CustomRPCPlugin.name)) setRpc();
+    queueSetRpc(true);
+    if (isPluginEnabled(CustomRPCPlugin.name)) queueSetRpc();
 });
 
 function isStreamLinkDisabled() {

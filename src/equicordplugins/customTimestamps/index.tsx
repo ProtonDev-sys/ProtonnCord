@@ -32,17 +32,26 @@ type TimeRowProps = {
     pluginSettings: any;
 };
 
-const format = (date: Date, formatTemplate: string): string => {
-    const mmt = moment(date);
+let hasConfiguredRelativeThresholds = false;
+
+function configureRelativeThresholds() {
+    if (hasConfiguredRelativeThresholds) return;
 
     moment.relativeTimeThreshold("s", 60);
     moment.relativeTimeThreshold("ss", -1);
     moment.relativeTimeThreshold("m", 60);
+    hasConfiguredRelativeThresholds = true;
+}
 
-    const sameDayFormat = settings.store?.formats?.sameDayFormat || timeFormats.sameDayFormat.default;
-    const lastDayFormat = settings.store?.formats?.lastDayFormat || timeFormats.lastDayFormat.default;
-    const lastWeekFormat = settings.store?.formats?.lastWeekFormat || timeFormats.lastWeekFormat.default;
-    const sameElseFormat = settings.store?.formats?.sameElseFormat || timeFormats.sameElseFormat.default;
+const format = (date: Date, formatTemplate: string): string => {
+    configureRelativeThresholds();
+
+    const mmt = moment(date);
+    const { formats } = settings.store;
+    const sameDayFormat = formats?.sameDayFormat || timeFormats.sameDayFormat.default;
+    const lastDayFormat = formats?.lastDayFormat || timeFormats.lastDayFormat.default;
+    const lastWeekFormat = formats?.lastWeekFormat || timeFormats.lastWeekFormat.default;
+    const sameElseFormat = formats?.sameElseFormat || timeFormats.sameElseFormat.default;
 
     return mmt.format(formatTemplate)
         .replace("calendar", () => mmt.calendar(null, {
@@ -53,6 +62,37 @@ const format = (date: Date, formatTemplate: string): string => {
         }))
         .replace("relative", () => mmt.fromNow());
 };
+
+const timestampSubscribers = new Set<() => void>();
+let timestampRefreshInterval: ReturnType<typeof setInterval> | undefined;
+
+function subscribeTimestampRefresh(callback: () => void) {
+    timestampSubscribers.add(callback);
+
+    timestampRefreshInterval ??= setInterval(() => {
+        for (const subscriber of timestampSubscribers) {
+            subscriber();
+        }
+    }, 60_000);
+
+    return () => {
+        timestampSubscribers.delete(callback);
+
+        if (timestampSubscribers.size === 0 && timestampRefreshInterval) {
+            clearInterval(timestampRefreshInterval);
+            timestampRefreshInterval = undefined;
+        }
+    };
+}
+
+function clearTimestampRefresh() {
+    timestampSubscribers.clear();
+
+    if (!timestampRefreshInterval) return;
+
+    clearInterval(timestampRefreshInterval);
+    timestampRefreshInterval = undefined;
+}
 
 const TimeRow = (props: TimeRowProps) => {
     const [state, setState] = useState(props.pluginSettings?.[props.id] || props.format.default);
@@ -173,6 +213,10 @@ export default definePlugin({
         }
     ],
 
+    stop() {
+        clearTimestampRefresh();
+    },
+
     renderTimestamp: (date: Date, type: "cozy" | "compact" | "tooltip" | "ariaLabel") => {
         const forceUpdater = useForceUpdater();
         let formatTemplate: string;
@@ -193,10 +237,9 @@ export default definePlugin({
 
         useEffect(() => {
             if (formatTemplate.includes("calendar") || formatTemplate.includes("relative")) {
-                const interval = setInterval(forceUpdater, 1000);
-                return () => clearInterval(interval);
+                return subscribeTimestampRefresh(forceUpdater);
             }
-        }, []);
+        }, [forceUpdater, formatTemplate]);
 
         return format(date, formatTemplate);
     }

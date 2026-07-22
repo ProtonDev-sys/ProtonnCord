@@ -53,12 +53,20 @@ export function extractSnowflakeFromString(value: string): string | null {
 
 export function extractSnowflakes(values: string[]): string[] {
     const ids = new Set<string>();
+    const output: string[] = [];
     const regex = /\d{17,20}/g;
     for (const value of values) {
         const matches = value.match(regex);
-        if (matches) matches.forEach(id => ids.add(id));
+        if (!matches) continue;
+
+        for (const id of matches) {
+            if (ids.has(id)) continue;
+            ids.add(id);
+            output.push(id);
+        }
     }
-    return Array.from(ids);
+
+    return output;
 }
 
 export function extractStrings(dataTransfer: DataTransfer): string[] {
@@ -71,25 +79,54 @@ export function extractStrings(dataTransfer: DataTransfer): string[] {
     add(dataTransfer.getData("application/json"));
     for (const type of dataTransfer.types ?? []) add(dataTransfer.getData(type));
 
+    const seen = new Set<string>();
     const split: string[] = [];
+    const addSplit = (value: string) => {
+        if (seen.has(value)) return;
+        seen.add(value);
+        split.push(value);
+    };
+
     for (const v of collected) {
-        split.push(v);
-        if (v.includes("\n")) split.push(...v.split(/\s+/).filter(Boolean));
+        addSplit(v);
+        if (!v.includes("\n")) continue;
+
+        for (const part of v.split(/\s+/)) {
+            if (part) addSplit(part);
+        }
     }
-    return Array.from(new Set(split));
+
+    return split;
 }
 
 export async function collectPayloadStrings(dataTransfer: DataTransfer): Promise<string[]> {
     const sync = extractStrings(dataTransfer);
     const asyncValues: string[] = [];
-    const itemPromises = Array.from(dataTransfer.items ?? [])
-        .filter(item => item.kind === "string")
-        .map(item => new Promise<void>(resolve => item.getAsString(val => {
+    const itemPromises: Promise<void>[] = [];
+    for (const item of dataTransfer.items ?? []) {
+        if (item.kind !== "string") continue;
+
+        itemPromises.push(new Promise<void>(resolve => item.getAsString(val => {
             if (val) asyncValues.push(val);
             resolve();
         })));
+    }
+
     await Promise.all(itemPromises);
-    return Array.from(new Set([...sync, ...asyncValues]));
+
+    const seen = new Set<string>();
+    const output: string[] = [];
+    for (const value of sync) {
+        seen.add(value);
+        output.push(value);
+    }
+    for (const value of asyncValues) {
+        if (seen.has(value)) continue;
+        seen.add(value);
+        output.push(value);
+    }
+
+    return output;
 }
 
 export function serializeDragEntity(entity: DropEntity) {

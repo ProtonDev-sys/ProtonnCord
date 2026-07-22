@@ -11,14 +11,95 @@ import definePlugin, { OptionType } from "@utils/types";
 import { Menu, VoiceStateStore } from "@webpack/common";
 
 const logger = new Logger("IdleAutoRestart");
+const activityThrottleMs = 1_000;
+const voiceChannelRecheckMs = 30_000;
+const maxTimeoutMs = 2_147_483_647;
+
 let lastActivity = 0;
-let intervalId: ReturnType<typeof setInterval> | null = null;
+let lastActivityUpdate = 0;
+let restartTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let activityListenersAttached = false;
+
+function clearRestartTimer() {
+    if (!restartTimeoutId) return;
+
+    clearTimeout(restartTimeoutId);
+    restartTimeoutId = null;
+}
+
+function getIdleMs() {
+    return Math.max(settings.store.idleMinutes, 1) * 60_000;
+}
+
+function scheduleRestartCheck(delay = getIdleMs() - (Date.now() - lastActivity)) {
+    clearRestartTimer();
+    if (!settings.store.isEnabled) return;
+
+    restartTimeoutId = setTimeout(checkIdleTimeout, Math.min(Math.max(delay, 0), maxTimeoutMs));
+}
+
+function checkIdleTimeout() {
+    restartTimeoutId = null;
+    if (!settings.store.isEnabled) return;
+
+    if (VoiceStateStore.isCurrentClientInVoiceChannel()) {
+        scheduleRestartCheck(voiceChannelRecheckMs);
+        return;
+    }
+
+    if (Date.now() - lastActivity < getIdleMs()) {
+        scheduleRestartCheck();
+        return;
+    }
+
+    logger.info("Idle timeout reached, reloading client");
+    location.reload();
+}
+
+function resetIdleTimer() {
+    lastActivity = Date.now();
+    lastActivityUpdate = lastActivity;
+    scheduleRestartCheck();
+}
+
+function attachActivityListeners() {
+    if (activityListenersAttached) return;
+
+    document.addEventListener("mousemove", onActivity);
+    document.addEventListener("keydown", onActivity);
+    document.addEventListener("mousedown", onActivity);
+    document.addEventListener("wheel", onActivity, { passive: true });
+    activityListenersAttached = true;
+}
+
+function detachActivityListeners() {
+    if (!activityListenersAttached) return;
+
+    document.removeEventListener("mousemove", onActivity);
+    document.removeEventListener("keydown", onActivity);
+    document.removeEventListener("mousedown", onActivity);
+    document.removeEventListener("wheel", onActivity);
+    activityListenersAttached = false;
+}
+
+function applyEnabledState(enabled: boolean) {
+    if (enabled) {
+        attachActivityListeners();
+        resetIdleTimer();
+    } else {
+        clearRestartTimer();
+        detachActivityListeners();
+    }
+}
 
 const settings = definePluginSettings({
     isEnabled: {
         description: "Enable automatic restart after idle",
         type: OptionType.BOOLEAN,
         default: true,
+        onChange: enabled => {
+            applyEnabledState(enabled);
+        },
     },
     idleMinutes: {
         description: "Minutes of inactivity before restarting (when not in VC)",
@@ -26,11 +107,19 @@ const settings = definePluginSettings({
         markers: [5, 10, 15, 30, 60, 120],
         default: 30,
         stickToMarkers: false,
+        onChange: () => {
+            if (settings.store.isEnabled) scheduleRestartCheck();
+        },
     },
 });
 
 function onActivity() {
-    lastActivity = Date.now();
+    const now = Date.now();
+    if (now - lastActivityUpdate < activityThrottleMs) return;
+
+    lastActivity = now;
+    lastActivityUpdate = now;
+    scheduleRestartCheck();
 }
 
 export default definePlugin({
@@ -47,40 +136,18 @@ export default definePlugin({
                 label={settings.store.isEnabled ? "Disable Auto Idle Restart" : "Enable Auto Idle Restart"}
                 action={() => {
                     settings.store.isEnabled = !settings.store.isEnabled;
+                    applyEnabledState(settings.store.isEnabled);
                 }}
             />
         );
     },
 
     start() {
-        lastActivity = Date.now();
-
-        document.addEventListener("mousemove", onActivity);
-        document.addEventListener("keydown", onActivity);
-        document.addEventListener("mousedown", onActivity);
-        document.addEventListener("wheel", onActivity, { passive: true });
-
-        if (intervalId) clearInterval(intervalId);
-        intervalId = setInterval(() => {
-            if (!settings.store.isEnabled || VoiceStateStore.isCurrentClientInVoiceChannel()) return;
-
-            const idleMs = settings.store.idleMinutes * 60_000;
-            if (Date.now() - lastActivity >= idleMs) {
-                logger.info("Idle timeout reached, reloading client");
-                location.reload();
-            }
-        }, 30_000);
+        if (settings.store.isEnabled) applyEnabledState(true);
     },
 
     stop() {
-        if (intervalId) {
-            clearInterval(intervalId);
-            intervalId = null;
-        }
-
-        document.removeEventListener("mousemove", onActivity);
-        document.removeEventListener("keydown", onActivity);
-        document.removeEventListener("mousedown", onActivity);
-        document.removeEventListener("wheel", onActivity);
+        clearRestartTimer();
+        detachActivityListeners();
     },
 });

@@ -40,9 +40,11 @@ export const isGhostPinged = (message?: LoggedMessageJSON) => {
 };
 
 export const hasPingged = (message?: LoggedMessageJSON | { mention_everyone: boolean, mentions: any[]; }) => {
+    const currentUserId = UserStore.getCurrentUser()?.id;
+
     return message && !!(
         message.mention_everyone ||
-        message.mentions?.find(m => (typeof m === "string" ? m : m.id) === UserStore.getCurrentUser().id)
+        currentUserId && message.mentions?.some(m => (typeof m === "string" ? m : m.id) === currentUserId)
     );
 };
 

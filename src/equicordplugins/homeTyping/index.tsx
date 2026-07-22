@@ -26,11 +26,18 @@ export default definePlugin({
         return <ThreeDots className={cl("dots")} dotRadius={3} themed={true} />;
     },
     isTyping() {
-        return useStateFromStores([TypingStore], () =>
-            PrivateChannelSortStore.getPrivateChannelIds().some(id =>
-                Object.keys(TypingStore.getTypingUsers(id)).some(userId => userId !== UserStore.getCurrentUser().id)
-            )
-        );
+        return useStateFromStores([TypingStore], () => {
+            const currentUserId = UserStore.getCurrentUser()?.id;
+            if (!currentUserId) return false;
+
+            return PrivateChannelSortStore.getPrivateChannelIds().some(id => {
+                const typingUsers = TypingStore.getTypingUsers(id);
+                for (const userId in typingUsers) {
+                    if (userId !== currentUserId) return true;
+                }
+                return false;
+            });
+        });
     },
     patches: [
         {

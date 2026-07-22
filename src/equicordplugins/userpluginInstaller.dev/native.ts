@@ -212,7 +212,6 @@ async function getPluginMeta(path: string, extra: object = {}): Promise<{
         let supportChannelID;
         try {
             const meta = readFileSync(join(path, "meta.yml"), "utf8");
-            console.log(meta);
             const parsed = yaml.load(meta);
             if (parsed.thread && typeof parsed.thread === "string" && /^\d+$/.test(parsed.thread)) {
                 supportChannelID = parsed.thread;
@@ -284,6 +283,19 @@ function generateUpdatePluginContent(meta: {
     return `data:text/html;base64,${buf}`;
 }
 
+function formatCommitMessages(rawOutput: string, remote: string): string {
+    const commitBaseUrl = remote.replace("plugins.nin0.dev", "git.nin0.dev/userplugins");
+    let output = "";
+
+    for (const line of rawOutput.split("\n")) {
+        const [user, shortCommit, longCommit, message] = line.split("////////");
+        if (output) output += "\n";
+        output += `${user} (<a href="${commitBaseUrl}/commit/${longCommit}" style="font-family: monospace;">${shortCommit}</a>) ~ ${message}`;
+    }
+
+    return output;
+}
+
 export async function getUserplugins() {
     const folderContents = await readdir(join(vencordPath, "..", "src", "userplugins"), {
         withFileTypes: true
@@ -345,7 +357,7 @@ export async function updatePlugin(_, directory: string) {
                     name: pluginMeta.name,
                     description: pluginMeta.description,
                     remote: pluginMeta.remote,
-                    commit: rawOutput.split("\n").map(line => line.split("////////")).map(([user, shortCommit, longCommit, message]) => `${user} (<a href="${pluginMeta.remote.replace("plugins.nin0.dev", "git.nin0.dev/userplugins")}/commit/${longCommit}" style="font-family: monospace;">${shortCommit}</a>) ~ ${message}`).join("\n")
+                    commit: formatCommitMessages(rawOutput, pluginMeta.remote)
                 }));
                 win.on("page-title-updated", async e => {
                     if (win.webContents.getTitle().startsWith("openLink:")) {
@@ -470,11 +482,4 @@ export async function openGitPathModal(_: any) {
     if (gitPathSet) {
         win.webContents.executeJavaScript(`document.querySelector("input").value = ${JSON.stringify(gitPathSet)};`);
     }
-
-    console.log(yaml.load(`
-    name: test
-    items:
-      - a
-      - b
-    `));
 }

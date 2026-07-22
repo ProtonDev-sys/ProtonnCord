@@ -17,7 +17,8 @@ import { ContextMenuApi, React, Toasts } from "@webpack/common";
 import { settings } from "./settings";
 import { cl, GlobalBadges, INVITE_LINK, loadBadges } from "./utils";
 
-let intervalId: any;
+let intervalId: ReturnType<typeof setInterval> | undefined;
+let startGeneration = 0;
 
 export default definePlugin({
     name: "GlobalBadges",
@@ -37,12 +38,19 @@ export default definePlugin({
         </>
     ),
     async start() {
-        await loadBadges();
+        const generation = ++startGeneration;
         clearInterval(intervalId);
-        intervalId = setInterval(loadBadges, 1000 * 60 * 30);
+        intervalId = undefined;
+
+        await loadBadges();
+        if (generation !== startGeneration) return;
+
+        intervalId = setInterval(() => void loadBadges(), 1000 * 60 * 30);
     },
     async stop() {
+        startGeneration++;
         clearInterval(intervalId);
+        intervalId = undefined;
     },
     toolboxActions: {
         async "Refetch Global Badges"() {

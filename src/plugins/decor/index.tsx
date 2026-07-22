@@ -134,7 +134,8 @@ export default definePlugin({
         CONNECTION_OPEN: () => {
             useAuthorizationStore.getState().init();
             useCurrentUserDecorationsStore.getState().clear();
-            useUsersDecorationsStore.getState().fetch(UserStore.getCurrentUser().id, true);
+            const currentUserId = UserStore.getCurrentUser()?.id;
+            if (currentUserId) useUsersDecorationsStore.getState().fetch(currentUserId, true);
         },
         USER_PROFILE_MODAL_OPEN: data => {
             useUsersDecorationsStore.getState().fetch(data.userId, true);
@@ -160,7 +161,8 @@ export default definePlugin({
 
     async start() {
         await setBaseUrl(settings.store.baseUrl);
-        useUsersDecorationsStore.getState().fetch(UserStore.getCurrentUser().id, true);
+        const currentUserId = UserStore.getCurrentUser()?.id;
+        if (currentUserId) useUsersDecorationsStore.getState().fetch(currentUserId, true);
     },
 
     getDecorAvatarDecorationURL({ avatarDecoration, canAnimate }: { avatarDecoration: AvatarDecoration | null; canAnimate?: boolean; }) {

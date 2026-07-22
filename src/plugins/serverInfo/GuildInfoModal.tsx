@@ -386,9 +386,15 @@ function MutualServerIcons({ member }: { member: MemberWithMutuals; }) {
 
 function MutualMembersTab({ guild, setCount }: RelationshipProps) {
     const [members, setMembers] = useState<MemberWithMutuals[]>([]);
-    const currentUserId = UserStore.getCurrentUser().id;
+    const currentUserId = UserStore.getCurrentUser()?.id;
 
     useEffect(() => {
+        if (!currentUserId) {
+            setMembers([]);
+            setCount(0);
+            return;
+        }
+
         const guildMembers = GuildMemberStore.getMemberIds(guild.id);
         const membersWithMutuals = guildMembers
             .map(id => getMutualGuilds(id))
@@ -400,27 +406,29 @@ function MutualMembersTab({ guild, setCount }: RelationshipProps) {
 
         setMembers(membersWithMutuals);
         setCount(membersWithMutuals.length);
-    }, [guild.id]);
+    }, [currentUserId, guild.id]);
+
+    const renderedMembers: Array<MemberWithMutuals & { user: User & { globalName?: string; }; }> = [];
+    for (const member of members) {
+        const user = UserStore.getUser(member.id) as User & { globalName?: string; } | undefined;
+        if (user) renderedMembers.push({ ...member, user });
+    }
+
+    renderedMembers.sort((a, b) => {
+        switch (settings.store.sorting) {
+            case "username":
+                return a.user.username.localeCompare(b.user.username);
+            case "displayname":
+                return a.user.globalName?.localeCompare(b.user.globalName || b.user.username)
+                    || a.user.username.localeCompare(b.user.globalName || b.user.username);
+            default:
+                return 0;
+        }
+    });
 
     return (
         <ScrollerThin fade className={cl("scroller")}>
-            {members
-                .map(member => {
-                    const user = UserStore.getUser(member.id) as User & { globalName: string; };
-                    return { ...member, user };
-                })
-                .filter(Boolean)
-                .sort((a, b) => {
-                    switch (settings.store.sorting) {
-                        case "username":
-                            return a.user.username.localeCompare(b.user.username);
-                        case "displayname":
-                            return a.user?.globalName?.localeCompare(b.user?.globalName || b.user.username)
-                                || a.user.username.localeCompare(b.user?.globalName || b.user.username);
-                        default:
-                            return 0;
-                    }
-                })
+            {renderedMembers
                 .map(member => (
                     <div
                         className={cl("member-row")}

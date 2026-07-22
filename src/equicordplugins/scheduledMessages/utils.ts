@@ -17,7 +17,8 @@ const logger = new Logger("ScheduledMessages");
 const STORAGE_KEY = "ScheduledMessages_queue";
 
 let scheduledMessages: ScheduledMessage[] = [];
-let checkInterval: ReturnType<typeof setInterval> | null = null;
+let checkTimeout: ReturnType<typeof setTimeout> | null = null;
+let schedulerRunning = false;
 let isProcessingMessages = false;
 
 export const phantomMessageMap = new Map<string, PhantomMessageData>();
@@ -28,10 +29,12 @@ const REACTION_COOLDOWN_MS = 2000;
 
 const pendingRecreations = new Map<string, ReturnType<typeof setTimeout>>();
 const RECREATE_DEBOUNCE_MS = 300;
+let phantomGeneration = 0;
 
 export async function loadScheduledMessages(): Promise<void> {
     const saved = await DataStore.get<ScheduledMessage[]>(STORAGE_KEY);
     scheduledMessages = Array.isArray(saved) ? saved : [];
+    scheduledMessages.sort((a, b) => a.scheduledTime - b.scheduledTime);
 }
 
 async function saveScheduledMessages(): Promise<void> {
@@ -230,7 +233,10 @@ export async function createPhantomMessage(msg: ScheduledMessage): Promise<void>
 }
 
 function applyPhantomClassToMessage(channelId: string, messageId: string): void {
+    const generation = phantomGeneration;
     const tryApply = (retries = 0) => {
+        if (generation !== phantomGeneration) return false;
+
         const el = document.getElementById(`chat-messages-${channelId}-${messageId}`);
         if (el) {
             el.classList.add("vc-scheduled-msg-phantom");
@@ -257,8 +263,11 @@ function updatePhantomReactions(messageId: string, channelId: string, reactions:
         clearTimeout(existingTimeout);
     }
 
+    const generation = phantomGeneration;
     const timeout = setTimeout(() => {
         pendingRecreations.delete(messageId);
+        if (generation !== phantomGeneration) return;
+
         doRecreatePhantomMessage(messageId, channelId, reactions);
     }, RECREATE_DEBOUNCE_MS);
 
@@ -266,8 +275,7 @@ function updatePhantomReactions(messageId: string, channelId: string, reactions:
 }
 
 function doRecreatePhantomMessage(messageId: string, channelId: string, reactions: ScheduledReaction[]): void {
-    logger.info("doRecreatePhantomMessage: Recreating phantom message with", reactions.length, "reactions");
-
+    const generation = phantomGeneration;
     const phantomData = phantomMessageMap.get(messageId);
     if (!phantomData) {
         logger.warn("doRecreatePhantomMessage: No phantom data found");
@@ -288,6 +296,8 @@ function doRecreatePhantomMessage(messageId: string, channelId: string, reaction
     });
 
     setTimeout(() => {
+        if (generation !== phantomGeneration) return;
+
         msg.reactions = reactions;
         createPhantomMessage(msg);
     }, 50);
@@ -411,6 +421,7 @@ export async function addScheduledMessage(
     scheduledMessages.sort((a, b) => a.scheduledTime - b.scheduledTime);
     await saveScheduledMessages();
     createPhantomMessage(newMessage);
+    scheduleNextCheck();
 
     return { success: true };
 }
@@ -442,6 +453,7 @@ export async function updateScheduledMessageTime(id: string, scheduledTime: numb
     scheduledMessages.sort((left, right) => left.scheduledTime - right.scheduledTime);
     await saveScheduledMessages();
     await createPhantomMessage(message);
+    scheduleNextCheck();
     return { success: true };
 }
 
@@ -465,6 +477,7 @@ export async function removeScheduledMessage(id: string): Promise<void> {
     if (msg) removePhantomMessage(msg);
     scheduledMessages = scheduledMessages.filter(m => m.id !== id);
     await saveScheduledMessages();
+    scheduleNextCheck();
 }
 
 export async function clearAllScheduledMessages(): Promise<void> {
@@ -473,6 +486,7 @@ export async function clearAllScheduledMessages(): Promise<void> {
     }
     scheduledMessages = [];
     await saveScheduledMessages();
+    scheduleNextCheck();
 }
 
 async function checkAndSendMessages(): Promise<void> {
@@ -489,17 +503,42 @@ async function checkAndSendMessages(): Promise<void> {
         }
     } finally {
         isProcessingMessages = false;
+        scheduleNextCheck();
     }
 }
 
 export function startScheduler(): void {
-    if (checkInterval) return;
-    checkAndSendMessages();
-    checkInterval = setInterval(checkAndSendMessages, settings.store.checkIntervalSeconds * 1000);
+    if (schedulerRunning) return;
+    schedulerRunning = true;
+    void checkAndSendMessages();
 }
 
 export function stopScheduler(): void {
-    if (checkInterval) { clearInterval(checkInterval); checkInterval = null; }
+    schedulerRunning = false;
+    if (checkTimeout) {
+        clearTimeout(checkTimeout);
+        checkTimeout = null;
+    }
+}
+
+function scheduleNextCheck(): void {
+    if (!schedulerRunning || isProcessingMessages) return;
+
+    if (checkTimeout) {
+        clearTimeout(checkTimeout);
+        checkTimeout = null;
+    }
+
+    const nextMessage = scheduledMessages[0];
+    if (!nextMessage) return;
+
+    const maxDelay = Math.max(1000, settings.store.checkIntervalSeconds * 1000);
+    const delay = Math.max(0, Math.min(maxDelay, nextMessage.scheduledTime - Date.now()));
+
+    checkTimeout = setTimeout(() => {
+        checkTimeout = null;
+        void checkAndSendMessages();
+    }, delay);
 }
 
 export async function recreatePhantomMessages(): Promise<void> {
@@ -507,12 +546,29 @@ export async function recreatePhantomMessages(): Promise<void> {
 }
 
 export function cleanupAllPhantomMessages(): void {
+    phantomGeneration++;
+
+    for (const timeout of pendingRecreations.values()) {
+        clearTimeout(timeout);
+    }
+    pendingRecreations.clear();
+
     for (const msg of scheduledMessages) removePhantomMessage(msg);
+
+    phantomMessageMap.clear();
+    pendingReactions.clear();
+    recentReactionChanges.clear();
+}
+
+function pruneRecentReactionChanges(now = Date.now()): void {
+    for (const [key, recent] of recentReactionChanges) {
+        if (now - recent.timestamp > REACTION_COOLDOWN_MS) {
+            recentReactionChanges.delete(key);
+        }
+    }
 }
 
 function modifyReaction(messageId: string, channelId: string, emoji: { id: string | null; name: string; animated?: boolean; }, delta: number): void {
-    logger.info("modifyReaction called:", { messageId, emoji: emoji.name, delta });
-
     const phantomData = phantomMessageMap.get(messageId);
     if (!phantomData) {
         logger.warn("modifyReaction: No phantom data found for messageId =", messageId);
@@ -528,8 +584,6 @@ function modifyReaction(messageId: string, channelId: string, emoji: { id: strin
     const reactions = pendingReactions.get(phantomData.messageId) ?? [];
     const idx = reactions.findIndex(r => r.emoji.name === emoji.name && r.emoji.id === emoji.id);
 
-    logger.info("modifyReaction: Current reactions count =", reactions.length, "found at idx =", idx);
-
     if (delta > 0) {
         if (idx >= 0) reactions[idx].count += delta;
         else reactions.push({ emoji: { id: emoji.id ?? null, name: emoji.name, animated: emoji.animated }, count: 1 });
@@ -540,9 +594,8 @@ function modifyReaction(messageId: string, channelId: string, emoji: { id: strin
 
     pendingReactions.set(phantomData.messageId, reactions);
     msg.reactions = reactions;
-    saveScheduledMessages();
+    void saveScheduledMessages();
 
-    logger.info("modifyReaction: Updated reactions count =", reactions.length, "calling updatePhantomReactions");
     updatePhantomReactions(messageId, channelId, reactions);
 }
 
@@ -552,42 +605,40 @@ function getReactionKey(messageId: string, emoji: { id: string | null; name: str
 
 export function handleReactionAdd(messageId: string, channelId: string, emoji: { id: string | null; name: string; animated?: boolean; }): void {
     const key = getReactionKey(messageId, emoji);
-    const recent = recentReactionChanges.get(key);
     const now = Date.now();
+    pruneRecentReactionChanges(now);
+
+    const recent = recentReactionChanges.get(key);
 
     if (recent && recent.action === "add" && now - recent.timestamp < REACTION_COOLDOWN_MS) {
-        logger.info("handleReactionAdd: Ignoring duplicate ADD within cooldown", { messageId, emoji: emoji.name });
         return;
     }
 
     if (recent && recent.action === "remove" && now - recent.timestamp < REACTION_COOLDOWN_MS) {
-        logger.info("handleReactionAdd: Ignoring Discord revert (ADD after our REMOVE)", { messageId, emoji: emoji.name });
         resyncPhantomReactions(messageId, channelId);
         return;
     }
 
-    logger.info("handleReactionAdd: Processing", { messageId, emoji: emoji.name });
     recentReactionChanges.set(key, { action: "add", timestamp: now });
     modifyReaction(messageId, channelId, emoji, 1);
 }
 
 export function handleReactionRemove(messageId: string, channelId: string, emoji: { id: string | null; name: string; }): void {
     const key = getReactionKey(messageId, emoji);
-    const recent = recentReactionChanges.get(key);
     const now = Date.now();
+    pruneRecentReactionChanges(now);
+
+    const recent = recentReactionChanges.get(key);
 
     if (recent && recent.action === "remove" && now - recent.timestamp < REACTION_COOLDOWN_MS) {
-        logger.info("handleReactionRemove: Ignoring duplicate REMOVE within cooldown", { messageId, emoji: emoji.name });
         return;
     }
 
     if (recent && recent.action === "add" && now - recent.timestamp < REACTION_COOLDOWN_MS) {
-        logger.info("handleReactionRemove: Ignoring Discord revert (REMOVE after our ADD)", { messageId, emoji: emoji.name });
         resyncPhantomReactions(messageId, channelId);
         return;
     }
 
-    logger.info("handleReactionRemove: Processing", { messageId, emoji: emoji.name });
     recentReactionChanges.set(key, { action: "remove", timestamp: now });
     modifyReaction(messageId, channelId, emoji, -1);
 }
@@ -597,8 +648,6 @@ export function isPhantomMessage(messageId: string): boolean {
 }
 
 export function resyncPhantomReactions(messageId: string, channelId: string): void {
-    logger.info("resyncPhantomReactions:", { messageId });
-
     const phantomData = phantomMessageMap.get(messageId);
     if (!phantomData) {
         logger.warn("resyncPhantomReactions: No phantom data for messageId =", messageId);
@@ -606,7 +655,5 @@ export function resyncPhantomReactions(messageId: string, channelId: string): vo
     }
 
     const reactions = pendingReactions.get(phantomData.messageId) ?? [];
-    logger.info("resyncPhantomReactions: Found", reactions.length, "reactions to sync");
-
     updatePhantomReactions(messageId, channelId, reactions);
 }

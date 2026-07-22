@@ -166,6 +166,7 @@ async function* parseJsonStream(readChunk: () => Promise<string | null>) {
         keepStack: false,
     });
     const queue: any[] = [];
+    let queueIndex = 0;
     let error: Error | null = null;
 
     parser.onValue = ({ value }) => {
@@ -179,8 +180,12 @@ async function* parseJsonStream(readChunk: () => Promise<string | null>) {
     try {
         while (true) {
             if (error) throw error;
-            while (queue.length > 0) {
-                yield queue.shift();
+            while (queueIndex < queue.length) {
+                yield queue[queueIndex++];
+            }
+            if (queueIndex > 0) {
+                queue.length = 0;
+                queueIndex = 0;
             }
 
             const chunk = await readChunk();
@@ -196,8 +201,8 @@ async function* parseJsonStream(readChunk: () => Promise<string | null>) {
     }
 
     if (error) throw error;
-    while (queue.length > 0) {
-        yield queue.shift();
+    while (queueIndex < queue.length) {
+        yield queue[queueIndex++];
     }
 }
 

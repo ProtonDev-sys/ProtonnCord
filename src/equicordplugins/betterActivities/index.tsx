@@ -13,6 +13,7 @@ import definePlugin from "@utils/types";
 import { patchActivityList } from "./patch-helpers/activityList";
 import { showAllActivitiesComponent } from "./patch-helpers/popout";
 import { settings } from "./settings";
+import { clearFetchedApplications } from "./utils";
 
 migratePluginSettings("BetterActivities", "MemberListActivities");
 
@@ -56,4 +57,7 @@ export default definePlugin({
             predicate: () => settings.store.userPopout
         },
     ],
+    stop() {
+        clearFetchedApplications();
+    },
 });

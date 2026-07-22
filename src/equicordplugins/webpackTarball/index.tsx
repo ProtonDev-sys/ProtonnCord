@@ -88,12 +88,18 @@ function TarModal({ modalProps }: { modalProps: RenderModalProps; }) {
     const [, rerender] = useState({});
     const [isLoading, setLoading] = useState(false);
     const paths = Webpack.getChunkPaths(webpackRequire);
-    const status = Object.entries(Webpack.getLoadedChunks(webpackRequire))
-        .filter(([k]) => webpackRequire.o(paths, k))
-        .map(([, v]) => v);
-    const loading = status.length;
-    const loaded = status.filter(v => v === 0 || v === undefined).length;
-    const errored = status.filter(v => v === undefined).length;
+    let loading = 0;
+    let loaded = 0;
+    let errored = 0;
+
+    for (const [key, value] of Object.entries(Webpack.getLoadedChunks(webpackRequire))) {
+        if (!webpackRequire.o(paths, key)) continue;
+
+        loading++;
+        if (value === 0 || value === undefined) loaded++;
+        if (value === undefined) errored++;
+    }
+
     const all = Object.keys(paths).length;
     const { patched } = settings.use(["patched"]);
     const WEBPACK_CHUNK = "webpackChunkdiscord_app";

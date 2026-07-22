@@ -34,7 +34,7 @@ export default definePlugin({
     },
 
     event(e: KeyboardEvent) {
-        if (e.code === "F8") {
+        if (e.code === "F8" && !e.repeat) {
             // Hi! You've just paused the client. Pressing F8 in DevTools or in the main window will unpause it again.
             // It's up to you on what to do, friend. Happy travels!
             debugger;

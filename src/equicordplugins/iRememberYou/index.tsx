@@ -24,8 +24,10 @@ export default definePlugin({
     dependencies: ["MessageEventsAPI"],
 
     patches: [],
+    startGeneration: 0,
 
     async start() {
+        const generation = ++this.startGeneration;
         SettingsPlugin.customEntries.push({
             key: "equicord_i_remember_you",
             title: "I Remember You",
@@ -36,6 +38,11 @@ export default definePlugin({
         const data = (this.dataManager = await new Data().withStart());
 
         await data.initializeUsersCollection();
+        if (generation !== this.startGeneration) {
+            data.stop();
+            return;
+        }
+
         data.writeGuildsOwnersToCollection();
         data.writeMembersFromUserGuildsToCollection();
         data._onMessagePreSend_preSend = addMessagePreSendListener(
@@ -45,10 +52,16 @@ export default definePlugin({
     },
 
     stop() {
+        this.startGeneration++;
         removeFromArray(SettingsPlugin.customEntries, e => e.key === "equicord_i_remember_you");
 
-        const dataManager = this.dataManager as Data;
-        removeMessagePreSendListener(dataManager._onMessagePreSend_preSend);
-        clearInterval(dataManager._storageAutoSaveProtocol_interval);
+        const dataManager = this.dataManager as Data | undefined;
+        if (!dataManager) return;
+
+        if (dataManager._onMessagePreSend_preSend) {
+            removeMessagePreSendListener(dataManager._onMessagePreSend_preSend);
+        }
+        dataManager.stop();
+        this.dataManager = undefined;
     },
 });

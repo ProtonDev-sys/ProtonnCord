@@ -23,6 +23,7 @@ export type ProfilePresetEx = ProfilePreset & {
 export let presets: ProfilePresetEx[] = [];
 export let currentPresetIndex = -1;
 let activeScopeKey: string | null = null;
+let loadGeneration = 0;
 
 function resetPresets(nextPresets: ProfilePresetEx[] = []) {
     presets = nextPresets;
@@ -38,13 +39,31 @@ function getLegacyKey(userId: string) {
     return `${LEGACY_PRESETS_KEY}:${userId}:main`;
 }
 
+function getCurrentUserId() {
+    return UserStore.getCurrentUser()?.id ?? null;
+}
+
+function isCurrentLoad(generation: number, key: string) {
+    return generation === loadGeneration && activeScopeKey === key;
+}
+
 export async function loadPresets(section: PresetSection) {
+    const userId = getCurrentUserId();
+    if (!userId) {
+        activeScopeKey = null;
+        loadGeneration++;
+        resetPresets();
+        return;
+    }
+
+    const key = getPresetsKey(section, userId);
+    const generation = ++loadGeneration;
+    activeScopeKey = key;
+
     try {
-        const currentUser = UserStore.getCurrentUser();
-        const userId = currentUser!.id;
-        const key = getPresetsKey(section, userId);
-        activeScopeKey = key;
         const stored = await DataStore.get(key);
+        if (!isCurrentLoad(generation, key)) return;
+
         if (stored && Array.isArray(stored)) {
             resetPresets(stored);
             return;
@@ -52,8 +71,12 @@ export async function loadPresets(section: PresetSection) {
 
         if (section === "main") {
             const legacyKey = getLegacyKey(userId);
-            const legacyStored = await DataStore.get(legacyKey);
-            const legacyBaseStored = await DataStore.get(LEGACY_PRESETS_KEY);
+            const [legacyStored, legacyBaseStored] = await Promise.all([
+                DataStore.get(legacyKey),
+                DataStore.get(LEGACY_PRESETS_KEY)
+            ]);
+            if (!isCurrentLoad(generation, key)) return;
+
             const legacyToUse = Array.isArray(legacyStored)
                 ? legacyStored
                 : (Array.isArray(legacyBaseStored) ? legacyBaseStored : null);
@@ -67,6 +90,8 @@ export async function loadPresets(section: PresetSection) {
         }
         resetPresets();
     } catch (err) {
+        if (!isCurrentLoad(generation, key)) return;
+
         logger.error("Failed to load presets", err);
         resetPresets();
     }
@@ -75,8 +100,9 @@ export async function loadPresets(section: PresetSection) {
 export async function savePresetsData(section?: PresetSection) {
     try {
         if (!activeScopeKey && !section) return;
-        const currentUser = UserStore.getCurrentUser();
-        const userId = currentUser!.id;
+        const userId = getCurrentUserId();
+        if (!userId) return;
+
         const key = section ? getPresetsKey(section, userId) : activeScopeKey!;
         await DataStore.set(key, presets);
     } catch (err) {

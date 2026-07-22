@@ -16,7 +16,7 @@ import { MediaEngineStore, SearchableSelect, useEffect, useState } from "@webpac
 
 interface PickerProps {
     streamMediaSelection: any[];
-    streamMedia: any[];
+    streamMedia: string;
 }
 
 const getDesktopSources = findByCodeLazy("desktop sources");
@@ -81,17 +81,23 @@ export async function getCurrentMedia() {
             }));
             sources.push(...videoSources);
         } catch (e) {
-            new log.warn("Failed to get video devices:", e);
+            log.warn("Failed to get video devices:", e);
         }
     }
 
     const streamMedia = sources.find(screen => screen.id === settings.store.streamMedia);
     if (streamMedia) return streamMedia;
 
+    const fallback = sources[0];
+    if (!fallback) {
+        log.error("No media sources found.");
+        return null;
+    }
+
     log.error(`Stream Media "${settings.store.streamMedia}" not found. Resetting to default.`);
 
-    settings.store.streamMedia = sources[0];
-    return sources[0];
+    settings.store.streamMedia = fallback.id;
+    return fallback;
 }
 
 function StreamSimplePicker({ streamMediaSelection, streamMedia }: PickerProps) {

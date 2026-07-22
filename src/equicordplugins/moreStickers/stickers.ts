@@ -144,15 +144,29 @@ export async function fetchDynamicPackSetMeta(dpsm: DynamicPackSetMeta): Promise
 }
 
 export async function refreshDynamicPackSet(old: DynamicPackSetMeta, _new: DynamicPackSetMeta): Promise<void> {
-    const oldPacks = old.packs.map(p => p.id);
-    const newPacks = _new.packs.map(p => p.id);
+    const oldPackIds = new Set<string>();
+    for (const pack of old.packs) {
+        oldPackIds.add(pack.id);
+    }
 
-    const toRemove = oldPacks.filter(p => !newPacks.includes(p));
-    const toAdd = newPacks.filter(p => !oldPacks.includes(p));
+    const newPackIds = new Set<string>();
+    for (const pack of _new.packs) {
+        newPackIds.add(pack.id);
+    }
+
+    const toRemove: string[] = [];
+    for (const pack of old.packs) {
+        if (!newPackIds.has(pack.id)) toRemove.push(pack.id);
+    }
+
+    const toAdd: DynamicStickerPackMeta[] = [];
+    for (const pack of _new.packs) {
+        if (!oldPackIds.has(pack.id)) toAdd.push(pack);
+    }
 
     await Promise.all([
         ...toRemove.map(id => deleteStickerPack(id)),
-        ...toAdd.map(id => getDynamicStickerPack(_new.packs.find(p => p.id === id)!).then(sp => sp && saveStickerPack(sp)))
+        ...toAdd.map(pack => getDynamicStickerPack(pack).then(sp => sp && saveStickerPack(sp)))
     ]);
 }
 

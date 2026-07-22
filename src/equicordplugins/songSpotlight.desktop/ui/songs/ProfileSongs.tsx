@@ -62,7 +62,7 @@ export default function ProfileSongs({ user, isSideBar }: ProfileSongsProps) {
         profileSongsLimit,
     ]);
 
-    const owned = UserStore.getCurrentUser().id === userId;
+    const owned = UserStore.getCurrentUser()?.id === userId;
 
     const pending = isAuthorized() && !clampedData && !data && !failed;
     if (!pending && !clampedData?.[0]) return null;

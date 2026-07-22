@@ -97,7 +97,9 @@ const focusChanged = () => {
 };
 
 let lastMouseDownTime = 0;
-const onMouseDown = () => {
+const onMouseDown = (event: MouseEvent) => {
+    if (event.button !== 0) return;
+
     const now = Date.now();
 
     // TODO: this logic is messy but it works so eh
@@ -134,6 +136,10 @@ let doubleClickFired = false;
 let mouseDownCount = 0;
 let doubleClickDetected = false;
 let secondMouseDownTime = 0;
+let cachedReactEmoji = "";
+let cachedAddAdditionalReacts = false;
+let cachedAdditionalReactEmojis = "";
+let cachedConfiguredReactionEmojis: string[] | null = null;
 
 export const settings = definePluginSettings({
     singleClickAction: {
@@ -296,19 +302,45 @@ function normalizeEmoji(emoji: string): string | null {
 }
 
 function getConfiguredReactionEmojis() {
-    const baseEmoji = normalizeEmoji(settings.store.reactEmoji);
-    const configured = [baseEmoji];
+    const { addAdditionalReacts } = settings.store;
+    const reactEmoji = settings.store.reactEmoji ?? "";
+    const additionalReactEmojis = settings.store.additionalReactEmojis ?? "";
 
-    if (settings.store.addAdditionalReacts) {
-        const extra = settings.store.additionalReactEmojis
-            .split(/[\n,]/g)
-            .map(normalizeEmoji)
-            .filter((emoji): emoji is string => Boolean(emoji))
-            .slice(0, MAX_ADDITIONAL_REACT_EMOJIS);
-        configured.push(...extra);
+    if (
+        cachedConfiguredReactionEmojis &&
+        cachedReactEmoji === reactEmoji &&
+        cachedAddAdditionalReacts === addAdditionalReacts &&
+        cachedAdditionalReactEmojis === additionalReactEmojis
+    ) {
+        return cachedConfiguredReactionEmojis;
     }
 
-    return Array.from(new Set(configured.filter((emoji): emoji is string => Boolean(emoji))));
+    const configured: string[] = [];
+    const seen = new Set<string>();
+    const addEmoji = (emoji: string | null) => {
+        if (!emoji || seen.has(emoji)) return;
+        seen.add(emoji);
+        configured.push(emoji);
+    };
+
+    addEmoji(normalizeEmoji(reactEmoji));
+
+    if (addAdditionalReacts) {
+        let additionalCount = 0;
+        for (const rawEmoji of additionalReactEmojis.split(/[\n,]/g)) {
+            const previousLength = configured.length;
+            addEmoji(normalizeEmoji(rawEmoji));
+            if (configured.length > previousLength) additionalCount++;
+            if (additionalCount >= MAX_ADDITIONAL_REACT_EMOJIS) break;
+        }
+    }
+
+    cachedReactEmoji = reactEmoji;
+    cachedAddAdditionalReacts = addAdditionalReacts;
+    cachedAdditionalReactEmojis = additionalReactEmojis;
+    cachedConfiguredReactionEmojis = configured;
+
+    return cachedConfiguredReactionEmojis;
 }
 
 const canSend = (channel: Channel) =>
@@ -422,7 +454,13 @@ function quoteMessage(channel: Channel, msg: Message) {
     }
     if (!content) return;
 
-    const quoteText = content.split("\n").map(line => `> ${line}`).join("\n") + "\n";
+    let quoteText = "> ";
+    for (const char of content) {
+        quoteText += char;
+        if (char === "\n") quoteText += "> ";
+    }
+
+    quoteText += "\n";
 
     insertTextIntoChatInputBox(quoteText);
 

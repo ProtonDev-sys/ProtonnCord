@@ -63,8 +63,14 @@ const charMap: Record<string, string> = {
     N: "𝓝", M: "𝓜",
 };
 
-const mapCharacters = (text: string, map: Record<string, string>) =>
-    text.split("").map(char => map[char] || char).join("");
+const mapCharacters = (text: string, map: Record<string, string>) => {
+    let output = "";
+    for (const char of text) {
+        output += map[char] || char;
+    }
+
+    return output;
+};
 
 export function makeFreaky(text: string) {
     text = mapCharacters(text.trim() || "freaky", charMap);
@@ -83,13 +89,30 @@ const morseMap = {
     " ": "/"
 };
 
+const reversedMorseMap: Record<string, string> = {};
+for (const [char, code] of Object.entries(morseMap)) {
+    reversedMorseMap[code] = char;
+}
+
 export const toMorse = (text: string) => {
-    return text.toUpperCase().split("").map(char => morseMap[char] ?? "").join(" ");
+    const upperText = text.toUpperCase();
+    let output = "";
+
+    for (let i = 0; i < upperText.length; i++) {
+        if (i) output += " ";
+        output += morseMap[upperText[i]] ?? "";
+    }
+
+    return output;
 };
 
 export const fromMorse = (text: string) => {
-    const reversedMap = Object.fromEntries(Object.entries(morseMap).map(([k, v]) => [v, k]));
-    const raw = text.split(" ").map(code => reversedMap[code] ?? "").join("").toLowerCase();
+    let raw = "";
+    for (const code of text.split(" ")) {
+        raw += reversedMorseMap[code] ?? "";
+    }
+
+    raw = raw.toLowerCase();
     return raw.charAt(0).toUpperCase() + raw.slice(1);
 };
 
@@ -142,6 +165,11 @@ export const replacements = [
     ["hello", "hewwo"],
 ];
 
+const replacementRules = replacements.map(([source, replacement]) => ({
+    regex: new RegExp(`\\b${source}\\b`, "gi"),
+    replacement
+}));
+
 export function selectRandomElement(arr) {
     // generate a random index based on the length of the array
     const randomIndex = Math.floor(Math.random() * arr.length);
@@ -155,12 +183,12 @@ export const isOneCharacterString = (str: string): boolean => {
 
 export function replaceString(inputString) {
     let replaced = false;
-    for (const replacement of replacements) {
-        const regex = new RegExp(`\\b${replacement[0]}\\b`, "gi");
-        if (regex.test(inputString)) {
-            inputString = inputString.replace(regex, replacement[1]);
+    for (const { regex, replacement } of replacementRules) {
+        regex.lastIndex = 0;
+        inputString = inputString.replace(regex, () => {
             replaced = true;
-        }
+            return replacement;
+        });
     }
     return replaced ? inputString : false;
 }
@@ -178,11 +206,12 @@ export function uwuify(message: string): string {
             continue;
         }
 
-        if (!replaceString(words[i])) {
+        const replacedWord = replaceString(words[i]);
+        if (!replacedWord) {
             answer += words[i]
                 .replace(/n(?=[aeo])/g, "ny")
                 .replace(/l|r/g, "w");
-        } else answer += replaceString(words[i]);
+        } else answer += replacedWord;
 
     }
 
@@ -238,11 +267,18 @@ export function loadFriendImage(source: File | string): Promise<HTMLImageElement
 
     return new Promise((resolve, reject) => {
         const img = new Image();
-        img.onload = () => {
+        const revokeUrl = () => {
             if (isFile) URL.revokeObjectURL(url);
+        };
+
+        img.onload = () => {
+            revokeUrl();
             resolve(img);
         };
-        img.onerror = (event, _source, _lineno, _colno, err) => reject(err || event);
+        img.onerror = (event, _source, _lineno, _colno, err) => {
+            revokeUrl();
+            reject(err || event);
+        };
         img.crossOrigin = "anonymous";
         img.src = url;
     });
@@ -339,11 +375,18 @@ export function loadImage(source: File | string) {
 
     return new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
-        img.onload = () => {
+        const revokeUrl = () => {
             if (isFile) URL.revokeObjectURL(url);
+        };
+
+        img.onload = () => {
+            revokeUrl();
             resolve(img);
         };
-        img.onerror = (event, _source, _lineno, _colno, err) => reject(err || event);
+        img.onerror = (event, _source, _lineno, _colno, err) => {
+            revokeUrl();
+            reject(err || event);
+        };
         img.crossOrigin = "Anonymous";
         img.src = url;
     });
