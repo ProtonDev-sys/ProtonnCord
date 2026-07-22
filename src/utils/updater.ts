@@ -21,6 +21,7 @@ import gitHash from "~git-hash";
 import { Logger } from "./Logger";
 import { relaunch } from "./native";
 import { IpcRes } from "./types";
+import { classifyUpdateChanges } from "./updateClassification";
 
 export const UpdateLogger = /* #__PURE__*/ new Logger("Updater", "white");
 export let isOutdated = false;
@@ -42,12 +43,12 @@ export async function checkForUpdates() {
 
     // we only want to check this for the git updater, not the http updater
     if (!IS_STANDALONE) {
-        if (changes.some(c => c.hash === gitHash)) {
-            isNewer = true;
-            return (isOutdated = false);
-        }
+        const classification = classifyUpdateChanges(changes, gitHash);
+        isNewer = classification.isNewer;
+        return (isOutdated = classification.isOutdated);
     }
 
+    isNewer = false;
     return (isOutdated = changes.length > 0);
 }
 
