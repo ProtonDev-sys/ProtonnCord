@@ -16,6 +16,27 @@ import { openCommandPalette } from "./components/CommandPalette";
 const cl = classNameFactory("vc-command-palette-");
 let isRecordingGlobal: boolean = false;
 
+const modifiers = {
+    control: "ctrlKey",
+    shift: "shiftKey",
+    alt: "altKey",
+    meta: "metaKey"
+} as const;
+
+function isModifierKey(key: string): key is keyof typeof modifiers {
+    return key in modifiers;
+}
+
+function formatHotkeyLabel(hotkey: readonly string[]): string {
+    let label = "";
+    for (const word of hotkey) {
+        if (label) label += " + ";
+        label += word.charAt(0).toUpperCase() + word.slice(1);
+    }
+
+    return label;
+}
+
 export const settings = definePluginSettings({
     hotkey: {
         description: "The hotkey to open the command palette.",
@@ -66,7 +87,7 @@ export const settings = definePluginSettings({
                 <>
                     <div className={cl("key-recorder-container")} onClick={() => recordKeybind(setIsRecording)}>
                         <div className={`${cl("key-recorder")} ${isRecording ? cl("recording") : ""}`}>
-                            {settings.store.hotkey.map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" + ")}
+                            {formatHotkeyLabel(settings.store.hotkey)}
                             <button className={`${cl("key-recorder-button")} ${isRecording ? cl("recording-button") : ""}`} disabled={isRecording}>
                                 {isRecording ? "Recording..." : "Record keybind"}
                             </button>
@@ -98,7 +119,7 @@ export default definePlugin({
                 id: "openDevSettings",
                 label: "Open Dev tab",
                 callback: () => SettingsRouter.openUserSettings("equicord_patch_helper_panel"),
-                registrar: "Equicord"
+                registrar: "Protonn Cord"
             });
         }
     },
@@ -108,27 +129,19 @@ export default definePlugin({
     },
 
     event(e: KeyboardEvent) {
-
-        enum Modifiers {
-            control = "ctrlKey",
-            shift = "shiftKey",
-            alt = "altKey",
-            meta = "metaKey"
-        }
+        if (isRecordingGlobal) return;
 
         const { hotkey } = settings.store;
         const pressedKey = e.key.toLowerCase();
 
-        if (isRecordingGlobal) return;
-
         for (let i = 0; i < hotkey.length; i++) {
             const lowercasedRequiredKey = hotkey[i].toLowerCase();
 
-            if (lowercasedRequiredKey in Modifiers && !e[Modifiers[lowercasedRequiredKey]]) {
+            if (isModifierKey(lowercasedRequiredKey) && !e[modifiers[lowercasedRequiredKey]]) {
                 return;
             }
 
-            if (!(lowercasedRequiredKey in Modifiers) && pressedKey !== lowercasedRequiredKey) {
+            if (!isModifierKey(lowercasedRequiredKey) && pressedKey !== lowercasedRequiredKey) {
                 return;
             }
         }

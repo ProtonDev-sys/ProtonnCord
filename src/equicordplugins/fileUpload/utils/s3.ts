@@ -30,6 +30,16 @@ type UploadRequestResponse = {
 type UploadRequest = (url: string, options: RequestInit) => Promise<UploadRequestResponse>;
 
 const textEncoder = new TextEncoder();
+const hexDigits = "0123456789abcdef";
+
+function bytesToHex(bytes: Uint8Array): string {
+    let output = "";
+    for (const byte of bytes) {
+        output += hexDigits.charAt(byte >> 4) + hexDigits.charAt(byte & 0xf);
+    }
+
+    return output;
+}
 
 function toArrayBuffer(data: ArrayBuffer | Uint8Array | string): ArrayBuffer {
     if (typeof data === "string") {
@@ -44,7 +54,7 @@ function toArrayBuffer(data: ArrayBuffer | Uint8Array | string): ArrayBuffer {
 }
 
 function toHex(buffer: ArrayBuffer): string {
-    return Array.from(new Uint8Array(buffer), b => b.toString(16).padStart(2, "0")).join("");
+    return bytesToHex(new Uint8Array(buffer));
 }
 
 function encodeRfc3986(value: string): string {
@@ -52,12 +62,16 @@ function encodeRfc3986(value: string): string {
 }
 
 function buildS3Path(...parts: string[]): string {
-    const normalized = parts
-        .filter(Boolean)
-        .flatMap(part => part.split("/"))
-        .filter(Boolean)
-        .map(encodeRfc3986)
-        .join("/");
+    const normalizedParts: string[] = [];
+
+    for (const part of parts) {
+        if (!part) continue;
+        for (const segment of part.split("/")) {
+            if (segment) normalizedParts.push(encodeRfc3986(segment));
+        }
+    }
+
+    const normalized = normalizedParts.join("/");
     return normalized ? `/${normalized}` : "/";
 }
 
@@ -87,7 +101,7 @@ async function hmacSha256(key: ArrayBuffer | Uint8Array | string, value: string)
 function makeRandomHex(length = 16): string {
     const bytes = new Uint8Array(length);
     crypto.getRandomValues(bytes);
-    return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+    return bytesToHex(bytes);
 }
 
 export function isS3Configured(): boolean {
@@ -123,10 +137,19 @@ export async function uploadToS3(
     }
 
     const extension = filename.includes(".") ? filename.slice(filename.lastIndexOf(".")) : "";
-    const prefixSegments = (s3Prefix || "").split("/").filter(Boolean);
+    const prefixSegments: string[] = [];
+    for (const segment of (s3Prefix || "").split("/")) {
+        if (segment) prefixSegments.push(segment);
+    }
+
     const objectName = `${Date.now()}-${makeRandomHex(8)}${extension}`;
     const objectKeyRaw = [...prefixSegments, objectName].join("/");
-    const objectKeyPath = objectKeyRaw.split("/").filter(Boolean).map(encodeRfc3986).join("/");
+    const objectKeyPathSegments: string[] = [];
+    for (const segment of objectKeyRaw.split("/")) {
+        if (segment) objectKeyPathSegments.push(encodeRfc3986(segment));
+    }
+
+    const objectKeyPath = objectKeyPathSegments.join("/");
 
     const host = s3ForcePathStyle ? endpoint.host : `${s3Bucket}.${endpoint.host}`;
     const canonicalUri = s3ForcePathStyle
@@ -154,8 +177,13 @@ export async function uploadToS3(
     }
 
     const signedHeaderEntries = Object.entries(canonicalHeadersMap).sort(([a], [b]) => a.localeCompare(b));
-    const signedHeaders = signedHeaderEntries.map(([key]) => key).join(";");
-    const canonicalHeaders = signedHeaderEntries.map(([key, value]) => `${key}:${value.trim()}\n`).join("");
+    let signedHeaders = "";
+    let canonicalHeaders = "";
+    for (const [key, value] of signedHeaderEntries) {
+        if (signedHeaders) signedHeaders += ";";
+        signedHeaders += key;
+        canonicalHeaders += `${key}:${value.trim()}\n`;
+    }
 
     const canonicalRequest = [
         "PUT",

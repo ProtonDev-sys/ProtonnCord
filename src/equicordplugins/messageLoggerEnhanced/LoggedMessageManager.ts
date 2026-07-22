@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { Flogger, settings } from ".";
+import { settings } from ".";
 import { addMessageIDB, db, DBMessageStatus, deleteMessagesBulkIDB, getOlderThanTimestampForGuildsIDB, getOldestMessagesIDB } from "./db";
 import { LoggedMessage, LoggedMessageJSON } from "./types";
 import { cleanupMessage } from "./utils";
@@ -40,7 +40,6 @@ export const addMessage = async (message: LoggedMessage | LoggedMessageJSON, sta
             const oldGuildMessages = await getOlderThanTimestampForGuildsIDB(cutoffTime, currentChannelId, settings.store.preserveCurrentChannel);
 
             if (oldGuildMessages.length > 0) {
-                Flogger.info(`Deleting ${oldGuildMessages.length} old server messages older than ${settings.store.timeBasedCleanupMinutes} minutes`);
                 await deleteMessagesBulkIDB(oldGuildMessages.map(m => m.message_id));
             }
         }
@@ -54,7 +53,6 @@ export const addMessage = async (message: LoggedMessage | LoggedMessageJSON, sta
 
             const oldestMessages = await getOldestMessagesIDB(messagesToDelete);
 
-            Flogger.info(`Deleting ${messagesToDelete} oldest messages`);
             await deleteMessagesBulkIDB(oldestMessages.map(m => m.message_id));
         }
     }

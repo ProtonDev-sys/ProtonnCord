@@ -38,8 +38,15 @@ export const useAuthorizationStore = proxyLazy(() => zustandCreate(
         (set: any, get: any) => ({
             token: null,
             tokens: {},
-            init: () => { set({ token: get().tokens[UserStore.getCurrentUser().id] ?? null }); },
-            setToken: (token: string) => set({ token, tokens: { ...get().tokens, [UserStore.getCurrentUser().id]: token } }),
+            init: () => {
+                const currentUserId = UserStore.getCurrentUser()?.id;
+                set({ token: currentUserId ? get().tokens[currentUserId] ?? null : null });
+            },
+            setToken: (token: string) => {
+                const currentUserId = UserStore.getCurrentUser()?.id;
+                if (!currentUserId) return;
+                set({ token, tokens: { ...get().tokens, [currentUserId]: token } });
+            },
             remove: (id: string) => {
                 const { tokens, init } = get();
                 const newTokens = { ...tokens };

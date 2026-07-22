@@ -111,7 +111,12 @@ export async function fetchTrackData(): Promise<TrackData | null> {
         "return output"
     ]);
 
-    const [id, name, album, artist, durationStr] = stdout.split("\n").filter(k => !!k);
+    const parts: string[] = [];
+    for (const line of stdout.split("\n")) {
+        if (line) parts.push(line);
+    }
+
+    const [id, name, album, artist, durationStr] = parts;
     const duration = Number.parseFloat(durationStr);
 
     const remoteData = await fetchRemoteData({ id, name, artist, album });

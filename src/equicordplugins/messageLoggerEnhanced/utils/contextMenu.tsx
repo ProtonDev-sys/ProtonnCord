@@ -11,7 +11,7 @@ import { FluxDispatcher, Menu, MessageActions, React, Toasts, UserStore } from "
 import { openLogModal } from "../components/LogsModal";
 import { deleteMessageIDB } from "../db";
 import { settings } from "../index";
-import { addToXAndRemoveFromOpposite, ListType, removeFromX } from ".";
+import { addToXAndRemoveFromOpposite, hasListId, ListType, removeFromX } from ".";
 
 const SortedGuildStore = findStoreLazy("SortedGuildStore");
 
@@ -32,9 +32,9 @@ function renderListOption(listType: ListType, IdType: idKeys, props: any) {
 
     const ids = Array.isArray(rawId) ? rawId : [rawId];
 
-    const isBlocked = ids.every(id => settings.store[listType].includes(id));
+    const isBlocked = ids.every(id => hasListId(listType, id));
     const oppositeListType = listType === "blacklistedIds" ? "whitelistedIds" : "blacklistedIds";
-    const isOppositeBlocked = ids.some(id => settings.store[oppositeListType].includes(id));
+    const isOppositeBlocked = ids.some(id => hasListId(oppositeListType, id));
     const list = listType === "blacklistedIds" ? "Blacklist" : "Whitelist";
 
     const addToList = () => ids.forEach(id => addToXAndRemoveFromOpposite(listType, id));
@@ -69,6 +69,8 @@ function renderOpenLogs(idType: idKeys, props: any) {
 
 export const contextMenuPath: NavContextMenuPatchCallback = (children, props) => {
     if (!props) return;
+
+    const currentUserId = UserStore.getCurrentUser()?.id;
 
     if (!children.some(child => child?.props?.id === "message-logger")) {
         children.push(
@@ -132,7 +134,7 @@ export const contextMenuPath: NavContextMenuPatchCallback = (children, props) =>
                 {
                     settings.store.hideMessageFromMessageLoggers
                     && props.navId === "message"
-                    && props.message?.author?.id === UserStore.getCurrentUser().id
+                    && props.message?.author?.id === currentUserId
                     && props.message?.deleted === false
                     && (
                         <>

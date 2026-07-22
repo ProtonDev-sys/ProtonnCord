@@ -58,7 +58,14 @@ function getMessageContent(message: Message) {
         || message.embeds?.find(embed => embed.type === "auto_moderation_message")?.rawDescription || "";
 }
 
-let tooltipTimeout: any;
+let tooltipTimeout: ReturnType<typeof setTimeout> | undefined;
+
+function clearTranslateTooltipTimeout() {
+    if (tooltipTimeout === undefined) return;
+
+    clearTimeout(tooltipTimeout);
+    tooltipTimeout = undefined;
+}
 
 export default definePlugin({
     name: "Translate",
@@ -104,10 +111,18 @@ export default definePlugin({
         if (!message.content) return;
 
         setShouldShowTranslateEnabledTooltip?.(true);
-        clearTimeout(tooltipTimeout);
-        tooltipTimeout = setTimeout(() => setShouldShowTranslateEnabledTooltip?.(false), 2000);
+        clearTranslateTooltipTimeout();
+        tooltipTimeout = setTimeout(() => {
+            tooltipTimeout = undefined;
+            setShouldShowTranslateEnabledTooltip?.(false);
+        }, 2000);
 
         const trans = await translate("sent", message.content);
         message.content = trans.text;
+    },
+
+    stop() {
+        clearTranslateTooltipTimeout();
+        setShouldShowTranslateEnabledTooltip?.(false);
     }
 });

@@ -97,7 +97,10 @@ const messageCtxPatch: NavContextMenuPatchCallback = (children, { msg }: { msg: 
     const forceUpdate = useForceUpdater();
 
     useEffect(() => {
-        const handler = () => {
+        const handler = (event: KeyboardEvent) => {
+            if (event.key !== "Shift") return;
+
+            shift = event.type === "keydown";
             forceUpdate();
         };
 
@@ -128,6 +131,10 @@ const keydownListener = (event: KeyboardEvent) => {
     if (event.key === "Shift") shift = true;
 };
 
+const blurListener = () => {
+    shift = false;
+};
+
 migratePluginSettings("RepeatMessages", "RepeatMessage");
 export default definePlugin({
     name: "RepeatMessages",
@@ -154,9 +161,11 @@ export default definePlugin({
     start() {
         document.addEventListener("keyup", keyupListener);
         document.addEventListener("keydown", keydownListener);
+        window.addEventListener("blur", blurListener);
     },
     stop() {
         document.removeEventListener("keyup", keyupListener);
         document.removeEventListener("keydown", keydownListener);
+        window.removeEventListener("blur", blurListener);
     },
 });

@@ -7,9 +7,9 @@
 import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
-import { Constants, PermissionsBits, PermissionStore, React, RestAPI, useCallback, useEffect, useState } from "@webpack/common";
+import { Constants, PermissionsBits, PermissionStore, React, RestAPI, useEffect, useState } from "@webpack/common";
 
-const validKeycodes = [
+const validKeycodes = new Set([
     "Backspace", "Tab", "Enter", "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight", "Pause", "CapsLock",
     "Escape", "Space", "PageUp", "PageDown", "End", "Home", "ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown", "PrintScreen", "Insert",
     "Delete", "Digit0", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "KeyA", "KeyB", "KeyC",
@@ -17,31 +17,52 @@ const validKeycodes = [
     "KeyU", "KeyV", "KeyW", "KeyX", "KeyY", "KeyZ", "MetaLeft", "MetaRight", "ContextMenu", "Numpad0", "Numpad1", "Numpad2", "Numpad3",
     "Numpad4", "Numpad5", "Numpad6", "Numpad7", "Numpad8", "Numpad9", "NumpadMultiply", "NumpadAdd", "NumpadSubtract", "NumpadDecimal",
     "NumpadDivide", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "NumLock", "ScrollLock",
-];
+]);
 
-function showIcon() {
-    const [show, setShow] = useState(false);
+let shouldShowTrash = false;
+const trashVisibilitySubscribers = new Set<(show: boolean) => void>();
+
+function setTrashVisibility(show: boolean) {
+    if (shouldShowTrash === show) return;
+
+    shouldShowTrash = show;
+    for (const subscriber of trashVisibilitySubscribers) subscriber(show);
+}
+
+function isDeleteKeyCombo(e: KeyboardEvent) {
     const { keyBind, reqCtrl, reqShift, reqAlt } = settings.store;
 
-    const handleKeys = useCallback((e: KeyboardEvent) => {
-        const isMatchingKey =
-            e.code === keyBind &&
-            (!reqCtrl || e.ctrlKey) &&
-            (!reqShift || e.shiftKey) &&
-            (!reqAlt || e.altKey);
+    return e.code === keyBind &&
+        (!reqCtrl || e.ctrlKey) &&
+        (!reqShift || e.shiftKey) &&
+        (!reqAlt || e.altKey);
+}
 
-        setShow(isMatchingKey);
-    }, [keyBind, reqCtrl, reqShift, reqAlt]);
+function handleKeyDown(e: KeyboardEvent) {
+    setTrashVisibility(isDeleteKeyCombo(e));
+}
+
+function handleKeyUp(e: KeyboardEvent) {
+    if (shouldShowTrash && (e.code === settings.store.keyBind || !isDeleteKeyCombo(e))) {
+        setTrashVisibility(false);
+    }
+}
+
+function resetTrashVisibility() {
+    setTrashVisibility(false);
+}
+
+function useTrashIconVisibility() {
+    const [show, setShow] = useState(shouldShowTrash);
 
     useEffect(() => {
-        window.addEventListener("keydown", handleKeys);
-        window.addEventListener("keyup", handleKeys);
+        trashVisibilitySubscribers.add(setShow);
+        setShow(shouldShowTrash);
 
         return () => {
-            window.removeEventListener("keydown", handleKeys);
-            window.removeEventListener("keyup", handleKeys);
+            trashVisibilitySubscribers.delete(setShow);
         };
-    }, [handleKeys]);
+    }, []);
 
     return show;
 }
@@ -52,22 +73,26 @@ const settings = definePluginSettings({
         description: "The key to toggle trash when pressed.",
         type: OptionType.STRING,
         default: "KeyZ",
-        isValid: (value: string) => validKeycodes.includes(value),
+        isValid: (value: string) => validKeycodes.has(value),
+        onChange: resetTrashVisibility,
     },
     reqCtrl: {
         description: "Require control to be held.",
         type: OptionType.BOOLEAN,
         default: true,
+        onChange: resetTrashVisibility,
     },
     reqShift: {
         description: "Require shift to be held.",
         type: OptionType.BOOLEAN,
         default: true,
+        onChange: resetTrashVisibility,
     },
     reqAlt: {
         description: "Require alt to be held.",
         type: OptionType.BOOLEAN,
         default: false,
+        onChange: resetTrashVisibility,
     },
 });
 
@@ -77,6 +102,16 @@ export default definePlugin({
     tags: ["Servers", "Utility"],
     authors: [Devs.thororen],
     settings,
+    start() {
+        window.addEventListener("keydown", handleKeyDown);
+        window.addEventListener("keyup", handleKeyUp);
+    },
+    stop() {
+        window.removeEventListener("keydown", handleKeyDown);
+        window.removeEventListener("keyup", handleKeyUp);
+        resetTrashVisibility();
+        trashVisibilitySubscribers.clear();
+    },
     patches: [
         // TY TypingIndicator
         // Normal Channels
@@ -97,7 +132,7 @@ export default definePlugin({
         }
     ],
     TrashIcon: channel => {
-        const show = showIcon();
+        const show = useTrashIconVisibility();
 
         if (!show || !PermissionStore.can(PermissionsBits.MANAGE_CHANNELS, channel)) return null;
 

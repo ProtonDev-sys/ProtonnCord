@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { LyricsData, Provider } from "@equicordplugins/musicControls/spotify/lyrics/providers/types";
+import { LyricsData, Provider, type SyncedLyric } from "@equicordplugins/musicControls/spotify/lyrics/providers/types";
 import { Track } from "@equicordplugins/musicControls/spotify/SpotifyStore";
 
 const baseUrlLrclib = "https://lrclib.net/api/get";
@@ -22,7 +22,9 @@ interface LrcLibResponse {
 }
 
 function lyricTimeToSeconds(time: string) {
-    const [minutes, seconds] = time.slice(1, -1).split(":").map(Number);
+    const separatorIndex = time.indexOf(":");
+    const minutes = Number(time.slice(1, separatorIndex));
+    const seconds = Number(time.slice(separatorIndex + 1, -1));
     return minutes * 60 + seconds;
 }
 
@@ -38,7 +40,7 @@ export async function getLyricsLrclib(track: Track): Promise<LyricsData | null> 
     const url = `${baseUrlLrclib}?${params.toString()}`;
     const response = await fetch(url, {
         headers: {
-            "User-Agent": "SpotifyLyrics for Equicord (https://github.com/Masterjoona/vc-spotifylyrics)"
+            "User-Agent": "SpotifyLyrics for ProtonnCord (https://github.com/Masterjoona/vc-spotifylyrics)"
         }
     });
 
@@ -47,20 +49,22 @@ export async function getLyricsLrclib(track: Track): Promise<LyricsData | null> 
     const data = await response.json() as LrcLibResponse;
     if (!data.syncedLyrics) return null;
 
-    const lyrics = data.syncedLyrics;
-    const lines = lyrics.split("\n").filter(line => line.trim() !== "");
+    const lines: SyncedLyric[] = [];
+    for (const line of data.syncedLyrics.split("\n")) {
+        if (!line.trim()) continue;
+
+        const [lrcTime, text] = line.split("]");
+        const trimmedText = text.trim();
+        lines.push({
+            time: lyricTimeToSeconds(lrcTime),
+            text: (trimmedText === "" || trimmedText === "♪") ? null : trimmedText
+        });
+    }
 
     return {
         useLyric: Provider.Lrclib,
         lyricsVersions: {
-            LRCLIB: lines.map(line => {
-                const [lrcTime, text] = line.split("]");
-                const trimmedText = text.trim();
-                return {
-                    time: lyricTimeToSeconds(lrcTime),
-                    text: (trimmedText === "" || trimmedText === "♪") ? null : trimmedText
-                };
-            })
+            LRCLIB: lines
         }
     };
 }

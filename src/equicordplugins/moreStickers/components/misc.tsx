@@ -389,9 +389,11 @@ export const Packs = () => {
                                 }
 
                                 const a = document.createElement("a");
-                                a.href = URL.createObjectURL(new Blob([JSON.stringify(result)], { type: "application/json" }));
+                                const url = URL.createObjectURL(new Blob([JSON.stringify(result)], { type: "application/json" }));
+                                a.href = url;
                                 a.download = "MoreStickers.stickerpacks";
                                 a.click();
+                                setTimeout(() => URL.revokeObjectURL(url), 0);
 
                                 Toasts.show({
                                     message: "Sticker Packs exported",

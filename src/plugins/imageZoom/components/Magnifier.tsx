@@ -121,13 +121,15 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
             }
         };
 
-        waitFor(() => instance.state.readyState === "READY", () => {
-            const elem = document.getElementById(ELEMENT_ID) as HTMLDivElement;
+        const cancelWaitForReady = waitFor(() => instance.state.readyState === "READY", () => {
+            const elem = document.getElementById(ELEMENT_ID) as HTMLDivElement | null;
+            if (!elem) return;
+
             element.current = elem;
             elem.querySelector("img,video")?.setAttribute("draggable", "false");
             if (instance.props.animated) {
-                originalVideoElementRef.current = elem!.querySelector("video")!;
-                originalVideoElementRef.current.addEventListener("timeupdate", syncVideos);
+                originalVideoElementRef.current = elem.querySelector("video");
+                originalVideoElementRef.current?.addEventListener("timeupdate", syncVideos);
             }
 
             setReady(true);
@@ -147,6 +149,10 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
             document.removeEventListener("mousedown", onMouseDown);
             document.removeEventListener("mouseup", onMouseUp);
             document.removeEventListener("wheel", onWheel);
+            cancelWaitForReady();
+            originalVideoElementRef.current?.removeEventListener("timeupdate", syncVideos);
+            originalVideoElementRef.current = null;
+            element.current = null;
         };
     }, []);
 

@@ -34,8 +34,10 @@ function showDisableInvites(guildId: string) {
 
 function disableInvites(guildId: string) {
     const guild = GuildStore.getGuild(guildId);
+    if (!guild || hasGuildFeature(guild, "INVITES_DISABLED")) return;
+
     const features = [...guild.features, "INVITES_DISABLED"];
-    RestAPI.patch({
+    void RestAPI.patch({
         url: Constants.Endpoints.GUILD(guildId),
         body: { features },
     });
@@ -44,7 +46,7 @@ function disableInvites(guildId: string) {
 export default definePlugin({
     name: "PauseInvitesForever",
     searchTerms: ["DisableInvitesForever"],
-    description: "Brings back the option to pause invites indefinitely that stupit Discord removed.",
+    description: "Brings back the option to pause invites indefinitely that Discord removed.",
     tags: ["Servers"],
     authors: [Devs.Dolfies, Devs.amia],
 

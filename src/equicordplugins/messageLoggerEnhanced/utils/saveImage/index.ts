@@ -20,8 +20,52 @@ import { MessageAttachment } from "@vencord/discord-types";
 
 import { Flogger, settings } from "../..";
 import { LoggedAttachment, LoggedMessage, LoggedMessageJSON } from "../../types";
-import { memoize } from "../memoize";
 import { deleteImage, downloadAttachment, getImage, } from "./ImageManager";
+
+const MAX_ATTACHMENT_BLOB_URLS = 100;
+
+type AttachmentBlobUrlCacheEntry = {
+    promise: Promise<string | null>;
+    url?: string;
+};
+
+const attachmentBlobUrlCache = new Map<string, AttachmentBlobUrlCacheEntry>();
+
+function getAttachmentBlobUrlCacheKey(attachment: LoggedAttachment) {
+    return `${attachment.id}:${attachment.fileExtension ?? ""}`;
+}
+
+function revokeAttachmentBlobUrlEntry(key: string, entry: AttachmentBlobUrlCacheEntry) {
+    if (entry.url) {
+        URL.revokeObjectURL(entry.url);
+        entry.url = undefined;
+        return;
+    }
+
+    void entry.promise.then(url => {
+        if (url && attachmentBlobUrlCache.get(key) !== entry) {
+            URL.revokeObjectURL(url);
+        }
+    }, () => { });
+}
+
+function pruneAttachmentBlobUrlCache() {
+    while (attachmentBlobUrlCache.size > MAX_ATTACHMENT_BLOB_URLS) {
+        const oldest = attachmentBlobUrlCache.entries().next().value;
+        if (!oldest) return;
+
+        const [key, entry] = oldest;
+        attachmentBlobUrlCache.delete(key);
+        revokeAttachmentBlobUrlEntry(key, entry);
+    }
+}
+
+export function clearAttachmentBlobUrlCache() {
+    for (const [key, entry] of attachmentBlobUrlCache) {
+        revokeAttachmentBlobUrlEntry(key, entry);
+    }
+    attachmentBlobUrlCache.clear();
+}
 
 export function getFileExtension(str: string) {
     const matches = str.match(/(\.[a-zA-Z0-9]+)(?:\?.*)?$/);
@@ -32,7 +76,6 @@ export function getFileExtension(str: string) {
 
 export function isAttachmentGoodToCache(attachment: MessageAttachment, fileExtension: string) {
     if (attachment.size > settings.store.attachmentSizeLimitInMegabytes * 1024 * 1024) {
-        Flogger.log("Attachment too large to cache", attachment.filename);
         return false;
     }
     const attachmentFileExtensionsStr = settings.store.attachmentFileExtensions.trim();
@@ -47,7 +90,6 @@ export function isAttachmentGoodToCache(attachment: MessageAttachment, fileExten
     }
 
     if (!fileExtension || !allowedFileExtensions.includes(fileExtension)) {
-        Flogger.log("Attachment not in allowed file extensions", attachment.filename);
         return false;
     }
 
@@ -60,7 +102,6 @@ export async function cacheMessageImages(message: LoggedMessage | LoggedMessageJ
             const fileExtension = getFileExtension(attachment.filename ?? attachment.url) ?? attachment?.content_type?.split("/")?.[1] ?? ".png";
 
             if (!isAttachmentGoodToCache(attachment, fileExtension)) {
-                Flogger.log("skipping", attachment.filename);
                 continue;
             }
 
@@ -100,12 +141,41 @@ export async function deleteMessageImages(message: LoggedMessage | LoggedMessage
     }
 }
 
-export const getAttachmentBlobUrl = memoize(async (attachment: LoggedAttachment) => {
-    const imageData = await getImage(attachment.id, attachment.fileExtension);
-    if (!imageData) return null;
+export async function getAttachmentBlobUrl(attachment: LoggedAttachment) {
+    const key = getAttachmentBlobUrlCacheKey(attachment);
+    const cached = attachmentBlobUrlCache.get(key);
+    if (cached) {
+        attachmentBlobUrlCache.delete(key);
+        attachmentBlobUrlCache.set(key, cached);
+        return cached.promise;
+    }
 
-    const blob = new Blob([imageData]);
-    const resUrl = URL.createObjectURL(blob);
+    const promise = (async () => {
+        const imageData = await getImage(attachment.id, attachment.fileExtension);
+        if (!imageData) return null;
 
-    return resUrl;
-});
+        const blob = new Blob([imageData]);
+        const resUrl = URL.createObjectURL(blob);
+
+        return resUrl;
+    })();
+    const entry: AttachmentBlobUrlCacheEntry = { promise };
+
+    void promise.then(url => {
+        if (!url) return;
+
+        entry.url = url;
+        if (attachmentBlobUrlCache.get(key) !== entry) {
+            URL.revokeObjectURL(url);
+            entry.url = undefined;
+        }
+    }, () => {
+        if (attachmentBlobUrlCache.get(key) === entry) {
+            attachmentBlobUrlCache.delete(key);
+        }
+    });
+
+    attachmentBlobUrlCache.set(key, entry);
+    pruneAttachmentBlobUrlCache();
+    return promise;
+}

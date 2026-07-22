@@ -54,13 +54,22 @@ export function QuestIcon(height: number, width: number, className?: string): JS
 }
 
 function splitClassNames(className: string): string[] {
-    const classNames = className.split(/\s+/).filter(Boolean);
+    const classNames: string[] = [];
+    for (const rawClassName of className.split(/\s+/)) {
+        if (rawClassName) classNames.push(rawClassName);
+    }
 
     return classNames.length ? classNames : [q("quest-button")];
 }
 
 function suffixClassNames(classNames: string[], suffix: string): string {
-    return classNames.map(className => `${className}-${suffix}`).join(" ");
+    let suffixedClassNames = "";
+    for (const className of classNames) {
+        if (suffixedClassNames) suffixedClassNames += " ";
+        suffixedClassNames += `${className}-${suffix}`;
+    }
+
+    return suffixedClassNames;
 }
 
 function QuestButtonLowerBadge(props: QuestButtonLowerBadgeProps & { className: string; }): JSX.Element {

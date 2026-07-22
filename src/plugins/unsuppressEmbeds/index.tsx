@@ -30,18 +30,18 @@ const messageContextMenuPatch: NavContextMenuPatchCallback = (
     { channel, message: { author, messageSnapshots, embeds, flags, id: messageId } }: { channel: Channel; message: Message; }
 ) => {
     const isEmbedSuppressed = (flags & EMBED_SUPPRESSED) !== 0;
-    const hasEmbedsInSnapshots = messageSnapshots.some(s => s.message.embeds.length);
+    const hasEmbedsInSnapshots = messageSnapshots?.some(s => s.message.embeds.length);
 
     if (!isEmbedSuppressed && !embeds.length && !hasEmbedsInSnapshots) return;
 
     const hasEmbedPerms = channel.isPrivate() || !!(PermissionStore.getChannelPermissions({ id: channel.id }) & PermissionsBits.EMBED_LINKS);
-    if (author.id === UserStore.getCurrentUser().id && !hasEmbedPerms) return;
+    if (author.id === UserStore.getCurrentUser()?.id && !hasEmbedPerms) return;
 
     const menuGroup = findGroupChildrenByChildId("delete", children);
     const deleteIndex = menuGroup?.findIndex(i => i?.props?.id === "delete");
-    if (!deleteIndex || !menuGroup) return;
+    if (!menuGroup || deleteIndex == null || deleteIndex < 0) return;
 
-    menuGroup.splice(deleteIndex - 1, 0, (
+    menuGroup.splice(Math.max(deleteIndex - 1, 0), 0, (
         <Menu.MenuItem
             id="unsuppress-embeds"
             key="unsuppress-embeds"
@@ -49,7 +49,7 @@ const messageContextMenuPatch: NavContextMenuPatchCallback = (
             color={isEmbedSuppressed ? undefined : "danger"}
             icon={isEmbedSuppressed ? ImageVisible : ImageInvisible}
             action={() =>
-                RestAPI.patch({
+                void RestAPI.patch({
                     url: Constants.Endpoints.MESSAGE(channel.id, messageId),
                     body: { flags: isEmbedSuppressed ? flags & ~EMBED_SUPPRESSED : flags | EMBED_SUPPRESSED }
                 })

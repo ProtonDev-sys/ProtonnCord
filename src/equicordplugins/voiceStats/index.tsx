@@ -27,6 +27,9 @@ const sessionStarts = new Map<string, number>();
 const totalsByUser = new Map<string, number>();
 let trackedChannelId: string | null = null;
 let saveIntervalId: ReturnType<typeof setInterval> | null = null;
+let totalsDirty = false;
+let pluginStarted = false;
+let startGeneration = 0;
 
 async function loadStoredTotals() {
     const saved = await get<Record<string, number>>(storageKey);
@@ -35,6 +38,9 @@ async function loadStoredTotals() {
 }
 
 async function persistTotals() {
+    if (!totalsDirty) return;
+
+    totalsDirty = false;
     await set(storageKey, Object.fromEntries(totalsByUser));
 }
 
@@ -42,34 +48,51 @@ function flushActiveSessions() {
     const now = Date.now();
     for (const [userId, startedAt] of sessionStarts) {
         const accrued = Math.floor((now - startedAt) / 1000);
+        if (accrued <= 0) continue;
+
         totalsByUser.set(userId, (totalsByUser.get(userId) ?? 0) + accrued);
         sessionStarts.set(userId, now);
+        totalsDirty = true;
     }
 }
 
+function startSaveInterval() {
+    if (saveIntervalId || sessionStarts.size === 0) return;
+
+    saveIntervalId = setInterval(() => {
+        flushActiveSessions();
+        void persistTotals();
+    }, saveIntervalMs);
+}
+
+function stopSaveInterval() {
+    if (!saveIntervalId) return;
+
+    clearInterval(saveIntervalId);
+    saveIntervalId = null;
+}
+
 function startTrackingChannel(channelId: string, myId: string) {
+    if (trackedChannelId) stopTrackingChannel();
+
     trackedChannelId = channelId;
+    sessionStarts.clear();
+
     const states = VoiceStateStore.getVoiceStatesForChannel(channelId) ?? {};
     const now = Date.now();
     for (const state of Object.values(states) as VoiceState[]) {
         if (state.userId !== myId) sessionStarts.set(state.userId, now);
     }
-    saveIntervalId = setInterval(() => {
-        flushActiveSessions();
-        persistTotals();
-    }, saveIntervalMs);
+    startSaveInterval();
 }
 
 function stopTrackingChannel() {
-    if (saveIntervalId) {
-        clearInterval(saveIntervalId);
-        saveIntervalId = null;
-    }
+    stopSaveInterval();
     if (!trackedChannelId) return;
     flushActiveSessions();
     sessionStarts.clear();
     trackedChannelId = null;
-    persistTotals();
+    void persistTotals();
 }
 
 function getLiveSeconds(userId: string): number {
@@ -146,6 +169,8 @@ export default definePlugin({
     },
     flux: {
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
+            if (!pluginStarted) return;
+
             const myId = UserStore.getCurrentUser()?.id;
             if (!myId) return;
 
@@ -166,27 +191,43 @@ export default definePlugin({
                 const leftMyChannel = trackedChannelId !== null && oldChannelId === trackedChannelId && channelId !== trackedChannelId;
 
                 if (joinedMyChannel) {
-                    sessionStarts.set(userId, Date.now());
+                    if (!sessionStarts.has(userId)) {
+                        sessionStarts.set(userId, Date.now());
+                        startSaveInterval();
+                    }
                 } else if (leftMyChannel && sessionStarts.has(userId)) {
                     const startedAt = sessionStarts.get(userId)!;
                     const accrued = Math.floor((Date.now() - startedAt) / 1000);
-                    totalsByUser.set(userId, (totalsByUser.get(userId) ?? 0) + accrued);
+                    if (accrued > 0) {
+                        totalsByUser.set(userId, (totalsByUser.get(userId) ?? 0) + accrued);
+                        totalsDirty = true;
+                    }
                     sessionStarts.delete(userId);
-                    persistTotals();
+                    if (sessionStarts.size === 0) stopSaveInterval();
+                    void persistTotals();
                 }
             }
         }
     },
 
     async start() {
+        pluginStarted = true;
+        const generation = ++startGeneration;
+
         await loadStoredTotals();
+        if (!pluginStarted || generation !== startGeneration) return;
+
         const myId = UserStore.getCurrentUser()?.id;
         if (!myId) return;
+
         const channelId = SelectedChannelStore.getVoiceChannelId?.();
         if (channelId) startTrackingChannel(channelId, myId);
     },
 
     stop() {
+        pluginStarted = false;
+        startGeneration++;
         stopTrackingChannel();
+        sessionStarts.clear();
     }
 });

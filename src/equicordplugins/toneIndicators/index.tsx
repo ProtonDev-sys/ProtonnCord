@@ -13,6 +13,16 @@ import { type ReactNode } from "react";
 import indicatorsDefault from "./indicators";
 import ToneIndicator from "./ToneIndicator";
 
+type IndicatorCache = {
+    prefix: string;
+    rawCustomIndicators: string;
+    customIndicators: Record<string, string>;
+    indicatorRegex: RegExp;
+    quickTestRegex: RegExp;
+};
+
+let indicatorCache: IndicatorCache | null = null;
+
 const settings = definePluginSettings({
     prefix: {
         type: OptionType.STRING,
@@ -26,11 +36,14 @@ const settings = definePluginSettings({
     },
 });
 
-function getCustomIndicators(): Record<string, string> {
-    const raw = settings.store.customIndicators || "";
+function escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseCustomIndicators(raw: string): Record<string, string> {
     const result: Record<string, string> = {};
 
-    raw.split("; ").forEach(entry => {
+    raw.split(/;\s*/).forEach(entry => {
         const [key, ...rest] = entry.split("=");
         if (key && rest.length > 0) {
             result[key.trim().toLowerCase()] = rest.join("=").trim();
@@ -40,9 +53,60 @@ function getCustomIndicators(): Record<string, string> {
     return result;
 }
 
+function getEscapedPrefix(prefix: string) {
+    const escapedPrefix = escapeRegExp(prefix);
+
+    return /[*_~`|]/.test(prefix)
+        ? `(?:\\\\${escapedPrefix}|${escapedPrefix})`
+        : escapedPrefix;
+}
+
+function getIndicatorCache() {
+    const prefix = settings.store.prefix || "/";
+    const rawCustomIndicators = settings.store.customIndicators || "";
+    if (
+        indicatorCache &&
+        indicatorCache.prefix === prefix &&
+        indicatorCache.rawCustomIndicators === rawCustomIndicators
+    ) return indicatorCache;
+
+    const customIndicators = parseCustomIndicators(rawCustomIndicators);
+    const allIndicators = new Set<string>();
+
+    indicatorsDefault.forEach((_, key) => {
+        allIndicators.add(key.replace(/^_/, ""));
+    });
+    Object.keys(customIndicators).forEach(key => {
+        allIndicators.add(key.replace(/^_/, ""));
+    });
+
+    const escaped: string[] = [];
+    for (const indicator of allIndicators) {
+        escaped.push(escapeRegExp(indicator));
+    }
+    escaped.sort((a, b) => b.length - a.length);
+
+    let escapedPattern = "";
+    for (const indicator of escaped) {
+        if (escapedPattern) escapedPattern += "|";
+        escapedPattern += indicator;
+    }
+
+    const escapedPrefix = getEscapedPrefix(prefix);
+    indicatorCache = {
+        prefix,
+        rawCustomIndicators,
+        customIndicators,
+        indicatorRegex: new RegExp(`(?:^|\\s)${escapedPrefix}(${escapedPattern})(?=\\s|$|[^\\s\\w/])`, "giu"),
+        quickTestRegex: new RegExp(`${escapedPrefix}[\\p{L}_]+`, "iu")
+    };
+
+    return indicatorCache;
+}
+
 function getIndicator(text: string): string | null {
     text = text.toLowerCase();
-    const customIndicators = getCustomIndicators();
+    const { customIndicators } = getIndicatorCache();
 
     return (
         customIndicators[text] ||
@@ -53,43 +117,13 @@ function getIndicator(text: string): string | null {
     );
 }
 
-function buildIndicatorRegex(): RegExp {
-    const customIndicators = getCustomIndicators();
-    const allIndicators = new Set<string>();
-
-    indicatorsDefault.forEach((_, key) => {
-        allIndicators.add(key.replace(/^_/, "")); // remove underscore prefix for aliases
-    });
-    Object.keys(customIndicators).forEach(key => {
-        allIndicators.add(key.replace(/^_/, "")); // remove underscore prefix for aliases
-    });
-
-    // escape special regex characters and sort by length (longest first)
-    const escaped = Array.from(allIndicators)
-        .map(ind => ind.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-        .sort((a, b) => b.length - a.length); // longest first to avoid partial matches (should fix some edge cases)
-
-    const prefix = settings.store.prefix || "/";
-    let escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-    // if prefix is a markdown character, also match escaped version
-    const isMarkdown = /[*_~`|]/.test(prefix);
-    if (isMarkdown) {
-        escapedPrefix = `(?:\\\\${escapedPrefix}|${escapedPrefix})`;
-    }
-
-    // exclude forward slash from punctuation to prevent sed syntax conflicts (s/find/replace)
-    const pattern = `(?:^|\\s)${escapedPrefix}(${escaped.join("|")})(?=\\s|$|[^\\s\\w/])`;
-    return new RegExp(pattern, "giu"); // 'i' = case-insensitive, 'u' = unicode
-}
-
 function splitTextWithIndicators(text: string): ReactNode[] {
     const nodes: ReactNode[] = [];
     let lastIndex = 0;
-    const regex = buildIndicatorRegex();
-    const prefix = settings.store.prefix || "/";
+    const { indicatorRegex: regex, prefix } = getIndicatorCache();
     let match: RegExpExecArray | null;
 
+    regex.lastIndex = 0;
     while ((match = regex.exec(text))) {
         const indicator = match[1];
         const desc = getIndicator(indicator);
@@ -129,16 +163,7 @@ function patchChildrenTree(children: any): any {
         if (node == null) return node;
 
         if (typeof node === "string") {
-            const prefix = settings.store.prefix || "/";
-            let escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-            // if prefix is markdown character, also check for escaped version
-            const isMarkdown = /[*_~`|]/.test(prefix);
-            if (isMarkdown) {
-                escapedPrefix = `(?:\\\\${escapedPrefix}|${escapedPrefix})`;
-            }
-
-            if (!new RegExp(`${escapedPrefix}[\\p{L}_]+`, "iu").test(node)) return node;
+            if (!getIndicatorCache().quickTestRegex.test(node)) return node;
             const parts = splitTextWithIndicators(node);
             return parts.length === 1 ? parts[0] : parts;
         }

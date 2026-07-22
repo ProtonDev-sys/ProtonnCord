@@ -15,6 +15,11 @@ import { ColorUtils, React, showToast, Toasts } from "@webpack/common";
 const cl = classNameFactory("vc-better-audio-player-");
 const CORS_PROXY = "https://cors.keiran0.workers.dev?url=";
 const MAX_FILE_SIZE = 12e6;
+const MAX_AUDIO_BLOB_CACHE_SIZE = 12;
+const MAX_COLOR_CACHE_SIZE = 16;
+
+const audioBlobCache = new Map<string, Promise<Blob | null>>();
+const colorCache = new Map<string, readonly [number, number, number]>();
 
 interface PlayerInstance {
     mediaRef: React.RefObject<HTMLAudioElement>;
@@ -36,6 +41,26 @@ function validateColor(value: string, key: string, fallback: string) {
     settings.store[key] = fallback;
 }
 
+function getRgbColor(value: string): readonly [number, number, number] {
+    const cachedColor = colorCache.get(value);
+    if (cachedColor) return cachedColor;
+
+    const firstSeparator = value.indexOf(",");
+    const secondSeparator = value.indexOf(",", firstSeparator + 1);
+    const r = Number(value.slice(0, firstSeparator));
+    const g = Number(value.slice(firstSeparator + 1, secondSeparator));
+    const b = Number(value.slice(secondSeparator + 1));
+    const color = [r, g, b] as const;
+    colorCache.set(value, color);
+
+    if (colorCache.size > MAX_COLOR_CACHE_SIZE) {
+        const oldestKey = colorCache.keys().next().value;
+        if (oldestKey) colorCache.delete(oldestKey);
+    }
+
+    return color;
+}
+
 function maxTypedArray(arr: Uint8Array<ArrayBufferLike>): number {
     let max = 0;
     for (let i = 0; i < arr.length; i++) {
@@ -46,7 +71,8 @@ function maxTypedArray(arr: Uint8Array<ArrayBufferLike>): number {
 
 function drawOscilloscope(ctx: CanvasRenderingContext2D, w: number, h: number, dataArray: Uint8Array<ArrayBufferLike>, bufferLength: number) {
     const sliceWidth = w / bufferLength;
-    const [r, g, b] = settings.store.oscilloscopeColor.split(",").map(Number);
+    const [r, g, b] = getRgbColor(settings.store.oscilloscopeColor);
+    const solidColor = settings.store.oscilloscopeSolidColor;
     const amp = 3;
     let x = 0;
 
@@ -57,7 +83,7 @@ function drawOscilloscope(ctx: CanvasRenderingContext2D, w: number, h: number, d
         const v = (dataArray[i] - 128) / 128;
         const y = (h / 2) - (v * amp * h / 2);
 
-        if (settings.store.oscilloscopeSolidColor) {
+        if (solidColor) {
             ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
         } else {
             const absV = Math.abs(v);
@@ -76,13 +102,14 @@ function drawSpectrograph(ctx: CanvasRenderingContext2D, w: number, h: number, f
     const maxVal = maxTypedArray(frequencyData);
     if (maxVal === 0) return;
 
-    const [r, g, b] = settings.store.spectrographColor.split(",").map(Number);
+    const [r, g, b] = getRgbColor(settings.store.spectrographColor);
+    const solidColor = settings.store.spectrographSolidColor;
     let x = 0;
 
     for (let i = 0; i < bufferLength; i++) {
         const barH = (frequencyData[i] / maxVal) * h;
 
-        if (settings.store.spectrographSolidColor) {
+        if (solidColor) {
             ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
         } else {
             const red = Math.min(r + (i / bufferLength) * 155, 255);
@@ -99,15 +126,43 @@ function drawSpectrograph(ctx: CanvasRenderingContext2D, w: number, h: number, f
     }
 }
 
-async function fetchAudioBlob(src: string): Promise<string | null> {
+async function fetchAudioBlobData(src: string): Promise<Blob | null> {
     const url = new URL(src);
     url.searchParams.set("t", Date.now().toString());
 
     const response = await fetch(CORS_PROXY + encodeURIComponent(url.href));
+    if (!response.ok) return null;
+
     const contentLength = response.headers.get("content-length");
     if (contentLength && Number(contentLength) > MAX_FILE_SIZE) return null;
 
     const blob = await response.blob();
+    if (blob.size > MAX_FILE_SIZE) return null;
+    return blob;
+}
+
+async function getAudioBlob(src: string): Promise<Blob | null> {
+    const cachedBlob = audioBlobCache.get(src);
+    if (cachedBlob) return cachedBlob;
+
+    const blobPromise = fetchAudioBlobData(src).catch(error => {
+        audioBlobCache.delete(src);
+        throw error;
+    });
+
+    audioBlobCache.set(src, blobPromise);
+    if (audioBlobCache.size > MAX_AUDIO_BLOB_CACHE_SIZE) {
+        const oldestKey = audioBlobCache.keys().next().value;
+        if (oldestKey) audioBlobCache.delete(oldestKey);
+    }
+
+    return blobPromise;
+}
+
+async function fetchAudioBlob(src: string): Promise<string | null> {
+    const blob = await getAudioBlob(src);
+    if (!blob) return null;
+
     return URL.createObjectURL(blob);
 }
 
@@ -118,6 +173,7 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
     const animFrameRef = React.useRef(0);
     const setupDoneRef = React.useRef(false);
     const blobUrlRef = React.useRef<string | null>(null);
+    const canvasSizeRef = React.useRef({ width: 0, height: 0 });
 
     React.useEffect(() => {
         const audio = playerRef.current;
@@ -156,9 +212,17 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
         let dataArray: Uint8Array<ArrayBuffer> | null = null;
         let frequencyData: Uint8Array<ArrayBuffer> | null = null;
 
+        const requestDraw = () => {
+            if (animFrameRef.current !== 0 || audio.paused) return;
+
+            animFrameRef.current = requestAnimationFrame(draw);
+        };
+
         const draw = () => {
+            animFrameRef.current = 0;
+
             const analyser = analyserRef.current;
-            if (!canvasCtx || !analyser) return;
+            if (!canvasCtx || !analyser || audio.paused) return;
 
             if (!dataArray || !frequencyData) {
                 const bufferLength = analyser.frequencyBinCount;
@@ -166,15 +230,17 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
                 frequencyData = new Uint8Array(bufferLength);
             }
 
-            if (!audio.paused) animFrameRef.current = requestAnimationFrame(draw);
-
             analyser.getByteTimeDomainData(dataArray);
             analyser.getByteFrequencyData(frequencyData);
 
-            const { width, height } = canvas.getBoundingClientRect();
+            const { width, height } = canvasSizeRef.current;
+            if (width === 0 || height === 0) return;
+
             canvasCtx.clearRect(0, 0, width, height);
             if (settings.store.oscilloscope) drawOscilloscope(canvasCtx, width, height, dataArray, dataArray.length);
             if (settings.store.spectrograph) drawSpectrograph(canvasCtx, width, height, frequencyData, frequencyData.length);
+
+            requestDraw();
         };
 
         const onPlay = () => {
@@ -182,12 +248,13 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
             if (audioCtxRef.current?.state === "suspended") {
                 audioCtxRef.current.resume();
             }
-            draw();
+            requestDraw();
         };
 
         const onPause = () => {
             audioCtxRef.current?.suspend();
             cancelAnimationFrame(animFrameRef.current);
+            animFrameRef.current = 0;
         };
 
         audio.addEventListener("play", onPlay);
@@ -199,6 +266,7 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
             audio.removeEventListener("play", onPlay);
             audio.removeEventListener("pause", onPause);
             cancelAnimationFrame(animFrameRef.current);
+            animFrameRef.current = 0;
             audioCtxRef.current?.close();
             audioCtxRef.current = null;
             analyserRef.current = null;
@@ -208,7 +276,7 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
                 blobUrlRef.current = null;
             }
         };
-    }, [playerRef]);
+    }, [playerRef, src]);
 
     React.useEffect(() => {
         const canvas = canvasRef.current;
@@ -216,10 +284,14 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
 
         const resize = () => {
             const rect = canvas.getBoundingClientRect();
-            canvas.width = rect.width * window.devicePixelRatio;
-            canvas.height = rect.height * window.devicePixelRatio;
+            const devicePixelRatio = window.devicePixelRatio || 1;
+
+            canvasSizeRef.current = { width: rect.width, height: rect.height };
+            canvas.width = Math.floor(rect.width * devicePixelRatio);
+            canvas.height = Math.floor(rect.height * devicePixelRatio);
+
             const ctx = canvas.getContext("2d");
-            ctx?.scale(window.devicePixelRatio, window.devicePixelRatio);
+            ctx?.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
         };
 
         resize();

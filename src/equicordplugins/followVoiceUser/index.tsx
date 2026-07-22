@@ -14,7 +14,7 @@ import { findByPropsLazy, findStoreLazy } from "@webpack";
 import { Menu, React, VoiceStateStore } from "@webpack/common";
 
 type TFollowedUserInfo = {
-    lastChannelId: string;
+    lastChannelId: string | null;
     userId: string;
 } | null;
 
@@ -43,8 +43,9 @@ const settings = definePluginSettings({
     }
 });
 
-const UserContextMenuPatch: NavContextMenuPatchCallback = (children, { channel, user }: UserContextProps) => {
-    if (UserStore.getCurrentUser().id === user.id || !RelationshipStore.getFriendIDs().includes(user.id)) return;
+const UserContextMenuPatch: NavContextMenuPatchCallback = (children, { user }: UserContextProps) => {
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    if (!currentUserId || currentUserId === user.id || !RelationshipStore.isFriend(user.id)) return;
 
     const [checked, setChecked] = React.useState(followedUserInfo?.userId === user.id);
 
@@ -61,13 +62,20 @@ const UserContextMenuPatch: NavContextMenuPatchCallback = (children, { channel, 
                     return;
                 }
 
+                const currentVoiceState = VoiceStateStore.getVoiceStateForUser(currentUserId);
+                const targetChannelId = VoiceStateStore.getVoiceStateForUser(user.id)?.channelId ?? null;
                 followedUserInfo = {
-                    lastChannelId: UserStore.getCurrentUser().id,
+                    lastChannelId: targetChannelId,
                     userId: user.id
                 };
+
+                if (targetChannelId && (!settings.store.onlyWhenInVoice || currentVoiceState)) {
+                    voiceChannelAction.selectVoiceChannel(targetChannelId);
+                }
+
                 setChecked(true);
             }}
-        ></Menu.MenuCheckboxItem>
+        />
     );
 };
 
@@ -83,34 +91,40 @@ export default definePlugin({
         </Notice.Info>
     ),
     flux: {
-        async VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
+        VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
             if (!followedUserInfo) return;
-            if (!RelationshipStore.getFriendIDs().includes(followedUserInfo.userId)) return;
+            if (!RelationshipStore.isFriend(followedUserInfo.userId)) {
+                followedUserInfo = null;
+                return;
+            }
+
+            const followedState = voiceStates.find(voiceState => voiceState.userId === followedUserInfo?.userId);
+            if (!followedState) return;
+
+            const currentUserId = UserStore.getCurrentUser()?.id;
+            if (!currentUserId) return;
 
             if (
                 settings.store.onlyWhenInVoice
-                && !VoiceStateStore.getVoiceStateForUser(UserStore.getCurrentUser().id)
+                && !VoiceStateStore.getVoiceStateForUser(currentUserId)
             ) return;
 
-            voiceStates.forEach(voiceState => {
-                if (
-                    voiceState.userId === followedUserInfo!.userId
-                    && voiceState.channelId
-                    && voiceState.channelId !== followedUserInfo!.lastChannelId
-                ) {
-                    followedUserInfo!.lastChannelId = voiceState.channelId;
-                    voiceChannelAction.selectVoiceChannel(followedUserInfo!.lastChannelId);
-                } else if (
-                    voiceState.userId === followedUserInfo!.userId
-                    && !voiceState.channelId
-                    && settings.store.leaveWhenUserLeaves
-                ) {
+            if (followedState.channelId && followedState.channelId !== followedUserInfo.lastChannelId) {
+                followedUserInfo.lastChannelId = followedState.channelId;
+                voiceChannelAction.selectVoiceChannel(followedState.channelId);
+            } else if (!followedState.channelId) {
+                followedUserInfo.lastChannelId = null;
+                if (settings.store.leaveWhenUserLeaves) {
                     voiceChannelAction.selectVoiceChannel(null);
                 }
-            });
+            }
         }
     },
     contextMenus: {
         "user-context": UserContextMenuPatch
+    },
+
+    stop() {
+        followedUserInfo = null;
     }
 });

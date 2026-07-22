@@ -64,7 +64,7 @@ function VencordPopoutButton() {
                     ref={buttonRef}
                     className="vc-toolbox-btn"
                     onClick={() => setShow(v => !v)}
-                    tooltip={isShown ? null : "Equicord Toolbox"}
+                    tooltip={isShown ? null : "Protonn Cord Toolbox"}
                     icon={Icon}
                     selected={isShown}
                 />
@@ -73,10 +73,10 @@ function VencordPopoutButton() {
     );
 }
 
-migratePluginSettings("EquicordToolbox", "VencordToolbox");
+migratePluginSettings("ProtonnCordToolbox", "EquicordToolbox", "VencordToolbox");
 export default definePlugin({
-    name: "EquicordToolbox",
-    description: "Adds a button next to the inbox button in the channel header that houses Equicord quick actions",
+    name: "ProtonnCordToolbox",
+    description: "Adds a button next to the inbox button in the channel header that houses Protonn Cord quick actions",
     tags: ["Voice", "Accessibility"],
     authors: [Devs.Ven, Devs.AutumnVN],
     dependencies: ["HeaderBarAPI"],

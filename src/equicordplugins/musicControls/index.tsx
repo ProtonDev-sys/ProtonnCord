@@ -20,6 +20,7 @@ import "./styles.css";
 
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Devs, EquicordDevs } from "@utils/constants";
+import { SYM_LAZY_CACHED } from "@utils/lazy";
 import definePlugin from "@utils/types";
 
 import { settings, toggleHoverControls } from "./settings";
@@ -27,7 +28,9 @@ import { migrateOldLyrics } from "./spotify/lyrics/api";
 import { SpotifyLyrics } from "./spotify/lyrics/components/lyrics";
 import { SpotifyPlayer } from "./spotify/PlayerComponent";
 import { TidalLyrics } from "./tidal/lyrics/components/lyrics";
+import { TidalLrcStore } from "./tidal/lyrics/providers/store";
 import { TidalPlayer } from "./tidal/TidalPlayer";
+import { TidalStore } from "./tidal/TidalStore";
 
 export default definePlugin({
     name: "MusicControls",
@@ -114,5 +117,10 @@ export default definePlugin({
     async start() {
         await migrateOldLyrics();
         toggleHoverControls(settings.store.hoverControls);
+    },
+
+    stop() {
+        (TidalLrcStore as any)[SYM_LAZY_CACHED]?.destroy?.();
+        (TidalStore as any)[SYM_LAZY_CACHED]?.destroy?.();
     },
 });

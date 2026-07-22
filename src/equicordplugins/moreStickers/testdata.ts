@@ -17,20 +17,15 @@ import {
 import { StickerPack } from "./types";
 
 export async function initTest() {
-    console.log("initTest.");
-
-    console.log("Clearing recent stickers.");
     setRecentStickers([]);
 
     // Clear all sticker packs
-    console.log("Clearing all sticker packs.");
     const stickerPackMetas = await getStickerPackMetas();
     for (const meta of stickerPackMetas) {
         await deleteStickerPack(meta.id);
     }
 
     // Add test sticker packs
-    console.log("Adding test sticker packs.");
     const lineStickerPackIds = [
         "22814489", // LV.47
         "22567773", // LV.46
@@ -54,22 +49,15 @@ export async function initTest() {
     }
     const stickerPacks = (await Promise.all(ps)).filter(sp => sp !== null) as StickerPack[];
 
-    console.log("Saving test sticker packs.");
     for (const sp of stickerPacks) {
         await saveStickerPack(sp);
     }
-
-    console.log(await getStickerPackMetas());
 }
 
 export async function clearTest() {
-    console.log("clearTest.");
-
-    console.log("Clearing recent stickers.");
     setRecentStickers([]);
 
     // Clear all sticker packs
-    console.log("Clearing all sticker packs.");
     const stickerPackMetas = await getStickerPackMetas();
     for (const meta of stickerPackMetas) {
         await deleteStickerPack(meta.id);

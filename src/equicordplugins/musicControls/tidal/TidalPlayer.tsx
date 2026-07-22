@@ -152,6 +152,7 @@ const seek = debounce((v: number) => {
 
 function TdlSeekBar() {
     const { songDuration, id: videoId } = TidalStore.track ?? { songDuration: 0, id: 0 };
+    const durationMs = songDuration * 1000;
 
     const [storePosition, isPlaying] = useStateFromStores(
         [TidalStore],
@@ -168,11 +169,11 @@ function TdlSeekBar() {
         if (isPlaying) {
             setPosition(TidalStore.position);
             const interval = setInterval(() => {
-                setPosition(p => p + 1000);
+                setPosition(p => Math.min(p + 1000, durationMs));
             }, 1000);
             return () => clearInterval(interval);
         }
-    }, [storePosition, isPlaying]);
+    }, [durationMs, storePosition, isPlaying]);
 
     const onChange = (v: number) => {
         setPosition(v);
@@ -192,7 +193,7 @@ function TdlSeekBar() {
             <SeekBar
                 initialValue={position}
                 minValue={0}
-                maxValue={songDuration * 1000}
+                maxValue={durationMs}
                 onValueChange={onChange}
                 asValueChanges={onChange}
                 onValueRender={msToHuman}
@@ -203,7 +204,7 @@ function TdlSeekBar() {
                 className={`${cl("progress-time")} ${cl("time-right")}`}
                 aria-label="Total Duration"
             >
-                {msToHuman(songDuration * 1000)}
+                {msToHuman(durationMs)}
             </BaseText>
         </div>
     );

@@ -33,6 +33,12 @@ const Engines = {
     ImgOps: "https://imgops.com/start?url="
 } as const;
 
+const engineEntries = Object.entries(Engines).map(([name, url]) => ({
+    name,
+    url,
+    iconUrl: `https://icons.duckduckgo.com/ip3/${new URL(url).host}.ico`
+}));
+
 function search(src: string, engine: string) {
     open(engine + encodeURIComponent(src), "_blank");
 }
@@ -44,8 +50,8 @@ function makeSearchItem(src: string) {
             key="search-image"
             id="search-image"
         >
-            {Object.keys(Engines).map((engine, i) => {
-                const key = "search-image-" + engine;
+            {engineEntries.map(({ name, url, iconUrl }) => {
+                const key = "search-image-" + name;
                 return (
                     <Menu.MenuItem
                         key={key}
@@ -59,12 +65,12 @@ function makeSearchItem(src: string) {
                                     aria-hidden="true"
                                     height={16}
                                     width={16}
-                                    src={`https://icons.duckduckgo.com/ip3/${new URL(Engines[engine]).host}.ico`}
+                                    src={iconUrl}
                                 />
-                                {engine}
+                                {name}
                             </Flex>
                         }
-                        action={() => search(src, Engines[engine])}
+                        action={() => search(src, url)}
                     />
                 );
             })}
@@ -77,7 +83,11 @@ function makeSearchItem(src: string) {
                         All
                     </Flex>
                 }
-                action={() => Object.values(Engines).forEach(e => search(src, e))}
+                action={() => {
+                    for (const { url } of engineEntries) {
+                        search(src, url);
+                    }
+                }}
             />
         </Menu.MenuItem>
     );

@@ -47,7 +47,7 @@ const ContributorBadge: ProfileBadge = {
 
 const EquicordContributorBadge: ProfileBadge = {
     id: "equicord_contributor_badge",
-    description: "Equicord Contributor",
+    description: "Protonn Cord Contributor",
     iconSrc: EQUICORD_CONTRIBUTOR_BADGE,
     position: BadgePosition.START,
     shouldShow: ({ userId }) => shouldShowEquicordContributorBadge(userId),
@@ -84,6 +84,7 @@ const UserPluginContributorBadge: ProfileBadge = {
 
 let DonorBadges = {} as Record<string, Array<Record<"tooltip" | "badge", string>>>;
 let EquicordDonorBadges = {} as Record<string, Array<Record<"tooltip" | "badge", string>>>;
+let loadAllBadgesPromise: Promise<void> | undefined;
 
 async function loadBadges(url: string, noCache = false) {
     const init = {} as RequestInit;
@@ -93,14 +94,27 @@ async function loadBadges(url: string, noCache = false) {
 }
 
 async function loadAllBadges(noCache = false) {
-    const vencordBadges = await loadBadges("https://badges.vencord.dev/badges.json", noCache);
-    const equicordBadges = await loadBadges("https://badge.equicord.org/badges.json", noCache);
+    if (loadAllBadgesPromise) return loadAllBadgesPromise;
 
-    DonorBadges = vencordBadges;
-    EquicordDonorBadges = equicordBadges;
+    loadAllBadgesPromise = (async () => {
+        const [vencordBadges, equicordBadges] = await Promise.all([
+            loadBadges("https://badges.vencord.dev/badges.json", noCache),
+            loadBadges("https://badge.equicord.org/badges.json", noCache)
+        ]);
+
+        DonorBadges = vencordBadges;
+        EquicordDonorBadges = equicordBadges;
+    })();
+
+    try {
+        await loadAllBadgesPromise;
+    } finally {
+        loadAllBadgesPromise = undefined;
+    }
 }
 
-let intervalId: any;
+let intervalId: ReturnType<typeof setInterval> | undefined;
+let badgeLoadGeneration = 0;
 
 export function BadgeContextMenu({ badge }: { badge: Omit<ProfileBadge, "id"> & BadgeUserArgs; }) {
     return (
@@ -189,13 +203,18 @@ export default definePlugin({
     userProfileBadges: [ContributorBadge, EquicordContributorBadge, UserPluginContributorBadge],
 
     async start() {
-        await loadAllBadges();
+        const generation = ++badgeLoadGeneration;
         clearInterval(intervalId);
-        intervalId = setInterval(loadAllBadges, 1000 * 60 * 30); // 30 minutes
+        await loadAllBadges();
+        if (generation !== badgeLoadGeneration) return;
+
+        intervalId = setInterval(() => void loadAllBadges(), 1000 * 60 * 30); // 30 minutes
     },
 
     async stop() {
+        badgeLoadGeneration++;
         clearInterval(intervalId);
+        intervalId = undefined;
     },
 
     getBadges(profile: { userId: string; guildId: string; }) {
@@ -231,7 +250,7 @@ export default definePlugin({
         return DonorBadges[userId]?.map((badge, idx) => ({
             id: `vencord_donor_badge_${idx}`,
             iconSrc: badge.badge,
-            description: badge.tooltip,
+            description: badge.tooltip.replace(/^Equicord/, "Protonn Cord"),
             position: BadgePosition.START,
             props: {
                 style: {

@@ -73,7 +73,7 @@ async function ensureBinary() {
 
     const res = await fetch(BASE_URL + filename, {
         headers: {
-            "User-Agent": "Equicord (https://github.com/Equicord/Equicord)",
+            "User-Agent": "ProtonnCord (https://github.com/ProtonnCord/ProtonnCord)",
             "If-None-Match": etag
         }
     });

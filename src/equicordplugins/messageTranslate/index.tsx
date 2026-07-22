@@ -11,7 +11,7 @@ import { classNameFactory } from "@utils/css";
 import definePlugin from "@utils/types";
 import { ChannelStore, FluxDispatcher, MessageStore, UserStore } from "@webpack/common";
 
-import { getIgnoredChannels, getIgnoredGuilds, getIgnoredUsers, settings } from "./settings";
+import { getIgnoredChannels, getIgnoredGuilds, getIgnoredUsers, refreshIgnoredIdCaches, settings } from "./settings";
 import { MessageWithContent } from "./types";
 import { clearCache, getCached, hasFailed, isInProgress, translate } from "./utils/translate";
 
@@ -111,5 +111,13 @@ export default definePlugin({
                 )}
             </>
         );
+    },
+
+    start() {
+        refreshIgnoredIdCaches();
+    },
+
+    stop() {
+        translatedMessages.clear();
     },
 });

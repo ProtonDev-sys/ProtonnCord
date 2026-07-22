@@ -23,6 +23,8 @@ import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 
 const CLEAR_URLS_JSON_URL = "https://raw.githubusercontent.com/ClearURLs/Rules/master/data.min.json";
+const HAS_URL_REGEX = /https?:\/\//;
+const MESSAGE_URL_REGEX = /(https?:\/\/[^\s<]+[^<.,:;"'>)|\]\s])/g;
 
 interface Provider {
     urlPattern: string;
@@ -107,9 +109,8 @@ export default definePlugin({
         // Cheap way to check if there are any search params
         if (url.searchParams.entries().next().done) return match;
 
-        // Check rules for each provider that matches
-        this.rules.forEach(({ urlPattern, exceptions, rawRules, rules }) => {
-            if (!urlPattern.test(url.href) || exceptions?.some(ex => ex.test(url.href))) return;
+        for (const { urlPattern, exceptions, rawRules, rules } of this.rules) {
+            if (!urlPattern.test(url.href) || exceptions?.some(ex => ex.test(url.href))) continue;
 
             const toDelete: string[] = [];
 
@@ -127,20 +128,28 @@ export default definePlugin({
 
             // Match and remove any raw rules
             let cleanedUrl = url.href;
-            rawRules?.forEach(rawRule => {
-                cleanedUrl = cleanedUrl.replace(rawRule, "");
-            });
-            url = new URL(cleanedUrl);
-        });
+            if (rawRules) {
+                for (const rawRule of rawRules) {
+                    cleanedUrl = cleanedUrl.replace(rawRule, "");
+                }
+            }
+            if (cleanedUrl !== url.href) {
+                try {
+                    url = new URL(cleanedUrl);
+                } catch {
+                    return match;
+                }
+            }
+        }
 
         return url.toString();
     },
 
     cleanMessage(msg: MessageObject) {
         // Only run on messages that contain URLs
-        if (/http(s)?:\/\//.test(msg.content)) {
+        if (HAS_URL_REGEX.test(msg.content)) {
             msg.content = msg.content.replace(
-                /(https?:\/\/[^\s<]+[^<.,:;"'>)|\]\s])/g,
+                MESSAGE_URL_REGEX,
                 match => this.replacer(match)
             );
         }

@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { DataStore } from "@api/index";
+import * as DataStore from "@api/DataStore";
+import type { MessageObject, SendMessageOptions } from "@api/MessageEvents";
 import { Guild, User } from "@vencord/discord-types";
-import { ChannelStore, GuildMemberStore, GuildStore, MessageStore, UserStore, } from "@webpack/common";
+import { ChannelStore, GuildMemberStore, GuildStore, MessageStore, UserStore } from "@webpack/common";
 
 export interface IUserExtra {
     isOwner?: boolean;
@@ -30,56 +31,56 @@ export interface GroupData {
 
 export class Data {
     declare usersCollection: Record<string, GroupData>;
-    declare _storageAutoSaveProtocol_interval;
+    declare _storageAutoSaveProtocol_interval: ReturnType<typeof setInterval> | undefined;
     declare _onMessagePreSend_preSend;
+    private storageDirty = false;
 
     withStart() {
         return this;
     }
 
-    onMessagePreSend(channelId, message, extra) {
-        const target: Set<{ user: User; source?: Guild, extra: IUserExtra; }> = new Set();
+    onMessagePreSend(channelId: string, message: MessageObject, extra: SendMessageOptions) {
+        const target: { user: User; source?: Guild, extra: IUserExtra; }[] = [];
         const now = Date.now();
-        const { replyOptions } = extra;
+        const { messageReference } = extra;
 
         const guild = (() => {
             const channel = ChannelStore.getChannel(channelId);
-            return GuildStore.getGuild(channel.guild_id) || undefined;
+            return channel?.guild_id ? GuildStore.getGuild(channel.guild_id) || undefined : undefined;
         })();
 
-        if (replyOptions.messageReference) {
-            const { channel_id, message_id } = replyOptions.messageReference;
+        if (messageReference) {
+            const { channel_id, message_id } = messageReference;
             const message = MessageStore.getMessage(channel_id, message_id);
             if (!message) {
                 return;
             }
             const { author } = message;
 
-            target.add({ user: author, source: guild, extra: { updatedAt: now } });
+            target.push({ user: author, source: guild, extra: { updatedAt: now } });
         }
 
         if (message.content) {
             const { content } = message;
             const ids = [...content.matchAll(/<@!?(?<id>\d{17,23})>/g)].map(
-                ({ groups }) => groups.id
+                ({ groups }) => groups!.id
             );
 
             const users = ids
                 .map(id => UserStore.getUser(id))
-                .filter(Boolean);
+                .filter((user): user is User => Boolean(user));
             for (const user of users) {
-                target.add({ user, source: guild, extra: { updatedAt: now } });
+                target.push({ user, source: guild, extra: { updatedAt: now } });
             }
         }
 
-        this.processUsersToCollection([...target]);
+        this.processUsersToCollection(target);
     }
 
-    async processUsersToCollection(
+    processUsersToCollection(
         array: { user: User; source?: Guild; extra?: IUserExtra; }[]
     ) {
         const target = this.usersCollection;
-        const processedGuilds = new Set<string>();
 
         for (const { user, source, extra } of array) {
             if (user.bot) {
@@ -94,24 +95,40 @@ export class Data {
                 inviteLink: undefined
             });
             const usersField = group.users;
-            const previouExtra = usersField[user.id]?.extra ?? {};
+            const previousExtra = usersField[user.id]?.extra ?? {};
             const { id, username } = user;
+            const tag = user.discriminator === "0" ? user.username : user.tag;
+            const iconURL = user.getAvatarURL();
+            const nextExtra = { ...previousExtra, ...extra };
+            const previousUser = usersField[id];
+
+            if (
+                previousUser?.username === username
+                && previousUser.tag === tag
+                && previousUser.iconURL === iconURL
+                && previousUser.extra?.isOwner === nextExtra.isOwner
+                && previousUser.extra?.updatedAt === nextExtra.updatedAt
+            ) {
+                continue;
+            }
 
             usersField[id] = {
                 id,
                 username,
-                tag: user.discriminator === "0" ? user.username : user.tag,
-                extra: { ...previouExtra, ...extra },
-                iconURL: user.getAvatarURL(),
+                tag,
+                extra: nextExtra,
+                iconURL,
             };
-            if (source && !processedGuilds.has(source.id)) {
-                processedGuilds.add(source.id);
-            }
+            this.storageDirty = true;
         }
     }
 
-    async updateStorage() {
+    async updateStorage(force = false) {
+        if (!this.usersCollection) return;
+        if (!force && !this.storageDirty) return;
+
         await DataStore.set("irememberyou.data", this.usersCollection);
+        this.storageDirty = false;
     }
 
     async initializeUsersCollection() {
@@ -120,13 +137,10 @@ export class Data {
     }
 
     writeMembersFromUserGuildsToCollection() {
-        const target: Set<{ user: User; source?: Guild, extra: IUserExtra; }> =
-            new Set();
-
         const now = Date.now();
         const LIMIT = 1_000;
 
-        const clientId = UserStore.getCurrentUser().id;
+        const clientId = UserStore.getCurrentUser()?.id;
         if (!clientId) {
             return;
         }
@@ -136,16 +150,15 @@ export class Data {
                 continue;
             }
 
-            const members = GuildMemberStore.getMembers(guild.id);
-            if (members.length > LIMIT) {
-                members.length = LIMIT;
-            }
+            const members = GuildMemberStore.getMembers(guild.id).slice(0, LIMIT);
+            const target: { user: User; source?: Guild, extra: IUserExtra; }[] = [];
+
             for (const member of members) {
                 const user = UserStore.getUser(member.userId);
-                target.add({ user, source: guild, extra: { updatedAt: now } });
+                if (user) target.push({ user, source: guild, extra: { updatedAt: now } });
             }
 
-            this.processUsersToCollection([...target]);
+            this.processUsersToCollection(target);
         }
     }
 
@@ -171,9 +184,19 @@ export class Data {
     }
 
     storageAutoSaveProtocol() {
-        this._storageAutoSaveProtocol_interval = setInterval(
-            this.updateStorage.bind(this),
-            60_000 * 3
-        );
+        this.stopStorageAutoSaveProtocol();
+        this._storageAutoSaveProtocol_interval = setInterval(() => void this.updateStorage(), 60_000 * 3);
+    }
+
+    stopStorageAutoSaveProtocol() {
+        if (!this._storageAutoSaveProtocol_interval) return;
+
+        clearInterval(this._storageAutoSaveProtocol_interval);
+        this._storageAutoSaveProtocol_interval = undefined;
+    }
+
+    stop() {
+        this.stopStorageAutoSaveProtocol();
+        void this.updateStorage(true);
     }
 }

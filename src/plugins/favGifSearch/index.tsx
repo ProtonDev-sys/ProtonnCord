@@ -58,6 +58,8 @@ interface Instance {
     forceUpdate: () => void;
 }
 
+const SEARCH_NORMALIZE_REGEX = /(%20|[_-])/g;
+
 export const settings = definePluginSettings({
     searchOption: {
         type: OptionType.SELECT,
@@ -79,6 +81,22 @@ export const settings = definePluginSettings({
         ] as const
     }
 });
+
+type SearchOption = typeof settings.store.searchOption;
+
+let searchTargetCache = new WeakMap<Gif, { option: SearchOption; source: string; value: string; }>();
+
+function getGifSearchTarget(gif: Gif) {
+    const source = gif.url ?? gif.src;
+    const option = settings.store.searchOption;
+    const cached = searchTargetCache.get(gif);
+
+    if (cached?.source === source && cached.option === option) return cached.value;
+
+    const value = getTargetString(source).replace(SEARCH_NORMALIZE_REGEX, " ").toLowerCase();
+    searchTargetCache.set(gif, { option, source, value });
+    return value;
+}
 
 export default definePlugin({
     name: "FavoriteGifSearch",
@@ -110,6 +128,7 @@ export default definePlugin({
     settings,
 
     getTargetString,
+    getGifSearchTarget,
 
     instance: null as Instance | null,
     renderSearchBar(instance: Instance, SearchBarComponent: TSearchBarComponent) {
@@ -127,6 +146,10 @@ export default definePlugin({
 
         return filteredFavorites != null && filteredFavorites?.length !== favorites.length ? filteredFavorites : favorites;
 
+    },
+
+    stop() {
+        searchTargetCache = new WeakMap();
     }
 });
 
@@ -151,13 +174,13 @@ function SearchBar({ instance, SearchBarComponent }: { instance: Instance; Searc
             ?.querySelector('[class*="scrollerBase"]')
             ?.scrollTo(0, 0);
 
-        const result =
-            props.favCopy
-                .map(gif => ({
-                    score: fuzzySearch(searchQuery.toLowerCase(), getTargetString(gif.url ?? gif.src).replace(/(%20|[_-])/g, " ").toLowerCase()),
-                    gif,
-                }))
-                .filter(m => m.score != null) as { score: number; gif: Gif; }[];
+        const normalizedQuery = searchQuery.toLowerCase();
+        const result: Array<{ score: number; gif: Gif; }> = [];
+
+        for (const gif of props.favCopy) {
+            const score = fuzzySearch(normalizedQuery, getGifSearchTarget(gif));
+            if (score != null) result.push({ score, gif });
+        }
 
         result.sort((a, b) => b.score - a.score);
         props.favorites = result.map(e => e.gif);

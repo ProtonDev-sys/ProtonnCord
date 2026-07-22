@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import * as DataStore from "@api/DataStore";
 import { Button } from "@components/Button";
 import { Margins } from "@components/margins";
 import type { Theme, ThemeLikeProps } from "@equicordplugins/themeLibrary/types";
-import { isAuthorized } from "@equicordplugins/themeLibrary/utils/auth";
+import { getThemeLibraryToken, isAuthorized } from "@equicordplugins/themeLibrary/utils/auth";
 import { LikeIcon } from "@equicordplugins/themeLibrary/utils/Icons";
 import { useEffect, useRef, useState } from "@webpack/common";
 
@@ -30,14 +29,16 @@ export const LikesComponent = ({ themeId, likedThemes: initialLikedThemes }: { t
     }
 
     const handleLikeClick = async (themeId: Theme["id"]) => {
-        if (!isAuthorized()) return;
+        if (!await isAuthorized()) return;
+        if (debounce.current) return;
+
         const theme = likedThemes?.likes.find(like => like.themeId === themeId as unknown as Number);
         const hasLiked: boolean = theme?.hasLiked ?? false;
         const endpoint = hasLiked ? "/likes/remove" : "/likes/add";
-        const token = await DataStore.get("ThemeLibrary_uniqueToken");
+        const token = await getThemeLibraryToken();
+        if (!token) return;
 
         // doing this so the delay is not visible to the user
-        if (debounce.current) return;
         setLikesCount(likesCount + (hasLiked ? -1 : 1));
         debounce.current = true;
 
@@ -53,11 +54,13 @@ export const LikesComponent = ({ themeId, likedThemes: initialLikedThemes }: { t
                 }),
             });
 
-            if (!response.ok) return logger.error("Couldnt update likes, response not ok");
+            if (!response.ok) {
+                setLikesCount(likesCount);
+                return logger.error("Couldnt update likes, response not ok");
+            }
 
             const fetchLikes = async () => {
                 try {
-                    const token = await DataStore.get("ThemeLibrary_uniqueToken");
                     const response = await themeRequest("/likes/get", {
                         headers: {
                             "Authorization": `Bearer ${token}`,
@@ -70,11 +73,13 @@ export const LikesComponent = ({ themeId, likedThemes: initialLikedThemes }: { t
                 }
             };
 
-            fetchLikes();
+            await fetchLikes();
         } catch (err) {
+            setLikesCount(likesCount);
             logger.error(err);
+        } finally {
+            debounce.current = false;
         }
-        debounce.current = false;
     };
 
     const hasLiked = likedThemes?.likes.some(like => like.themeId === themeId as unknown as Number && like?.hasLiked === true) ?? false;

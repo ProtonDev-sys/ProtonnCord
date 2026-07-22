@@ -68,9 +68,10 @@ const messageContextMenuPatch: NavContextMenuPatchCallback = (
     const sticker = message.stickerItems.find(s => s.id === favoriteableId);
     if (!sticker?.format_type) return;
 
-    const idx = children.findIndex(c => Array.isArray(c) && findGroupChildrenByChildId("vc-copy-sticker-url", c) != null);
+    const idx = children.findIndex(c => Array.isArray(c) && findGroupChildrenByChildId("vc-copy-sticker-link", c) != null);
+    const insertIndex = idx === -1 ? children.length : idx;
 
-    children.splice(idx, 0, buildMenuItem(sticker, idx !== -1));
+    children.splice(insertIndex, 0, buildMenuItem(sticker, idx !== -1));
 };
 
 const expressionPickerPatch: NavContextMenuPatchCallback = (children, props: { target: HTMLElement; }) => {

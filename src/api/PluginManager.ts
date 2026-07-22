@@ -55,6 +55,13 @@ export const PMLogger = logger;
 let enabledPluginsSubscribedFlux = false;
 const subscribedFluxEventsPlugins = new Set<string>();
 
+const pluginKeysToBind = [
+    "onBeforeMessageEdit", "onBeforeMessageSend", "onMessageClick",
+    "renderMemberListDecorator", "renderMessageAccessory", "renderMessageDecoration",
+    // Custom
+    "renderNicknameIcon"
+] as const satisfies ReadonlyArray<keyof PluginDef & `${"on" | "render"}${string}`>;
+
 export function isPluginEnabled(p: string) {
     return (
         Plugins[p]?.required ||
@@ -378,16 +385,27 @@ export const stopPlugin = traceFunction("stopPlugin", function stopPlugin(p: Plu
     return true;
 }, p => `stopPlugin ${p.name}`);
 
+function bindPluginSettings(p: Plugin) {
+    if (!p.settings) return;
+
+    p.settings.pluginName = p.name;
+
+    for (const [key, def] of Object.entries(p.settings.def)) {
+        if (!def.onChange) continue;
+
+        SettingsStore.addChangeListener(`plugins.${p.name}.${key}`, def.onChange);
+    }
+}
+
+function bindPluginMethods(p: Plugin) {
+    for (const key of pluginKeysToBind) {
+        p[key] &&= p[key].bind(p) as any;
+    }
+}
+
 export const initPluginManager = onlyOnce(function init() {
     const pluginsValues = Object.values(Plugins);
     const settings = Settings.plugins;
-
-    const pluginKeysToBind: Array<keyof PluginDef & `${"on" | "render"}${string}`> = [
-        "onBeforeMessageEdit", "onBeforeMessageSend", "onMessageClick",
-        "renderMemberListDecorator", "renderMessageAccessory", "renderMessageDecoration",
-        // Custom
-        "renderNicknameIcon"
-    ];
 
     const neededApiPlugins = new Set<string>();
 
@@ -433,9 +451,7 @@ export const initPluginManager = onlyOnce(function init() {
         if (p.renderProfileSection) neededApiPlugins.add("ProfileSectionsAPI");
         if (p.gifPickerContextMenu) neededApiPlugins.add("ExtraContextMenusAPI");
 
-        for (const key of pluginKeysToBind) {
-            p[key] &&= (p[key] as Function).bind(p) as any;
-        }
+        bindPluginMethods(p);
     }
 
     for (const p of neededApiPlugins) {
@@ -444,14 +460,7 @@ export const initPluginManager = onlyOnce(function init() {
     }
 
     for (const p of pluginsValues) {
-        if (p.settings) {
-            p.settings.pluginName = p.name;
-
-            for (const [key, def] of Object.entries(p.settings.def)) {
-                if (def.onChange)
-                    SettingsStore.addChangeListener(`plugins.${p.name}.${key}`, def.onChange);
-            }
-        }
+        bindPluginSettings(p);
 
         if (p.patches && isPluginEnabled(p.name)) {
             if (!IS_REPORTER || isReporterTestable(p, ReporterTestable.Patches)) {
@@ -461,4 +470,5 @@ export const initPluginManager = onlyOnce(function init() {
             }
         }
     }
+
 });

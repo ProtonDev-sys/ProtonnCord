@@ -24,22 +24,26 @@ import { Review, UserType } from "./entities";
 
 export const cl = classNameFactory("vc-rdb-");
 
+const getCurrentUserId = () => UserStore.getCurrentUser()?.id;
+
 export function canDeleteReview(profileId: string, review: Review) {
-    const myId = UserStore.getCurrentUser().id;
+    const myId = getCurrentUserId();
     return (
-        myId === profileId
-        || review.sender.discordID === myId
+        (myId != null && (myId === profileId || review.sender.discordID === myId))
         || Auth.user?.type === UserType.Admin
     );
 }
 
 export function canBlockReviewAuthor(profileId: string, review: Review) {
-    const myId = UserStore.getCurrentUser().id;
+    const myId = getCurrentUserId();
+    if (!myId) return false;
+
     return profileId === myId && review.sender.discordID !== myId;
 }
 
 export function canReportReview(review: Review) {
-    return review.sender.discordID !== UserStore.getCurrentUser().id;
+    const myId = getCurrentUserId();
+    return myId != null && review.sender.discordID !== myId;
 }
 
 export function showToast(message: string, type = Toasts.Type.MESSAGE) {

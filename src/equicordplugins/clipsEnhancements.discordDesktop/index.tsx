@@ -106,7 +106,10 @@ export default definePlugin({
     getApplicationId(activityName: string) {
         if (settings.store.richPresenceTagging === "never") return null;
 
-        const activities: Activity[] = PresenceStore.getActivities(UserStore.getCurrentUser().id);
+        const currentUserId = UserStore.getCurrentUser()?.id;
+        if (!currentUserId) return null;
+
+        const activities: Activity[] = PresenceStore.getActivities(currentUserId);
         const validActivities = activities.filter(activity => activity.type === 0 && activity.application_id !== null);
         const splitName = activityName.split(" ");
 

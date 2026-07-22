@@ -12,16 +12,19 @@ import definePlugin, { makeRange, OptionType } from "@utils/types";
 import type { Channel } from "@vencord/discord-types";
 import { GuildChannelStore, Menu, React, RestAPI, UserStore, VoiceStateStore } from "@webpack/common";
 
-async function runSequential<T>(promises: Promise<T>[]): Promise<T[]> {
-    const results: T[] = [];
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-    for (let i = 0; i < promises.length; i++) {
-        const promise = promises[i];
-        const result = await promise;
+async function runSequential<T>(tasks: Array<() => Promise<T>>): Promise<T[]> {
+    const results: T[] = [];
+    const waitAfter = Math.max(1, settings.store.waitAfter);
+    const waitMs = Math.max(0, settings.store.waitSeconds * 1000);
+
+    for (let i = 0; i < tasks.length; i++) {
+        const result = await tasks[i]();
         results.push(result);
 
-        if (i % settings.store.waitAfter === 0) {
-            await new Promise(resolve => setTimeout(resolve, settings.store.waitSeconds * 1000));
+        if ((i + 1) % waitAfter === 0 && i < tasks.length - 1 && waitMs > 0) {
+            await sleep(waitMs);
         }
     }
 
@@ -29,32 +32,44 @@ async function runSequential<T>(promises: Promise<T>[]): Promise<T[]> {
 }
 
 function sendPatch(channel: Channel, body: Record<string, any>, bypass = false) {
-    const usersVoice = VoiceStateStore.getVoiceStatesForChannel(channel.id); // Get voice states by channel id
-    const myId = UserStore.getCurrentUser().id; // Get my user id
+    const usersVoice = VoiceStateStore.getVoiceStatesForChannel(channel.id);
+    if (!usersVoice) return;
 
-    const promises: Promise<any>[] = [];
-    Object.keys(usersVoice).forEach((key, index) => {
+    const myId = UserStore.getCurrentUser()?.id;
+    const tasks: Array<() => Promise<unknown>> = [];
+
+    for (const key in usersVoice) {
         const userVoice = usersVoice[key];
+        if (!userVoice?.userId || (!bypass && userVoice.userId === myId)) continue;
 
-        if (bypass || userVoice.userId !== myId) {
-            promises.push(RestAPI.patch({
-                url: `/guilds/${channel.guild_id}/members/${userVoice.userId}`,
-                body: body
-            }));
-        }
-    });
+        tasks.push(() => RestAPI.patch({
+            url: `/guilds/${channel.guild_id}/members/${userVoice.userId}`,
+            body
+        }));
+    }
 
-    runSequential(promises).catch(error => {
+    if (tasks.length === 0) return;
+
+    runSequential(tasks).catch(error => {
         console.error("VoiceChatUtilities failed to run", error);
     });
 }
 
 function mentionVoiceUsers(channel: Channel) {
     const currentUserId = UserStore.getCurrentUser()?.id;
-    const mentions = Object.values(VoiceStateStore.getVoiceStatesForChannel(channel.id))
-        .map(state => state.userId)
-        .filter((userId, index, arr) => userId && userId !== currentUserId && arr.indexOf(userId) === index)
-        .map(userId => `<@${userId}>`);
+    const voiceStates = VoiceStateStore.getVoiceStatesForChannel(channel.id);
+    if (!voiceStates) return;
+
+    const seenUserIds = new Set<string>();
+    const mentions: string[] = [];
+
+    for (const key in voiceStates) {
+        const userId = voiceStates[key]?.userId;
+        if (!userId || userId === currentUserId || seenUserIds.has(userId)) continue;
+
+        seenUserIds.add(userId);
+        mentions.push(`<@${userId}>`);
+    }
 
     if (mentions.length === 0) return;
     insertTextIntoChatInputBox(`${mentions.join(" ")} `);
@@ -67,11 +82,14 @@ interface VoiceChannelContextProps {
 const VoiceChannelContext: NavContextMenuPatchCallback = (children, { channel }: VoiceChannelContextProps) => {
     // only for voice and stage channels
     if (!channel || (channel.type !== 2 && channel.type !== 13)) return;
-    const userCount = Object.keys(VoiceStateStore.getVoiceStatesForChannel(channel.id)).length;
+    const userCount = Object.keys(VoiceStateStore.getVoiceStatesForChannel(channel.id) ?? {}).length;
     if (userCount === 0) return;
 
     const guildChannels: { VOCAL: { channel: Channel, comparator: number; }[]; } = GuildChannelStore.getChannels(channel.guild_id);
-    const voiceChannels = guildChannels.VOCAL.map(({ channel }) => channel).filter(({ id }) => id !== channel.id);
+    const voiceChannels: Channel[] = [];
+    for (const { channel: voiceChannel } of guildChannels.VOCAL ?? []) {
+        if (voiceChannel.id !== channel.id) voiceChannels.push(voiceChannel);
+    }
 
     children.splice(
         -1,

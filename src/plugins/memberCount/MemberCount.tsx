@@ -28,13 +28,16 @@ export function MemberCount({ isTooltip, tooltipGuildId }: { isTooltip?: true; t
             const voiceStates = VoiceStateStore.getVoiceStates(guildId);
             if (!voiceStates) return 0;
 
-            return Object.values(voiceStates)
-                .filter(({ channelId }) => {
-                    if (!channelId) return false;
-                    const channel = ChannelStore.getChannel(channelId);
-                    return channel && PermissionStore.can(PermissionsBits.VIEW_CHANNEL, channel);
-                })
-                .length;
+            let count = 0;
+            for (const userId in voiceStates) {
+                const { channelId } = voiceStates[userId];
+                if (!channelId) continue;
+
+                const channel = ChannelStore.getChannel(channelId);
+                if (channel && PermissionStore.can(PermissionsBits.VIEW_CHANNEL, channel)) count++;
+            }
+
+            return count;
         }
     );
 
@@ -58,12 +61,23 @@ export function MemberCount({ isTooltip, tooltipGuildId }: { isTooltip?: true; t
         () => ThreadMemberListStore.getMemberListSections(currentChannel?.id)
     );
 
-    if (!isTooltip && (groups.length >= 1 || groups[0].id !== "unknown")) {
-        onlineCount = groups.reduce((total, curr) => total + (curr.id === "offline" ? 0 : curr.count), 0);
+    if (!isTooltip && groups.length >= 1 && groups[0].id !== "unknown") {
+        let count = 0;
+        for (const group of groups) {
+            if (group.id !== "offline") count += group.count;
+        }
+
+        onlineCount = count;
     }
 
     if (!isTooltip && threadGroups && !isObjectEmpty(threadGroups)) {
-        onlineCount = Object.values(threadGroups).reduce((total, curr) => total + (curr.sectionId === "offline" ? 0 : curr.userIds.length), 0);
+        let count = 0;
+        for (const key in threadGroups) {
+            const group = threadGroups[key];
+            if (group.sectionId !== "offline") count += group.userIds.length;
+        }
+
+        onlineCount = count;
     }
 
     useEffect(() => {
@@ -75,6 +89,7 @@ export function MemberCount({ isTooltip, tooltipGuildId }: { isTooltip?: true; t
 
     const formattedVoiceCount = numberFormat(voiceActivityCount ?? 0);
     const formattedOnlineCount = onlineCount != null ? numberFormat(onlineCount) : "?";
+    const formattedTotalCount = numberFormat(totalCount);
 
     return (
         <div className={cl("widget", { tooltip: isTooltip, "member-list": !isTooltip })}>
@@ -86,11 +101,11 @@ export function MemberCount({ isTooltip, tooltipGuildId }: { isTooltip?: true; t
                     </div>
                 )}
             </Tooltip>
-            <Tooltip text={`${numberFormat(totalCount)} total server members`} position="bottom">
+            <Tooltip text={`${formattedTotalCount} total server members`} position="bottom">
                 {props => (
                     <div {...props} className={cl("container")}>
                         <CircleIcon className={cl("total-count")} />
-                        <span className={cl("total")}>{numberFormat(totalCount)}</span>
+                        <span className={cl("total")}>{formattedTotalCount}</span>
                     </div>
                 )}
             </Tooltip>

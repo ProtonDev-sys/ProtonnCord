@@ -39,30 +39,53 @@ let root: Root | null = null;
 let element: HTMLDivElement | null = null;
 let madeComponent = false;
 
+type CachedMessage = Message & { deleted?: boolean; };
+
+function getMessageTimestamp(message: Message) {
+    return new Date(message.timestamp).getTime();
+}
+
 function findReplies(message: Message) {
-    const messages: Array<Message & {
-        deleted?: boolean;
-    }> = [...MessageStore.getMessages(message.channel_id)?._array ?? []].filter(m => !m.deleted).sort((a, b) => {
-        return a.timestamp.toString().localeCompare(b.timestamp.toString());
-    }); // Need to deep copy Message array when sorting
-    const found: Message[] = [];
-    for (const other of messages) {
-        if (other.timestamp.toString().localeCompare(message.timestamp.toString()) <= 0) continue;
-        if (other.messageReference?.message_id === message.id) {
-            found.push(other);
-        }
-        if (settings.store.includePings) {
-            if (other.content?.includes(`<@${message.author.id}>`)) {
-                found.push(other);
-            }
-        }
-        if (settings.store.includeAuthor) {
-            if (messages.find(m => m.id === other.messageReference?.message_id)?.author.id === message.author.id) {
-                found.push(other);
-            }
+    const messages = MessageStore.getMessages(message.channel_id)?._array as CachedMessage[] | undefined;
+    if (!messages?.length) return [];
+
+    const authorId = message.author?.id;
+    if (!authorId) return [];
+
+    const targetTimestamp = getMessageTimestamp(message);
+    const messageById = settings.store.includeAuthor ? new Map<string, CachedMessage>() : null;
+    if (messageById) {
+        for (const other of messages) {
+            if (!other.deleted) messageById.set(other.id, other);
         }
     }
-    return found;
+
+    const found: Message[] = [];
+    const foundIds = new Set<string>();
+    const plainMention = settings.store.includePings ? `<@${authorId}>` : "";
+    const nickMention = settings.store.includePings ? `<@!${authorId}>` : "";
+
+    for (const other of messages) {
+        if (other.deleted || getMessageTimestamp(other) <= targetTimestamp) continue;
+
+        let isReply = other.messageReference?.message_id === message.id;
+
+        if (!isReply && settings.store.includePings && (other.content?.includes(plainMention) || other.content?.includes(nickMention))) {
+            isReply = true;
+        }
+
+        if (!isReply && messageById) {
+            const referencedMessageId = other.messageReference?.message_id;
+            isReply = referencedMessageId != null && messageById.get(referencedMessageId)?.author.id === authorId;
+        }
+
+        if (isReply && !foundIds.has(other.id)) {
+            foundIds.add(other.id);
+            found.push(other);
+        }
+    }
+
+    return found.sort((a, b) => getMessageTimestamp(a) - getMessageTimestamp(b));
 }
 
 const settings = definePluginSettings({

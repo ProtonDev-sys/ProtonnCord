@@ -12,18 +12,21 @@ const RESPONSE_TEMPLATE_REGEX = /\$response\$|\{response\}/g;
 function parseDestinationTypes(destinationType?: string): string[] {
     if (!destinationType) return [];
 
-    return destinationType
-        .split(",")
-        .map(type => type.trim())
-        .filter(Boolean);
+    const destinationTypes: string[] = [];
+    for (const rawType of destinationType.split(",")) {
+        const type = rawType.trim();
+        if (type) destinationTypes.push(type);
+    }
+
+    return destinationTypes;
 }
 
 function getNestedValue(data: unknown, path: string): unknown {
     const normalizedPath = path.replace(/\[(\d+)\]/g, ".$1");
-    const segments = normalizedPath.split(".").filter(Boolean);
 
     let current: unknown = data;
-    for (const segment of segments) {
+    for (const segment of normalizedPath.split(".")) {
+        if (!segment) continue;
         if (!current || typeof current !== "object" || !(segment in current)) {
             return undefined;
         }

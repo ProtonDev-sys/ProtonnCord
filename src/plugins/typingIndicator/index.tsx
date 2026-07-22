@@ -40,17 +40,25 @@ function getDisplayName(guildId: string, userId: string) {
     return GuildMemberStore.getNick(guildId, userId) ?? (user as any).globalName ?? user.username;
 }
 
+function areTypingUsersEqual(old: Record<string, number>, current: Record<string, number>) {
+    let oldCount = 0;
+    for (const key in old) oldCount++;
+
+    let currentCount = 0;
+    for (const key in current) {
+        if (old[key] == null) return false;
+        currentCount++;
+    }
+
+    return oldCount === currentCount;
+}
+
 function TypingIndicator({ channelId, guildId }: { channelId: string; guildId: string; }) {
     const typingUsers: Record<string, number> = useStateFromStores(
         [TypingStore],
         () => ({ ...TypingStore.getTypingUsers(channelId) }),
         null,
-        (old, current) => {
-            const oldKeys = Object.keys(old);
-            const currentKeys = Object.keys(current);
-
-            return oldKeys.length === currentKeys.length && currentKeys.every(key => old[key] != null);
-        }
+        areTypingUsersEqual
     );
     const currentChannelId = useStateFromStores([SelectedChannelStore], () => SelectedChannelStore.getChannelId());
 
@@ -65,9 +73,15 @@ function TypingIndicator({ channelId, guildId }: { channelId: string; guildId: s
 
     const myId = UserStore.getCurrentUser()?.id;
 
-    const typingUsersArray = Object.keys(typingUsers).filter(id =>
-        id !== myId && !(RelationshipStore.isBlocked(id) && !settings.store.includeBlockedUsers) && !(RelationshipStore.isIgnored(id) && !settings.store.includeIgnoredUsers)
-    );
+    const typingUsersArray: string[] = [];
+    for (const id in typingUsers) {
+        if (id === myId) continue;
+        if (RelationshipStore.isBlocked(id) && !settings.store.includeBlockedUsers) continue;
+        if (RelationshipStore.isIgnored(id) && !settings.store.includeIgnoredUsers) continue;
+
+        typingUsersArray.push(id);
+    }
+
     const [a, b, c] = typingUsersArray;
     let tooltipText: string;
 

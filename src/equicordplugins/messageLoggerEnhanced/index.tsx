@@ -25,7 +25,7 @@ import { settings } from "./settings";
 import { FetchMessagesResponse, LoadMessagePayload, LoggedMessage, LoggedMessageJSON, MessageCreatePayload, MessageDeleteBulkPayload, MessageDeletePayload, MessageUpdatePayload } from "./types";
 import { cleanUpCachedMessage, cleanupUserObject, getNative, isGhostPinged, mapTimestamp, messageJsonToMessageClass, reAddDeletedMessages } from "./utils";
 import { removeContextMenuBindings, setupContextMenuPatches } from "./utils/contextMenu";
-import { shouldIgnore } from "./utils/index";
+import { hasWhitelistedId, shouldIgnore } from "./utils/index";
 import { LimitedMap } from "./utils/LimitedMap";
 import { doesMatch } from "./utils/parseQuery";
 import * as imageUtils from "./utils/saveImage";
@@ -69,7 +69,7 @@ async function messageDeleteHandler(payload: MessageDeletePayload & { isBulk: bo
         if (message == null) {
             // most likely an edited message
             const cachedMessage = cacheSentMessages.get(`${payload.channelId},${payload.id}`);
-            if (!cachedMessage) return; // Flogger.log("no message to save");
+            if (!cachedMessage) return;
 
             message = { ...cacheSentMessages.get(`${payload.channelId},${payload.id}`), deleted: true } as LoggedMessageJSON;
         }
@@ -124,7 +124,6 @@ async function messageDeleteBulkHandler({ channelId, guildId, ids }: MessageDele
         const oldGuildMessages = await idb.getOlderThanTimestampForGuildsIDB(cutoffTime, currentChannelId, settings.store.preserveCurrentChannel);
 
         if (oldGuildMessages.length > 0) {
-            Flogger.info(`Deleting ${oldGuildMessages.length} old server messages older than ${settings.store.timeBasedCleanupMinutes} minutes (bulk cleanup)`);
             await idb.deleteMessagesBulkIDB(oldGuildMessages.map(m => m.message_id));
         }
     }
@@ -182,12 +181,7 @@ async function messageUpdateHandler(payload: MessageUpdatePayload) {
 function messageCreateHandler(payload: MessageCreatePayload) {
     // we do this here because cache is limited and to save memory
     if (!settings.store.cacheMessagesFromServers && payload.guildId != null) {
-        const ids = [payload.channelId, payload.message?.author?.id, payload.guildId];
-        const isWhitelisted =
-            settings.store.whitelistedIds
-                .split(",")
-                .some(e => ids.includes(e));
-        if (!isWhitelisted) {
+        if (!hasWhitelistedId([payload.channelId, payload.message?.author?.id, payload.guildId])) {
             return; // dont cache messages from servers when cacheMessagesFromServers is disabled and not whitelisted.
         }
     }
@@ -218,9 +212,11 @@ async function processMessageFetch(response: FetchMessagesResponse) {
             m.status === idb.DBMessageStatus.DELETED ||
             m.status === idb.DBMessageStatus.GHOST_PINGED
         );
+        const recordsByMessageId = new Map(messages.map(record => [record.message_id, record]));
+        const fetchedAuthorsById = new Map(response.body.map(message => [message.author.id, message.author]));
 
         for (const recivedMessage of response.body) {
-            const record = messages.find(m => m.message_id === recivedMessage.id);
+            const record = recordsByMessageId.get(recivedMessage.id);
 
             if (record == null) continue;
 
@@ -229,7 +225,7 @@ async function processMessageFetch(response: FetchMessagesResponse) {
             }
         }
 
-        const fetchUser = (id: string) => UserStore.getUser(id) || response.body.find(e => e.author.id === id);
+        const fetchUser = (id: string) => UserStore.getUser(id) || fetchedAuthorsById.get(id);
 
         for (let i = 0, len = messages.length; i < len; i++) {
             const record = messages[i];
@@ -425,5 +421,6 @@ export default definePlugin({
     stop() {
         removeContextMenuBindings();
         MessageStore.getMessage = this.oldGetMessage;
+        imageUtils.clearAttachmentBlobUrlCache();
     }
 });

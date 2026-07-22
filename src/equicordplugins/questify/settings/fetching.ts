@@ -58,14 +58,12 @@ export function startAutoFetchingQuests(force: boolean = false): void {
     const { questFetchInterval } = getQuestifySettings();
     const interval = Math.min(Math.max(questFetchInterval, minimumAutoFetchIntervalValue), maximumAutoFetchIntervalValue);
     autoFetchInterval = setInterval(() => { void fetchAndAlertQuests("AUTO_FETCH"); }, interval * 1000);
-    QL.info("START_AUTO_FETCHING_QUESTS", { autoFetchIntervalID: autoFetchInterval, questFetchInterval, questFetchIntervalClamped: interval });
 }
 
 export function stopAutoFetchingQuests(): void {
     if (autoFetchInterval) {
         clearInterval(autoFetchInterval);
         autoFetchInterval = null;
-        QL.info("STOP_AUTO_FETCHING_QUESTS");
     }
 }
 

@@ -55,6 +55,15 @@ export type SongLinkResult = {
 };
 
 export const Native = VencordNative.pluginHelpers.SongLink as PluginNative<typeof import("./native")>;
+const MUSIC_LINK_REGEX = /https:\/\/(?:open|play)\.spotify\.com\/track\/[a-zA-Z0-9]+|https:\/\/(?:music|itunes)\.apple\.com\/[a-z]{2}\/album\/\S+|https:\/\/music\.youtube\.com\/watch\?v=[0-9A-Za-z_-]+|https:\/\/tidal\.com\/track\/[0-9]+\/u/g;
+const MAX_SONG_LINK_CACHE_ENTRIES = 100;
+
+function extractMusicLinks(content: string) {
+    MUSIC_LINK_REGEX.lastIndex = 0;
+    const links = content.match(MUSIC_LINK_REGEX);
+
+    return links?.length ? Array.from(new Set(links)) : null;
+}
 
 function formatMessage(data: SongLinkResult): string | null {
     const lines: string[] = [];
@@ -129,9 +138,28 @@ export default definePlugin({
     authors: [Devs.nin0dev, EquicordDevs.NassCT],
     settings,
     Providers,
-    cache: ({} as Record<string, SongLinkResult>),
+    cache: ({} as Record<string, SongLinkResult | undefined>),
+    cacheKeys: [] as string[],
+    getFromCache(link: string) {
+        const cached = this.cache[link];
+        if (!cached) return undefined;
+
+        const existingIndex = this.cacheKeys.indexOf(link);
+        if (existingIndex >= 0) this.cacheKeys.splice(existingIndex, 1);
+        this.cacheKeys.push(link);
+
+        return cached;
+    },
     addToCache(link, data: SongLinkResult) {
+        const existingIndex = this.cacheKeys.indexOf(link);
+        if (existingIndex >= 0) this.cacheKeys.splice(existingIndex, 1);
+        this.cacheKeys.push(link);
+
         this.cache[link] = data;
+        while (this.cacheKeys.length > MAX_SONG_LINK_CACHE_ENTRIES) {
+            const oldestKey = this.cacheKeys.shift();
+            if (oldestKey) delete this.cache[oldestKey];
+        }
     },
     renderMessageAccessory(props: Record<string, any>) {
         const { content }: {
@@ -139,16 +167,8 @@ export default definePlugin({
         } = props.message;
         if (!content) return;
 
-        const regexes = [
-            /https:\/\/(?:open|play)\.spotify\.com\/track\/[a-zA-Z0-9]+/, // spotify
-            /https:\/\/(music|itunes)\.apple\.com\/[a-z]{2}\/album\/\S+/, // apple music/itunes
-            /https:\/\/music\.youtube\.com\/watch\?v=[0-9A-Za-z_-]+/, // yt music
-            /https:\/\/tidal\.com\/track\/[0-9]+\/u/ // tidal
-        ];
-        const allMatches = content.match(new RegExp(regexes.map(r => r.source).join("|"), "g"));
-        if (!allMatches?.length) return;
-
-        const musicLinks = [...new Set(allMatches)];
+        const musicLinks = extractMusicLinks(content);
+        if (!musicLinks) return;
 
         return <SongLinkerList urls={musicLinks} />;
     },
@@ -200,4 +220,8 @@ export default definePlugin({
             },
         },
     ],
+    stop() {
+        this.cache = {};
+        this.cacheKeys = [];
+    },
 });

@@ -29,6 +29,31 @@ const enum ReplacementEngineValue {
     CUSTOM = "custom",
 }
 
+interface SearchEngineEntry {
+    name: string;
+    url: string;
+    iconUrl: string | null;
+}
+
+function getEngineIconUrl(url: string) {
+    try {
+        return `https://icons.duckduckgo.com/ip3/${new URL(url).hostname}.ico`;
+    } catch {
+        return null;
+    }
+}
+
+function makeEngineEntry(name: string, url: string): SearchEngineEntry {
+    return {
+        name,
+        url,
+        iconUrl: getEngineIconUrl(url),
+    };
+}
+
+const defaultEngineEntries = Object.entries(DefaultEngines).map(([name, url]) => makeEngineEntry(name, url));
+const defaultEngineOptions = defaultEngineEntries.map(({ name }) => ({ label: name, value: name }));
+
 const settings = definePluginSettings({
     customEngineName: {
         description: "Name of the custom search engine",
@@ -47,7 +72,7 @@ const settings = definePluginSettings({
         options: [
             { label: "Off", value: ReplacementEngineValue.OFF, default: true },
             { label: "Custom Engine", value: ReplacementEngineValue.CUSTOM },
-            ...Object.keys(DefaultEngines).map(engine => ({ label: engine, value: engine }))
+            ...defaultEngineOptions
         ]
     }
 });
@@ -59,26 +84,30 @@ function search(src: string, engine: string) {
 function makeSearchItem(src: string) {
     const { customEngineName, customEngineURL, replacementEngine } = settings.store;
 
-    const hasCustomEngine = Boolean(customEngineName && customEngineURL);
+    const customName = customEngineName?.trim();
+    const customUrl = customEngineURL?.trim();
+    const customEngine = customName && customUrl ? makeEngineEntry(customName, customUrl) : null;
+    const engineEntries = customEngine
+        ? defaultEngineEntries.some(({ name }) => name === customEngine.name)
+            ? defaultEngineEntries.map(entry => entry.name === customEngine.name ? customEngine : entry)
+            : [...defaultEngineEntries, customEngine]
+        : defaultEngineEntries;
+    const hasCustomEngine = Boolean(customEngine);
     const hasValidReplacementEngine = replacementEngine !== ReplacementEngineValue.OFF && !(replacementEngine === ReplacementEngineValue.CUSTOM && !hasCustomEngine);
 
-    const Engines = { ...DefaultEngines };
-
-    if (hasCustomEngine) {
-        Engines[customEngineName!] = customEngineURL;
-    }
-
     if (hasValidReplacementEngine) {
-        const name = replacementEngine === ReplacementEngineValue.CUSTOM && hasCustomEngine
-            ? customEngineName
-            : replacementEngine;
+        const engine = replacementEngine === ReplacementEngineValue.CUSTOM && customEngine
+            ? customEngine
+            : engineEntries.find(({ name }) => name === replacementEngine);
+
+        if (!engine) return null;
 
         return (
             <Menu.MenuItem
-                label={`Search with ${name}`}
+                label={`Search with ${engine.name}`}
                 key="search-custom-engine"
                 id="vc-search-custom-engine"
-                action={() => search(src, Engines[name!])}
+                action={() => search(src, engine.url)}
             />
         );
     }
@@ -89,27 +118,29 @@ function makeSearchItem(src: string) {
             key="search-text"
             id="vc-search-text"
         >
-            {Object.keys(Engines).map(engine => {
-                const key = "vc-search-content-" + engine;
+            {engineEntries.map(({ name, url, iconUrl }) => {
+                const key = "vc-search-content-" + name;
                 return (
                     <Menu.MenuItem
                         key={key}
                         id={key}
                         label={
                             <Flex gap="0.5em" alignItems="center">
-                                <img
-                                    style={{
-                                        borderRadius: "50%"
-                                    }}
-                                    aria-hidden="true"
-                                    height={16}
-                                    width={16}
-                                    src={`https://icons.duckduckgo.com/ip3/${new URL(Engines[engine]).hostname}.ico`}
-                                />
-                                {engine}
+                                {iconUrl && (
+                                    <img
+                                        style={{
+                                            borderRadius: "50%"
+                                        }}
+                                        aria-hidden="true"
+                                        height={16}
+                                        width={16}
+                                        src={iconUrl}
+                                    />
+                                )}
+                                {name}
                             </Flex>
                         }
-                        action={() => search(src, Engines[engine])}
+                        action={() => search(src, url)}
                     />
                 );
             })}

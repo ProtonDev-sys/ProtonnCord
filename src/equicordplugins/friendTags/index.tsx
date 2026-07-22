@@ -22,6 +22,7 @@ interface UserTagData {
 }
 
 let SavedData: UserTagData[] = [];
+let savedDataSerialized = "[]";
 const tagStoreName = "vc-friendtags-tags";
 
 function parseUsertags(text: string): string[] {
@@ -32,45 +33,67 @@ function parseUsertags(text: string): string[] {
 }
 
 function queryFriendTags(query) {
-    const tags = parseUsertags(query);
-    if (!tags.length) return [];
+    const tags = new Set(parseUsertags(query).map(tag => tag.toLowerCase()));
+    if (!tags.size) return [];
 
-    const filteredTagObjects = SavedData
-        .filter(data => data.tagName.length && data.userIds.length)
-        .filter(data => tags.some(tag => tag.toLowerCase() === data.tagName.toLowerCase()));
-    if (!filteredTagObjects.length) return [];
+    const taggedUserIds = new Set<string>();
+    for (const data of SavedData) {
+        if (!data.tagName.length || !data.userIds.length || !tags.has(data.tagName.toLowerCase())) continue;
 
-    const users = Array.from(new Set([...ChannelStore.getDMUserIds(), ...RelationshipStore.getFriendIDs()]))
-        .filter(user => filteredTagObjects.some(tag => tag.userIds.includes(user)));
+        for (const userId of data.userIds) taggedUserIds.add(userId);
+    }
+    if (!taggedUserIds.size) return [];
 
-    return users.map(user => {
+    const users: Array<{ type: "USER"; record: any; score: number; comparator: string; sortable: string; }> = [];
+    const seenUserIds = new Set<string>();
+    const addTaggedUser = (user: string) => {
+        if (seenUserIds.has(user) || !taggedUserIds.has(user)) return;
+        seenUserIds.add(user);
+
         const userObject: any = UserStore.getUser(user);
-        return {
+        if (!userObject) return;
+
+        users.push({
             type: "USER",
             record: userObject,
             score: 20,
             comparator: userObject.globalName || userObject.username,
             sortable: userObject.globalName || userObject.username
-        };
-    });
+        });
+    };
+
+    for (const user of ChannelStore.getDMUserIds()) addTaggedUser(user);
+    for (const user of RelationshipStore.getFriendIDs()) addTaggedUser(user);
+
+    return users;
 }
 
 async function SetData() {
-    const fetchData = await DataStore.get(tagStoreName);
-    if (SavedData !== fetchData) {
-        await DataStore.set(tagStoreName, JSON.stringify(SavedData));
-    }
+    const serialized = JSON.stringify(SavedData);
+    if (serialized === savedDataSerialized) return true;
+
+    savedDataSerialized = serialized;
+    await DataStore.set(tagStoreName, serialized);
     return true;
 }
 
 async function GetData() {
-    const fetchData = await DataStore.get(tagStoreName);
+    const fetchData = await DataStore.get<string>(tagStoreName);
     if (!fetchData) {
-        DataStore.set(tagStoreName, JSON.stringify([]));
         SavedData = [];
+        savedDataSerialized = "[]";
+        void DataStore.set(tagStoreName, savedDataSerialized);
         return;
     }
-    SavedData = JSON.parse(fetchData);
+
+    try {
+        SavedData = JSON.parse(fetchData);
+        savedDataSerialized = fetchData;
+    } catch {
+        SavedData = [];
+        savedDataSerialized = "[]";
+        void DataStore.set(tagStoreName, savedDataSerialized);
+    }
 }
 
 function TagConfigCard(props) {
@@ -111,7 +134,7 @@ function TagConfigCard(props) {
                             const userData: any = UserStore.getUser(user);
                             if (!userData) return null;
                             return (
-                                <div style={{ display: "flex" }} key={user.id}>
+                                <div style={{ display: "flex" }} key={user}>
                                     <img src={userData.getAvatarURL()} style={{ height: "20px", borderRadius: "50%", marginRight: "5px" }}></img>
                                     <BaseText style={{ cursor: "pointer" }} size="md" onClick={() => setUserIDs(userIds.replace(`, ${user}`, "").replace(user, ""))}>{userData.globalName || userData.username}</BaseText>
                                 </div>
@@ -174,23 +197,28 @@ const settings = definePluginSettings({
 });
 
 function UserToTagID(user, tag, remove) {
+    const dataTag = SavedData.find(e => e.tagName === tag);
+    if (!dataTag) return;
+
     if (remove) {
-        SavedData.filter(e => e.tagName === tag)[0].userIds = SavedData.filter(e => e.tagName === tag)[0].userIds.filter(e => e !== user);
+        dataTag.userIds = dataTag.userIds.filter(e => e !== user);
     }
-    else {
-        SavedData.filter(e => e.tagName === tag)[0]?.userIds.push(user);
+    else if (!dataTag.userIds.includes(user)) {
+        dataTag.userIds.push(user);
     }
     SetData();
 }
 
 const userPatch: NavContextMenuPatchCallback = (children, { user }) => {
+    if (!user?.id) return;
+
     const buttonElement =
         <Menu.MenuItem
             id="vc-tag-group"
             label="Tag"
         >
             {SavedData.map(tag => {
-                const isTagged = SavedData.filter(e => e.tagName === tag.tagName)[0].userIds.includes(user.id);
+                const isTagged = tag.userIds.includes(user.id);
 
                 return (
                     <Menu.MenuItem

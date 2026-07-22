@@ -11,6 +11,47 @@ import definePlugin, { OptionType } from "@utils/types";
 import { GuildMember } from "@vencord/discord-types";
 import { ChannelStore, GuildMemberStore, GuildRoleStore, React, RelationshipStore, UserStore } from "@webpack/common";
 
+const ID_REGEX = /^\d{17,20}$/;
+
+let userIdsToBlock = new Set<string>();
+let guildBlacklistIds = new Set<string>();
+let guildWhitelistIds = new Set<string>();
+let idCachesInitialized = false;
+
+function parseIdSet(value: string | undefined): Set<string> {
+    const ids = new Set<string>();
+
+    for (const rawId of (value ?? "").split(",")) {
+        const id = rawId.trim();
+        if (ID_REGEX.test(id)) ids.add(id);
+    }
+
+    return ids;
+}
+
+function validateIdList(value: string) {
+    if (!value) return true;
+
+    for (const rawId of value.split(",")) {
+        const id = rawId.trim();
+        if (!id) continue;
+        if (!ID_REGEX.test(id)) return `${id} isn't a valid Discord id`;
+    }
+
+    return true;
+}
+
+function refreshIdCaches() {
+    userIdsToBlock = parseIdSet(settings.store.usersToBlock);
+    guildBlacklistIds = parseIdSet(settings.store.guildBlackList);
+    guildWhitelistIds = parseIdSet(settings.store.guildWhiteList);
+    idCachesInitialized = true;
+}
+
+function ensureIdCaches() {
+    if (!idCachesInitialized) refreshIdCaches();
+}
+
 const settings = definePluginSettings({
     hideVc: {
         type: OptionType.BOOLEAN,
@@ -20,8 +61,12 @@ const settings = definePluginSettings({
     },
     usersToBlock: {
         type: OptionType.STRING,
-        description: "User IDs seperated by a comma and a space",
-        restartNeeded: true,
+        description: "User IDs separated by commas.",
+        onChange: value => {
+            userIdsToBlock = parseIdSet(value);
+            idCachesInitialized = true;
+        },
+        isValid: validateIdList,
         default: ""
     },
     hideBlockedUsers: {
@@ -54,45 +99,63 @@ const settings = definePluginSettings({
     guildBlackList: {
         type: OptionType.STRING,
         description: "Guild ids to disable functionality in",
-        restartNeeded: true,
+        onChange: value => {
+            guildBlacklistIds = parseIdSet(value);
+            idCachesInitialized = true;
+        },
+        isValid: validateIdList,
         default: ""
     },
     guildWhiteList: {
         type: OptionType.STRING,
         description: "Guild ids to enable functionality in",
-        restartNeeded: true,
+        onChange: value => {
+            guildWhitelistIds = parseIdSet(value);
+            idCachesInitialized = true;
+        },
+        isValid: validateIdList,
         default: ""
     }
 });
 
-function isChannelInGuildBlocked(channelID, guild) {
-    const guildID = guild ? channelID : ChannelStore.getChannel(channelID)?.guild_id;
+function isPluginDisabledForGuild(channelIdOrGuildId: string | undefined, isGuildId: boolean) {
+    ensureIdCaches();
 
-    const blacklist = settings.store.guildBlackList?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
-    const whitelist = settings.store.guildWhiteList?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
+    const guildId = isGuildId
+        ? channelIdOrGuildId
+        : (channelIdOrGuildId ? ChannelStore.getChannel(channelIdOrGuildId)?.guild_id : undefined);
+    if (!guildId) return false;
 
-    if (blacklist.includes(guildID)) return true;
-    if (whitelist.length && !whitelist.includes(guildID)) return true;
+    if (guildBlacklistIds.has(guildId)) return true;
+    if (guildWhitelistIds.size && !guildWhitelistIds.has(guildId)) return true;
 
     return false;
 }
 
 function shouldHideUser(userId: string, channelId?: string) {
-    if (channelId && isChannelInGuildBlocked(channelId, false)) return true;
+    ensureIdCaches();
+
+    if (!userId) return false;
+    if (channelId && isPluginDisabledForGuild(channelId, false)) return false;
     if (RelationshipStore.isBlocked(userId) && settings.store.hideBlockedUsers) return true;
-    if (settings.store.usersToBlock.length === 0) return false;
-    return settings.store.usersToBlock.split(", ").includes(userId);
+    return userIdsToBlock.has(userId);
 }
 
 function isRoleAllBlockedMembers(roleId, guildId) {
     const role = GuildRoleStore.getRole(guildId, roleId);
     if (!role) return false;
+    if (isPluginDisabledForGuild(guildId, true)) return false;
 
-    const membersWithRole: GuildMember[] = GuildMemberStore.getMembers(guildId).filter(member => member.roles.includes(roleId));
-    if (!membersWithRole.length) return false;
-    if (isChannelInGuildBlocked(guildId, true)) return true;
+    let hasMembersWithRole = false;
+    for (const member of GuildMemberStore.getMembers(guildId) as GuildMember[]) {
+        if (!member.roles.includes(roleId)) continue;
 
-    return membersWithRole.every(member => shouldHideUser(member.userId) && !(UserStore.getUser(member.userId).desktop || UserStore.getUser(member.userId).mobile));
+        hasMembersWithRole = true;
+        const user = UserStore.getUser(member.userId);
+        if (!shouldHideUser(member.userId) || user?.desktop || user?.mobile) return false;
+    }
+
+    return hasMembersWithRole;
 }
 
 function hiddenReplyComponent() {
@@ -146,6 +209,15 @@ export default definePlugin({
     searchTerms: ["blocked", "block", "hide", "hidden", "noblockedmessages"],
     authors: [Devs.Samwich, EquicordDevs.KamiRu],
     settings,
+    start() {
+        refreshIdCaches();
+    },
+    stop() {
+        userIdsToBlock = new Set();
+        guildBlacklistIds = new Set();
+        guildWhitelistIds = new Set();
+        idCachesInitialized = false;
+    },
     activeNowView,
     shouldHideUser,
     hiddenReplyComponent,

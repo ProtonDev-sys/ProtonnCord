@@ -23,7 +23,7 @@ import { sleep } from "@utils/misc";
 import { Queue } from "@utils/Queue";
 import definePlugin from "@utils/types";
 import { ProfileBadge } from "@vencord/discord-types";
-import { Constants, FluxDispatcher, RestAPI, UserProfileStore, UserStore, useState } from "@webpack/common";
+import { Constants, FluxDispatcher, RestAPI, useEffect, useRef, UserProfileStore, UserStore, useState } from "@webpack/common";
 import { type ComponentType, type ReactNode } from "react";
 
 // LYING to the type checker here
@@ -44,6 +44,15 @@ const badges: Record<string, ProfileBadge> = {
     premium_early_supporter: { id: "early_supporter", description: "Early Supporter", icon: "7060786766c9c840eb3019e725d2b358", link: "https://discord.com/settings/premium" },
     verified_developer: { id: "verified_developer", description: "Early Verified Bot Developer", icon: "6df5892e0f35b051f8b61eace34f4967" },
 };
+
+const USER_MENTION_REGEX = /<@!?(\d+)>/;
+let userFlagBadges: Array<readonly [number, ProfileBadge]> | undefined;
+
+function getUserFlagBadges() {
+    return userFlagBadges ??= Object.entries(UserFlags)
+        .map(([key, flag]) => [flag, badges[key.toLowerCase()]] as const)
+        .filter((entry): entry is readonly [number, ProfileBadge] => Number.isFinite(entry[0]) && isNonNullish(entry[1]));
+}
 
 const fetching = new Set<string>();
 const queue = new Queue(5);
@@ -87,10 +96,14 @@ async function getUser(id: string) {
     );
 
     userObj = UserStore.getUser(id);
-    const fakeBadges: ProfileBadge[] = Object.entries(UserFlags)
-        .filter(([_, flag]) => !isNaN(flag) && userObj.hasFlag(flag))
-        .map(([key]) => badges[key.toLowerCase()])
-        .filter(isNonNullish);
+    const fakeBadges: ProfileBadge[] = [];
+
+    if (userObj) {
+        for (const [flag, badge] of getUserFlagBadges()) {
+            if (userObj.hasFlag(flag)) fakeBadges.push(badge);
+        }
+    }
+
     if (user.premium_type || !user.bot && (user.banner || user.avatar?.startsWith?.("a_")))
         fakeBadges.push(badges.premium);
 
@@ -108,6 +121,11 @@ async function getUser(id: string) {
 
 function MentionWrapper({ data, UserMention, RoleMention, parse, props }: MentionProps) {
     const [userId, setUserId] = useState(data.userId);
+    const mountedRef = useRef(true);
+
+    useEffect(() => () => {
+        mountedRef.current = false;
+    }, []);
 
     // if userId is set it means the user is cached. Uncached users have userId set to undefined
     if (userId)
@@ -137,7 +155,7 @@ function MentionWrapper({ data, UserMention, RoleMention, parse, props }: Mentio
                     const mention = children?.[0]?.props?.children;
                     if (typeof mention !== "string") return;
 
-                    const id = mention.match(/<@!?(\d+)>/)?.[1];
+                    const id = mention.match(USER_MENTION_REGEX)?.[1];
                     if (!id) return;
 
                     if (fetching.has(id))
@@ -151,17 +169,18 @@ function MentionWrapper({ data, UserMention, RoleMention, parse, props }: Mentio
 
                         queue.unshift(() =>
                             getUser(id)
-                                .then(() => {
-                                    setUserId(id);
-                                    fetching.delete(id);
+                                .then(user => {
+                                    if (user && mountedRef.current) setUserId(id);
                                 })
                                 .catch(e => {
                                     if (e?.status === 429) {
                                         queue.unshift(() => sleep(e?.body?.retry_after ?? 1000).then(fetch));
-                                        fetching.delete(id);
                                     }
                                 })
-                                .finally(() => sleep(300))
+                                .finally(() => {
+                                    fetching.delete(id);
+                                    return sleep(300);
+                                })
                         );
                     };
 

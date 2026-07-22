@@ -39,10 +39,14 @@ const AccountPanelContextMenu = ErrorBoundary.wrap(() => {
                 disabled={getCurrentChannel()?.getGuildId() == null}
                 action={async e => {
                     if (isPluginEnabled(alwaysExpandProfiles.name)) {
-                        const user = await fetchUserProfile(UserStore.getCurrentUser().id, {
-                            guild_id: prioritizeServerProfile ? undefined : getCurrentChannel()?.getGuildId()
-                        }, false);
-                        return openUserProfile(user!.userId);
+                        const currentUserId = UserStore.getCurrentUser()?.id;
+                        if (!currentUserId) return;
+
+                        const currentChannel = getCurrentChannel();
+                        const user = await fetchUserProfile(currentUserId, {
+                            guild_id: prioritizeServerProfile ? undefined : currentChannel?.getGuildId()
+                        }, false).catch(() => null);
+                        if (user) return openUserProfile(user.userId);
                     }
                     openAlternatePopout = true;
                     accountPanelRef.current?.click();
@@ -142,11 +146,16 @@ export default definePlugin({
 
 function ServerProfileLauncher({ popoutProps, userId, guildId }: { popoutProps: Record<string, any>; userId: string; guildId: string; }) {
     useEffect(() => {
+        let isActive = true;
         popoutProps.closePopout?.();
         popoutProps.onRequestClose?.();
-        fetchUserProfile(userId, { guild_id: guildId }, false).then(user => {
-            if (user) openUserProfile(user.userId);
-        });
-    }, []);
+        void fetchUserProfile(userId, { guild_id: guildId }, false).then(user => {
+            if (isActive && user) openUserProfile(user.userId);
+        }).catch(() => null);
+
+        return () => {
+            isActive = false;
+        };
+    }, [guildId, popoutProps, userId]);
     return null;
 }

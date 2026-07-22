@@ -102,7 +102,7 @@ function toCodeBlock(s: string, indentation = 0, isDiscord = false) {
 async function printReport() {
     console.log();
 
-    console.log("# Equicord Report" + (CANARY ? " (Canary)" : ""));
+    console.log("# Protonn Cord Report" + (CANARY ? " (Canary)" : ""));
 
     console.log();
 
@@ -203,7 +203,7 @@ async function printReport() {
         }
 
         const body = JSON.stringify({
-            username: "Equicord Reporter" + (CANARY ? " (Canary)" : ""),
+            username: "Protonn Cord Reporter" + (CANARY ? " (Canary)" : ""),
             embeds
         });
 
@@ -229,6 +229,29 @@ async function printReport() {
     }
 }
 
+const reporterTimeoutMs = Number(process.env.REPORTER_TIMEOUT_MS ?? 180_000);
+let isFinishing = false;
+let reporterTimeout: ReturnType<typeof setTimeout>;
+
+async function finishReporter(timedOut = false) {
+    if (isFinishing) return;
+    isFinishing = true;
+    clearTimeout(reporterTimeout);
+
+    if (timedOut) {
+        const message = `Reporter did not complete within ${reporterTimeoutMs}ms`;
+        logStderr(message);
+        report.otherErrors.push(message);
+        process.exitCode = 1;
+    }
+
+    await browser.close();
+    await printReport();
+    process.exit();
+}
+
+reporterTimeout = setTimeout(() => void finishReporter(true), reporterTimeoutMs);
+
 page.on("console", async e => {
     const level = e.type();
     const rawArgs = e.args();
@@ -250,7 +273,7 @@ page.on("console", async e => {
 
     const firstArg = await rawArgs[0]?.jsonValue();
 
-    const isEquicord = firstArg === "[Equicord]";
+    const isEquicord = firstArg === "[Equicord]" || firstArg === "[ProtonnCord]";
     const isDebug = firstArg === "[PUP_DEBUG]";
     const isReporterMeta = firstArg === "[REPORTER_META]";
 
@@ -324,9 +347,7 @@ page.on("console", async e => {
                         report.badWebpackFinds.push(otherMessage);
                         break;
                     case "Finished test":
-                        await browser.close();
-                        await printReport();
-                        process.exit();
+                        await finishReporter();
                 }
         }
     }

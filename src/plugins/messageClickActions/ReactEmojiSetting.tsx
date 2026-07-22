@@ -152,21 +152,27 @@ function EmojiPickerButton({
 }
 
 function parseEmojiList(value: string) {
-    return Array.from(new Set(
-        value
-            .split(/[\n,]/g)
-            .map(entry => entry.trim())
-            .filter(Boolean)
-    )).slice(0, MAX_ADDITIONAL_REACT_EMOJIS);
+    const emojis: string[] = [];
+    const seen = new Set<string>();
+
+    for (const rawEntry of value.split(/[\n,]/g)) {
+        const entry = rawEntry.trim();
+        if (!entry || seen.has(entry)) continue;
+
+        seen.add(entry);
+        emojis.push(entry);
+        if (emojis.length >= MAX_ADDITIONAL_REACT_EMOJIS) break;
+    }
+
+    return emojis;
 }
 
 function addEmojiToList(list: string, emoji: string) {
     const parsedList = parseEmojiList(list);
     if (parsedList.includes(emoji)) return parsedList.join(", ");
 
-    return [...parsedList, emoji]
-        .slice(0, MAX_ADDITIONAL_REACT_EMOJIS)
-        .join(", ");
+    if (parsedList.length < MAX_ADDITIONAL_REACT_EMOJIS) parsedList.push(emoji);
+    return parsedList.join(", ");
 }
 
 function EmojiPreview({ value }: { value: string; }) {

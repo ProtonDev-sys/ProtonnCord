@@ -45,6 +45,10 @@ const messageCache = new Map<string, {
     message?: Message;
     fetched: boolean;
 }>();
+const maxMessageCacheSize = 200;
+const idRegex = /^\d{17,20}$/;
+
+let listedIds = new Set<string>();
 
 const Embed = findComponentLazy(m => m.prototype?.renderSuppressButton);
 const ChannelMessage = findComponentByCodeLazy("childrenExecutedCommand:", ".hideAccessories");
@@ -116,6 +120,9 @@ const settings = definePluginSettings({
         type: OptionType.STRING,
         default: "",
         multiline: true,
+        onChange: value => {
+            listedIds = parseIdList(value);
+        }
     },
     clearMessageCache: {
         type: OptionType.COMPONENT,
@@ -127,11 +134,31 @@ const settings = definePluginSettings({
     }
 });
 
+function parseIdList(value: string) {
+    const ids = new Set<string>();
+
+    for (const id of value.split(",")) {
+        const trimmed = id.trim();
+        if (idRegex.test(trimmed)) ids.add(trimmed);
+    }
+
+    return ids;
+}
+
+function setMessageCache(messageID: string, value: { message?: Message; fetched: boolean; }) {
+    if (!messageCache.has(messageID) && messageCache.size >= maxMessageCacheSize) {
+        const oldestKey = messageCache.keys().next().value;
+        if (oldestKey !== undefined) messageCache.delete(oldestKey);
+    }
+
+    messageCache.set(messageID, value);
+}
+
 async function fetchMessage(channelID: string, messageID: string) {
     const cached = messageCache.get(messageID);
     if (cached) return cached.message;
 
-    messageCache.set(messageID, { fetched: false });
+    setMessageCache(messageID, { fetched: false });
 
     const res = await RestAPI.get({
         url: Constants.Endpoints.MESSAGES(channelID),
@@ -148,7 +175,7 @@ async function fetchMessage(channelID: string, messageID: string) {
     const message: Message = MessageStore.getMessages(msg.channel_id).receiveMessage(msg).get(msg.id);
     if (!message) return;
 
-    messageCache.set(message.id, {
+    setMessageCache(message.id, {
         message,
         fetched: true
     });
@@ -237,9 +264,9 @@ function MessageEmbedAccessory({ message }: { message: Message; }) {
             continue;
         }
 
-        const { listMode, idList } = settings.store;
+        const { listMode } = settings.store;
 
-        const isListed = [linkedChannel.guild_id, channelID, message.author.id].some(id => id && idList.includes(id));
+        const isListed = [linkedChannel.guild_id, channelID, message.author.id].some(id => id && listedIds.has(id));
 
         if (listMode === "blacklist" && isListed) continue;
         if (listMode === "whitelist" && !isListed) continue;
@@ -248,7 +275,7 @@ function MessageEmbedAccessory({ message }: { message: Message; }) {
         if (!linkedMessage) {
             linkedMessage ??= MessageStore.getMessage(channelID, messageID);
             if (linkedMessage) {
-                messageCache.set(messageID, { message: linkedMessage, fetched: true });
+                setMessageCache(messageID, { message: linkedMessage, fetched: true });
             } else {
 
                 messageFetchQueue.unshift(() => fetchMessage(channelID, messageID)
@@ -283,7 +310,8 @@ function getChannelLabelAndIconUrl(channel: Channel) {
 function ChannelMessageEmbedAccessory({ message, channel }: MessageEmbedProps): JSX.Element | null {
     const compact = MessageDisplayCompact.useSetting();
 
-    const dmReceiver = UserStore.getUser(ChannelStore.getChannel(channel.id).recipients?.[0]);
+    const dmReceiverId = channel.recipients?.[0];
+    const dmReceiver = dmReceiverId ? UserStore.getUser(dmReceiverId) : null;
 
     const [channelLabel, iconUrl] = getChannelLabelAndIconUrl(channel);
 
@@ -295,7 +323,7 @@ function ChannelMessageEmbedAccessory({ message, channel }: MessageEmbedProps): 
                 author: {
                     name: <BaseText size="xs" weight="medium" tag="span">
                         <span>{channelLabel} - </span>
-                        {Parser.parse(channel.isDM() ? `<@${dmReceiver.id}>` : `<#${channel.id}>`)}
+                        {Parser.parse(channel.isDM() && dmReceiver ? `<@${dmReceiver.id}>` : `<#${channel.id}>`)}
                     </BaseText>,
                     iconProxyURL: iconUrl
                 }
@@ -389,6 +417,8 @@ export default definePlugin({
     },
 
     start() {
+        listedIds = parseIdList(settings.store.idList);
+
         addMessageAccessory("MessageLinkEmbeds", props => {
             if (!messageLinkRegex.test(props.message.content))
                 return null;
@@ -405,5 +435,7 @@ export default definePlugin({
     },
     stop() {
         removeMessageAccessory("MessageLinkEmbeds");
+        messageCache.clear();
+        listedIds = new Set();
     }
 });

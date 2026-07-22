@@ -23,6 +23,8 @@ import definePlugin, { IconComponent, StartAt } from "@utils/types";
 import { CloudUpload, MessageAttachment } from "@vencord/discord-types";
 import { DraftStore, DraftType, UploadAttachmentStore, UserStore, useStateFromStores } from "@webpack/common";
 
+const PREVIEW_ATTACHMENT_URL_TTL_MS = 5 * 60 * 1000;
+
 const getDraft = (channelId: string) => DraftStore.getDraft(channelId, DraftType.ChannelMessage);
 
 const getImageBox = (url: string): Promise<{ width: number, height: number; } | null> =>
@@ -37,12 +39,36 @@ const getImageBox = (url: string): Promise<{ width: number, height: number; } | 
         img.src = url;
     });
 
-const getAttachments = async (channelId: string) =>
-    await Promise.all(
-        UploadAttachmentStore.getUploads(channelId, DraftType.ChannelMessage)
+function createPreviewAttachmentUrlTracker() {
+    const objectUrls = new Set<string>();
+    const cleanup = () => {
+        for (const url of objectUrls) {
+            URL.revokeObjectURL(url);
+        }
+        objectUrls.clear();
+    };
+
+    return {
+        add(url: string) {
+            objectUrls.add(url);
+            return url;
+        },
+        cleanup,
+        scheduleCleanup() {
+            window.setTimeout(cleanup, PREVIEW_ATTACHMENT_URL_TTL_MS);
+        }
+    };
+}
+
+const getAttachments = async (channelId: string) => {
+    const urls = createPreviewAttachmentUrlTracker();
+
+    try {
+        const attachments = await Promise.all(
+            UploadAttachmentStore.getUploads(channelId, DraftType.ChannelMessage)
             .map(async (upload: CloudUpload) => {
                 const { isImage, filename, spoiler, item: { file } } = upload;
-                const url = URL.createObjectURL(file);
+                const url = urls.add(URL.createObjectURL(file));
                 const attachment: MessageAttachment = {
                     id: generateId(),
                     filename: spoiler ? "SPOILER_" + filename : filename,
@@ -65,7 +91,14 @@ const getAttachments = async (channelId: string) =>
 
                 return attachment;
             })
-    );
+        );
+
+        return { attachments, cleanup: () => urls.cleanup(), scheduleCleanup: () => urls.scheduleCleanup() };
+    } catch (error) {
+        urls.cleanup();
+        throw error;
+    }
+};
 
 const PreviewIcon: IconComponent = ({ height = 20, width = 20, className }) => {
     return (
@@ -96,15 +129,24 @@ const PreviewButton: ChatBarButtonFactory = ({ isAnyChat, isEmpty, type: { attac
     return (
         <ChatBarButton
             tooltip="Preview Message"
-            onClick={async () =>
-                sendBotMessage(
-                    channelId,
-                    {
-                        content: getDraft(channelId),
-                        author: UserStore.getCurrentUser(),
-                        attachments: hasAttachments ? await getAttachments(channelId) : undefined,
-                    }
-                )}
+            onClick={async () => {
+                const previewAttachments = hasAttachments ? await getAttachments(channelId) : undefined;
+
+                try {
+                    sendBotMessage(
+                        channelId,
+                        {
+                            content: getDraft(channelId),
+                            author: UserStore.getCurrentUser(),
+                            attachments: previewAttachments?.attachments,
+                        }
+                    );
+                    previewAttachments?.scheduleCleanup();
+                } catch (error) {
+                    previewAttachments?.cleanup();
+                    throw error;
+                }
+            }}
             buttonProps={{
                 style: {
                     translate: "0 2px"

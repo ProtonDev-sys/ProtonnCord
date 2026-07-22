@@ -146,7 +146,10 @@ export default definePlugin({
 
     flux: {
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
-            const myId = UserStore.getCurrentUser().id;
+            const currentUser = UserStore.getCurrentUser();
+            if (!currentUser) return;
+
+            const myId = currentUser.id;
 
             for (const state of voiceStates) {
                 const { userId, channelId, guildId } = state;
@@ -190,13 +193,12 @@ export default definePlugin({
 
             // find all users that have the same guildId and if that user is not in the voiceStates, remove them from the map
             const { guildId } = passiveUpdate;
+            const activeUserIds = new Set(voiceStates.map(state => state.userId));
 
             // check the guildId in the userJoinTimes map
             for (const [userId, data] of userJoinTimes) {
                 if (data.guildId === guildId) {
-                    // check if the user is in the voiceStates
-                    const userInVoiceStates = voiceStates.find(state => state.userId === userId);
-                    if (!userInVoiceStates) {
+                    if (!activeUserIds.has(userId)) {
                         // remove the user from the map
                         removeUserJoinTime(userId);
                     }
@@ -213,9 +215,10 @@ export default definePlugin({
                 }
 
                 // check if the user is in the map
-                if (userJoinTimes.has(userId)) {
+                const existingJoinTime = userJoinTimes.get(userId);
+                if (existingJoinTime) {
                     // check if the user is in a channel
-                    if (channelId !== userJoinTimes.get(userId)?.channelId) {
+                    if (channelId !== existingJoinTime.channelId) {
                         // update the user's join time
                         addUserJoinTime(userId, channelId, guildId);
                     }
@@ -229,8 +232,11 @@ export default definePlugin({
 
     subscribeToAllGuilds() {
         // we need to subscribe to all guilds' events because otherwise we would miss updates on large guilds
-        const guilds = Object.values(GuildStore.getGuilds()).map(guild => guild.id);
-        const subscriptions = guilds.reduce((acc, id) => ({ ...acc, [id]: { typing: true } }), {});
+        const subscriptions: Record<string, { typing: true; }> = {};
+        for (const guild of Object.values(GuildStore.getGuilds())) {
+            subscriptions[guild.id] = { typing: true };
+        }
+
         FluxDispatcher.dispatch({ type: "GUILD_SUBSCRIPTIONS_FLUSH", subscriptions });
     },
 
@@ -240,6 +246,12 @@ export default definePlugin({
         }
     },
 
+    stop() {
+        userJoinTimes.clear();
+        myLastChannelId = undefined;
+        runOneTime = true;
+    },
+
     renderTimer(userId: string) {
         // get the user join time from the users object
         const joinTime = userJoinTimes.get(userId);
@@ -247,7 +259,7 @@ export default definePlugin({
             // join time is unknown
             return;
         }
-        if (userId === UserStore.getCurrentUser().id && !settings.store.trackSelf) {
+        if (userId === UserStore.getCurrentUser()?.id && !settings.store.trackSelf) {
             // don't show for self
             return;
         }

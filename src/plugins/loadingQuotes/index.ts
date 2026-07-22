@@ -22,7 +22,15 @@ import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import presetQuotesText from "file://quotes.txt";
 
-const presetQuotes = presetQuotesText.split("\n").map(quote => /^\s*[^#\s]/.test(quote) && quote.trim()).filter(Boolean) as string[];
+const VALID_PRESET_QUOTE_REGEX = /^\s*[^#\s]/;
+const presetQuotes: string[] = [];
+for (const rawQuote of presetQuotesText.split("\n")) {
+    if (!VALID_PRESET_QUOTE_REGEX.test(rawQuote)) continue;
+
+    const quote = rawQuote.trim();
+    if (quote) presetQuotes.push(quote);
+}
+
 const noQuotesQuote = "Did you really disable all loading quotes? What a buffoon you are...";
 
 const settings = definePluginSettings({
@@ -86,10 +94,15 @@ export default definePlugin({
             if (!enableDiscordPresetQuotes)
                 quotes.length = 0;
 
-            if (enablePluginPresetQuotes)
-                quotes.push(...presetQuotes);
+            if (enablePluginPresetQuotes) {
+                for (const quote of presetQuotes) {
+                    quotes.push(quote);
+                }
+            }
 
-            quotes.push(...additionalQuotes.split(additionalQuotesDelimiter).filter(Boolean));
+            for (const quote of additionalQuotes.split(additionalQuotesDelimiter)) {
+                if (quote) quotes.push(quote);
+            }
 
             if (!quotes.length)
                 quotes.push(noQuotesQuote);

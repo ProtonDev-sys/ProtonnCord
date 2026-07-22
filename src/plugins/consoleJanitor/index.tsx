@@ -26,8 +26,6 @@ const NoopLogger = {
     fileOnly: Noop
 };
 
-const logAllow = new Set();
-
 interface AllowLevels {
     error: boolean;
     warn: boolean;
@@ -35,6 +33,29 @@ interface AllowLevels {
     log: boolean;
     info: boolean;
     debug: boolean;
+}
+
+const ALLOW_LEVEL_KEYS: Array<keyof AllowLevels> = ["error", "warn", "trace", "log", "info", "debug"];
+const logAllow = new Set<string>();
+let allowedLevels = new Set<keyof AllowLevels>();
+
+function rebuildLogAllow(value = settings.store.whitelistedLoggers ?? "") {
+    logAllow.clear();
+
+    for (const logger of value.split(";")) {
+        const trimmed = logger.trim();
+        if (trimmed) logAllow.add(trimmed);
+    }
+}
+
+function rebuildAllowedLevels() {
+    const nextAllowedLevels = new Set<keyof AllowLevels>();
+
+    for (const level of ALLOW_LEVEL_KEYS) {
+        if (settings.store.allowLevel[level]) nextAllowedLevels.add(level);
+    }
+
+    allowedLevels = nextAllowedLevels;
 }
 
 interface AllowLevelSettingProps {
@@ -48,7 +69,10 @@ function AllowLevelSetting({ settingKey }: AllowLevelSettingProps) {
     return (
         <Checkbox
             value={value}
-            onChange={(_, newValue) => settings.store.allowLevel[settingKey] = newValue}
+            onChange={(_, newValue) => {
+                settings.store.allowLevel[settingKey] = newValue;
+                rebuildAllowedLevels();
+            }}
             size={20}
         >
             <BaseText size="sm">{settingKey[0].toUpperCase() + settingKey.slice(1)}</BaseText>
@@ -60,8 +84,8 @@ const AllowLevelSettings = ErrorBoundary.wrap(() => {
     return (
         <SettingsSection name="Filter List" id="filterList" description="Always allow loggers of these types">
             <div style={{ display: "flex", flexDirection: "row" }}>
-                {Object.keys(settings.store.allowLevel).map(key => (
-                    <AllowLevelSetting key={key} settingKey={key as keyof AllowLevels} />
+                {ALLOW_LEVEL_KEYS.map(key => (
+                    <AllowLevelSetting key={key} settingKey={key} />
                 ))}
             </div>
         </SettingsSection>
@@ -86,10 +110,7 @@ const settings = definePluginSettings({
         description: "Semicolon (;) separated list of loggers to allow even if others are hidden",
         default: "GatewaySocket; Routing/Utils",
         multiline: true,
-        onChange(newVal: string) {
-            logAllow.clear();
-            newVal.split(";").map(x => x.trim()).forEach(logAllow.add.bind(logAllow));
-        }
+        onChange: rebuildLogAllow
     },
     allowLevel: {
         type: OptionType.COMPONENT,
@@ -114,15 +135,15 @@ export default definePlugin({
 
     startAt: StartAt.Init,
     start() {
-        logAllow.clear();
-        this.settings.store.whitelistedLoggers?.split(";").map(x => x.trim()).forEach(logAllow.add.bind(logAllow));
+        rebuildLogAllow(this.settings.store.whitelistedLoggers);
+        rebuildAllowedLevels();
     },
 
     Noop,
     NoopLogger: () => NoopLogger,
 
     shouldLog(logger: string, level: keyof AllowLevels) {
-        return logAllow.has(logger) || settings.store.allowLevel[level] === true;
+        return logAllow.has(logger) || allowedLevels.has(level);
     },
 
     patches: [

@@ -37,12 +37,15 @@ interface ReactionProps {
     type: number;
 }
 
+const MAX_PENDING_REACTION_FETCHES = 50;
+
 let Scroll: any = null;
-const queue = new Queue();
+const queue = new Queue(MAX_PENDING_REACTION_FETCHES);
+let fetchGeneration = 0;
 let reactions: Record<string, ReactionCacheEntry> = {};
 
 function fetchReactions(msg: Message, emoji: ReactionEmoji, type: number) {
-    const key = emoji.name + (emoji.id ? `:${emoji.id}` : "");
+    const key = getEmojiKey(emoji);
     return RestAPI.get({
         url: Constants.Endpoints.REACTIONS(msg.channel_id, msg.id, key),
         query: {
@@ -72,11 +75,19 @@ function fetchReactions(msg: Message, emoji: ReactionEmoji, type: number) {
         .finally(() => sleep(250));
 }
 
+function getEmojiKey(emoji: Pick<ReactionEmoji, "id" | "name">) {
+    return emoji.name + (emoji.id ? `:${emoji.id}` : "");
+}
+
 function getReactionsWithQueue(msg: Message, e: ReactionEmoji, type: number) {
-    const key = `${msg.id}:${e.name}:${e.id ?? ""}:${type}`;
+    const key = `${msg.id}:${getEmojiKey(e)}:${type}`;
     const cache = reactions[key] ??= { fetched: false, users: new Map() };
     if (!cache.fetched) {
-        queue.unshift(() => fetchReactions(msg, e, type));
+        const generation = fetchGeneration;
+        queue.unshift(() => {
+            if (generation !== fetchGeneration) return;
+            return fetchReactions(msg, e, type);
+        });
         cache.fetched = true;
     }
 
@@ -89,6 +100,7 @@ function handleClickAvatar(event: React.UIEvent<HTMLElement, Event>) {
 
 function ReactionUsers({ message, emoji, type }: ReactionProps) {
     const forceUpdate = useForceUpdater();
+    const emojiKey = getEmojiKey(emoji);
 
     useLayoutEffect(() => { // bc need to prevent autoscrolling
         if (Scroll?.scrollCounter > 0) {
@@ -98,16 +110,21 @@ function ReactionUsers({ message, emoji, type }: ReactionProps) {
 
     useEffect(() => {
         const cb = (e: any) => {
-            if (e?.messageId === message.id)
+            if (e?.messageId === message.id && e.reactionType === type && e.emoji && getEmojiKey(e.emoji) === emojiKey)
                 forceUpdate();
         };
         FluxDispatcher.subscribe("MESSAGE_REACTION_ADD_USERS", cb);
 
         return () => FluxDispatcher.unsubscribe("MESSAGE_REACTION_ADD_USERS", cb);
-    }, [message.id, forceUpdate]);
+    }, [message.id, type, emojiKey, forceUpdate]);
 
     const reactions = getReactionsWithQueue(message, emoji, type);
-    const users = Array.from(reactions, ([id]) => UserStore.getUser(id)).filter(Boolean);
+    const users: User[] = [];
+
+    for (const id of reactions.keys()) {
+        const user = UserStore.getUser(id);
+        if (user) users.push(user);
+    }
 
     return (
         <div
@@ -184,5 +201,10 @@ export default definePlugin({
 
     set reactions(value: any) {
         reactions = value;
+    },
+
+    stop() {
+        fetchGeneration++;
+        Scroll = null;
     }
 });

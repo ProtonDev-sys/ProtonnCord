@@ -45,6 +45,11 @@ export default definePlugin({
                     replace: "$1.playbackRate=this._speed,"
                 },
                 {
+                    // Prevents aborted audio starts from becoming uncaught promise rejections.
+                    match: /(\i\.play\(\))/g,
+                    replace: "$self.handlePlayPromise(this,$1)"
+                },
+                {
                     // Makes use of the error handler if an error occurs during playback.
                     match: /(onerror=\()(\)=>{)(?=let)/,
                     replace: "$1error$2this.onError?.(error);"
@@ -101,7 +106,7 @@ export default definePlugin({
         if (restart) {
             player.ensureAudio().then(audio => {
                 audio.currentTime = 0;
-                audio.play();
+                this.handlePlayPromise(player, audio.play());
             });
         } else {
             if (!player.persistent) {
@@ -115,6 +120,13 @@ export default definePlugin({
                 });
             }
         }
+    },
+
+    handlePlayPromise(player: AudioPlayerInternal, playPromise: Promise<void> | void) {
+        playPromise?.catch(error => {
+            if (error?.name === "AbortError") return;
+            player.onError?.(error);
+        });
     },
 
     processAudio(player: AudioPlayerInternal) {

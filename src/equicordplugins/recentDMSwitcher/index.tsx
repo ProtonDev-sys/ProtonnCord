@@ -14,12 +14,15 @@ import definePlugin, { makeRange, OptionType } from "@utils/types";
 import { Button, ChannelRouter, ChannelStore, closeModal, IconUtils, openModal,React, RelationshipStore, SelectedChannelStore, Toasts, UserStore } from "@webpack/common";
 
 const STORAGE_KEY = "RDMSwitch_history";
+const PERSIST_DELAY_MS = 1000;
 
 let rmdsDmChannelIds: string[] = [];
 let isCyclingSessionActive = false;
 let suppressRdmsWhileCycling = false;
 let cycleSnapshot: string[] = [];
 let cycleIndex = -1;
+let historyPersistTimeout: ReturnType<typeof setTimeout> | null = null;
+let historyDirty = false;
 
 const cl = classNameFactory("vc-rdms-");
 
@@ -67,7 +70,7 @@ const settings = definePluginSettings({
     },
     clearRdms: {
         type: OptionType.COMPONENT,
-        description: "Testing utility: Clear RDMS list",
+        description: "Clear the saved recent DM history.",
         component: () => (
             <Button
                 color={Button.Colors.RED}
@@ -75,10 +78,11 @@ const settings = definePluginSettings({
                     rmdsDmChannelIds = [];
                     cycleSnapshot = [];
                     cycleIndex = -1;
-                    await DataStore.set(STORAGE_KEY, []);
+                    historyDirty = true;
+                    await persistHistoryNow();
                     Toasts.show({ id: Toasts.genId(), type: Toasts.Type.SUCCESS, message: "Cleared RDMS history" });
                 }}>
-                "Clear RDMS History
+                Clear RDMS History
             </Button>
         )
     }
@@ -100,11 +104,34 @@ function isDirectMessageChannel(channelId: string | null | undefined): boolean {
     }
 }
 
+async function persistHistoryNow() {
+    if (historyPersistTimeout) {
+        clearTimeout(historyPersistTimeout);
+        historyPersistTimeout = null;
+    }
+
+    if (!historyDirty) return;
+    historyDirty = false;
+    await DataStore.set(STORAGE_KEY, rmdsDmChannelIds);
+}
+
+function scheduleHistoryPersist() {
+    historyDirty = true;
+    if (historyPersistTimeout) clearTimeout(historyPersistTimeout);
+
+    historyPersistTimeout = setTimeout(() => {
+        historyPersistTimeout = null;
+        void persistHistoryNow();
+    }, PERSIST_DELAY_MS);
+}
+
 function pushChannelToFront(channelId: string) {
-    rmdsDmChannelIds = rmdsDmChannelIds.filter(id => id !== channelId);
-    rmdsDmChannelIds.unshift(channelId);
-    if (rmdsDmChannelIds.length > settings.store.amountOfUsers) rmdsDmChannelIds.length = settings.store.amountOfUsers;
-    void DataStore.set(STORAGE_KEY, rmdsDmChannelIds);
+    const next = [channelId, ...rmdsDmChannelIds.filter(id => id !== channelId)];
+    if (next.length > settings.store.amountOfUsers) next.length = settings.store.amountOfUsers;
+    if (next.length === rmdsDmChannelIds.length && next.every((id, i) => id === rmdsDmChannelIds[i])) return;
+
+    rmdsDmChannelIds = next;
+    scheduleHistoryPersist();
 }
 
 function sanitizeHistory(ids: string[]): string[] {
@@ -343,7 +370,7 @@ export default definePlugin({
                 if (targetId) ChannelRouter.transitionToChannel(targetId);
             }
         },
-        async CHANNEL_SELECT({ channelId }: { channelId: string | null; }) {
+        CHANNEL_SELECT({ channelId }: { channelId: string | null; }) {
             if (suppressRdmsWhileCycling) return;
             if (!channelId) return;
             if (!isDirectMessageChannel(channelId)) return;
@@ -370,6 +397,7 @@ export default definePlugin({
         cycleSnapshot = [];
         cycleIndex = -1;
         activeToastId = null;
+        void persistHistoryNow();
 
         const visEnd = (settings as any).store?.visualStyle;
         if (visEnd === "overlay") unmountOverlay();

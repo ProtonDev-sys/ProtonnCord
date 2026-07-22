@@ -26,9 +26,45 @@ export type InviteCacheEntry = {
 };
 
 const inviteCache = new Map<string, InviteCacheEntry>();
+const MAX_INVITE_CACHE_ENTRIES = 100;
 
 export function clearInviteCache() {
     inviteCache.clear();
+}
+
+function getCachedInvite(guildId: string) {
+    const cached = inviteCache.get(guildId);
+    if (!cached) return null;
+
+    if (isInviteExpired(cached)) {
+        inviteCache.delete(guildId);
+        return null;
+    }
+
+    inviteCache.delete(guildId);
+    inviteCache.set(guildId, cached);
+    return cached;
+}
+
+function trimInviteCache() {
+    if (inviteCache.size <= MAX_INVITE_CACHE_ENTRIES) return;
+
+    for (const [guildId, invite] of inviteCache) {
+        if (inviteCache.size <= MAX_INVITE_CACHE_ENTRIES) return;
+        if (isInviteExpired(invite)) inviteCache.delete(guildId);
+    }
+
+    while (inviteCache.size > MAX_INVITE_CACHE_ENTRIES) {
+        const oldestGuildId = inviteCache.keys().next().value;
+        if (oldestGuildId === undefined) return;
+        inviteCache.delete(oldestGuildId);
+    }
+}
+
+function setCachedInvite(guildId: string, invite: InviteCacheEntry) {
+    if (inviteCache.has(guildId)) inviteCache.delete(guildId);
+    inviteCache.set(guildId, invite);
+    trimInviteCache();
 }
 
 function normalizeInviteCacheEntry(invite: {
@@ -101,8 +137,8 @@ function resolveInviteChannel(guildId: string, currentChannel: Channel): Channel
 }
 
 async function fetchReusableInvite(guildId: string, inviteChannelId: string) {
-    const cached = inviteCache.get(guildId);
-    if (cached && cached.maxUses === null && !isInviteExpired(cached)) return { ok: true as const, code: cached.code };
+    const cached = getCachedInvite(guildId);
+    if (cached?.maxUses === null) return { ok: true as const, code: cached.code };
 
     try {
         const { body } = await RestAPI.get({ url: `/channels/${inviteChannelId}/invites` });
@@ -120,7 +156,7 @@ async function fetchReusableInvite(guildId: string, inviteChannelId: string) {
 
         if (!invite?.code) return { ok: false as const, reason: "missing" as const };
 
-        inviteCache.set(guildId, normalizeInviteCacheEntry(invite));
+        setCachedInvite(guildId, normalizeInviteCacheEntry(invite));
         return { ok: true as const, code: invite.code };
     } catch (error) {
         logger.error("Failed to reuse invite", error);
@@ -168,7 +204,7 @@ export async function createInvite(guildId: string, currentChannel: Channel, set
         const code = typeof body === "object" && body ? (body as { code?: string; }).code : null;
         if (!code) throw new Error("Invite response missing code");
 
-        inviteCache.set(guildId, {
+        setCachedInvite(guildId, {
             code,
             expiresAt: maxAge > 0 ? Date.now() + maxAge * 1000 : null,
             maxUses: maxUses === 0 ? null : maxUses,

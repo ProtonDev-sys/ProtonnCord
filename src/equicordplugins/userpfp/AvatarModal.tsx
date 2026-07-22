@@ -11,7 +11,7 @@ import { classNameFactory } from "@utils/css";
 import { RenderModalProps } from "@vencord/discord-types";
 import { IconUtils, Modal, React, TextInput, Toasts, UserStore, useState } from "@webpack/common";
 
-import { data, KEY_DATASTORE } from ".";
+import { clearAvatarUrlCache, data, KEY_DATASTORE } from ".";
 
 const cl = classNameFactory("vc-userpfp-");
 
@@ -66,12 +66,14 @@ export function SetAvatarModal({ userId, modalProps }: { userId: string; modalPr
             return;
         }
         avatars[userId] = url.trim();
+        clearAvatarUrlCache(userId);
         await set(KEY_DATASTORE, avatars);
         modalProps.onClose();
     }
 
     async function deleteUserAvatar() {
         delete avatars[userId];
+        clearAvatarUrlCache(userId);
         await set(KEY_DATASTORE, avatars);
         modalProps.onClose();
     }

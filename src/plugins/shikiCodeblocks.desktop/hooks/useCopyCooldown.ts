@@ -21,12 +21,23 @@ import { React } from "@webpack/common";
 
 export function useCopyCooldown(cooldown: number) {
     const [copyCooldown, setCopyCooldown] = React.useState(false);
+    const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+    React.useEffect(() => () => {
+        if (timeoutRef.current === undefined) return;
+
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = undefined;
+    }, []);
 
     function copy(text: string) {
         copyToClipboard(text);
         setCopyCooldown(true);
 
-        setTimeout(() => {
+        if (timeoutRef.current !== undefined) clearTimeout(timeoutRef.current);
+
+        timeoutRef.current = setTimeout(() => {
+            timeoutRef.current = undefined;
             setCopyCooldown(false);
         }, cooldown);
     }

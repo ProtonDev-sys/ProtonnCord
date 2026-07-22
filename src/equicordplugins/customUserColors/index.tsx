@@ -19,10 +19,31 @@ import { SetColorModal } from "./SetColorModal";
 
 export const DATASTORE_KEY = "equicord-customcolors";
 export let colors: Record<string, string> = {};
+let colorsLoaded = false;
+let colorsLoad: Promise<void> | null = null;
+let colorsGeneration = 0;
 
-(async () => {
-    colors = await get<Record<string, string>>(DATASTORE_KEY) || {};
-})();
+function isColorMap(value: unknown): value is Record<string, string> {
+    return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+export async function loadCustomColors() {
+    if (colorsLoaded) return;
+
+    const generation = colorsGeneration;
+    colorsLoad ??= get<Record<string, string>>(DATASTORE_KEY)
+        .then(storedColors => {
+            if (generation !== colorsGeneration) return;
+
+            colors = isColorMap(storedColors) ? storedColors : {};
+            colorsLoaded = true;
+        })
+        .finally(() => {
+            if (generation === colorsGeneration) colorsLoad = null;
+        });
+
+    await colorsLoad;
+}
 
 // needed for color picker to be available without opening settings (ty pindms!!)
 const requireSettingsMenu = extractAndLoadChunksLazy(['type:"USER_SETTINGS_MODAL_OPEN"']);
@@ -49,7 +70,7 @@ const userContextMenuPatch: NavContextMenuPatchCallback = (children, { user }: {
             id="set-color"
             icon={ColorIcon}
             action={async () => {
-                await requireSettingsMenu();
+                await Promise.all([requireSettingsMenu(), loadCustomColors()]);
                 openModal(modalProps => <SetColorModal id={user.id} modalProps={modalProps} />);
             }}
         />
@@ -67,7 +88,7 @@ const channelContextMenuPatch: NavContextMenuPatchCallback = (children, { channe
             id="set-color"
             icon={ColorIcon}
             action={async () => {
-                await requireSettingsMenu();
+                await Promise.all([requireSettingsMenu(), loadCustomColors()]);
                 openModal(modalProps => <SetColorModal id={channel.id} modalProps={modalProps} />);
             }}
         />
@@ -108,6 +129,20 @@ export default definePlugin({
     settings,
     requireSettingsMenu,
     getCustomColorString,
+
+    async start() {
+        colorsGeneration++;
+        colorsLoaded = false;
+        colorsLoad = null;
+        await loadCustomColors();
+    },
+
+    stop() {
+        colorsGeneration++;
+        colors = {};
+        colorsLoaded = false;
+        colorsLoad = null;
+    },
 
     patches: [
         {

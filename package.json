@@ -1,18 +1,18 @@
 {
-    "name": "equicord",
+    "name": "protonn-cord",
     "private": "true",
     "version": "1.14.16.0",
-    "description": "The other cutest Discord client mod",
-    "homepage": "https://github.com/Equicord/Equicord#readme",
+    "description": "Protonn Cord, a Discord client mod",
+    "homepage": "https://github.com/ProtonnCord/ProtonnCord#readme",
     "bugs": {
-        "url": "https://github.com/Equicord/Equicord/issues"
+        "url": "https://github.com/ProtonnCord/ProtonnCord/issues"
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/Equicord/Equicord.git"
+        "url": "git+https://github.com/ProtonnCord/ProtonnCord.git"
     },
     "license": "GPL-3.0-or-later",
-    "author": "Equicord",
+    "author": "Protonn Cord",
     "scripts": {
         "build": "node --require=./scripts/suppressExperimentalWarnings.js scripts/build/build.mjs",
         "buildStandalone": "pnpm build --standalone",
@@ -25,7 +25,8 @@
         "watchWeb": "pnpm buildWeb --watch",
         "generateDevsList": "tsx scripts/generateDevsList.ts",
         "generatePluginJson": "tsx scripts/generatePluginList.ts",
-        "generateEquicordPluginJson": "tsx scripts/generatePluginList.ts --equicord",
+        "generateProtonnCordPluginJson": "tsx scripts/generatePluginList.ts --equicord",
+        "generateEquicordPluginJson": "pnpm generateProtonnCordPluginJson",
         "generateVencordPluginJson": "tsx scripts/generatePluginList.ts --vencord",
         "generateTypes": "tspc --emitDeclarationOnly --declaration --outDir packages/vencord-types --allowJs false",
         "inject": "node scripts/runInstaller.mjs -- --install",
@@ -37,6 +38,11 @@
         "lint:fix": "pnpm lint --fix",
         "lint:intl": "node scripts/lintIntl.mjs",
         "lint:patches": "node scripts/lintPatches.mjs",
+        "testPrimaryStreamAudio": "tsx scripts/testPrimaryStreamAudio.ts",
+        "testNewPluginsManager": "tsx scripts/testNewPluginsManager.ts",
+        "testClientsideGuildIcons": "tsx scripts/testClientsideGuildIcons.ts",
+        "testPromiseTimeout": "tsx scripts/testPromiseTimeout.ts",
+        "benchmarkDiscord": "tsx scripts/benchmarkDiscord.ts",
         "test": "pnpm buildStandalone && pnpm testTsc && pnpm lint:fix && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
         "testWeb": "pnpm lint:fix && pnpm buildWeb && pnpm testTsc",
         "testTsc": "tsc --noEmit"

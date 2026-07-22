@@ -25,7 +25,7 @@ import { promisify } from "util";
 import { serializeErrors } from "./common";
 
 const VENCORD_SRC_DIR = join(__dirname, "..");
-const EQUICORD_DIR = join(__dirname, "../../");
+const PROTONN_CORD_DIR = join(__dirname, "../../");
 
 const execFile = promisify(cpExecFile);
 
@@ -42,9 +42,12 @@ function git(...args: string[]) {
 
 async function getRepo() {
     const res = await git("remote", "get-url", "origin");
-    return res.stdout.trim()
+    const remote = res.stdout.trim()
         .replace(/git@(.+):/, "https://$1/")
         .replace(/\.git$/, "");
+    return remote === "https://github.com/Equicord/Equicord"
+        ? "https://github.com/ProtonnCord/ProtonnCord"
+        : remote;
 }
 
 async function calculateGitChanges() {
@@ -73,7 +76,7 @@ async function pull() {
 }
 
 async function build() {
-    const opts = { cwd: EQUICORD_DIR };
+    const opts = { cwd: PROTONN_CORD_DIR };
 
     const command = isFlatpak ? "flatpak-spawn" : "node";
     const args = isFlatpak ? ["--host", "node", "scripts/build/build.mjs"] : ["scripts/build/build.mjs"];

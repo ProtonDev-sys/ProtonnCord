@@ -10,7 +10,7 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import ShowHiddenChannelsPlugin from "@plugins/showHiddenChannels";
 import { classNameFactory } from "@utils/css";
 import { classes } from "@utils/misc";
-import { Channel } from "@vencord/discord-types";
+import { Channel, User } from "@vencord/discord-types";
 import { findByPropsLazy, findCssClassesLazy } from "@webpack";
 import { ChannelRouter, ChannelStore, Parser, PermissionsBits, PermissionStore, React, showToast, Toasts, Tooltip, useMemo, UserStore, UserSummaryItem, useStateFromStores, VoiceStateStore } from "@webpack/common";
 import { PropsWithChildren } from "react";
@@ -91,10 +91,16 @@ interface VoiceChannelTooltipProps {
 function VoiceChannelTooltip({ channel, isLocked }: VoiceChannelTooltipProps) {
     const voiceStates = useStateFromStores([VoiceStateStore], () => VoiceStateStore.getVoiceStatesForChannel(channel.id));
 
-    const users = useMemo(
-        () => Object.values(voiceStates).map(voiceState => UserStore.getUser(voiceState.userId)).filter(user => user != null),
-        [voiceStates]
-    );
+    const users = useMemo(() => {
+        const users: User[] = [];
+
+        for (const key in voiceStates) {
+            const user = UserStore.getUser(voiceStates[key].userId);
+            if (user != null) users.push(user);
+        }
+
+        return users;
+    }, [voiceStates]);
 
     const Icon = isLocked ? LockedSpeakerIcon : SpeakerIcon;
     return (
@@ -122,7 +128,21 @@ export type VoiceChannelIndicatorProps = {
     shouldHighlight?: boolean;
 };
 
-const clickTimers = new Map<string, any>();
+const clickTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearClickTimer(channelId: string) {
+    const timeoutId = clickTimers.get(channelId);
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    clickTimers.delete(channelId);
+}
+
+export function clearVoiceChannelIndicatorTimers() {
+    for (const timeoutId of clickTimers.values()) {
+        clearTimeout(timeoutId);
+    }
+
+    clickTimers.clear();
+}
 
 export const VoiceChannelIndicator = ErrorBoundary.wrap(({ userId, isProfile, isActionButton, shouldHighlight }: VoiceChannelIndicatorProps) => {
     const channelId = useStateFromStores([VoiceStateStore], () => VoiceStateStore.getVoiceStateForUser(userId)?.channelId);
@@ -149,8 +169,7 @@ export const VoiceChannelIndicator = ErrorBoundary.wrap(({ userId, isProfile, is
 
         if (channel == null || channelId == null) return;
 
-        clearTimeout(clickTimers.get(channelId));
-        clickTimers.delete(channelId);
+        clearClickTimer(channelId);
 
         if (e.detail > 1) {
             if (!isDM && !PermissionStore.can(PermissionsBits.CONNECT, channel)) {

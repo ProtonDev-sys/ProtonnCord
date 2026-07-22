@@ -50,6 +50,35 @@ const platformMap = {
     vr: "VR"
 };
 
+function getStatusPriority(status: string) {
+    switch (status) {
+        case "online":
+            return 3;
+        case "idle":
+            return 2;
+        case "dnd":
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+function getOwnClientStatuses(sessions: Record<string, Session>) {
+    const ownStatus: Record<string, string> = {};
+
+    for (const session of Object.values(sessions)) {
+        const { client } = session.clientInfo;
+        if (client === "unknown") continue;
+
+        const currentStatus = ownStatus[client];
+        if (!currentStatus || getStatusPriority(session.status) > getStatusPriority(currentStatus)) {
+            ownStatus[client] = session.status;
+        }
+    }
+
+    return ownStatus;
+}
+
 function Icon(path: string, opts?: { viewBox?: string; width?: number; height?: number; }) {
     return ({ color, tooltip, small }: { color: string; tooltip: string; small: boolean; }) => (
         <Tooltip text={tooltip}>
@@ -103,29 +132,16 @@ const PlatformIcon = ({ platform, status, small }) => {
 };
 
 function useEnsureOwnStatus(user: User) {
-    if (user.id !== AuthenticationStore.getId()) {
+    const currentUserId = AuthenticationStore.getId();
+    if (!currentUserId || user.id !== currentUserId) {
         return;
     }
 
     const sessions = useStateFromStores([SessionsStore], () => SessionsStore.getSessions());
-    if (typeof sessions !== "object") return null;
-    const sortedSessions = Object.values(sessions).sort(({ status: a }, { status: b }) => {
-        if (a === b) return 0;
-        if (a === "online") return 1;
-        if (b === "online") return -1;
-        if (a === "idle") return 1;
-        if (b === "idle") return -1;
-        return 0;
-    });
-
-    const ownStatus = Object.values(sortedSessions).reduce((acc, curr) => {
-        if (curr.clientInfo.client !== "unknown")
-            acc[curr.clientInfo.client] = curr.status;
-        return acc;
-    }, {});
+    if (!sessions || typeof sessions !== "object") return null;
 
     const { clientStatuses } = PresenceStore.getState();
-    clientStatuses[UserStore.getCurrentUser().id] = ownStatus;
+    clientStatuses[currentUserId] = getOwnClientStatuses(sessions);
 }
 
 interface PlatformIndicatorProps {
@@ -200,7 +216,7 @@ const settings = definePluginSettings({
         restartNeeded: true,
         options: [
             {
-                label: "Equicord",
+                label: "Protonn Cord",
                 value: "equicord",
                 default: true
             },

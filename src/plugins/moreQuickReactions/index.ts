@@ -120,21 +120,32 @@ export default definePlugin({
         }
     ],
     getMaxQuickReactions() {
-        return settings.store.rows * settings.store.columns;
+        return Math.max(0, settings.store.rows * settings.store.columns);
     },
     get reactionCount() {
-        return settings.store.reactionCount;
+        return Math.max(0, Math.min(42, settings.store.reactionCount));
     },
     applyScroll(emojis: any[], index: number) {
-        return emojis.slice(index, index + this.getMaxQuickReactions());
+        const maxReactions = this.getMaxQuickReactions();
+        if (maxReactions <= 0) return [];
+        if (emojis.length <= maxReactions) return emojis;
+
+        const startIndex = Math.max(0, Math.min(index, emojis.length - maxReactions));
+        return emojis.slice(startIndex, startIndex + maxReactions);
     },
     onWheelWrapper(currentScrollValue: number, setScrollHook: (value: number) => void, emojisLength: number) {
-        if (settings.store.scroll) return (e: WheelEvent) => {
+        if (!settings.store.scroll) return;
+
+        const maxReactions = this.getMaxQuickReactions();
+        const maxScroll = Math.max(0, emojisLength - maxReactions);
+        if (maxScroll === 0) return;
+
+        return (e: WheelEvent) => {
             if (e.deltaY === 0 || e.shiftKey) return;
             e.stopPropagation(); // does this do anything?
             const modifier = e.deltaY < 0 ? -1 : 1;
             const newValue = currentScrollValue + (modifier * settings.store.columns);
-            setScrollHook(Math.max(0, Math.min(newValue, emojisLength - this.getMaxQuickReactions())));
+            setScrollHook(Math.max(0, Math.min(newValue, maxScroll)));
         };
     },
 });

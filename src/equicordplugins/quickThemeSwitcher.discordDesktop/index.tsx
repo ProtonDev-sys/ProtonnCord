@@ -26,20 +26,45 @@ interface ThemeFile {
 
 let themeList: ThemeItem[] = [];
 let currentIndex = 0;
-let fileWatcher: NodeJS.Timeout | null = null;
+let fileWatcher: ReturnType<typeof setTimeout> | null = null;
+let fileWatcherRunning = false;
 let lastThemeCount = 0;
+let pluginStarted = false;
 let skipNextIndexUpdate = false;
+let startGeneration = 0;
+const fileWatcherIntervalMs = 2000;
+
+function countLocalThemeItems(themes: ThemeItem[]) {
+    let count = 0;
+    for (const theme of themes) {
+        if (theme.type === "local") count++;
+    }
+    return count;
+}
+
+function countLocalThemeFiles(themes: ThemeFile[]) {
+    let count = 0;
+    for (const theme of themes) {
+        if (theme.fileName.endsWith(".css") && theme.fileName !== "source.theme.css") count++;
+    }
+    return count;
+}
 
 const updateCurrentIndex = () => {
     if (skipNextIndexUpdate) return skipNextIndexUpdate = false;
     currentIndex = findCurrentThemeIndex();
 };
 
-const refreshThemeList = async (silent = false) => {
+const refreshThemeList = async (silent = false, generation = startGeneration) => {
+    if (!pluginStarted || generation !== startGeneration) return;
+
     const oldTheme = themeList[currentIndex];
     const oldCount = themeList.length;
 
-    themeList = await getAllThemes();
+    const nextThemeList = await getAllThemes();
+    if (!pluginStarted || generation !== startGeneration) return;
+
+    themeList = nextThemeList;
     currentIndex = findCurrentThemeIndex();
 
     if (oldTheme && themeList[currentIndex]?.id !== oldTheme.id) {
@@ -55,14 +80,17 @@ const refreshThemeList = async (silent = false) => {
     }
 };
 
-const debouncedRefresh = debounce(() => refreshThemeList(), 500);
+const debouncedRefresh = debounce(() => void refreshThemeList(), 500);
 
 const settings = definePluginSettings({
     includeLocal: {
         type: OptionType.BOOLEAN,
         description: "Include local themes",
         default: true,
-        onChange: refreshThemeList,
+        onChange: () => {
+            void refreshThemeList();
+            syncFileWatcher();
+        },
     },
     includeOnline: {
         type: OptionType.BOOLEAN,
@@ -84,6 +112,7 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         description: "Auto-refresh theme list when changes are detected",
         default: true,
+        onChange: syncFileWatcher,
     },
     showNotifications: {
         type: OptionType.BOOLEAN,
@@ -189,17 +218,18 @@ async function reloadThemes() {
     showToast(`Reloaded ${themeList.length} themes`, Toasts.Type.SUCCESS);
 }
 
-async function watchForLocalThemeChanges() {
-    if (!settings.store.autoRefresh || !settings.store.includeLocal) return;
+async function watchForLocalThemeChanges(generation = startGeneration) {
+    if (!pluginStarted || generation !== startGeneration || !settings.store.autoRefresh || !settings.store.includeLocal) return;
 
     const currentThemes = await VencordNative.themes.getThemesList();
-    const currentCount = currentThemes.filter(
-        (t: ThemeFile) => t.fileName.endsWith(".css") && t.fileName !== "source.theme.css",
-    ).length;
+    if (!pluginStarted || generation !== startGeneration) return;
+
+    const currentCount = countLocalThemeFiles(currentThemes);
 
     if (lastThemeCount && currentCount !== lastThemeCount) {
         const diff = currentCount - lastThemeCount;
-        await refreshThemeList();
+        await refreshThemeList(false, generation);
+        if (!pluginStarted || generation !== startGeneration) return;
 
         if (settings.store.showNotifications) {
             const action = diff > 0 ? "Added" : "Removed";
@@ -209,6 +239,36 @@ async function watchForLocalThemeChanges() {
     }
 
     lastThemeCount = currentCount;
+}
+
+function startFileWatcher() {
+    if (fileWatcherRunning || !settings.store.autoRefresh || !settings.store.includeLocal) return;
+
+    fileWatcherRunning = true;
+    const generation = startGeneration;
+    void watchForLocalThemeChanges(generation).finally(() => scheduleNextFileWatch(generation));
+}
+
+function scheduleNextFileWatch(generation = startGeneration) {
+    if (!pluginStarted || generation !== startGeneration || !fileWatcherRunning || fileWatcher || !settings.store.autoRefresh || !settings.store.includeLocal) return;
+
+    fileWatcher = setTimeout(() => {
+        fileWatcher = null;
+        void watchForLocalThemeChanges(generation).finally(() => scheduleNextFileWatch(generation));
+    }, fileWatcherIntervalMs);
+}
+
+function stopFileWatcher() {
+    fileWatcherRunning = false;
+    if (!fileWatcher) return;
+
+    clearTimeout(fileWatcher);
+    fileWatcher = null;
+}
+
+function syncFileWatcher() {
+    if (settings.store.autoRefresh && settings.store.includeLocal) startFileWatcher();
+    else stopFileWatcher();
 }
 
 const isCtrl = (e: KeyboardEvent) => (IS_MAC ? e.metaKey : e.ctrlKey);
@@ -260,9 +320,14 @@ export default definePlugin({
     ),
 
     async start() {
+        pluginStarted = true;
+        const generation = ++startGeneration;
+
         themeList = await getAllThemes();
+        if (!pluginStarted || generation !== startGeneration) return;
+
         currentIndex = findCurrentThemeIndex();
-        lastThemeCount = themeList.filter(t => t.type === "local").length;
+        lastThemeCount = countLocalThemeItems(themeList);
 
         document.addEventListener("keydown", handleKeyDown);
 
@@ -271,12 +336,13 @@ export default definePlugin({
         SettingsStore.addChangeListener("enabledThemes", updateCurrentIndex);
         SettingsStore.addChangeListener("enabledThemeLinks", updateCurrentIndex);
 
-        if (settings.store.autoRefresh && settings.store.includeLocal) {
-            fileWatcher = setInterval(watchForLocalThemeChanges, 2000);
-        }
+        syncFileWatcher();
     },
 
     stop() {
+        pluginStarted = false;
+        startGeneration++;
+
         document.removeEventListener("keydown", handleKeyDown);
 
         SettingsStore.removeChangeListener("themeLinks", handleThemeLinksChange);
@@ -284,10 +350,7 @@ export default definePlugin({
         SettingsStore.removeChangeListener("enabledThemes", updateCurrentIndex);
         SettingsStore.removeChangeListener("enabledThemeLinks", updateCurrentIndex);
 
-        if (fileWatcher) {
-            clearInterval(fileWatcher);
-            fileWatcher = null;
-        }
+        stopFileWatcher();
 
         themeList = [];
         currentIndex = 0;

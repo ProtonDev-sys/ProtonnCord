@@ -88,17 +88,24 @@ export default definePlugin({
 
     flux: {
         CONVERSATION_SUMMARY_UPDATE(data) {
+            if (!data.channel_id || !Array.isArray(data.summaries) || data.summaries.length === 0) return;
+
+            const now = Date.now();
             const incomingSummaries: ChannelSummary[] = data.summaries.map((summary: any) => ({
                 ...createChannelSummaryFromServer(summary, undefined!),
-                time: Date.now()
+                time: now
             }));
 
-            // idk if this is good for performance but it doesnt seem to be a problem in my experience
             DataStore.update("summaries-data", summaries => {
                 summaries ??= {};
-                summaries[data.channel_id] ? summaries[data.channel_id].unshift(...incomingSummaries) : (summaries[data.channel_id] = incomingSummaries);
-                if (summaries[data.channel_id].length > 50)
-                    summaries[data.channel_id] = summaries[data.channel_id].slice(0, 50);
+                const channelSummaries = summaries[data.channel_id];
+
+                if (Array.isArray(channelSummaries)) {
+                    channelSummaries.unshift(...incomingSummaries);
+                    if (channelSummaries.length > 50) channelSummaries.length = 50;
+                } else {
+                    summaries[data.channel_id] = incomingSummaries.slice(0, 50);
+                }
 
                 return summaries;
             });
@@ -108,9 +115,16 @@ export default definePlugin({
     async start() {
         await DataStore.update("summaries-data", summaries => {
             summaries ??= {};
+            const expireBefore = Date.now() - 1000 * 60 * 60 * 24 * settings.store.summaryExpiryThresholdDays;
+
             for (const key of Object.keys(summaries)) {
+                if (!Array.isArray(summaries[key])) {
+                    delete summaries[key];
+                    continue;
+                }
+
                 for (let i = summaries[key].length - 1; i >= 0; i--) {
-                    if (summaries[key][i].time < Date.now() - 1000 * 60 * 60 * 24 * settings.store.summaryExpiryThresholdDays) {
+                    if ((summaries[key][i].time ?? 0) < expireBefore) {
                         summaries[key].splice(i, 1);
                     }
                 }
@@ -127,8 +141,11 @@ export default definePlugin({
 
     shouldFetch(channelId: string) {
         const channel = ChannelStore.getChannel(channelId);
+        if (!channel?.guild_id) return false;
+
         // SUMMARIES_ENABLED feature is not in discord-types
         const guild = GuildStore.getGuild(channel.guild_id);
+        if (!guild) return false;
 
         return hasGuildFeature(guild, "SUMMARIES_ENABLED_GA");
     }

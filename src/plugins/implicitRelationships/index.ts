@@ -33,6 +33,23 @@ const settings = definePluginSettings(
     }
 );
 
+const logger = new Logger("ImplicitRelationships");
+let fetchGeneration = 0;
+let memberChunkCallback: ((event: { chunks?: Array<{ nonce?: string; }>; }) => void) | null = null;
+let memberRequestTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function clearPendingMemberRequest() {
+    if (memberChunkCallback) {
+        FluxDispatcher.unsubscribe("GUILD_MEMBERS_CHUNK_BATCH", memberChunkCallback);
+        memberChunkCallback = null;
+    }
+
+    if (memberRequestTimeout) {
+        clearTimeout(memberRequestTimeout);
+        memberRequestTimeout = null;
+    }
+}
+
 export default definePlugin({
     name: "ImplicitRelationships",
     description: "Shows your implicit relationships in the Friends tab.",
@@ -123,19 +140,33 @@ export default definePlugin({
     },
 
     async fetchImplicitRelationships() {
+        clearPendingMemberRequest();
+        const generation = ++fetchGeneration;
+
         // Implicit relationships are defined as users that you:
         // 1. Have an affinity for
         // 2. Do not have a relationship with
         const userAffinities: Record<string, any>[] = UserAffinitiesStore.getUserAffinities();
         const relationships = RelationshipStore.getMutableRelationships();
-        const nonFriendAffinities = userAffinities.filter(a => !RelationshipStore.getRelationshipType(a.otherUserId));
-        nonFriendAffinities.forEach(a => {
-            relationships.set(a.otherUserId, 5);
-        });
-        RelationshipStore.emitChange();
+        const toRequest: string[] = [];
+        let addedImplicitRelationships = false;
 
-        const toRequest = nonFriendAffinities.filter(a => !UserStore.getUser(a.otherUserId));
+        for (const affinity of userAffinities) {
+            const userId = affinity.otherUserId;
+            if (!userId || RelationshipStore.getRelationshipType(userId)) continue;
+
+            relationships.set(userId, 5);
+            addedImplicitRelationships = true;
+
+            if (!UserStore.getUser(userId)) toRequest.push(userId);
+        }
+
+        if (addedImplicitRelationships) RelationshipStore.emitChange();
+        if (!toRequest.length) return;
+
         const allGuildIds = Object.keys(GuildStore.getGuilds());
+        if (!allGuildIds.length) return;
+
         const sentNonce = SnowflakeUtils.fromTimestamp(Date.now());
         let count = allGuildIds.length * Math.ceil(toRequest.length / 100);
 
@@ -143,22 +174,34 @@ export default definePlugin({
         // Note: As we are using OP 8 here, implicit relationships who we do not share a guild
         // with will not be fetched; so, if they're not otherwise cached, they will not be shown
         // This should not be a big deal as these should be rare
-        const callback = ({ chunks }) => {
+        const callback = ({ chunks }: { chunks?: Array<{ nonce?: string; }>; }) => {
+            if (generation !== fetchGeneration) return;
+            if (!chunks?.length) return;
+
             try {
-                const chunkCount = chunks.filter(chunk => chunk.nonce === sentNonce).length;
+                let chunkCount = 0;
+                for (const chunk of chunks) {
+                    if (chunk.nonce === sentNonce) chunkCount++;
+                }
+
                 if (chunkCount === 0) return;
 
                 count -= chunkCount;
                 RelationshipStore.emitChange();
                 if (count <= 0) {
-                    FluxDispatcher.unsubscribe("GUILD_MEMBERS_CHUNK_BATCH", callback);
+                    clearPendingMemberRequest();
                 }
             } catch (e) {
-                new Logger("ImplicitRelationships").error("Error in GUILD_MEMBERS_CHUNK_BATCH handler", e);
+                logger.error("Error in GUILD_MEMBERS_CHUNK_BATCH handler", e);
             }
         };
 
+        memberChunkCallback = callback;
+        memberRequestTimeout = setTimeout(() => {
+            if (generation === fetchGeneration) clearPendingMemberRequest();
+        }, 30000);
         FluxDispatcher.subscribe("GUILD_MEMBERS_CHUNK_BATCH", callback);
+
         for (let i = 0; i < toRequest.length; i += 100) {
             FluxDispatcher.dispatch({
                 type: "GUILD_MEMBERS_REQUEST",
@@ -172,5 +215,10 @@ export default definePlugin({
 
     start() {
         Constants.FriendsSections.IMPLICIT = "IMPLICIT";
+    },
+
+    stop() {
+        fetchGeneration++;
+        clearPendingMemberRequest();
     }
 });

@@ -92,7 +92,9 @@ export default definePlugin({
                 const isVoiceMessage = media.className.includes("audioElement");
                 if (isVoiceMessage) {
                     // Workaround because Discord seems to override it somewhere
-                    media.addEventListener("play", () => { changeSpeed(settings.store.defaultVoiceMessageSpeed); }, { once: true });
+                    const setVoiceSpeed = () => changeSpeed(settings.store.defaultVoiceMessageSpeed);
+                    media.addEventListener("play", setVoiceSpeed, { once: true });
+                    return () => media.removeEventListener("play", setVoiceSpeed);
                 } else {
                     changeSpeed(settings.store.defaultAudioSpeed);
                 }

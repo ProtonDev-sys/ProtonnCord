@@ -10,10 +10,9 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { Devs } from "@utils/constants";
 import { classNameFactory } from "@utils/css";
 import { openUserProfile } from "@utils/discord";
-import { isTruthy } from "@utils/guards";
 import { Logger } from "@utils/Logger";
 import definePlugin from "@utils/types";
-import type { Role } from "@vencord/discord-types";
+import type { Role, User } from "@vencord/discord-types";
 import { findByPropsLazy } from "@webpack";
 import { Constants, GuildRoleStore, IconUtils, Popout, RestAPI, ScrollerThin, useEffect, useRef, UserStore, useState, useStateFromStores } from "@webpack/common";
 
@@ -25,18 +24,50 @@ const GuildActions = findByPropsLazy("requestMembersById", "banUser");
 
 const MAX_VISIBLE_MEMBERS = 20;
 const CACHE_TTL = 60_000;
+const MAX_MEMBER_CACHE_ENTRIES = 100;
 
 const memberCache = new Map<string, { ids: string[]; timestamp: number; }>();
 
 function getCachedMemberIds(guildId: string, roleId: string) {
     const key = `${guildId}-${roleId}`;
     const cached = memberCache.get(key);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) return cached.ids;
-    return null;
+    if (!cached) return null;
+
+    if (Date.now() - cached.timestamp >= CACHE_TTL) {
+        memberCache.delete(key);
+        return null;
+    }
+
+    memberCache.delete(key);
+    memberCache.set(key, cached);
+    return cached.ids;
+}
+
+function trimMemberCache() {
+    if (memberCache.size <= MAX_MEMBER_CACHE_ENTRIES) return;
+
+    const now = Date.now();
+    for (const [key, entry] of memberCache) {
+        if (memberCache.size <= MAX_MEMBER_CACHE_ENTRIES) return;
+        if (now - entry.timestamp >= CACHE_TTL) memberCache.delete(key);
+    }
+
+    while (memberCache.size > MAX_MEMBER_CACHE_ENTRIES) {
+        const oldestKey = memberCache.keys().next().value;
+        if (oldestKey === undefined) return;
+        memberCache.delete(oldestKey);
+    }
+}
+
+function clearMemberCache() {
+    memberCache.clear();
 }
 
 function setCachedMemberIds(guildId: string, roleId: string, ids: string[]) {
-    memberCache.set(`${guildId}-${roleId}`, { ids, timestamp: Date.now() });
+    const key = `${guildId}-${roleId}`;
+    if (memberCache.has(key)) memberCache.delete(key);
+    memberCache.set(key, { ids, timestamp: Date.now() });
+    trimMemberCache();
 }
 
 function RoleMembersList({ roleId, guildId, closePopout, setPopoutRef }: { roleId: string; guildId: string; closePopout(): void; setPopoutRef(ref: HTMLDivElement | null): void; }) {
@@ -81,7 +112,16 @@ function RoleMembersList({ roleId, guildId, closePopout, setPopoutRef }: { roleI
 
     const users = useStateFromStores(
         [UserStore],
-        () => memberIds.map(id => UserStore.getUser(id)).filter(isTruthy),
+        () => {
+            const users: User[] = [];
+
+            for (const id of memberIds) {
+                const user = UserStore.getUser(id);
+                if (user) users.push(user);
+            }
+
+            return users;
+        },
         [memberIds]
     );
 
@@ -184,5 +224,9 @@ export default definePlugin({
                 {renderOriginal()}
             </WrappedClickableRole>
         );
+    },
+
+    stop() {
+        clearMemberCache();
     },
 });

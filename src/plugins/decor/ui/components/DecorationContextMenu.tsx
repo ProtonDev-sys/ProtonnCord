@@ -13,6 +13,7 @@ import { ConfirmModal,ContextMenuApi, Menu, openModal, UserStore } from "@webpac
 
 export default function DecorationContextMenu({ decoration }: { decoration: Decoration; }) {
     const { delete: deleteDecoration } = useCurrentUserDecorationsStore();
+    const currentUserId = UserStore.getCurrentUser()?.id;
 
     return <Menu.Menu
         navId={cl("decoration-context-menu")}
@@ -25,7 +26,7 @@ export default function DecorationContextMenu({ decoration }: { decoration: Deco
             icon={CopyIcon}
             action={() => copyToClipboard(decoration.hash)}
         />
-        {decoration.authorId === UserStore.getCurrentUser().id &&
+        {decoration.authorId === currentUserId &&
             <Menu.MenuItem
                 id={cl("decoration-context-menu-delete")}
                 label="Delete Decoration"

@@ -30,8 +30,11 @@ export async function getToken() {
 
 export async function updateAuth(newAuth: ReviewDBAuth) {
     return DataStore.update(DATA_STORE_KEY, auth => {
+        const currentUserId = UserStore.getCurrentUser()?.id;
+        if (!currentUserId) return auth ?? {};
+
         auth ??= {};
-        Auth = auth[UserStore.getCurrentUser().id] ??= {};
+        Auth = auth[currentUserId] ??= {};
 
         if (newAuth.token) Auth.token = newAuth.token;
         if (newAuth.user) Auth.user = newAuth.user;
@@ -65,7 +68,7 @@ export function authorize(callback?: () => void) {
                     }
 
                     const { token } = await res.json();
-                    updateAuth({ token });
+                    void updateAuth({ token });
                     showToast("Successfully logged in!", Toasts.Type.SUCCESS);
                     callback?.();
                 } catch (e) {

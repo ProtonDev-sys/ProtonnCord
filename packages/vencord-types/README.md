@@ -1,6 +1,6 @@
-# Equicord Types
+# Protonn Cord Types
 
-Typings for Equicord's api, published to npm
+Typings for Protonn Cord's API, published to npm-compatible tooling.
 
 ```sh
 npm i @equicord/types

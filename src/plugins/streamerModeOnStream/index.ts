@@ -25,7 +25,8 @@ interface StreamEvent {
 }
 
 function toggleStreamerMode({ streamKey }: StreamEvent, value: boolean) {
-    if (!streamKey.endsWith(UserStore.getCurrentUser().id)) return;
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    if (!currentUserId || !streamKey.endsWith(currentUserId)) return;
 
     FluxDispatcher.dispatch({
         type: "STREAMER_MODE_UPDATE",

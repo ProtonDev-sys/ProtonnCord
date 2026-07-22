@@ -247,11 +247,17 @@ function TranscriptionModal(props: { modalProps: RenderModalProps, src: string, 
         return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
     };
 
-    const displayText = result ? (
-        showTimestamps
-            ? result.chunks.map(c => `[${formatTimestamp(c.timestamp[0])} - ${formatTimestamp(c.timestamp[1])}] ${c.text}`).join("\n")
-            : result.text
-    ) : "";
+    let displayText = "";
+    if (result) {
+        if (showTimestamps) {
+            for (const chunk of result.chunks) {
+                if (displayText) displayText += "\n";
+                displayText += `[${formatTimestamp(chunk.timestamp[0])} - ${formatTimestamp(chunk.timestamp[1])}] ${chunk.text}`;
+            }
+        } else {
+            displayText = result.text;
+        }
+    }
 
     const actions: any[] = [];
     if (error) {

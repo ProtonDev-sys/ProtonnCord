@@ -14,25 +14,44 @@ import { MessageType } from "@vencord/discord-types/enums";
 import { ChannelStore, GuildStore, NavigationRouter, RelationshipStore } from "@webpack/common";
 
 interface MessageCreatePayload {
-    guildId: string;
+    guildId?: string;
     channelId: string;
     message: MessageJSON;
 }
+
+const USER_ID_REGEX = /^\d{17,20}$/;
+let notifyUserIds = new Set<string>();
 
 const settings = definePluginSettings({
     users: {
         type: OptionType.STRING,
         description: "Comma separated list of user ids to get message toasts for",
         default: "",
+        onChange: value => { notifyUserIds = parseUserIds(value); },
         isValid(value: string) {
             if (value === "") return true;
-            const userIds = value.split(",").map(id => id.trim());
-            for (const id of userIds)
-                if (!/\d+/.test(id)) return `${id} isn't a valid user id`;
+
+            for (const rawId of value.split(",")) {
+                const id = rawId.trim();
+                if (!id) continue;
+                if (!USER_ID_REGEX.test(id)) return `${id} isn't a valid user id`;
+            }
+
             return true;
         },
     },
 });
+
+function parseUserIds(value: string): Set<string> {
+    const userIds = new Set<string>();
+
+    for (const rawId of value.split(",")) {
+        const id = rawId.trim();
+        if (USER_ID_REGEX.test(id)) userIds.add(id);
+    }
+
+    return userIds;
+}
 
 export default definePlugin({
     authors: [EquicordDevs.cassie, EquicordDevs.mochienya],
@@ -43,14 +62,14 @@ export default definePlugin({
     flux: {
         MESSAGE_CREATE({ message, channelId, guildId }: MessageCreatePayload) {
             if (message.type !== MessageType.DEFAULT || getCurrentChannel()?.id === channelId) return;
+            if (!notifyUserIds.has(message.author.id)) return;
 
-            const userIds = settings.store.users.split(",").map(id => id.trim());
-            if (!userIds.includes(message.author.id)) return;
+            const channel = ChannelStore.getChannel(channelId);
+            if (!channel) return;
 
             const username = RelationshipStore.getNickname(message.author.id) ?? message.author.globalName ?? message.author.username;
-            const guild = GuildStore.getGuild(guildId);
-            const channel = ChannelStore.getChannel(channelId);
-            const locationName = guild ? `${guild.name}#${channel.name}` : channel?.name ?? "their dms";
+            const guild = guildId ? GuildStore.getGuild(guildId) : null;
+            const locationName = guild ? `${guild.name} #${channel.name}` : channel.name ?? "their DMs";
 
             Notifications.showNotification({
                 title: `${username} sent a message`,
@@ -60,5 +79,13 @@ export default definePlugin({
                 },
             });
         },
+    },
+
+    start() {
+        notifyUserIds = parseUserIds(settings.store.users);
+    },
+
+    stop() {
+        notifyUserIds = new Set();
     },
 });

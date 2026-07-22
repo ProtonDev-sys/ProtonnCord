@@ -106,9 +106,13 @@ export default definePlugin({
         const expiredGifs = collection.gifs.filter(g => g.src && g.url && (isCdnUrlExpired(g.src) || isCdnUrlExpired(g.url)));
         if (expiredGifs.length === 0) return;
 
-        const allUrls = [...new Set<string>(
-            expiredGifs.flatMap(g => [g.src, g.url].filter((u): u is string => !!u && isCdnUrlExpired(u)))
-        )];
+        const urlSet = new Set<string>();
+        for (const gif of expiredGifs) {
+            if (gif.src && isCdnUrlExpired(gif.src)) urlSet.add(gif.src);
+            if (gif.url && isCdnUrlExpired(gif.url)) urlSet.add(gif.url);
+        }
+
+        const allUrls = [...urlSet];
 
         if (!refreshingUrls) this.refreshExpiredUrls(allUrls, expiredGifs, instance.props.query);
     },

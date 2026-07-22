@@ -136,7 +136,8 @@ async function cloneEmoji(guildId: string, emoji: Emoji) {
 }
 
 function getGuildCandidates(data: Data) {
-    const meId = UserStore.getCurrentUser().id;
+    const meId = UserStore.getCurrentUser()?.id;
+    if (!meId) return [];
 
     return Object.values(GuildStore.getGuilds()).filter(g => {
         const canCreate = g.ownerId === meId ||

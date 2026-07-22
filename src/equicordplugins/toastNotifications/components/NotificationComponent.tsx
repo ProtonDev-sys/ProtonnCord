@@ -10,7 +10,7 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { settings as PluginSettings } from "@equicordplugins/toastNotifications/index";
 import { classNameFactory } from "@utils/css";
 import { findComponentByCodeLazy } from "@webpack";
-import { FluxDispatcher, GuildStore, IconUtils, React, useEffect, useMemo, useRef, useState } from "@webpack/common";
+import { FluxDispatcher, GuildStore, IconUtils, React, useEffect, useMemo, useState } from "@webpack/common";
 
 import { MessageNotification, NotificationData } from "./Notifications";
 
@@ -26,7 +26,13 @@ function renderContextHeader(channel: MessageNotification["channel"]): React.Rea
         const icon = channel.icon
             ? IconUtils.getChannelIconURL?.({ id: channel.id, icon: channel.icon, size: 32 })
             : undefined;
-        const rawName = channel.name?.trim() || channel.rawRecipients.slice(0, 3).map(e => e.username).join(", ");
+        let fallbackName = "";
+        for (let i = 0; i < Math.min(channel.rawRecipients.length, 3); i++) {
+            if (fallbackName) fallbackName += ", ";
+            fallbackName += channel.rawRecipients[i].username;
+        }
+
+        const rawName = channel.name?.trim() || fallbackName;
         const name = rawName.length > 20 ? rawName.substring(0, 20) + "..." : rawName;
         return (
             <div className={cl("context-header")}>
@@ -62,29 +68,16 @@ function renderContextHeader(channel: MessageNotification["channel"]): React.Rea
 
 export default ErrorBoundary.wrap(function NotificationComponent(props: NotificationData) {
     const [isHover, setIsHover] = useState(false);
-    const [elapsed, setElapsed] = useState(0);
 
     const timeout = (PluginSettings.store.timeout ?? 5) * 1000;
     const opacity = PluginSettings.store.opacity / 100;
-    const startRef = useRef(Date.now());
 
     useEffect(() => {
-        if (isHover || props.permanent) {
-            setElapsed(0);
-            return;
-        }
+        if (isHover || props.permanent) return;
 
-        startRef.current = Date.now();
-        const intervalId = setInterval(() => {
-            const next = Date.now() - startRef.current;
-            if (next >= timeout) props.onClose!();
-            else setElapsed(next);
-        }, 10);
-
-        return () => clearInterval(intervalId);
+        const closeTimeout = setTimeout(() => props.onClose!(), timeout);
+        return () => clearTimeout(closeTimeout);
     }, [isHover, props.permanent, timeout]);
-
-    const timeoutProgress = elapsed / timeout;
 
     const handleClick = () => {
         props.onClick?.();
@@ -173,7 +166,9 @@ export default ErrorBoundary.wrap(function NotificationComponent(props: Notifica
             {timeout !== 0 && !props.permanent && (
                 <div
                     className={cl("notification-progressbar")}
-                    style={{ width: `${(1 - timeoutProgress) * 100}%` }}
+                    style={isHover
+                        ? { animationName: "none", transform: "scaleX(1)" }
+                        : { animationDuration: `${timeout}ms` }}
                 />
             )}
         </button>

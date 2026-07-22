@@ -13,23 +13,29 @@ export const OnlineMemberCountStore = proxyLazy(() => {
     const preloadQueue = new Queue();
 
     const onlineMemberMap = new Map<string, number>();
+    const pendingPreloads = new Set<string>();
 
     class OnlineMemberCountStore extends Flux.Store {
         getCount(guildId?: string) {
-            return onlineMemberMap.get(guildId!);
+            if (!guildId) return undefined;
+            return onlineMemberMap.get(guildId);
         }
 
         async _ensureCount(guildId: string) {
             if (onlineMemberMap.has(guildId)) return;
+            const defaultChannel = GuildChannelStore.getDefaultChannel(guildId);
+            if (!defaultChannel) return;
 
-            await ChannelActionCreators.preload(guildId, GuildChannelStore.getDefaultChannel(guildId)!.id);
+            await ChannelActionCreators.preload(guildId, defaultChannel.id);
         }
 
         ensureCount(guildId?: string) {
-            if (!guildId || onlineMemberMap.has(guildId)) return;
+            if (!guildId || onlineMemberMap.has(guildId) || pendingPreloads.has(guildId)) return;
 
+            pendingPreloads.add(guildId);
             preloadQueue.push(() =>
                 this._ensureCount(guildId)
+                    .finally(() => pendingPreloads.delete(guildId))
                     .then(
                         () => sleep(200),
                         () => sleep(200)
@@ -44,9 +50,11 @@ export const OnlineMemberCountStore = proxyLazy(() => {
                 guildId,
                 groups.reduce((total, curr) => total + (curr.id === "offline" ? 0 : curr.count), 0)
             );
+            pendingPreloads.delete(guildId);
         },
         ONLINE_GUILD_MEMBER_COUNT_UPDATE({ guildId, count }) {
             onlineMemberMap.set(guildId, count);
+            pendingPreloads.delete(guildId);
         }
     });
 });

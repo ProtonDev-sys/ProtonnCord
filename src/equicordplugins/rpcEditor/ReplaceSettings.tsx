@@ -29,7 +29,11 @@ function isValidSnowflake(v: string) {
 }
 
 export function ReplaceTutorial() {
-    const activities: Activity[] = PresenceStore.getActivities(UserStore.getCurrentUser().id);
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    const activities: Activity[] = currentUserId
+        ? PresenceStore.getActivities(currentUserId)
+        : [];
+
     return (
         <>
             <HeadingSecondary>IDs of currently running activities</HeadingSecondary>

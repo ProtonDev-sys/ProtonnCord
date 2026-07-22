@@ -146,7 +146,7 @@ export const settings = definePluginSettings({
         default: true,
     },
     showFailedToasts: {
-        description: "Hide toasts when lyrics fail to fetch",
+        description: "Show toasts when lyrics fail to fetch",
         type: OptionType.BOOLEAN,
         default: true,
     },
@@ -218,7 +218,7 @@ export const settings = definePluginSettings({
         default: false,
     },
     showTidalLyrics: {
-        description: "Show Tidal Controls",
+        description: "Show Tidal Lyrics",
         type: OptionType.BOOLEAN,
         default: false,
     },

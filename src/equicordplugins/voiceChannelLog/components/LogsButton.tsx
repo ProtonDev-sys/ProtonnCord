@@ -10,6 +10,10 @@ import { ChannelStore, SelectedChannelStore, useStateFromStores } from "@webpack
 import { cl } from "../utils";
 import { openVoiceChannelLog } from "./VoiceChannelLogModal";
 
+function getSelectedVoiceChannelId(): string | undefined {
+    return SelectedChannelStore?.getVoiceChannelId?.();
+}
+
 function LogIcon({ height = 24, width = 24 }: { height?: number; width?: number; }) {
     return (
         <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox="0 0 24 24" fill="none">
@@ -20,7 +24,7 @@ function LogIcon({ height = 24, width = 24 }: { height?: number; width?: number;
 }
 
 export function OpenLogsButton() {
-    const voiceChannelId = useStateFromStores([SelectedChannelStore], () => SelectedChannelStore.getVoiceChannelId());
+    const voiceChannelId = useStateFromStores(SelectedChannelStore ? [SelectedChannelStore] : [], getSelectedVoiceChannelId);
 
     if (!voiceChannelId) return null;
 

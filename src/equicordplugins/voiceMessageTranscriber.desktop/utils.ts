@@ -116,23 +116,27 @@ const getAudioContext = () => new (window.AudioContext || (window as any).webkit
 export async function decodeAudio(blob: Blob): Promise<Float32Array> {
     const arrayBuffer = await blob.arrayBuffer();
     const audioContext = getAudioContext();
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    try {
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
-    // Mix down to mono
-    const channelData = audioBuffer.getChannelData(0);
-    if (audioBuffer.numberOfChannels > 1) {
-        for (let i = 1; i < audioBuffer.numberOfChannels; i++) {
-            const channel = audioBuffer.getChannelData(i);
-            for (let j = 0; j < channelData.length; j++) {
-                channelData[j] += channel[j];
+        // Mix down to mono
+        const channelData = audioBuffer.getChannelData(0);
+        if (audioBuffer.numberOfChannels > 1) {
+            for (let i = 1; i < audioBuffer.numberOfChannels; i++) {
+                const channel = audioBuffer.getChannelData(i);
+                for (let j = 0; j < channelData.length; j++) {
+                    channelData[j] += channel[j];
+                }
+            }
+            for (let i = 0; i < channelData.length; i++) {
+                channelData[i] /= audioBuffer.numberOfChannels;
             }
         }
-        for (let i = 0; i < channelData.length; i++) {
-            channelData[i] /= audioBuffer.numberOfChannels;
-        }
-    }
 
-    return channelData;
+        return new Float32Array(channelData);
+    } finally {
+        void audioContext.close().catch(() => undefined);
+    }
 }
 
 const workerCode = `
@@ -260,6 +264,7 @@ async function runTranscription({ audio, model, quantized, language, task }) {
 
 export class TranscriptionWorker {
     private worker: Worker;
+    private workerUrl: string;
     private onStatus: (status: string) => void;
     private onComplete: (output: any) => void;
     private onError: (error: any) => void;
@@ -277,7 +282,8 @@ export class TranscriptionWorker {
         this.onPartial = onPartial;
 
         const blob = new Blob([workerCode], { type: "text/javascript" });
-        this.worker = new Worker(URL.createObjectURL(blob), { type: "module" });
+        this.workerUrl = URL.createObjectURL(blob);
+        this.worker = new Worker(this.workerUrl, { type: "module" });
         this.worker.onmessage = this.handleMessage.bind(this);
     }
 
@@ -359,5 +365,6 @@ export class TranscriptionWorker {
 
     public terminate() {
         this.worker.terminate();
+        URL.revokeObjectURL(this.workerUrl);
     }
 }

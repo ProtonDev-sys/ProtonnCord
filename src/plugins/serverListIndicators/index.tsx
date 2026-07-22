@@ -38,8 +38,10 @@ let onlineFriendsCount = 0;
 let guildCount = 0;
 
 const UserGuildJoinRequestStore = findStoreLazy("UserGuildJoinRequestStore");
+const indicatorClassNames = classNameFactory("vc-indicators-");
+const compactIndicatorClassNames = classNameFactory("vc-indicators-compact-");
 
-function FriendsIndicator() {
+function FriendsIndicator({ useCompact }: { useCompact: boolean; }) {
     onlineFriendsCount = useStateFromStores([RelationshipStore, PresenceStore], () => {
         let count = 0;
 
@@ -58,7 +60,7 @@ function FriendsIndicator() {
 
     return (
         <div id="vc-friendcount">
-            {!settings.store.useCompact &&
+            {!useCompact &&
                 <svg
                     id="vc-friendcount-icon"
                     xmlns="http://www.w3.org/2000/svg"
@@ -78,23 +80,28 @@ function FriendsIndicator() {
                 size="xs"
                 id="vc-friendcount-text">{onlineFriendsCount}
             </BaseText>
-            {!!settings.store.useCompact && <BaseText size="xs" id="vc-friendcount-text-compact">Friends</BaseText>}
+            {useCompact && <BaseText size="xs" id="vc-friendcount-text-compact">Friends</BaseText>}
         </div>
     );
 }
 
-function ServersIndicator() {
+function ServersIndicator({ useCompact }: { useCompact: boolean; }) {
     guildCount = useStateFromStores([GuildStore, UserGuildJoinRequestStore], () => {
         const guildJoinRequests: string[] = UserGuildJoinRequestStore.computeGuildIds();
         const guilds = GuildStore.getGuilds();
+        let pendingJoinRequestCount = 0;
 
         // Filter only pending guild join requests
-        return GuildStore.getGuildCount() + guildJoinRequests.filter(id => guilds[id] == null).length;
+        for (const id of guildJoinRequests) {
+            if (guilds[id] == null) pendingJoinRequestCount++;
+        }
+
+        return GuildStore.getGuildCount() + pendingJoinRequestCount;
     });
 
     return (
         <div id="vc-guildcount">
-            {!settings.store.useCompact &&
+            {!useCompact &&
                 <svg
                     id="vc-guildcount-icon"
                     aria-hidden="true"
@@ -114,7 +121,7 @@ function ServersIndicator() {
                 size="xs"
                 id="vc-guildcount-text">{guildCount}
             </BaseText>
-            {!!settings.store.useCompact && <BaseText size="xs" id="vc-guildcount-text-compact">Servers</BaseText>}
+            {useCompact && <BaseText size="xs" id="vc-guildcount-text-compact">Servers</BaseText>}
         </div>
     );
 }
@@ -162,7 +169,7 @@ export default definePlugin({
                 break;
         }
 
-        const cl = useCompact ? classNameFactory("vc-indicators-compact-") : classNameFactory("vc-indicators-");
+        const cl = useCompact ? compactIndicatorClassNames : indicatorClassNames;
 
         return <ErrorBoundary noop>
             <div id={cl("container")}>
@@ -172,8 +179,8 @@ export default definePlugin({
                             id={cl("indicator-items")}
                             onMouseEnter={onMouseEnter}
                             onMouseLeave={onMouseLeave}>
-                            {!!(mode & IndicatorType.FRIEND) && <FriendsIndicator />}
-                            {!!(mode & IndicatorType.SERVER) && <ServersIndicator />}
+                            {!!(mode & IndicatorType.FRIEND) && <FriendsIndicator useCompact={useCompact} />}
+                            {!!(mode & IndicatorType.SERVER) && <ServersIndicator useCompact={useCompact} />}
                         </div>
                     )}
                 </Tooltip>

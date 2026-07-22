@@ -34,7 +34,7 @@ async function zipGuildAssets(guild: Guild, type: "emojis" | "stickers") {
         : StickersStore.getStickersByGuildId(guild.id);
 
     if (!items) {
-        return console.log("Server not found!");
+        return;
     }
 
     const getProxyEndpoint = () => {
@@ -84,10 +84,12 @@ async function zipGuildAssets(guild: Guild, type: "emojis" | "stickers") {
             const zipped = zipSync(Object.fromEntries(results.map(({ file, filename }) => [filename, file])));
             const blob = new Blob([new Uint8Array(zipped)], { type: "application/zip" });
             const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
+            const url = URL.createObjectURL(blob);
+            link.href = url;
             link.download = `${guild.name}-${type}.zip`;
             link.click();
             link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 0);
         })
         .catch(console.error);
 }

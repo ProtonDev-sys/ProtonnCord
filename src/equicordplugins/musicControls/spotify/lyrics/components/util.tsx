@@ -24,7 +24,7 @@ export function NoteSvg() {
     );
 }
 
-const getIndexes = (lyrics: SyncedLyric[], position: number, delay: number) => {
+const getIndexes = (lyrics: SyncedLyric[], position: number, delay: number): [number | null, number | null] => {
     const posInSec = (position + delay) / 1000;
 
     let left = 0, right = lyrics.length - 1;
@@ -74,12 +74,15 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
     const [lyricRefs, setLyricRefs] = useState<React.RefObject<HTMLDivElement | null>[]>([]);
 
     const currentLyrics = lyricsInfo?.lyricsVersions[lyricsInfo.useLyric];
+    const duration = track?.duration ?? Number.POSITIVE_INFINITY;
 
     useEffect(() => {
-        if (currentLyrics) {
-            setLyricRefs(currentLyrics.map(() => React.createRef()));
-        }
+        setLyricRefs(currentLyrics?.map(() => React.createRef()) ?? []);
     }, [currentLyrics]);
+
+    useEffect(() => {
+        setPosition(Math.min(storePosition, duration));
+    }, [duration, storePosition]);
 
     useEffect(() => {
         if (currentLyrics && position != null) {
@@ -95,7 +98,7 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
     useEffect(() => {
         if (scroll && currLrcIndex !== null) {
             if (currLrcIndex >= 0) {
-                lyricRefs[currLrcIndex].current?.scrollIntoView({ behavior: "smooth", block: "center" });
+                lyricRefs[currLrcIndex]?.current?.scrollIntoView({ behavior: "smooth", block: "center" });
             }
             if (currLrcIndex < 0 && nextLyric !== null) {
                 lyricRefs[nextLyric]?.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -107,10 +110,10 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
         if (!isPlaying) return;
 
         setPosition(SpotifyStore.position);
-        const interval = setInterval(() => setPosition(p => p + 1000), 1000);
+        const interval = setInterval(() => setPosition(p => Math.min(p + 1000, duration)), 1000);
 
         return () => clearInterval(interval);
-    }, [storePosition, isPlaying]);
+    }, [duration, storePosition, isPlaying]);
 
     return { track, lyricsInfo, lyricRefs, currLrcIndex, nextLyric };
 }

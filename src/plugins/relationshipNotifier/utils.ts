@@ -42,25 +42,32 @@ const friends = {
     requests: [] as string[]
 };
 
-const guildsKey = () => `relationship-notifier-guilds-${UserStore.getCurrentUser().id}`;
-const groupsKey = () => `relationship-notifier-groups-${UserStore.getCurrentUser().id}`;
-const friendsKey = () => `relationship-notifier-friends-${UserStore.getCurrentUser().id}`;
+const LEGACY_DATASTORE_KEYS = ["relationship-notifier-guilds", "relationship-notifier-groups", "relationship-notifier-friends"];
+let migrationsRun = false;
+
+const guildsKey = (userId: string) => `relationship-notifier-guilds-${userId}`;
+const groupsKey = (userId: string) => `relationship-notifier-groups-${userId}`;
+const friendsKey = (userId: string) => `relationship-notifier-friends-${userId}`;
 
 async function runMigrations() {
-    DataStore.delMany(["relationship-notifier-guilds", "relationship-notifier-groups", "relationship-notifier-friends"]);
+    if (migrationsRun) return;
+
+    await DataStore.delMany(LEGACY_DATASTORE_KEYS);
+    migrationsRun = true;
 }
 
 export async function syncAndRunChecks() {
     await runMigrations();
-    if (UserStore.getCurrentUser() == null) return;
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    if (!currentUserId) return;
 
     const [oldGuilds, oldGroups, oldFriends] = await DataStore.getMany([
-        guildsKey(),
-        groupsKey(),
-        friendsKey()
+        guildsKey(currentUserId),
+        groupsKey(currentUserId),
+        friendsKey(currentUserId)
     ]) as [Map<string, SimpleGuild> | undefined, Map<string, SimpleGroupChannel> | undefined, Record<"friends" | "requests", string[]> | undefined];
 
-    await Promise.all([syncGuilds(), syncGroups(), syncFriends()]);
+    await Promise.all([syncGuildsForUser(currentUserId), syncGroupsForUser(currentUserId), syncFriendsForUser(currentUserId)]);
 
     if (settings.store.offlineRemovals) {
         if (settings.store.groups && oldGroups?.size) {
@@ -132,18 +139,24 @@ export function deleteGuild(id: string) {
 }
 
 export async function syncGuilds() {
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    if (!currentUserId) return;
+
+    return syncGuildsForUser(currentUserId);
+}
+
+async function syncGuildsForUser(userId: string) {
     guilds.clear();
 
-    const me = UserStore.getCurrentUser().id;
     for (const [id, { name, icon }] of Object.entries(GuildStore.getGuilds())) {
-        if (GuildMemberStore.isMember(id, me))
+        if (GuildMemberStore.isMember(id, userId))
             guilds.set(id, {
                 id,
                 name,
                 iconURL: icon && `https://cdn.discordapp.com/icons/${id}/${icon}.png`
             });
     }
-    await DataStore.set(guildsKey(), guilds);
+    await DataStore.set(guildsKey(userId), guilds);
 }
 
 export function getGroup(id: string) {
@@ -156,21 +169,42 @@ export function deleteGroup(id: string) {
 }
 
 export async function syncGroups() {
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    if (!currentUserId) return;
+
+    return syncGroupsForUser(currentUserId);
+}
+
+async function syncGroupsForUser(userId: string) {
     groups.clear();
 
     for (const { type, id, name, rawRecipients, icon } of ChannelStore.getSortedPrivateChannels()) {
-        if (type === ChannelType.GROUP_DM)
+        if (type === ChannelType.GROUP_DM) {
+            let fallbackName = "";
+            for (const recipient of rawRecipients) {
+                if (fallbackName) fallbackName += ", ";
+                fallbackName += recipient.username;
+            }
+
             groups.set(id, {
                 id,
-                name: name || rawRecipients.map(r => r.username).join(", "),
+                name: name || fallbackName,
                 iconURL: icon && `https://cdn.discordapp.com/channel-icons/${id}/${icon}.png`
             });
+        }
     }
 
-    await DataStore.set(groupsKey(), groups);
+    await DataStore.set(groupsKey(userId), groups);
 }
 
 export async function syncFriends() {
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    if (!currentUserId) return;
+
+    return syncFriendsForUser(currentUserId);
+}
+
+async function syncFriendsForUser(userId: string) {
     friends.friends = [];
     friends.requests = [];
 
@@ -186,5 +220,5 @@ export async function syncFriends() {
         }
     }
 
-    await DataStore.set(friendsKey(), friends);
+    await DataStore.set(friendsKey(userId), friends);
 }

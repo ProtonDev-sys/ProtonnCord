@@ -10,9 +10,13 @@ import { isPluginEnabled } from "@api/PluginManager";
 import { definePluginSettings } from "@api/Settings";
 import equicordToolbox from "@equicordplugins/equicordToolbox";
 import { Devs } from "@utils/constants";
+import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { saveFile } from "@utils/web";
 import { Menu, UserSettingsActionCreators } from "@webpack/common";
+
+const logger = new Logger("SaveFavoriteGIFs");
+const MAX_GIF_CHECK_CONCURRENCY = 8;
 
 async function saveContentToFile(content: string, filename: string) {
     try {
@@ -30,7 +34,7 @@ async function saveContentToFile(content: string, filename: string) {
             color: "var(--text-positive)",
         });
     } catch (error) {
-        console.error(error);
+        logger.error("Failed to save GIFs", error);
         showNotification({
             title: "Save Favorite GIFs",
             body: "Failed to save GIFs",
@@ -41,6 +45,49 @@ async function saveContentToFile(content: string, filename: string) {
 
 function getGifUrls(): string[] {
     return Object.keys(UserSettingsActionCreators.FrecencyUserSettingsActionCreators.getCurrentValue().favoriteGifs.gifs);
+}
+
+async function isGifReachable(url: string) {
+    try {
+        const response = await fetch(url, { method: "HEAD" });
+        if (response.ok) return true;
+    } catch {
+        return await isGifReachableByGet(url);
+    }
+
+    return await isGifReachableByGet(url);
+}
+
+async function isGifReachableByGet(url: string) {
+    try {
+        const response = await fetch(url);
+        return response.ok;
+    } catch {
+        return false;
+    }
+}
+
+async function filterReachableGifs(gifUrls: string[]) {
+    const reachable = new Array<boolean>(gifUrls.length).fill(false);
+    let nextIndex = 0;
+
+    async function worker() {
+        for (;;) {
+            const index = nextIndex++;
+            if (index >= gifUrls.length) return;
+
+            reachable[index] = await isGifReachable(gifUrls[index]);
+        }
+    }
+
+    await Promise.all(
+        Array.from(
+            { length: Math.min(MAX_GIF_CHECK_CONCURRENCY, gifUrls.length) },
+            worker
+        )
+    );
+
+    return gifUrls.filter((_, index) => reachable[index]);
 }
 
 async function saveAllGifs() {
@@ -69,19 +116,7 @@ async function saveWorkingGifs() {
         body: `Testing ${gifUrls.length} GIFs.. This may take a moment...`,
     });
 
-    const workingUrls: string[] = [];
-
-    await Promise.all(gifUrls.map(async url => {
-        try {
-            const response = await fetch(url, { method: "HEAD" });
-            if (response.ok) workingUrls.push(url);
-        } catch (e) {
-            try {
-                const response = await fetch(url);
-                if (response.ok) workingUrls.push(url);
-            } catch (err) { }
-        }
-    }));
+    const workingUrls = await filterReachableGifs(gifUrls);
 
     if (workingUrls.length === 0) {
         showNotification({ title: "Save Favorite GIFs", body: "None of your saved GIFs appear to be working." });
@@ -102,7 +137,7 @@ async function saveWorkingGifs() {
 
 const settings = definePluginSettings({
     showToolboxButton: {
-        description: "Show 'Save Favorite GIFs' button in Equicord Toolbox (Requires Reload)",
+        description: "Show 'Save Favorite GIFs' button in Protonn Cord Toolbox (Requires Reload)",
         type: OptionType.BOOLEAN,
         default: true,
         restartNeeded: true,

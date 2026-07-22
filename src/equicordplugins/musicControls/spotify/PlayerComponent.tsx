@@ -169,15 +169,19 @@ function SpotifySeekBar() {
     const [position, setPosition] = useState(storePosition);
 
     useEffect(() => {
+        setPosition(Math.min(storePosition, duration));
+    }, [duration, storePosition]);
+
+    useEffect(() => {
         if (isPlaying && !isSettingPosition) {
             setPosition(SpotifyStore.position);
             const interval = setInterval(() => {
-                setPosition(p => p + 1000);
+                setPosition(p => Math.min(p + 1000, duration));
             }, 1000);
 
             return () => clearInterval(interval);
         }
-    }, [storePosition, isSettingPosition, isPlaying]);
+    }, [duration, storePosition, isSettingPosition, isPlaying]);
 
     const onChange = (v: number) => {
         if (isSettingPosition) return;

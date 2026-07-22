@@ -26,6 +26,15 @@ export const Native = VencordNative.pluginHelpers.UserpluginInstaller as PluginN
 export const OpenSettingsModule = findByPropsLazy("openUserSettings");
 const AppsIcon = findComponentByCodeLazy("2.95H20a2 2 0");
 
+function shouldSkipUpdateNotification(pluginName: string): boolean {
+    const normalizedPluginName = pluginName.toLowerCase();
+    for (const rawName of settings.store.neverNotifyForPlugins.split(",")) {
+        if (rawName.trim().toLowerCase() === normalizedPluginName) return true;
+    }
+
+    return false;
+}
+
 export const settings = definePluginSettings({
     allowlistedChannels: {
         type: OptionType.STRING,
@@ -57,7 +66,7 @@ export default definePlugin({
     tags: ["Developers"],
     settingsAboutComponent: () => (
         <Notice.Warning>
-            Equicord does not moderate userplugins and takes no responsibility for anything that may result from installing them.
+            Protonn Cord does not moderate userplugins and takes no responsibility for anything that may result from installing them.
             Only install userplugins from developers you trust. Doing so is entirely at your own risk.
         </Notice.Warning>
     ),
@@ -102,7 +111,7 @@ export default definePlugin({
 
         this.pluginsWithUpdates.registerCallback((value, id) => {
             if (value.plugins.length === 0) return;
-            if (settings.store.neverNotifyForPlugins.split(",").map(t => t.trim().toLowerCase()).includes(value.plugins[value.plugins.length - 1].toLowerCase()))
+            if (shouldSkipUpdateNotification(value.plugins[value.plugins.length - 1]))
                 return;
             this.pluginsWithUpdates.deregisterCallback(id);
             if (settings.store.notifyIfUpdate)

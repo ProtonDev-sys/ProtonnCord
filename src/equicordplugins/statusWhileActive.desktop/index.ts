@@ -11,7 +11,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import { VoiceState } from "@vencord/discord-types";
 import { UserStore, VoiceStateStore } from "@webpack/common";
 
-let savedStatus: string | null;
+let savedStatus: string | null = null;
 
 const StatusSettings = getUserSettingLazy<string>("status", "status")!;
 
@@ -41,16 +41,31 @@ const settings = definePluginSettings({
     }
 });
 
-function setStatus(preq, status) {
-    if (preq) {
+function setStatus(inVoiceChannel: boolean, status: string) {
+    if (inVoiceChannel) {
         if (status !== settings.store.statusToSet) {
             savedStatus = status;
             StatusSettings?.updateSetting(settings.store.statusToSet);
         }
-    } else if (savedStatus && savedStatus !== settings.store.statusToSet) {
-        StatusSettings?.updateSetting(savedStatus);
+        return;
+    }
+
+    if (savedStatus) {
+        if (savedStatus !== settings.store.statusToSet) {
+            StatusSettings?.updateSetting(savedStatus);
+        }
         savedStatus = null;
     }
+}
+
+function updateStatusForCurrentVoiceState() {
+    const userId = UserStore.getCurrentUser()?.id;
+    if (!userId) return;
+
+    const status = StatusSettings.getSetting();
+    const inVoiceChannel = !!VoiceStateStore.getVoiceStateForUser(userId)?.channelId;
+
+    setStatus(inVoiceChannel, status);
 }
 
 export default definePlugin({
@@ -61,21 +76,23 @@ export default definePlugin({
     settings,
     flux: {
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
-            const userId = UserStore.getCurrentUser().id;
+            const userId = UserStore.getCurrentUser()?.id;
+            if (!userId) return;
+
             const myState = voiceStates.find(state => state.userId === userId);
             if (!myState) return;
 
-            const status = StatusSettings.getSetting();
-            const inVoiceChannel = !!VoiceStateStore.getVoiceStateForUser(userId)?.channelId;
-
-            setStatus(inVoiceChannel, status);
+            updateStatusForCurrentVoiceState();
         },
         VOICE_CHANNEL_STATUS_UPDATE() {
-            const userId = UserStore.getCurrentUser().id;
-            const status = StatusSettings.getSetting();
-            const inVoiceChannel = !!VoiceStateStore.getVoiceStateForUser(userId)?.channelId;
-
-            setStatus(inVoiceChannel, status);
+            updateStatusForCurrentVoiceState();
         }
     },
+
+    stop() {
+        if (!savedStatus) return;
+
+        StatusSettings?.updateSetting(savedStatus);
+        savedStatus = null;
+    }
 });

@@ -11,7 +11,7 @@ import { CopyIcon, NoEntrySignIcon } from "@components/Icons";
 import { Devs } from "@utils/constants";
 import { copyWithToast } from "@utils/discord";
 import definePlugin from "@utils/types";
-import { Tooltip, useState } from "@webpack/common";
+import { Tooltip, useEffect, useRef, useState } from "@webpack/common";
 
 const CheckMarkIcon = () => {
     return <svg width="18" height="18" viewBox="0 0 24 24">
@@ -44,6 +44,25 @@ export default definePlugin({
 
     addCopyButton: ErrorBoundary.wrap(({ fileContents, bytesLeft }: { fileContents: string, bytesLeft: number; }) => {
         const [recentlyCopied, setRecentlyCopied] = useState(false);
+        const copiedResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+        useEffect(() => () => {
+            if (copiedResetTimeoutRef.current === undefined) return;
+
+            clearTimeout(copiedResetTimeoutRef.current);
+            copiedResetTimeoutRef.current = undefined;
+        }, []);
+
+        const scheduleCopiedReset = () => {
+            if (copiedResetTimeoutRef.current !== undefined) {
+                clearTimeout(copiedResetTimeoutRef.current);
+            }
+
+            copiedResetTimeoutRef.current = setTimeout(() => {
+                copiedResetTimeoutRef.current = undefined;
+                setRecentlyCopied(false);
+            }, 2000);
+        };
 
         return (
             <Tooltip text={recentlyCopied ? "Copied!" : bytesLeft > 0 ? "File too large to copy" : "Copy File Contents"}>
@@ -56,7 +75,7 @@ export default definePlugin({
                             if (!recentlyCopied && bytesLeft <= 0) {
                                 copyWithToast(fileContents);
                                 setRecentlyCopied(true);
-                                setTimeout(() => setRecentlyCopied(false), 2000);
+                                scheduleCopiedReset();
                             }
                         }}
                     >

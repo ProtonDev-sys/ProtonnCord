@@ -50,8 +50,19 @@ function mapApiResponseToTrack(apiData: any): Track | null {
         url: track.url || null,
         album: track.album?.title || null,
         id: track.id?.toString() || "0",
-        vibrantColor: track.album.vibrantColor || null,
+        vibrantColor: track.album?.vibrantColor || null,
     };
+}
+
+function isSameTrack(previous: Track | null, next: Track) {
+    return previous?.id === next.id
+        && previous.name === next.name
+        && previous.artist === next.artist
+        && previous.imageSrc === next.imageSrc
+        && previous.songDuration === next.songDuration
+        && previous.url === next.url
+        && previous.album === next.album
+        && previous.vibrantColor === next.vibrantColor;
 }
 
 type Message = { type: "update"; all: boolean; fields?: any; field?: string; value?: any; } | { type: "subscribed" | "unsubscribed" | "ok" | "error";[key: string]: any; };
@@ -61,21 +72,29 @@ class TidalSocket {
     public ready = false;
 
     public socket: WebSocket | undefined;
+    private connecting = false;
+    private reconnectTimeout: ReturnType<typeof setTimeout> | undefined;
 
     constructor(onChange: typeof this.onChange) {
-        this.reconnect();
         this.onChange = onChange;
+        this.reconnect();
     }
 
     public reconnect() {
-        if (this.ready) return;
+        if (this.ready || this.connecting) return;
+        if (this.reconnectTimeout) {
+            clearTimeout(this.reconnectTimeout);
+            this.reconnectTimeout = undefined;
+        }
+
         try {
             this.initWs();
         } catch (e) {
+            this.connecting = false;
             logger.error("Failed to connect to Tidal WebSocket", e);
+            this.scheduleReconnect(5_000);
             return;
         }
-        this.ready = true;
     }
 
     get routes() {
@@ -92,30 +111,62 @@ class TidalSocket {
         };
     }
 
+    private scheduleReconnect(delay: number) {
+        if (this.reconnectTimeout) return;
+
+        this.reconnectTimeout = setTimeout(() => {
+            this.reconnectTimeout = undefined;
+            this.reconnect();
+        }, delay);
+    }
+
+    public destroy() {
+        if (this.reconnectTimeout) {
+            clearTimeout(this.reconnectTimeout);
+            this.reconnectTimeout = undefined;
+        }
+
+        const { socket } = this;
+        this.socket = undefined;
+        this.connecting = false;
+        this.ready = false;
+        socket?.close();
+    }
+
     private initWs() {
         const url = settings.store.websocketURL || "ws://localhost:24123";
         if (!url) {
             return;
         }
-        this.socket = new WebSocket(url);
+        this.connecting = true;
+        const socket = new WebSocket(url);
+        this.socket = socket;
 
-        this.socket.addEventListener("open", () => {
+        socket.addEventListener("open", () => {
+            if (this.socket !== socket) return;
+            this.connecting = false;
             this.ready = true;
-            this.socket?.send(JSON.stringify({ action: "subscribe", all: true, fields: ["currentTime"] }));
+            socket.send(JSON.stringify({ action: "subscribe", all: true, fields: ["currentTime"] }));
         });
 
-        this.socket.addEventListener("error", e => {
-            if (!this.ready) setTimeout(() => this.reconnect(), 5_000);
-            this.onChange({ type: "update", all: true, fields: { playing: false, track: null, currentTime: 0, repeatMode: 0, shuffle: false, volume: 100 } });
-        });
-
-        this.socket.addEventListener("close", e => {
+        socket.addEventListener("error", () => {
+            if (this.socket !== socket) return;
+            this.connecting = false;
             this.ready = false;
-            if (!this.ready) setTimeout(() => this.reconnect(), 10_000);
+            this.scheduleReconnect(5_000);
             this.onChange({ type: "update", all: true, fields: { playing: false, track: null, currentTime: 0, repeatMode: 0, shuffle: false, volume: 100 } });
         });
 
-        this.socket.addEventListener("message", e => {
+        socket.addEventListener("close", () => {
+            if (this.socket !== socket) return;
+            this.connecting = false;
+            this.ready = false;
+            this.scheduleReconnect(10_000);
+            this.onChange({ type: "update", all: true, fields: { playing: false, track: null, currentTime: 0, repeatMode: 0, shuffle: false, volume: 100 } });
+        });
+
+        socket.addEventListener("message", e => {
+            if (this.socket !== socket) return;
             let message: Message;
             try {
                 message = JSON.parse(e.data) as Message;
@@ -123,9 +174,6 @@ class TidalSocket {
                 switch (message.type) {
                     case "update":
                         this.onChange(message);
-                        break;
-                    case "subscribed":
-                        logger.info("Successfully subscribed to Tidal API updates");
                         break;
                     case "error":
                         logger.error("Tidal API error:", message);
@@ -152,6 +200,8 @@ export const TidalStore = proxyLazyWebpack(() => {
         public shuffle = false;
         public volume = 100;
         public playerElement: HTMLElement | null = null;
+        private appliedVibrantColor: string | null = null;
+
         public socket = new TidalSocket((message: Message) => {
             if (message.type === "update" && message.all && message.fields) {
                 const apiData = message.fields;
@@ -159,17 +209,11 @@ export const TidalStore = proxyLazyWebpack(() => {
                 const track = mapApiResponseToTrack(apiData);
 
                 if (track) {
-                    store.track = { ...track };
-                    store.position = (apiData.currentTime || 0);
-                    if (track.vibrantColor) {
-                        if (this.playerElement) {
-                            this.playerElement.style.setProperty("--eq-tdl-slider-gradient", `linear-gradient(to right, ${track.vibrantColor} 80%, #E5E5E5 100%)`);
-                            this.playerElement.style.setProperty("--eq-tdl-slider-grabber", track.vibrantColor);
-                        } else {
-                            this.playerElement = document.querySelector("#eq-tdl-player");
-                            logger.info(this.playerElement ? "Player element found" : "Player element not found");
-                        }
+                    if (!isSameTrack(store.track, track)) {
+                        store.track = track;
                     }
+                    store.position = (apiData.currentTime || 0);
+                    this.applyVibrantColor(track.vibrantColor);
                 }
 
                 if (apiData.playing !== undefined) store.isPlaying = apiData.playing;
@@ -184,6 +228,18 @@ export const TidalStore = proxyLazyWebpack(() => {
         public openExternal(path: string) {
             VencordNative.native.openExternal(path.replace("http://www.tidal.com", "tidal://"));
 
+        }
+
+        private applyVibrantColor(vibrantColor?: string | null) {
+            if (!vibrantColor) return;
+            if (this.playerElement && this.appliedVibrantColor === vibrantColor) return;
+
+            this.playerElement ??= document.querySelector("#eq-tdl-player");
+            if (!this.playerElement) return;
+
+            this.playerElement.style.setProperty("--eq-tdl-slider-gradient", `linear-gradient(to right, ${vibrantColor} 80%, #E5E5E5 100%)`);
+            this.playerElement.style.setProperty("--eq-tdl-slider-grabber", vibrantColor);
+            this.appliedVibrantColor = vibrantColor;
         }
 
         set position(p: number) {
@@ -241,6 +297,17 @@ export const TidalStore = proxyLazyWebpack(() => {
                 return false;
             }
             return true;
+        }
+
+        public destroy() {
+            this.socket.destroy();
+            this.track = null;
+            this.isPlaying = false;
+            this.mPosition = 0;
+            this.start = 0;
+            this.playerElement = null;
+            this.appliedVibrantColor = null;
+            this.emitChange();
         }
     }
 

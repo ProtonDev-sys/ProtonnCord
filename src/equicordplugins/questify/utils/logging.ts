@@ -74,6 +74,4 @@ export function notifyQuestCompletion(quest?: Quest): void {
         dismissOnClick: true,
         onClick: () => NavigationRouter.transitionTo(`${QUEST_PAGE}#${quest.id}`)
     });
-
-    QL.log("NOTIFY_QUEST_COMPLETION", { quest });
 }

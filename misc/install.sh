@@ -5,7 +5,7 @@ INSTALLER_PATH="$HOME/.equilotl"
 GITHUB_URL="https://github.com/Equicord/Equilotl/releases/latest/download/EquilotlCli-Linux"
 PRIVILEGE_CMDS=("sudo" "doas")
 DEBUG=false
-LOG_FILE="$(dirname "$(realpath "$0")")/equicordinstalldebug.log"
+LOG_FILE="$(dirname "$(realpath "$0")")/protonncordinstalldebug.log"
 
 # Colors for output
 RED='\033[0;31m'
@@ -116,7 +116,7 @@ main() {
     echo -e "\n${GREEN}Installation completed successfully!${NC}"
     echo -e "\nCredits:"
     echo "Original script forked from Vencord"
-    echo "Modified by PhoenixAceVFX for Equicord Updater"
+    echo "Modified for Protonn Cord Updater"
     echo "Rewrite by PhoenixAceVFX"
 }
 

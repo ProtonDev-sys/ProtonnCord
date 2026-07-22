@@ -64,6 +64,44 @@ export const fallbackServiceOrder: ServiceType[] = [
     ServiceType.SHAREX
 ];
 
+const serviceTypeSet = new Set<string>(fallbackServiceOrder);
+
+export function isServiceType(value: string): value is ServiceType {
+    return serviceTypeSet.has(value);
+}
+
+export function formatFallbackServiceOrder(order: readonly ServiceType[] = fallbackServiceOrder): string {
+    let output = "";
+    for (const service of order) {
+        if (output) output += ",";
+        output += service;
+    }
+
+    return output;
+}
+
+export function parseFallbackServiceOrder(value?: string): ServiceType[] {
+    const configuredOrder = value || formatFallbackServiceOrder();
+    const services: ServiceType[] = [];
+    const seen = new Set<ServiceType>();
+    let validEntryCount = 0;
+
+    for (const rawService of configuredOrder.split(/[\n,]/)) {
+        const service = rawService.trim();
+        if (!isServiceType(service)) continue;
+
+        validEntryCount++;
+        if (seen.has(service)) continue;
+
+        seen.add(service);
+        services.push(service);
+    }
+
+    return validEntryCount === fallbackServiceOrder.length && services.length === fallbackServiceOrder.length
+        ? services
+        : fallbackServiceOrder;
+}
+
 export interface UploadResponse {
     files: {
         id: string;

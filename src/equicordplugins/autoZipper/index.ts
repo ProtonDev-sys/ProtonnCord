@@ -8,10 +8,12 @@ import { definePluginSettings } from "@api/Settings";
 import { EquicordDevs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
-import { ChannelStore, DraftType, SelectedChannelStore, UploadHandler } from "@webpack/common";
+import { ChannelStore, DraftType, SelectedChannelStore, showToast, Toasts, UploadHandler } from "@webpack/common";
 import { zipSync } from "fflate";
 
 const logger = new Logger("AutoZipper");
+const MAX_ZIP_INPUT_BYTES = 100 * 1024 * 1024;
+const MAX_FOLDER_FILE_COUNT = 500;
 
 const settings = definePluginSettings({
     extensions: {
@@ -29,22 +31,32 @@ const extensionsToZip = new Set<string>();
 
 function parseExtensions() {
     extensionsToZip.clear();
-    const exts = settings.store.extensions.split(",").map(ext => ext.trim().toLowerCase());
-    exts.forEach(ext => {
+    for (const rawExt of settings.store.extensions.split(",")) {
+        const ext = rawExt.trim().toLowerCase();
         if (ext && !ext.startsWith(".")) {
             extensionsToZip.add("." + ext);
         } else if (ext) {
             extensionsToZip.add(ext);
         }
-    });
+    }
 }
 
 function shouldZipFile(file: File): boolean {
-    const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
-    return ext !== "" && extensionsToZip.has(ext);
+    const extensionIndex = file.name.lastIndexOf(".");
+    if (extensionIndex <= 0) return false;
+
+    return extensionsToZip.has(file.name.substring(extensionIndex).toLowerCase());
+}
+
+function assertZipInputSize(fileName: string, bytes: number) {
+    if (bytes <= MAX_ZIP_INPUT_BYTES) return;
+
+    throw new Error(`${fileName} is too large to zip safely (${Math.ceil(bytes / 1024 / 1024)} MB).`);
 }
 
 async function zipFile(file: File): Promise<File> {
+    assertZipInputSize(file.name, file.size);
+
     const arrayBuffer = await file.arrayBuffer();
     const data = new Uint8Array(arrayBuffer);
 
@@ -69,6 +81,8 @@ async function readFileEntry(entry: FileSystemFileEntry): Promise<File> {
 
 async function readDirectoryEntry(entry: FileSystemDirectoryEntry): Promise<Record<string, Uint8Array>> {
     const files: Record<string, Uint8Array> = {};
+    let fileCount = 0;
+    let totalBytes = 0;
 
     async function readEntries(dirEntry: FileSystemDirectoryEntry, path = ""): Promise<void> {
         const reader = dirEntry.createReader();
@@ -81,15 +95,23 @@ async function readDirectoryEntry(entry: FileSystemDirectoryEntry): Promise<Reco
                         return;
                     }
 
-                    for (const entry of entries) {
-                        const entryPath = path ? `${path}/${entry.name}` : entry.name;
+                    for (const childEntry of entries) {
+                        const entryPath = path ? `${path}/${childEntry.name}` : childEntry.name;
 
-                        if (entry.isFile) {
-                            const file = await readFileEntry(entry as FileSystemFileEntry);
+                        if (childEntry.isFile) {
+                            const file = await readFileEntry(childEntry as FileSystemFileEntry);
+                            fileCount++;
+                            if (fileCount > MAX_FOLDER_FILE_COUNT) {
+                                throw new Error(`${entry.name} contains more than ${MAX_FOLDER_FILE_COUNT} files.`);
+                            }
+
+                            totalBytes += file.size;
+                            assertZipInputSize(entry.name, totalBytes);
+
                             const arrayBuffer = await file.arrayBuffer();
                             files[entryPath] = new Uint8Array(arrayBuffer);
-                        } else if (entry.isDirectory) {
-                            await readEntries(entry as FileSystemDirectoryEntry, entryPath);
+                        } else if (childEntry.isDirectory) {
+                            await readEntries(childEntry as FileSystemDirectoryEntry, entryPath);
                         }
                     }
 
@@ -106,17 +128,21 @@ async function readDirectoryEntry(entry: FileSystemDirectoryEntry): Promise<Reco
     return files;
 }
 
+function notifyZipFailure(message: string) {
+    showToast(message, Toasts.Type.FAILURE);
+}
+
 async function processFiles(files: File[]): Promise<File[]> {
     const processedFiles: File[] = [];
 
     for (const file of files) {
         if (shouldZipFile(file)) {
-            logger.info(`Auto-zipping file: ${file.name}`);
             try {
                 const zippedFile = await zipFile(file);
                 processedFiles.push(zippedFile);
             } catch (error) {
                 logger.error(`Failed to zip file ${file.name}:`, error);
+                notifyZipFailure(`Failed to zip ${file.name}. Uploading the original file instead.`);
                 processedFiles.push(file);
             }
         } else {
@@ -137,7 +163,10 @@ function handleDrop(event: DragEvent) {
 
     const hasTargetedItem = items.some(item => {
         const entry = item.webkitGetAsEntry();
-        return entry?.isDirectory || (item.kind === "file" && item.getAsFile() && shouldZipFile(item.getAsFile()!));
+        if (entry?.isDirectory) return true;
+
+        const file = item.kind === "file" ? item.getAsFile() : null;
+        return file != null && shouldZipFile(file);
     });
 
     if (!hasTargetedItem) return;
@@ -145,28 +174,28 @@ function handleDrop(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
 
-    const processPromises: Promise<File>[] = [];
+    const processPromises: Array<Promise<File | null>> = [];
 
     for (const item of items) {
         const entry = item.webkitGetAsEntry();
 
         if (entry?.isDirectory) {
-            logger.info(`Zipping folder: ${entry.name}`);
             const folderPromise = readDirectoryEntry(entry as FileSystemDirectoryEntry)
                 .then(fileEntries => zipFolder(entry.name, fileEntries))
                 .catch(error => {
                     logger.error(`Failed to zip folder ${entry.name}:`, error);
+                    notifyZipFailure(`Failed to zip folder ${entry.name}.`);
                     return null;
                 });
-            processPromises.push(folderPromise as Promise<File>);
+            processPromises.push(folderPromise);
         } else if (entry?.isFile) {
             const file = item.getAsFile();
             if (file) {
                 if (shouldZipFile(file)) {
-                    logger.info(`Auto-zipping file: ${file.name}`);
                     processPromises.push(
                         zipFile(file).catch(error => {
                             logger.error(`Failed to zip file ${file.name}:`, error);
+                            notifyZipFailure(`Failed to zip ${file.name}. Uploading the original file instead.`);
                             return file;
                         })
                     );
@@ -178,7 +207,7 @@ function handleDrop(event: DragEvent) {
     }
 
     Promise.all(processPromises).then(processedFiles => {
-        const validFiles = processedFiles.filter(f => f !== null);
+        const validFiles = processedFiles.filter((file): file is File => file !== null);
         const channelId = SelectedChannelStore.getChannelId();
         const channel = ChannelStore.getChannel(channelId);
         if (channel && validFiles.length > 0) {

@@ -42,12 +42,18 @@ function loadImage(source: File | string) {
 
     return new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
+        const revokeUrl = () => {
+            if (isFile) URL.revokeObjectURL(url);
+        };
+
         img.onload = () => {
-            if (isFile)
-                URL.revokeObjectURL(url);
+            revokeUrl();
             resolve(img);
         };
-        img.onerror = _event => reject(Error(`An error occurred while loading ${url}. Check the console for more info.`));
+        img.onerror = _event => {
+            revokeUrl();
+            reject(Error(`An error occurred while loading ${url}. Check the console for more info.`));
+        };
         img.crossOrigin = "Anonymous";
         img.src = url;
     });
