@@ -33,21 +33,19 @@ import definePlugin, { OptionType } from "@utils/types";
 import { chooseFile } from "@utils/web";
 import { RenderModalProps } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
-import { Button, CloudUploader, Constants, FluxDispatcher, Forms, lodash, Menu, MessageActions, Modal, openModal, PendingReplyStore, PermissionsBits, PermissionStore, RestAPI, SelectedChannelStore, showToast, SnowflakeUtils, Toasts, useEffect, useState } from "@webpack/common";
+import { Button, CloudUploader, Constants, FluxDispatcher, Forms, Menu, MessageActions, Modal, openModal, PendingReplyStore, PermissionsBits, PermissionStore, RestAPI, SelectedChannelStore, showToast, SnowflakeUtils, Toasts, useEffect, useState } from "@webpack/common";
 import { ComponentType } from "react";
 
 import { VoiceRecorderDesktop } from "./components/DesktopRecorder";
 import { VoiceMessageProps, VoicePreview } from "./components/VoicePreview";
 import { VoiceRecorderWeb } from "./components/WebRecorder";
+import { DEFAULT_WAVEFORM, generateWaveform } from "./waveform";
+
+export { DEFAULT_WAVEFORM } from "./waveform";
 
 const VOICE_MESSAGE_FLAG = 1 << 13;
 const SILENT_MESSAGE_FLAG = 4096;
-const DEFAULT_WAVEFORM = "AAAAAAAAAAAA";
 const DEFAULT_DURATION = 1;
-const WAVEFORM_MIN_BINS = 32;
-const WAVEFORM_MAX_BINS = 256;
-const WAVEFORM_BINS_PER_SECOND = 10;
-const WAVEFORM_MAX_VALUE = 0xFF;
 
 const EMPTY_META: AudioMetadata = {
     waveform: DEFAULT_WAVEFORM,
@@ -126,38 +124,6 @@ type AudioMetadata = {
     duration: number,
 };
 
-function generateWaveform(audioBuffer: AudioBuffer): string {
-    const channelData = audioBuffer.getChannelData(0);
-    const binCount = lodash.clamp(
-        Math.floor(audioBuffer.duration * WAVEFORM_BINS_PER_SECOND),
-        Math.min(WAVEFORM_MIN_BINS, channelData.length),
-        WAVEFORM_MAX_BINS
-    );
-
-    const bins = new Uint8Array(binCount);
-    const samplesPerBin = Math.floor(channelData.length / binCount);
-
-    for (let binIdx = 0; binIdx < binCount; binIdx++) {
-        let sum = 0;
-        for (let sampleIdx = 0; sampleIdx < samplesPerBin; sampleIdx++) {
-            const offset = binIdx * samplesPerBin + sampleIdx;
-            sum += channelData[offset + sampleIdx] ** 2;
-        }
-        bins[binIdx] = Math.floor(Math.sqrt(sum / samplesPerBin) * WAVEFORM_MAX_VALUE);
-    }
-
-    const maxBin = Math.max(...bins);
-    if (maxBin) {
-        const easing = Math.min(1, 100 * (maxBin / WAVEFORM_MAX_VALUE) ** 3);
-        const ratio = 1 + (WAVEFORM_MAX_VALUE / maxBin - 1) * easing;
-        for (let i = 0; i < binCount; i++) {
-            bins[i] = Math.min(WAVEFORM_MAX_VALUE, Math.floor(bins[i] * ratio));
-        }
-    }
-
-    return window.btoa(String.fromCharCode(...bins));
-}
-
 function sendAudio(blob: Blob, meta: AudioMetadata) {
     const channelId = SelectedChannelStore.getChannelId();
     const reply = PendingReplyStore.getPendingReply(channelId);
@@ -224,7 +190,7 @@ function VoiceMessageModal({ modalProps }: { modalProps: RenderModalProps; }) {
         const audioBuffer = await audioContext.decodeAudioData(await blob.arrayBuffer());
 
         return {
-            waveform: generateWaveform(audioBuffer),
+            waveform: generateWaveform(audioBuffer.getChannelData(0), audioBuffer.sampleRate),
             duration: audioBuffer.duration,
         };
     }, {

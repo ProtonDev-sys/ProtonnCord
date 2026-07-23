@@ -6,11 +6,26 @@
 
 import { IpcMainInvokeEvent } from "electron";
 
+import { isRecognizedAudioContainer } from "./audioValidation";
+
 // we love CORS
 export async function fetchAudio(_: IpcMainInvokeEvent, url: string): Promise<Uint8Array> {
-    if (!url.startsWith("https://cdn.discordapp.com")) throw new Error("Unknown URL");
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || (parsed.hostname !== "cdn.discordapp.com" && parsed.hostname !== "media.discordapp.net"))
+        throw new Error("Blocked an untrusted voice-message URL");
+
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.statusText}`);
-    if (!res.headers.get("Content-Type")?.startsWith("audio/")) throw new Error(`${url} is not an audio file`);
-    return new Uint8Array(await res.arrayBuffer());
+
+    const contentLength = Number(res.headers.get("Content-Length"));
+    if (Number.isFinite(contentLength) && contentLength > 25 * 1024 * 1024)
+        throw new Error("Voice message exceeds the 25 MB transcription limit");
+
+    const audio = new Uint8Array(await res.arrayBuffer());
+    if (audio.byteLength > 25 * 1024 * 1024)
+        throw new Error("Voice message exceeds the 25 MB transcription limit");
+    if (!isRecognizedAudioContainer(audio))
+        throw new Error("Discord returned an unsupported or invalid audio file");
+
+    return audio;
 }

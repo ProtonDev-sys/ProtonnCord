@@ -8,6 +8,8 @@ import { DataStore } from "@api/index";
 import { classNameFactory } from "@utils/css";
 import { lodash } from "@webpack/common";
 
+import { TranscriptionProgress } from "./transcriptionData";
+
 export const LANGUAGES = {
     en: "english",
     zh: "chinese",
@@ -183,7 +185,7 @@ globalThis.fetch = async (input, init) => {
 
 let transcriber = null;
 
-async function runTranscription({ audio, model, quantized, language, task }) {
+async function runTranscription({ audio, model, quantized, language }) {
     try {
         if (!transcriber) {
             self.postMessage({ type: 'status', status: 'loading' });
@@ -250,8 +252,7 @@ async function runTranscription({ audio, model, quantized, language, task }) {
             return_timestamps: true,
             callback_function,
             chunk_callback,
-            language,
-            task: task === "translate" ? "translate" : undefined
+            language
         });
 
         self.postMessage({ type: 'complete', output });
@@ -269,17 +270,21 @@ export class TranscriptionWorker {
     private onComplete: (output: any) => void;
     private onError: (error: any) => void;
     private onPartial: (output: any) => void;
+    private onProgress: (progress: TranscriptionProgress) => void;
+    private terminated = false;
 
     constructor(
         onStatus: (status: string) => void,
         onComplete: (output: any) => void,
         onError: (error: any) => void,
-        onPartial: (output: any) => void
+        onPartial: (output: any) => void,
+        onProgress: (progress: TranscriptionProgress) => void = () => { }
     ) {
         this.onStatus = onStatus;
         this.onComplete = onComplete;
         this.onError = onError;
         this.onPartial = onPartial;
+        this.onProgress = onProgress;
 
         const blob = new Blob([workerCode], { type: "text/javascript" });
         this.workerUrl = URL.createObjectURL(blob);
@@ -288,10 +293,16 @@ export class TranscriptionWorker {
     }
 
     private getMimeType(url: string): string {
-        if (url.endsWith(".wasm")) return "application/wasm";
-        if (url.endsWith(".json")) return "application/json";
-        if (url.endsWith(".onnx")) return "application/octet-stream";
+        const { pathname } = new URL(url);
+        if (pathname.endsWith(".wasm")) return "application/wasm";
+        if (pathname.endsWith(".json")) return "application/json";
         return "application/octet-stream";
+    }
+
+    private validateModelUrl(url: string): void {
+        const { hostname } = new URL(url);
+        if (hostname !== "huggingface.co" && hostname !== "cdn.jsdelivr.net")
+            throw new Error(`Blocked unexpected model host: ${hostname}`);
     }
 
     private async handleMessage(event: MessageEvent) {
@@ -300,7 +311,9 @@ export class TranscriptionWorker {
         switch (type) {
             case "fetch_request":
                 try {
+                    this.validateModelUrl(url);
                     const cachedData = await DataStore.get(`VoiceMessageTranscriber_${url}`);
+                    if (this.terminated) return;
 
                     if (cachedData && lodash.isArrayBuffer(cachedData)) {
                         this.worker.postMessage({
@@ -311,13 +324,14 @@ export class TranscriptionWorker {
                                 "Content-Length": cachedData.byteLength.toString(),
                                 "Content-Type": this.getMimeType(url)
                             }
-                        });
+                        }, [cachedData]);
                     } else {
                         const res = await fetch(url);
                         if (!res.ok) throw new Error("Failed to fetch " + url);
 
                         const buffer = await res.arrayBuffer();
                         await DataStore.set(`VoiceMessageTranscriber_${url}`, buffer);
+                        if (this.terminated) return;
 
                         this.worker.postMessage({
                             type: "fetch_response",
@@ -327,9 +341,10 @@ export class TranscriptionWorker {
                                 "Content-Length": res.headers.get("Content-Length") || buffer.byteLength.toString(),
                                 "Content-Type": this.getMimeType(url)
                             }
-                        });
+                        }, [buffer]);
                     }
                 } catch (err) {
+                    if (this.terminated) return;
                     this.worker.postMessage({
                         type: "fetch_response",
                         id,
@@ -346,24 +361,28 @@ export class TranscriptionWorker {
             case "partial":
                 this.onPartial(output);
                 break;
+            case "progress":
+                this.onProgress(event.data.data);
+                break;
             case "error":
                 this.onError(error);
                 break;
         }
     }
 
-    public run(audio: Float32Array, model: string, quantized: boolean = true, language?: string, task?: string) {
+    public run(audio: Float32Array, model: string, quantized: boolean = true, language?: string) {
         this.worker.postMessage({
             type: "run",
             audio,
             model,
             quantized,
-            language,
-            task
-        });
+            language
+        }, [audio.buffer]);
     }
 
     public terminate() {
+        if (this.terminated) return;
+        this.terminated = true;
         this.worker.terminate();
         URL.revokeObjectURL(this.workerUrl);
     }
