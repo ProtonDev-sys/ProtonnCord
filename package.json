@@ -43,6 +43,7 @@
         "testClientsideGuildIcons": "tsx scripts/testClientsideGuildIcons.ts",
         "testPromiseTimeout": "tsx scripts/testPromiseTimeout.ts",
         "testUpdaterClassification": "tsx scripts/testUpdaterClassification.ts",
+        "testVoiceMessageTranscriber": "tsx scripts/testVoiceMessageTranscriber.ts",
         "benchmarkDiscord": "tsx scripts/benchmarkDiscord.ts",
         "test": "pnpm buildStandalone && pnpm testTsc && pnpm lint:fix && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
         "testWeb": "pnpm lint:fix && pnpm buildWeb && pnpm testTsc",

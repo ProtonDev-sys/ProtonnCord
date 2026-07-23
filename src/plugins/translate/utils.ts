@@ -66,8 +66,8 @@ export const getLanguages = () => {
     }
 };
 
-export async function translate(kind: "received" | "sent", text: string): Promise<TranslationValue> {
-    const translate = IS_WEB ? googleTranslate : (() => {
+export async function translateText(text: string, sourceLang: string, targetLang: string): Promise<TranslationValue> {
+    const translateImpl = IS_WEB ? googleTranslate : (() => {
         switch (settings.store.service) {
             case "google":
                 return googleTranslate;
@@ -78,12 +78,11 @@ export async function translate(kind: "received" | "sent", text: string): Promis
         }
     })();
 
+    if (!IS_WEB && (settings.store.service === "deepl" || settings.store.service === "deepl-pro") && sourceLang === "auto")
+        sourceLang = "";
+
     try {
-        return await translate(
-            text,
-            settings.store[`${kind}Input`],
-            settings.store[`${kind}Output`]
-        );
+        return await translateImpl(text, sourceLang, targetLang);
     } catch (e) {
         const userMessage = typeof e === "string"
             ? e
@@ -95,6 +94,14 @@ export async function translate(kind: "received" | "sent", text: string): Promis
             ? e
             : new Error(userMessage);
     }
+}
+
+export function translate(kind: "received" | "sent", text: string): Promise<TranslationValue> {
+    return translateText(
+        text,
+        settings.store[`${kind}Input`],
+        settings.store[`${kind}Output`]
+    );
 }
 
 async function googleTranslate(text: string, sourceLang: string, targetLang: string): Promise<TranslationValue> {

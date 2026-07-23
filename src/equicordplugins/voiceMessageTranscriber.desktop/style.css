@@ -1,27 +1,47 @@
-.vc-transcription-button {
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    cursor: pointer;
-    position: relative;
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Protonn Cord contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+.vc-transcription-accessory {
+    box-sizing: border-box;
+    max-width: min(560px, 100%);
+    margin-top: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--background-secondary-alt);
 }
 
-.vc-transcription-icon {
-    color: var(--interactive-icon-default);
+.vc-transcription-status {
+    min-height: 24px;
 }
 
-.vc-transcription-icon:hover {
-    color: var(--interactive-background-hover);
-}
-
-.vc-transcription-content {
-    min-height: 200px;
+.vc-transcription-playback-fallback {
+    margin-bottom: 10px;
 }
 
 .vc-transcription-result {
-    padding: 16px;
-    white-space: pre-wrap;
-    user-select: text;
-    max-height: 400px;
+    max-height: 220px;
+    margin: 6px 0;
+    padding: 8px 10px;
     overflow-y: auto;
+    border-radius: 6px;
+    background: var(--background-secondary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+}
+
+.vc-transcription-translation {
+    padding-top: 10px;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.vc-transcription-error {
+    display: block;
+    margin-top: 8px;
+    color: var(--text-feedback-critical);
+    white-space: pre-wrap;
 }

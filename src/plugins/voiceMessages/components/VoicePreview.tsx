@@ -24,6 +24,7 @@ const PREVIEW_IDLE_LABEL = "----";
 const PREVIEW_RECORDING_LABEL = "RECORDING";
 
 export interface VoiceMessageProps {
+    duration?: number;
     src: string;
     waveform: string;
 }
