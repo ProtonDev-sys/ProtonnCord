@@ -42,6 +42,8 @@ interface ToolArguments {
     after?: unknown;
     around?: unknown;
     reply_to_message_id?: unknown;
+    subscription_id?: unknown;
+    timeout_seconds?: unknown;
 }
 
 interface RawAttachment {
@@ -59,11 +61,36 @@ interface RawAttachment {
     description?: unknown;
 }
 
+interface SubscriptionWaiter {
+    resolve(result: SubscriptionWaitResult): void;
+    timer: ReturnType<typeof setTimeout>;
+}
+
+interface MessageSubscription {
+    id: string;
+    channelId: string;
+    createdAt: string;
+    lastMessageId: string | null;
+    messages: any[];
+    waiter?: SubscriptionWaiter;
+}
+
+interface SubscriptionWaitResult {
+    subscriptionId: string;
+    timedOut: boolean;
+    cancelled: boolean;
+    message: any | null;
+}
+
 const Native = VencordNative.pluginHelpers.DiscordMCP as PluginNative<typeof import("./native")>;
 const logger = new Logger("DiscordMCP");
 const LONG_POLL_MS = 10_000;
 const MAX_WAVEFORM_CACHE_ENTRIES = 25;
+const MAX_SUBSCRIPTIONS = 100;
+const MAX_SUBSCRIPTION_MESSAGES = 100;
 const waveformCache = new Map<string, Promise<string>>();
+const subscriptions = new Map<string, MessageSubscription>();
+const inFlightRequests = new Set<Promise<void>>();
 
 let bridgeGeneration = 0;
 
@@ -72,6 +99,19 @@ function requireAccessibleChannel(channelId: unknown): string {
     if (!ChannelStore.getChannel(normalized))
         throw new Error("Channel is not available to the authenticated Discord account");
     return normalized;
+}
+
+function requireSubscriptionId(value: unknown): string {
+    if (typeof value !== "string" || !/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(value))
+        throw new Error("subscription_id must be a valid subscription ID");
+    return value;
+}
+
+function normalizeWaitSeconds(value: unknown): number {
+    if (value === undefined) return 60;
+    if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 300)
+        throw new Error("timeout_seconds must be an integer from 1 to 300");
+    return value as number;
 }
 
 function argsOf(value: unknown): ToolArguments {
@@ -263,6 +303,127 @@ function listDms() {
     });
 }
 
+function subscriptionMetadata(subscription: MessageSubscription) {
+    const channel = ChannelStore.getChannel(subscription.channelId);
+    return {
+        id: subscription.id,
+        channel: channel ? serializeChannel(channel) : { id: subscription.channelId },
+        createdAt: subscription.createdAt,
+        lastMessageId: subscription.lastMessageId,
+        queuedMessageCount: subscription.messages.length,
+        waiting: Boolean(subscription.waiter),
+    };
+}
+
+function subscribeChannel(args: ToolArguments) {
+    const channelId = requireAccessibleChannel(args.channel_id);
+    if (subscriptions.size >= MAX_SUBSCRIPTIONS)
+        throw new Error(`Discord MCP supports at most ${MAX_SUBSCRIPTIONS} active subscriptions`);
+
+    const channel = ChannelStore.getChannel(channelId)!;
+    const subscription: MessageSubscription = {
+        id: globalThis.crypto.randomUUID(),
+        channelId,
+        createdAt: new Date().toISOString(),
+        lastMessageId: channel.lastMessageId ?? null,
+        messages: [],
+    };
+    subscriptions.set(subscription.id, subscription);
+    return subscriptionMetadata(subscription);
+}
+
+function waitForSubscription(args: ToolArguments): Promise<SubscriptionWaitResult> {
+    const subscriptionId = requireSubscriptionId(args.subscription_id);
+    const subscription = subscriptions.get(subscriptionId);
+    if (!subscription) throw new Error("Discord MCP subscription was not found");
+    if (subscription.waiter) throw new Error("A wait is already active for this subscription");
+
+    const queued = subscription.messages.shift();
+    if (queued) {
+        return Promise.resolve({
+            subscriptionId,
+            timedOut: false,
+            cancelled: false,
+            message: queued,
+        });
+    }
+
+    const timeoutMs = normalizeWaitSeconds(args.timeout_seconds) * 1_000;
+    return new Promise(resolve => {
+        const timer = setTimeout(() => {
+            if (subscription.waiter?.timer === timer) subscription.waiter = undefined;
+            resolve({ subscriptionId, timedOut: true, cancelled: false, message: null });
+        }, timeoutMs);
+        subscription.waiter = { resolve, timer };
+    });
+}
+
+function unsubscribeChannel(args: ToolArguments) {
+    const subscriptionId = requireSubscriptionId(args.subscription_id);
+    const subscription = subscriptions.get(subscriptionId);
+    if (!subscription) return { subscriptionId, unsubscribed: false };
+
+    subscriptions.delete(subscriptionId);
+    if (subscription.waiter) {
+        clearTimeout(subscription.waiter.timer);
+        subscription.waiter.resolve({ subscriptionId, timedOut: false, cancelled: true, message: null });
+        subscription.waiter = undefined;
+    }
+    return { subscriptionId, unsubscribed: true };
+}
+
+function listSubscriptions() {
+    return [...subscriptions.values()]
+        .map(subscriptionMetadata)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+function handleMessageCreate({ optimistic, type, message, channelId }: {
+    optimistic?: boolean;
+    type?: string;
+    message: any;
+    channelId?: string;
+}) {
+    if (optimistic || type !== "MESSAGE_CREATE" || !message || message.state === "SENDING") return;
+    const messageChannelId = String(channelId ?? message.channel_id ?? "");
+    if (!messageChannelId) return;
+
+    for (const subscription of subscriptions.values()) {
+        if (subscription.channelId !== messageChannelId || subscription.lastMessageId === String(message.id)) continue;
+        subscription.lastMessageId = String(message.id);
+        const serialized = serializeMessage(message);
+
+        if (subscription.waiter) {
+            const { waiter } = subscription;
+            subscription.waiter = undefined;
+            clearTimeout(waiter.timer);
+            waiter.resolve({
+                subscriptionId: subscription.id,
+                timedOut: false,
+                cancelled: false,
+                message: serialized,
+            });
+        } else {
+            subscription.messages.push(serialized);
+            if (subscription.messages.length > MAX_SUBSCRIPTION_MESSAGES) subscription.messages.shift();
+        }
+    }
+}
+
+function clearSubscriptions() {
+    for (const subscription of subscriptions.values()) {
+        if (!subscription.waiter) continue;
+        clearTimeout(subscription.waiter.timer);
+        subscription.waiter.resolve({
+            subscriptionId: subscription.id,
+            timedOut: false,
+            cancelled: true,
+            message: null,
+        });
+    }
+    subscriptions.clear();
+}
+
 async function readMessages(args: ToolArguments) {
     const channelId = requireAccessibleChannel(args.channel_id);
     const anchors = {
@@ -395,6 +556,7 @@ async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Pro
                 allAccessibleChannels: true,
                 changesActiveView: false,
                 silentBackground: true,
+                subscriptions: true,
                 membershipChanges: false,
                 relationshipChanges: false,
                 blocking: false,
@@ -412,7 +574,22 @@ async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Pro
         case "download_attachment": return downloadAttachment(args);
         case "send_message": return sendMessage(args);
         case "delete_own_message": return deleteOwnMessage(args);
+        case "subscribe_channel": return subscribeChannel(args);
+        case "wait_for_message": return waitForSubscription(args);
+        case "list_subscriptions": return listSubscriptions();
+        case "unsubscribe_channel": return unsubscribeChannel(args);
         default: throw new Error("Unsupported Discord MCP tool");
+    }
+}
+
+async function handleBridgeRequest(request: Awaited<ReturnType<typeof Native.takeRequests>>[number]): Promise<void> {
+    try {
+        if (!DISCORD_MCP_TOOL_NAMES.includes(request.tool as DiscordMcpToolName))
+            throw new Error("Unsupported Discord MCP tool");
+        const result = await executeTool(request.tool as DiscordMcpToolName, request.arguments);
+        await Native.writeResponse({ id: request.id, ok: true, result });
+    } catch (error) {
+        await Native.writeResponse({ id: request.id, ok: false, error: errorMessage(error) });
     }
 }
 
@@ -430,14 +607,9 @@ async function bridgeLoop(generation: number): Promise<void> {
         if (generation !== bridgeGeneration) return;
 
         for (const request of requests) {
-            try {
-                if (!DISCORD_MCP_TOOL_NAMES.includes(request.tool as DiscordMcpToolName))
-                    throw new Error("Unsupported Discord MCP tool");
-                const result = await executeTool(request.tool as DiscordMcpToolName, request.arguments);
-                await Native.writeResponse({ id: request.id, ok: true, result });
-            } catch (error) {
-                await Native.writeResponse({ id: request.id, ok: false, error: errorMessage(error) });
-            }
+            const task = handleBridgeRequest(request);
+            inFlightRequests.add(task);
+            void task.finally(() => inFlightRequests.delete(task));
         }
     }
 }
@@ -447,6 +619,10 @@ export default definePlugin({
     description: "A local, fixed-surface MCP bridge for agent access to every channel visible to this authenticated Discord client.",
     authors: [EquicordDevs.nobody],
 
+    flux: {
+        MESSAGE_CREATE: handleMessageCreate,
+    },
+
     async start() {
         await Native.initializeBridge();
         const generation = ++bridgeGeneration;
@@ -455,5 +631,6 @@ export default definePlugin({
 
     stop() {
         bridgeGeneration++;
+        clearSubscriptions();
     },
 });

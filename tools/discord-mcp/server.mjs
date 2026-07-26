@@ -18,6 +18,11 @@ const snowflake = {
 };
 
 const channelId = { ...snowflake, description: "Any Discord channel ID visible to the authenticated account" };
+const subscriptionId = {
+    type: "string",
+    pattern: "^[a-fA-F0-9]{8}-(?:[a-fA-F0-9]{4}-){3}[a-fA-F0-9]{12}$",
+    description: "Subscription ID returned by discord_subscribe_channel",
+};
 const messageLocationProperties = {
     channel_id: channelId,
     message_id: { ...snowflake, description: "Discord message ID" },
@@ -131,6 +136,44 @@ export const TOOLS = [
             additionalProperties: false,
         },
     },
+    {
+        name: "discord_subscribe_channel",
+        description: "Silently subscribe to new MESSAGE_CREATE events in any visible channel. Existing messages are not returned.",
+        inputSchema: {
+            type: "object",
+            properties: { channel_id: channelId },
+            required: ["channel_id"],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "discord_wait_for_message",
+        description: "Wait for the next new message on an active subscription without polling Discord or changing the active view. Returns on a message or timeout.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                subscription_id: subscriptionId,
+                timeout_seconds: { type: "integer", minimum: 1, maximum: 300, default: 60 },
+            },
+            required: ["subscription_id"],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "discord_list_subscriptions",
+        description: "List active channel subscriptions, buffered-message counts, and wait state.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    },
+    {
+        name: "discord_unsubscribe_channel",
+        description: "Remove an active channel subscription and cancel its current wait, if any.",
+        inputSchema: {
+            type: "object",
+            properties: { subscription_id: subscriptionId },
+            required: ["subscription_id"],
+            additionalProperties: false,
+        },
+    },
 ];
 
 const toolMap = new Map(TOOLS.map(tool => [tool.name, tool]));
@@ -145,6 +188,10 @@ const bridgeToolNames = new Map([
     ["discord_download_attachment", "download_attachment"],
     ["discord_send_message", "send_message"],
     ["discord_delete_own_message", "delete_own_message"],
+    ["discord_subscribe_channel", "subscribe_channel"],
+    ["discord_wait_for_message", "wait_for_message"],
+    ["discord_list_subscriptions", "list_subscriptions"],
+    ["discord_unsubscribe_channel", "unsubscribe_channel"],
 ]);
 
 function sleep(ms) {
@@ -257,6 +304,12 @@ async function toolContent(name, result) {
     return content;
 }
 
+function bridgeTimeoutForTool(name, args) {
+    if (name !== "discord_wait_for_message") return DEFAULT_TIMEOUT_MS;
+    const requestedSeconds = Number.isInteger(args?.timeout_seconds) ? args.timeout_seconds : 60;
+    return Math.min(315_000, Math.max(11_000, requestedSeconds * 1_000 + 10_000));
+}
+
 async function handleRequest(message) {
     if (!message || message.jsonrpc !== "2.0" || typeof message.method !== "string") {
         rpcError(message?.id, -32600, "Invalid Request");
@@ -297,7 +350,8 @@ async function handleRequest(message) {
             return;
         }
         try {
-            const result = await callBridge(bridgeToolNames.get(name), message.params?.arguments ?? {});
+            const args = message.params?.arguments ?? {};
+            const result = await callBridge(bridgeToolNames.get(name), args, bridgeTimeoutForTool(name, args));
             send({
                 jsonrpc: "2.0",
                 id: message.id,

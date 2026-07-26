@@ -10,6 +10,7 @@ This local stdio MCP server talks to the `DiscordMCP` ProtonnCord plugin through
 - Deletes require both the bridge's persistent sent ledger and confirmation that the authenticated account authored the message.
 - Attachments are resolved from a message in a visible channel, fetched only from Discord's attachment CDN, capped at 25 MB, and hashed. Images and voice messages are also returned as native MCP image/audio content blocks so sandboxed agents can consume them directly.
 - Idle operation uses an event-driven local file watcher instead of a frequent timer. Reads and downloads do not navigate Discord, display UI, or mark channels read; only explicit send/delete calls change Discord state.
+- `discord_subscribe_channel` listens to Discord's native `MESSAGE_CREATE` stream. Agents can use `discord_wait_for_message` for up to five minutes at a time, inspect active subscriptions, and unsubscribe without REST polling or UI changes.
 
 ## Run
 
