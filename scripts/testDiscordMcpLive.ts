@@ -30,6 +30,7 @@ async function main() {
     const browser = await connectWithRetry();
     let mcp: ChildProcessWithoutNullStreams | undefined;
     let sentMessageId: string | undefined;
+    let subscriptionId: string | undefined;
     let callTool: ((name: string, args?: Record<string, unknown>) => Promise<any>) | undefined;
 
     try {
@@ -105,7 +106,7 @@ async function main() {
         });
         assert.equal(initialized.serverInfo.name, "discord-mcp");
         const toolList = await rpc("tools/list");
-        assert.equal(toolList.tools.length, 10, "all ten silent, scoped tools are exposed over stdio MCP");
+        assert.equal(toolList.tools.length, 14, "all fourteen silent, scoped tools are exposed over stdio MCP");
 
         const status = await callTool("discord_connection_status");
         assert.equal(status.connected, true);
@@ -113,6 +114,7 @@ async function main() {
         assert.equal(status.capabilities.allAccessibleChannels, true);
         assert.equal(status.capabilities.changesActiveView, false);
         assert.equal(status.capabilities.silentBackground, true);
+        assert.equal(status.capabilities.subscriptions, true);
         assert.equal(status.capabilities.membershipChanges, false);
         assert.equal(status.capabilities.relationshipChanges, false);
         assert.equal(status.capabilities.blocking, false);
@@ -191,10 +193,31 @@ async function main() {
         }).then(() => null, error => error as Error);
         assert.match(preexistingDelete!.message, /not sent by Discord MCP/, "pre-existing messages cannot be deleted");
 
+        const subscription = await callTool("discord_subscribe_channel", { channel_id: TEST_CHANNEL_ID });
+        subscriptionId = subscription.id;
+        const activeSubscriptions = await callTool("discord_list_subscriptions");
+        assert.ok(activeSubscriptions.some((entry: any) => entry.id === subscriptionId), "the channel subscription is active");
+
+        const waitForMessage = callTool("discord_wait_for_message", {
+            subscription_id: subscriptionId,
+            timeout_seconds: 15,
+        });
+        await new Promise(resolvePromise => setTimeout(resolvePromise, 250));
+
         const marker = `Discord MCP live verification ${new Date().toISOString()}`;
         const sent = await callTool("discord_send_message", { channel_id: TEST_CHANNEL_ID, content: marker });
         sentMessageId = sent.id;
         assert.equal(sent.content, marker, "send returns the exact live message");
+
+        const subscriptionEvent = await waitForMessage;
+        assert.equal(subscriptionEvent.timedOut, false, "subscription wait resolves before its timeout");
+        assert.equal(subscriptionEvent.cancelled, false);
+        assert.equal(subscriptionEvent.message.id, sentMessageId, "subscription delivered the newly created message");
+        assert.equal(subscriptionEvent.message.content, marker);
+
+        const unsubscribed = await callTool("discord_unsubscribe_channel", { subscription_id: subscriptionId });
+        assert.equal(unsubscribed.unsubscribed, true);
+        subscriptionId = undefined;
 
         const sentLookup = await callTool("discord_get_message", {
             channel_id: TEST_CHANNEL_ID,
@@ -230,10 +253,14 @@ async function main() {
             serverChannelToolVerified: true,
             serverCount: servers.length,
             stdioToolsVerified: toolList.tools.length,
+            subscriptionWaitVerified: true,
             voiceMetadata: { durationSeconds: voiceAttachment.durationSeconds, waveformCharacters: fetched.attachments[0].waveform.length },
             voiceFixtureDirection: voiceMessage.author?.id === EXPECTED_RECIPIENT_ID ? "received" : "outgoing",
         }, null, 2));
     } finally {
+        if (subscriptionId && callTool) {
+            await callTool("discord_unsubscribe_channel", { subscription_id: subscriptionId }).catch(() => undefined);
+        }
         if (sentMessageId && callTool) {
             await callTool("discord_delete_own_message", {
                 channel_id: TEST_CHANNEL_ID,

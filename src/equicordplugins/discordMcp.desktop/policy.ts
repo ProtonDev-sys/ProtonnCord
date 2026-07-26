@@ -15,6 +15,10 @@ export const DISCORD_MCP_TOOL_NAMES = [
     "download_attachment",
     "send_message",
     "delete_own_message",
+    "subscribe_channel",
+    "wait_for_message",
+    "list_subscriptions",
+    "unsubscribe_channel",
 ] as const;
 
 export type DiscordMcpToolName = typeof DISCORD_MCP_TOOL_NAMES[number];
