@@ -1,0 +1,483 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Protonn Cord contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+import { definePluginSettings } from "@api/Settings";
+import { generateWaveform } from "@plugins/voiceMessages/waveform";
+import { EquicordDevs } from "@utils/constants";
+import { Logger } from "@utils/Logger";
+import definePlugin, { OptionType, PluginNative } from "@utils/types";
+import { Channel } from "@vencord/discord-types";
+import { ChannelType, MessageFlags } from "@vencord/discord-types/enums";
+import {
+    ChannelStore,
+    Constants,
+    GuildChannelStore,
+    GuildStore,
+    NavigationRouter,
+    RestAPI,
+    SnowflakeUtils,
+    UserStore,
+} from "@webpack/common";
+
+import { decodeAudio } from "../voiceMessageTranscriber.desktop/utils";
+import {
+    DEFAULT_ALLOWED_CHANNEL_IDS,
+    DISCORD_MCP_TOOL_NAMES,
+    DiscordMcpToolName,
+    normalizeMessageContent,
+    normalizeMessageLimit,
+    parseAllowedChannelIds,
+    requireAllowedChannel,
+    requireSnowflake,
+} from "./policy";
+
+interface BridgeRequest {
+    id: string;
+    tool: DiscordMcpToolName;
+    arguments?: unknown;
+}
+
+interface ToolArguments {
+    channel_id?: unknown;
+    channel_ids?: unknown;
+    guild_id?: unknown;
+    message_id?: unknown;
+    attachment_id?: unknown;
+    content?: unknown;
+    limit?: unknown;
+    limit_per_channel?: unknown;
+    before?: unknown;
+    after?: unknown;
+    around?: unknown;
+    reply_to_message_id?: unknown;
+}
+
+interface RawAttachment {
+    id?: unknown;
+    filename?: unknown;
+    content_type?: unknown;
+    size?: unknown;
+    width?: unknown;
+    height?: unknown;
+    duration_secs?: unknown;
+    waveform?: unknown;
+    url?: unknown;
+    proxy_url?: unknown;
+    title?: unknown;
+    description?: unknown;
+}
+
+const Native = VencordNative.pluginHelpers.DiscordMCP as PluginNative<typeof import("./native")>;
+const logger = new Logger("DiscordMCP");
+const POLL_INTERVAL_MS = 400;
+const MAX_WAVEFORM_CACHE_ENTRIES = 25;
+const waveformCache = new Map<string, Promise<string>>();
+
+const settings = definePluginSettings({
+    allowedChannelIds: {
+        type: OptionType.STRING,
+        description: "Comma or space separated channel IDs whose messages agents may read, download, send, delete-own, or open.",
+        default: DEFAULT_ALLOWED_CHANNEL_IDS.join(","),
+        restartNeeded: false,
+    },
+});
+
+let pollTimer: ReturnType<typeof setInterval> | undefined;
+let polling = false;
+
+function allowedChannelIds(): Set<string> {
+    return parseAllowedChannelIds(settings.store.allowedChannelIds);
+}
+
+function argsOf(value: unknown): ToolArguments {
+    if (value === undefined) return {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("arguments must be an object");
+    return value as ToolArguments;
+}
+
+function errorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    if (error && typeof error === "object" && "message" in error && typeof error.message === "string") return error.message;
+    if (error && typeof error === "object" && "status" in error && typeof error.status === "number")
+        return `Discord request failed with HTTP ${error.status}`;
+    if (typeof error === "string") return error;
+    return "Discord MCP request failed";
+}
+
+function optionalSnowflake(value: unknown, fieldName: string): string | undefined {
+    return value === undefined ? undefined : requireSnowflake(value, fieldName);
+}
+
+function serializeUser(user: any) {
+    if (!user) return null;
+    return {
+        id: String(user.id),
+        username: user.username ?? null,
+        globalName: user.global_name ?? user.globalName ?? null,
+        displayName: user.display_name ?? user.displayName ?? null,
+        discriminator: user.discriminator ?? null,
+        bot: Boolean(user.bot),
+    };
+}
+
+function serializeAttachment(attachment: RawAttachment) {
+    const waveform = typeof attachment.waveform === "string" ? attachment.waveform : null;
+    return {
+        id: String(attachment.id),
+        filename: typeof attachment.filename === "string" ? attachment.filename : "attachment",
+        contentType: typeof attachment.content_type === "string" ? attachment.content_type : null,
+        size: typeof attachment.size === "number" ? attachment.size : null,
+        width: typeof attachment.width === "number" ? attachment.width : null,
+        height: typeof attachment.height === "number" ? attachment.height : null,
+        durationSeconds: typeof attachment.duration_secs === "number" ? attachment.duration_secs : null,
+        waveform,
+        waveformSource: waveform ? "discord" : null,
+        title: typeof attachment.title === "string" ? attachment.title : null,
+        description: typeof attachment.description === "string" ? attachment.description : null,
+    };
+}
+
+async function generateAttachmentWaveformFromBytes(bytes: Uint8Array, contentType: string): Promise<string> {
+    const blob = new Blob([bytes as any], { type: contentType });
+    return generateWaveform(await decodeAudio(blob), 16_000);
+}
+
+function generateAttachmentWaveform(attachment: RawAttachment): Promise<string> {
+    if (typeof attachment.url !== "string") throw new Error("Voice attachment is missing its Discord CDN URL");
+    const cached = waveformCache.get(attachment.url);
+    if (cached) return cached;
+
+    const pending = Native.fetchDiscordAttachment(attachment.url)
+        .then(({ contentType, data }) => generateAttachmentWaveformFromBytes(data, contentType))
+        .catch(error => {
+            waveformCache.delete(attachment.url as string);
+            throw error;
+        });
+    waveformCache.set(attachment.url, pending);
+    if (waveformCache.size > MAX_WAVEFORM_CACHE_ENTRIES) waveformCache.delete(waveformCache.keys().next().value!);
+    return pending;
+}
+
+async function serializeMessageWithVoiceWaveform(message: any) {
+    const serialized = serializeMessage(message);
+    if (!serialized.isVoiceMessage) return serialized;
+
+    const rawAttachments = Array.isArray(message.attachments) ? message.attachments as RawAttachment[] : [];
+    await Promise.all(serialized.attachments.map(async (attachment, index) => {
+        if (attachment.waveform) return;
+        const rawAttachment = rawAttachments[index];
+        if (!rawAttachment) return;
+        attachment.waveform = await generateAttachmentWaveform(rawAttachment);
+        attachment.waveformSource = "generated";
+    }));
+    return serialized;
+}
+
+function serializeEmbed(embed: any) {
+    return {
+        type: embed?.type ?? null,
+        title: embed?.title ?? null,
+        description: embed?.description ?? null,
+        url: embed?.url ?? null,
+        timestamp: embed?.timestamp ?? null,
+        provider: embed?.provider?.name ?? null,
+        author: embed?.author?.name ?? null,
+        imageUrl: embed?.image?.url ?? null,
+        thumbnailUrl: embed?.thumbnail?.url ?? null,
+    };
+}
+
+function serializeMessage(message: any) {
+    const flags = Number(message?.flags ?? 0);
+    return {
+        id: String(message.id),
+        channelId: String(message.channel_id),
+        guildId: message.guild_id ? String(message.guild_id) : null,
+        author: serializeUser(message.author),
+        content: typeof message.content === "string" ? message.content : "",
+        timestamp: message.timestamp instanceof Date ? message.timestamp.toISOString() : message.timestamp ?? null,
+        editedTimestamp: message.edited_timestamp ?? message.editedTimestamp?.toISOString?.() ?? null,
+        type: Number(message.type ?? 0),
+        flags,
+        isVoiceMessage: Boolean(flags & MessageFlags.IS_VOICE_MESSAGE),
+        pinned: Boolean(message.pinned),
+        tts: Boolean(message.tts),
+        attachments: Array.isArray(message.attachments) ? message.attachments.map(serializeAttachment) : [],
+        embeds: Array.isArray(message.embeds) ? message.embeds.map(serializeEmbed) : [],
+        replyToMessageId: message.message_reference?.message_id ?? message.messageReference?.message_id ?? null,
+    };
+}
+
+function serializeChannel(channel: Channel | any) {
+    return {
+        id: String(channel.id),
+        guildId: channel.guild_id ? String(channel.guild_id) : null,
+        type: Number(channel.type),
+        name: channel.name ?? null,
+        parentId: channel.parent_id ?? channel.parentId ?? null,
+        position: typeof channel.position === "number" ? channel.position : null,
+        topic: channel.topic ?? null,
+        nsfw: Boolean(channel.nsfw),
+        lastMessageId: channel.lastMessageId ?? channel.last_message_id ?? null,
+    };
+}
+
+async function fetchMessage(channelId: string, messageId: string): Promise<any> {
+    const response = await RestAPI.get({
+        url: Constants.Endpoints.MESSAGES(channelId),
+        query: { around: messageId, limit: 1 },
+        retries: 2,
+    });
+    const message = Array.isArray(response.body)
+        ? response.body.find(candidate => String(candidate.id) === messageId)
+        : null;
+    if (!message || String(message.id) !== messageId || String(message.channel_id) !== channelId)
+        throw new Error("Discord returned an unexpected message");
+    return message;
+}
+
+function listServers() {
+    return Object.values(GuildStore.getGuilds())
+        .map(guild => ({
+            id: guild.id,
+            name: guild.name,
+            description: guild.description ?? null,
+            ownerId: guild.ownerId,
+            preferredLocale: guild.preferredLocale,
+            features: [...guild.features].sort(),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function listServerChannels(guildId: string) {
+    if (!GuildStore.getGuild(guildId)) throw new Error("Server is not available in the authenticated Discord client");
+    const groups = GuildChannelStore.getChannels(guildId);
+    const uniqueChannels = new Map<string, Channel>();
+    for (const entry of [
+        ...(groups?.SELECTABLE ?? []),
+        ...(groups?.VOCAL ?? []),
+        ...(groups?.[ChannelType.GUILD_CATEGORY] ?? []),
+    ]) {
+        const channel = "channel" in entry ? entry.channel : entry;
+        if (channel?.id) uniqueChannels.set(channel.id, channel as Channel);
+    }
+    return [...uniqueChannels.values()]
+        .map(serializeChannel)
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || String(a.name).localeCompare(String(b.name)));
+}
+
+function listDms() {
+    return ChannelStore.getSortedPrivateChannels().map(channel => {
+        const rawRecipients = new Map((channel.rawRecipients ?? []).map(recipient => [recipient.id, recipient]));
+        return {
+            ...serializeChannel(channel),
+            recipients: (channel.recipients ?? [])
+                .map(userId => serializeUser(UserStore.getUser(userId) ?? rawRecipients.get(userId)))
+                .filter(Boolean),
+        };
+    });
+}
+
+async function readMessages(args: ToolArguments) {
+    const channelId = requireAllowedChannel(args.channel_id, allowedChannelIds());
+    const anchors = {
+        before: optionalSnowflake(args.before, "before"),
+        after: optionalSnowflake(args.after, "after"),
+        around: optionalSnowflake(args.around, "around"),
+    };
+    if (Object.values(anchors).filter(Boolean).length > 1)
+        throw new Error("Only one of before, after, or around may be provided");
+
+    const response = await RestAPI.get({
+        url: Constants.Endpoints.MESSAGES(channelId),
+        query: {
+            limit: normalizeMessageLimit(args.limit),
+            ...anchors,
+        },
+        retries: 2,
+    });
+    if (!Array.isArray(response.body)) throw new Error("Discord returned an invalid message list");
+    return response.body.map(serializeMessage);
+}
+
+async function bulkReadMessages(args: ToolArguments) {
+    if (!Array.isArray(args.channel_ids) || args.channel_ids.length < 1 || args.channel_ids.length > 10)
+        throw new Error("channel_ids must contain 1 to 10 allowlisted channel IDs");
+    const allowlist = allowedChannelIds();
+    const channelIds = [...new Set(args.channel_ids.map(channelId => requireAllowedChannel(channelId, allowlist)))];
+    const limitPerChannel = normalizeMessageLimit(args.limit_per_channel);
+    if (channelIds.length * limitPerChannel > 500)
+        throw new Error("bulk reads are capped at 500 total requested messages");
+
+    const channels: Array<{ channelId: string; messages: any[]; }> = [];
+    for (const channelId of channelIds) {
+        channels.push({
+            channelId,
+            messages: await readMessages({ channel_id: channelId, limit: limitPerChannel }),
+        });
+    }
+    return {
+        channels,
+        totalMessages: channels.reduce((total, channel) => total + channel.messages.length, 0),
+    };
+}
+
+async function getMessage(args: ToolArguments) {
+    const channelId = requireAllowedChannel(args.channel_id, allowedChannelIds());
+    const messageId = requireSnowflake(args.message_id, "message_id");
+    return serializeMessageWithVoiceWaveform(await fetchMessage(channelId, messageId));
+}
+
+async function downloadAttachment(args: ToolArguments) {
+    const channelId = requireAllowedChannel(args.channel_id, allowedChannelIds());
+    const messageId = requireSnowflake(args.message_id, "message_id");
+    const attachmentId = requireSnowflake(args.attachment_id, "attachment_id");
+    const message = await fetchMessage(channelId, messageId);
+    const attachment = (message.attachments as RawAttachment[] | undefined)?.find(item => String(item.id) === attachmentId);
+    if (!attachment || typeof attachment.url !== "string" || typeof attachment.filename !== "string")
+        throw new Error("Attachment was not found on that message");
+
+    const downloaded = await Native.downloadDiscordAttachment(attachment.url, attachment.filename);
+    const { data, ...download } = downloaded;
+    const serializedAttachment = serializeAttachment(attachment);
+    if (!serializedAttachment.waveform && Boolean(Number(message.flags ?? 0) & MessageFlags.IS_VOICE_MESSAGE)) {
+        serializedAttachment.waveform = await generateAttachmentWaveformFromBytes(data, download.contentType);
+        serializedAttachment.waveformSource = "generated";
+    }
+
+    return {
+        messageId,
+        attachment: serializedAttachment,
+        download,
+    };
+}
+
+async function sendMessage(args: ToolArguments) {
+    const channelId = requireAllowedChannel(args.channel_id, allowedChannelIds());
+    const content = normalizeMessageContent(args.content);
+    const replyToMessageId = optionalSnowflake(args.reply_to_message_id, "reply_to_message_id");
+    const channel = ChannelStore.getChannel(channelId);
+    if (!channel) throw new Error("Channel is not available in the authenticated Discord client");
+    if (replyToMessageId) await fetchMessage(channelId, replyToMessageId);
+
+    const response = await RestAPI.post({
+        url: Constants.Endpoints.MESSAGES(channelId),
+        body: {
+            channel_id: channelId,
+            content,
+            nonce: SnowflakeUtils.fromTimestamp(Date.now()),
+            sticker_ids: [],
+            type: 0,
+            attachments: [],
+            allowed_mentions: { parse: [], replied_user: false },
+            ...(replyToMessageId ? {
+                message_reference: {
+                    channel_id: channelId,
+                    guild_id: channel.guild_id,
+                    message_id: replyToMessageId,
+                },
+            } : {}),
+        },
+    });
+    const message = response.body;
+    if (!message?.id || String(message.channel_id) !== channelId) throw new Error("Discord did not return the sent message");
+    await Native.recordSentMessage(channelId, String(message.id));
+    return serializeMessage(message);
+}
+
+async function deleteOwnMessage(args: ToolArguments) {
+    const channelId = requireAllowedChannel(args.channel_id, allowedChannelIds());
+    const messageId = requireSnowflake(args.message_id, "message_id");
+    if (!await Native.isSentMessage(channelId, messageId))
+        throw new Error("Refusing to delete a message that was not sent by Discord MCP");
+
+    const message = await fetchMessage(channelId, messageId);
+    if (String(message.author?.id) !== UserStore.getCurrentUser()?.id)
+        throw new Error("Refusing to delete a message not authored by the authenticated account");
+
+    await RestAPI.del({ url: Constants.Endpoints.MESSAGE(channelId, messageId) });
+    await Native.forgetSentMessage(channelId, messageId);
+    return { deleted: true, channelId, messageId };
+}
+
+function openChannel(args: ToolArguments) {
+    const channelId = requireAllowedChannel(args.channel_id, allowedChannelIds());
+    const channel = ChannelStore.getChannel(channelId);
+    if (!channel) throw new Error("Channel is not available in the authenticated Discord client");
+    NavigationRouter.transitionTo(`/channels/${channel.guild_id ?? "@me"}/${channelId}`);
+    return { opened: true, channelId };
+}
+
+async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Promise<unknown> {
+    const args = argsOf(rawArguments);
+    switch (tool) {
+        case "connection_status": return {
+            connected: Boolean(UserStore.getCurrentUser()),
+            currentUser: serializeUser(UserStore.getCurrentUser()),
+            allowedChannelIds: [...allowedChannelIds()],
+            capabilities: {
+                membershipChanges: false,
+                relationshipChanges: false,
+                blocking: false,
+                moderation: false,
+                arbitraryRequests: false,
+                mentions: false,
+            },
+        };
+        case "list_servers": return listServers();
+        case "list_server_channels": return listServerChannels(requireSnowflake(args.guild_id, "guild_id"));
+        case "list_dms": return listDms();
+        case "read_messages": return readMessages(args);
+        case "bulk_read_messages": return bulkReadMessages(args);
+        case "get_message": return getMessage(args);
+        case "download_attachment": return downloadAttachment(args);
+        case "send_message": return sendMessage(args);
+        case "delete_own_message": return deleteOwnMessage(args);
+        case "open_channel": return openChannel(args);
+        default: throw new Error("Unsupported Discord MCP tool");
+    }
+}
+
+async function pollRequests(): Promise<void> {
+    if (polling) return;
+    polling = true;
+    try {
+        const requests = await Native.takeRequests();
+        for (const request of requests) {
+            try {
+                if (!DISCORD_MCP_TOOL_NAMES.includes(request.tool as DiscordMcpToolName))
+                    throw new Error("Unsupported Discord MCP tool");
+                const result = await executeTool(request.tool as DiscordMcpToolName, request.arguments);
+                await Native.writeResponse({ id: request.id, ok: true, result });
+            } catch (error) {
+                await Native.writeResponse({ id: request.id, ok: false, error: errorMessage(error) });
+            }
+        }
+    } catch (error) {
+        logger.error("Bridge poll failed", error);
+    } finally {
+        polling = false;
+    }
+}
+
+export default definePlugin({
+    name: "DiscordMCP",
+    description: "A local, allowlisted MCP bridge for agent access to this authenticated Discord client.",
+    authors: [EquicordDevs.nobody],
+    settings,
+
+    async start() {
+        await Native.initializeBridge();
+        await pollRequests();
+        pollTimer = setInterval(pollRequests, POLL_INTERVAL_MS);
+    },
+
+    stop() {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = undefined;
+        polling = false;
+    },
+});
