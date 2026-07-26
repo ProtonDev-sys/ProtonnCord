@@ -1,0 +1,352 @@
+#!/usr/bin/env node
+
+import { randomUUID } from "node:crypto";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { createInterface } from "node:readline";
+
+const SERVER_NAME = "discord-mcp";
+const SERVER_VERSION = "0.1.0";
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+const snowflake = {
+    type: "string",
+    pattern: "^\\d{17,20}$",
+    description: "Discord snowflake ID",
+};
+
+const channelId = { ...snowflake, description: "An allowlisted Discord channel ID" };
+const messageLocationProperties = {
+    channel_id: channelId,
+    message_id: { ...snowflake, description: "Discord message ID" },
+};
+
+export const TOOLS = [
+    {
+        name: "discord_connection_status",
+        description: "Check the local Discord bridge, authenticated account, allowlisted channels, and disabled capabilities.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    },
+    {
+        name: "discord_list_servers",
+        description: "List servers visible to the authenticated Discord account. This returns server metadata, never members or messages.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    },
+    {
+        name: "discord_list_server_channels",
+        description: "List cached visible channels in one server. This returns channel metadata, not message contents.",
+        inputSchema: {
+            type: "object",
+            properties: { guild_id: { ...snowflake, description: "Discord server ID" } },
+            required: ["guild_id"],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "discord_list_dms",
+        description: "List DM and group-DM channel metadata visible to the authenticated Discord account. This does not read their messages.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    },
+    {
+        name: "discord_read_messages",
+        description: "Read up to 100 messages from an allowlisted channel, including image/audio/voice-message metadata and duration. Use discord_get_message or discord_download_attachment to generate a waveform when Discord omits it.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                channel_id: channelId,
+                limit: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+                before: { ...snowflake, description: "Return messages before this message ID" },
+                after: { ...snowflake, description: "Return messages after this message ID" },
+                around: { ...snowflake, description: "Return messages around this message ID" },
+            },
+            required: ["channel_id"],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "discord_bulk_read_messages",
+        description: "Read recent messages from up to 10 allowlisted channels in one call. The whole request is rejected before reading if any channel is not allowlisted, and total requested messages are capped at 500.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                channel_ids: {
+                    type: "array",
+                    items: channelId,
+                    minItems: 1,
+                    maxItems: 10,
+                    uniqueItems: true,
+                },
+                limit_per_channel: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+            },
+            required: ["channel_ids"],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "discord_get_message",
+        description: "Get one message from an allowlisted channel. If Discord omits a voice waveform, this tool downloads and decodes that voice attachment to generate one.",
+        inputSchema: {
+            type: "object",
+            properties: messageLocationProperties,
+            required: ["channel_id", "message_id"],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "discord_download_attachment",
+        description: "Download one attachment from a message in an allowlisted channel to a private local directory. Downloads are capped at 25 MB and return path, MIME type, size, and SHA-256.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                ...messageLocationProperties,
+                attachment_id: { ...snowflake, description: "Attachment ID reported by a message read tool" },
+            },
+            required: ["channel_id", "message_id", "attachment_id"],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "discord_send_message",
+        description: "Send a plain-text message to an allowlisted channel. Mentions are deliberately disabled; an optional reply does not ping its author.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                channel_id: channelId,
+                content: { type: "string", minLength: 1, maxLength: 2000 },
+                reply_to_message_id: { ...snowflake, description: "Optional message in the same channel to reply to without pinging" },
+            },
+            required: ["channel_id", "content"],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "discord_delete_own_message",
+        description: "Delete a message only when the Discord MCP sent ledger proves this bridge sent it and Discord confirms the current account authored it.",
+        inputSchema: {
+            type: "object",
+            properties: messageLocationProperties,
+            required: ["channel_id", "message_id"],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "discord_open_channel",
+        description: "Navigate the local Discord client to an allowlisted channel.",
+        inputSchema: {
+            type: "object",
+            properties: { channel_id: channelId },
+            required: ["channel_id"],
+            additionalProperties: false,
+        },
+    },
+];
+
+const toolMap = new Map(TOOLS.map(tool => [tool.name, tool]));
+const bridgeToolNames = new Map([
+    ["discord_connection_status", "connection_status"],
+    ["discord_list_servers", "list_servers"],
+    ["discord_list_server_channels", "list_server_channels"],
+    ["discord_list_dms", "list_dms"],
+    ["discord_read_messages", "read_messages"],
+    ["discord_bulk_read_messages", "bulk_read_messages"],
+    ["discord_get_message", "get_message"],
+    ["discord_download_attachment", "download_attachment"],
+    ["discord_send_message", "send_message"],
+    ["discord_delete_own_message", "delete_own_message"],
+    ["discord_open_channel", "open_channel"],
+]);
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function candidateBridgeDirectories() {
+    const candidates = [];
+    if (process.env.PROTONN_CORD_DISCORD_MCP_DIR) candidates.push(process.env.PROTONN_CORD_DISCORD_MCP_DIR);
+    const appData = process.env.APPDATA;
+    if (appData) {
+        candidates.push(join(appData, "ProtonnCord", "discord-mcp"));
+        candidates.push(join(appData, "ProtonnCord", "dev", "discord-mcp"));
+        candidates.push(join(appData, "ProtonnCordData", "discord-mcp"));
+    }
+    candidates.push(join(homedir(), ".protonn-cord", "discord-mcp"));
+    return [...new Set(candidates.map(candidate => dirname(join(candidate, "config.json"))))];
+}
+
+async function loadBridgeConfig() {
+    const attempted = [];
+    for (const directory of candidateBridgeDirectories()) {
+        const configPath = join(directory, "config.json");
+        attempted.push(configPath);
+        try {
+            const config = JSON.parse(await readFile(configPath, "utf8"));
+            if (config?.schemaVersion === 1 && typeof config.secret === "string" && config.secret.length >= 32)
+                return { directory, secret: config.secret };
+        } catch { }
+    }
+    throw new Error(`Discord MCP bridge is not ready. Enable DiscordMCP in ProtonnCord and keep Discord running. Checked: ${attempted.join(", ")}`);
+}
+
+async function writeAtomic(path, body) {
+    const temporaryPath = `${path}.${randomUUID()}.tmp`;
+    await writeFile(temporaryPath, body, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    await rename(temporaryPath, path);
+}
+
+export async function callBridge(tool, args = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+    const { directory, secret } = await loadBridgeConfig();
+    const requestsDirectory = join(directory, "requests");
+    const responsesDirectory = join(directory, "responses");
+    await Promise.all([mkdir(requestsDirectory, { recursive: true }), mkdir(responsesDirectory, { recursive: true })]);
+
+    const id = randomUUID();
+    const requestPath = join(requestsDirectory, `${Date.now()}-${id}.json`);
+    const responsePath = join(responsesDirectory, `${id}.json`);
+    await writeAtomic(requestPath, JSON.stringify({ id, secret, tool, arguments: args, createdAt: Date.now() }));
+
+    const deadline = Date.now() + timeoutMs;
+    try {
+        while (Date.now() < deadline) {
+            try {
+                await access(responsePath);
+                const response = JSON.parse(await readFile(responsePath, "utf8"));
+                if (response?.id !== id) throw new Error("Discord MCP returned a mismatched response ID");
+                if (!response.ok) throw new Error(response.error || "Discord MCP request failed");
+                return response.result;
+            } catch (error) {
+                if (error?.code !== "ENOENT") throw error;
+            }
+            await sleep(40);
+        }
+        throw new Error("Discord MCP request timed out; make sure Discord is running and the DiscordMCP plugin is enabled");
+    } finally {
+        await Promise.all([
+            rm(requestPath, { force: true }),
+            rm(responsePath, { force: true }),
+        ]);
+    }
+}
+
+function send(message) {
+    process.stdout.write(`${JSON.stringify(message)}\n`);
+}
+
+function rpcError(id, code, message) {
+    send({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
+}
+
+async function toolContent(name, result) {
+    const content = [{ type: "text", text: JSON.stringify(result, null, 2) }];
+    if (name !== "discord_download_attachment") return content;
+
+    const path = result?.download?.path;
+    const reportedType = result?.download?.contentType;
+    if (typeof path !== "string" || typeof reportedType !== "string") return content;
+
+    const isVoiceMessage = typeof result?.attachment?.durationSeconds === "number" &&
+        typeof result?.attachment?.waveform === "string";
+    if (!reportedType.startsWith("image/") && !reportedType.startsWith("audio/") && !isVoiceMessage) {
+        content.push({
+            type: "resource_link",
+            name: result?.attachment?.filename ?? "Discord attachment",
+            uri: pathToFileURL(path).href,
+            mimeType: reportedType,
+            size: result?.download?.size,
+        });
+        return content;
+    }
+
+    const data = (await readFile(path)).toString("base64");
+    if (reportedType.startsWith("image/")) {
+        content.push({ type: "image", data, mimeType: reportedType });
+    } else {
+        const mimeType = isVoiceMessage && reportedType === "video/mp4" ? "audio/mp4" : reportedType;
+        content.push({ type: "audio", data, mimeType });
+    }
+    return content;
+}
+
+async function handleRequest(message) {
+    if (!message || message.jsonrpc !== "2.0" || typeof message.method !== "string") {
+        rpcError(message?.id, -32600, "Invalid Request");
+        return;
+    }
+
+    if (message.method === "notifications/initialized" || message.method === "notifications/cancelled") return;
+
+    if (message.method === "initialize") {
+        send({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+                protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
+                capabilities: { tools: { listChanged: false } },
+                serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+                instructions: "Use only allowlisted channels. This server cannot change users, relationships, blocks, membership, roles, or moderation state. It can delete only messages recorded as sent by this bridge.",
+            },
+        });
+        return;
+    }
+
+    if (message.method === "ping") {
+        send({ jsonrpc: "2.0", id: message.id, result: {} });
+        return;
+    }
+
+    if (message.method === "tools/list") {
+        send({ jsonrpc: "2.0", id: message.id, result: { tools: TOOLS } });
+        return;
+    }
+
+    if (message.method === "tools/call") {
+        const name = message.params?.name;
+        const tool = toolMap.get(name);
+        if (!tool) {
+            rpcError(message.id, -32602, `Unknown tool: ${String(name)}`);
+            return;
+        }
+        try {
+            const result = await callBridge(bridgeToolNames.get(name), message.params?.arguments ?? {});
+            send({
+                jsonrpc: "2.0",
+                id: message.id,
+                result: {
+                    content: await toolContent(name, result),
+                    structuredContent: result && typeof result === "object" ? result : { value: result },
+                },
+            });
+        } catch (error) {
+            send({
+                jsonrpc: "2.0",
+                id: message.id,
+                result: {
+                    isError: true,
+                    content: [{ type: "text", text: error instanceof Error ? error.message : "Discord MCP tool failed" }],
+                },
+            });
+        }
+        return;
+    }
+
+    rpcError(message.id, -32601, `Method not found: ${message.method}`);
+}
+
+export function startServer() {
+    const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+    input.on("line", line => {
+        if (!line.trim()) return;
+        let message;
+        try { message = JSON.parse(line); }
+        catch {
+            rpcError(null, -32700, "Parse error");
+            return;
+        }
+        void handleRequest(message).catch(error => {
+            rpcError(message?.id, -32603, error instanceof Error ? error.message : "Internal error");
+        });
+    });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) startServer();
