@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-export const DEFAULT_ALLOWED_CHANNEL_IDS = ["895063026686885909"] as const;
-
 export const DISCORD_MCP_TOOL_NAMES = [
     "connection_status",
     "list_servers",
@@ -17,7 +15,6 @@ export const DISCORD_MCP_TOOL_NAMES = [
     "download_attachment",
     "send_message",
     "delete_own_message",
-    "open_channel",
 ] as const;
 
 export type DiscordMcpToolName = typeof DISCORD_MCP_TOOL_NAMES[number];
@@ -28,24 +25,9 @@ export function isDiscordSnowflake(value: unknown): value is string {
     return typeof value === "string" && DISCORD_SNOWFLAKE.test(value);
 }
 
-export function parseAllowedChannelIds(value: string): Set<string> {
-    return new Set(
-        value
-            .split(/[\s,]+/g)
-            .map(id => id.trim())
-            .filter(isDiscordSnowflake)
-    );
-}
-
 export function requireSnowflake(value: unknown, fieldName: string): string {
     if (!isDiscordSnowflake(value)) throw new Error(`${fieldName} must be a Discord snowflake ID`);
     return value;
-}
-
-export function requireAllowedChannel(channelId: unknown, allowedChannelIds: ReadonlySet<string>): string {
-    const normalized = requireSnowflake(channelId, "channel_id");
-    if (!allowedChannelIds.has(normalized)) throw new Error("Channel is not in the Discord MCP allowlist");
-    return normalized;
 }
 
 export function normalizeMessageLimit(value: unknown): number {

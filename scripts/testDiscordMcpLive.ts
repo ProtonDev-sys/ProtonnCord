@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 
 import puppeteer from "puppeteer-core";
 
-const AUTHORIZED_CHANNEL_ID = "895063026686885909";
+const TEST_CHANNEL_ID = "895063026686885909";
 const EXPECTED_RECIPIENT_ID = "710514340855545878";
 const DEBUG_URL = process.env.DISCORD_DEBUG_URL ?? "http://127.0.0.1:9222";
 
@@ -34,33 +34,34 @@ async function main() {
 
     try {
         const pages = await browser.pages();
-        const page = pages.find(candidate => candidate.url().includes("discord.com")) ?? pages[0];
+        const page = pages.find(candidate => candidate.url().includes("discord.com/channels")) ?? pages[0];
         await page.waitForFunction(() => Boolean((globalThis as any).Vencord?.Plugins?.plugins), { timeout: 30_000 });
+        const routeBefore = new URL(page.url()).pathname;
 
-        const pluginState = await page.evaluate(async allowedChannelId => {
+        const pluginState = await page.evaluate(async () => {
             const global = globalThis as any;
             const vencord = global.Vencord;
             const plugin = vencord.Plugins.plugins.DiscordMCP;
             if (!plugin) throw new Error("DiscordMCP plugin is missing from the built client");
 
             const pluginSettings = vencord.Settings.plugins.DiscordMCP ??= {};
-            pluginSettings.allowedChannelIds = allowedChannelId;
+            delete pluginSettings.allowedChannelIds;
             pluginSettings.enabled = true;
             if (!plugin.started) vencord.Plugins.startPlugin(plugin);
 
             await new Promise(resolvePromise => setTimeout(resolvePromise, 1_000));
             const bridge = await global.VencordNative.pluginHelpers.DiscordMCP.initializeBridge();
             return {
-                allowedChannelIds: pluginSettings.allowedChannelIds,
+                legacyAllowlistRemoved: !("allowedChannelIds" in pluginSettings),
                 enabled: pluginSettings.enabled,
                 pluginStarted: plugin.started,
                 queueDirectory: bridge.queueDirectory,
             };
-        }, AUTHORIZED_CHANNEL_ID);
+        });
 
         assert.equal(pluginState.enabled, true, "DiscordMCP is enabled in persisted ProtonnCord settings");
         assert.equal(pluginState.pluginStarted, true, "DiscordMCP started in the renderer");
-        assert.equal(pluginState.allowedChannelIds, AUTHORIZED_CHANNEL_ID, "the live allowlist has only the authorized test channel");
+        assert.equal(pluginState.legacyAllowlistRemoved, true, "the obsolete channel allowlist setting was removed");
 
         mcp = spawn(process.execPath, [resolve("tools/discord-mcp/server.mjs")], {
             cwd: resolve("."),
@@ -104,11 +105,14 @@ async function main() {
         });
         assert.equal(initialized.serverInfo.name, "discord-mcp");
         const toolList = await rpc("tools/list");
-        assert.equal(toolList.tools.length, 11, "all eleven scoped tools are exposed over stdio MCP");
+        assert.equal(toolList.tools.length, 10, "all ten silent, scoped tools are exposed over stdio MCP");
 
         const status = await callTool("discord_connection_status");
         assert.equal(status.connected, true);
-        assert.deepEqual(status.allowedChannelIds, [AUTHORIZED_CHANNEL_ID]);
+        assert.equal(status.channelAccess, "all_accessible_channels");
+        assert.equal(status.capabilities.allAccessibleChannels, true);
+        assert.equal(status.capabilities.changesActiveView, false);
+        assert.equal(status.capabilities.silentBackground, true);
         assert.equal(status.capabilities.membershipChanges, false);
         assert.equal(status.capabilities.relationshipChanges, false);
         assert.equal(status.capabilities.blocking, false);
@@ -120,27 +124,29 @@ async function main() {
         assert.ok(Array.isArray(serverChannels), "server channel listing succeeds");
 
         const dms = await callTool("discord_list_dms");
-        const authorizedDm = dms.find((channel: any) => channel.id === AUTHORIZED_CHANNEL_ID);
-        assert.ok(authorizedDm, "authorized DM is present in the DM listing");
+        const testDm = dms.find((channel: any) => channel.id === TEST_CHANNEL_ID);
+        const otherDm = dms.find((channel: any) => channel.id !== TEST_CHANNEL_ID);
+        assert.ok(testDm, "test DM is present in the DM listing");
         assert.ok(
-            authorizedDm.recipients.some((recipient: any) => recipient?.id === EXPECTED_RECIPIENT_ID),
-            "authorized channel belongs to the supplied testing user"
+            testDm.recipients.some((recipient: any) => recipient?.id === EXPECTED_RECIPIENT_ID),
+            "test channel belongs to the supplied testing user"
         );
 
-        const messages = await callTool("discord_read_messages", { channel_id: AUTHORIZED_CHANNEL_ID, limit: 100 });
-        assert.ok(Array.isArray(messages) && messages.length > 0, "allowlisted message reads return live messages");
+        const messages = await callTool("discord_read_messages", { channel_id: TEST_CHANNEL_ID, limit: 100 });
+        assert.ok(Array.isArray(messages) && messages.length > 0, "message reads return live messages");
         const bulkMessages = await callTool("discord_bulk_read_messages", {
-            channel_ids: [AUTHORIZED_CHANNEL_ID],
+            channel_ids: [TEST_CHANNEL_ID, ...(otherDm ? [otherDm.id] : [])],
             limit_per_channel: 10,
         });
-        assert.equal(bulkMessages.channels[0].channelId, AUTHORIZED_CHANNEL_ID);
+        assert.equal(bulkMessages.channels[0].channelId, TEST_CHANNEL_ID);
+        assert.equal(bulkMessages.channels.length, otherDm ? 2 : 1, "bulk reads accept every visible channel supplied");
         assert.ok(bulkMessages.totalMessages > 0, "bulk message reads return live messages");
         assert.ok(
             messages.some((message: any) => message.author?.id === EXPECTED_RECIPIENT_ID),
             "received messages from the supplied testing user are readable"
         );
         const newest = messages[0];
-        assert.equal(newest.isVoiceMessage, true, "the newest authorized message is the supplied voice-message fixture");
+        assert.equal(newest.isVoiceMessage, true, "the newest test-channel message is the supplied voice-message fixture");
         const voiceMessage = newest;
         const voiceAttachment = voiceMessage.attachments[0];
         assert.equal(typeof voiceAttachment.durationSeconds, "number", "voice duration is populated");
@@ -151,7 +157,7 @@ async function main() {
         );
 
         const fetched = await callTool("discord_get_message", {
-            channel_id: AUTHORIZED_CHANNEL_ID,
+            channel_id: TEST_CHANNEL_ID,
             message_id: voiceMessage.id,
         });
         assert.equal(fetched.id, voiceMessage.id, "single-message lookup matches the list result");
@@ -160,7 +166,7 @@ async function main() {
         assert.equal(fetched.attachments[0].waveformSource, "generated");
 
         const downloaded = await callTool("discord_download_attachment", {
-            channel_id: AUTHORIZED_CHANNEL_ID,
+            channel_id: TEST_CHANNEL_ID,
             message_id: voiceMessage.id,
             attachment_id: voiceAttachment.id,
         });
@@ -174,69 +180,63 @@ async function main() {
         assert.ok(audioBlock.data.length > downloaded.download.size, "the MCP audio block contains base64 media bytes");
         await access(downloaded.download.path);
 
-        const otherDm = dms.find((channel: any) => channel.id !== AUTHORIZED_CHANNEL_ID);
         if (otherDm) {
-            const denied = await callTool("discord_read_messages", { channel_id: otherDm.id, limit: 1 }).then(
-                () => null,
-                error => error as Error
-            );
-            assert.match(denied!.message, /allowlist/, "message reads from unselected channels are denied inside Discord");
+            const otherMessages = await callTool("discord_read_messages", { channel_id: otherDm.id, limit: 1 });
+            assert.ok(Array.isArray(otherMessages), "a second visible DM can be read without an allowlist");
         }
 
         const preexistingDelete = await callTool("discord_delete_own_message", {
-            channel_id: AUTHORIZED_CHANNEL_ID,
+            channel_id: TEST_CHANNEL_ID,
             message_id: newest.id,
         }).then(() => null, error => error as Error);
         assert.match(preexistingDelete!.message, /not sent by Discord MCP/, "pre-existing messages cannot be deleted");
 
         const marker = `Discord MCP live verification ${new Date().toISOString()}`;
-        const sent = await callTool("discord_send_message", { channel_id: AUTHORIZED_CHANNEL_ID, content: marker });
+        const sent = await callTool("discord_send_message", { channel_id: TEST_CHANNEL_ID, content: marker });
         sentMessageId = sent.id;
         assert.equal(sent.content, marker, "send returns the exact live message");
 
         const sentLookup = await callTool("discord_get_message", {
-            channel_id: AUTHORIZED_CHANNEL_ID,
+            channel_id: TEST_CHANNEL_ID,
             message_id: sentMessageId,
         });
         assert.equal(sentLookup.content, marker, "the sent message can be read back");
 
-        const opened = await callTool("discord_open_channel", { channel_id: AUTHORIZED_CHANNEL_ID });
-        assert.equal(opened.opened, true, "channel navigation succeeds");
-
         const deleted = await callTool("discord_delete_own_message", {
-            channel_id: AUTHORIZED_CHANNEL_ID,
+            channel_id: TEST_CHANNEL_ID,
             message_id: sentMessageId,
         });
         assert.equal(deleted.deleted, true, "the bridge can delete its own sent message");
         sentMessageId = undefined;
 
         const repeatedDelete = await callTool("discord_delete_own_message", {
-            channel_id: AUTHORIZED_CHANNEL_ID,
+            channel_id: TEST_CHANNEL_ID,
             message_id: sent.id,
         }).then(() => null, error => error as Error);
         assert.match(repeatedDelete!.message, /not sent by Discord MCP/, "the ledger entry is removed after deletion");
+        assert.equal(new URL(page.url()).pathname, routeBefore, "MCP activity does not navigate or replace the active Discord view");
 
         assert.equal(stderr, "", "the stdio server emitted no unexpected diagnostics");
         console.log(JSON.stringify({
             attachmentDownload: { contentType: downloaded.download.contentType, sha256Verified: true, size: downloaded.download.size },
-            authorizedChannelVerified: true,
+            allChannelAccessVerified: Boolean(otherDm),
             bulkReadVerified: true,
             deletionBoundaryVerified: true,
             dmCount: dms.length,
             messageCountSampled: messages.length,
             pluginEnabled: pluginState.enabled,
             receivedMessagesReadable: true,
+            silentRouteVerified: true,
             serverChannelToolVerified: true,
             serverCount: servers.length,
             stdioToolsVerified: toolList.tools.length,
-            unallowlistedReadDenied: Boolean(otherDm),
             voiceMetadata: { durationSeconds: voiceAttachment.durationSeconds, waveformCharacters: fetched.attachments[0].waveform.length },
             voiceFixtureDirection: voiceMessage.author?.id === EXPECTED_RECIPIENT_ID ? "received" : "outgoing",
         }, null, 2));
     } finally {
         if (sentMessageId && callTool) {
             await callTool("discord_delete_own_message", {
-                channel_id: AUTHORIZED_CHANNEL_ID,
+                channel_id: TEST_CHANNEL_ID,
                 message_id: sentMessageId,
             }).catch(() => undefined);
         }

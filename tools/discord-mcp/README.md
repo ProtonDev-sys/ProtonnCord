@@ -4,11 +4,12 @@ This local stdio MCP server talks to the `DiscordMCP` ProtonnCord plugin through
 
 ## Safety boundary
 
-- Message reads, attachment downloads, sends, deletes, and navigation require a channel ID present in the plugin allowlist.
+- Message reads, attachment downloads, sends, deletes, and bulk reads may use any channel visible to the authenticated Discord account.
 - The server has no generic REST request, membership, relationship, block, role, or moderation tool.
 - Sends disable parsed mentions. Replies do not ping.
 - Deletes require both the bridge's persistent sent ledger and confirmation that the authenticated account authored the message.
-- Attachments are resolved from an allowlisted message, fetched only from Discord's attachment CDN, capped at 25 MB, and hashed. Images and voice messages are also returned as native MCP image/audio content blocks so sandboxed agents can consume them directly.
+- Attachments are resolved from a message in a visible channel, fetched only from Discord's attachment CDN, capped at 25 MB, and hashed. Images and voice messages are also returned as native MCP image/audio content blocks so sandboxed agents can consume them directly.
+- Idle operation uses an event-driven local file watcher instead of a frequent timer. Reads and downloads do not navigate Discord, display UI, or mark channels read; only explicit send/delete calls change Discord state.
 
 ## Run
 

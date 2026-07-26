@@ -7,6 +7,7 @@
 import { DATA_DIR } from "@main/utils/constants";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import type { IpcMainInvokeEvent } from "electron";
+import { watch } from "fs";
 import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "fs/promises";
 import { basename, extname, join } from "path";
 
@@ -154,8 +155,7 @@ export async function initializeBridge(_: IpcMainInvokeEvent): Promise<{
     };
 }
 
-export async function takeRequests(_: IpcMainInvokeEvent): Promise<BridgeRequest[]> {
-    await ensureInitialized();
+async function claimRequests(): Promise<BridgeRequest[]> {
     const requests: BridgeRequest[] = [];
     const entries = (await readdir(REQUESTS_DIR, { withFileTypes: true }))
         .filter(entry => entry.isFile() && entry.name.endsWith(".json"))
@@ -179,6 +179,41 @@ export async function takeRequests(_: IpcMainInvokeEvent): Promise<BridgeRequest
     }
 
     return requests;
+}
+
+function waitForRequestSignal(timeoutMs: number): Promise<void> {
+    return new Promise(resolve => {
+        let finished = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let watcher: ReturnType<typeof watch> | undefined;
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            if (timer) clearTimeout(timer);
+            watcher?.close();
+            resolve();
+        };
+
+        try {
+            watcher = watch(REQUESTS_DIR, { persistent: false }, (_event, filename) => {
+                if (!filename || filename.toString().endsWith(".json")) finish();
+            });
+            watcher.once("error", finish);
+            timer = setTimeout(finish, timeoutMs);
+        } catch {
+            finish();
+        }
+    });
+}
+
+export async function takeRequests(_: IpcMainInvokeEvent, waitMs = 10_000): Promise<BridgeRequest[]> {
+    await ensureInitialized();
+    const immediatelyAvailable = await claimRequests();
+    if (immediatelyAvailable.length > 0) return immediatelyAvailable;
+
+    const boundedWaitMs = Number.isFinite(waitMs) ? Math.max(0, Math.min(30_000, waitMs)) : 10_000;
+    if (boundedWaitMs > 0) await waitForRequestSignal(boundedWaitMs);
+    return claimRequests();
 }
 
 export async function writeResponse(_: IpcMainInvokeEvent, response: BridgeResponse): Promise<void> {

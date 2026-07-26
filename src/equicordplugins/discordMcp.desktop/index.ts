@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { definePluginSettings } from "@api/Settings";
 import { generateWaveform } from "@plugins/voiceMessages/waveform";
 import { EquicordDevs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
-import definePlugin, { OptionType, PluginNative } from "@utils/types";
+import definePlugin, { PluginNative } from "@utils/types";
 import { Channel } from "@vencord/discord-types";
 import { ChannelType, MessageFlags } from "@vencord/discord-types/enums";
 import {
@@ -16,23 +15,13 @@ import {
     Constants,
     GuildChannelStore,
     GuildStore,
-    NavigationRouter,
     RestAPI,
     SnowflakeUtils,
     UserStore,
 } from "@webpack/common";
 
 import { decodeAudio } from "../voiceMessageTranscriber.desktop/utils";
-import {
-    DEFAULT_ALLOWED_CHANNEL_IDS,
-    DISCORD_MCP_TOOL_NAMES,
-    DiscordMcpToolName,
-    normalizeMessageContent,
-    normalizeMessageLimit,
-    parseAllowedChannelIds,
-    requireAllowedChannel,
-    requireSnowflake,
-} from "./policy";
+import { DISCORD_MCP_TOOL_NAMES, DiscordMcpToolName, normalizeMessageContent, normalizeMessageLimit, requireSnowflake } from "./policy";
 
 interface BridgeRequest {
     id: string;
@@ -72,24 +61,17 @@ interface RawAttachment {
 
 const Native = VencordNative.pluginHelpers.DiscordMCP as PluginNative<typeof import("./native")>;
 const logger = new Logger("DiscordMCP");
-const POLL_INTERVAL_MS = 400;
+const LONG_POLL_MS = 10_000;
 const MAX_WAVEFORM_CACHE_ENTRIES = 25;
 const waveformCache = new Map<string, Promise<string>>();
 
-const settings = definePluginSettings({
-    allowedChannelIds: {
-        type: OptionType.STRING,
-        description: "Comma or space separated channel IDs whose messages agents may read, download, send, delete-own, or open.",
-        default: DEFAULT_ALLOWED_CHANNEL_IDS.join(","),
-        restartNeeded: false,
-    },
-});
+let bridgeGeneration = 0;
 
-let pollTimer: ReturnType<typeof setInterval> | undefined;
-let polling = false;
-
-function allowedChannelIds(): Set<string> {
-    return parseAllowedChannelIds(settings.store.allowedChannelIds);
+function requireAccessibleChannel(channelId: unknown): string {
+    const normalized = requireSnowflake(channelId, "channel_id");
+    if (!ChannelStore.getChannel(normalized))
+        throw new Error("Channel is not available to the authenticated Discord account");
+    return normalized;
 }
 
 function argsOf(value: unknown): ToolArguments {
@@ -282,7 +264,7 @@ function listDms() {
 }
 
 async function readMessages(args: ToolArguments) {
-    const channelId = requireAllowedChannel(args.channel_id, allowedChannelIds());
+    const channelId = requireAccessibleChannel(args.channel_id);
     const anchors = {
         before: optionalSnowflake(args.before, "before"),
         after: optionalSnowflake(args.after, "after"),
@@ -305,9 +287,8 @@ async function readMessages(args: ToolArguments) {
 
 async function bulkReadMessages(args: ToolArguments) {
     if (!Array.isArray(args.channel_ids) || args.channel_ids.length < 1 || args.channel_ids.length > 10)
-        throw new Error("channel_ids must contain 1 to 10 allowlisted channel IDs");
-    const allowlist = allowedChannelIds();
-    const channelIds = [...new Set(args.channel_ids.map(channelId => requireAllowedChannel(channelId, allowlist)))];
+        throw new Error("channel_ids must contain 1 to 10 channel IDs available to the authenticated account");
+    const channelIds = [...new Set(args.channel_ids.map(requireAccessibleChannel))];
     const limitPerChannel = normalizeMessageLimit(args.limit_per_channel);
     if (channelIds.length * limitPerChannel > 500)
         throw new Error("bulk reads are capped at 500 total requested messages");
@@ -326,13 +307,13 @@ async function bulkReadMessages(args: ToolArguments) {
 }
 
 async function getMessage(args: ToolArguments) {
-    const channelId = requireAllowedChannel(args.channel_id, allowedChannelIds());
+    const channelId = requireAccessibleChannel(args.channel_id);
     const messageId = requireSnowflake(args.message_id, "message_id");
     return serializeMessageWithVoiceWaveform(await fetchMessage(channelId, messageId));
 }
 
 async function downloadAttachment(args: ToolArguments) {
-    const channelId = requireAllowedChannel(args.channel_id, allowedChannelIds());
+    const channelId = requireAccessibleChannel(args.channel_id);
     const messageId = requireSnowflake(args.message_id, "message_id");
     const attachmentId = requireSnowflake(args.attachment_id, "attachment_id");
     const message = await fetchMessage(channelId, messageId);
@@ -356,7 +337,7 @@ async function downloadAttachment(args: ToolArguments) {
 }
 
 async function sendMessage(args: ToolArguments) {
-    const channelId = requireAllowedChannel(args.channel_id, allowedChannelIds());
+    const channelId = requireAccessibleChannel(args.channel_id);
     const content = normalizeMessageContent(args.content);
     const replyToMessageId = optionalSnowflake(args.reply_to_message_id, "reply_to_message_id");
     const channel = ChannelStore.getChannel(channelId);
@@ -389,7 +370,7 @@ async function sendMessage(args: ToolArguments) {
 }
 
 async function deleteOwnMessage(args: ToolArguments) {
-    const channelId = requireAllowedChannel(args.channel_id, allowedChannelIds());
+    const channelId = requireAccessibleChannel(args.channel_id);
     const messageId = requireSnowflake(args.message_id, "message_id");
     if (!await Native.isSentMessage(channelId, messageId))
         throw new Error("Refusing to delete a message that was not sent by Discord MCP");
@@ -403,22 +384,17 @@ async function deleteOwnMessage(args: ToolArguments) {
     return { deleted: true, channelId, messageId };
 }
 
-function openChannel(args: ToolArguments) {
-    const channelId = requireAllowedChannel(args.channel_id, allowedChannelIds());
-    const channel = ChannelStore.getChannel(channelId);
-    if (!channel) throw new Error("Channel is not available in the authenticated Discord client");
-    NavigationRouter.transitionTo(`/channels/${channel.guild_id ?? "@me"}/${channelId}`);
-    return { opened: true, channelId };
-}
-
 async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Promise<unknown> {
     const args = argsOf(rawArguments);
     switch (tool) {
         case "connection_status": return {
             connected: Boolean(UserStore.getCurrentUser()),
             currentUser: serializeUser(UserStore.getCurrentUser()),
-            allowedChannelIds: [...allowedChannelIds()],
+            channelAccess: "all_accessible_channels",
             capabilities: {
+                allAccessibleChannels: true,
+                changesActiveView: false,
+                silentBackground: true,
                 membershipChanges: false,
                 relationshipChanges: false,
                 blocking: false,
@@ -436,16 +412,23 @@ async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Pro
         case "download_attachment": return downloadAttachment(args);
         case "send_message": return sendMessage(args);
         case "delete_own_message": return deleteOwnMessage(args);
-        case "open_channel": return openChannel(args);
         default: throw new Error("Unsupported Discord MCP tool");
     }
 }
 
-async function pollRequests(): Promise<void> {
-    if (polling) return;
-    polling = true;
-    try {
-        const requests = await Native.takeRequests();
+async function bridgeLoop(generation: number): Promise<void> {
+    while (generation === bridgeGeneration) {
+        let requests: Awaited<ReturnType<typeof Native.takeRequests>>;
+        try {
+            requests = await Native.takeRequests(LONG_POLL_MS);
+        } catch (error) {
+            if (generation !== bridgeGeneration) return;
+            logger.error("Bridge wait failed", error);
+            await new Promise(resolve => setTimeout(resolve, 1_000));
+            continue;
+        }
+        if (generation !== bridgeGeneration) return;
+
         for (const request of requests) {
             try {
                 if (!DISCORD_MCP_TOOL_NAMES.includes(request.tool as DiscordMcpToolName))
@@ -456,28 +439,21 @@ async function pollRequests(): Promise<void> {
                 await Native.writeResponse({ id: request.id, ok: false, error: errorMessage(error) });
             }
         }
-    } catch (error) {
-        logger.error("Bridge poll failed", error);
-    } finally {
-        polling = false;
     }
 }
 
 export default definePlugin({
     name: "DiscordMCP",
-    description: "A local, allowlisted MCP bridge for agent access to this authenticated Discord client.",
+    description: "A local, fixed-surface MCP bridge for agent access to every channel visible to this authenticated Discord client.",
     authors: [EquicordDevs.nobody],
-    settings,
 
     async start() {
         await Native.initializeBridge();
-        await pollRequests();
-        pollTimer = setInterval(pollRequests, POLL_INTERVAL_MS);
+        const generation = ++bridgeGeneration;
+        void bridgeLoop(generation);
     },
 
     stop() {
-        if (pollTimer) clearInterval(pollTimer);
-        pollTimer = undefined;
-        polling = false;
+        bridgeGeneration++;
     },
 });
