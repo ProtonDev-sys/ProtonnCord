@@ -37,7 +37,6 @@ async function main() {
         const pages = await browser.pages();
         const page = pages.find(candidate => candidate.url().includes("discord.com/channels")) ?? pages[0];
         await page.waitForFunction(() => Boolean((globalThis as any).Vencord?.Plugins?.plugins), { timeout: 30_000 });
-        const routeBefore = new URL(page.url()).pathname;
 
         const pluginState = await page.evaluate(async () => {
             const global = globalThis as any;
@@ -63,6 +62,8 @@ async function main() {
         assert.equal(pluginState.enabled, true, "DiscordMCP is enabled in persisted ProtonnCord settings");
         assert.equal(pluginState.pluginStarted, true, "DiscordMCP started in the renderer");
         assert.equal(pluginState.legacyAllowlistRemoved, true, "the obsolete channel allowlist setting was removed");
+        await new Promise(resolvePromise => setTimeout(resolvePromise, 1_000));
+        const routeBefore = new URL(page.url()).pathname;
 
         mcp = spawn(process.execPath, [resolve("tools/discord-mcp/server.mjs")], {
             cwd: resolve("."),
@@ -106,7 +107,7 @@ async function main() {
         });
         assert.equal(initialized.serverInfo.name, "discord-mcp");
         const toolList = await rpc("tools/list");
-        assert.equal(toolList.tools.length, 14, "all fourteen silent, scoped tools are exposed over stdio MCP");
+        assert.equal(toolList.tools.length, 15, "all fifteen silent, scoped tools are exposed over stdio MCP");
 
         const status = await callTool("discord_connection_status");
         assert.equal(status.connected, true);
@@ -115,6 +116,7 @@ async function main() {
         assert.equal(status.capabilities.changesActiveView, false);
         assert.equal(status.capabilities.silentBackground, true);
         assert.equal(status.capabilities.subscriptions, true);
+        assert.equal(status.capabilities.messageSearch, true);
         assert.equal(status.capabilities.membershipChanges, false);
         assert.equal(status.capabilities.relationshipChanges, false);
         assert.equal(status.capabilities.blocking, false);
@@ -147,6 +149,50 @@ async function main() {
             messages.some((message: any) => message.author?.id === EXPECTED_RECIPIENT_ID),
             "received messages from the supplied testing user are readable"
         );
+        const routeBeforeChannelSearch = new URL(page.url()).pathname;
+        const searchStartedAt = performance.now();
+        const searchResults = await callTool("discord_search_messages", {
+            channel_id: TEST_CHANNEL_ID,
+            author_id: EXPECTED_RECIPIENT_ID,
+            sort_order: "desc",
+            limit: 5,
+        });
+        const searchLatencyMs = Math.round(performance.now() - searchStartedAt);
+        assert.equal(searchResults.scope.type, "channel", "search stays scoped to the requested DM");
+        assert.ok(searchResults.resultCount > 0, "headless search returns live indexed messages");
+        assert.ok(
+            searchResults.messages.every((message: any) => message.author?.id === EXPECTED_RECIPIENT_ID),
+            "Discord applies the requested author filter"
+        );
+        assert.equal(new URL(page.url()).pathname, routeBeforeChannelSearch, "headless search does not navigate or open Discord search UI");
+
+        const routeBeforeServerSearch = new URL(page.url()).pathname;
+        let serverSearchProof: { guildId: string; resultCount: number; } | undefined;
+        for (const server of servers.slice(0, 3)) {
+            const channels = server.id === servers[0].id
+                ? serverChannels
+                : await callTool("discord_list_server_channels", { guild_id: server.id });
+            for (const channel of channels.filter((candidate: any) => [0, 5, 10, 11, 12].includes(candidate.type)).slice(0, 5)) {
+                const sample = await callTool("discord_read_messages", { channel_id: channel.id, limit: 1 })
+                    .catch(() => []);
+                const authorId = sample[0]?.author?.id;
+                if (!authorId) continue;
+                const serverSearch = await callTool("discord_search_messages", {
+                    guild_id: server.id,
+                    author_id: authorId,
+                    sort_order: "desc",
+                    limit: 1,
+                }).catch(() => null);
+                if (!serverSearch?.resultCount) continue;
+                assert.equal(serverSearch.scope.type, "guild");
+                assert.equal(serverSearch.messages[0].guildId, server.id);
+                serverSearchProof = { guildId: server.id, resultCount: serverSearch.resultCount };
+                break;
+            }
+            if (serverSearchProof) break;
+        }
+        assert.ok(serverSearchProof, "server-wide headless search returns a live indexed message");
+        assert.equal(new URL(page.url()).pathname, routeBeforeServerSearch, "server-wide search also leaves Discord's route unchanged");
         const newest = messages[0];
         assert.equal(newest.isVoiceMessage, true, "the newest test-channel message is the supplied voice-message fixture");
         const voiceMessage = newest;
@@ -247,6 +293,8 @@ async function main() {
             deletionBoundaryVerified: true,
             dmCount: dms.length,
             messageCountSampled: messages.length,
+            messageSearchVerified: { latencyMs: searchLatencyMs, resultCount: searchResults.resultCount },
+            serverWideSearchVerified: serverSearchProof,
             pluginEnabled: pluginState.enabled,
             receivedMessagesReadable: true,
             silentRouteVerified: true,

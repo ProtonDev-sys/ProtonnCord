@@ -12,6 +12,10 @@ import {
     isDiscordSnowflake,
     normalizeMessageContent,
     normalizeMessageLimit,
+    normalizeSearchHas,
+    normalizeSearchOffset,
+    normalizeSearchQuery,
+    normalizeSearchSortOrder,
     requireSnowflake,
     sentMessageKey,
 } from "../src/equicordplugins/discordMcp.desktop/policy";
@@ -26,6 +30,18 @@ assert.throws(() => normalizeMessageLimit(101), /1 to 100/);
 assert.equal(normalizeMessageContent("hello"), "hello");
 assert.throws(() => normalizeMessageContent("  "), /non-empty/);
 assert.throws(() => normalizeMessageContent("x".repeat(2001)), /2,000/);
+assert.equal(normalizeSearchQuery("  release notes  "), "release notes");
+assert.equal(normalizeSearchQuery(undefined), undefined);
+assert.throws(() => normalizeSearchQuery(" "), /non-empty/);
+assert.throws(() => normalizeSearchQuery("x".repeat(1025)), /1,024/);
+assert.equal(normalizeSearchOffset(undefined), 0);
+assert.equal(normalizeSearchOffset(5_000), 5_000);
+assert.throws(() => normalizeSearchOffset(5_001), /0 to 5,000/);
+assert.deepEqual(normalizeSearchHas(["image", "file", "image"]), ["image", "file"]);
+assert.throws(() => normalizeSearchHas(["anything"]), /unsupported/);
+assert.equal(normalizeSearchSortOrder(undefined), "desc");
+assert.equal(normalizeSearchSortOrder("asc"), "asc");
+assert.throws(() => normalizeSearchSortOrder("relevance"), /asc or desc/);
 
 const sent = new Set([sentMessageKey("895063026686885909", "123456789012345678")]);
 assert.equal(canDeleteRecordedMessage(sent, "895063026686885909", "123456789012345678"), true);
@@ -114,6 +130,9 @@ try {
     assert.deepEqual(names, DISCORD_MCP_TOOL_NAMES.map(name => `discord_${name}`), "all fixed Discord tools are advertised");
     assert.equal(names.some((name: string) => /member|friend|relationship|block|role|moder|request|rest/i.test(name)), false, "no user-management, moderation, or arbitrary request tool exists");
     for (const tool of listed.tools) assert.equal(tool.inputSchema.additionalProperties, false, `${tool.name} rejects unknown arguments`);
+    const searchTool = listed.tools.find((tool: any) => tool.name === "discord_search_messages");
+    assert.ok(searchTool, "headless message search is exposed");
+    assert.deepEqual(searchTool.inputSchema.anyOf, [{ required: ["channel_id"] }, { required: ["guild_id"] }]);
 
     const status = await rpc("tools/call", { name: "discord_connection_status", arguments: {} });
     assert.equal(status.structuredContent.connected, true);

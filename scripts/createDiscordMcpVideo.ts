@@ -52,7 +52,7 @@ const slides: Slide[] = [
         body: `
           <div class="flow">
             <div class="flow-node"><b>AI agent</b><small>MCP client</small></div><i>→</i>
-            <div class="flow-node"><b>stdio server</b><small>14 focused tools</small></div><i>→</i>
+            <div class="flow-node"><b>stdio server</b><small>15 focused tools</small></div><i>→</i>
             <div class="flow-node secure"><b>private queue</b><small>local + authenticated</small></div><i>→</i>
             <div class="flow-node"><b>ProtonnCord</b><small>Discord APIs + events</small></div>
           </div>
@@ -67,11 +67,11 @@ const slides: Slide[] = [
         body: `
           <div class="tool-grid">
             <div class="tool-card"><em>DISCOVER</em><b>Servers · Channels · DMs</b><p>Resolve Discord structure without touching the active view.</p></div>
-            <div class="tool-card"><em>READ</em><b>Single · Bulk · Attachments</b><p>Up to 100 messages per channel and 500 per bulk request.</p></div>
+            <div class="tool-card"><em>READ</em><b>Search · Single · Bulk · Media</b><p>Headless Discord search plus structured messages and attachments.</p></div>
             <div class="tool-card"><em>ACT</em><b>Send · Delete-own</b><p>Mentions disabled. Deletion requires the MCP sent ledger.</p></div>
             <div class="tool-card hot"><em>SUBSCRIBE</em><b>Subscribe · Wait · List · Stop</b><p>Receive new messages from Discord's native event stream.</p></div>
           </div>
-          <div class="big-caption"><strong>14</strong> scoped tools <span>•</span> <strong>0</strong> arbitrary REST calls</div>`,
+          <div class="big-caption"><strong>15</strong> scoped tools <span>•</span> <strong>0</strong> arbitrary REST calls</div>`,
     },
     {
         eyebrow: "NEW: CHANNEL SUBSCRIPTIONS",
@@ -108,7 +108,7 @@ const slides: Slide[] = [
         accent: "#ff718d",
         body: `
           <div class="safety-grid">
-            <div class="safety-card can"><h3>CAN</h3><ul><li>Use every visible channel</li><li>Read and bulk-read messages</li><li>Subscribe and wait silently</li><li>Send explicit plain-text messages</li><li>Delete messages the MCP sent</li></ul></div>
+            <div class="safety-card can"><h3>CAN</h3><ul><li>Use every visible channel</li><li>Search messages headlessly</li><li>Subscribe and wait silently</li><li>Send explicit plain-text messages</li><li>Delete messages the MCP sent</li></ul></div>
             <div class="safety-card cannot"><h3>CANNOT</h3><ul><li>Add, remove, or block users</li><li>Change membership or roles</li><li>Perform moderation actions</li><li>Make arbitrary Discord requests</li><li>Navigate your active view</li></ul></div>
           </div>`,
     },

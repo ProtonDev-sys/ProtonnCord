@@ -21,7 +21,17 @@ import {
 } from "@webpack/common";
 
 import { decodeAudio } from "../voiceMessageTranscriber.desktop/utils";
-import { DISCORD_MCP_TOOL_NAMES, DiscordMcpToolName, normalizeMessageContent, normalizeMessageLimit, requireSnowflake } from "./policy";
+import {
+    DISCORD_MCP_TOOL_NAMES,
+    DiscordMcpToolName,
+    normalizeMessageContent,
+    normalizeMessageLimit,
+    normalizeSearchHas,
+    normalizeSearchOffset,
+    normalizeSearchQuery,
+    normalizeSearchSortOrder,
+    requireSnowflake,
+} from "./policy";
 
 interface BridgeRequest {
     id: string;
@@ -38,6 +48,15 @@ interface ToolArguments {
     content?: unknown;
     limit?: unknown;
     limit_per_channel?: unknown;
+    query?: unknown;
+    author_id?: unknown;
+    mentions_user_id?: unknown;
+    has?: unknown;
+    pinned?: unknown;
+    before_message_id?: unknown;
+    after_message_id?: unknown;
+    sort_order?: unknown;
+    offset?: unknown;
     before?: unknown;
     after?: unknown;
     around?: unknown;
@@ -467,6 +486,121 @@ async function bulkReadMessages(args: ToolArguments) {
     };
 }
 
+function optionalBoolean(value: unknown, fieldName: string): boolean | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== "boolean") throw new Error(`${fieldName} must be a boolean`);
+    return value;
+}
+
+function extractSearchHit(group: unknown): any | null {
+    if (!Array.isArray(group)) return null;
+    return group.find(message => message?.hit === true && message?.id) ?? group.find(message => message?.id) ?? null;
+}
+
+async function searchMessages(args: ToolArguments) {
+    const requestedChannelId = optionalSnowflake(args.channel_id, "channel_id");
+    const requestedGuildId = optionalSnowflake(args.guild_id, "guild_id");
+    if (!requestedChannelId && !requestedGuildId)
+        throw new Error("One of channel_id or guild_id is required for message search");
+
+    const channelId = requestedChannelId ? requireAccessibleChannel(requestedChannelId) : undefined;
+    const channel = channelId ? ChannelStore.getChannel(channelId)! : undefined;
+    const channelGuildId = channel?.guild_id ? String(channel.guild_id) : undefined;
+    if (requestedGuildId && !GuildStore.getGuild(requestedGuildId))
+        throw new Error("Server is not available in the authenticated Discord client");
+    if (requestedGuildId && channelId && requestedGuildId !== channelGuildId)
+        throw new Error("channel_id does not belong to guild_id");
+
+    const guildId = requestedGuildId ?? channelGuildId;
+    const query = normalizeSearchQuery(args.query);
+    const authorId = optionalSnowflake(args.author_id, "author_id");
+    const mentionsUserId = optionalSnowflake(args.mentions_user_id, "mentions_user_id");
+    const has = normalizeSearchHas(args.has);
+    const pinned = optionalBoolean(args.pinned, "pinned");
+    const beforeMessageId = optionalSnowflake(args.before_message_id, "before_message_id");
+    const afterMessageId = optionalSnowflake(args.after_message_id, "after_message_id");
+    const sortOrder = normalizeSearchSortOrder(args.sort_order);
+    const limit = normalizeMessageLimit(args.limit);
+    const initialOffset = normalizeSearchOffset(args.offset);
+
+    if (!query && !authorId && !mentionsUserId && has.length === 0 && pinned === undefined && !beforeMessageId && !afterMessageId)
+        throw new Error("Search requires query or at least one message filter");
+
+    const baseUrl = guildId ? `/guilds/${guildId}/messages/search` : `/channels/${channelId}/messages/search`;
+    const staticParameters = new URLSearchParams({ sort_by: "timestamp", sort_order: sortOrder });
+    if (channelId && guildId) staticParameters.set("channel_id", channelId);
+    if (query) staticParameters.set("content", query);
+    if (authorId) staticParameters.set("author_id", authorId);
+    if (mentionsUserId) staticParameters.set("mentions", mentionsUserId);
+    for (const filter of has) staticParameters.append("has", filter);
+    if (pinned !== undefined) staticParameters.set("pinned", String(pinned));
+    if (beforeMessageId) staticParameters.set("max_id", beforeMessageId);
+    if (afterMessageId) staticParameters.set("min_id", afterMessageId);
+
+    const messages: any[] = [];
+    const seenMessageIds = new Set<string>();
+    let totalResults: number | null = null;
+    let consumedResults = 0;
+    let exhausted = false;
+
+    while (messages.length < limit && initialOffset + consumedResults <= 5_000) {
+        const parameters = new URLSearchParams(staticParameters);
+        parameters.set("offset", String(initialOffset + consumedResults));
+        const response = await RestAPI.get({ url: `${baseUrl}?${parameters}`, retries: 2 });
+        const groups = Array.isArray(response.body?.messages) ? response.body.messages : null;
+        if (!groups) throw new Error("Discord returned an invalid search result");
+        if (typeof response.body?.total_results === "number") totalResults = response.body.total_results;
+
+        let pageConsumed = 0;
+        for (const group of groups) {
+            pageConsumed++;
+            const hit = extractSearchHit(group);
+            if (hit?.id && !seenMessageIds.has(String(hit.id))) {
+                seenMessageIds.add(String(hit.id));
+                const hitChannel = ChannelStore.getChannel(String(hit.channel_id));
+                const serializedHit = serializeMessage(hit);
+                if (!serializedHit.guildId && hitChannel?.guild_id) serializedHit.guildId = String(hitChannel.guild_id);
+                messages.push({
+                    ...serializedHit,
+                    channel: hitChannel ? serializeChannel(hitChannel) : { id: String(hit.channel_id) },
+                });
+            }
+            if (messages.length >= limit) break;
+        }
+
+        consumedResults += pageConsumed;
+        if (groups.length === 0 || (pageConsumed === groups.length && groups.length < 25)) {
+            exhausted = true;
+            break;
+        }
+        if (messages.length >= limit) break;
+    }
+
+    const candidateNextOffset = initialOffset + consumedResults;
+    const hasMore = !exhausted && candidateNextOffset <= 5_000 &&
+        (totalResults === null || candidateNextOffset < totalResults);
+    return {
+        scope: channelId
+            ? { type: "channel", channel: serializeChannel(channel!) }
+            : { type: "guild", guild: { id: guildId, name: GuildStore.getGuild(guildId!)?.name ?? null } },
+        filters: {
+            query: query ?? null,
+            authorId: authorId ?? null,
+            mentionsUserId: mentionsUserId ?? null,
+            has,
+            pinned: pinned ?? null,
+            beforeMessageId: beforeMessageId ?? null,
+            afterMessageId: afterMessageId ?? null,
+            sortOrder,
+        },
+        offset: initialOffset,
+        nextOffset: hasMore ? candidateNextOffset : null,
+        totalResults,
+        resultCount: messages.length,
+        messages,
+    };
+}
+
 async function getMessage(args: ToolArguments) {
     const channelId = requireAccessibleChannel(args.channel_id);
     const messageId = requireSnowflake(args.message_id, "message_id");
@@ -557,6 +691,7 @@ async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Pro
                 changesActiveView: false,
                 silentBackground: true,
                 subscriptions: true,
+                messageSearch: true,
                 membershipChanges: false,
                 relationshipChanges: false,
                 blocking: false,
@@ -570,6 +705,7 @@ async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Pro
         case "list_dms": return listDms();
         case "read_messages": return readMessages(args);
         case "bulk_read_messages": return bulkReadMessages(args);
+        case "search_messages": return searchMessages(args);
         case "get_message": return getMessage(args);
         case "download_attachment": return downloadAttachment(args);
         case "send_message": return sendMessage(args);
