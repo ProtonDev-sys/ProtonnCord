@@ -17,7 +17,7 @@ const snowflake = {
     description: "Discord snowflake ID",
 };
 
-const channelId = { ...snowflake, description: "An allowlisted Discord channel ID" };
+const channelId = { ...snowflake, description: "Any Discord channel ID visible to the authenticated account" };
 const messageLocationProperties = {
     channel_id: channelId,
     message_id: { ...snowflake, description: "Discord message ID" },
@@ -26,7 +26,7 @@ const messageLocationProperties = {
 export const TOOLS = [
     {
         name: "discord_connection_status",
-        description: "Check the local Discord bridge, authenticated account, allowlisted channels, and disabled capabilities.",
+        description: "Check the local Discord bridge, authenticated account, all-channel access mode, and disabled capabilities.",
         inputSchema: { type: "object", properties: {}, additionalProperties: false },
     },
     {
@@ -51,7 +51,7 @@ export const TOOLS = [
     },
     {
         name: "discord_read_messages",
-        description: "Read up to 100 messages from an allowlisted channel, including image/audio/voice-message metadata and duration. Use discord_get_message or discord_download_attachment to generate a waveform when Discord omits it.",
+        description: "Read up to 100 messages from any channel visible to the authenticated account, including image/audio/voice-message metadata and duration. Use discord_get_message or discord_download_attachment to generate a waveform when Discord omits it.",
         inputSchema: {
             type: "object",
             properties: {
@@ -67,7 +67,7 @@ export const TOOLS = [
     },
     {
         name: "discord_bulk_read_messages",
-        description: "Read recent messages from up to 10 allowlisted channels in one call. The whole request is rejected before reading if any channel is not allowlisted, and total requested messages are capped at 500.",
+        description: "Read recent messages from up to 10 channels visible to the authenticated account in one call. All channel IDs are validated before reading, and total requested messages are capped at 500.",
         inputSchema: {
             type: "object",
             properties: {
@@ -86,7 +86,7 @@ export const TOOLS = [
     },
     {
         name: "discord_get_message",
-        description: "Get one message from an allowlisted channel. If Discord omits a voice waveform, this tool downloads and decodes that voice attachment to generate one.",
+        description: "Get one message from any channel visible to the authenticated account. If Discord omits a voice waveform, this tool downloads and decodes that voice attachment to generate one.",
         inputSchema: {
             type: "object",
             properties: messageLocationProperties,
@@ -96,7 +96,7 @@ export const TOOLS = [
     },
     {
         name: "discord_download_attachment",
-        description: "Download one attachment from a message in an allowlisted channel to a private local directory. Downloads are capped at 25 MB and return path, MIME type, size, and SHA-256.",
+        description: "Download one attachment from a message in any visible channel to a private local directory. Downloads are capped at 25 MB and return path, MIME type, size, and SHA-256.",
         inputSchema: {
             type: "object",
             properties: {
@@ -109,7 +109,7 @@ export const TOOLS = [
     },
     {
         name: "discord_send_message",
-        description: "Send a plain-text message to an allowlisted channel. Mentions are deliberately disabled; an optional reply does not ping its author.",
+        description: "Send a plain-text message to any channel visible to the authenticated account. Mentions are deliberately disabled; an optional reply does not ping its author.",
         inputSchema: {
             type: "object",
             properties: {
@@ -131,16 +131,6 @@ export const TOOLS = [
             additionalProperties: false,
         },
     },
-    {
-        name: "discord_open_channel",
-        description: "Navigate the local Discord client to an allowlisted channel.",
-        inputSchema: {
-            type: "object",
-            properties: { channel_id: channelId },
-            required: ["channel_id"],
-            additionalProperties: false,
-        },
-    },
 ];
 
 const toolMap = new Map(TOOLS.map(tool => [tool.name, tool]));
@@ -155,7 +145,6 @@ const bridgeToolNames = new Map([
     ["discord_download_attachment", "download_attachment"],
     ["discord_send_message", "send_message"],
     ["discord_delete_own_message", "delete_own_message"],
-    ["discord_open_channel", "open_channel"],
 ]);
 
 function sleep(ms) {
@@ -284,7 +273,7 @@ async function handleRequest(message) {
                 protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
                 capabilities: { tools: { listChanged: false } },
                 serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
-                instructions: "Use only allowlisted channels. This server cannot change users, relationships, blocks, membership, roles, or moderation state. It can delete only messages recorded as sent by this bridge.",
+                instructions: "This silent background server can use every channel visible to the authenticated Discord account without navigating the active Discord view. It cannot change users, relationships, blocks, membership, roles, or moderation state, and it can delete only messages recorded as sent by this bridge.",
             },
         });
         return;

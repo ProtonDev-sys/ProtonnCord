@@ -8,19 +8,18 @@ import { createInterface } from "node:readline";
 
 import {
     canDeleteRecordedMessage,
-    DEFAULT_ALLOWED_CHANNEL_IDS,
     DISCORD_MCP_TOOL_NAMES,
+    isDiscordSnowflake,
     normalizeMessageContent,
     normalizeMessageLimit,
-    parseAllowedChannelIds,
-    requireAllowedChannel,
+    requireSnowflake,
     sentMessageKey,
 } from "../src/equicordplugins/discordMcp.desktop/policy";
 
-const allowed = parseAllowedChannelIds(`${DEFAULT_ALLOWED_CHANNEL_IDS[0]}, invalid 123456789012345678`);
-assert.deepEqual([...allowed], ["123456789012345679", "123456789012345678"], "only valid snowflakes enter the allowlist");
-assert.equal(requireAllowedChannel("123456789012345679", allowed), "123456789012345679");
-assert.throws(() => requireAllowedChannel("111111111111111111", allowed), /allowlist/, "unselected channels are rejected");
+assert.equal(isDiscordSnowflake("123456789012345679"), true);
+assert.equal(isDiscordSnowflake("invalid"), false);
+assert.equal(requireSnowflake("123456789012345679", "channel_id"), "123456789012345679");
+assert.throws(() => requireSnowflake("invalid", "channel_id"), /snowflake/);
 assert.equal(normalizeMessageLimit(undefined), 50);
 assert.equal(normalizeMessageLimit(100), 100);
 assert.throws(() => normalizeMessageLimit(101), /1 to 100/);
@@ -83,7 +82,7 @@ const fakeWorker = (async () => {
                 observedRequests.push(request);
                 assert.equal(request.secret, secret, "queue requests authenticate with the private bridge secret");
                 const result = request.tool === "connection_status"
-                    ? { connected: true, allowedChannelIds: [DEFAULT_ALLOWED_CHANNEL_IDS[0]] }
+                    ? { connected: true, channelAccess: "all_accessible_channels" }
                     : request.tool === "download_attachment"
                         ? {
                             attachment: { filename: "test-image.png", contentType: "image/png" },
@@ -118,7 +117,7 @@ try {
 
     const status = await rpc("tools/call", { name: "discord_connection_status", arguments: {} });
     assert.equal(status.structuredContent.connected, true);
-    assert.equal(status.structuredContent.allowedChannelIds[0], DEFAULT_ALLOWED_CHANNEL_IDS[0]);
+    assert.equal(status.structuredContent.channelAccess, "all_accessible_channels");
     assert.equal(observedRequests[0].tool, "connection_status", "public tool names map to the fixed bridge operation");
 
     const imageDownload = await rpc("tools/call", {
