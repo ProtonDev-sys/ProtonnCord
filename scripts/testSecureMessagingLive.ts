@@ -197,6 +197,25 @@ async function assertSecureMessagingInitialState(page: Page, expectStarted: bool
     }, expectStarted);
 }
 
+async function assertMessageEventsSendPatch(page: Page): Promise<void> {
+    await page.waitForFunction(() => document.querySelector('[role="textbox"]'), { timeout: 30_000 });
+    const result = await page.evaluate(() => {
+        const editor = document.querySelector('[role="textbox"]');
+        const fiberKey = editor && Object.keys(editor).find(key => key.startsWith("__reactFiber$"));
+        let fiber = fiberKey ? (editor as any)[fiberKey] : null;
+        while (fiber) {
+            const handleSendMessage = fiber.stateNode?.handleSendMessage;
+            if (typeof handleSendMessage === "function") {
+                const source = Function.prototype.toString.call(handleSendMessage);
+                return source.split("Vencord.Api.MessageEvents._handlePreSend").length - 1;
+            }
+            fiber = fiber.return;
+        }
+        return 0;
+    });
+    assert.equal(result, 1, "the current chat-input send path must invoke MessageEvents exactly once");
+}
+
 async function preflightPristineState(page: Page, announcement: string, pluginPrestarted: boolean): Promise<LivePreflight> {
     return page.evaluate(async ({ announcement, announcementMessageId, channelId, pluginPrestarted, recipientId }) => {
         const global = globalThis as any;
@@ -941,6 +960,7 @@ async function main(): Promise<void> {
             () => Boolean((globalThis as any).Vencord?.Webpack?.Common?.UserStore?.getCurrentUser?.()),
             { timeout: 30_000 },
         );
+        await assertMessageEventsSendPatch(page);
         await initializeMessageRegistry(page);
 
         const preflight = await preflightPristineState(page, recipientAnnouncement, pluginPrestarted);
