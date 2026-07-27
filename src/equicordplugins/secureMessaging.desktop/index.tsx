@@ -73,6 +73,58 @@ import {
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const SECURE_LISTENER_PRIORITY = 1_000_000;
 
+type ScreenCaptureProtectionStatus = "disabled" | "failed" | "pending" | "ready";
+
+let screenCaptureProtectionStatus: ScreenCaptureProtectionStatus = "disabled";
+let screenCaptureProtectionGeneration = 0;
+let secureMessageListenersInstalled = false;
+const screenCaptureProtectionListeners = new Set<(status: ScreenCaptureProtectionStatus) => void>();
+const pendingAttachmentOwners = new Set<{ forceUpdate(): void; }>();
+
+function setScreenCaptureProtectionStatus(status: ScreenCaptureProtectionStatus): void {
+    screenCaptureProtectionStatus = status;
+    for (const listener of screenCaptureProtectionListeners) {
+        try {
+            listener(status);
+        } catch {
+            // A stale React subscriber must not prevent the protection state transition.
+        }
+    }
+    if (status === "ready") {
+        for (const owner of pendingAttachmentOwners) {
+            try {
+                owner.forceUpdate();
+            } catch {
+                // Discord may have already disposed a message renderer while IPC was pending.
+            }
+        }
+    }
+    if (status !== "pending") pendingAttachmentOwners.clear();
+}
+
+function useScreenCaptureProtectionStatus(): ScreenCaptureProtectionStatus {
+    const [status, setStatus] = useState(screenCaptureProtectionStatus);
+    useEffect(() => {
+        screenCaptureProtectionListeners.add(setStatus);
+        return () => { screenCaptureProtectionListeners.delete(setStatus); };
+    }, []);
+    return status;
+}
+
+async function applyScreenCaptureProtection(enabled: boolean): Promise<boolean> {
+    try {
+        const result = await Native.setScreenCaptureProtection(enabled);
+        if (result.status === "applied") return true;
+    } catch {
+        // The same visible failure is used for rejected IPC and structured native failures.
+    }
+    if (enabled)
+        showToast("Secure Messaging could not apply screen capture protection.", Toasts.Type.FAILURE);
+    else
+        showToast("Secure Messaging could not release screen capture protection.", Toasts.Type.FAILURE);
+    return false;
+}
+
 const permittedAnnouncements = new Map<string, number>();
 const keyReviewGate = new KeyReviewGate();
 type RestMethod = (request: Record<string, any>, ...args: any[]) => Promise<any>;
@@ -172,6 +224,7 @@ function failureMessage(failure: NativeFailure): string {
     if (failure.error === "counter_exhausted") return "This identity's message counter is exhausted. Rotate the identity before sending again.";
     if (failure.error === "capacity_exceeded") return "The encrypted vault reached a safety limit.";
     if (failure.error === "cryptographic_operation_failed") return "The cryptographic operation failed.";
+    if (failure.error === "screen_capture_protection_failed") return "Operating-system screen-capture protection is unavailable, so encrypted content remains hidden.";
     return "The encrypted vault could not be saved.";
 }
 
@@ -325,6 +378,8 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
     if (!endpoint) return request;
     const protection = await resolveConversationProtection(endpoint.channelId);
     if (protection.kind === "unprotected") return request;
+    if (screenCaptureProtectionStatus !== "ready")
+        throw new Error("Secure Messaging blocked a protected send because screen-capture protection is unavailable");
     if (attachment) {
         if (protection.kind === "persisted_protected" || requiresFailClosedSend(protection.conversation)) {
             const files = reservationFiles(request.body);
@@ -820,11 +875,12 @@ function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: 
 function EncryptedMessageAccessory({ message }: { message: Message; }) {
     const [result, setResult] = useState<DecryptIncomingResult | null>(null);
     const localUserId = UserStore.getCurrentUser()?.id;
+    const captureProtection = useScreenCaptureProtectionStatus();
 
     useEffect(() => {
         let active = true;
         setResult(null);
-        if (!localUserId || !message.author?.id) return () => { active = false; };
+        if (captureProtection !== "ready" || !localUserId || !message.author?.id) return () => { active = false; };
         void Native.decryptIncoming(localUserId, {
             channelId: message.channel_id,
             content: message.content,
@@ -835,7 +891,19 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
             if (active) setResult({ status: "failed", error: "cryptographic_operation_failed" });
         });
         return () => { active = false; };
-    }, [localUserId, message.channel_id, message.id, message.content, message.author?.id]);
+    }, [captureProtection, localUserId, message.channel_id, message.id, message.content, message.author?.id]);
+
+    if (captureProtection !== "ready") {
+        const detail = captureProtection === "pending"
+            ? "Waiting for operating-system screen-capture protection before decrypting…"
+            : "Operating-system screen-capture protection is unavailable, so plaintext remains hidden.";
+        return (
+            <div className="pc-secure-card pc-secure-card-danger pc-secure-replaces-content">
+                <div className="pc-secure-card-header"><LockIcon color="var(--status-danger)" /> Encrypted message protected</div>
+                <BaseText size="sm">{detail}</BaseText>
+            </div>
+        );
+    }
 
     if (!result) {
         return (
@@ -1099,15 +1167,39 @@ export default definePlugin({
     },
 
     start() {
+        const generation = ++screenCaptureProtectionGeneration;
+        setScreenCaptureProtectionStatus("pending");
         installNetworkGuard();
-        addMessagePreSendListener(outgoingListener, { priority: SECURE_LISTENER_PRIORITY, cancelOnError: true });
-        addMessagePreEditListener(editListener, { priority: SECURE_LISTENER_PRIORITY, cancelOnError: true });
+        void applyScreenCaptureProtection(true).then(applied => {
+            if (generation !== screenCaptureProtectionGeneration) return;
+            if (!applied) {
+                setScreenCaptureProtectionStatus("failed");
+                return;
+            }
+            setScreenCaptureProtectionStatus("ready");
+            try {
+                addMessagePreSendListener(outgoingListener, { priority: SECURE_LISTENER_PRIORITY, cancelOnError: true });
+                addMessagePreEditListener(editListener, { priority: SECURE_LISTENER_PRIORITY, cancelOnError: true });
+                secureMessageListenersInstalled = true;
+            } catch {
+                removeMessagePreSendListener(outgoingListener);
+                removeMessagePreEditListener(editListener);
+                setScreenCaptureProtectionStatus("failed");
+                showToast("Secure Messaging could not install its protected message listeners.", Toasts.Type.FAILURE);
+            }
+        });
     },
 
     stop() {
+        screenCaptureProtectionGeneration++;
+        setScreenCaptureProtectionStatus("disabled");
         uninstallNetworkGuard();
-        removeMessagePreSendListener(outgoingListener);
-        removeMessagePreEditListener(editListener);
+        void applyScreenCaptureProtection(false);
+        if (secureMessageListenersInstalled) {
+            removeMessagePreSendListener(outgoingListener);
+            removeMessagePreEditListener(editListener);
+            secureMessageListenersInstalled = false;
+        }
         permittedAnnouncements.clear();
         clearWirePayloadAuthorizations();
         clearEncryptedAttachmentCache();
@@ -1115,6 +1207,12 @@ export default definePlugin({
     },
 
     patchEncryptedAttachments(message: Message, owner: { forceUpdate(): void; }) {
-        return patchEncryptedMessageAttachments(message, () => owner.forceUpdate());
+        const ready = screenCaptureProtectionStatus === "ready";
+        if (!ready) pendingAttachmentOwners.add(owner);
+        return patchEncryptedMessageAttachments(message, () => owner.forceUpdate(), ready);
+    },
+
+    getScreenCaptureProtectionStatus() {
+        return screenCaptureProtectionStatus;
     },
 });

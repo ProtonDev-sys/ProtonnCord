@@ -184,7 +184,9 @@ function ensureEntry(message: Message): AttachmentCacheEntry | null {
     return entry;
 }
 
-export function patchEncryptedMessageAttachments(message: Message, onReady: () => void): Message {
+export function patchEncryptedMessageAttachments(message: Message, onReady: () => void, canDecrypt = true): Message {
+    if (!canDecrypt && isEncryptedMessage(message.content) && message.attachments.length > 0)
+        return cloneWithAttachments(message, []);
     const entry = ensureEntry(message);
     if (!entry) return message;
     if (entry.status.status === "loading") entry.listeners.add(onReady);
