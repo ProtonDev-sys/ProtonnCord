@@ -584,6 +584,7 @@ async function sendAuthorizedRuntimePayload(page: Page, content: string): Promis
 async function sendEncryptedAttachmentThroughRuntime(page: Page, plaintext: string): Promise<{
     ciphertextHidFileBytes: boolean;
     ciphertextHidFilename: boolean;
+    eagerPlaintextUploadDeferred: boolean;
     encryptedFilename: string;
     message: RawDiscordMessage;
     plaintextWasTransformed: boolean;
@@ -601,6 +602,11 @@ async function sendEncryptedAttachmentThroughRuntime(page: Page, plaintext: stri
         const pngBytes = Uint8Array.from(atob(pngBase64), value => value.charCodeAt(0));
         const file = new File([pngBytes], filename, { type: "image/png" });
         const upload = new common.CloudUploader({ file, platform: 1 }, channelId);
+        await upload.upload();
+        const eagerPlaintextUploadDeferred = upload.status === "NOT_STARTED" &&
+            upload.uploadedFilename == null && upload.responseUrl == null;
+        if (!eagerPlaintextUploadDeferred)
+            throw new Error("Secure Messaging did not defer Discord's eager plaintext attachment upload");
         const message = {
             content: plaintext,
             invalidEmojis: [],
@@ -678,6 +684,7 @@ async function sendEncryptedAttachmentThroughRuntime(page: Page, plaintext: stri
         return {
             ciphertextHidFileBytes,
             ciphertextHidFilename,
+            eagerPlaintextUploadDeferred,
             encryptedFilename: String(upload.filename),
             message: {
                 attachments: sent.attachments.map((attachment: any) => ({
@@ -1046,6 +1053,7 @@ async function main(): Promise<void> {
         const attachmentSend = await sendEncryptedAttachmentThroughRuntime(page, attachmentPlaintext);
         sentMessageIds.add(attachmentSend.message.id);
         assert.equal(attachmentSend.plaintextWasTransformed, true, "attachment-message plaintext must be encrypted before upload");
+        assert.equal(attachmentSend.eagerPlaintextUploadDeferred, true, "Discord's eager plaintext upload must be deferred until send encryption");
         assert.equal(attachmentSend.ciphertextHidFileBytes, true, "the opaque Discord upload must not contain the original PNG bytes");
         assert.equal(attachmentSend.ciphertextHidFilename, true, "the opaque Discord upload must not expose the original filename");
         assert.match(attachmentSend.encryptedFilename, /^pc-[A-Za-z0-9_-]{22}-0\.pcaf$/u);
@@ -1142,6 +1150,7 @@ async function main(): Promise<void> {
                 ciphertextHidFileBytes: attachmentSend.ciphertextHidFileBytes,
                 ciphertextHidFilename: attachmentSend.ciphertextHidFilename,
                 decryptedBySelectedRecipient: recipientAttachment.metadata.name === PROOF_PNG_FILENAME,
+                eagerPlaintextUploadDeferred: attachmentSend.eagerPlaintextUploadDeferred,
                 nativeImageHeight: attachmentRenderProof.imageHeight,
                 nativeImageRendererUsed: attachmentRenderProof.imageUsesLocalAuthenticatedUrl,
                 nativeImageWidth: attachmentRenderProof.imageWidth,
