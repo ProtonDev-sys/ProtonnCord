@@ -130,6 +130,14 @@ const runtimeStubs: Plugin = {
                     encryptString: value => runtime.protector.encryptString(value),
                     decryptString: value => runtime.protector.decryptString(value),
                 };
+                export const BrowserWindow = {
+                    getAllWindows: () => runtime.browserWindows ?? [],
+                };
+                export const app = {
+                    on: (event, listener) => {
+                        (runtime.appListeners ??= []).push([event, listener]);
+                    },
+                };
             `,
             loader: "js",
         }));

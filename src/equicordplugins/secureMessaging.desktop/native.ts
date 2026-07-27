@@ -6,7 +6,7 @@
 
 import { DATA_DIR } from "@main/utils/constants";
 import { createHash, randomUUID } from "crypto";
-import { type IpcMainInvokeEvent, safeStorage } from "electron";
+import { app, BrowserWindow, type IpcMainInvokeEvent, safeStorage } from "electron";
 import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "fs/promises";
 import { createServer, type Server } from "net";
 import { dirname, join, resolve } from "path";
@@ -122,6 +122,10 @@ export type ConversationResult =
 
 export type ChannelProtectionResult =
     | { status: "unconfigured" | "disabled" | "protected"; }
+    | NativeFailure;
+
+export type ScreenCaptureProtectionResult =
+    | { status: "applied"; enabled: boolean; windowCount: number; }
     | NativeFailure;
 
 export type EncryptOutgoingResult =
@@ -1855,4 +1859,32 @@ export async function decryptIncoming(
         await saveVault(context.vault);
         return { status: "decrypted", plaintext, counter: envelope.q, envelopeId: envelope.i };
     });
+}
+
+// setContentProtection applies per window, so existing and future windows are both covered;
+// Electron has no per-element equivalent. This blocks capture APIs only. A participant running
+// a modified build, or a camera pointed at the screen, still reads decrypted plaintext.
+let screenCaptureProtectionEnabled = false;
+let newWindowHookInstalled = false;
+
+function installNewWindowProtectionHook() {
+    if (newWindowHookInstalled) return;
+    newWindowHookInstalled = true;
+    app.on("browser-window-created", (_event, window) => {
+        window.setContentProtection(screenCaptureProtectionEnabled);
+    });
+}
+
+export async function setScreenCaptureProtection(
+    event: IpcMainInvokeEvent,
+    enabled: boolean
+): Promise<ScreenCaptureProtectionResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    if (typeof enabled !== "boolean") return invalidInput("enabled must be a boolean");
+    screenCaptureProtectionEnabled = enabled;
+    installNewWindowProtectionHook();
+    const windows = BrowserWindow.getAllWindows();
+    for (const window of windows) window.setContentProtection(enabled);
+    return { status: "applied", enabled, windowCount: windows.length };
 }
