@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 
 import {
+    attachmentBundleRoot,
+    decryptAttachmentBytes,
+    encodedImageDimensions,
+    encryptAttachmentBytes,
+    generateAttachmentBundleMaterial,
+    parseSecurePlaintext,
+    serializeSecurePlaintext,
+} from "../src/equicordplugins/secureMessaging.desktop/attachments";
+import {
     createKeyAnnouncement,
     decryptMessage,
     encryptMessage,
@@ -33,8 +42,10 @@ import type {
     UnsignedEncryptedEnvelope,
 } from "../src/equicordplugins/secureMessaging.desktop/protocol";
 import {
+    authorizeAttachmentUploadReservations,
     authorizeWirePayload,
     clearWirePayloadAuthorizations,
+    consumeAttachmentUploadReservations,
     consumeWirePayloadAuthorization,
 } from "../src/equicordplugins/secureMessaging.desktop/wireAuthorizations";
 import { availableSelectedRecipientIds } from "../src/equicordplugins/secureMessaging.desktop/conversationSelection";
@@ -223,7 +234,126 @@ async function main(): Promise<void> {
     assert.equal(consumeWirePayloadAuthorization(CHANNEL_ID, "PCEM1:counted", 4_002), true);
     assert.equal(consumeWirePayloadAuthorization(CHANNEL_ID, "PCEM1:counted", 4_003), true);
     assert.equal(consumeWirePayloadAuthorization(CHANNEL_ID, "PCEM1:counted", 4_004), false, "authorization count cannot be over-consumed");
+    const protectedFiles = [{ filename: "pc-bundle-0.pcaf", size: 123 }];
+    authorizeWirePayload(CHANNEL_ID, "PCEM1:attachment", protectedFiles.map(file => file.filename), 5_000);
+    assert.equal(
+        consumeWirePayloadAuthorization(CHANNEL_ID, "PCEM1:attachment", [], 5_001),
+        false,
+        "an encrypted attachment authorization cannot be consumed without its exact filenames",
+    );
+    assert.equal(
+        consumeWirePayloadAuthorization(CHANNEL_ID, "PCEM1:attachment", protectedFiles.map(file => file.filename), 5_002),
+        true,
+        "an exact encrypted attachment message authorization is one-use",
+    );
+    authorizeAttachmentUploadReservations(CHANNEL_ID, protectedFiles, 6_000);
+    assert.equal(
+        consumeAttachmentUploadReservations(CHANNEL_ID, [{ ...protectedFiles[0], size: 124 }], 6_001),
+        false,
+        "an incorrect upload size does not consume the encrypted attachment reservation",
+    );
+    assert.equal(consumeAttachmentUploadReservations(CHANNEL_ID, protectedFiles, 6_002), true);
+    assert.equal(consumeAttachmentUploadReservations(CHANNEL_ID, protectedFiles, 6_003), false, "upload reservation is one-use");
     clearWirePayloadAuthorizations();
+
+    const pngHeader = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB", "base64");
+    assert.deepEqual(encodedImageDimensions(pngHeader), { height: 1, width: 1 }, "PNG dimensions are preserved for native rendering");
+    assert.equal(encodedImageDimensions(new Uint8Array([0, 1, 2, 3])), null, "non-images do not receive fabricated dimensions");
+
+    const firstAttachment = new TextEncoder().encode("private attachment bytes α");
+    const secondAttachment = new Uint8Array([0, 1, 2, 3, 254, 255]);
+    const bundleMaterial = generateAttachmentBundleMaterial(2);
+    const attachmentMetadata = {
+        name: "private-note.txt",
+        mimeType: "text/plain; charset=utf-8",
+        size: firstAttachment.byteLength,
+        spoiler: true,
+        description: "private description",
+        width: null,
+        height: null,
+        duration: null,
+    };
+    const encryptedAttachments = await Promise.all([
+        encryptAttachmentBytes({
+            bundleId: bundleMaterial.descriptor.id,
+            channelId: CHANNEL_ID,
+            count: 2,
+            data: firstAttachment,
+            index: 0,
+            masterKey: bundleMaterial.keyBytes,
+            metadata: attachmentMetadata,
+            senderUserId: ALICE_ID,
+        }),
+        encryptAttachmentBytes({
+            bundleId: bundleMaterial.descriptor.id,
+            channelId: CHANNEL_ID,
+            count: 2,
+            data: secondAttachment,
+            index: 1,
+            masterKey: bundleMaterial.keyBytes,
+            metadata: {
+                ...attachmentMetadata,
+                name: "pixels.bin",
+                mimeType: "application/octet-stream",
+                size: secondAttachment.byteLength,
+                spoiler: false,
+                description: null,
+            },
+            senderUserId: ALICE_ID,
+        }),
+    ]);
+    assert.equal(
+        new TextDecoder().decode(encryptedAttachments[0]).includes(attachmentMetadata.name),
+        false,
+        "encrypted attachment bytes do not expose the private filename",
+    );
+    const attachmentRoot = await attachmentBundleRoot(bundleMaterial.descriptor.id, encryptedAttachments);
+    const securePlaintext = serializeSecurePlaintext("message with files", { ...bundleMaterial.descriptor, root: attachmentRoot });
+    assert.deepEqual(parseSecurePlaintext(securePlaintext), {
+        text: "message with files",
+        attachments: { ...bundleMaterial.descriptor, root: attachmentRoot },
+    });
+    assert.deepEqual(parseSecurePlaintext("legacy message"), { text: "legacy message", attachments: null });
+    const openedAttachment = await decryptAttachmentBytes({
+        bundleId: bundleMaterial.descriptor.id,
+        channelId: CHANNEL_ID,
+        ciphertext: encryptedAttachments[0],
+        count: 2,
+        index: 0,
+        masterKey: bundleMaterial.keyBytes,
+        senderUserId: ALICE_ID,
+    });
+    assert.deepEqual(openedAttachment.metadata, attachmentMetadata);
+    assert.deepEqual(openedAttachment.data, firstAttachment);
+    await assert.rejects(
+        decryptAttachmentBytes({
+            bundleId: bundleMaterial.descriptor.id,
+            channelId: CHANNEL_ID,
+            ciphertext: encryptedAttachments[0],
+            count: 2,
+            index: 1,
+            masterKey: bundleMaterial.keyBytes,
+            senderUserId: ALICE_ID,
+        }),
+        /authentication failed/,
+        "encrypted attachments cannot be reordered",
+    );
+    const tamperedAttachment = Uint8Array.from(encryptedAttachments[0]);
+    tamperedAttachment[tamperedAttachment.length - 1] ^= 1;
+    await assert.rejects(
+        decryptAttachmentBytes({
+            bundleId: bundleMaterial.descriptor.id,
+            channelId: CHANNEL_ID,
+            ciphertext: tamperedAttachment,
+            count: 2,
+            index: 0,
+            masterKey: bundleMaterial.keyBytes,
+            senderUserId: ALICE_ID,
+        }),
+        /authentication failed/,
+        "encrypted attachment tampering is rejected",
+    );
+    bundleMaterial.keyBytes.fill(0);
 
     const [aliceIdentity, bobIdentity, carolIdentity, malloryIdentity] = await Promise.all([
         generateIdentity(NOW),
