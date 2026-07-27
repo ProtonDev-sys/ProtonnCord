@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import { build, type Plugin } from "esbuild";
 import type { IpcMainInvokeEvent } from "electron";
 
+import { generateAttachmentBundleMaterial, serializeSecurePlaintext } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import type { ConversationSnapshot } from "../src/equicordplugins/secureMessaging.desktop/native";
 
 type NativeModule = typeof import("../src/equicordplugins/secureMessaging.desktop/native");
@@ -536,6 +537,48 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     });
     expectStatus(decrypted, "decrypted", "sender decrypts own message after Discord replaces its optimistic message ID");
     assert.equal(decrypted.plaintext, dmPlaintext);
+
+    const attachmentMaterial = generateAttachmentBundleMaterial(2);
+    const encryptedAttachmentMessage = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        plaintext: serializeSecurePlaintext("", {
+            ...attachmentMaterial.descriptor,
+            root: attachmentMaterial.descriptor.key,
+        }),
+        snapshot: aliceDm,
+    });
+    attachmentMaterial.keyBytes.fill(0);
+    expectStatus(encryptedAttachmentMessage, "encrypted", "Alice encrypts an attachment bundle descriptor");
+    const attachmentMessageInput = {
+        channelId: DM_CHANNEL_ID,
+        content: encryptedAttachmentMessage.content,
+        discordAuthorId: ALICE_ID,
+        discordEditedTimestamp: null,
+        discordMessageId: messageId(14),
+    };
+    const decryptedAttachmentMessage = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, attachmentMessageInput);
+    expectStatus(decryptedAttachmentMessage, "decrypted", "Bob authenticates the attachment bundle descriptor");
+    assert.equal(decryptedAttachmentMessage.plaintext, "");
+    assert.equal(decryptedAttachmentMessage.attachmentBundle?.count, 2);
+    const invalidAttachmentUrl = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, {
+        ...attachmentMessageInput,
+        attachments: [{
+            id: messageId(101),
+            proxyUrl: "https://example.com/not-discord",
+            size: 100,
+            url: "https://example.com/not-discord",
+        }],
+    });
+    expectStatus(invalidAttachmentUrl, "invalid_input", "native attachment downloads reject non-Discord origins");
+    const oneOfTwoAttachments = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, {
+        ...attachmentMessageInput,
+        attachments: [{
+            id: messageId(101),
+            proxyUrl: `https://media.discordapp.net/attachments/${DM_CHANNEL_ID}/${messageId(101)}/pc-test.pcaf`,
+            size: 100,
+            url: `https://cdn.discordapp.com/attachments/${DM_CHANNEL_ID}/${messageId(101)}/pc-test.pcaf`,
+        }],
+    });
+    expectStatus(oneOfTwoAttachments, "invalid_message", "missing ciphertext attachments fail before any download");
 
     decrypted = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, bobDmInput);
     expectStatus(decrypted, "decrypted", "exact message rerender is idempotent");
