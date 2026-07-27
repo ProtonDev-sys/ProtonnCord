@@ -8,7 +8,7 @@ import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Devs, EquicordDevs } from "@utils/constants";
 import { useFixedTimer } from "@utils/react";
-import { formatDurationMs } from "@utils/text";
+import { formatDuration } from "@utils/text";
 import definePlugin, { OptionType } from "@utils/types";
 import { PassiveUpdateState, VoiceState } from "@vencord/discord-types";
 import { FluxDispatcher, GuildStore, React, UserStore } from "@webpack/common";
@@ -30,7 +30,7 @@ export const settings = definePluginSettings({
                 label: "30d 23h 00m 42s",
                 value: "human"
             }
-        ]
+        ] as const
     },
     allCallTimers: {
         type: OptionType.BOOLEAN,
@@ -273,7 +273,7 @@ export default definePlugin({
 
         return (
             <p style={{ margin: 0, fontFamily: "var(--font-code)" }}>
-                {formatDurationMs(time, settings.store.format === "human")}
+                {formatDuration(time, settings.store.format === "human")}
             </p>
         );
     }, { noop: true }),
