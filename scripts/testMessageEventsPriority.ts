@@ -14,6 +14,8 @@ import type {
     SendMessageOptions,
     SendMessageProps,
 } from "../src/api/MessageEvents";
+import messageEventsPlugin from "../src/plugins/_api/messageEvents";
+import { canonicalizeMatch } from "../src/utils/patches";
 
 type MessageEventsModule = typeof import("../src/api/MessageEvents");
 
@@ -85,6 +87,26 @@ function handleSend(events: MessageEventsModule): Promise<boolean> {
 
 function handleEdit(events: MessageEventsModule): Promise<boolean> {
     return events._handlePreEdit("channel", "message", messageObj);
+}
+
+function testCurrentDiscordSendPatch(): void {
+    const patch = messageEventsPlugin.patches?.find(candidate => candidate.find === ".handleSendMessage,onResize:");
+    assert(patch, "the MessageEvents chat-input patch exists");
+    const replacement = Array.isArray(patch.replacement) ? patch.replacement[0] : patch.replacement;
+    assert(replacement, "the MessageEvents chat-input replacement exists");
+    assert.equal(typeof replacement.replace, "function");
+
+    const source = `class ChatInput {handleSendMessage=async e=>{let _=tU.Ay.parse(h,t);_.tts=_.tts||A,null!=o&&(_.content="",_.components=o);let I={...x.A.getSendMessageOptions({content:t,channelId:h.id,uploads:n,stickers:l,command:i,isGif:a,pendingReply:m,alsoForwardToChannelId:p?h.parent_id??void 0:void 0,scheduledTimestamp:this.props.pendingScheduledMessage?.scheduledTimestamp}),location:nB.Hx.CHAT_INPUT};if(null!=n&&n.length>0)I.attachmentsToUpload=n;return{shouldClear:true}}};const chatInput=new ChatInput(),view={handleSendMessage:chatInput.handleSendMessage,onResize:null};`;
+    const patched = source.replace(canonicalizeMatch(replacement.match), replacement.replace);
+
+    assert.notEqual(patched, source, "the current Discord chat-input source must match the MessageEvents patch");
+    assert.equal(
+        patched.split("Vencord.Api.MessageEvents._handlePreSend").length - 1,
+        1,
+        "the current Discord chat-input send path invokes MessageEvents exactly once",
+    );
+    assert.match(patched, /hasAttachments:\(vcContentOptions\.uploads\?\.length\?\?0\)>0/);
+    assert.doesNotThrow(() => Function(patched), "the patched current Discord chat-input source must remain valid JavaScript");
 }
 
 async function testSendOrderingAndAsyncHandlers(events: MessageEventsModule): Promise<void> {
@@ -400,6 +422,7 @@ async function testEditDuplicatePreservesOriginalFailClosedRegistration(events: 
 }
 
 async function main(): Promise<void> {
+    testCurrentDiscordSendPatch();
     const events = await loadMessageEvents();
 
     await testSendOrderingAndAsyncHandlers(events);
