@@ -76,6 +76,19 @@ const SECURE_LISTENER_PRIORITY = 1_000_000;
 
 type ScreenCaptureProtectionStatus = "disabled" | "failed" | "pending" | "ready" | "screenshot";
 
+interface ReplyPreviewProps {
+    referencedMessage?: {
+        message?: Message;
+        [key: string]: unknown;
+    };
+    [key: string]: unknown;
+}
+
+interface ReplyPreviewState {
+    key: string;
+    result: DecryptIncomingResult | null;
+}
+
 let screenCaptureProtectionStatus: ScreenCaptureProtectionStatus = "disabled";
 let screenCaptureProtectionGeneration = 0;
 let secureMessageListenersInstalled = false;
@@ -138,6 +151,82 @@ async function setScreenshotMode(enabled: boolean): Promise<boolean> {
     setScreenCaptureProtectionStatus(applied ? enabled ? "screenshot" : "ready" : enabled ? "ready" : "failed");
     MessageStore.emitChange();
     return applied;
+}
+
+function replyPreviewKey(localUserId: string, message: Message): string {
+    return [
+        localUserId,
+        message.channel_id,
+        message.id,
+        message.author?.id ?? "",
+        discordEditedTimestamp(message) ?? "",
+        message.content,
+    ].join("\0");
+}
+
+function replyPreviewText(result: DecryptIncomingResult | null): string {
+    if (!result) return "Authenticating encrypted reply…";
+    if (result.status !== "decrypted") return "Encrypted message blocked";
+    if (result.plaintext) return result.plaintext;
+    const attachmentCount = result.attachmentBundle?.count ?? 0;
+    if (attachmentCount === 1) return "Encrypted attachment";
+    if (attachmentCount > 1) return `${attachmentCount} encrypted attachments`;
+    return "Encrypted message";
+}
+
+function replyPreviewMessage(message: Message, content: string): Message {
+    return message
+        .set("content", content)
+        .set("attachments", [])
+        .set("embeds", [])
+        .set("customRenderedContent", null);
+}
+
+function useSecureReplyPreview<T extends ReplyPreviewProps>(props: T): T {
+    const message = props?.referencedMessage?.message;
+    const localUserId = UserStore.getCurrentUser()?.id;
+    const captureProtection = useScreenCaptureProtectionStatus();
+    const key = message && localUserId && message.author?.id && isEncryptedMessage(message.content)
+        ? replyPreviewKey(localUserId, message)
+        : null;
+    const [state, setState] = useState<ReplyPreviewState | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        setState(null);
+        if (captureProtection !== "ready" || !key || !localUserId || !message?.author?.id)
+            return () => { active = false; };
+        void Native.decryptIncoming(localUserId, {
+            channelId: message.channel_id,
+            content: message.content,
+            discordAuthorId: message.author.id,
+            discordEditedTimestamp: discordEditedTimestamp(message),
+            discordMessageId: message.id,
+        }).then(result => {
+            if (active) setState({ key, result });
+        }).catch(() => {
+            if (active) setState({ key, result: { status: "failed", error: "cryptographic_operation_failed" } });
+        });
+        return () => { active = false; };
+    }, [captureProtection, key, localUserId]);
+
+    if (!message || !isEncryptedMessage(message.content)) return props;
+
+    let content: string;
+    if (captureProtection !== "ready") {
+        content = captureProtection === "screenshot"
+            ? "Encrypted reply hidden while screenshots are allowed"
+            : "Encrypted reply protected";
+    } else if (!key) content = "Encrypted message blocked";
+    else content = replyPreviewText(state?.key === key ? state.result : null);
+
+    return {
+        ...props,
+        referencedMessage: {
+            ...props.referencedMessage,
+            message: replyPreviewMessage(message, content),
+        },
+    };
 }
 
 const permittedAnnouncements = new Map<string, number>();
@@ -1219,13 +1308,22 @@ export default definePlugin({
     authors: [EquicordDevs.creations],
     dependencies: ["ChatInputButtonAPI", "MessageAccessoriesAPI", "MessageEventsAPI"],
 
-    patches: [{
-        find: "renderAttachments",
-        replacement: {
-            match: /renderAttachments\((\i)\)\{(?=let\{channel:)/,
-            replace: "$&$1=$self.patchEncryptedAttachments($1,this);",
+    patches: [
+        {
+            find: "renderAttachments",
+            replacement: {
+                match: /renderAttachments\((\i)\)\{(?=let\{channel:)/,
+                replace: "$&$1=$self.patchEncryptedAttachments($1,this);",
+            },
         },
-    }],
+        {
+            find: /function\(\i\)\{let\{baseMessage:\i,referencedMessage:\i,channel:\i,compact:/,
+            replacement: {
+                match: /(function\((\i)\)\{)(?=let\{baseMessage:\i,referencedMessage:\i,channel:\i,compact:)/,
+                replace: "$1$2=$self.useSecureReplyPreview($2);",
+            },
+        },
+    ],
 
     chatBarButton: {
         icon: LockIcon,
@@ -1303,6 +1401,8 @@ export default definePlugin({
         if (!ready) pendingAttachmentOwners.add(owner);
         return patchEncryptedMessageAttachments(message, () => owner.forceUpdate(), ready);
     },
+
+    useSecureReplyPreview,
 
     getScreenCaptureProtectionStatus() {
         return screenCaptureProtectionStatus;
