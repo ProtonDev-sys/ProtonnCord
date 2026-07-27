@@ -1698,15 +1698,25 @@ export async function encryptOutgoing(
     });
 }
 
-function replayMatches(
+function replayEnvelopeMatches(
     replay: ReplayRecord,
     input: DecryptIncomingInput,
     envelope: EncryptedEnvelope,
     contentDigest: string
 ): boolean {
     return replay.channelId === input.channelId && replay.contentDigest === contentDigest && replay.counter === envelope.q &&
-        replay.discordMessageId === input.discordMessageId && replay.envelopeId === envelope.i &&
-        replay.senderFingerprint === envelope.k && replay.senderUserId === input.discordAuthorId;
+        replay.envelopeId === envelope.i && replay.senderFingerprint === envelope.k &&
+        replay.senderUserId === input.discordAuthorId;
+}
+
+function replayMatches(
+    replay: ReplayRecord,
+    input: DecryptIncomingInput,
+    envelope: EncryptedEnvelope,
+    contentDigest: string
+): boolean {
+    return replay.discordMessageId === input.discordMessageId &&
+        replayEnvelopeMatches(replay, input, envelope, contentDigest);
 }
 
 function replayCollides(replay: ReplayRecord, input: DecryptIncomingInput, envelope: EncryptedEnvelope): boolean {
@@ -1824,6 +1834,9 @@ export async function decryptIncoming(
         const contentDigest = createHash("sha256").update(checkedInput.value.content, "utf8").digest("base64url");
         const collisions = context.account.replayCache.filter(replay => replayCollides(replay, checkedInput.value, envelope));
         if (collisions.some(replay => replayMatches(replay, checkedInput.value, envelope, contentDigest)))
+            return { status: "decrypted", plaintext, counter: envelope.q, envelopeId: envelope.i };
+        if (checkedInput.value.discordAuthorId === user.value &&
+            collisions.some(replay => replayEnvelopeMatches(replay, checkedInput.value, envelope, contentDigest)))
             return { status: "decrypted", plaintext, counter: envelope.q, envelopeId: envelope.i };
         if (collisions.length > 0) return { status: "replay_detected" };
 
