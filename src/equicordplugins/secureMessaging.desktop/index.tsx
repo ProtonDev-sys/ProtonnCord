@@ -23,10 +23,11 @@ import { copyToClipboard } from "@utils/clipboard";
 import { EquicordDevs } from "@utils/constants";
 import { sendMessage } from "@utils/discord";
 import definePlugin, { PluginNative } from "@utils/types";
-import type { Channel, Message, RenderModalProps } from "@vencord/discord-types";
+import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/discord-types";
 import {
     ChannelStore,
     Checkbox,
+    CloudUploader,
     MessageStore,
     Modal,
     openModal,
@@ -133,6 +134,9 @@ let originalRestPost: RestMethod | null = null;
 let originalRestPatch: RestMethod | null = null;
 let guardedRestPost: RestMethod | null = null;
 let guardedRestPatch: RestMethod | null = null;
+let originalAttachmentUpload: CloudUpload["upload"] | null = null;
+let guardedAttachmentUpload: CloudUpload["upload"] | null = null;
+let approvedAttachmentUploads = new WeakSet<CloudUpload>();
 
 function announcementKey(channelId: string, content: string): string {
     return `${channelId}\0${content}`;
@@ -371,6 +375,33 @@ async function resolveConversationProtection(channelId: string): Promise<Convers
     return persisted.status === "protected" ? { kind: "persisted_protected" } : { kind: "unprotected" };
 }
 
+function installAttachmentUploadGuard(): void {
+    if (guardedAttachmentUpload) return;
+    const original = CloudUploader.prototype.upload;
+    originalAttachmentUpload = original;
+    guardedAttachmentUpload = async function (this: CloudUpload) {
+        if (approvedAttachmentUploads.has(this)) return original.call(this);
+        let protection: ConversationProtection;
+        try {
+            protection = await resolveConversationProtection(this.channelId);
+        } catch {
+            return;
+        }
+        if (protection.kind === "unprotected" ||
+            (protection.kind === "snapshot" && !requiresFailClosedSend(protection.conversation)))
+            return original.call(this);
+    };
+    CloudUploader.prototype.upload = guardedAttachmentUpload;
+}
+
+function uninstallAttachmentUploadGuard(): void {
+    if (guardedAttachmentUpload && CloudUploader.prototype.upload === guardedAttachmentUpload && originalAttachmentUpload)
+        CloudUploader.prototype.upload = originalAttachmentUpload;
+    originalAttachmentUpload = null;
+    guardedAttachmentUpload = null;
+    approvedAttachmentUploads = new WeakSet();
+}
+
 async function protectProgrammaticPost(request: Record<string, any>): Promise<Record<string, any>> {
     const message = messageEndpoint(request?.url, false);
     const attachment = attachmentReservationEndpoint(request?.url);
@@ -510,6 +541,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
         if (preparedAttachments) authorizeAttachmentUploadReservations(channelId, preparedAttachments.files);
         authorizeWirePayload(channelId, encrypted.content, attachmentFilenames);
         message.content = encrypted.content;
+        for (const upload of uploads) approvedAttachmentUploads.add(upload);
         return { stop: true };
     } catch {
         showToast("Secure Messaging stopped the send because encryption failed unexpectedly.", Toasts.Type.FAILURE);
@@ -1169,6 +1201,7 @@ export default definePlugin({
     start() {
         const generation = ++screenCaptureProtectionGeneration;
         setScreenCaptureProtectionStatus("pending");
+        installAttachmentUploadGuard();
         installNetworkGuard();
         void applyScreenCaptureProtection(true).then(applied => {
             if (generation !== screenCaptureProtectionGeneration) return;
@@ -1193,6 +1226,7 @@ export default definePlugin({
     stop() {
         screenCaptureProtectionGeneration++;
         setScreenCaptureProtectionStatus("disabled");
+        uninstallAttachmentUploadGuard();
         uninstallNetworkGuard();
         void applyScreenCaptureProtection(false);
         if (secureMessageListenersInstalled) {
