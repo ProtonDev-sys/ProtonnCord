@@ -319,6 +319,14 @@ async function startSecureMessagingPlugin(page: Page): Promise<{ pluginStarted: 
     });
 }
 
+async function waitForScreenCaptureProtection(page: Page): Promise<string> {
+    await page.waitForFunction(() => {
+        const plugin = (globalThis as any).Vencord?.Plugins?.plugins?.SecureMessaging;
+        return plugin?.getScreenCaptureProtectionStatus?.() === "ready";
+    }, { timeout: 30_000 });
+    return page.evaluate(() => (globalThis as any).Vencord.Plugins.plugins.SecureMessaging.getScreenCaptureProtectionStatus());
+}
+
 async function assertPersistedProtectionAndMissingChannelFailClosed(page: Page): Promise<{
     channelStoreRestored: boolean;
     missingChannelBlocked: boolean;
@@ -963,6 +971,8 @@ async function main(): Promise<void> {
             : await startSecureMessagingPlugin(page);
         pluginStartedByHarness = !pluginPrestarted && pluginStart.pluginStarted;
         assert.equal(pluginStart.pluginStarted, true, `SecureMessaging failed to start: ${String(pluginStart.startResult)}`);
+        const screenCaptureProtection = await waitForScreenCaptureProtection(page);
+        assert.equal(screenCaptureProtection, "ready", "screen-capture protection must be active before any decryption or protected send");
 
         const persistedProof = await assertPersistedProtectionAndMissingChannelFailClosed(page);
         assert.equal(persistedProof.persistedStatus, "protected", "native persisted protection lookup must identify the test DM");
@@ -1131,6 +1141,7 @@ async function main(): Promise<void> {
             rawCiphertextHidden: renderProof.rawCiphertextHidden,
             rendererPlaintextVerified: renderProof.plaintextVisible && renderProof.verifiedHeader,
             senderIdReplacementAccepted: rejectionProof.senderIdReplacementStatus === "decrypted",
+            screenCaptureProtection,
             restGuard: {
                 decryptedBySelectedRecipient: restDecrypted.plaintext === restPlaintext,
                 messageId: restMessage.id,

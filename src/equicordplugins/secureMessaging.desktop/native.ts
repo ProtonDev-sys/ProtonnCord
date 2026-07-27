@@ -6,7 +6,7 @@
 
 import { DATA_DIR } from "@main/utils/constants";
 import { createHash, randomUUID } from "crypto";
-import { type IpcMainInvokeEvent, safeStorage } from "electron";
+import { app, BrowserWindow, type IpcMainInvokeEvent, safeStorage } from "electron";
 import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "fs/promises";
 import { createServer, type Server } from "net";
 import { dirname, join, resolve } from "path";
@@ -53,7 +53,7 @@ export type NativeFailure =
     | {
         status: "failed";
         error: "attachment_download_failed" | "attachment_too_large" | "capacity_exceeded" | "counter_exhausted" |
-        "cryptographic_operation_failed" | "message_too_long" | "storage_error";
+        "cryptographic_operation_failed" | "message_too_long" | "screen_capture_protection_failed" | "storage_error";
     };
 
 export interface IdentitySummary {
@@ -144,6 +144,10 @@ export type ConversationResult =
 
 export type ChannelProtectionResult =
     | { status: "unconfigured" | "disabled" | "protected"; }
+    | NativeFailure;
+
+export type ScreenCaptureProtectionResult =
+    | { status: "applied"; enabled: boolean; windowCount: number; }
     | NativeFailure;
 
 export type EncryptOutgoingResult =
@@ -1894,6 +1898,8 @@ export async function decryptIncoming(
     if (!user.ok) return invalidInput(user.error);
     const checkedInput = validateDecryptInput(input);
     if (!checkedInput.ok) return invalidInput(checkedInput.error);
+    if (!screenCaptureProtectionEnabled || !screenCaptureProtectionHealthy)
+        return { status: "failed", error: "screen_capture_protection_failed" };
     return runSerialized(async (): Promise<DecryptIncomingResult> => {
         const context = await loadAccount(user.value);
         if (context.created) await saveVault(context.vault);
@@ -2060,4 +2066,76 @@ export async function decryptIncomingAttachments(
     } finally {
         for (const ciphertext of ciphertexts) ciphertext.fill(0);
     }
+}
+
+// setContentProtection applies per window, so existing and future windows are both covered;
+// Electron has no per-element equivalent. This blocks capture APIs only. A participant running
+// a modified build, or a camera pointed at the screen, still reads decrypted plaintext.
+let screenCaptureProtectionEnabled = false;
+let screenCaptureProtectionHealthy = false;
+let newWindowHookInstalled = false;
+let screenCaptureProtectionOperation: Promise<void> = Promise.resolve();
+
+function markProtectionUnhealthyAfterWindowFailure(): void {
+    screenCaptureProtectionHealthy = false;
+    for (const window of BrowserWindow.getAllWindows()) {
+        try {
+            window.setContentProtection(screenCaptureProtectionEnabled);
+        } catch {
+            // The unhealthy state keeps every subsequent decrypt operation fail-closed.
+        }
+    }
+}
+
+function installNewWindowProtectionHook(): void {
+    if (newWindowHookInstalled) return;
+    app.on("browser-window-created", (_event, window) => {
+        try {
+            window.setContentProtection(screenCaptureProtectionEnabled);
+        } catch {
+            markProtectionUnhealthyAfterWindowFailure();
+        }
+    });
+    newWindowHookInstalled = true;
+}
+
+async function applyScreenCaptureProtection(enabled: boolean): Promise<ScreenCaptureProtectionResult> {
+    const previousEnabled = screenCaptureProtectionEnabled;
+    const previousHealthy = screenCaptureProtectionHealthy;
+    let windows: BrowserWindow[] = [];
+    try {
+        installNewWindowProtectionHook();
+        windows = BrowserWindow.getAllWindows();
+        for (const window of windows) window.setContentProtection(enabled);
+        screenCaptureProtectionEnabled = enabled;
+        screenCaptureProtectionHealthy = true;
+        return { status: "applied", enabled, windowCount: windows.length };
+    } catch {
+        let rollbackSucceeded = true;
+        for (const window of windows) {
+            try {
+                window.setContentProtection(previousEnabled && previousHealthy);
+            } catch {
+                rollbackSucceeded = false;
+            }
+        }
+        screenCaptureProtectionEnabled = rollbackSucceeded ? previousEnabled : false;
+        screenCaptureProtectionHealthy = rollbackSucceeded ? previousHealthy : false;
+        return { status: "failed", error: "screen_capture_protection_failed" };
+    }
+}
+
+export async function setScreenCaptureProtection(
+    event: IpcMainInvokeEvent,
+    enabled: boolean,
+): Promise<ScreenCaptureProtectionResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    if (typeof enabled !== "boolean") return invalidInput("enabled must be a boolean");
+    const operation = screenCaptureProtectionOperation.then(
+        () => applyScreenCaptureProtection(enabled),
+        () => applyScreenCaptureProtection(enabled),
+    );
+    screenCaptureProtectionOperation = operation.then(() => undefined, () => undefined);
+    return operation;
 }
