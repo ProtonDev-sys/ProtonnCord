@@ -8,7 +8,7 @@ import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Devs, EquicordDevs } from "@utils/constants";
 import { useFixedTimer } from "@utils/react";
-import { formatDuration } from "@utils/text";
+import { formatDurationMs } from "@utils/text";
 import definePlugin, { OptionType } from "@utils/types";
 import { PassiveUpdateState, VoiceState } from "@vencord/discord-types";
 import { FluxDispatcher, GuildStore, React, UserStore } from "@webpack/common";
@@ -273,7 +273,7 @@ export default definePlugin({
 
         return (
             <p style={{ margin: 0, fontFamily: "var(--font-code)" }}>
-                {formatDuration(time, settings.store.format === "human")}
+                {formatDurationMs(time, settings.store.format === "human")}
             </p>
         );
     }, { noop: true }),
