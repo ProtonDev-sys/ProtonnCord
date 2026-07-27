@@ -40,7 +40,7 @@
 
 .pc-secure-card-plaintext {
     overflow-wrap: anywhere;
-    color: var(--text-normal);
+    color: var(--text-default);
     white-space: break-spaces;
 }
 
