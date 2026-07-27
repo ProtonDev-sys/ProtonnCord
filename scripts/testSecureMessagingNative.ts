@@ -523,11 +523,18 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     decrypted = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, bobDmInput);
     expectStatus(decrypted, "decrypted", "Bob decrypts Alice DM");
     assert.equal(decrypted.plaintext, dmPlaintext);
-    decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+    const aliceOwnDmInput = {
         ...bobDmInput,
         discordMessageId: messageId(11),
-    });
+    };
+    decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, aliceOwnDmInput);
     expectStatus(decrypted, "decrypted", "sender decrypts own message");
+    assert.equal(decrypted.plaintext, dmPlaintext);
+    decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        ...aliceOwnDmInput,
+        discordMessageId: messageId(13),
+    });
+    expectStatus(decrypted, "decrypted", "sender decrypts own message after Discord replaces its optimistic message ID");
     assert.equal(decrypted.plaintext, dmPlaintext);
 
     decrypted = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, bobDmInput);
@@ -545,6 +552,11 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         content: secondDm.content,
     });
     expectStatus(differentMessageReplay, "replay_detected", "different ciphertext reusing a Discord message ID");
+    const senderMessageIdCollision = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        ...aliceOwnDmInput,
+        content: secondDm.content,
+    });
+    expectStatus(senderMessageIdCollision, "replay_detected", "sender still rejects different ciphertext reusing a Discord message ID");
 
     conversation = await native.configureConversation(DISCORD_EVENT, ALICE_ID, {
         enabled: true,

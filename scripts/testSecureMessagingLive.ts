@@ -566,7 +566,7 @@ async function verifyNativeRejectionPaths(page: Page, message: RawDiscordMessage
         const native = global.VencordNative.pluginHelpers.SecureMessaging;
         const localUserId = common.UserStore.getCurrentUser().id;
         const alternativeLastDigit = message.id.endsWith("9") ? "8" : "9";
-        const replayMessageId = `${message.id.slice(0, -1)}${alternativeLastDigit}`;
+        const replacementMessageId = `${message.id.slice(0, -1)}${alternativeLastDigit}`;
         const tamperedLastCharacter = message.content.endsWith("A") ? "B" : "A";
         const tamperedContent = `${message.content.slice(0, -1)}${tamperedLastCharacter}`;
 
@@ -577,12 +577,12 @@ async function verifyNativeRejectionPaths(page: Page, message: RawDiscordMessage
             discordEditedTimestamp: message.editedTimestamp,
             discordMessageId: message.id,
         });
-        const replay = await native.decryptIncoming(localUserId, {
+        const senderIdReplacement = await native.decryptIncoming(localUserId, {
             channelId: message.channelId,
             content: message.content,
             discordAuthorId: message.authorId,
             discordEditedTimestamp: message.editedTimestamp,
-            discordMessageId: replayMessageId,
+            discordMessageId: replacementMessageId,
         });
         const tampered = await native.decryptIncoming(localUserId, {
             channelId: message.channelId,
@@ -595,7 +595,7 @@ async function verifyNativeRejectionPaths(page: Page, message: RawDiscordMessage
         return {
             exactPlaintext: exactRerender.status === "decrypted" ? exactRerender.plaintext : "",
             exactStatus: exactRerender.status,
-            replayStatus: replay.status,
+            senderIdReplacementStatus: senderIdReplacement.status,
             tamperedStatus: tampered.status,
             expectedPlaintext: plaintext,
         };
@@ -825,7 +825,11 @@ async function main(): Promise<void> {
         const rejectionProof = await verifyNativeRejectionPaths(page, runtimeProof.message, runtimePlaintext);
         assert.equal(rejectionProof.exactStatus, "decrypted", "an exact React rerender must remain idempotent");
         assert.equal(rejectionProof.exactPlaintext, rejectionProof.expectedPlaintext);
-        assert.equal(rejectionProof.replayStatus, "replay_detected", "copied ciphertext under another message ID must be rejected");
+        assert.equal(
+            rejectionProof.senderIdReplacementStatus,
+            "decrypted",
+            "the sender must still render ciphertext after Discord replaces its optimistic message ID",
+        );
         assert.equal(rejectionProof.tamperedStatus, "invalid_message", "tampered ciphertext must be rejected");
 
         report = {
@@ -842,7 +846,7 @@ async function main(): Promise<void> {
             prefixedPayloadBypassBlocked: failClosed.prefixedPayloadBlocked,
             rawCiphertextHidden: renderProof.rawCiphertextHidden,
             rendererPlaintextVerified: renderProof.plaintextVisible && renderProof.verifiedHeader,
-            replayRejected: rejectionProof.replayStatus === "replay_detected",
+            senderIdReplacementAccepted: rejectionProof.senderIdReplacementStatus === "decrypted",
             restGuard: {
                 decryptedBySelectedRecipient: restDecrypted.plaintext === restPlaintext,
                 messageId: restMessage.id,
