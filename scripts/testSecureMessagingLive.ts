@@ -373,6 +373,35 @@ async function verifyScreenshotMode(page: Page, message: RawDiscordMessage, plai
     }, { message, plaintext });
 }
 
+async function verifyRenderedReplyPreview(
+    page: Page,
+    reply: RawDiscordMessage,
+    referencedCiphertext: string,
+    referencedPlaintext: string,
+) {
+    await page.waitForFunction(
+        ({ channelId, messageId, plaintext }) => {
+            const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+            return row?.innerText.includes(plaintext) ?? false;
+        },
+        { timeout: 30_000 },
+        { channelId: reply.channelId, messageId: reply.id, plaintext: referencedPlaintext },
+    );
+    return page.evaluate(({ channelId, ciphertext, messageId, plaintext }) => {
+        const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+        const rowText = row?.innerText ?? "";
+        return {
+            ciphertextHidden: !rowText.includes(ciphertext) && !rowText.includes("PCEM1:"),
+            plaintextVisible: rowText.includes(plaintext),
+        };
+    }, {
+        channelId: reply.channelId,
+        ciphertext: referencedCiphertext,
+        messageId: reply.id,
+        plaintext: referencedPlaintext,
+    });
+}
+
 async function assertPersistedProtectionAndMissingChannelFailClosed(page: Page): Promise<{
     channelStoreRestored: boolean;
     missingChannelBlocked: boolean;
@@ -606,6 +635,40 @@ async function sendAuthorizedRuntimePayload(page: Page, content: string): Promis
             oneShotReplayBlocked: /blocked an unauthorized prefixed programmatic payload/iu.test(replayError),
         };
     }, { channelId: TEST_CHANNEL_ID, content, registryName: PAGE_MESSAGE_REGISTRY });
+}
+
+async function sendAuthorizedRuntimeReply(page: Page, content: string, referencedMessageId: string): Promise<RawDiscordMessage> {
+    return page.evaluate(async ({ channelId, content, referencedMessageId, registryName }) => {
+        const global = globalThis as any;
+        const common = global.Vencord.Webpack.Common;
+        const response = await common.RestAPI.post({
+            url: common.Constants.Endpoints.MESSAGES(channelId),
+            body: {
+                allowed_mentions: { parse: [], replied_user: false },
+                attachments: [],
+                channel_id: channelId,
+                content,
+                message_reference: {
+                    channel_id: channelId,
+                    message_id: referencedMessageId,
+                },
+                nonce: common.SnowflakeUtils.fromTimestamp(Date.now()),
+                sticker_ids: [],
+                type: 0,
+            },
+        });
+        const message = response.body;
+        if (!message?.id) throw new Error("Discord REST did not return the authorized encrypted reply");
+        (global[registryName] ??= []).push(String(message.id));
+        return {
+            attachments: [],
+            authorId: String(message.author.id),
+            channelId: String(message.channel_id),
+            content: String(message.content),
+            editedTimestamp: typeof message.edited_timestamp === "string" ? message.edited_timestamp : null,
+            id: String(message.id),
+        };
+    }, { channelId: TEST_CHANNEL_ID, content, referencedMessageId, registryName: PAGE_MESSAGE_REGISTRY });
 }
 
 async function sendEncryptedAttachmentThroughRuntime(page: Page, plaintext: string): Promise<{
@@ -1076,6 +1139,22 @@ async function main(): Promise<void> {
         });
         assert.equal(runtimeDecrypted.plaintext, runtimePlaintext, "the selected recipient must decrypt the runtime-listener send exactly");
 
+        const replyPlaintext = `Secure Messaging encrypted-reply proof ${crypto.randomUUID()} δ`;
+        const preparedReply = await prepareThroughRuntimeMessageEvents(page, replyPlaintext);
+        assert.equal(preparedReply.cancelled, false, "the secure listener must accept an ordinary reply");
+        assert.equal(preparedReply.plaintextWasTransformed, true, "reply text must be encrypted before REST");
+        const replyMessage = await sendAuthorizedRuntimeReply(page, preparedReply.content, runtimeProof.message.id);
+        sentMessageIds.add(replyMessage.id);
+        const recipientReply = await decryptMessage({
+            channelId: TEST_CHANNEL_ID,
+            content: replyMessage.content,
+            discordAuthorId: preflight.localUserId,
+            identity: temporaryRecipient,
+            localUserId: EXPECTED_RECIPIENT_ID,
+            senderIdentity: localPublicIdentity,
+        });
+        assert.equal(recipientReply.plaintext, replyPlaintext, "the selected recipient must decrypt the reply exactly");
+
         const attachmentPlaintext = `Secure Messaging encrypted-attachment proof ${crypto.randomUUID()} γ`;
         const attachmentSend = await sendEncryptedAttachmentThroughRuntime(page, attachmentPlaintext);
         sentMessageIds.add(attachmentSend.message.id);
@@ -1153,6 +1232,15 @@ async function main(): Promise<void> {
         assert.equal(renderProof.rawCiphertextHidden, true, "raw Discord ciphertext must be hidden in the message row");
         assert.equal(renderProof.verifiedHeader, true, "rendered message must identify authenticated encrypted content");
 
+        const replyPreviewProof = await verifyRenderedReplyPreview(
+            page,
+            replyMessage,
+            runtimeProof.message.content,
+            runtimePlaintext,
+        );
+        assert.equal(replyPreviewProof.plaintextVisible, true, "an encrypted reply preview must show the referenced plaintext");
+        assert.equal(replyPreviewProof.ciphertextHidden, true, "an encrypted reply preview must never show the referenced ciphertext envelope");
+
         const attachmentRenderProof = await verifyRenderedEncryptedAttachment(page, attachmentSend.message, attachmentPlaintext);
         assert.equal(attachmentRenderProof.plaintextVisible, true, "encrypted attachment text must render locally");
         assert.equal(attachmentRenderProof.imageUsesLocalAuthenticatedUrl, true, "Discord's native renderer must receive a local authenticated blob URL");
@@ -1203,6 +1291,7 @@ async function main(): Promise<void> {
             prefixedPayloadBypassBlocked: failClosed.prefixedPayloadBlocked,
             rawCiphertextHidden: renderProof.rawCiphertextHidden,
             rendererPlaintextVerified: renderProof.plaintextVisible && renderProof.verifiedHeader,
+            replyPreview: replyPreviewProof,
             senderIdReplacementAccepted: rejectionProof.senderIdReplacementStatus === "decrypted",
             screenCaptureProtection,
             screenshotMode: screenshotModeProof,
