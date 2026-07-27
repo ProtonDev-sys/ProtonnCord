@@ -63,61 +63,128 @@ export interface SendMessageProps {
     openWarningPopout: (props: any) => any;
 }
 
-export type MessageSendListener = (channelId: string, messageObj: MessageObject, options: SendMessageOptions, props: SendMessageProps) => Promisable<void | { cancel: boolean; }>;
-export type MessageEditListener = (channelId: string, messageId: string, messageObj: MessageObject) => Promisable<void | { cancel: boolean; }>;
+export interface MessageEventListenerResult {
+    cancel?: boolean;
+    stop?: boolean;
+}
 
-const sendListeners = new Set<MessageSendListener>();
-const editListeners = new Set<MessageEditListener>();
+export interface MessageEventListenerOptions {
+    /** Higher priority listeners run first. Defaults to 0. */
+    priority?: number;
+    /** Cancel the send or edit if this listener throws. Defaults to false. */
+    cancelOnError?: boolean;
+}
+
+export type MessageSendListener = (channelId: string, messageObj: MessageObject, options: SendMessageOptions, props: SendMessageProps) => Promisable<void | MessageEventListenerResult>;
+export type MessageEditListener = (channelId: string, messageId: string, messageObj: MessageObject) => Promisable<void | MessageEventListenerResult>;
+
+type MessageEventListener = (...args: any[]) => Promisable<void | MessageEventListenerResult>;
+
+interface ListenerRegistration<Listener extends MessageEventListener> {
+    listener: Listener;
+    priority: number;
+    order: number;
+    cancelOnError: boolean;
+}
+
+interface ListenerStore<Listener extends MessageEventListener> {
+    registrations: Map<Listener, ListenerRegistration<Listener>>;
+    nextOrder: number;
+}
+
+function createListenerStore<Listener extends MessageEventListener>(): ListenerStore<Listener> {
+    return {
+        registrations: new Map(),
+        nextOrder: 0,
+    };
+}
+
+function addListener<Listener extends MessageEventListener>(
+    store: ListenerStore<Listener>,
+    listener: Listener,
+    options: number | MessageEventListenerOptions,
+): Listener {
+    const priority = typeof options === "number" ? options : options?.priority ?? 0;
+    const normalizedPriority = typeof priority === "number" && !Number.isNaN(priority) ? priority : 0;
+
+    if (!store.registrations.has(listener)) {
+        store.registrations.set(listener, {
+            listener,
+            priority: normalizedPriority,
+            order: store.nextOrder++,
+            cancelOnError: typeof options === "object" && options?.cancelOnError === true,
+        });
+    }
+
+    return listener;
+}
+
+async function runListeners<Listener extends MessageEventListener>(
+    store: ListenerStore<Listener>,
+    invoke: (listener: Listener) => Promisable<void | MessageEventListenerResult>,
+    errorMessage: string,
+): Promise<boolean> {
+    const registrations = Array.from(store.registrations.values())
+        .sort((a, b) => b.priority - a.priority || a.order - b.order);
+
+    for (const registration of registrations) {
+        if (store.registrations.get(registration.listener) !== registration) continue;
+
+        try {
+            const result = await invoke(registration.listener);
+            if (result?.cancel) return true;
+            if (result?.stop) break;
+        } catch (e) {
+            MessageEventsLogger.error(errorMessage, e);
+            if (registration.cancelOnError) return true;
+        }
+    }
+
+    return false;
+}
+
+const sendListeners = createListenerStore<MessageSendListener>();
+const editListeners = createListenerStore<MessageEditListener>();
 
 export async function _handlePreSend(channelId: string, messageObj: MessageObject, options: SendMessageOptions, props: SendMessageProps, contentOptions: MessageContentOptions) {
     options = { ...contentOptions, ...options };
 
-    for (const listener of sendListeners) {
-        try {
-            const result = await listener(channelId, messageObj, options, props);
-            if (result?.cancel) {
-                return true;
-            }
-        } catch (e) {
-            MessageEventsLogger.error("MessageSendHandler: Listener encountered an unknown error\n", e);
-        }
-    }
-    return false;
+    return runListeners(
+        sendListeners,
+        listener => listener(channelId, messageObj, options, props),
+        "MessageSendHandler: Listener encountered an unknown error\n",
+    );
 }
 
 export async function _handlePreEdit(channelId: string, messageId: string, messageObj: MessageObject) {
-    for (const listener of editListeners) {
-        try {
-            const result = await listener(channelId, messageId, messageObj);
-            if (result?.cancel) {
-                return true;
-            }
-        } catch (e) {
-            MessageEventsLogger.error("MessageEditHandler: Listener encountered an unknown error\n", e);
-        }
-    }
-    return false;
+    return runListeners(
+        editListeners,
+        listener => listener(channelId, messageId, messageObj),
+        "MessageEditHandler: Listener encountered an unknown error\n",
+    );
 }
 
 /**
  * Note: This event fires off before a message is sent, allowing you to edit the message.
+ * Higher priority listeners run first. Listeners with the same priority run in registration order.
+ * Pass `cancelOnError: true` for fail-closed listeners whose errors must cancel the send.
  */
-export function addMessagePreSendListener(listener: MessageSendListener) {
-    sendListeners.add(listener);
-    return listener;
+export function addMessagePreSendListener(listener: MessageSendListener, options: number | MessageEventListenerOptions = {}) {
+    return addListener(sendListeners, listener, options);
 }
 /**
  * Note: This event fires off before a message's edit is applied, allowing you to further edit the message.
+ * Higher priority listeners run first. Listeners with the same priority run in registration order.
+ * Pass `cancelOnError: true` for fail-closed listeners whose errors must cancel the edit.
  */
-export function addMessagePreEditListener(listener: MessageEditListener) {
-    editListeners.add(listener);
-    return listener;
+export function addMessagePreEditListener(listener: MessageEditListener, options: number | MessageEventListenerOptions = {}) {
+    return addListener(editListeners, listener, options);
 }
 export function removeMessagePreSendListener(listener: MessageSendListener) {
-    return sendListeners.delete(listener);
+    return sendListeners.registrations.delete(listener);
 }
 export function removeMessagePreEditListener(listener: MessageEditListener) {
-    return editListeners.delete(listener);
+    return editListeners.registrations.delete(listener);
 }
 
 // Message clicks
