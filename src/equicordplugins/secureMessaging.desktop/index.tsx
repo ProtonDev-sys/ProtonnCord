@@ -63,6 +63,12 @@ import {
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const SECURE_LISTENER_PRIORITY = 1_000_000;
 
+async function applyScreenCaptureProtection(enabled: boolean) {
+    const result = await Native.setScreenCaptureProtection(enabled);
+    if (result.status !== "applied")
+        showToast("Secure Messaging could not apply screen capture protection.", Toasts.Type.FAILURE);
+}
+
 const permittedAnnouncements = new Map<string, number>();
 const keyReviewGate = new KeyReviewGate();
 type RestMethod = (request: Record<string, any>, ...args: any[]) => Promise<any>;
@@ -1013,12 +1019,14 @@ export default definePlugin({
 
     start() {
         installNetworkGuard();
+        void applyScreenCaptureProtection(true);
         addMessagePreSendListener(outgoingListener, { priority: SECURE_LISTENER_PRIORITY, cancelOnError: true });
         addMessagePreEditListener(editListener, { priority: SECURE_LISTENER_PRIORITY, cancelOnError: true });
     },
 
     stop() {
         uninstallNetworkGuard();
+        void applyScreenCaptureProtection(false);
         removeMessagePreSendListener(outgoingListener);
         removeMessagePreEditListener(editListener);
         permittedAnnouncements.clear();
