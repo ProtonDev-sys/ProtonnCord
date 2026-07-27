@@ -16,6 +16,12 @@ import {
     generateIdentity,
     verifyKeyAnnouncement,
 } from "../src/equicordplugins/secureMessaging.desktop/crypto";
+import {
+    attachmentBundleRoot,
+    decryptAttachmentBytes,
+    parseSecurePlaintext,
+} from "../src/equicordplugins/secureMessaging.desktop/attachments";
+import { decodeBase64Url } from "../src/equicordplugins/secureMessaging.desktop/protocol";
 
 const TEST_CHANNEL_ID = "895063026686885909";
 const EXPECTED_RECIPIENT_ID = "710514340855545878";
@@ -28,14 +34,27 @@ const DISPOSABLE_ACKNOWLEDGEMENT = "I_UNDERSTAND_THIS_IS_DISPOSABLE";
 const DISPOSABLE_FLAG_ENV = "PROTONN_CORD_SECURE_MESSAGING_LIVE_TEST";
 const DISPOSABLE_DATA_DIR_ENV = "PROTONN_CORD_SECURE_MESSAGING_LIVE_DATA_DIR";
 const CLIENT_DATA_DIR_ENV = "PROTONN_CORD_USER_DATA_DIR";
+const PRESTARTED_PLUGIN_ENV = "PROTONN_CORD_SECURE_MESSAGING_PRESTARTED";
 const PAGE_MESSAGE_REGISTRY = "__protonnCordSecureMessagingLiveMessageIds";
+const PROOF_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAYAAAC56t6BAAAAFUlEQVR4nGP8z8Dwn4GBgYEJRKAwADE7AgRVI0g0AAAAAElFTkSuQmCC";
+const PROOF_PNG_FILENAME = "encrypted-proof-pixel.png";
 
 interface RawDiscordMessage {
+    attachments: RawDiscordAttachment[];
     authorId: string;
     channelId: string;
     content: string;
     editedTimestamp: string | null;
     id: string;
+}
+
+interface RawDiscordAttachment {
+    contentType: string | null;
+    filename: string;
+    id: string;
+    proxyUrl: string;
+    size: number;
+    url: string;
 }
 
 interface LivePreflight {
@@ -119,10 +138,22 @@ async function connectWithRetry() {
 }
 
 async function getDiscordPage(pages: Page[]): Promise<Page> {
-    const page = pages.find(candidate => candidate.url().includes("discord.com/channels")) ?? pages[0];
-    assert.ok(page, "Discord did not expose a renderer page");
-    await page.waitForFunction(() => Boolean((globalThis as any).Vencord?.Plugins?.plugins), { timeout: 30_000 });
-    return page;
+    const deadline = Date.now() + 30_000;
+    let candidates = pages;
+    while (Date.now() < deadline) {
+        const page = candidates.find(candidate => !candidate.isClosed() && candidate.url().includes("discord.com/channels")) ??
+            candidates.find(candidate => !candidate.isClosed());
+        if (page) {
+            try {
+                if (await page.evaluate(() => Boolean((globalThis as any).Vencord?.Plugins?.plugins))) return page;
+            } catch {
+                // Discord replaces its startup frame; reacquire the renderer page until it settles.
+            }
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+        candidates = page ? await page.browser().pages() : candidates;
+    }
+    throw new Error("Discord did not expose a stable Protonn Cord renderer page");
 }
 
 async function assertConnectedClientUsesDisposableDataDir(page: Page, expectedDataDir: string): Promise<void> {
@@ -144,22 +175,30 @@ async function initializeMessageRegistry(page: Page): Promise<void> {
     }, PAGE_MESSAGE_REGISTRY);
 }
 
-async function assertSecureMessagingInitiallyStopped(page: Page): Promise<void> {
-    await page.evaluate(() => {
+async function assertSecureMessagingInitialState(page: Page, expectStarted: boolean): Promise<void> {
+    if (expectStarted) {
+        await page.waitForFunction(() => {
+            const vencord = (globalThis as any).Vencord;
+            return Boolean(vencord?.Plugins?.plugins?.SecureMessaging?.started) &&
+                vencord?.Settings?.plugins?.SecureMessaging?.enabled === true;
+        }, { timeout: 30_000 });
+    }
+    await page.evaluate(expected => {
         const vencord = (globalThis as any).Vencord;
         const plugin = vencord?.Plugins?.plugins?.SecureMessaging;
         if (!plugin) throw new Error("SecureMessaging is missing from the installed client bundle");
-        if (plugin.started) throw new Error("SecureMessaging is already started; use a fresh disposable test profile");
+        if (Boolean(plugin.started) !== expected)
+            throw new Error(`SecureMessaging initial started state was ${Boolean(plugin.started)} instead of ${expected}`);
         const pluginSettings = Object.prototype.hasOwnProperty.call(vencord.Settings?.plugins ?? {}, "SecureMessaging")
             ? vencord.Settings.plugins.SecureMessaging
             : undefined;
-        if (pluginSettings?.enabled === true)
-            throw new Error("SecureMessaging is already enabled in settings; use a fresh disposable test profile");
-    });
+        if (Boolean(pluginSettings?.enabled) !== expected)
+            throw new Error(`SecureMessaging initial enabled setting was ${Boolean(pluginSettings?.enabled)} instead of ${expected}`);
+    }, expectStarted);
 }
 
-async function preflightPristineState(page: Page, announcement: string): Promise<LivePreflight> {
-    return page.evaluate(async ({ announcement, announcementMessageId, channelId, recipientId }) => {
+async function preflightPristineState(page: Page, announcement: string, pluginPrestarted: boolean): Promise<LivePreflight> {
+    return page.evaluate(async ({ announcement, announcementMessageId, channelId, pluginPrestarted, recipientId }) => {
         const global = globalThis as any;
         const vencord = global.Vencord;
         const common = vencord.Webpack.Common;
@@ -167,12 +206,13 @@ async function preflightPristineState(page: Page, announcement: string): Promise
         if (!plugin) throw new Error("SecureMessaging is missing from the installed client bundle");
         const native = global.VencordNative?.pluginHelpers?.SecureMessaging;
         if (!native) throw new Error("SecureMessaging native IPC helpers are unavailable");
-        if (plugin.started) throw new Error("SecureMessaging is already started; use a fresh disposable test profile");
+        if (Boolean(plugin.started) !== pluginPrestarted)
+            throw new Error("SecureMessaging changed its started state after the initial preflight");
         const pluginSettings = Object.prototype.hasOwnProperty.call(vencord.Settings?.plugins ?? {}, "SecureMessaging")
             ? vencord.Settings.plugins.SecureMessaging
             : undefined;
-        if (pluginSettings?.enabled === true)
-            throw new Error("SecureMessaging is already enabled in settings; use a fresh disposable test profile");
+        if (Boolean(pluginSettings?.enabled) !== pluginPrestarted)
+            throw new Error("SecureMessaging changed its enabled setting after the initial preflight");
 
         const localUserId = common.UserStore.getCurrentUser()?.id;
         if (!localUserId) throw new Error("Discord has no authenticated user");
@@ -237,6 +277,7 @@ async function preflightPristineState(page: Page, announcement: string): Promise
         announcement,
         announcementMessageId: SYNTHETIC_ANNOUNCEMENT_MESSAGE_ID,
         channelId: TEST_CHANNEL_ID,
+        pluginPrestarted,
         recipientId: EXPECTED_RECIPIENT_ID,
     });
 }
@@ -276,6 +317,14 @@ async function startSecureMessagingPlugin(page: Page): Promise<{ pluginStarted: 
         const startResult = await Promise.resolve(vencord.Plugins.startPlugin(plugin));
         return { pluginStarted: Boolean(plugin.started), startResult };
     });
+}
+
+async function waitForScreenCaptureProtection(page: Page): Promise<string> {
+    await page.waitForFunction(() => {
+        const plugin = (globalThis as any).Vencord?.Plugins?.plugins?.SecureMessaging;
+        return plugin?.getScreenCaptureProtectionStatus?.() === "ready";
+    }, { timeout: 30_000 });
+    return page.evaluate(() => (globalThis as any).Vencord.Plugins.plugins.SecureMessaging.getScreenCaptureProtectionStatus());
 }
 
 async function assertPersistedProtectionAndMissingChannelFailClosed(page: Page): Promise<{
@@ -389,8 +438,8 @@ async function assertFailClosedBoundaries(page: Page): Promise<{
         }
 
         return {
-            attachmentBlocked: /blocked a non-text programmatic send/iu.test(attachmentError),
-            attachmentReservationBlocked: /blocked an attachment upload reservation/iu.test(attachmentReservationError),
+            attachmentBlocked: /blocked a malformed or unsupported programmatic send/iu.test(attachmentError),
+            attachmentReservationBlocked: /blocked an unauthorized attachment upload reservation/iu.test(attachmentReservationError),
             editBlocked: /blocked a programmatic edit/iu.test(editError),
             prefixedPayloadBlocked: /blocked an unauthorized prefixed programmatic payload/iu.test(prefixedPayloadError),
         };
@@ -499,8 +548,9 @@ async function sendAuthorizedRuntimePayload(page: Page, content: string): Promis
         }
 
         return {
-            attachmentBearingPayloadBlocked: /blocked a non-text programmatic send/iu.test(attachmentError),
+            attachmentBearingPayloadBlocked: /blocked an unauthorized prefixed programmatic payload/iu.test(attachmentError),
             message: {
+                attachments: [],
                 authorId: String(message.author.id),
                 channelId: String(message.channel_id),
                 content: String(message.content),
@@ -510,6 +560,131 @@ async function sendAuthorizedRuntimePayload(page: Page, content: string): Promis
             oneShotReplayBlocked: /blocked an unauthorized prefixed programmatic payload/iu.test(replayError),
         };
     }, { channelId: TEST_CHANNEL_ID, content, registryName: PAGE_MESSAGE_REGISTRY });
+}
+
+async function sendEncryptedAttachmentThroughRuntime(page: Page, plaintext: string): Promise<{
+    ciphertextHidFileBytes: boolean;
+    ciphertextHidFilename: boolean;
+    encryptedFilename: string;
+    message: RawDiscordMessage;
+    plaintextWasTransformed: boolean;
+    wireContentLength: number;
+}> {
+    return page.evaluate(async ({ channelId, filename, plaintext, pngBase64, registryName }) => {
+        const global = globalThis as any;
+        const common = global.Vencord.Webpack.Common;
+        const messageEvents = global.Vencord.Api?.MessageEvents;
+        if (typeof messageEvents?._handlePreSend !== "function")
+            throw new Error("The runtime MessageEvents pre-send dispatcher is unavailable");
+        const channel = common.ChannelStore.getChannel(channelId);
+        if (!channel) throw new Error("The authorized test channel is not loaded");
+
+        const pngBytes = Uint8Array.from(atob(pngBase64), value => value.charCodeAt(0));
+        const file = new File([pngBytes], filename, { type: "image/png" });
+        const upload = new common.CloudUploader({ file, platform: 1 }, channelId);
+        const message = {
+            content: plaintext,
+            invalidEmojis: [],
+            tts: false,
+            validNonShortcutEmojis: [],
+        };
+        const contentOptions = {
+            channelId,
+            command: null,
+            content: plaintext,
+            isGif: false,
+            stickers: [],
+            uploads: [upload],
+        };
+        const options = {
+            ...contentOptions,
+            allowedMentions: { parse: [], repliedUser: false },
+            location: "SecureMessaging encrypted-attachment live harness",
+            stickerIds: [],
+        };
+        const props = {
+            channel,
+            content: plaintext,
+            hasAttachments: true,
+            hasStickers: false,
+            openWarningPopout: null,
+        };
+        const cancelled = await messageEvents._handlePreSend(channelId, message, options, props, contentOptions);
+        if (cancelled) throw new Error("Secure Messaging cancelled a valid encrypted attachment send");
+        if (!message.content.startsWith("PCEM1:") || message.content.includes(plaintext))
+            throw new Error("Secure Messaging did not transform attachment-message plaintext before upload");
+        if (!(upload.item.file instanceof File) || !upload.filename.endsWith(".pcaf") || upload.item.file.type !== "application/octet-stream")
+            throw new Error("Secure Messaging did not replace the pending file with an opaque encrypted upload");
+
+        const ciphertext = new Uint8Array(await upload.item.file.arrayBuffer());
+        let ciphertextHidFileBytes = true;
+        outer: for (let offset = 0; offset <= ciphertext.length - pngBytes.length; offset++) {
+            for (let index = 0; index < pngBytes.length; index++) {
+                if (ciphertext[offset + index] !== pngBytes[index]) continue outer;
+                }
+            ciphertextHidFileBytes = false;
+            break;
+        }
+        const ciphertextHidFilename = !new TextDecoder().decode(ciphertext).includes(filename);
+
+        await new Promise<void>((resolve, reject) => {
+            upload.on("complete", resolve);
+            upload.on("error", (error: unknown) => reject(error instanceof Error ? error : new Error(String(error))));
+            try {
+                upload.upload();
+            } catch (error) {
+                reject(error);
+            }
+        });
+        if (typeof upload.uploadedFilename !== "string" || upload.uploadedFilename.length === 0)
+            throw new Error("Discord did not return an encrypted attachment upload token");
+
+        const response = await common.RestAPI.post({
+            url: common.Constants.Endpoints.MESSAGES(channelId),
+            body: {
+                allowed_mentions: { parse: [], replied_user: false },
+                attachments: [{ id: "0", filename: upload.filename, uploaded_filename: upload.uploadedFilename }],
+                channel_id: channelId,
+                content: message.content,
+                nonce: common.SnowflakeUtils.fromTimestamp(Date.now()),
+                sticker_ids: [],
+                type: 0,
+            },
+        });
+        const sent = response.body;
+        if (!sent?.id || !Array.isArray(sent.attachments) || sent.attachments.length !== 1)
+            throw new Error("Discord REST did not return the encrypted attachment message");
+        (global[registryName] ??= []).push(String(sent.id));
+
+        return {
+            ciphertextHidFileBytes,
+            ciphertextHidFilename,
+            encryptedFilename: String(upload.filename),
+            message: {
+                attachments: sent.attachments.map((attachment: any) => ({
+                    contentType: typeof attachment.content_type === "string" ? attachment.content_type : null,
+                    filename: String(attachment.filename),
+                    id: String(attachment.id),
+                    proxyUrl: String(attachment.proxy_url),
+                    size: Number(attachment.size),
+                    url: String(attachment.url),
+                })),
+                authorId: String(sent.author.id),
+                channelId: String(sent.channel_id),
+                content: String(sent.content),
+                editedTimestamp: typeof sent.edited_timestamp === "string" ? sent.edited_timestamp : null,
+                id: String(sent.id),
+            },
+            plaintextWasTransformed: message.content !== plaintext,
+            wireContentLength: message.content.length,
+        };
+    }, {
+        channelId: TEST_CHANNEL_ID,
+        filename: PROOF_PNG_FILENAME,
+        plaintext,
+        pngBase64: PROOF_PNG_BASE64,
+        registryName: PAGE_MESSAGE_REGISTRY,
+    });
 }
 
 async function sendThroughRestGuard(page: Page, plaintext: string): Promise<RawDiscordMessage> {
@@ -532,6 +707,7 @@ async function sendThroughRestGuard(page: Page, plaintext: string): Promise<RawD
         if (!message?.id) throw new Error("Discord REST did not return the sent message");
         (global[registryName] ??= []).push(String(message.id));
         return {
+            attachments: [],
             authorId: String(message.author.id),
             channelId: String(message.channel_id),
             content: String(message.content),
@@ -557,6 +733,47 @@ async function verifyRenderedMessage(page: Page, message: RawDiscordMessage, pla
             verifiedHeader: item?.querySelector(".pc-secure-card-header")?.textContent?.includes("Verified encrypted message") ?? false,
         };
     }, { channelId: message.channelId, messageId: message.id, plaintext });
+}
+
+async function verifyRenderedEncryptedAttachment(page: Page, message: RawDiscordMessage, plaintext: string) {
+    try {
+        await page.waitForFunction(({ channelId, messageId, plaintext }) => {
+            const item = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+            const image = item?.querySelector<HTMLImageElement>("img[src^='blob:']");
+            return item?.querySelector(".pc-secure-card-plaintext")?.textContent?.includes(plaintext) &&
+                image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0;
+        }, { timeout: 20_000 }, { channelId: message.channelId, messageId: message.id, plaintext });
+    } catch {
+        // The structured diagnostic below is more useful than Puppeteer's generic timeout.
+    }
+
+    const proof = await page.evaluate(({ channelId, encryptedFilename, messageId, plaintext }) => {
+        const item = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+        const image = item?.querySelector<HTMLImageElement>("img[src^='blob:']");
+        return {
+            html: item?.innerHTML.slice(0, 8_000) ?? "",
+            images: [...(item?.querySelectorAll<HTMLImageElement>("img") ?? [])].map(candidate => ({
+                complete: candidate.complete,
+                height: candidate.naturalHeight,
+                src: candidate.src.slice(0, 200),
+                width: candidate.naturalWidth,
+            })),
+            imageHeight: image?.naturalHeight ?? 0,
+            imageUsesLocalAuthenticatedUrl: image?.src.startsWith("blob:") ?? false,
+            imageWidth: image?.naturalWidth ?? 0,
+            plaintextVisible: item?.querySelector(".pc-secure-card-plaintext")?.textContent?.includes(plaintext) ?? false,
+            rawEncryptedFilenameHidden: !(item?.textContent ?? "").includes(encryptedFilename),
+            text: item?.textContent?.slice(0, 2_000) ?? "",
+        };
+    }, {
+        channelId: message.channelId,
+        encryptedFilename: message.attachments[0]?.filename ?? "",
+        messageId: message.id,
+        plaintext,
+    });
+    if (!proof.imageUsesLocalAuthenticatedUrl || proof.imageWidth < 1 || proof.imageHeight < 1)
+        throw new Error(`Encrypted attachment native-render diagnostic: ${JSON.stringify(proof)}`);
+    return proof;
 }
 
 async function verifyNativeRejectionPaths(page: Page, message: RawDiscordMessage, plaintext: string) {
@@ -696,7 +913,8 @@ async function stopSecureMessagingPlugin(page: Page) {
 
 async function main(): Promise<void> {
     const expectedDataDir = requireDisposableDataDirectory();
-    await assertNoExistingSecureMessagingVault(expectedDataDir);
+    const pluginPrestarted = process.env[PRESTARTED_PLUGIN_ENV] === "1";
+    if (!pluginPrestarted) await assertNoExistingSecureMessagingVault(expectedDataDir);
     const temporaryRecipient = await generateIdentity();
     const recipientAnnouncement = await createKeyAnnouncement(temporaryRecipient, EXPECTED_RECIPIENT_ID);
     const recipientPublicIdentity = await verifyKeyAnnouncement(recipientAnnouncement, EXPECTED_RECIPIENT_ID);
@@ -714,7 +932,7 @@ async function main(): Promise<void> {
     try {
         page = await getDiscordPage(await browser.pages());
         await assertConnectedClientUsesDisposableDataDir(page, expectedDataDir);
-        await assertSecureMessagingInitiallyStopped(page);
+        await assertSecureMessagingInitialState(page, pluginPrestarted);
         await page.goto(`https://discord.com/channels/@me/${TEST_CHANNEL_ID}`, {
             waitUntil: "domcontentloaded",
             timeout: 30_000,
@@ -725,7 +943,7 @@ async function main(): Promise<void> {
         );
         await initializeMessageRegistry(page);
 
-        const preflight = await preflightPristineState(page, recipientAnnouncement);
+        const preflight = await preflightPristineState(page, recipientAnnouncement, pluginPrestarted);
         assert.equal(preflight.vaultReady, true);
         assert.equal(preflight.reviewedRecipientFingerprint, recipientPublicIdentity.fingerprint);
         const localPublicIdentity = await verifyKeyAnnouncement(preflight.localAnnouncement, preflight.localUserId);
@@ -748,9 +966,13 @@ async function main(): Promise<void> {
         assert.equal(configured.status, "enabled", `protected DM configuration failed: ${configured.status}`);
         assert.deepEqual(configured.selectedRecipientIds, [EXPECTED_RECIPIENT_ID]);
 
-        const pluginStart = await startSecureMessagingPlugin(page);
-        pluginStartedByHarness = pluginStart.pluginStarted;
+        const pluginStart = pluginPrestarted
+            ? { pluginStarted: true, startResult: "enabled before Discord loaded so webpack attachment patches were installed" }
+            : await startSecureMessagingPlugin(page);
+        pluginStartedByHarness = !pluginPrestarted && pluginStart.pluginStarted;
         assert.equal(pluginStart.pluginStarted, true, `SecureMessaging failed to start: ${String(pluginStart.startResult)}`);
+        const screenCaptureProtection = await waitForScreenCaptureProtection(page);
+        assert.equal(screenCaptureProtection, "ready", "screen-capture protection must be active before any decryption or protected send");
 
         const persistedProof = await assertPersistedProtectionAndMissingChannelFailClosed(page);
         assert.equal(persistedProof.persistedStatus, "protected", "native persisted protection lookup must identify the test DM");
@@ -776,7 +998,7 @@ async function main(): Promise<void> {
         assert.equal(
             runtimeProof.attachmentBearingPayloadBlocked,
             true,
-            "even a legitimately authorized encrypted payload must be blocked when attachments are present",
+            "an encrypted text authorization must not authorize a different attachment-bearing payload",
         );
         assert.equal(
             runtimeProof.oneShotReplayBlocked,
@@ -800,6 +1022,60 @@ async function main(): Promise<void> {
         });
         assert.equal(runtimeDecrypted.plaintext, runtimePlaintext, "the selected recipient must decrypt the runtime-listener send exactly");
 
+        const attachmentPlaintext = `Secure Messaging encrypted-attachment proof ${crypto.randomUUID()} γ`;
+        const attachmentSend = await sendEncryptedAttachmentThroughRuntime(page, attachmentPlaintext);
+        sentMessageIds.add(attachmentSend.message.id);
+        assert.equal(attachmentSend.plaintextWasTransformed, true, "attachment-message plaintext must be encrypted before upload");
+        assert.equal(attachmentSend.ciphertextHidFileBytes, true, "the opaque Discord upload must not contain the original PNG bytes");
+        assert.equal(attachmentSend.ciphertextHidFilename, true, "the opaque Discord upload must not expose the original filename");
+        assert.match(attachmentSend.encryptedFilename, /^pc-[A-Za-z0-9_-]{22}-0\.pcaf$/u);
+        assert.equal(attachmentSend.message.attachments.length, 1);
+        assert.equal(attachmentSend.message.attachments[0].filename, attachmentSend.encryptedFilename);
+        assert.ok(
+            attachmentSend.message.attachments[0].contentType === null ||
+                attachmentSend.message.attachments[0].contentType === "application/octet-stream",
+            "Discord must not classify the stored ciphertext as the original image type",
+        );
+        assert.equal(attachmentSend.message.content.includes(PROOF_PNG_FILENAME), false);
+        assert.equal(attachmentSend.message.content.includes(attachmentPlaintext), false);
+
+        const recipientAttachmentEnvelope = await decryptMessage({
+            channelId: TEST_CHANNEL_ID,
+            content: attachmentSend.message.content,
+            discordAuthorId: preflight.localUserId,
+            identity: temporaryRecipient,
+            localUserId: EXPECTED_RECIPIENT_ID,
+            senderIdentity: localPublicIdentity,
+        });
+        const recipientAttachmentPlaintext = parseSecurePlaintext(recipientAttachmentEnvelope.plaintext);
+        assert.equal(recipientAttachmentPlaintext.text, attachmentPlaintext);
+        assert.ok(recipientAttachmentPlaintext.attachments, "the selected recipient must receive the encrypted attachment descriptor");
+        const rawAttachmentResponse = await fetch(attachmentSend.message.attachments[0].url);
+        assert.equal(rawAttachmentResponse.ok, true, "Discord must return the stored encrypted attachment bytes");
+        const rawAttachmentBytes = new Uint8Array(await rawAttachmentResponse.arrayBuffer());
+        assert.equal(rawAttachmentBytes.byteLength, attachmentSend.message.attachments[0].size);
+        assert.equal(
+            await attachmentBundleRoot(recipientAttachmentPlaintext.attachments.id, [rawAttachmentBytes]),
+            recipientAttachmentPlaintext.attachments.root,
+            "the selected recipient must authenticate the exact ordered Discord attachment set",
+        );
+        const recipientAttachmentMasterKey = decodeBase64Url(recipientAttachmentPlaintext.attachments.key, 32);
+        const recipientAttachment = await decryptAttachmentBytes({
+            bundleId: recipientAttachmentPlaintext.attachments.id,
+            channelId: TEST_CHANNEL_ID,
+            ciphertext: rawAttachmentBytes,
+            count: recipientAttachmentPlaintext.attachments.count,
+            index: 0,
+            masterKey: recipientAttachmentMasterKey,
+            senderUserId: preflight.localUserId,
+        });
+        recipientAttachmentMasterKey.fill(0);
+        assert.equal(recipientAttachment.metadata.name, PROOF_PNG_FILENAME);
+        assert.equal(recipientAttachment.metadata.mimeType, "image/png");
+        assert.equal(recipientAttachment.metadata.width, 2);
+        assert.equal(recipientAttachment.metadata.height, 3);
+        assert.equal(Buffer.from(recipientAttachment.data).toString("base64"), PROOF_PNG_BASE64);
+
         const restPlaintext = `Secure Messaging REST-guard proof ${crypto.randomUUID()} β`;
         const restMessage = await sendThroughRestGuard(page, restPlaintext);
         sentMessageIds.add(restMessage.id);
@@ -822,6 +1098,13 @@ async function main(): Promise<void> {
         assert.equal(renderProof.rawCiphertextHidden, true, "raw Discord ciphertext must be hidden in the message row");
         assert.equal(renderProof.verifiedHeader, true, "rendered message must identify authenticated encrypted content");
 
+        const attachmentRenderProof = await verifyRenderedEncryptedAttachment(page, attachmentSend.message, attachmentPlaintext);
+        assert.equal(attachmentRenderProof.plaintextVisible, true, "encrypted attachment text must render locally");
+        assert.equal(attachmentRenderProof.imageUsesLocalAuthenticatedUrl, true, "Discord's native renderer must receive a local authenticated blob URL");
+        assert.equal(attachmentRenderProof.imageWidth, 2, "Discord's native image renderer must decode the original width");
+        assert.equal(attachmentRenderProof.imageHeight, 3, "Discord's native image renderer must decode the original height");
+        assert.equal(attachmentRenderProof.rawEncryptedFilenameHidden, true, "the opaque Discord filename must not be shown to the user");
+
         const rejectionProof = await verifyNativeRejectionPaths(page, runtimeProof.message, runtimePlaintext);
         assert.equal(rejectionProof.exactStatus, "decrypted", "an exact React rerender must remain idempotent");
         assert.equal(rejectionProof.exactPlaintext, rejectionProof.expectedPlaintext);
@@ -835,6 +1118,17 @@ async function main(): Promise<void> {
         report = {
             attachmentBlocked: failClosed.attachmentBlocked,
             attachmentReservationBlocked: failClosed.attachmentReservationBlocked,
+            encryptedAttachment: {
+                ciphertextHidFileBytes: attachmentSend.ciphertextHidFileBytes,
+                ciphertextHidFilename: attachmentSend.ciphertextHidFilename,
+                decryptedBySelectedRecipient: recipientAttachment.metadata.name === PROOF_PNG_FILENAME,
+                nativeImageHeight: attachmentRenderProof.imageHeight,
+                nativeImageRendererUsed: attachmentRenderProof.imageUsesLocalAuthenticatedUrl,
+                nativeImageWidth: attachmentRenderProof.imageWidth,
+                originalFilenameRestored: recipientAttachment.metadata.name,
+                rawEncryptedFilenameHidden: attachmentRenderProof.rawEncryptedFilenameHidden,
+                wireContentLength: attachmentSend.wireContentLength,
+            },
             authorizedAttachmentBlockedBeforeCapabilityConsumption: runtimeProof.attachmentBearingPayloadBlocked,
             editBlocked: failClosed.editBlocked,
             localIdentityFingerprintMatched: true,
@@ -847,6 +1141,7 @@ async function main(): Promise<void> {
             rawCiphertextHidden: renderProof.rawCiphertextHidden,
             rendererPlaintextVerified: renderProof.plaintextVisible && renderProof.verifiedHeader,
             senderIdReplacementAccepted: rejectionProof.senderIdReplacementStatus === "decrypted",
+            screenCaptureProtection,
             restGuard: {
                 decryptedBySelectedRecipient: restDecrypted.plaintext === restPlaintext,
                 messageId: restMessage.id,

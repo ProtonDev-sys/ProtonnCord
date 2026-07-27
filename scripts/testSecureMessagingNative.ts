@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import { build, type Plugin } from "esbuild";
 import type { IpcMainInvokeEvent } from "electron";
 
+import { generateAttachmentBundleMaterial, serializeSecurePlaintext } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import type { ConversationSnapshot } from "../src/equicordplugins/secureMessaging.desktop/native";
 
 type NativeModule = typeof import("../src/equicordplugins/secureMessaging.desktop/native");
@@ -64,8 +65,16 @@ class AuthenticatedProtector {
 }
 
 interface HarnessRuntime {
+    appListeners?: Array<[string, (event: unknown, window: HarnessWindow) => void]>;
+    browserWindows?: HarnessWindow[];
     dataDir: string;
     protector: AuthenticatedProtector;
+}
+
+interface HarnessWindow {
+    failWhen?: boolean;
+    values: boolean[];
+    setContentProtection(enabled: boolean): void;
 }
 
 interface HarnessGlobal {
@@ -243,6 +252,12 @@ async function trustAnnouncement(
 
 async function testInvalidInputs(native: NativeModule): Promise<void> {
     const hostileEvent = discordEvent("https://example.com/channels/@me/200000000000000001");
+    expectStatus(await native.setScreenCaptureProtection(hostileEvent, true), "invalid_input", "non-Discord capture-protection IPC origin");
+    expectStatus(
+        await native.setScreenCaptureProtection(DISCORD_EVENT, "true" as never),
+        "invalid_input",
+        "capture-protection input must be boolean",
+    );
     expectStatus(await native.getIdentity(hostileEvent, ALICE_ID), "invalid_input", "non-Discord IPC origin");
     expectStatus(await native.getIdentity(DISCORD_EVENT, "not-a-snowflake"), "invalid_input", "invalid local user");
     expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, "not-a-snowflake"), "invalid_input", "invalid protection channel");
@@ -318,6 +333,67 @@ async function testInvalidInputs(native: NativeModule): Promise<void> {
         discordEditedTimestamp: "9999-99-99T99:99:99.999Z",
         discordMessageId: messageId(1),
     }), "invalid_input", "invalid canonical-shaped edited timestamp");
+}
+
+async function testScreenCaptureProtection(native: NativeModule): Promise<void> {
+    const primary: HarnessWindow = {
+        values: [],
+        setContentProtection(enabled) {
+            this.values.push(enabled);
+            if (this.failWhen === enabled) throw new Error("Injected screen-capture protection failure");
+        },
+    };
+    const failing: HarnessWindow = {
+        failWhen: true,
+        values: [],
+        setContentProtection: primary.setContentProtection,
+    };
+    const runtime = harnessGlobal.__secureMessagingNativeHarness;
+    runtime.browserWindows = [primary, failing];
+
+    const failedEnable = await native.setScreenCaptureProtection(DISCORD_EVENT, true);
+    expectStatus(failedEnable, "failed", "window capture-protection failure is structured across IPC");
+    assert.equal(failedEnable.error, "screen_capture_protection_failed");
+    assert.deepEqual(primary.values, [true, false], "a partial enable is rolled back on every reachable window");
+    assert.deepEqual(failing.values, [true, false], "the failing window also receives the safe rollback attempt");
+
+    failing.failWhen = undefined;
+    runtime.browserWindows = [primary];
+    const enabled = await native.setScreenCaptureProtection(DISCORD_EVENT, true);
+    expectStatus(enabled, "applied", "screen-capture protection enables after the injected failure clears");
+    assert.equal(enabled.enabled, true);
+    assert.equal(enabled.windowCount, 1);
+    assert.equal(runtime.appListeners?.filter(([event]) => event === "browser-window-created").length, 1, "future-window hook installs once");
+
+    const futureWindow: HarnessWindow = { values: [], setContentProtection: primary.setContentProtection };
+    const windowHook = runtime.appListeners?.find(([event]) => event === "browser-window-created")?.[1];
+    assert.ok(windowHook, "future-window protection hook is registered");
+    windowHook({}, futureWindow);
+    assert.deepEqual(futureWindow.values, [true], "a future window is protected before it can display decrypted content");
+
+    const failingFutureWindow: HarnessWindow = {
+        failWhen: true,
+        values: [],
+        setContentProtection: primary.setContentProtection,
+    };
+    runtime.browserWindows = [primary, failingFutureWindow];
+    windowHook({}, failingFutureWindow);
+    assert.equal(primary.values.at(-1), true, "a future-window failure preserves protection on existing windows");
+    const failClosedDecrypt = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        channelId: DM_CHANNEL_ID,
+        content: "PCEM1:blocked-until-protection-recovers",
+        discordAuthorId: BOB_ID,
+        discordEditedTimestamp: null,
+        discordMessageId: messageId(2),
+    });
+    expectStatus(failClosedDecrypt, "failed", "future-window protection failure blocks subsequent decryptions");
+    assert.equal(failClosedDecrypt.error, "screen_capture_protection_failed");
+
+    runtime.browserWindows = [primary];
+    expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, true), "applied", "protection recovers after a future-window failure");
+    expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, false), "applied", "screen-capture protection disables cleanly");
+    expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, true), "applied", "screen-capture protection re-enables serially");
+    assert.equal(runtime.appListeners?.filter(([event]) => event === "browser-window-created").length, 1, "re-enabling does not duplicate hooks");
 }
 
 async function testStorageFailures(bundlePath: string, linuxBundlePath: string, windowsBundlePath: string, root: string): Promise<void> {
@@ -430,6 +506,7 @@ async function testStorageFailures(bundlePath: string, linuxBundlePath: string, 
 async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise<void> {
     const native = await loadNative(bundlePath, dataDir);
     await testInvalidInputs(native);
+    await testScreenCaptureProtection(native);
 
     const aliceIdentity = await native.getIdentity(DISCORD_EVENT, ALICE_ID);
     const bobIdentity = await native.getIdentity(DISCORD_EVENT, BOB_ID);
@@ -544,6 +621,48 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     });
     expectStatus(decrypted, "decrypted", "sender decrypts own message after Discord replaces its optimistic message ID");
     assert.equal(decrypted.plaintext, dmPlaintext);
+
+    const attachmentMaterial = generateAttachmentBundleMaterial(2);
+    const encryptedAttachmentMessage = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        plaintext: serializeSecurePlaintext("", {
+            ...attachmentMaterial.descriptor,
+            root: attachmentMaterial.descriptor.key,
+        }),
+        snapshot: aliceDm,
+    });
+    attachmentMaterial.keyBytes.fill(0);
+    expectStatus(encryptedAttachmentMessage, "encrypted", "Alice encrypts an attachment bundle descriptor");
+    const attachmentMessageInput = {
+        channelId: DM_CHANNEL_ID,
+        content: encryptedAttachmentMessage.content,
+        discordAuthorId: ALICE_ID,
+        discordEditedTimestamp: null,
+        discordMessageId: messageId(14),
+    };
+    const decryptedAttachmentMessage = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, attachmentMessageInput);
+    expectStatus(decryptedAttachmentMessage, "decrypted", "Bob authenticates the attachment bundle descriptor");
+    assert.equal(decryptedAttachmentMessage.plaintext, "");
+    assert.equal(decryptedAttachmentMessage.attachmentBundle?.count, 2);
+    const invalidAttachmentUrl = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, {
+        ...attachmentMessageInput,
+        attachments: [{
+            id: messageId(101),
+            proxyUrl: "https://example.com/not-discord",
+            size: 100,
+            url: "https://example.com/not-discord",
+        }],
+    });
+    expectStatus(invalidAttachmentUrl, "invalid_input", "native attachment downloads reject non-Discord origins");
+    const oneOfTwoAttachments = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, {
+        ...attachmentMessageInput,
+        attachments: [{
+            id: messageId(101),
+            proxyUrl: `https://media.discordapp.net/attachments/${DM_CHANNEL_ID}/${messageId(101)}/pc-test.pcaf`,
+            size: 100,
+            url: `https://cdn.discordapp.com/attachments/${DM_CHANNEL_ID}/${messageId(101)}/pc-test.pcaf`,
+        }],
+    });
+    expectStatus(oneOfTwoAttachments, "invalid_message", "missing ciphertext attachments fail before any download");
 
     decrypted = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, bobDmInput);
     expectStatus(decrypted, "decrypted", "exact message rerender is idempotent");
@@ -684,6 +803,11 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     }
 
     const freshlyLoaded = await loadNative(bundlePath, dataDir);
+    expectStatus(
+        await freshlyLoaded.setScreenCaptureProtection(DISCORD_EVENT, true),
+        "applied",
+        "fresh native bundle protects its windows before decrypting",
+    );
     const durableCounter = await freshlyLoaded.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
         plaintext: "counter after fresh module load",
         snapshot: aliceDm,
