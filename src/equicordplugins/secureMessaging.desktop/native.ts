@@ -13,6 +13,16 @@ import { dirname, join, resolve } from "path";
 import { setTimeout as delay } from "timers/promises";
 
 import {
+    type AttachmentBundleDescriptor,
+    attachmentBundleRoot,
+    type AttachmentMetadata,
+    decryptAttachmentBytes,
+    MAX_ATTACHMENT_CIPHERTEXT_BYTES,
+    MAX_ATTACHMENT_COUNT,
+    MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES,
+    parseSecurePlaintext,
+} from "./attachments";
+import {
     createKeyAnnouncement,
     decryptMessage as decryptProtocolMessage,
     encryptMessage as encryptProtocolMessage,
@@ -42,7 +52,8 @@ export type NativeFailure =
     | { status: "unavailable"; reason: VaultUnavailableReason; }
     | {
         status: "failed";
-        error: "capacity_exceeded" | "counter_exhausted" | "cryptographic_operation_failed" | "message_too_long" | "storage_error";
+        error: "attachment_download_failed" | "attachment_too_large" | "capacity_exceeded" | "counter_exhausted" |
+        "cryptographic_operation_failed" | "message_too_long" | "storage_error";
     };
 
 export interface IdentitySummary {
@@ -103,6 +114,17 @@ export interface DecryptIncomingInput {
     discordMessageId: string;
 }
 
+export interface EncryptedAttachmentReference {
+    id: string;
+    proxyUrl: string;
+    size: number;
+    url: string;
+}
+
+export interface DecryptIncomingAttachmentsInput extends DecryptIncomingInput {
+    attachments: EncryptedAttachmentReference[];
+}
+
 export type ParticipantSummary =
     | { status: "key_changed"; identity: IdentitySummary; }
     | { status: "trusted"; identity: IdentitySummary; }
@@ -134,7 +156,22 @@ export type EncryptOutgoingResult =
     | NativeFailure;
 
 export type DecryptIncomingResult =
-    | { status: "decrypted"; plaintext: string; counter: number; envelopeId: string; }
+    | {
+        status: "decrypted";
+        attachmentBundle: AttachmentBundleDescriptor | null;
+        plaintext: string;
+        counter: number;
+        envelopeId: string;
+    }
+    | { status: "invalid_message" | "replay_detected" | "untrusted_author"; }
+    | NativeFailure;
+
+export type DecryptIncomingAttachmentsResult =
+    | {
+        status: "decrypted";
+        attachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }>;
+        plaintext: string;
+    }
     | { status: "invalid_message" | "replay_detected" | "untrusted_author"; }
     | NativeFailure;
 
@@ -258,6 +295,9 @@ const ALLOWED_RENDERER_ORIGINS = new Set([
     "https://discord.com",
     "https://ptb.discord.com",
 ]);
+const ALLOWED_ATTACHMENT_HOSTS = new Set(["cdn.discordapp.com", "media.discordapp.net"]);
+const ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 60_000;
+const MAX_ATTACHMENT_REDIRECTS = 3;
 
 const pendingReviews = new Map<string, PendingReview>();
 const volatileQuarantines = new Map<string, number>();
@@ -1051,6 +1091,114 @@ function validateDecryptInput(value: unknown): ValidationResult<DecryptIncomingI
     };
 }
 
+function validateAttachmentUrl(value: string, channelId: string, attachmentId: string): URL | null {
+    if (value.length < 1 || value.length > 2_048) return null;
+    let url: URL;
+    try {
+        url = new URL(value);
+    } catch {
+        return null;
+    }
+    if (url.protocol !== "https:" || url.username || url.password || url.port || !ALLOWED_ATTACHMENT_HOSTS.has(url.hostname)) return null;
+    const match = /^\/attachments\/(\d{17,20})\/(\d{17,20})\/[^/]{1,512}$/u.exec(url.pathname);
+    return match?.[1] === channelId && match[2] === attachmentId ? url : null;
+}
+
+function validateDecryptAttachmentsInput(value: unknown): ValidationResult<DecryptIncomingAttachmentsInput> {
+    if (!isRecord(value) || !hasExactKeys(value, [
+        "attachments", "channelId", "content", "discordAuthorId", "discordEditedTimestamp", "discordMessageId",
+    ]) || !Array.isArray(value.attachments))
+        return { ok: false, error: "Invalid encrypted Discord attachment details" };
+    const message = validateDecryptInput({
+        channelId: value.channelId,
+        content: value.content,
+        discordAuthorId: value.discordAuthorId,
+        discordEditedTimestamp: value.discordEditedTimestamp,
+        discordMessageId: value.discordMessageId,
+    });
+    if (!message.ok) return message;
+    if (value.attachments.length < 1 || value.attachments.length > MAX_ATTACHMENT_COUNT)
+        return { ok: false, error: `attachments must contain 1 to ${MAX_ATTACHMENT_COUNT} Discord attachments` };
+    const attachments: EncryptedAttachmentReference[] = [];
+    let totalSize = 0;
+    for (const attachment of value.attachments) {
+        if (!isRecord(attachment) || !hasExactKeys(attachment, ["id", "proxyUrl", "size", "url"]) ||
+            !isSnowflake(attachment.id) || typeof attachment.url !== "string" || typeof attachment.proxyUrl !== "string" ||
+            !Number.isSafeInteger(attachment.size) || (attachment.size as number) < 21 ||
+            (attachment.size as number) > MAX_ATTACHMENT_CIPHERTEXT_BYTES ||
+            !validateAttachmentUrl(attachment.url, message.value.channelId, attachment.id) ||
+            !validateAttachmentUrl(attachment.proxyUrl, message.value.channelId, attachment.id))
+            return { ok: false, error: "Invalid encrypted Discord attachment reference" };
+        totalSize += attachment.size as number;
+        if (totalSize > MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES)
+            return { ok: false, error: "Encrypted Discord attachments exceed the total size limit" };
+        attachments.push({
+            id: attachment.id,
+            proxyUrl: attachment.proxyUrl,
+            size: attachment.size as number,
+            url: attachment.url,
+        });
+    }
+    return { ok: true, value: { ...message.value, attachments } };
+}
+
+async function downloadAttachmentUrl(initialUrl: URL, expectedSize: number, channelId: string, attachmentId: string): Promise<Uint8Array> {
+    let current = initialUrl;
+    for (let redirect = 0; redirect <= MAX_ATTACHMENT_REDIRECTS; redirect++) {
+        const response = await fetch(current, {
+            redirect: "manual",
+            signal: AbortSignal.timeout(ATTACHMENT_DOWNLOAD_TIMEOUT_MS),
+        });
+        if ([301, 302, 303, 307, 308].includes(response.status)) {
+            const location = response.headers.get("location");
+            const next = location ? validateAttachmentUrl(new URL(location, current).toString(), channelId, attachmentId) : null;
+            if (!next || redirect === MAX_ATTACHMENT_REDIRECTS) throw new Error("Unsafe encrypted attachment redirect");
+            current = next;
+            continue;
+        }
+        if (!response.ok || !response.body) throw new Error("Encrypted attachment download failed");
+        const declaredLength = response.headers.get("content-length");
+        if (declaredLength !== null && Number(declaredLength) !== expectedSize)
+            throw new Error("Encrypted attachment length changed");
+        const chunks: Uint8Array[] = [];
+        const reader = response.body.getReader();
+        let length = 0;
+        while (true) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            length += chunk.value.byteLength;
+            if (length > expectedSize) {
+                await reader.cancel();
+                throw new Error("Encrypted attachment exceeded its declared size");
+            }
+            chunks.push(chunk.value);
+        }
+        if (length !== expectedSize) throw new Error("Encrypted attachment was truncated");
+        const result = new Uint8Array(length);
+        let offset = 0;
+        for (const chunk of chunks) {
+            result.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+        return result;
+    }
+    throw new Error("Encrypted attachment redirected too many times");
+}
+
+async function downloadEncryptedAttachment(reference: EncryptedAttachmentReference, channelId: string): Promise<Uint8Array> {
+    const urls = [reference.url, reference.proxyUrl];
+    for (const value of urls) {
+        const url = validateAttachmentUrl(value, channelId, reference.id);
+        if (!url) continue;
+        try {
+            return await downloadAttachmentUrl(url, reference.size, channelId, reference.id);
+        } catch {
+            continue;
+        }
+    }
+    throw new Error("Encrypted attachment download failed");
+}
+
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
     return left.length === right.length && left.every((value, index) => value === right[index]);
 }
@@ -1814,19 +1962,24 @@ export async function decryptIncoming(
         }
 
         let plaintext: string | null = null;
+        let attachmentBundle: AttachmentBundleDescriptor | null = null;
         for (const identity of localIdentities) {
             try {
-                plaintext = (await decryptProtocolMessage({
+                const decrypted = await decryptProtocolMessage({
                     channelId: checkedInput.value.channelId,
                     content: checkedInput.value.content,
                     discordAuthorId: checkedInput.value.discordAuthorId,
                     identity,
                     localUserId: user.value,
                     senderIdentity,
-                })).plaintext;
+                });
+                const securePlaintext = parseSecurePlaintext(decrypted.plaintext);
+                plaintext = securePlaintext.text;
+                attachmentBundle = securePlaintext.attachments;
                 break;
             } catch {
                 plaintext = null;
+                attachmentBundle = null;
             }
         }
         if (plaintext === null) return { status: "invalid_message" };
@@ -1834,10 +1987,10 @@ export async function decryptIncoming(
         const contentDigest = createHash("sha256").update(checkedInput.value.content, "utf8").digest("base64url");
         const collisions = context.account.replayCache.filter(replay => replayCollides(replay, checkedInput.value, envelope));
         if (collisions.some(replay => replayMatches(replay, checkedInput.value, envelope, contentDigest)))
-            return { status: "decrypted", plaintext, counter: envelope.q, envelopeId: envelope.i };
+            return { status: "decrypted", plaintext, attachmentBundle, counter: envelope.q, envelopeId: envelope.i };
         if (checkedInput.value.discordAuthorId === user.value &&
             collisions.some(replay => replayEnvelopeMatches(replay, checkedInput.value, envelope, contentDigest)))
-            return { status: "decrypted", plaintext, counter: envelope.q, envelopeId: envelope.i };
+            return { status: "decrypted", plaintext, attachmentBundle, counter: envelope.q, envelopeId: envelope.i };
         if (collisions.length > 0) return { status: "replay_detected" };
 
         context.account.replayCache.push({
@@ -1853,6 +2006,58 @@ export async function decryptIncoming(
         if (context.account.replayCache.length > MAX_REPLAY_RECORDS)
             context.account.replayCache.splice(0, context.account.replayCache.length - MAX_REPLAY_RECORDS);
         await saveVault(context.vault);
-        return { status: "decrypted", plaintext, counter: envelope.q, envelopeId: envelope.i };
+        return { status: "decrypted", plaintext, attachmentBundle, counter: envelope.q, envelopeId: envelope.i };
     });
+}
+
+export async function decryptIncomingAttachments(
+    event: IpcMainInvokeEvent,
+    localUserId: string,
+    input: DecryptIncomingAttachmentsInput,
+): Promise<DecryptIncomingAttachmentsResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    const user = validateLocalUserId(localUserId);
+    if (!user.ok) return invalidInput(user.error);
+    const checkedInput = validateDecryptAttachmentsInput(input);
+    if (!checkedInput.ok) return invalidInput(checkedInput.error);
+    const { attachments, ...message } = checkedInput.value;
+    const decrypted = await decryptIncoming(event, user.value, message);
+    if (decrypted.status !== "decrypted") return decrypted;
+    if (!decrypted.attachmentBundle || decrypted.attachmentBundle.count !== attachments.length)
+        return { status: "invalid_message" };
+
+    let ciphertexts: Uint8Array[];
+    try {
+        ciphertexts = await Promise.all(attachments.map(attachment => downloadEncryptedAttachment(attachment, message.channelId)));
+    } catch {
+        return { status: "failed", error: "attachment_download_failed" };
+    }
+
+    const bundle = decrypted.attachmentBundle;
+    try {
+        if (await attachmentBundleRoot(bundle.id, ciphertexts) !== bundle.root) return { status: "invalid_message" };
+        const masterKey = decodeBase64Url(bundle.key, 32);
+        try {
+            const resolved = await Promise.all(ciphertexts.map(async (ciphertext, index) => ({
+                id: attachments[index].id,
+                ...await decryptAttachmentBytes({
+                    bundleId: bundle.id,
+                    channelId: message.channelId,
+                    ciphertext,
+                    count: bundle.count,
+                    index,
+                    masterKey,
+                    senderUserId: message.discordAuthorId,
+                }),
+            })));
+            return { status: "decrypted", plaintext: decrypted.plaintext, attachments: resolved };
+        } finally {
+            masterKey.fill(0);
+        }
+    } catch {
+        return { status: "invalid_message" };
+    } finally {
+        for (const ciphertext of ciphertexts) ciphertext.fill(0);
+    }
 }
