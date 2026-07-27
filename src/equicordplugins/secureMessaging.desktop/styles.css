@@ -8,6 +8,21 @@
     display: none;
 }
 
+[id^="chat-messages-"]:has(.pc-secure-content-hidden) [id^="message-accessories-"] > :not(.pc-secure-card),
+.pc-secure-screenshot-mode [id^="chat-messages-"]:has(.pc-secure-replaces-content) [id^="message-accessories-"] > :not(.pc-secure-card) {
+    display: none;
+}
+
+.pc-secure-screenshot-mode .pc-secure-message > * {
+    display: none;
+}
+
+.pc-secure-screenshot-mode .pc-secure-message::after {
+    content: "Encrypted message hidden while screenshots are allowed.";
+    color: var(--text-muted);
+    font-size: 0.875rem;
+}
+
 .pc-secure-card {
     box-sizing: border-box;
     max-width: min(42rem, 100%);

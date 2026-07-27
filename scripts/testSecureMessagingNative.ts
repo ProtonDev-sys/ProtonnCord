@@ -73,7 +73,12 @@ interface HarnessRuntime {
 
 interface HarnessWindow {
     failWhen?: boolean;
+    scripts: string[];
     values: boolean[];
+    webContents: {
+        fail?: boolean;
+        executeJavaScript(script: string): Promise<void>;
+    };
     setContentProtection(enabled: boolean): void;
 }
 
@@ -83,6 +88,26 @@ interface HarnessGlobal {
 
 const harnessGlobal = globalThis as typeof globalThis & HarnessGlobal;
 const protector = new AuthenticatedProtector();
+
+function captureWindow(failWhen?: boolean): HarnessWindow {
+    const scripts: string[] = [];
+    const webContents: HarnessWindow["webContents"] = {
+        async executeJavaScript(script) {
+            scripts.push(script);
+            if (this.fail) throw new Error("Injected encrypted-content visibility failure");
+        },
+    };
+    return {
+        failWhen,
+        scripts,
+        values: [],
+        webContents,
+        setContentProtection(enabled) {
+            this.values.push(enabled);
+            if (this.failWhen === enabled) throw new Error("Injected screen-capture protection failure");
+        },
+    };
+}
 
 function discordEvent(url: string): IpcMainInvokeEvent {
     return {
@@ -336,18 +361,8 @@ async function testInvalidInputs(native: NativeModule): Promise<void> {
 }
 
 async function testScreenCaptureProtection(native: NativeModule): Promise<void> {
-    const primary: HarnessWindow = {
-        values: [],
-        setContentProtection(enabled) {
-            this.values.push(enabled);
-            if (this.failWhen === enabled) throw new Error("Injected screen-capture protection failure");
-        },
-    };
-    const failing: HarnessWindow = {
-        failWhen: true,
-        values: [],
-        setContentProtection: primary.setContentProtection,
-    };
+    const primary = captureWindow();
+    const failing = captureWindow(true);
     const runtime = harnessGlobal.__secureMessagingNativeHarness;
     runtime.browserWindows = [primary, failing];
 
@@ -356,6 +371,7 @@ async function testScreenCaptureProtection(native: NativeModule): Promise<void> 
     assert.equal(failedEnable.error, "screen_capture_protection_failed");
     assert.deepEqual(primary.values, [true, false], "a partial enable is rolled back on every reachable window");
     assert.deepEqual(failing.values, [true, false], "the failing window also receives the safe rollback attempt");
+    assert.ok(primary.scripts.at(-1)?.includes("classList.add"), "an unprotected rollback hides encrypted DOM content");
 
     failing.failWhen = undefined;
     runtime.browserWindows = [primary];
@@ -363,19 +379,17 @@ async function testScreenCaptureProtection(native: NativeModule): Promise<void> 
     expectStatus(enabled, "applied", "screen-capture protection enables after the injected failure clears");
     assert.equal(enabled.enabled, true);
     assert.equal(enabled.windowCount, 1);
+    assert.ok(primary.scripts.at(-1)?.includes("classList.remove"), "encrypted DOM content is revealed only after protection succeeds");
     assert.equal(runtime.appListeners?.filter(([event]) => event === "browser-window-created").length, 1, "future-window hook installs once");
 
-    const futureWindow: HarnessWindow = { values: [], setContentProtection: primary.setContentProtection };
+    const futureWindow = captureWindow();
     const windowHook = runtime.appListeners?.find(([event]) => event === "browser-window-created")?.[1];
     assert.ok(windowHook, "future-window protection hook is registered");
     windowHook({}, futureWindow);
     assert.deepEqual(futureWindow.values, [true], "a future window is protected before it can display decrypted content");
+    assert.ok(futureWindow.scripts.at(-1)?.includes("classList.remove"), "a protected future window is not left in screenshot mode");
 
-    const failingFutureWindow: HarnessWindow = {
-        failWhen: true,
-        values: [],
-        setContentProtection: primary.setContentProtection,
-    };
+    const failingFutureWindow = captureWindow(true);
     runtime.browserWindows = [primary, failingFutureWindow];
     windowHook({}, failingFutureWindow);
     assert.equal(primary.values.at(-1), true, "a future-window failure preserves protection on existing windows");
@@ -392,7 +406,9 @@ async function testScreenCaptureProtection(native: NativeModule): Promise<void> 
     runtime.browserWindows = [primary];
     expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, true), "applied", "protection recovers after a future-window failure");
     expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, false), "applied", "screen-capture protection disables cleanly");
+    assert.ok(primary.scripts.at(-1)?.includes("classList.add"), "screenshot mode hides encrypted DOM content before capture is enabled");
     expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, true), "applied", "screen-capture protection re-enables serially");
+    assert.ok(primary.scripts.at(-1)?.includes("classList.remove"), "capture protection is restored before encrypted DOM content is revealed");
     assert.equal(runtime.appListeners?.filter(([event]) => event === "browser-window-created").length, 1, "re-enabling does not duplicate hooks");
 }
 
