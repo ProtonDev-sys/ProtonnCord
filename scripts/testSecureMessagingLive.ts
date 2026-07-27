@@ -346,6 +346,33 @@ async function waitForScreenCaptureProtection(page: Page): Promise<string> {
     return page.evaluate(() => (globalThis as any).Vencord.Plugins.plugins.SecureMessaging.getScreenCaptureProtectionStatus());
 }
 
+async function verifyScreenshotMode(page: Page, message: RawDiscordMessage, plaintext: string) {
+    return page.evaluate(async ({ message, plaintext }) => {
+        const plugin = (globalThis as any).Vencord?.Plugins?.plugins?.SecureMessaging;
+        if (!plugin || typeof plugin.setScreenshotMode !== "function")
+            throw new Error("SecureMessaging screenshot mode is unavailable");
+        let screenshotModeEnabled = false;
+        try {
+            screenshotModeEnabled = await plugin.setScreenshotMode(true);
+            if (!screenshotModeEnabled) throw new Error("SecureMessaging refused to enable screenshot mode");
+            await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+            const row = document.getElementById(`chat-messages-${message.channelId}-${message.id}`);
+            const attachmentSiblings = row?.querySelectorAll<HTMLElement>('[id^="message-accessories-"] > :not(.pc-secure-card)') ?? [];
+            return {
+                attachmentPixelsHidden: [...attachmentSiblings].every(element => getComputedStyle(element).display === "none"),
+                encryptedPlaceholderVisible: row?.innerText.includes("Screenshot mode is on") ?? false,
+                rootCaptureClassApplied: document.documentElement.classList.contains("pc-secure-screenshot-mode"),
+                plaintextHidden: !(row?.innerText ?? "").includes(plaintext),
+            };
+        } finally {
+            if (screenshotModeEnabled || plugin.getScreenCaptureProtectionStatus?.() === "failed") {
+                const restored = await plugin.setScreenshotMode(false);
+                if (!restored) throw new Error("SecureMessaging did not restore screen-capture protection");
+            }
+        }
+    }, { message, plaintext });
+}
+
 async function assertPersistedProtectionAndMissingChannelFailClosed(page: Page): Promise<{
     channelStoreRestored: boolean;
     missingChannelBlocked: boolean;
@@ -1133,6 +1160,13 @@ async function main(): Promise<void> {
         assert.equal(attachmentRenderProof.imageHeight, 3, "Discord's native image renderer must decode the original height");
         assert.equal(attachmentRenderProof.rawEncryptedFilenameHidden, true, "the opaque Discord filename must not be shown to the user");
 
+        const screenshotModeProof = await verifyScreenshotMode(page, attachmentSend.message, attachmentPlaintext);
+        assert.equal(screenshotModeProof.rootCaptureClassApplied, true, "screenshot mode must apply its capture-safe root class before releasing OS protection");
+        assert.equal(screenshotModeProof.plaintextHidden, true, "screenshot mode must hide decrypted text");
+        assert.equal(screenshotModeProof.attachmentPixelsHidden, true, "screenshot mode must hide decrypted attachment pixels");
+        assert.equal(screenshotModeProof.encryptedPlaceholderVisible, true, "screenshot mode must leave a clear protected placeholder");
+        assert.equal(await waitForScreenCaptureProtection(page), "ready", "screen-capture protection must restore after the screenshot-mode proof");
+
         const rejectionProof = await verifyNativeRejectionPaths(page, runtimeProof.message, runtimePlaintext);
         assert.equal(rejectionProof.exactStatus, "decrypted", "an exact React rerender must remain idempotent");
         assert.equal(rejectionProof.exactPlaintext, rejectionProof.expectedPlaintext);
@@ -1171,6 +1205,7 @@ async function main(): Promise<void> {
             rendererPlaintextVerified: renderProof.plaintextVisible && renderProof.verifiedHeader,
             senderIdReplacementAccepted: rejectionProof.senderIdReplacementStatus === "decrypted",
             screenCaptureProtection,
+            screenshotMode: screenshotModeProof,
             restGuard: {
                 decryptedBySelectedRecipient: restDecrypted.plaintext === restPlaintext,
                 messageId: restMessage.id,
