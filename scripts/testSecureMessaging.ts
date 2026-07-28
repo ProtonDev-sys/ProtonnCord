@@ -325,8 +325,33 @@ async function main(): Promise<void> {
     assert.deepEqual(parseSecurePlaintext(securePlaintext), {
         text: "message with files",
         attachments: { ...bundleMaterial.descriptor, root: attachmentRoot },
+        stickers: [],
     });
-    assert.deepEqual(parseSecurePlaintext("legacy message"), { text: "legacy message", attachments: null });
+    assert.deepEqual(parseSecurePlaintext("legacy message"), { text: "legacy message", attachments: null, stickers: [] });
+    const sticker = { formatType: 3, id: "749054660769218631", name: "Wave" };
+    assert.deepEqual(parseSecurePlaintext(serializeSecurePlaintext("", null, [sticker])), {
+        text: "",
+        attachments: null,
+        stickers: [sticker],
+    }, "sticker metadata round-trips through the authenticated rich-content payload");
+    assert.deepEqual(parseSecurePlaintext(serializeSecurePlaintext("sticker and file", {
+        ...bundleMaterial.descriptor,
+        root: attachmentRoot,
+    }, [sticker])), {
+        text: "sticker and file",
+        attachments: { ...bundleMaterial.descriptor, root: attachmentRoot },
+        stickers: [sticker],
+    }, "stickers compose with encrypted attachment descriptors");
+    assert.deepEqual(parseSecurePlaintext(serializeSecurePlaintext("PCER1:literal text")), {
+        text: "PCER1:literal text",
+        attachments: null,
+        stickers: [],
+    }, "rich-content prefix collisions round-trip as ordinary text");
+    assert.throws(
+        () => serializeSecurePlaintext("", null, [sticker, sticker]),
+        /duplicates/,
+        "duplicate sticker IDs are rejected",
+    );
     const openedAttachment = await decryptAttachmentBytes({
         bundleId: bundleMaterial.descriptor.id,
         channelId: CHANNEL_ID,

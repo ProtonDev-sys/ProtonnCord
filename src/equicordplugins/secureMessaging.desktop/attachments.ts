@@ -7,10 +7,12 @@
 import { decodeBase64Url, encodeBase64Url, isSnowflake } from "./protocol";
 
 export const ATTACHMENT_PAYLOAD_PREFIX = "PCEA1:";
+export const RICH_CONTENT_PAYLOAD_PREFIX = "PCER1:";
 export const ENCRYPTED_ATTACHMENT_EXTENSION = ".pcaf";
 export const MAX_ATTACHMENT_COUNT = 10;
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_BYTES = 200 * 1024 * 1024;
+export const MAX_STICKER_COUNT = 3;
 
 const ATTACHMENT_VERSION = 1 as const;
 const BASE64URL_16 = /^[A-Za-z0-9_-]{22}$/u;
@@ -40,7 +42,14 @@ export interface AttachmentMetadata {
 
 export interface SecurePlaintext {
     attachments: AttachmentBundleDescriptor | null;
+    stickers: SecureStickerItem[];
     text: string;
+}
+
+export interface SecureStickerItem {
+    formatType: number;
+    id: string;
+    name: string;
 }
 
 interface SerializedAttachmentMetadata {
@@ -66,6 +75,14 @@ interface SerializedSecurePlaintext {
     };
 }
 
+interface SerializedRichSecurePlaintext extends SerializedSecurePlaintext {
+    s: Array<{
+        i: string;
+        n: string;
+        f: number;
+    }>;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -74,6 +91,23 @@ function hasExactKeys(value: Record<string, unknown>, expected: readonly string[
     const actual = Object.keys(value).sort();
     const sortedExpected = [...expected].sort();
     return actual.length === sortedExpected.length && actual.every((key, index) => key === sortedExpected[index]);
+}
+
+function validateSticker(sticker: SecureStickerItem): void {
+    if (!isSnowflake(sticker.id) || typeof sticker.name !== "string" || sticker.name.length < 1 ||
+        sticker.name.length > 100 || sticker.name.includes("\0") ||
+        !Number.isInteger(sticker.formatType) || sticker.formatType < 1 || sticker.formatType > 4)
+        throw new Error("Secure sticker item is invalid");
+}
+
+function validateStickers(stickers: SecureStickerItem[]): void {
+    if (!Array.isArray(stickers) || stickers.length > MAX_STICKER_COUNT) throw new Error("Secure sticker list is invalid");
+    const ids = new Set<string>();
+    for (const sticker of stickers) {
+        validateSticker(sticker);
+        if (ids.has(sticker.id)) throw new Error("Secure sticker list contains duplicates");
+        ids.add(sticker.id);
+    }
 }
 
 function concatBytes(...values: Uint8Array[]): Uint8Array {
@@ -346,29 +380,45 @@ export async function attachmentBundleRoot(bundleId: string, ciphertexts: Uint8A
     return encodeBase64Url(root);
 }
 
-export function serializeSecurePlaintext(text: string, attachments: AttachmentBundleDescriptor | null = null): string {
+export function serializeSecurePlaintext(
+    text: string,
+    attachments: AttachmentBundleDescriptor | null = null,
+    stickers: SecureStickerItem[] = [],
+): string {
     if (typeof text !== "string" || text.length > 2_000) throw new Error("Secure message text is invalid");
-    if (attachments === null && !text.startsWith(ATTACHMENT_PAYLOAD_PREFIX)) return text;
+    validateStickers(stickers);
+    if (attachments === null && stickers.length === 0 &&
+        !text.startsWith(ATTACHMENT_PAYLOAD_PREFIX) && !text.startsWith(RICH_CONTENT_PAYLOAD_PREFIX)) return text;
     if (attachments) validateBundleDescriptor(attachments);
     const value: SerializedSecurePlaintext = {
         v: ATTACHMENT_VERSION,
         m: text,
         a: attachments ? { i: attachments.id, k: attachments.key, c: attachments.count, r: attachments.root } : null,
     };
+    if (stickers.length > 0) {
+        const richValue: SerializedRichSecurePlaintext = {
+            ...value,
+            s: stickers.map(sticker => ({ i: sticker.id, n: sticker.name, f: sticker.formatType })),
+        };
+        return `${RICH_CONTENT_PAYLOAD_PREFIX}${JSON.stringify(richValue)}`;
+    }
     return `${ATTACHMENT_PAYLOAD_PREFIX}${JSON.stringify(value)}`;
 }
 
 export function parseSecurePlaintext(value: string): SecurePlaintext {
     if (typeof value !== "string") throw new Error("Secure plaintext is invalid");
-    if (!value.startsWith(ATTACHMENT_PAYLOAD_PREFIX)) return { text: value, attachments: null };
+    const rich = value.startsWith(RICH_CONTENT_PAYLOAD_PREFIX);
+    if (!rich && !value.startsWith(ATTACHMENT_PAYLOAD_PREFIX)) return { text: value, attachments: null, stickers: [] };
+    const prefix = rich ? RICH_CONTENT_PAYLOAD_PREFIX : ATTACHMENT_PAYLOAD_PREFIX;
     let parsed: unknown;
     try {
-        parsed = JSON.parse(value.slice(ATTACHMENT_PAYLOAD_PREFIX.length));
+        parsed = JSON.parse(value.slice(prefix.length));
     } catch {
-        throw new Error("Secure attachment payload is malformed");
+        throw new Error("Secure content payload is malformed");
     }
-    if (!isRecord(parsed) || !hasExactKeys(parsed, ["v", "m", "a"]) || parsed.v !== ATTACHMENT_VERSION || typeof parsed.m !== "string")
-        throw new Error("Secure attachment payload is invalid");
+    if (!isRecord(parsed) || !hasExactKeys(parsed, rich ? ["v", "m", "a", "s"] : ["v", "m", "a"]) ||
+        parsed.v !== ATTACHMENT_VERSION || typeof parsed.m !== "string")
+        throw new Error("Secure content payload is invalid");
     let attachments: AttachmentBundleDescriptor | null = null;
     if (parsed.a !== null) {
         if (!isRecord(parsed.a) || !hasExactKeys(parsed.a, ["i", "k", "c", "r"]) ||
@@ -378,12 +428,24 @@ export function parseSecurePlaintext(value: string): SecurePlaintext {
         attachments = { id: parsed.a.i, key: parsed.a.k, count: parsed.a.c, root: parsed.a.r };
         validateBundleDescriptor(attachments);
     }
-    const canonical: SerializedSecurePlaintext = {
+    const stickers: SecureStickerItem[] = [];
+    if (rich) {
+        if (!Array.isArray(parsed.s)) throw new Error("Secure sticker list is invalid");
+        for (const sticker of parsed.s) {
+            if (!isRecord(sticker) || !hasExactKeys(sticker, ["i", "n", "f"]) ||
+                typeof sticker.i !== "string" || typeof sticker.n !== "string" || typeof sticker.f !== "number")
+                throw new Error("Secure sticker item is invalid");
+            stickers.push({ id: sticker.i, name: sticker.n, formatType: sticker.f });
+        }
+        validateStickers(stickers);
+        if (stickers.length === 0) throw new Error("Secure rich content requires a sticker");
+    }
+    const canonical: SerializedSecurePlaintext | SerializedRichSecurePlaintext = {
         v: ATTACHMENT_VERSION,
         m: parsed.m,
         a: attachments ? { i: attachments.id, k: attachments.key, c: attachments.count, r: attachments.root } : null,
+        ...(rich ? { s: stickers.map(sticker => ({ i: sticker.id, n: sticker.name, f: sticker.formatType })) } : {}),
     };
-    if (JSON.stringify(canonical) !== value.slice(ATTACHMENT_PAYLOAD_PREFIX.length))
-        throw new Error("Secure attachment payload is not canonical");
-    return { text: parsed.m, attachments };
+    if (JSON.stringify(canonical) !== value.slice(prefix.length)) throw new Error("Secure content payload is not canonical");
+    return { text: parsed.m, attachments, stickers };
 }

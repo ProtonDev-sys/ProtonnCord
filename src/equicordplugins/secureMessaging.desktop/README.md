@@ -1,6 +1,6 @@
 # Secure Messaging
 
-Secure Messaging adds opt-in encrypted messages and ordinary file attachments to Discord DMs and group DMs. A conversation remains ordinary Discord until the local user verifies at least one participant key and explicitly enables encryption for a selected recipient set.
+Secure Messaging adds opt-in encrypted messages, stickers, GIF-picker links, and ordinary file attachments to Discord DMs and group DMs. A conversation remains ordinary Discord until the local user verifies at least one participant key and explicitly enables encryption for a selected recipient set.
 
 ## Protocol (version 1)
 
@@ -9,6 +9,7 @@ Secure Messaging adds opt-in encrypted messages and ordinary file attachments to
 - The content key is wrapped independently for every selected recipient, and for the sender, with RFC 9180 HPKE (`DHKEM(X25519, HKDF-SHA256)`, HKDF-SHA256, AES-128-GCM).
 - The sender signs the complete canonical envelope with Ed25519. The signature binds the version, message UUID, Discord channel and author, timestamp, persistent counter, sender fingerprint, ordered recipient set, wrapped keys, nonce, and content ciphertext.
 - Every attached file is encrypted locally with an independently derived AES-256-GCM key and nonce. The signed message plaintext contains only a compact encrypted bundle descriptor; file bytes and private metadata stay in opaque Discord attachments. An ordered aggregate digest binds the exact ciphertext attachment set to the descriptor.
+- Sticker IDs, names, and formats are carried inside the authenticated encrypted payload and reconstructed only for Discord's local native sticker renderer. GIF-picker URLs are encrypted as message text and reconstructed through the native embed renderer.
 - The privileged native helper resolves recipients only through its persistent verified-key store. The receiver validates the Discord author/channel binding, pinned sender fingerprint, signature, AEAD tag, recipient entry, and persistent replay state before rendering plaintext.
 - Private key material and counters are stored in an encrypted vault protected by Electron `safeStorage`. The plugin refuses to operate if secure OS storage is unavailable, including Linux's `basic_text` backend.
 
@@ -26,7 +27,7 @@ The encrypted vault retains at most four retired local private identities and fo
 
 Version 1 is intentionally described as **non-ratcheting E2EE**. Static recipient-key compromise can expose previously recorded version 1 messages addressed to that key, and the protocol does not heal automatically after compromise. A future protocol upgrade should use an audited MLS implementation for forward secrecy and post-compromise security rather than adding a custom ratchet.
 
-The protocol does not hide Discord metadata such as channel membership, sender, timing, message and attachment ciphertext sizes, attachment counts, recipient identifiers, reply relationships, or traffic patterns. It does not encrypt stickers, GIF-picker sends, reactions, calls, or notifications. Those send paths are blocked where practical when a conversation is enabled. Discord retains the message and attachment ciphertext. The plugin refuses to decrypt until Electron has applied operating-system screen-capture protection to every Discord window, including future popouts. That mitigates compliant screenshot, recorder, and screenshare APIs; it cannot stop a camera, a modified build, or malicious endpoint code. A compromised endpoint, Discord renderer, malicious client plugin, keylogger, or clipboard monitor can still access plaintext while the user can see it.
+The protocol does not hide Discord metadata such as channel membership, sender, timing, message and attachment ciphertext sizes, attachment counts, recipient identifiers, reply relationships, or traffic patterns. It does not encrypt reactions, calls, or notifications. Normal link and GIF previews require disclosing the extracted URL to Discord's unfurl service, while displaying a sticker requests its asset ID from Discord's media CDN; the encrypted message body remains ciphertext. Unsupported send paths are blocked where practical when a conversation is enabled. Discord retains the message and attachment ciphertext. The plugin refuses to decrypt until Electron has applied operating-system screen-capture protection to every Discord window, including future popouts. That mitigates compliant screenshot, recorder, and screenshare APIs; it cannot stop a camera, a modified build, or malicious endpoint code. A compromised endpoint, Discord renderer, malicious client plugin, keylogger, or clipboard monitor can still access plaintext while the user can see it.
 
 ## Operational rules
 
