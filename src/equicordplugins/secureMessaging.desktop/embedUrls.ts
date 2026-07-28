@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-const MAX_EMBED_URLS = 5;
+const MAX_EMBED_URLS = 10;
 const MAX_EMBED_URL_LENGTH = 2_048;
 const URL_PATTERN = /https?:\/\/[^\s<>"'`]+/giu;
 const TRAILING_PUNCTUATION = /[),.!?;:\\}\]]+$/u;

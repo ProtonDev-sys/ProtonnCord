@@ -60,6 +60,7 @@ import {
     clearEncryptedEmbedCache,
     patchEncryptedMessageEmbeds,
     patchEncryptedMessageStickers,
+    prefetchEncryptedMessageEmbeds,
 } from "./embedCache";
 import { KeyReviewGate } from "./keyReviewGate";
 import { discordEditedTimestamp } from "./messageMetadata";
@@ -697,6 +698,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             return { cancel: true };
         }
 
+        void prefetchEncryptedMessageEmbeds(message.content);
         preparedAttachments?.apply();
         clearOutgoingStickers(options);
         const attachmentFilenames = preparedAttachments?.files.map(file => file.filename) ?? [];

@@ -22,7 +22,11 @@ const convertEmbed = findByCodeLazy(".uniqueId(\"embed_\")") as (
     embed: Record<string, unknown>,
 ) => Embed | null;
 const MAX_CACHE_ENTRIES = 256;
+const MAX_UNFURL_CACHE_ENTRIES = 128;
 const LOCAL_CONTENT_SCAN_VERSION = -1;
+const SUCCESSFUL_UNFURL_TTL = 30 * 60 * 1_000;
+const EMPTY_UNFURL_TTL = 30_000;
+const UNFURL_RETRY_DELAYS = [0, 250, 1_000, 3_000] as const;
 
 interface EmbedCacheEntry {
     embeds: Embed[];
@@ -32,7 +36,14 @@ interface EmbedCacheEntry {
     stickers: SecureStickerItem[];
 }
 
+interface UnfurlCacheEntry {
+    expiresAt: number;
+    lastAccess: number;
+    promise: Promise<Record<string, unknown>[]>;
+}
+
 const cache = new Map<string, EmbedCacheEntry>();
+const unfurlCache = new Map<string, UnfurlCacheEntry>();
 
 function cacheKey(message: Message): string {
     return `${message.channel_id}\0${message.id}\0${message.author?.id ?? ""}\0${discordEditedTimestamp(message) ?? ""}\0${message.content}`;
@@ -77,6 +88,70 @@ function pruneCache(protectedKey: string): void {
     }
 }
 
+function pruneUnfurlCache(protectedKey: string, now: number): void {
+    for (const [key, entry] of unfurlCache) {
+        if (key !== protectedKey && entry.expiresAt <= now) unfurlCache.delete(key);
+    }
+    while (unfurlCache.size > MAX_UNFURL_CACHE_ENTRIES) {
+        let oldest: [string, UnfurlCacheEntry] | null = null;
+        for (const value of unfurlCache) {
+            if (value[0] === protectedKey) continue;
+            if (!oldest || value[1].lastAccess < oldest[1].lastAccess) oldest = value;
+        }
+        if (!oldest) break;
+        unfurlCache.delete(oldest[0]);
+    }
+}
+
+async function requestUnfurl(url: string): Promise<Record<string, unknown>[]> {
+    for (const retryDelay of UNFURL_RETRY_DELAYS) {
+        if (retryDelay > 0) await new Promise(resolve => setTimeout(resolve, retryDelay));
+        try {
+            const response = await RestAPI.post({
+                url: Constants.Endpoints.UNFURL_EMBED_URLS,
+                body: { urls: [url] },
+                retries: 1,
+            });
+            const embeds = Array.isArray(response?.body?.embeds) ? response.body.embeds : [];
+            if (embeds.length > 0) return embeds;
+        } catch {
+            // Discord's unfurl service can be temporarily unavailable; retry without disturbing the message row.
+        }
+    }
+    return [];
+}
+
+function unfurlUrl(url: string): Promise<Record<string, unknown>[]> {
+    const now = Date.now();
+    const existing = unfurlCache.get(url);
+    if (existing && existing.expiresAt > now) {
+        existing.lastAccess = now;
+        return existing.promise;
+    }
+    if (existing) unfurlCache.delete(url);
+    const entry: UnfurlCacheEntry = {
+        expiresAt: Number.POSITIVE_INFINITY,
+        lastAccess: now,
+        promise: Promise.resolve([]),
+    };
+    entry.promise = requestUnfurl(url).then(embeds => {
+        if (unfurlCache.get(url) === entry) {
+            const settledAt = Date.now();
+            entry.expiresAt = settledAt + (embeds.length > 0 ? SUCCESSFUL_UNFURL_TTL : EMPTY_UNFURL_TTL);
+            entry.lastAccess = settledAt;
+            pruneUnfurlCache(url, settledAt);
+        }
+        return embeds;
+    });
+    unfurlCache.set(url, entry);
+    pruneUnfurlCache(url, now);
+    return entry.promise;
+}
+
+async function unfurlEmbeds(urls: string[]): Promise<Record<string, unknown>[]> {
+    return (await Promise.all(urls.map(unfurlUrl))).flat();
+}
+
 function finishEntry(key: string, entry: EmbedCacheEntry): void {
     if (cache.get(key) !== entry) return;
     entry.lastAccess = Date.now();
@@ -114,18 +189,8 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
         finishEntry(key, entry);
         return;
     }
-    let rawEmbeds: Record<string, unknown>[];
-    try {
-        // Matching Discord's native previews requires disclosing only the extracted URLs to its unfurl service.
-        const response = await RestAPI.post({
-            url: Constants.Endpoints.UNFURL_EMBED_URLS,
-            body: { urls },
-            retries: 2,
-        });
-        rawEmbeds = Array.isArray(response?.body?.embeds) ? response.body.embeds : [];
-    } catch {
-        rawEmbeds = [];
-    }
+    // Matching Discord's native previews requires disclosing only the extracted URLs to its unfurl service.
+    const rawEmbeds = await unfurlEmbeds(urls);
     const converted: Embed[] = [];
     for (const rawEmbed of rawEmbeds) {
         try {
@@ -182,4 +247,10 @@ export function patchEncryptedMessageStickers(message: Message, onReady: () => v
 
 export function clearEncryptedEmbedCache(): void {
     cache.clear();
+    unfurlCache.clear();
+}
+
+export async function prefetchEncryptedMessageEmbeds(plaintext: string): Promise<void> {
+    const urls = extractSecureEmbedUrls(plaintext);
+    if (urls.length > 0) await unfurlEmbeds(urls);
 }
