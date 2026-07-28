@@ -38,6 +38,7 @@ import {
 import {
     decodeBase64Url,
     type EncryptedEnvelope,
+    isEnvelopeId,
     isProtocolTimestamp,
     isSnowflake,
     MAX_DISCORD_MESSAGE_LENGTH,
@@ -466,7 +467,7 @@ function parseReplayRecord(value: unknown): ReplayRecord | null {
         "channelId", "contentDigest", "counter", "discordMessageId", "envelopeId", "seenAt", "senderFingerprint", "senderUserId",
     ]) || !isSnowflake(value.channelId) || !isEncodedKey(value.contentDigest, 32) ||
         !Number.isSafeInteger(value.counter) || (value.counter as number) < 1 || !isSnowflake(value.discordMessageId) ||
-        typeof value.envelopeId !== "string" || !UUID.test(value.envelopeId) || !isTimestamp(value.seenAt) ||
+        !isEnvelopeId(value.envelopeId) || !isTimestamp(value.seenAt) ||
         !isEncodedKey(value.senderFingerprint, 32) || !isSnowflake(value.senderUserId))
         return null;
     return {
@@ -1908,7 +1909,10 @@ export async function decryptIncoming(
 
         let envelope: EncryptedEnvelope;
         try {
-            envelope = parseEncryptedEnvelope(checkedInput.value.content);
+            envelope = parseEncryptedEnvelope(checkedInput.value.content, {
+                channelId: checkedInput.value.channelId,
+                discordAuthorId: checkedInput.value.discordAuthorId,
+            });
         } catch {
             return { status: "invalid_message" };
         }
