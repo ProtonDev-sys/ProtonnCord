@@ -16,6 +16,7 @@ import {
     generateAttachmentBundleMaterial,
     MAX_ATTACHMENT_COUNT,
     MAX_TOTAL_ATTACHMENT_BYTES,
+    type SecureStickerItem,
     serializeSecurePlaintext,
 } from "./attachments";
 
@@ -74,6 +75,7 @@ export async function prepareEncryptedAttachments(
     text: string,
     channelId: string,
     senderUserId: string,
+    stickers: SecureStickerItem[] = [],
 ): Promise<PreparedEncryptedAttachments> {
     if (uploads.length < 1 || uploads.length > MAX_ATTACHMENT_COUNT)
         throw new Error(`Secure Messaging supports 1 to ${MAX_ATTACHMENT_COUNT} attachments per message`);
@@ -129,7 +131,7 @@ export async function prepareEncryptedAttachments(
                 }
             },
             files: replacements.map(({ encryptedFile, filename }) => ({ filename, size: encryptedFile.size })),
-            plaintext: serializeSecurePlaintext(text, { ...descriptor, root }),
+            plaintext: serializeSecurePlaintext(text, { ...descriptor, root }, stickers),
         };
     } finally {
         keyBytes.fill(0);

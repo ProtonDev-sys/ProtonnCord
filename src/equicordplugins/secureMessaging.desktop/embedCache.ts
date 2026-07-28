@@ -9,6 +9,7 @@ import type { Embed, Message } from "@vencord/discord-types";
 import { findByCodeLazy } from "@webpack";
 import { Constants, RestAPI, UserStore } from "@webpack/common";
 
+import type { SecureStickerItem } from "./attachments";
 import { extractSecureEmbedUrls } from "./embedUrls";
 import { discordEditedTimestamp } from "./messageMetadata";
 import type { DecryptIncomingResult } from "./native";
@@ -28,6 +29,7 @@ interface EmbedCacheEntry {
     lastAccess: number;
     listeners: Set<() => void>;
     status: "loading" | "ready";
+    stickers: SecureStickerItem[];
 }
 
 const cache = new Map<string, EmbedCacheEntry>();
@@ -39,6 +41,16 @@ function cacheKey(message: Message): string {
 function cloneWithEmbeds(message: Message, embeds: Embed[]): Message {
     const clone = Object.assign(Object.create(Object.getPrototypeOf(message)), message) as Message;
     clone.embeds = embeds;
+    return clone;
+}
+
+function cloneWithStickers(message: Message, stickers: SecureStickerItem[]): Message {
+    const clone = Object.assign(Object.create(Object.getPrototypeOf(message)), message) as Message;
+    clone.stickerItems = stickers.map(sticker => ({
+        format_type: sticker.formatType,
+        id: sticker.id,
+        name: sticker.name,
+    }));
     return clone;
 }
 
@@ -65,11 +77,18 @@ function pruneCache(protectedKey: string): void {
     }
 }
 
+function finishEntry(key: string, entry: EmbedCacheEntry): void {
+    if (cache.get(key) !== entry) return;
+    entry.lastAccess = Date.now();
+    entry.status = "ready";
+    notify(entry);
+    pruneCache(key);
+}
+
 async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry): Promise<void> {
     const localUserId = UserStore.getCurrentUser()?.id;
     if (!localUserId || !message.author?.id) {
-        entry.status = "ready";
-        notify(entry);
+        finishEntry(key, entry);
         return;
     }
     let decrypted: DecryptIncomingResult;
@@ -82,19 +101,17 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
             discordMessageId: message.id,
         });
     } catch {
-        entry.status = "ready";
-        notify(entry);
+        finishEntry(key, entry);
         return;
     }
     if (decrypted.status !== "decrypted") {
-        entry.status = "ready";
-        notify(entry);
+        finishEntry(key, entry);
         return;
     }
+    entry.stickers = decrypted.stickers ?? [];
     const urls = extractSecureEmbedUrls(decrypted.plaintext);
     if (urls.length === 0) {
-        entry.status = "ready";
-        notify(entry);
+        finishEntry(key, entry);
         return;
     }
     let rawEmbeds: Record<string, unknown>[];
@@ -124,10 +141,7 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
     }
     if (cache.get(key) !== entry) return;
     entry.embeds = converted;
-    entry.lastAccess = Date.now();
-    entry.status = "ready";
-    notify(entry);
-    pruneCache(key);
+    finishEntry(key, entry);
 }
 
 function ensureEntry(message: Message): EmbedCacheEntry | null {
@@ -143,6 +157,7 @@ function ensureEntry(message: Message): EmbedCacheEntry | null {
         lastAccess: Date.now(),
         listeners: new Set(),
         status: "loading",
+        stickers: [],
     };
     cache.set(key, entry);
     void loadEntry(message, key, entry);
@@ -155,6 +170,14 @@ export function patchEncryptedMessageEmbeds(message: Message, onReady: () => voi
     if (!entry) return message;
     if (entry.status === "loading") entry.listeners.add(onReady);
     return cloneWithEmbeds(message, entry.status === "ready" ? entry.embeds : []);
+}
+
+export function patchEncryptedMessageStickers(message: Message, onReady: () => void, canDecrypt = true): Message {
+    if (!canDecrypt && isEncryptedMessage(message.content)) return cloneWithStickers(message, []);
+    const entry = ensureEntry(message);
+    if (!entry) return message;
+    if (entry.status === "loading") entry.listeners.add(onReady);
+    return cloneWithStickers(message, entry.status === "ready" ? entry.stickers : []);
 }
 
 export function clearEncryptedEmbedCache(): void {

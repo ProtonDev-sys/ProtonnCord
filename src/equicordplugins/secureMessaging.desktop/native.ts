@@ -21,6 +21,7 @@ import {
     MAX_ATTACHMENT_COUNT,
     MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES,
     parseSecurePlaintext,
+    type SecureStickerItem,
 } from "./attachments";
 import {
     createKeyAnnouncement,
@@ -164,6 +165,7 @@ export type DecryptIncomingResult =
         status: "decrypted";
         attachmentBundle: AttachmentBundleDescriptor | null;
         plaintext: string;
+        stickers: SecureStickerItem[];
         counter: number;
         envelopeId: string;
     }
@@ -1969,6 +1971,7 @@ export async function decryptIncoming(
 
         let plaintext: string | null = null;
         let attachmentBundle: AttachmentBundleDescriptor | null = null;
+        let stickers: SecureStickerItem[] = [];
         for (const identity of localIdentities) {
             try {
                 const decrypted = await decryptProtocolMessage({
@@ -1982,10 +1985,12 @@ export async function decryptIncoming(
                 const securePlaintext = parseSecurePlaintext(decrypted.plaintext);
                 plaintext = securePlaintext.text;
                 attachmentBundle = securePlaintext.attachments;
+                stickers = securePlaintext.stickers;
                 break;
             } catch {
                 plaintext = null;
                 attachmentBundle = null;
+                stickers = [];
             }
         }
         if (plaintext === null) return { status: "invalid_message" };
@@ -1993,10 +1998,10 @@ export async function decryptIncoming(
         const contentDigest = createHash("sha256").update(checkedInput.value.content, "utf8").digest("base64url");
         const collisions = context.account.replayCache.filter(replay => replayCollides(replay, checkedInput.value, envelope));
         if (collisions.some(replay => replayMatches(replay, checkedInput.value, envelope, contentDigest)))
-            return { status: "decrypted", plaintext, attachmentBundle, counter: envelope.q, envelopeId: envelope.i };
+            return { status: "decrypted", plaintext, attachmentBundle, stickers, counter: envelope.q, envelopeId: envelope.i };
         if (checkedInput.value.discordAuthorId === user.value &&
             collisions.some(replay => replayEnvelopeMatches(replay, checkedInput.value, envelope, contentDigest)))
-            return { status: "decrypted", plaintext, attachmentBundle, counter: envelope.q, envelopeId: envelope.i };
+            return { status: "decrypted", plaintext, attachmentBundle, stickers, counter: envelope.q, envelopeId: envelope.i };
         if (collisions.length > 0) return { status: "replay_detected" };
 
         context.account.replayCache.push({
@@ -2012,7 +2017,7 @@ export async function decryptIncoming(
         if (context.account.replayCache.length > MAX_REPLAY_RECORDS)
             context.account.replayCache.splice(0, context.account.replayCache.length - MAX_REPLAY_RECORDS);
         await saveVault(context.vault);
-        return { status: "decrypted", plaintext, attachmentBundle, counter: envelope.q, envelopeId: envelope.i };
+        return { status: "decrypted", plaintext, attachmentBundle, stickers, counter: envelope.q, envelopeId: envelope.i };
     });
 }
 

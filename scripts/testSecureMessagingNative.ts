@@ -659,6 +659,24 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     expectStatus(decryptedAttachmentMessage, "decrypted", "Bob authenticates the attachment bundle descriptor");
     assert.equal(decryptedAttachmentMessage.plaintext, "");
     assert.equal(decryptedAttachmentMessage.attachmentBundle?.count, 2);
+    assert.deepEqual(decryptedAttachmentMessage.stickers, []);
+    const secureSticker = { formatType: 3, id: "749054660769218631", name: "Wave" };
+    const encryptedStickerMessage = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        plaintext: serializeSecurePlaintext("", null, [secureSticker]),
+        snapshot: aliceDm,
+    });
+    expectStatus(encryptedStickerMessage, "encrypted", "Alice encrypts a sticker item");
+    const decryptedStickerMessage = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, {
+        channelId: DM_CHANNEL_ID,
+        content: encryptedStickerMessage.content,
+        discordAuthorId: ALICE_ID,
+        discordEditedTimestamp: null,
+        discordMessageId: messageId(15),
+    });
+    expectStatus(decryptedStickerMessage, "decrypted", "Bob authenticates encrypted sticker metadata");
+    assert.equal(decryptedStickerMessage.plaintext, "");
+    assert.equal(decryptedStickerMessage.attachmentBundle, null);
+    assert.deepEqual(decryptedStickerMessage.stickers, [secureSticker]);
     const invalidAttachmentUrl = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, {
         ...attachmentMessageInput,
         attachments: [{
