@@ -17,8 +17,13 @@ const MAX_CACHE_BYTES = 256 * 1024 * 1024;
 const MAX_CACHE_ENTRIES = 128;
 const SPOILER_FLAG = 8;
 const ANIMATED_FLAG = 32;
+// Discord treats a missing scan version as pending and can obscure media from non-friends.
+// E2EE plaintext cannot be scanned by Discord, so use its explicit local/unscanned sentinel
+// instead of misrepresenting the ciphertext attachment's scan as applying to decrypted bytes.
+const LOCAL_CONTENT_SCAN_VERSION = -1;
 
 interface ExtendedAttachment extends MessageAttachment {
+    content_scan_version?: number;
     description?: string;
     duration_secs?: number;
     flags?: number;
@@ -135,6 +140,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
         attachments.push({
             id: attachment.id,
             filename: metadata.name,
+            content_scan_version: LOCAL_CONTENT_SCAN_VERSION,
             content_type: metadata.mimeType || undefined,
             size: metadata.size,
             spoiler: metadata.spoiler,
