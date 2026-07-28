@@ -181,6 +181,11 @@ async function main(): Promise<void> {
         "https://cdn.example.com/image.PNG?size=2",
         "https://media.example.com/clip.webm",
     ]);
+    assert.equal(
+        extractSecureEmbedUrls(Array.from({ length: 12 }, (_, index) => `https://example.com/embed-${index}`).join(" ")).length,
+        10,
+        "encrypted messages preserve Discord's ten-embed limit",
+    );
     const reviewGate = new KeyReviewGate();
     reviewGate.begin(ALICE_ID, BOB_ID);
     reviewGate.fail(ALICE_ID, BOB_ID, "new-key-message");
