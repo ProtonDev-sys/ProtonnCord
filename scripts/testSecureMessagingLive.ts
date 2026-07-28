@@ -29,7 +29,7 @@ const EXPECTED_RECIPIENT_ID = "710514340855545878";
 // The announcement is never posted, so the fixture supplies stable Discord provenance without creating another live message.
 const SYNTHETIC_ANNOUNCEMENT_MESSAGE_ID = "1456074443980800000";
 const DEBUG_URL = process.env.DISCORD_DEBUG_URL ?? "http://127.0.0.1:9222";
-const ENCRYPTED_PREFIX = "PCEM1:";
+const ENCRYPTED_PREFIX = "PCEM2:";
 const DISPOSABLE_ACKNOWLEDGEMENT = "I_UNDERSTAND_THIS_IS_DISPOSABLE";
 const DISPOSABLE_FLAG_ENV = "PROTONN_CORD_SECURE_MESSAGING_LIVE_TEST";
 const DISPOSABLE_DATA_DIR_ENV = "PROTONN_CORD_SECURE_MESSAGING_LIVE_DATA_DIR";
@@ -391,7 +391,7 @@ async function verifyRenderedReplyPreview(
         const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
         const rowText = row?.innerText ?? "";
         return {
-            ciphertextHidden: !rowText.includes(ciphertext) && !rowText.includes("PCEM1:"),
+            ciphertextHidden: !rowText.includes(ciphertext) && !rowText.includes("PCEM1:") && !rowText.includes("PCEM2:"),
             plaintextVisible: rowText.includes(plaintext),
         };
     }, {
@@ -526,7 +526,7 @@ async function prepareThroughRuntimeMessageEvents(page: Page, plaintext: string)
     content: string;
     plaintextWasTransformed: boolean;
 }> {
-    return page.evaluate(async ({ channelId, plaintext }) => {
+    return page.evaluate(async ({ channelId, encryptedPrefix, plaintext }) => {
         const global = globalThis as any;
         const common = global.Vencord.Webpack.Common;
         const messageEvents = global.Vencord.Api?.MessageEvents;
@@ -566,9 +566,9 @@ async function prepareThroughRuntimeMessageEvents(page: Page, plaintext: string)
         return {
             cancelled: Boolean(cancelled),
             content: message.content,
-            plaintextWasTransformed: message.content !== plaintext && message.content.startsWith("PCEM1:"),
+            plaintextWasTransformed: message.content !== plaintext && message.content.startsWith(encryptedPrefix),
         };
-    }, { channelId: TEST_CHANNEL_ID, plaintext });
+    }, { channelId: TEST_CHANNEL_ID, encryptedPrefix: ENCRYPTED_PREFIX, plaintext });
 }
 
 async function sendAuthorizedRuntimePayload(page: Page, content: string): Promise<{
@@ -680,7 +680,7 @@ async function sendEncryptedAttachmentThroughRuntime(page: Page, plaintext: stri
     plaintextWasTransformed: boolean;
     wireContentLength: number;
 }> {
-    return page.evaluate(async ({ channelId, filename, plaintext, pngBase64, registryName }) => {
+    return page.evaluate(async ({ channelId, encryptedPrefix, filename, plaintext, pngBase64, registryName }) => {
         const global = globalThis as any;
         const common = global.Vencord.Webpack.Common;
         const messageEvents = global.Vencord.Api?.MessageEvents;
@@ -726,7 +726,7 @@ async function sendEncryptedAttachmentThroughRuntime(page: Page, plaintext: stri
         };
         const cancelled = await messageEvents._handlePreSend(channelId, message, options, props, contentOptions);
         if (cancelled) throw new Error("Secure Messaging cancelled a valid encrypted attachment send");
-        if (!message.content.startsWith("PCEM1:") || message.content.includes(plaintext))
+        if (!message.content.startsWith(encryptedPrefix) || message.content.includes(plaintext))
             throw new Error("Secure Messaging did not transform attachment-message plaintext before upload");
         if (!(upload.item.file instanceof File) || !upload.filename.endsWith(".pcaf") || upload.item.file.type !== "application/octet-stream")
             throw new Error("Secure Messaging did not replace the pending file with an opaque encrypted upload");
@@ -796,6 +796,7 @@ async function sendEncryptedAttachmentThroughRuntime(page: Page, plaintext: stri
         };
     }, {
         channelId: TEST_CHANNEL_ID,
+        encryptedPrefix: ENCRYPTED_PREFIX,
         filename: PROOF_PNG_FILENAME,
         plaintext,
         pngBase64: PROOF_PNG_BASE64,

@@ -28,6 +28,7 @@ import {
     isEncryptedMessage,
     isKeyAnnouncement,
     KEY_ANNOUNCEMENT_PREFIX,
+    LEGACY_ENCRYPTED_MESSAGE_PREFIX,
     MAX_DISCORD_MESSAGE_LENGTH,
     MAX_SELECTED_RECIPIENTS,
     parseEncryptedEnvelope,
@@ -60,7 +61,7 @@ const MALLORY_ID = "100000000000000004";
 const CHANNEL_ID = "200000000000000001";
 const OTHER_CHANNEL_ID = "200000000000000002";
 const NOW = 1_800_000_000_000;
-const MESSAGE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const MESSAGE_ID = "qqqqqqqqqqqqqqqqqqqqqg";
 
 type MutableJson = Record<string, any>;
 
@@ -151,10 +152,17 @@ function expectKeyParserFailure(value: unknown, label: string): void {
 
 function expectEnvelopeParserFailure(value: unknown, label: string): void {
     assert.throws(
-        () => parseEncryptedEnvelope(wirePayload(ENCRYPTED_MESSAGE_PREFIX, value)),
+        () => parseEncryptedEnvelope(wirePayload(ENCRYPTED_MESSAGE_PREFIX, value), {
+            channelId: CHANNEL_ID,
+            discordAuthorId: ALICE_ID,
+        }),
         isError,
         label,
     );
+}
+
+function parseTestEnvelope(content: string, channelId = CHANNEL_ID, discordAuthorId = ALICE_ID): EncryptedEnvelope {
+    return parseEncryptedEnvelope(content, { channelId, discordAuthorId });
 }
 
 function seededGarbage(seed: number, length: number): string {
@@ -332,6 +340,21 @@ async function main(): Promise<void> {
         attachments: { ...bundleMaterial.descriptor, root: attachmentRoot },
         stickers: [],
     });
+    const legacySecurePlaintext = `PCEA1:${JSON.stringify({
+        v: 1,
+        m: "message with files",
+        a: {
+            i: bundleMaterial.descriptor.id,
+            k: bundleMaterial.descriptor.key,
+            c: bundleMaterial.descriptor.count,
+            r: attachmentRoot,
+        },
+    })}`;
+    const attachmentPayloadBytesSaved = legacySecurePlaintext.length - securePlaintext.length;
+    assert.ok(attachmentPayloadBytesSaved >= 20,
+        `compact attachment descriptor should save at least 20 characters, saved ${attachmentPayloadBytesSaved}`);
+    assert.deepEqual(parseSecurePlaintext(legacySecurePlaintext), parseSecurePlaintext(securePlaintext),
+        "existing PCEA1 attachment descriptors remain parseable");
     assert.deepEqual(parseSecurePlaintext("legacy message"), { text: "legacy message", attachments: null, stickers: [] });
     const sticker = { formatType: 3, id: "749054660769218631", name: "Wave" };
     assert.deepEqual(parseSecurePlaintext(serializeSecurePlaintext("", null, [sticker])), {
@@ -339,6 +362,18 @@ async function main(): Promise<void> {
         attachments: null,
         stickers: [sticker],
     }, "sticker metadata round-trips through the authenticated rich-content payload");
+    const compactStickerPlaintext = serializeSecurePlaintext("", null, [sticker]);
+    const legacyStickerPlaintext = `PCER1:${JSON.stringify({
+        v: 1,
+        m: "",
+        a: null,
+        s: [{ i: sticker.id, n: sticker.name, f: sticker.formatType }],
+    })}`;
+    const richPayloadBytesSaved = legacyStickerPlaintext.length - compactStickerPlaintext.length;
+    assert.ok(richPayloadBytesSaved >= 20,
+        `compact sticker descriptor should save at least 20 characters, saved ${richPayloadBytesSaved}`);
+    assert.deepEqual(parseSecurePlaintext(legacyStickerPlaintext), parseSecurePlaintext(compactStickerPlaintext),
+        "existing PCER1 sticker descriptors remain parseable");
     assert.deepEqual(parseSecurePlaintext(serializeSecurePlaintext("sticker and file", {
         ...bundleMaterial.descriptor,
         root: attachmentRoot,
@@ -515,7 +550,7 @@ async function main(): Promise<void> {
         messageId: MESSAGE_ID,
         counter: 7,
     });
-    const envelope = parseEncryptedEnvelope(encrypted);
+    const envelope = parseTestEnvelope(encrypted);
 
     assert.equal(isEncryptedMessage(encrypted), true);
     assert.equal(isEncryptedMessage(`${ENCRYPTED_MESSAGE_PREFIX}not-json`), true, "prefix detection does not imply validity");
@@ -530,6 +565,15 @@ async function main(): Promise<void> {
         [ALICE_ID, BOB_ID, CAROL_ID],
         "recipients are deduplicated, sorted, and always include the sender",
     );
+    const legacyEquivalent = serializeEncryptedEnvelope({
+        ...envelope,
+        v: 1,
+        i: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    });
+    const envelopeBytesSaved = legacyEquivalent.length - encrypted.length;
+    assert.ok(envelopeBytesSaved >= 100, `compact envelope should save at least 100 characters, saved ${envelopeBytesSaved}`);
+    assert.equal(parseEncryptedEnvelope(legacyEquivalent).v, 1, "existing PCEM1 messages remain parseable");
+    assert.ok(isEncryptedMessage(legacyEquivalent), "legacy encrypted messages remain detectable");
 
     for (const [label, identity, userId] of [
         ["sender", aliceIdentity, ALICE_ID],
@@ -550,7 +594,7 @@ async function main(): Promise<void> {
         now: NOW + 11,
         counter: 8,
     });
-    assert.deepEqual(parseEncryptedEnvelope(selfOnly).r.map(recipient => recipient.u), [ALICE_ID]);
+    assert.deepEqual(parseTestEnvelope(selfOnly).r.map(recipient => recipient.u), [ALICE_ID]);
     assert.equal(
         (await decryptMessage(makeDecryptInput(selfOnly, aliceIdentity, ALICE_ID, alicePublic))).plaintext,
         "private note to self",
@@ -606,15 +650,15 @@ async function main(): Promise<void> {
         recipients: [bobPublic],
         senderUserId: ALICE_ID,
         now: NOW + 20,
-        messageId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        messageId: "u7u7u7u7u7u7u7u7u7u7uw",
         counter: 10,
     };
     const [randomizedOne, randomizedTwo] = await Promise.all([
         encryptMessage(deterministicInput),
         encryptMessage(deterministicInput),
     ]);
-    const randomizedEnvelopeOne = parseEncryptedEnvelope(randomizedOne);
-    const randomizedEnvelopeTwo = parseEncryptedEnvelope(randomizedTwo);
+    const randomizedEnvelopeOne = parseTestEnvelope(randomizedOne);
+    const randomizedEnvelopeTwo = parseTestEnvelope(randomizedTwo);
     assert.notEqual(randomizedOne, randomizedTwo, "identical logical inputs do not repeat a wire ciphertext");
     assert.notEqual(randomizedEnvelopeOne.n, randomizedEnvelopeTwo.n, "AES-GCM nonces are fresh");
     assert.notEqual(randomizedEnvelopeOne.x, randomizedEnvelopeTwo.x, "content ciphertexts are randomized");
@@ -625,13 +669,13 @@ async function main(): Promise<void> {
         encryptMessage({ ...deterministicInput, messageId: undefined, counter: 12 }),
     ]);
     assert.notEqual(
-        parseEncryptedEnvelope(generatedIdOne).i,
-        parseEncryptedEnvelope(generatedIdTwo).i,
+        parseTestEnvelope(generatedIdOne).i,
+        parseTestEnvelope(generatedIdTwo).i,
         "generated envelope IDs are unique",
     );
 
     const badSignature = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
-        value.z = mutateBase64Url(value.z);
+        value[7] = mutateBase64Url(value[7]);
     });
     await assert.rejects(
         decryptMessage(makeDecryptInput(badSignature, bobIdentity, BOB_ID, alicePublic)),
@@ -639,25 +683,22 @@ async function main(): Promise<void> {
         "envelope signature tampering is rejected",
     );
     const nonCanonicalEnvelopeSignature = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
-        value.z = makeNonCanonicalBase64Url(value.z);
+        value[7] = makeNonCanonicalBase64Url(value[7]);
     });
     await assert.rejects(
         decryptMessage(makeDecryptInput(nonCanonicalEnvelopeSignature, bobIdentity, BOB_ID, alicePublic)),
         /invalid|canonical/i,
         "alternate base64url spellings cannot bypass wire replay hashes",
     );
-    const duplicateEnvelopeChannel = encrypted.replace(
-        `${ENCRYPTED_MESSAGE_PREFIX}{`,
-        `${ENCRYPTED_MESSAGE_PREFIX}{\"c\":\"${OTHER_CHANNEL_ID}\",`,
-    );
+    const oversizedEnvelopeTuple = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => value.push("extra"));
     assert.throws(
-        () => parseEncryptedEnvelope(duplicateEnvelopeChannel),
-        /canonical/i,
-        "duplicate envelope JSON members are rejected",
+        () => parseTestEnvelope(oversizedEnvelopeTuple),
+        /malformed/i,
+        "compact envelopes reject trailing boilerplate",
     );
 
     const unsignedContentTamper = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
-        value.x = mutateBase64Url(value.x);
+        value[6] = mutateBase64Url(value[6]);
     });
     await assert.rejects(
         decryptMessage(makeDecryptInput(unsignedContentTamper, bobIdentity, BOB_ID, alicePublic)),
@@ -695,8 +736,8 @@ async function main(): Promise<void> {
 
     await assert.rejects(
         decryptMessage(makeDecryptInput(encrypted, bobIdentity, BOB_ID, alicePublic, OTHER_CHANNEL_ID)),
-        /copied from another channel/,
-        "a valid envelope cannot be copied to another Discord channel",
+        /signature is invalid/,
+        "the implicit Discord channel context prevents copying a compact envelope",
     );
     const channelTamperEnvelope = clone(envelope);
     channelTamperEnvelope.c = OTHER_CHANNEL_ID;
@@ -712,13 +753,11 @@ async function main(): Promise<void> {
         /sender does not match its Discord author/,
         "the observed Discord author must match the signed sender",
     );
-    const authorTamper = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
-        value.s = BOB_ID;
-    });
+    const observedAuthorTamper = { ...alicePublic, userId: BOB_ID };
     await assert.rejects(
-        decryptMessage(makeDecryptInput(authorTamper, bobIdentity, BOB_ID, alicePublic)),
-        /sender does not match its Discord author/,
-        "tampering the envelope sender is rejected before decryption",
+        decryptMessage(makeDecryptInput(encrypted, bobIdentity, BOB_ID, observedAuthorTamper, CHANNEL_ID, BOB_ID)),
+        /unverified sender key|malformed|signature is invalid/,
+        "the authenticated Discord author context cannot be changed",
     );
 
     const counterTamperEnvelope = clone(envelope);
@@ -730,7 +769,7 @@ async function main(): Promise<void> {
         "the message counter is bound into the HPKE context and content AAD",
     );
     const senderKeyTamper = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
-        value.k = mutateBase64Url(value.k);
+        value[3] = mutateBase64Url(value[3]);
     });
     await assert.rejects(
         decryptMessage(makeDecryptInput(senderKeyTamper, bobIdentity, BOB_ID, alicePublic)),
@@ -783,46 +822,52 @@ async function main(): Promise<void> {
     }
 
     assert.throws(() => parseEncryptedEnvelope("ordinary message"), /Unsupported secure-message payload/);
-    assert.throws(() => parseEncryptedEnvelope(`${ENCRYPTED_MESSAGE_PREFIX}{`), /Malformed secure-message JSON/);
+    assert.throws(() => parseTestEnvelope(`${ENCRYPTED_MESSAGE_PREFIX}[`), /Malformed secure-message JSON/);
     assert.throws(
-        () => parseEncryptedEnvelope(`${ENCRYPTED_MESSAGE_PREFIX}${" ".repeat(MAX_DISCORD_MESSAGE_LENGTH)}`),
+        () => parseEncryptedEnvelope(`${ENCRYPTED_MESSAGE_PREFIX}[]`),
+        /requires valid Discord context/,
+        "compact envelopes cannot be interpreted without authenticated Discord metadata",
+    );
+    assert.throws(
+        () => parseEncryptedEnvelope(`${LEGACY_ENCRYPTED_MESSAGE_PREFIX}{`),
+        /Malformed secure-message JSON/,
+        "legacy envelope parsing remains supported",
+    );
+    assert.throws(
+        () => parseTestEnvelope(`${ENCRYPTED_MESSAGE_PREFIX}${" ".repeat(MAX_DISCORD_MESSAGE_LENGTH)}`),
         /Unsupported secure-message payload/,
         "encrypted payloads over Discord's wire limit are rejected before JSON parsing",
     );
-    expectEnvelopeParserFailure(null, "envelope root must be an object");
-    expectEnvelopeParserFailure([], "envelope root cannot be an array");
-    expectEnvelopeParserFailure({}, "envelope requires every exact field");
+    expectEnvelopeParserFailure(null, "envelope root must be an array");
+    expectEnvelopeParserFailure([], "envelope tuple requires every exact field");
+    expectEnvelopeParserFailure({}, "envelope root cannot be an object");
 
     const validEnvelopeObject = rawPayload(encrypted, ENCRYPTED_MESSAGE_PREFIX);
     const envelopeMutations: Array<[string, (value: MutableJson) => void]> = [
-        ["missing envelope field", value => { delete value.z; }],
-        ["extra envelope field", value => { value.extra = true; }],
-        ["wrong envelope version", value => { value.v = 2; }],
-        ["wrong envelope type", value => { value.t = "k"; }],
-        ["invalid envelope UUID", value => { value.i = "not-a-uuid"; }],
-        ["invalid channel snowflake", value => { value.c = "channel"; }],
-        ["invalid sender snowflake", value => { value.s = "sender"; }],
-        ["timestamp below range", value => { value.d = 1_699_999_999_999; }],
-        ["fractional envelope timestamp", value => { value.d = NOW + 0.5; }],
-        ["zero counter", value => { value.q = 0; }],
-        ["fractional counter", value => { value.q = 1.5; }],
-        ["unsafe counter", value => { value.q = Number.MAX_SAFE_INTEGER + 1; }],
-        ["short sender fingerprint", value => { value.k = value.k.slice(1); }],
-        ["empty recipient list", value => { value.r = []; }],
-        ["non-array recipient list", value => { value.r = {}; }],
-        ["non-object recipient", value => { value.r[0] = null; }],
-        ["missing recipient field", value => { delete value.r[0].x; }],
-        ["extra recipient field", value => { value.r[0].extra = true; }],
-        ["invalid recipient snowflake", value => { value.r[0].u = "recipient"; }],
-        ["short HPKE encapsulation", value => { value.r[0].e = value.r[0].e.slice(1); }],
-        ["short wrapped key", value => { value.r[0].x = "A".repeat(21); }],
-        ["oversized wrapped key", value => { value.r[0].x = "A".repeat(129); }],
-        ["duplicate recipients", value => { value.r[1].u = value.r[0].u; }],
-        ["unsorted recipients", value => { [value.r[0], value.r[1]] = [value.r[1], value.r[0]]; }],
-        ["short nonce", value => { value.n = value.n.slice(1); }],
-        ["short ciphertext", value => { value.x = "A".repeat(21); }],
-        ["short envelope signature", value => { value.z = value.z.slice(1); }],
-        ["invalid envelope signature alphabet", value => { value.z = `!${value.z.slice(1)}`; }],
+        ["missing envelope field", value => { value.pop(); }],
+        ["extra envelope field", value => { value.push(null); }],
+        ["invalid compact envelope ID", value => { value[0] = "not-an-id"; }],
+        ["timestamp below range", value => { value[1] = 1_699_999_999_999; }],
+        ["fractional envelope timestamp", value => { value[1] = NOW + 0.5; }],
+        ["zero counter", value => { value[2] = 0; }],
+        ["fractional counter", value => { value[2] = 1.5; }],
+        ["unsafe counter", value => { value[2] = Number.MAX_SAFE_INTEGER + 1; }],
+        ["short sender fingerprint", value => { value[3] = value[3].slice(1); }],
+        ["empty recipient list", value => { value[4] = []; }],
+        ["non-array recipient list", value => { value[4] = {}; }],
+        ["non-array recipient", value => { value[4][0] = null; }],
+        ["missing recipient field", value => { value[4][0].pop(); }],
+        ["extra recipient field", value => { value[4][0].push("extra"); }],
+        ["invalid recipient snowflake", value => { value[4][0][0] = "recipient"; }],
+        ["short HPKE encapsulation", value => { value[4][0][1] = value[4][0][1].slice(1); }],
+        ["short wrapped key", value => { value[4][0][2] = "A".repeat(21); }],
+        ["oversized wrapped key", value => { value[4][0][2] = "A".repeat(129); }],
+        ["duplicate recipients", value => { value[4][1][0] = value[4][0][0]; }],
+        ["unsorted recipients", value => { [value[4][0], value[4][1]] = [value[4][1], value[4][0]]; }],
+        ["short nonce", value => { value[5] = value[5].slice(1); }],
+        ["short ciphertext", value => { value[6] = "A".repeat(21); }],
+        ["short envelope signature", value => { value[7] = value[7].slice(1); }],
+        ["invalid envelope signature alphabet", value => { value[7] = `!${value[7].slice(1)}`; }],
     ];
     for (const [label, mutate] of envelopeMutations) {
         const candidate = clone(validEnvelopeObject);
@@ -893,9 +938,9 @@ async function main(): Promise<void> {
             recipients: [bobPublic],
             senderUserId: ALICE_ID,
             counter: 20,
-            messageId: "not-a-uuid",
+            messageId: "not-a-compact-id",
         }),
-        /UUID/,
+        /16-byte base64url/,
     );
     await assert.rejects(
         encryptMessage({
@@ -947,7 +992,7 @@ async function main(): Promise<void> {
             `key parser rejects deterministic malformed fuzz case ${iteration}`,
         );
         assert.throws(
-            () => parseEncryptedEnvelope(`${ENCRYPTED_MESSAGE_PREFIX}${fragment}`),
+            () => parseTestEnvelope(`${ENCRYPTED_MESSAGE_PREFIX}${fragment}`),
             isError,
             `envelope parser rejects deterministic malformed fuzz case ${iteration}`,
         );
@@ -972,7 +1017,7 @@ async function main(): Promise<void> {
         );
     }
 
-    console.log("secure-messaging cryptographic and protocol checks passed");
+    console.log(`secure-messaging cryptographic and protocol checks passed; compact wire saved ${envelopeBytesSaved} envelope, ${attachmentPayloadBytesSaved} attachment-descriptor, and ${richPayloadBytesSaved} sticker-descriptor characters`);
 }
 
 void main();

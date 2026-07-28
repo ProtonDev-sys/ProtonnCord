@@ -16,6 +16,7 @@ import {
     canonicalKeyAnnouncement,
     decodeBase64Url,
     encodeBase64Url,
+    ENCRYPTED_MESSAGE_VERSION,
     EncryptedEnvelope,
     envelopeHeader,
     isEnvelopeId,
@@ -239,8 +240,8 @@ export async function encryptMessage(input: EncryptMessageInput): Promise<string
         throw new Error(`recipients must contain at most ${MAX_SELECTED_RECIPIENTS} verified identities`);
     const now = input.now ?? Date.now();
     if (!isProtocolTimestamp(now)) throw new Error("now must be a valid protocol timestamp");
-    const id = input.messageId ?? crypto.randomUUID();
-    if (!isEnvelopeId(id)) throw new Error("messageId must be a UUID");
+    const id = input.messageId ?? encodeBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+    if (!isEnvelopeId(id) || id.length !== 22) throw new Error("messageId must be a canonical 16-byte base64url value");
 
     const self = await publicIdentity(input.identity, senderUserId);
     const recipientMap = new Map<string, PublicIdentity>([[self.userId, self]]);
@@ -255,7 +256,7 @@ export async function encryptMessage(input: EncryptMessageInput): Promise<string
     const recipients = [...recipientMap.values()].sort((left, right) => left.userId.localeCompare(right.userId));
     const skeletonRecipients: WrappedContentKey[] = recipients.map(recipient => ({ u: recipient.userId, e: "", x: "" }));
     const base = {
-        v: PROTOCOL_VERSION,
+        v: ENCRYPTED_MESSAGE_VERSION,
         t: "m" as const,
         i: id,
         c: channelId,
@@ -317,7 +318,7 @@ export async function decryptMessage(input: DecryptMessageInput): Promise<{ enve
     const discordAuthorId = requireSnowflake(input.discordAuthorId, "discordAuthorId");
     const localUserId = requireSnowflake(input.localUserId, "localUserId");
     assertIdentityEncoding(input.identity);
-    const envelope = parseEncryptedEnvelope(input.content);
+    const envelope = parseEncryptedEnvelope(input.content, { channelId, discordAuthorId });
     if (envelope.c !== channelId) throw new Error("Encrypted message was copied from another channel");
     if (envelope.s !== discordAuthorId || input.senderIdentity.userId !== discordAuthorId)
         throw new Error("Encrypted message sender does not match its Discord author");
