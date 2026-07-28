@@ -51,6 +51,7 @@ import {
 import { availableSelectedRecipientIds } from "../src/equicordplugins/secureMessaging.desktop/conversationSelection";
 import { discordEditedTimestamp } from "../src/equicordplugins/secureMessaging.desktop/messageMetadata";
 import { KeyReviewGate } from "../src/equicordplugins/secureMessaging.desktop/keyReviewGate";
+import { extractSecureEmbedUrls } from "../src/equicordplugins/secureMessaging.desktop/embedUrls";
 
 const ALICE_ID = "100000000000000001";
 const BOB_ID = "100000000000000002";
@@ -168,6 +169,18 @@ function seededGarbage(seed: number, length: number): string {
 }
 
 async function main(): Promise<void> {
+    assert.deepEqual(extractSecureEmbedUrls([
+        "Links:",
+        "https://example.com/path?x=1.",
+        "https://cdn.example.com/image.PNG?size=2",
+        "https://media.example.com/clip.webm",
+        "https://example.com/path?x=1",
+        "https://user:password@example.com/private",
+    ].join(" ")), [
+        "https://example.com/path?x=1",
+        "https://cdn.example.com/image.PNG?size=2",
+        "https://media.example.com/clip.webm",
+    ]);
     const reviewGate = new KeyReviewGate();
     reviewGate.begin(ALICE_ID, BOB_ID);
     reviewGate.fail(ALICE_ID, BOB_ID, "new-key-message");
