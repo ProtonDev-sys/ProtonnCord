@@ -50,6 +50,7 @@ import {
 import { serializeSecurePlaintext } from "./attachments";
 import { prepareEncryptedAttachments } from "./attachmentUploads";
 import { availableSelectedRecipientIds } from "./conversationSelection";
+import { clearEncryptedEmbedCache, patchEncryptedMessageEmbeds } from "./embedCache";
 import { KeyReviewGate } from "./keyReviewGate";
 import { discordEditedTimestamp } from "./messageMetadata";
 import type {
@@ -93,7 +94,7 @@ let screenCaptureProtectionStatus: ScreenCaptureProtectionStatus = "disabled";
 let screenCaptureProtectionGeneration = 0;
 let secureMessageListenersInstalled = false;
 const screenCaptureProtectionListeners = new Set<(status: ScreenCaptureProtectionStatus) => void>();
-const pendingAttachmentOwners = new Set<{ forceUpdate(): void; }>();
+const pendingEncryptedRenderOwners = new Set<{ forceUpdate(): void; }>();
 
 function setScreenCaptureProtectionStatus(status: ScreenCaptureProtectionStatus): void {
     screenCaptureProtectionStatus = status;
@@ -105,7 +106,7 @@ function setScreenCaptureProtectionStatus(status: ScreenCaptureProtectionStatus)
         }
     }
     if (status === "ready") {
-        for (const owner of pendingAttachmentOwners) {
+        for (const owner of pendingEncryptedRenderOwners) {
             try {
                 owner.forceUpdate();
             } catch {
@@ -113,7 +114,7 @@ function setScreenCaptureProtectionStatus(status: ScreenCaptureProtectionStatus)
             }
         }
     }
-    if (status !== "pending") pendingAttachmentOwners.clear();
+    if (status !== "pending") pendingEncryptedRenderOwners.clear();
 }
 
 function useScreenCaptureProtectionStatus(): ScreenCaptureProtectionStatus {
@@ -145,6 +146,7 @@ async function setScreenshotMode(enabled: boolean): Promise<boolean> {
     const generation = ++screenCaptureProtectionGeneration;
     setScreenCaptureProtectionStatus(enabled ? "screenshot" : "pending");
     clearEncryptedAttachmentCache();
+    clearEncryptedEmbedCache();
     MessageStore.emitChange();
     const applied = await applyScreenCaptureProtection(!enabled);
     if (generation !== screenCaptureProtectionGeneration) return false;
@@ -1311,10 +1313,16 @@ export default definePlugin({
     patches: [
         {
             find: "renderAttachments",
-            replacement: {
-                match: /renderAttachments\((\i)\)\{(?=let\{channel:)/,
-                replace: "$&$1=$self.patchEncryptedAttachments($1,this);",
-            },
+            replacement: [
+                {
+                    match: /renderAttachments\((\i)\)\{(?=let\{channel:)/,
+                    replace: "$&$1=$self.patchEncryptedAttachments($1,this);",
+                },
+                {
+                    match: /renderEmbeds\((\i)\)\{/,
+                    replace: "$&$1=$self.patchEncryptedEmbeds($1,this);",
+                },
+            ],
         },
         {
             find: /function\(\i\)\{let\{baseMessage:\i,referencedMessage:\i,channel:\i,compact:/,
@@ -1393,13 +1401,20 @@ export default definePlugin({
         permittedAnnouncements.clear();
         clearWirePayloadAuthorizations();
         clearEncryptedAttachmentCache();
+        clearEncryptedEmbedCache();
         keyReviewGate.clear();
     },
 
     patchEncryptedAttachments(message: Message, owner: { forceUpdate(): void; }) {
         const ready = screenCaptureProtectionStatus === "ready";
-        if (!ready) pendingAttachmentOwners.add(owner);
+        if (!ready) pendingEncryptedRenderOwners.add(owner);
         return patchEncryptedMessageAttachments(message, () => owner.forceUpdate(), ready);
+    },
+
+    patchEncryptedEmbeds(message: Message, owner: { forceUpdate(): void; }) {
+        const ready = screenCaptureProtectionStatus === "ready";
+        if (!ready) pendingEncryptedRenderOwners.add(owner);
+        return patchEncryptedMessageEmbeds(message, () => owner.forceUpdate(), ready);
     },
 
     useSecureReplyPreview,
