@@ -6,8 +6,10 @@
 
 import { decodeBase64Url, encodeBase64Url, isSnowflake } from "./protocol";
 
-export const ATTACHMENT_PAYLOAD_PREFIX = "PCEA1:";
-export const RICH_CONTENT_PAYLOAD_PREFIX = "PCER1:";
+export const LEGACY_ATTACHMENT_PAYLOAD_PREFIX = "PCEA1:";
+export const LEGACY_RICH_CONTENT_PAYLOAD_PREFIX = "PCER1:";
+export const ATTACHMENT_PAYLOAD_PREFIX = "PCEA2:";
+export const RICH_CONTENT_PAYLOAD_PREFIX = "PCER2:";
 export const ENCRYPTED_ATTACHMENT_EXTENSION = ".pcaf";
 export const MAX_ATTACHMENT_COUNT = 10;
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
@@ -388,28 +390,69 @@ export function serializeSecurePlaintext(
     if (typeof text !== "string" || text.length > 2_000) throw new Error("Secure message text is invalid");
     validateStickers(stickers);
     if (attachments === null && stickers.length === 0 &&
-        !text.startsWith(ATTACHMENT_PAYLOAD_PREFIX) && !text.startsWith(RICH_CONTENT_PAYLOAD_PREFIX)) return text;
+        !text.startsWith(ATTACHMENT_PAYLOAD_PREFIX) && !text.startsWith(RICH_CONTENT_PAYLOAD_PREFIX) &&
+        !text.startsWith(LEGACY_ATTACHMENT_PAYLOAD_PREFIX) && !text.startsWith(LEGACY_RICH_CONTENT_PAYLOAD_PREFIX)) return text;
     if (attachments) validateBundleDescriptor(attachments);
-    const value: SerializedSecurePlaintext = {
-        v: ATTACHMENT_VERSION,
-        m: text,
-        a: attachments ? { i: attachments.id, k: attachments.key, c: attachments.count, r: attachments.root } : null,
-    };
+    const compactAttachment = attachments
+        ? [attachments.id, attachments.key, attachments.count, attachments.root]
+        : null;
     if (stickers.length > 0) {
-        const richValue: SerializedRichSecurePlaintext = {
-            ...value,
-            s: stickers.map(sticker => ({ i: sticker.id, n: sticker.name, f: sticker.formatType })),
-        };
-        return `${RICH_CONTENT_PAYLOAD_PREFIX}${JSON.stringify(richValue)}`;
+        return `${RICH_CONTENT_PAYLOAD_PREFIX}${JSON.stringify([
+            text,
+            compactAttachment,
+            stickers.map(sticker => [sticker.id, sticker.name, sticker.formatType]),
+        ])}`;
     }
-    return `${ATTACHMENT_PAYLOAD_PREFIX}${JSON.stringify(value)}`;
+    return `${ATTACHMENT_PAYLOAD_PREFIX}${JSON.stringify([text, compactAttachment])}`;
 }
 
 export function parseSecurePlaintext(value: string): SecurePlaintext {
     if (typeof value !== "string") throw new Error("Secure plaintext is invalid");
-    const rich = value.startsWith(RICH_CONTENT_PAYLOAD_PREFIX);
-    if (!rich && !value.startsWith(ATTACHMENT_PAYLOAD_PREFIX)) return { text: value, attachments: null, stickers: [] };
-    const prefix = rich ? RICH_CONTENT_PAYLOAD_PREFIX : ATTACHMENT_PAYLOAD_PREFIX;
+    const compactRich = value.startsWith(RICH_CONTENT_PAYLOAD_PREFIX);
+    const compactAttachment = value.startsWith(ATTACHMENT_PAYLOAD_PREFIX);
+    if (compactRich || compactAttachment) {
+        const prefix = compactRich ? RICH_CONTENT_PAYLOAD_PREFIX : ATTACHMENT_PAYLOAD_PREFIX;
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(value.slice(prefix.length));
+        } catch {
+            throw new Error("Secure content payload is malformed");
+        }
+        if (!Array.isArray(parsed) || parsed.length !== (compactRich ? 3 : 2) || typeof parsed[0] !== "string")
+            throw new Error("Secure content payload is invalid");
+        let attachments: AttachmentBundleDescriptor | null = null;
+        if (parsed[1] !== null) {
+            if (!Array.isArray(parsed[1]) || parsed[1].length !== 4 ||
+                typeof parsed[1][0] !== "string" || typeof parsed[1][1] !== "string" ||
+                typeof parsed[1][2] !== "number" || typeof parsed[1][3] !== "string")
+                throw new Error("Secure attachment bundle is invalid");
+            attachments = { id: parsed[1][0], key: parsed[1][1], count: parsed[1][2], root: parsed[1][3] };
+            validateBundleDescriptor(attachments);
+        }
+        const stickers: SecureStickerItem[] = [];
+        if (compactRich) {
+            if (!Array.isArray(parsed[2])) throw new Error("Secure sticker list is invalid");
+            for (const sticker of parsed[2]) {
+                if (!Array.isArray(sticker) || sticker.length !== 3 ||
+                    typeof sticker[0] !== "string" || typeof sticker[1] !== "string" || typeof sticker[2] !== "number")
+                    throw new Error("Secure sticker item is invalid");
+                stickers.push({ id: sticker[0], name: sticker[1], formatType: sticker[2] });
+            }
+            validateStickers(stickers);
+            if (stickers.length === 0) throw new Error("Secure rich content requires a sticker");
+        }
+        const canonical = [
+            parsed[0],
+            attachments ? [attachments.id, attachments.key, attachments.count, attachments.root] : null,
+            ...(compactRich ? [stickers.map(sticker => [sticker.id, sticker.name, sticker.formatType])] : []),
+        ];
+        if (JSON.stringify(canonical) !== value.slice(prefix.length)) throw new Error("Secure content payload is not canonical");
+        return { text: parsed[0], attachments, stickers };
+    }
+
+    const rich = value.startsWith(LEGACY_RICH_CONTENT_PAYLOAD_PREFIX);
+    if (!rich && !value.startsWith(LEGACY_ATTACHMENT_PAYLOAD_PREFIX)) return { text: value, attachments: null, stickers: [] };
+    const prefix = rich ? LEGACY_RICH_CONTENT_PAYLOAD_PREFIX : LEGACY_ATTACHMENT_PAYLOAD_PREFIX;
     let parsed: unknown;
     try {
         parsed = JSON.parse(value.slice(prefix.length));
