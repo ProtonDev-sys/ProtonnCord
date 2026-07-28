@@ -28,12 +28,14 @@ import {
     ChannelStore,
     Checkbox,
     CloudUploader,
+    Constants,
     MessageStore,
     Modal,
     openModal,
     Parser,
     RestAPI,
     showToast,
+    StickersStore,
     Toasts,
     useCallback,
     useEffect,
@@ -47,9 +49,19 @@ import {
     patchEncryptedMessageAttachments,
     subscribeEncryptedAttachmentStatus,
 } from "./attachmentCache";
-import { serializeSecurePlaintext } from "./attachments";
+import {
+    MAX_STICKER_COUNT,
+    type SecureStickerItem,
+    serializeSecurePlaintext,
+} from "./attachments";
 import { prepareEncryptedAttachments } from "./attachmentUploads";
 import { availableSelectedRecipientIds } from "./conversationSelection";
+import {
+    clearEncryptedEmbedCache,
+    patchEncryptedMessageEmbeds,
+    patchEncryptedMessageStickers,
+    prefetchEncryptedMessageEmbeds,
+} from "./embedCache";
 import { KeyReviewGate } from "./keyReviewGate";
 import { discordEditedTimestamp } from "./messageMetadata";
 import type {
@@ -93,7 +105,7 @@ let screenCaptureProtectionStatus: ScreenCaptureProtectionStatus = "disabled";
 let screenCaptureProtectionGeneration = 0;
 let secureMessageListenersInstalled = false;
 const screenCaptureProtectionListeners = new Set<(status: ScreenCaptureProtectionStatus) => void>();
-const pendingAttachmentOwners = new Set<{ forceUpdate(): void; }>();
+const pendingEncryptedRenderOwners = new Set<{ forceUpdate(): void; }>();
 
 function setScreenCaptureProtectionStatus(status: ScreenCaptureProtectionStatus): void {
     screenCaptureProtectionStatus = status;
@@ -105,7 +117,7 @@ function setScreenCaptureProtectionStatus(status: ScreenCaptureProtectionStatus)
         }
     }
     if (status === "ready") {
-        for (const owner of pendingAttachmentOwners) {
+        for (const owner of pendingEncryptedRenderOwners) {
             try {
                 owner.forceUpdate();
             } catch {
@@ -113,7 +125,7 @@ function setScreenCaptureProtectionStatus(status: ScreenCaptureProtectionStatus)
             }
         }
     }
-    if (status !== "pending") pendingAttachmentOwners.clear();
+    if (status !== "pending") pendingEncryptedRenderOwners.clear();
 }
 
 function useScreenCaptureProtectionStatus(): ScreenCaptureProtectionStatus {
@@ -145,6 +157,7 @@ async function setScreenshotMode(enabled: boolean): Promise<boolean> {
     const generation = ++screenCaptureProtectionGeneration;
     setScreenCaptureProtectionStatus(enabled ? "screenshot" : "pending");
     clearEncryptedAttachmentCache();
+    clearEncryptedEmbedCache();
     MessageStore.emitChange();
     const applied = await applyScreenCaptureProtection(!enabled);
     if (generation !== screenCaptureProtectionGeneration) return false;
@@ -171,6 +184,9 @@ function replyPreviewText(result: DecryptIncomingResult | null): string {
     const attachmentCount = result.attachmentBundle?.count ?? 0;
     if (attachmentCount === 1) return "Encrypted attachment";
     if (attachmentCount > 1) return `${attachmentCount} encrypted attachments`;
+    const stickers = result.stickers ?? [];
+    if (stickers.length === 1) return `Sticker: ${stickers[0].name}`;
+    if (stickers.length > 1) return `${stickers.length} stickers`;
     return "Encrypted message";
 }
 
@@ -385,15 +401,56 @@ function conversationStatusMessage(result: ConversationResult): string {
     return "This conversation has not been configured.";
 }
 
-function blockedOutgoingReason(messageContent: string, options: Record<string, any>, props: Record<string, any>): string | null {
+function selectedOutgoingStickerIds(options: Record<string, any>, props: Record<string, any>): string[] | null {
+    const ids: string[] = [];
+    for (const source of [options.stickerIds, options.stickers]) {
+        if (source == null) continue;
+        if (!Array.isArray(source) || source.some(value => typeof value !== "string" || !/^\d{17,20}$/u.test(value))) return null;
+        for (const id of source) if (!ids.includes(id)) ids.push(id);
+    }
+    if ((props.hasStickers && ids.length === 0) || ids.length > MAX_STICKER_COUNT) return null;
+    return ids;
+}
+
+function secureStickerItem(value: unknown, expectedId: string): SecureStickerItem | null {
+    if (!value || typeof value !== "object") return null;
+    const sticker = value as Record<string, unknown>;
+    const formatType = sticker.format_type ?? sticker.formatType;
+    if (sticker.id !== expectedId || typeof sticker.name !== "string" || sticker.name.length < 1 ||
+        sticker.name.length > 100 || sticker.name.includes("\0") ||
+        typeof formatType !== "number" || !Number.isInteger(formatType) || formatType < 1 || formatType > 4) return null;
+    return { formatType, id: expectedId, name: sticker.name };
+}
+
+async function resolveSelectedStickers(ids: string[]): Promise<SecureStickerItem[]> {
+    return Promise.all(ids.map(async id => {
+        const cached = secureStickerItem(StickersStore.getStickerById(id), id);
+        if (cached) return cached;
+        const response = await RestAPI.get({ url: Constants.Endpoints.STICKER(id) });
+        const fetched = secureStickerItem(response?.body, id);
+        if (!fetched) throw new Error("Discord returned an invalid sticker item");
+        return fetched;
+    }));
+}
+
+function clearOutgoingStickers(options: Record<string, any>): void {
+    if (Array.isArray(options.stickerIds)) options.stickerIds.length = 0;
+    if (Array.isArray(options.stickers)) options.stickers.length = 0;
+}
+
+function blockedOutgoingReason(
+    messageContent: string,
+    options: Record<string, any>,
+    props: Record<string, any>,
+    stickerIds: string[] | null,
+): string | null {
     if (props.hasAttachments && (!Array.isArray(options.uploads) || options.uploads.length === 0))
         return "Secure Messaging could not access the pending attachments before Discord uploaded them.";
-    if (props.hasStickers || options.stickers?.length || options.stickerIds?.length) return "Stickers are not encrypted by Secure Messaging v1.";
-    if (options.isGif) return "GIF sends are not encrypted by Secure Messaging v1.";
+    if (stickerIds === null) return "Secure Messaging could not resolve the selected stickers safely.";
     if (options.alsoForwardToChannelId) return "Forwarded messages are not encrypted by Secure Messaging v1.";
     if (options.command != null) return "Discord commands cannot be sent through an encrypted conversation.";
-    if (!messageContent && (!Array.isArray(options.uploads) || options.uploads.length === 0))
-        return "Enter text or attach a file to send an encrypted message.";
+    if (!messageContent && (!Array.isArray(options.uploads) || options.uploads.length === 0) && stickerIds.length === 0)
+        return "Enter text, choose a GIF or sticker, or attach a file to send an encrypted message.";
     return null;
 }
 
@@ -619,18 +676,20 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             return { cancel: true };
         }
 
-        const blockedReason = blockedOutgoingReason(message.content, options, props);
+        const stickerIds = selectedOutgoingStickerIds(options, props);
+        const blockedReason = blockedOutgoingReason(message.content, options, props, stickerIds);
         if (blockedReason) {
             showToast(blockedReason, Toasts.Type.FAILURE);
             return { cancel: true };
         }
 
+        const stickers = await resolveSelectedStickers(stickerIds ?? []);
         const uploads = Array.isArray(options.uploads) ? options.uploads : [];
         const preparedAttachments = uploads.length > 0
-            ? await prepareEncryptedAttachments(uploads, message.content, channelId, context.localUserId)
+            ? await prepareEncryptedAttachments(uploads, message.content, channelId, context.localUserId, stickers)
             : null;
         const encrypted = await Native.encryptOutgoing(context.localUserId, {
-            plaintext: preparedAttachments?.plaintext ?? serializeSecurePlaintext(message.content),
+            plaintext: preparedAttachments?.plaintext ?? serializeSecurePlaintext(message.content, null, stickers),
             snapshot: context.snapshot,
         });
         if (encrypted.status !== "encrypted") {
@@ -639,7 +698,9 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             return { cancel: true };
         }
 
+        void prefetchEncryptedMessageEmbeds(message.content);
         preparedAttachments?.apply();
+        clearOutgoingStickers(options);
         const attachmentFilenames = preparedAttachments?.files.map(file => file.filename) ?? [];
         if (preparedAttachments) authorizeAttachmentUploadReservations(channelId, preparedAttachments.files);
         authorizeWirePayload(channelId, encrypted.content, attachmentFilenames);
@@ -930,7 +991,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                 <section className="pc-secure-modal-section">
                     <Heading tag="h5">Important limitations</Heading>
                     <BaseText size="xs" color="text-muted">
-                        v1 encrypts text and ordinary file attachments. Received files are fully downloaded, authenticated, and decrypted locally before Discord's normal attachment renderer displays them. Stickers, GIF-picker sends, commands, and edits remain blocked. Discord still sees who talks, when, ciphertext sizes, attachment counts, channel membership, and reply metadata. v1 has no forward secrecy or post-compromise healing, and a compromised client or plugin can read plaintext while it is displayed.
+                        v1 encrypts text, GIF-picker links, sticker metadata, and ordinary file attachments. Received files are fully downloaded, authenticated, and decrypted locally before Discord's normal renderers display them. Commands and edits remain blocked. Discord still sees who talks, when, ciphertext sizes, attachment counts, channel membership, and reply metadata. Normal link and GIF previews disclose their URL to Discord's unfurl service; displaying a sticker requests its asset ID from Discord's media CDN. v1 has no forward secrecy or post-compromise healing, and a compromised client or plugin can read plaintext while it is displayed.
                     </BaseText>
                 </section>
 
@@ -1303,7 +1364,7 @@ function SecureMessageAccessory({ message }: { message: Message; }) {
 
 export default definePlugin({
     name: "SecureMessaging",
-    description: "Non-ratcheting end-to-end encrypted messages and file attachments for explicitly verified people in DMs and group DMs.",
+    description: "Non-ratcheting end-to-end encrypted messages, stickers, GIF links, and file attachments for explicitly verified people in DMs and group DMs.",
     tags: ["Chat", "Privacy", "Utility"],
     authors: [EquicordDevs.creations],
     dependencies: ["ChatInputButtonAPI", "MessageAccessoriesAPI", "MessageEventsAPI"],
@@ -1311,10 +1372,20 @@ export default definePlugin({
     patches: [
         {
             find: "renderAttachments",
-            replacement: {
-                match: /renderAttachments\((\i)\)\{(?=let\{channel:)/,
-                replace: "$&$1=$self.patchEncryptedAttachments($1,this);",
-            },
+            replacement: [
+                {
+                    match: /renderAttachments\((\i)\)\{(?=let\{channel:)/,
+                    replace: "$&$1=$self.patchEncryptedAttachments($1,this);",
+                },
+                {
+                    match: /renderEmbeds\((\i)\)\{/,
+                    replace: "$&$1=$self.patchEncryptedEmbeds($1,this);",
+                },
+                {
+                    match: /renderStickersAccessories\((\i)\)\{/,
+                    replace: "$&$1=$self.patchEncryptedStickers($1,this);",
+                },
+            ],
         },
         {
             find: /function\(\i\)\{let\{baseMessage:\i,referencedMessage:\i,channel:\i,compact:/,
@@ -1393,13 +1464,26 @@ export default definePlugin({
         permittedAnnouncements.clear();
         clearWirePayloadAuthorizations();
         clearEncryptedAttachmentCache();
+        clearEncryptedEmbedCache();
         keyReviewGate.clear();
     },
 
     patchEncryptedAttachments(message: Message, owner: { forceUpdate(): void; }) {
         const ready = screenCaptureProtectionStatus === "ready";
-        if (!ready) pendingAttachmentOwners.add(owner);
+        if (!ready) pendingEncryptedRenderOwners.add(owner);
         return patchEncryptedMessageAttachments(message, () => owner.forceUpdate(), ready);
+    },
+
+    patchEncryptedEmbeds(message: Message, owner: { forceUpdate(): void; }) {
+        const ready = screenCaptureProtectionStatus === "ready";
+        if (!ready) pendingEncryptedRenderOwners.add(owner);
+        return patchEncryptedMessageEmbeds(message, () => owner.forceUpdate(), ready);
+    },
+
+    patchEncryptedStickers(message: Message, owner: { forceUpdate(): void; }) {
+        const ready = screenCaptureProtectionStatus === "ready";
+        if (!ready) pendingEncryptedRenderOwners.add(owner);
+        return patchEncryptedMessageStickers(message, () => owner.forceUpdate(), ready);
     },
 
     useSecureReplyPreview,

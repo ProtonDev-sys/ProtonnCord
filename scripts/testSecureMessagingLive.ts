@@ -864,8 +864,21 @@ async function verifyRenderedEncryptedAttachment(page: Page, message: RawDiscord
     }
 
     const proof = await page.evaluate(({ channelId, encryptedFilename, messageId, plaintext }) => {
+        const global = globalThis as any;
         const item = document.getElementById(`chat-messages-${channelId}-${messageId}`);
         const image = item?.querySelector<HTMLImageElement>("img[src^='blob:']");
+        const storedMessage = global.Vencord?.Webpack?.Common?.MessageStore?.getMessage?.(channelId, messageId);
+        const projectedMessage = storedMessage
+            ? global.Vencord?.Plugins?.plugins?.SecureMessaging?.patchEncryptedAttachments?.(storedMessage, { forceUpdate() { } })
+            : null;
+        let imageObscured = false;
+        for (let ancestor: HTMLElement | null = image?.parentElement ?? null; ancestor && ancestor !== item; ancestor = ancestor.parentElement) {
+            const style = getComputedStyle(ancestor);
+            if (style.filter.includes("brightness(0)") || ancestor.className.includes("hiddenExplicit")) {
+                imageObscured = true;
+                break;
+            }
+        }
         return {
             html: item?.innerHTML.slice(0, 8_000) ?? "",
             images: [...(item?.querySelectorAll<HTMLImageElement>("img") ?? [])].map(candidate => ({
@@ -875,8 +888,10 @@ async function verifyRenderedEncryptedAttachment(page: Page, message: RawDiscord
                 width: candidate.naturalWidth,
             })),
             imageHeight: image?.naturalHeight ?? 0,
+            imageObscured,
             imageUsesLocalAuthenticatedUrl: image?.src.startsWith("blob:") ?? false,
             imageWidth: image?.naturalWidth ?? 0,
+            localContentScanVersion: projectedMessage?.attachments?.[0]?.content_scan_version ?? null,
             plaintextVisible: item?.querySelector(".pc-secure-card-plaintext")?.textContent?.includes(plaintext) ?? false,
             rawEncryptedFilenameHidden: !(item?.textContent ?? "").includes(encryptedFilename),
             text: item?.textContent?.slice(0, 2_000) ?? "",
@@ -1246,6 +1261,8 @@ async function main(): Promise<void> {
         assert.equal(attachmentRenderProof.imageUsesLocalAuthenticatedUrl, true, "Discord's native renderer must receive a local authenticated blob URL");
         assert.equal(attachmentRenderProof.imageWidth, 2, "Discord's native image renderer must decode the original width");
         assert.equal(attachmentRenderProof.imageHeight, 3, "Discord's native image renderer must decode the original height");
+        assert.equal(attachmentRenderProof.imageObscured, false, "decrypted E2EE media must not be mistaken for a pending Discord content scan");
+        assert.equal(attachmentRenderProof.localContentScanVersion, -1, "decrypted E2EE media must carry Discord's local unscanned sentinel");
         assert.equal(attachmentRenderProof.rawEncryptedFilenameHidden, true, "the opaque Discord filename must not be shown to the user");
 
         const screenshotModeProof = await verifyScreenshotMode(page, attachmentSend.message, attachmentPlaintext);
@@ -1274,8 +1291,10 @@ async function main(): Promise<void> {
                 decryptedBySelectedRecipient: recipientAttachment.metadata.name === PROOF_PNG_FILENAME,
                 eagerPlaintextUploadDeferred: attachmentSend.eagerPlaintextUploadDeferred,
                 nativeImageHeight: attachmentRenderProof.imageHeight,
+                nativeImageObscured: attachmentRenderProof.imageObscured,
                 nativeImageRendererUsed: attachmentRenderProof.imageUsesLocalAuthenticatedUrl,
                 nativeImageWidth: attachmentRenderProof.imageWidth,
+                localContentScanVersion: attachmentRenderProof.localContentScanVersion,
                 originalFilenameRestored: recipientAttachment.metadata.name,
                 rawEncryptedFilenameHidden: attachmentRenderProof.rawEncryptedFilenameHidden,
                 wireContentLength: attachmentSend.wireContentLength,

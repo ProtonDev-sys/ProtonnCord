@@ -51,6 +51,7 @@ import {
 import { availableSelectedRecipientIds } from "../src/equicordplugins/secureMessaging.desktop/conversationSelection";
 import { discordEditedTimestamp } from "../src/equicordplugins/secureMessaging.desktop/messageMetadata";
 import { KeyReviewGate } from "../src/equicordplugins/secureMessaging.desktop/keyReviewGate";
+import { extractSecureEmbedUrls } from "../src/equicordplugins/secureMessaging.desktop/embedUrls";
 
 const ALICE_ID = "100000000000000001";
 const BOB_ID = "100000000000000002";
@@ -168,6 +169,23 @@ function seededGarbage(seed: number, length: number): string {
 }
 
 async function main(): Promise<void> {
+    assert.deepEqual(extractSecureEmbedUrls([
+        "Links:",
+        "https://example.com/path?x=1.",
+        "https://cdn.example.com/image.PNG?size=2",
+        "https://media.example.com/clip.webm",
+        "https://example.com/path?x=1",
+        "https://user:password@example.com/private",
+    ].join(" ")), [
+        "https://example.com/path?x=1",
+        "https://cdn.example.com/image.PNG?size=2",
+        "https://media.example.com/clip.webm",
+    ]);
+    assert.equal(
+        extractSecureEmbedUrls(Array.from({ length: 12 }, (_, index) => `https://example.com/embed-${index}`).join(" ")).length,
+        10,
+        "encrypted messages preserve Discord's ten-embed limit",
+    );
     const reviewGate = new KeyReviewGate();
     reviewGate.begin(ALICE_ID, BOB_ID);
     reviewGate.fail(ALICE_ID, BOB_ID, "new-key-message");
@@ -312,8 +330,33 @@ async function main(): Promise<void> {
     assert.deepEqual(parseSecurePlaintext(securePlaintext), {
         text: "message with files",
         attachments: { ...bundleMaterial.descriptor, root: attachmentRoot },
+        stickers: [],
     });
-    assert.deepEqual(parseSecurePlaintext("legacy message"), { text: "legacy message", attachments: null });
+    assert.deepEqual(parseSecurePlaintext("legacy message"), { text: "legacy message", attachments: null, stickers: [] });
+    const sticker = { formatType: 3, id: "749054660769218631", name: "Wave" };
+    assert.deepEqual(parseSecurePlaintext(serializeSecurePlaintext("", null, [sticker])), {
+        text: "",
+        attachments: null,
+        stickers: [sticker],
+    }, "sticker metadata round-trips through the authenticated rich-content payload");
+    assert.deepEqual(parseSecurePlaintext(serializeSecurePlaintext("sticker and file", {
+        ...bundleMaterial.descriptor,
+        root: attachmentRoot,
+    }, [sticker])), {
+        text: "sticker and file",
+        attachments: { ...bundleMaterial.descriptor, root: attachmentRoot },
+        stickers: [sticker],
+    }, "stickers compose with encrypted attachment descriptors");
+    assert.deepEqual(parseSecurePlaintext(serializeSecurePlaintext("PCER1:literal text")), {
+        text: "PCER1:literal text",
+        attachments: null,
+        stickers: [],
+    }, "rich-content prefix collisions round-trip as ordinary text");
+    assert.throws(
+        () => serializeSecurePlaintext("", null, [sticker, sticker]),
+        /duplicates/,
+        "duplicate sticker IDs are rejected",
+    );
     const openedAttachment = await decryptAttachmentBytes({
         bundleId: bundleMaterial.descriptor.id,
         channelId: CHANNEL_ID,
