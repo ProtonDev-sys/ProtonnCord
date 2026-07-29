@@ -43,6 +43,7 @@
         "testClientsideGuildIcons": "tsx scripts/testClientsideGuildIcons.ts",
         "testPromiseTimeout": "tsx scripts/testPromiseTimeout.ts",
         "testUpdaterClassification": "tsx scripts/testUpdaterClassification.ts",
+        "testUpdaterRepository": "tsx scripts/testUpdaterRepository.ts",
         "testVoiceMessageTranscriber": "tsx scripts/testVoiceMessageTranscriber.ts",
         "testDiscordMcp": "tsx scripts/testDiscordMcp.ts",
         "testMessageEventsPriority": "tsx scripts/testMessageEventsPriority.ts",
@@ -51,7 +52,7 @@
         "testSecureMessagingLive": "tsx scripts/testSecureMessagingLive.ts",
         "createDiscordMcpVideo": "tsx scripts/createDiscordMcpVideo.ts",
         "benchmarkDiscord": "tsx scripts/benchmarkDiscord.ts",
-        "test": "pnpm buildStandalone && pnpm testTsc && pnpm testMessageEventsPriority && pnpm testSecureMessaging && pnpm testSecureMessagingNative && pnpm lint:fix && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
+        "test": "pnpm buildStandalone && pnpm testTsc && pnpm testUpdaterClassification && pnpm testUpdaterRepository && pnpm testMessageEventsPriority && pnpm testSecureMessaging && pnpm testSecureMessagingNative && pnpm lint:fix && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
         "testWeb": "pnpm lint:fix && pnpm buildWeb && pnpm testTsc",
         "testTsc": "tsc --noEmit"
     },

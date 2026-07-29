@@ -6,20 +6,20 @@ on:
 
 env:
     FORCE_COLOR: true
-    GITHUB_TOKEN: ${{ secrets.ETOKEN }}
-    REPO: Equicord/Equibored
-    USERNAME: GitHub-Actions
+    GITHUB_TOKEN: ${{ github.token }}
 
 permissions:
     contents: write
 
 jobs:
     Build:
-        name: Build Equicord
+        name: Build Protonn Cord
         runs-on: ubuntu-latest
 
         steps:
             - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
 
             - uses: pnpm/action-setup@v6
 
@@ -67,22 +67,12 @@ jobs:
                   rm release/package.json
                   rm release/*.map
 
-            - name: Upload Equicord Stable
-              if: ${{ vars.ACT == 'false' }}
+            - name: Upload Protonn Cord Stable
+              if: github.repository == 'ProtonDev-sys/ProtonnCord' && vars.ACT != 'true'
               run: |
+                  if gh release view latest >/dev/null 2>&1; then
+                      gh release edit latest --title "Protonn Cord $GITHUB_SHA" --latest
+                  else
+                      gh release create latest --target "$GITHUB_SHA" --title "Protonn Cord $GITHUB_SHA" --notes "Automatically built from Protonn Cord main."
+                  fi
                   gh release upload latest --clobber dist/release/*
-
-            - name: Upload Plugin JSONs to Equibored repo
-              if: github.repository == 'Equicord/Equicord' && vars.ACT == 'false'
-              run: |
-                  git config --global user.name "GitHub-Actions"
-                  git config --global user.email actions@github.com
-                  git clone https://$USERNAME:$GITHUB_TOKEN@github.com/$REPO.git plugins
-                  cd plugins
-
-                  cp ../dist/release/*plugins.json .
-                  cp ../dist/release/devs.json .
-                  git add -A
-
-                  git commit -m "Plugins for https://github.com/$GITHUB_REPOSITORY/commit/$GITHUB_SHA"
-                  git push --force https://$USERNAME:$GITHUB_TOKEN@github.com/$REPO.git
