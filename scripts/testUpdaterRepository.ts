@@ -21,5 +21,10 @@ assert.equal(
 assert.match(workflow, /gh release create latest[^\n]+Protonn Cord \$GITHUB_SHA/);
 assert.match(workflow, /gh release edit latest --title "Protonn Cord \$GITHUB_SHA" --latest/);
 assert.match(workflow, /gh release upload latest --clobber dist\/release\/\*/);
+assert.match(workflow, /cp ProtonnCord\.user\.\{js,js\.LEGAL\.txt\} release/);
+assert.doesNotMatch(workflow, /cp Equicord\.user/);
+assert.match(workflow, /shopt -s nullglob/);
+assert.doesNotMatch(workflow, /cp \*\.\{json,zip,asar\} release/);
+assert.match(workflow, /find release -type f -size 0 -delete/);
 
 console.log("updater repository and release pipeline checks passed");
