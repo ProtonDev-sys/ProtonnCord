@@ -145,9 +145,9 @@ async function applyScreenCaptureProtection(enabled: boolean): Promise<boolean> 
         // The same visible failure is used for rejected IPC and structured native failures.
     }
     if (enabled)
-        showToast("Secure Messaging could not apply screen capture protection.", Toasts.Type.FAILURE);
+        showToast("Secure Messaging could not restore encrypted content after screenshot mode.", Toasts.Type.FAILURE);
     else
-        showToast("Secure Messaging could not release screen capture protection.", Toasts.Type.FAILURE);
+        showToast("Secure Messaging could not hide encrypted content for screenshot mode.", Toasts.Type.FAILURE);
     return false;
 }
 
@@ -347,7 +347,7 @@ function failureMessage(failure: NativeFailure): string {
     if (failure.error === "counter_exhausted") return "This identity's message counter is exhausted. Rotate the identity before sending again.";
     if (failure.error === "capacity_exceeded") return "The encrypted vault reached a safety limit.";
     if (failure.error === "cryptographic_operation_failed") return "The cryptographic operation failed.";
-    if (failure.error === "screen_capture_protection_failed") return "Operating-system screen-capture protection is unavailable, so encrypted content remains hidden.";
+    if (failure.error === "screen_capture_protection_failed") return "Encrypted content visibility could not be updated safely.";
     return "The encrypted vault could not be saved.";
 }
 
@@ -570,7 +570,7 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
     const protection = await resolveConversationProtection(endpoint.channelId);
     if (protection.kind === "unprotected") return request;
     if (screenCaptureProtectionStatus !== "ready")
-        throw new Error("Secure Messaging blocked a protected send because screen-capture protection is unavailable");
+        throw new Error("Secure Messaging blocked a protected send while encrypted content is hidden for screenshot mode");
     if (attachment) {
         if (protection.kind === "persisted_protected" || requiresFailClosedSend(protection.conversation)) {
             const files = reservationFiles(request.body);
@@ -969,7 +969,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                 <section className="pc-secure-modal-section">
                     <Heading tag="h5">Screenshots and screen sharing</Heading>
                     <BaseText size="xs" color="text-muted">
-                        Screenshot mode makes Discord capturable while replacing decrypted messages and attachments with protected placeholders. Protected sending and decryption resume after capture protection is restored.
+                        Discord is always capturable. Screenshot mode temporarily replaces decrypted messages and attachments with protected placeholders before you capture or share the window.
                     </BaseText>
                     <Button
                         size="small"
@@ -978,13 +978,13 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                         onClick={() => void setScreenshotMode(captureProtection === "ready")}
                     >
                         {captureProtection === "screenshot" ? "Protect encrypted messages again" :
-                            captureProtection === "failed" ? "Retry screen-capture protection" : "Allow screenshots safely"}
+                            captureProtection === "failed" ? "Retry encrypted-content visibility" : "Hide encrypted content"}
                     </Button>
                     <BaseText size="xs" className={captureProtection === "screenshot" ? "pc-secure-status-warning" : undefined}>
-                        {captureProtection === "screenshot" ? "Screenshots are allowed. Encrypted content is hidden." :
-                            captureProtection === "ready" ? "Encrypted content is visible and Discord is excluded from capture." :
-                                captureProtection === "failed" ? "Encrypted content remains hidden because capture protection is unavailable." :
-                                    "Updating screen-capture protection…"}
+                        {captureProtection === "screenshot" ? "Encrypted content is hidden; screenshots remain available." :
+                            captureProtection === "ready" ? "Discord is capturable and encrypted content is visible." :
+                                captureProtection === "failed" ? "Encrypted content visibility could not be updated safely." :
+                                    "Updating encrypted-content visibility…"}
                     </BaseText>
                 </section>
 
@@ -1117,10 +1117,10 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
     if (captureProtection !== "ready") {
         const screenshotMode = captureProtection === "screenshot";
         const detail = screenshotMode
-            ? "Screenshot mode is on. Restore screen-capture protection to view this message."
+            ? "Screenshot mode is on. Show encrypted content again to view this message."
             : captureProtection === "pending"
-            ? "Waiting for operating-system screen-capture protection before decrypting…"
-            : "Operating-system screen-capture protection is unavailable, so plaintext remains hidden.";
+            ? "Waiting for encrypted-content visibility to update…"
+            : "Encrypted content visibility could not be updated safely.";
         return (
             <div className={`pc-secure-card ${screenshotMode ? "pc-secure-card-warning" : "pc-secure-card-danger"} pc-secure-content-hidden pc-secure-replaces-content`}>
                 <div className="pc-secure-card-header"><LockIcon color={screenshotMode ? "var(--status-warning)" : "var(--status-danger)"} /> Encrypted message protected</div>
@@ -1404,15 +1404,15 @@ export default definePlugin({
     renderMessageAccessory: props => <SecureMessageAccessory message={props.message} />,
 
     toolboxActions: {
-        async "Toggle safe screenshots"() {
+        async "Toggle encrypted screenshot hiding"() {
             const enabling = screenCaptureProtectionStatus === "ready";
             if (!enabling && screenCaptureProtectionStatus !== "screenshot" && screenCaptureProtectionStatus !== "failed") {
-                showToast("Screen-capture protection is still updating.", Toasts.Type.FAILURE);
+                showToast("Encrypted-content visibility is still updating.", Toasts.Type.FAILURE);
                 return;
             }
             if (await setScreenshotMode(enabling)) {
                 showToast(
-                    enabling ? "Screenshots are allowed; encrypted content is hidden." : "Encrypted content is protected again.",
+                    enabling ? "Encrypted content is hidden for screenshots." : "Encrypted content is visible again.",
                     Toasts.Type.SUCCESS,
                 );
             }
@@ -1455,7 +1455,7 @@ export default definePlugin({
         setScreenCaptureProtectionStatus("disabled");
         uninstallAttachmentUploadGuard();
         uninstallNetworkGuard();
-        void applyScreenCaptureProtection(false);
+        void applyScreenCaptureProtection(true);
         if (secureMessageListenersInstalled) {
             removeMessagePreSendListener(outgoingListener);
             removeMessagePreEditListener(editListener);
