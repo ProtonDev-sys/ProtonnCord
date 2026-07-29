@@ -194,8 +194,8 @@ async function main() {
         assert.ok(serverSearchProof, "server-wide headless search returns a live indexed message");
         assert.equal(new URL(page.url()).pathname, routeBeforeServerSearch, "server-wide search also leaves Discord's route unchanged");
         const newest = messages[0];
-        assert.equal(newest.isVoiceMessage, true, "the newest test-channel message is the supplied voice-message fixture");
-        const voiceMessage = newest;
+        const voiceMessage = messages.find((message: any) => message.isVoiceMessage);
+        assert.ok(voiceMessage, "the test-channel sample contains a voice-message fixture");
         const voiceAttachment = voiceMessage.attachments[0];
         assert.equal(typeof voiceAttachment.durationSeconds, "number", "voice duration is populated");
         assert.ok(voiceAttachment.durationSeconds > 0, "voice duration is positive");

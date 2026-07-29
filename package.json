@@ -1,15 +1,15 @@
 {
     "name": "protonn-cord",
     "private": "true",
-    "version": "1.14.16.0",
+    "version": "1.15.0.2",
     "description": "Protonn Cord, a Discord client mod",
-    "homepage": "https://github.com/ProtonnCord/ProtonnCord#readme",
+    "homepage": "https://github.com/ProtonDev-sys/ProtonnCord#readme",
     "bugs": {
-        "url": "https://github.com/ProtonnCord/ProtonnCord/issues"
+        "url": "https://github.com/ProtonDev-sys/ProtonnCord/issues"
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/ProtonnCord/ProtonnCord.git"
+        "url": "git+https://github.com/ProtonDev-sys/ProtonnCord.git"
     },
     "license": "GPL-3.0-or-later",
     "author": "Protonn Cord",
@@ -112,7 +112,7 @@
         "typescript-transform-paths": "^3.5.6",
         "zip-local": "^0.3.5"
     },
-    "packageManager": "pnpm@11.13.0",
+    "packageManager": "pnpm@11.17.0",
     "engines": {
         "node": ">=22"
     }

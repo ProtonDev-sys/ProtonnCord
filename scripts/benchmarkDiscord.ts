@@ -81,6 +81,41 @@ async function getChannelPaths(page: Page): Promise<string[]> {
         .filter((href, index, paths) => paths.indexOf(href) === index));
 }
 
+async function ensureGuildChannelPaths(page: Page): Promise<string[]> {
+    let channelPaths = await getChannelPaths(page);
+    if (channelPaths.length >= 2) return channelPaths;
+
+    const openedGuild = await page.evaluate(() => {
+        const guildLink = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href^='/channels/']"))
+            .find(anchor => anchor.getClientRects().length > 0 && /^\/channels\/\d+$/.test(anchor.getAttribute("href") ?? ""));
+        if (guildLink) {
+            guildLink.click();
+            return true;
+        }
+
+        const common = Vencord.Webpack.Common as any;
+        for (const guildId of Object.keys(common.GuildStore.getGuilds())) {
+            const channel = common.GuildChannelStore.getSelectableChannels(guildId)
+                .map((entry: any) => entry.channel)
+                .find((candidate: any) => candidate?.type === 0 || candidate?.type === 5);
+            if (!channel) continue;
+            common.NavigationRouter.transitionTo(`/channels/${guildId}/${channel.id}`);
+            return true;
+        }
+        return false;
+    });
+    assert.equal(openedGuild, true, "A visible guild is required when the benchmark starts from a DM");
+
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+        channelPaths = await getChannelPaths(page);
+        if (channelPaths.length >= 2) return channelPaths;
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    return channelPaths;
+}
+
 async function measureNavigation(page: Page, targetPath: string): Promise<NavigationSample> {
     return page.evaluate(async path => {
         const anchor = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href^='/channels/']"))
@@ -181,7 +216,7 @@ async function main(): Promise<void> {
     try {
         const page = await getDiscordPage(browser);
         await page.bringToFront();
-        const channelPaths = await getChannelPaths(page);
+        const channelPaths = await ensureGuildChannelPaths(page);
         assert(channelPaths.length >= 2, "At least two visible guild text channels are required");
 
         const targets = channelPaths.filter(path => path !== new URL(page.url()).pathname).slice(0, 2);
