@@ -46,7 +46,7 @@ async function getRepo() {
         .replace(/git@(.+):/, "https://$1/")
         .replace(/\.git$/, "");
     return remote === "https://github.com/Equicord/Equicord"
-        ? "https://github.com/ProtonnCord/ProtonnCord"
+        ? "https://github.com/ProtonDev-sys/ProtonnCord"
         : remote;
 }
 
