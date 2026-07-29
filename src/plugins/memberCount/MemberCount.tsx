@@ -17,13 +17,17 @@ export function MemberCount({ isTooltip, tooltipGuildId }: { isTooltip?: true; t
     const { voiceActivity } = settings.use(["voiceActivity"]);
     const includeVoice = voiceActivity && !isTooltip;
 
-    const currentChannel = useStateFromStores([SelectedChannelStore], () => getCurrentChannel());
-    const guildId = isTooltip ? tooltipGuildId! : currentChannel?.guild_id;
+    const currentChannel = useStateFromStores(
+        [SelectedChannelStore], () => isTooltip ? undefined : getCurrentChannel(),
+        [], (a, b) => a?.id === b?.id
+    );
+
+    const guildId = tooltipGuildId ?? currentChannel?.guild_id;
 
     const voiceActivityCount = useStateFromStores(
         [VoiceStateStore],
         () => {
-            if (!includeVoice) return 0;
+            if (!includeVoice || !guildId) return 0;
 
             const voiceStates = VoiceStateStore.getVoiceStates(guildId);
             if (!voiceStates) return 0;
@@ -43,45 +47,59 @@ export function MemberCount({ isTooltip, tooltipGuildId }: { isTooltip?: true; t
 
     const totalCount = useStateFromStores(
         [GuildMemberCountStore],
-        () => GuildMemberCountStore.getMemberCount(guildId!)
+        () => guildId ? GuildMemberCountStore.getMemberCount(guildId) : null
     );
 
     let onlineCount = useStateFromStores(
         [OnlineMemberCountStore],
-        () => OnlineMemberCountStore.getCount(guildId)
+        () => guildId ? OnlineMemberCountStore.getCount(guildId) : null
     );
 
-    const { groups } = useStateFromStores(
+    const memberListOnlineCount = useStateFromStores(
         [ChannelMemberStore],
-        () => ChannelMemberStore.getProps(guildId, currentChannel?.id)
+        () => {
+            if (isTooltip || !guildId) return null;
+
+            const { groups } = ChannelMemberStore.getProps(guildId, currentChannel?.id);
+
+            if (groups.length < 1 || groups[0].id === "unknown") return null;
+
+            let count = 0;
+            for (const group of groups) {
+                if (group.id !== "offline") count += group.count;
+            }
+
+            return count;
+        }
     );
 
-    const threadGroups = useStateFromStores(
+    const threadListOnlineCount = useStateFromStores(
         [ThreadMemberListStore],
-        () => ThreadMemberListStore.getMemberListSections(currentChannel?.id)
+        () => {
+            if (isTooltip) return null;
+
+            const threadGroups = ThreadMemberListStore.getMemberListSections(currentChannel?.id);
+
+            if (threadGroups && !isObjectEmpty(threadGroups)) {
+                let count = 0;
+                for (const key in threadGroups) {
+                    const group = threadGroups[key];
+                    if (group.sectionId !== "offline") count += group.userIds.length;
+                }
+                return count;
+            }
+
+            return null;
+        }
     );
 
-    if (!isTooltip && groups.length >= 1 && groups[0].id !== "unknown") {
-        let count = 0;
-        for (const group of groups) {
-            if (group.id !== "offline") count += group.count;
-        }
-
-        onlineCount = count;
-    }
-
-    if (!isTooltip && threadGroups && !isObjectEmpty(threadGroups)) {
-        let count = 0;
-        for (const key in threadGroups) {
-            const group = threadGroups[key];
-            if (group.sectionId !== "offline") count += group.userIds.length;
-        }
-
-        onlineCount = count;
-    }
+    if (memberListOnlineCount != null) onlineCount = memberListOnlineCount;
+    if (threadListOnlineCount != null) onlineCount = threadListOnlineCount;
 
     useEffect(() => {
-        OnlineMemberCountStore.ensureCount(guildId);
+        if (guildId) {
+            OnlineMemberCountStore.ensureCount(guildId);
+        }
     }, [guildId]);
 
     if (totalCount == null)
@@ -109,6 +127,7 @@ export function MemberCount({ isTooltip, tooltipGuildId }: { isTooltip?: true; t
                     </div>
                 )}
             </Tooltip>
+
             {includeVoice && voiceActivityCount > 0 &&
                 <Tooltip text={`${formattedVoiceCount} members in voice`} position="bottom">
                     {props => (

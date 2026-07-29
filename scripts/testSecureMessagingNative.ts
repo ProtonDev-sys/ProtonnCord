@@ -362,53 +362,53 @@ async function testInvalidInputs(native: NativeModule): Promise<void> {
 
 async function testScreenCaptureProtection(native: NativeModule): Promise<void> {
     const primary = captureWindow();
-    const failing = captureWindow(true);
+    const failing = captureWindow(false);
     const runtime = harnessGlobal.__secureMessagingNativeHarness;
     runtime.browserWindows = [primary, failing];
 
     const failedEnable = await native.setScreenCaptureProtection(DISCORD_EVENT, true);
     expectStatus(failedEnable, "failed", "window capture-protection failure is structured across IPC");
     assert.equal(failedEnable.error, "screen_capture_protection_failed");
-    assert.deepEqual(primary.values, [true, false], "a partial enable is rolled back on every reachable window");
-    assert.deepEqual(failing.values, [true, false], "the failing window also receives the safe rollback attempt");
-    assert.ok(primary.scripts.at(-1)?.includes("classList.add"), "an unprotected rollback hides encrypted DOM content");
+    assert.deepEqual(primary.values, [false, false], "capture blocking stays disabled during a partial visibility failure");
+    assert.deepEqual(failing.values, [false, false], "the failing window never receives capture blocking during rollback");
+    assert.ok(primary.values.every(value => value === false), "whole-window content protection is never enabled");
 
     failing.failWhen = undefined;
     runtime.browserWindows = [primary];
     const enabled = await native.setScreenCaptureProtection(DISCORD_EVENT, true);
-    expectStatus(enabled, "applied", "screen-capture protection enables after the injected failure clears");
+    expectStatus(enabled, "applied", "normal encrypted-content visibility restores after the injected failure clears");
     assert.equal(enabled.enabled, true);
     assert.equal(enabled.windowCount, 1);
-    assert.ok(primary.scripts.at(-1)?.includes("classList.remove"), "encrypted DOM content is revealed only after protection succeeds");
+    assert.ok(primary.scripts.at(-1)?.includes("classList.remove"), "encrypted DOM content is revealed after visibility restoration");
     assert.equal(runtime.appListeners?.filter(([event]) => event === "browser-window-created").length, 1, "future-window hook installs once");
 
     const futureWindow = captureWindow();
     const windowHook = runtime.appListeners?.find(([event]) => event === "browser-window-created")?.[1];
-    assert.ok(windowHook, "future-window protection hook is registered");
+    assert.ok(windowHook, "future-window screenshot-mode hook is registered");
     windowHook({}, futureWindow);
-    assert.deepEqual(futureWindow.values, [true], "a future window is protected before it can display decrypted content");
-    assert.ok(futureWindow.scripts.at(-1)?.includes("classList.remove"), "a protected future window is not left in screenshot mode");
+    assert.deepEqual(futureWindow.values, [false], "a future window remains capturable while encrypted content is visible");
+    assert.ok(futureWindow.scripts.at(-1)?.includes("classList.remove"), "a normal future window is not left in screenshot mode");
 
-    const failingFutureWindow = captureWindow(true);
+    const failingFutureWindow = captureWindow(false);
     runtime.browserWindows = [primary, failingFutureWindow];
     windowHook({}, failingFutureWindow);
-    assert.equal(primary.values.at(-1), true, "a future-window failure preserves protection on existing windows");
-    const failClosedDecrypt = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+    assert.equal(primary.values.at(-1), false, "a future-window failure never enables capture blocking on existing windows");
+    const decryptAfterVisibilityFailure = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
         channelId: DM_CHANNEL_ID,
         content: "PCEM1:blocked-until-protection-recovers",
         discordAuthorId: BOB_ID,
         discordEditedTimestamp: null,
         discordMessageId: messageId(2),
     });
-    expectStatus(failClosedDecrypt, "failed", "future-window protection failure blocks subsequent decryptions");
-    assert.equal(failClosedDecrypt.error, "screen_capture_protection_failed");
+    expectStatus(decryptAfterVisibilityFailure, "invalid_message", "capture visibility failures do not block cryptographic processing");
 
     runtime.browserWindows = [primary];
-    expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, true), "applied", "protection recovers after a future-window failure");
-    expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, false), "applied", "screen-capture protection disables cleanly");
-    assert.ok(primary.scripts.at(-1)?.includes("classList.add"), "screenshot mode hides encrypted DOM content before capture is enabled");
-    expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, true), "applied", "screen-capture protection re-enables serially");
-    assert.ok(primary.scripts.at(-1)?.includes("classList.remove"), "capture protection is restored before encrypted DOM content is revealed");
+    expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, true), "applied", "visibility recovers after a future-window failure");
+    expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, false), "applied", "screenshot mode enables cleanly");
+    assert.ok(primary.scripts.at(-1)?.includes("classList.add"), "screenshot mode hides encrypted DOM content");
+    expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, true), "applied", "encrypted content becomes visible serially");
+    assert.ok(primary.scripts.at(-1)?.includes("classList.remove"), "encrypted DOM content is revealed after screenshot mode");
+    assert.ok(primary.values.every(value => value === false), "every screenshot-mode transition keeps Discord capturable");
     assert.equal(runtime.appListeners?.filter(([event]) => event === "browser-window-created").length, 1, "re-enabling does not duplicate hooks");
 }
 
@@ -840,7 +840,7 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     expectStatus(
         await freshlyLoaded.setScreenCaptureProtection(DISCORD_EVENT, true),
         "applied",
-        "fresh native bundle protects its windows before decrypting",
+        "fresh native bundle restores encrypted-content visibility before decrypting",
     );
     const durableCounter = await freshlyLoaded.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
         plaintext: "counter after fresh module load",

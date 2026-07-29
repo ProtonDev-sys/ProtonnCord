@@ -352,6 +352,7 @@ export default definePlugin({
     stop() {
         stopSocket();
         avatarIconCache.clear();
+        Native.closeSocket();
     },
 
     settingsAboutComponent: () => (
@@ -409,7 +410,7 @@ function sendMsgNotif(titleString: string, content: string, message: Message) {
                 content: content,
                 useBase64Icon: true,
                 icon: result,
-                sourceApp: "Vencord"
+                sourceApp: "Protonn Cord"
             };
 
             void sendToOverlay(msgData).catch(error => logger.error("Failed to send XSOverlay message notification", error));
@@ -440,7 +441,7 @@ async function sendToOverlay(notif: NotificationObject) {
         return;
     }
     const apiObject: ApiObject = {
-        sender: "Vencord",
+        sender: "Protonn Cord",
         target: "xsoverlay",
         command: "SendNotification",
         jsonData: JSON.stringify(notif),
