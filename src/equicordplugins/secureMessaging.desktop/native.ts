@@ -1901,8 +1901,6 @@ export async function decryptIncoming(
     if (!user.ok) return invalidInput(user.error);
     const checkedInput = validateDecryptInput(input);
     if (!checkedInput.ok) return invalidInput(checkedInput.error);
-    if (!screenCaptureProtectionEnabled || !screenCaptureProtectionHealthy)
-        return { status: "failed", error: "screen_capture_protection_failed" };
     return runSerialized(async (): Promise<DecryptIncomingResult> => {
         const context = await loadAccount(user.value);
         if (context.created) await saveVault(context.vault);
@@ -2077,9 +2075,7 @@ export async function decryptIncomingAttachments(
     }
 }
 
-// setContentProtection applies per window, so existing and future windows are both covered.
-// Screenshot mode hides encrypted DOM content in every window before capture protection is released.
-// A participant running a modified build, or a camera pointed at the screen, still reads plaintext.
+// Discord remains capturable at all times. Screenshot mode only hides decrypted DOM content.
 const SCREENSHOT_MODE_CLASS = "pc-secure-screenshot-mode";
 let screenCaptureProtectionEnabled = false;
 let screenCaptureProtectionHealthy = false;
@@ -2100,9 +2096,9 @@ function markProtectionUnhealthyAfterWindowFailure(): void {
     const windows = BrowserWindow.getAllWindows();
     for (const window of windows) {
         try {
-            window.setContentProtection(screenCaptureProtectionEnabled);
+            window.setContentProtection(false);
         } catch {
-            // The unhealthy state keeps every subsequent decrypt operation fail-closed.
+            // Best effort: never deliberately restore whole-window capture blocking.
         }
     }
     void setEncryptedContentHidden(windows, true).catch(() => undefined);
@@ -2112,7 +2108,7 @@ function installNewWindowProtectionHook(): void {
     if (newWindowHookInstalled) return;
     app.on("browser-window-created", (_event, window) => {
         try {
-            window.setContentProtection(screenCaptureProtectionEnabled);
+            window.setContentProtection(false);
             void setEncryptedContentHidden([window], !screenCaptureProtectionEnabled || !screenCaptureProtectionHealthy)
                 .catch(markProtectionUnhealthyAfterWindowFailure);
         } catch {
@@ -2130,7 +2126,7 @@ async function applyScreenCaptureProtection(enabled: boolean): Promise<ScreenCap
         installNewWindowProtectionHook();
         windows = BrowserWindow.getAllWindows();
         if (!enabled) await setEncryptedContentHidden(windows, true);
-        for (const window of windows) window.setContentProtection(enabled);
+        for (const window of windows) window.setContentProtection(false);
         if (enabled) await setEncryptedContentHidden(windows, false);
         screenCaptureProtectionEnabled = enabled;
         screenCaptureProtectionHealthy = true;
@@ -2139,7 +2135,7 @@ async function applyScreenCaptureProtection(enabled: boolean): Promise<ScreenCap
         let rollbackSucceeded = true;
         for (const window of windows) {
             try {
-                window.setContentProtection(previousEnabled && previousHealthy);
+                window.setContentProtection(false);
             } catch {
                 rollbackSucceeded = false;
             }

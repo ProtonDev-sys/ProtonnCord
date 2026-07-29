@@ -57,11 +57,15 @@ async function calculateGitChanges() {
 async function fetchUpdates() {
     const data = await githubGet("/releases/latest");
 
-    const hash = data.name.slice(data.name.lastIndexOf(" ") + 1);
+    const hash = String(data.name ?? "").trim().split(/\s+/).at(-1);
+    if (!hash || !/^[a-f0-9]{40}$/i.test(hash))
+        throw new Error("The latest Protonn Cord release does not identify its source commit");
     if (hash === gitHash)
         return false;
 
     const asset = data.assets.find(a => a.name === ASAR_FILE);
+    if (!asset?.browser_download_url)
+        throw new Error(`The latest Protonn Cord release is missing ${ASAR_FILE}`);
     PendingUpdate = asset.browser_download_url;
 
     return true;

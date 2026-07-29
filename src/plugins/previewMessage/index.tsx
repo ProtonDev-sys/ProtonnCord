@@ -24,6 +24,16 @@ import { CloudUpload, MessageAttachment } from "@vencord/discord-types";
 import { DraftStore, DraftType, UploadAttachmentStore, UserStore, useStateFromStores } from "@webpack/common";
 
 const PREVIEW_ATTACHMENT_URL_TTL_MS = 5 * 60 * 1000;
+const objectURLMap = new Map<string, { timeoutId: number; urls: string[]; }>();
+
+function cleanupPreviewMessage(messageId: string) {
+    const tracked = objectURLMap.get(messageId);
+    if (!tracked) return;
+
+    window.clearTimeout(tracked.timeoutId);
+    for (const url of tracked.urls) URL.revokeObjectURL(url);
+    objectURLMap.delete(messageId);
+}
 
 const getDraft = (channelId: string) => DraftStore.getDraft(channelId, DraftType.ChannelMessage);
 
@@ -54,8 +64,10 @@ function createPreviewAttachmentUrlTracker() {
             return url;
         },
         cleanup,
-        scheduleCleanup() {
-            window.setTimeout(cleanup, PREVIEW_ATTACHMENT_URL_TTL_MS);
+        release() {
+            const result = [...objectUrls];
+            objectUrls.clear();
+            return result;
         }
     };
 }
@@ -83,17 +95,17 @@ const getAttachments = async (channelId: string) => {
 
                 if (isImage) {
                     const box = await getImageBox(url);
-                    if (!box) return attachment;
-
-                    attachment.width = box.width;
-                    attachment.height = box.height;
+                    if (box) {
+                        attachment.width = box.width;
+                        attachment.height = box.height;
+                    }
                 }
 
                 return attachment;
             })
         );
 
-        return { attachments, cleanup: () => urls.cleanup(), scheduleCleanup: () => urls.scheduleCleanup() };
+        return { attachments, cleanup: () => urls.cleanup(), release: () => urls.release() };
     } catch (error) {
         urls.cleanup();
         throw error;
@@ -133,7 +145,7 @@ const PreviewButton: ChatBarButtonFactory = ({ isAnyChat, isEmpty, type: { attac
                 const previewAttachments = hasAttachments ? await getAttachments(channelId) : undefined;
 
                 try {
-                    sendBotMessage(
+                    const message = sendBotMessage(
                         channelId,
                         {
                             content: getDraft(channelId),
@@ -141,7 +153,13 @@ const PreviewButton: ChatBarButtonFactory = ({ isAnyChat, isEmpty, type: { attac
                             attachments: previewAttachments?.attachments,
                         }
                     );
-                    previewAttachments?.scheduleCleanup();
+                    if (previewAttachments) {
+                        const timeoutId = window.setTimeout(
+                            () => cleanupPreviewMessage(message.id),
+                            PREVIEW_ATTACHMENT_URL_TTL_MS,
+                        );
+                        objectURLMap.set(message.id, { timeoutId, urls: previewAttachments.release() });
+                    }
                 } catch (error) {
                     previewAttachments?.cleanup();
                     throw error;
@@ -172,5 +190,15 @@ export default definePlugin({
     chatBarButton: {
         icon: PreviewIcon,
         render: PreviewButton
-    }
+    },
+
+    flux: {
+        MESSAGE_DELETE({ id: messageId }) {
+            cleanupPreviewMessage(messageId);
+        }
+    },
+
+    stop() {
+        for (const messageId of objectURLMap.keys()) cleanupPreviewMessage(messageId);
+    },
 });

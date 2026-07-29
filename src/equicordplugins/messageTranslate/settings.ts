@@ -5,14 +5,19 @@
  */
 
 import { definePluginSettings } from "@api/Settings";
-import { OptionType } from "@utils/types";
+import { makeRange, OptionType } from "@utils/types";
 
 const ID_REGEX = /^\d{17,20}$/;
 
 let ignoredGuildIds = new Set<string>();
 let ignoredChannelIds = new Set<string>();
 let ignoredUserIds = new Set<string>();
+let excludedLanguageCodes = new Set<string>();
 let idCachesInitialized = false;
+
+function parseList(value: string): Set<string> {
+    return new Set(value.split(",").map(item => item.trim().toLowerCase()).filter(Boolean));
+}
 
 function parseIdList(value: string): Set<string> {
     const ids = new Set<string>();
@@ -41,6 +46,7 @@ export function refreshIgnoredIdCaches() {
     ignoredGuildIds = parseIdList(settings.store.ignoredGuilds);
     ignoredChannelIds = parseIdList(settings.store.ignoredChannels);
     ignoredUserIds = parseIdList(settings.store.ignoredUsers);
+    excludedLanguageCodes = parseList(settings.store.excludedLanguages);
     idCachesInitialized = true;
 }
 
@@ -50,9 +56,19 @@ export const settings = definePluginSettings({
         description: "Target language code for translations (e.g. en, es, fr, de, ja).",
         default: "en",
     },
+    excludedLanguages: {
+        type: OptionType.STRING,
+        description: "Language codes to exclude from translation (e.g. en, es, fr, de, ja).",
+        onChange: value => {
+            excludedLanguageCodes = parseList(value);
+            idCachesInitialized = true;
+        },
+        default: "en",
+    },
     confidenceRequirement: {
-        type: OptionType.NUMBER,
+        type: OptionType.SLIDER,
         description: "Minimum confidence (0 to 1) required to show a translation.",
+        markers: makeRange(0, 1, 0.1),
         default: 0.8,
     },
     autoTranslate: {
@@ -105,7 +121,31 @@ export const settings = definePluginSettings({
         description: "Append a small (translated) indicator to translated messages.",
         default: true,
     },
+    showOriginal: {
+        type: OptionType.SELECT,
+        description: "Show the original and translated text.",
+        options: [
+            {
+                label: "Don't show original.",
+                value: "no-orig",
+                default: true,
+            },
+            {
+                label: "Show original in subtext",
+                value: "orig-in-subtext",
+            },
+            {
+                label: "Show original message, translation in subtext",
+                value: "trans-in-subtext",
+            },
+        ]
+    },
 });
+
+export function getExcludedLanguages(): Set<string> {
+    if (!idCachesInitialized) refreshIgnoredIdCaches();
+    return excludedLanguageCodes;
+}
 
 export function getIgnoredGuilds(): Set<string> {
     if (!idCachesInitialized) refreshIgnoredIdCaches();

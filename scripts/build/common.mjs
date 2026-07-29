@@ -21,14 +21,13 @@
 import "../suppressExperimentalWarnings.js";
 import "../checkNodeVersion.js";
 
-import { exec, execSync } from "child_process";
+import { execSync } from "child_process";
 import esbuild, { build, context } from "esbuild";
 import { constants as FsConstants, readFileSync } from "fs";
 import { access, readdir, readFile } from "fs/promises";
 import { minify as minifyHtml } from "html-minifier-terser";
 import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
-import { promisify } from "util";
 
 import { getPluginTarget } from "../utils.mjs";
 
@@ -229,17 +228,11 @@ export const gitRemotePlugin = {
             namespace: "git-remote", path: args.path
         }));
         build.onLoad({ filter, namespace: "git-remote" }, async () => {
-            let remote = process.env.PROTONN_CORD_REMOTE || process.env.EQUICORD_REMOTE;
-            if (!remote) {
-                const res = await promisify(exec)("git remote get-url origin", { encoding: "utf-8" });
-                remote = res.stdout.trim()
-                    .replace("https://github.com/", "")
-                    .replace("git@github.com:", "")
-                    .replace(/.git$/, "");
-            }
-            if (remote === "Equicord/Equicord") remote = "ProtonnCord/ProtonnCord";
+            const remote = process.env.PROTONN_CORD_REMOTE || "ProtonDev-sys/ProtonnCord";
+            if (!/^[\w.-]+\/[\w.-]+$/.test(remote))
+                throw new Error(`Invalid PROTONN_CORD_REMOTE value: ${JSON.stringify(remote)}`);
 
-            return { contents: `export default "${remote}"` };
+            return { contents: `export default ${JSON.stringify(remote)}` };
         });
     }
 };

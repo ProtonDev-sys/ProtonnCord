@@ -367,7 +367,7 @@ async function verifyScreenshotMode(page: Page, message: RawDiscordMessage, plai
         } finally {
             if (screenshotModeEnabled || plugin.getScreenCaptureProtectionStatus?.() === "failed") {
                 const restored = await plugin.setScreenshotMode(false);
-                if (!restored) throw new Error("SecureMessaging did not restore screen-capture protection");
+                if (!restored) throw new Error("SecureMessaging did not restore encrypted-content visibility");
             }
         }
     }, { message, plaintext });
@@ -1267,11 +1267,11 @@ async function main(): Promise<void> {
         assert.equal(attachmentRenderProof.rawEncryptedFilenameHidden, true, "the opaque Discord filename must not be shown to the user");
 
         const screenshotModeProof = await verifyScreenshotMode(page, attachmentSend.message, attachmentPlaintext);
-        assert.equal(screenshotModeProof.rootCaptureClassApplied, true, "screenshot mode must apply its capture-safe root class before releasing OS protection");
+        assert.equal(screenshotModeProof.rootCaptureClassApplied, true, "screenshot mode must apply its capture-safe root class");
         assert.equal(screenshotModeProof.plaintextHidden, true, "screenshot mode must hide decrypted text");
         assert.equal(screenshotModeProof.attachmentPixelsHidden, true, "screenshot mode must hide decrypted attachment pixels");
         assert.equal(screenshotModeProof.encryptedPlaceholderVisible, true, "screenshot mode must leave a clear protected placeholder");
-        assert.equal(await waitForScreenCaptureProtection(page), "ready", "screen-capture protection must restore after the screenshot-mode proof");
+        assert.equal(await waitForScreenCaptureProtection(page), "ready", "encrypted-content visibility must restore after the screenshot-mode proof");
 
         const rejectionProof = await verifyNativeRejectionPaths(page, runtimeProof.message, runtimePlaintext);
         assert.equal(rejectionProof.exactStatus, "decrypted", "an exact React rerender must remain idempotent");
