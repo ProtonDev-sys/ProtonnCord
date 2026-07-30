@@ -255,8 +255,11 @@ let originalAttachmentUpload: CloudUpload["upload"] | null = null;
 let guardedAttachmentUpload: CloudUpload["upload"] | null = null;
 let approvedAttachmentUploads = new WeakSet<CloudUpload>();
 type StartEditMessage = (...args: any[]) => any;
+type StartEditMessageRecord = (channelId: string, message: Message, source?: unknown) => any;
 let originalStartEditMessage: StartEditMessage | null = null;
 let guardedStartEditMessage: StartEditMessage | null = null;
+let originalStartEditMessageRecord: StartEditMessageRecord | null = null;
+let guardedStartEditMessageRecord: StartEditMessageRecord | null = null;
 
 function announcementKey(channelId: string, content: string): string {
     return `${channelId}\0${content}`;
@@ -725,42 +728,63 @@ function installNetworkGuard(): void {
     rest.patch = guardedRestPatch;
 }
 
+function openEncryptedMessageEditor(message: Message, openEditor: (plaintext: string) => void): void {
+    const localUserId = UserStore.getCurrentUser()?.id;
+    if (!localUserId || message.author?.id !== localUserId) {
+        showToast("Only your own encrypted messages can be edited.", Toasts.Type.FAILURE);
+        return;
+    }
+    if (screenCaptureProtectionStatus !== "ready") {
+        showToast("Show encrypted content before editing this message.", Toasts.Type.FAILURE);
+        return;
+    }
+
+    const finish = (result: DecryptIncomingResult) => {
+        if (result.status !== "decrypted") {
+            showToast("The encrypted message could not be authenticated for editing.", Toasts.Type.FAILURE);
+            return;
+        }
+        if (MessageStore.getMessage(message.channel_id, message.id)?.content !== message.content) return;
+        openEditor(result.plaintext);
+    };
+    const cached = getCachedDecryption(localUserId, message);
+    if (cached) finish(cached);
+    else void decryptCachedMessage(localUserId, message).then(finish);
+}
+
 function installEncryptedEditStarter(): void {
-    if (guardedStartEditMessage) return;
+    if (guardedStartEditMessage || guardedStartEditMessageRecord) return;
     const actions = MessageActions as unknown as Record<string, any>;
     const original = actions.startEditMessage;
-    if (typeof original !== "function") throw new Error("Discord's message editor action is unavailable");
+    const originalRecord = actions.startEditMessageRecord;
+    if (typeof original !== "function" || typeof originalRecord !== "function")
+        throw new Error("Discord's message editor actions are unavailable");
     originalStartEditMessage = original;
+    originalStartEditMessageRecord = originalRecord;
     guardedStartEditMessage = function (channelId: string, messageId: string, content: string, ...args: any[]) {
         const message = MessageStore.getMessage(channelId, messageId);
         if (!message || !isEncryptedMessage(message.content)) return original.call(actions, channelId, messageId, content, ...args);
-        const localUserId = UserStore.getCurrentUser()?.id;
-        if (!localUserId || message.author?.id !== localUserId) {
-            showToast("Only your own encrypted messages can be edited.", Toasts.Type.FAILURE);
-            return;
-        }
-        if (screenCaptureProtectionStatus !== "ready") {
-            showToast("Show encrypted content before editing this message.", Toasts.Type.FAILURE);
-            return;
-        }
-        void decryptCachedMessage(localUserId, message).then(result => {
-            if (result.status !== "decrypted") {
-                showToast("The encrypted message could not be authenticated for editing.", Toasts.Type.FAILURE);
-                return;
-            }
-            if (MessageStore.getMessage(channelId, messageId)?.content !== message.content) return;
-            original.call(actions, channelId, messageId, result.plaintext, ...args);
-        });
+        openEncryptedMessageEditor(message, plaintext => original.call(actions, channelId, messageId, plaintext, ...args));
+    };
+    guardedStartEditMessageRecord = function (channelId: string, message: Message, source?: unknown) {
+        const stored = MessageStore.getMessage(channelId, message.id);
+        if (!stored || !isEncryptedMessage(stored.content)) return originalRecord.call(actions, channelId, message, source);
+        openEncryptedMessageEditor(stored, plaintext => original.call(actions, channelId, stored.id, plaintext, source));
     };
     actions.startEditMessage = guardedStartEditMessage;
+    actions.startEditMessageRecord = guardedStartEditMessageRecord;
 }
 
 function uninstallEncryptedEditStarter(): void {
     const actions = MessageActions as unknown as Record<string, any>;
     if (guardedStartEditMessage && actions.startEditMessage === guardedStartEditMessage && originalStartEditMessage)
         actions.startEditMessage = originalStartEditMessage;
+    if (guardedStartEditMessageRecord && actions.startEditMessageRecord === guardedStartEditMessageRecord && originalStartEditMessageRecord)
+        actions.startEditMessageRecord = originalStartEditMessageRecord;
     originalStartEditMessage = null;
     guardedStartEditMessage = null;
+    originalStartEditMessageRecord = null;
+    guardedStartEditMessageRecord = null;
 }
 
 function uninstallNetworkGuard(): void {
