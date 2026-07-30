@@ -287,13 +287,6 @@ export default definePlugin({
             }
         },
         {
-            find: '"--custom-cutout-radius":',
-            replacement: {
-                match: /style:{(?=\.\.\.\i,backgroundImage:null!=(\i).{0,20}?\?`url\(\$\{\1\}\)`)/,
-                replace: (_, bannerSrc) => `onClick:vcEvent=>${bannerSrc}!=null&&$self.openBanner(${bannerSrc},vcEvent),style:{cursor:${bannerSrc}!=null?"pointer":void 0,`
-            }
-        },
-        {
             find: "#{intl::GUILD_COMMUNICATION_DISABLED_ICON_TOOLTIP_BODY}",
             replacement: {
                 // thanks https://github.com/Syncxv/vc-timezones/pull/4
