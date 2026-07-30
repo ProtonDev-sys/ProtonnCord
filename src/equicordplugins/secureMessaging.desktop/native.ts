@@ -1167,7 +1167,7 @@ async function downloadAttachmentUrl(initialUrl: URL, expectedSize: number, chan
         const declaredLength = response.headers.get("content-length");
         if (declaredLength !== null && Number(declaredLength) !== expectedSize)
             throw new Error("Encrypted attachment length changed");
-        const chunks: Uint8Array[] = [];
+        const result = new Uint8Array(expectedSize);
         const reader = response.body.getReader();
         let length = 0;
         while (true) {
@@ -1178,22 +1178,16 @@ async function downloadAttachmentUrl(initialUrl: URL, expectedSize: number, chan
                 await reader.cancel();
                 throw new Error("Encrypted attachment exceeded its declared size");
             }
-            chunks.push(chunk.value);
+            result.set(chunk.value, length - chunk.value.byteLength);
         }
         if (length !== expectedSize) throw new Error("Encrypted attachment was truncated");
-        const result = new Uint8Array(length);
-        let offset = 0;
-        for (const chunk of chunks) {
-            result.set(chunk, offset);
-            offset += chunk.byteLength;
-        }
         return result;
     }
     throw new Error("Encrypted attachment redirected too many times");
 }
 
 async function downloadEncryptedAttachment(reference: EncryptedAttachmentReference, channelId: string): Promise<Uint8Array> {
-    const urls = [reference.url, reference.proxyUrl];
+    const urls = [...new Set([reference.url, reference.proxyUrl])];
     for (const value of urls) {
         const url = validateAttachmentUrl(value, channelId, reference.id);
         if (!url) continue;
@@ -2004,7 +1998,19 @@ export async function decryptIncoming(
         if (checkedInput.value.discordAuthorId === user.value &&
             collisions.some(replay => replayEnvelopeMatches(replay, checkedInput.value, envelope, contentDigest)))
             return { status: "decrypted", plaintext, attachmentBundle, stickers, counter: envelope.q, envelopeId: envelope.i };
-        if (collisions.length > 0) return { status: "replay_detected" };
+
+        const sameDiscordMessage = collisions.filter(replay => replay.discordMessageId === checkedInput.value.discordMessageId);
+        const reusedEnvelope = collisions.some(replay => replay.discordMessageId !== checkedInput.value.discordMessageId);
+        if (reusedEnvelope) return { status: "replay_detected" };
+        if (sameDiscordMessage.length > 0) {
+            // A Discord edit must carry a freshly signed, monotonically newer envelope. Replacing the
+            // stored record makes any older edit a rollback instead of allowing both versions forever.
+            if (checkedInput.value.discordEditedTimestamp === null || sameDiscordMessage.some(replay =>
+                replay.senderFingerprint === envelope.k && replay.counter >= envelope.q))
+                return { status: "replay_detected" };
+            context.account.replayCache = context.account.replayCache.filter(replay =>
+                replay.discordMessageId !== checkedInput.value.discordMessageId);
+        }
 
         context.account.replayCache.push({
             channelId: checkedInput.value.channelId,
