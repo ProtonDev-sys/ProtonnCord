@@ -40,7 +40,7 @@ The protocol does not hide Discord metadata such as channel membership, sender, 
 - Discord's whole-window operating-system capture block is always disabled. Optional screenshot mode hides decrypted content in current and future Discord windows while it is active; protected sends pause until encrypted content is shown again.
 - Only exact, bounded-lifetime, one-use ciphertext/key payloads and opaque attachment reservations produced by Secure Messaging can pass the protected REST backstop. A forged `PCEM2:`/`PCEM1:`/`PCEK1:` prefix is not authorization.
 - Up to 10 ordinary files, 100 MiB each and 200 MiB total, are supported per encrypted message. Files are fully authenticated and decrypted before display, cached only in memory, exposed to Discord's native image/video/audio/file renderer through revocable local blob URLs, and never streamed before authentication succeeds.
-- Normal edits of protected messages are blocked. Send a correction as a new encrypted message.
+- Your encrypted messages can be edited: Secure Messaging decrypts the editor locally, preserves the authenticated attachment/sticker descriptor, and sends a freshly signed higher-counter envelope. Older versions cannot be replayed as a rollback. Adding, removing, or replacing attachments during an edit remains blocked because Discord cannot atomically replace their encrypted bundle.
 - Plaintext is kept in component memory for display and is not written to Discord's message store or plugin settings.
 
 Client code with direct access to Discord's network stack can deliberately bypass any client-side guard, so other installed plugins remain part of the trusted endpoint. This code and its tests provide implementation evidence, not a formal proof or independent security audit.

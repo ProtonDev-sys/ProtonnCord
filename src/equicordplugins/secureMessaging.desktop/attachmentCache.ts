@@ -6,7 +6,7 @@
 
 import type { PluginNative } from "@utils/types";
 import type { Message, MessageAttachment } from "@vencord/discord-types";
-import { UserStore } from "@webpack/common";
+import { Constants, RestAPI, UserStore } from "@webpack/common";
 
 import { discordEditedTimestamp } from "./messageMetadata";
 import type { DecryptIncomingAttachmentsResult } from "./native";
@@ -17,6 +17,13 @@ const MAX_CACHE_BYTES = 256 * 1024 * 1024;
 const MAX_CACHE_ENTRIES = 128;
 const SPOILER_FLAG = 8;
 const ANIMATED_FLAG = 32;
+const ATTACHMENT_URL_REFRESH_THRESHOLD_MS = 60 * 60 * 1_000;
+const ALLOWED_ATTACHMENT_HOSTS = new Set(["cdn.discordapp.com", "media.discordapp.net"]);
+const SAFE_INLINE_MIME_TYPES = new Set([
+    "audio/aac", "audio/flac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/opus", "audio/wav", "audio/webm",
+    "image/avif", "image/gif", "image/jpeg", "image/png", "image/webp",
+    "video/mp4", "video/ogg", "video/quicktime", "video/webm",
+]);
 // Discord treats a missing scan version as pending and can obscure media from non-friends.
 // E2EE plaintext cannot be scanned by Discord, so use its explicit local/unscanned sentinel
 // instead of misrepresenting the ciphertext attachment's scan as applying to decrypted bytes.
@@ -46,9 +53,9 @@ interface AttachmentCacheEntry {
 const cache = new Map<string, AttachmentCacheEntry>();
 let cachedBytes = 0;
 
-function cacheKey(message: Message): string {
-    return `${message.channel_id}\0${message.id}\0${message.content}\0${message.attachments.map(attachment =>
-        `${attachment.id}:${attachment.size}:${attachment.url}:${attachment.proxy_url}`).join("\0")}`;
+export function encryptedAttachmentCacheKey(message: Message): string {
+    return `${message.channel_id}\0${message.id}\0${message.author?.id ?? ""}\0${message.content}\0${message.attachments.map(attachment =>
+        `${attachment.id}:${attachment.size}`).join("\0")}`;
 }
 
 function cloneWithAttachments(message: Message, attachments: ExtendedAttachment[]): Message {
@@ -59,8 +66,67 @@ function cloneWithAttachments(message: Message, attachments: ExtendedAttachment[
 
 function notify(entry: AttachmentCacheEntry): void {
     if (entry.disposed) return;
-    for (const listener of entry.listeners) listener();
+    for (const listener of entry.listeners) {
+        try {
+            listener();
+        } catch {
+            // Discord may dispose a message renderer before asynchronous decryption finishes.
+        }
+    }
     entry.listeners.clear();
+}
+
+function validatedAttachmentUrl(value: string, channelId: string, attachmentId: string): URL | null {
+    if (typeof value !== "string" || value.length < 1 || value.length > 2_048) return null;
+    let url: URL;
+    try {
+        url = new URL(value);
+    } catch {
+        return null;
+    }
+    if (url.protocol !== "https:" || url.username || url.password || url.port || !ALLOWED_ATTACHMENT_HOSTS.has(url.hostname)) return null;
+    const match = /^\/attachments\/(\d{17,20})\/(\d{17,20})\/[^/]{1,512}$/u.exec(url.pathname);
+    return match?.[1] === channelId && match[2] === attachmentId ? url : null;
+}
+
+function needsUrlRefresh(url: URL): boolean {
+    const expiresAt = Number.parseInt(url.searchParams.get("ex") ?? "", 16) * 1_000;
+    return Number.isFinite(expiresAt) && expiresAt - ATTACHMENT_URL_REFRESH_THRESHOLD_MS <= Date.now();
+}
+
+async function refreshedAttachmentUrls(message: Message): Promise<Map<string, string>> {
+    const candidates = new Map<string, string>();
+    for (const attachment of message.attachments) {
+        for (const value of [attachment.url, attachment.proxy_url]) {
+            const url = validatedAttachmentUrl(value, message.channel_id, attachment.id);
+            if (url && needsUrlRefresh(url)) candidates.set(value, attachment.id);
+        }
+    }
+    if (candidates.size === 0) return new Map();
+
+    try {
+        const response = await RestAPI.post({
+            url: Constants.Endpoints.ATTACHMENTS_REFRESH_URLS,
+            body: { attachment_urls: [...candidates.keys()] },
+            retries: 2,
+        });
+        const result = new Map<string, string>();
+        const refreshed = Array.isArray(response?.body?.refreshed_urls) ? response.body.refreshed_urls : [];
+        for (const entry of refreshed) {
+            if (!entry || typeof entry.original !== "string" || typeof entry.refreshed !== "string") continue;
+            const attachmentId = candidates.get(entry.original);
+            if (!attachmentId || !validatedAttachmentUrl(entry.refreshed, message.channel_id, attachmentId)) continue;
+            result.set(entry.original, entry.refreshed);
+        }
+        return result;
+    } catch {
+        return new Map();
+    }
+}
+
+function safeInlineMimeType(value: string | null): string {
+    const normalized = value?.split(";", 1)[0].trim().toLowerCase() ?? "";
+    return SAFE_INLINE_MIME_TYPES.has(normalized) ? normalized : "application/octet-stream";
 }
 
 function removeEntry(key: string, entry: AttachmentCacheEntry): void {
@@ -102,6 +168,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
         notify(entry);
         return;
     }
+    const refreshedUrls = await refreshedAttachmentUrls(message);
     const result = await Native.decryptIncomingAttachments(localUserId, {
         channelId: message.channel_id,
         content: message.content,
@@ -110,9 +177,9 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
         discordMessageId: message.id,
         attachments: message.attachments.map(attachment => ({
             id: attachment.id,
-            proxyUrl: attachment.proxy_url,
+            proxyUrl: refreshedUrls.get(attachment.proxy_url) ?? attachment.proxy_url,
             size: attachment.size,
-            url: attachment.url,
+            url: refreshedUrls.get(attachment.url) ?? attachment.url,
         })),
     });
     if (entry.disposed) return;
@@ -126,8 +193,9 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
     let bytes = 0;
     for (const attachment of result.attachments) {
         const { metadata } = attachment;
+        const contentType = safeInlineMimeType(metadata.mimeType);
         const blob = new Blob([Uint8Array.from(attachment.data).buffer], {
-            type: metadata.mimeType || "application/octet-stream",
+            type: contentType,
         });
         const objectUrl = URL.createObjectURL(blob);
         if (entry.disposed) {
@@ -141,17 +209,19 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
             id: attachment.id,
             filename: metadata.name,
             content_scan_version: LOCAL_CONTENT_SCAN_VERSION,
-            content_type: metadata.mimeType || undefined,
+            content_type: contentType,
             size: metadata.size,
             spoiler: metadata.spoiler,
             url: `${objectUrl}#`,
             proxy_url: `${objectUrl}#`,
             description: metadata.description ?? undefined,
-            width: metadata.width ?? undefined,
-            height: metadata.height ?? undefined,
-            duration_secs: metadata.duration ?? undefined,
+            width: contentType.startsWith("image/") ? metadata.width ?? undefined : undefined,
+            height: contentType.startsWith("image/") ? metadata.height ?? undefined : undefined,
+            duration_secs: contentType.startsWith("audio/") || contentType.startsWith("video/")
+                ? metadata.duration ?? undefined
+                : undefined,
             flags: (metadata.spoiler ? SPOILER_FLAG : 0) |
-                (metadata.mimeType === "image/gif" ? ANIMATED_FLAG : 0),
+                (contentType === "image/gif" ? ANIMATED_FLAG : 0),
         });
     }
     entry.attachments = attachments;
@@ -166,7 +236,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
 
 function ensureEntry(message: Message): AttachmentCacheEntry | null {
     if (!isEncryptedMessage(message.content) || message.attachments.length === 0) return null;
-    const key = cacheKey(message);
+    const key = encryptedAttachmentCacheKey(message);
     const existing = cache.get(key);
     if (existing) {
         existing.lastAccess = Date.now();
