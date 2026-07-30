@@ -4,18 +4,17 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import type { PluginNative } from "@utils/types";
 import type { Embed, Message } from "@vencord/discord-types";
 import { findByCodeLazy } from "@webpack";
 import { Constants, RestAPI, UserStore } from "@webpack/common";
 
 import type { SecureStickerItem } from "./attachments";
+import { decryptCachedMessage } from "./decryptCache";
 import { extractSecureEmbedUrls } from "./embedUrls";
 import { discordEditedTimestamp } from "./messageMetadata";
 import type { DecryptIncomingResult } from "./native";
 import { isEncryptedMessage } from "./protocol";
 
-const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const convertEmbed = findByCodeLazy(".uniqueId(\"embed_\")") as (
     channelId: string,
     messageId: string,
@@ -168,13 +167,7 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
     }
     let decrypted: DecryptIncomingResult;
     try {
-        decrypted = await Native.decryptIncoming(localUserId, {
-            channelId: message.channel_id,
-            content: message.content,
-            discordAuthorId: message.author.id,
-            discordEditedTimestamp: discordEditedTimestamp(message),
-            discordMessageId: message.id,
-        });
+        decrypted = await decryptCachedMessage(localUserId, message);
     } catch {
         finishEntry(key, entry);
         return;

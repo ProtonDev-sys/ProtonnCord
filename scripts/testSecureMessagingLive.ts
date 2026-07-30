@@ -515,7 +515,7 @@ async function assertFailClosedBoundaries(page: Page): Promise<{
         return {
             attachmentBlocked: /blocked a malformed or unsupported programmatic send/iu.test(attachmentError),
             attachmentReservationBlocked: /blocked an unauthorized attachment upload reservation/iu.test(attachmentReservationError),
-            editBlocked: /blocked a programmatic edit/iu.test(editError),
+            editBlocked: /blocked an edit because the original message is unavailable/iu.test(editError),
             prefixedPayloadBlocked: /blocked an unauthorized prefixed programmatic payload/iu.test(prefixedPayloadError),
         };
     }, { channelId: TEST_CHANNEL_ID, registryName: PAGE_MESSAGE_REGISTRY });
@@ -635,6 +635,102 @@ async function sendAuthorizedRuntimePayload(page: Page, content: string): Promis
             oneShotReplayBlocked: /blocked an unauthorized prefixed programmatic payload/iu.test(replayError),
         };
     }, { channelId: TEST_CHANNEL_ID, content, registryName: PAGE_MESSAGE_REGISTRY });
+}
+
+async function editEncryptedMessageThroughRuntime(
+    page: Page,
+    original: RawDiscordMessage,
+    originalPlaintext: string,
+    editedPlaintext: string,
+    retainAttachmentIds: string[] = [],
+): Promise<{
+    editorPlaintextVisible: boolean;
+    message: RawDiscordMessage;
+    plaintextWasTransformed: boolean;
+    replayBlocked: boolean;
+}> {
+    await page.waitForFunction(({ channelId, messageId }) =>
+        Boolean((globalThis as any).Vencord?.Webpack?.Common?.MessageStore?.getMessage?.(channelId, messageId)),
+    { timeout: 30_000 }, { channelId: original.channelId, messageId: original.id });
+
+    return page.evaluate(async ({ channelId, editedPlaintext, encryptedPrefix, messageId, originalPlaintext, retainAttachmentIds }) => {
+        const global = globalThis as any;
+        const common = global.Vencord.Webpack.Common;
+        const messageEvents = global.Vencord.Api?.MessageEvents;
+        const stored = common.MessageStore.getMessage(channelId, messageId);
+        if (!stored) throw new Error("The encrypted edit target is absent from MessageStore");
+
+        common.MessageActions.startEditMessage(stored.channel_id, stored.id, stored.content);
+        const editorDeadline = Date.now() + 10_000;
+        let editorPlaintextVisible = false;
+        while (Date.now() < editorDeadline) {
+            const editor = [...document.querySelectorAll<HTMLElement>('[role="textbox"]')]
+                .find(candidate => candidate.textContent?.includes(originalPlaintext));
+            if (editor) {
+                editorPlaintextVisible = !(editor.textContent ?? "").includes(encryptedPrefix);
+                break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 25));
+        }
+        common.MessageActions.endEditMessage?.(stored.channel_id, stored.id);
+
+        if (typeof messageEvents?._handlePreEdit !== "function")
+            throw new Error("The runtime MessageEvents pre-edit dispatcher is unavailable");
+        const edit = {
+            content: editedPlaintext,
+            invalidEmojis: [],
+            tts: false,
+            validNonShortcutEmojis: [],
+        };
+        const cancelled = await messageEvents._handlePreEdit(stored.channel_id, stored.id, edit);
+        if (cancelled) throw new Error("Secure Messaging cancelled a valid encrypted edit");
+        if (!edit.content.startsWith(encryptedPrefix) || edit.content.includes(editedPlaintext))
+            throw new Error("Secure Messaging did not transform edited plaintext before REST");
+
+        const body: Record<string, unknown> = { content: edit.content };
+        if (retainAttachmentIds.length > 0)
+            body.attachments = retainAttachmentIds.map(id => ({ id }));
+        const response = await common.RestAPI.patch({
+            url: common.Constants.Endpoints.MESSAGE(stored.channel_id, stored.id),
+            body,
+        });
+        const message = response.body;
+        if (!message?.id || typeof message.edited_timestamp !== "string")
+            throw new Error("Discord REST did not return the encrypted edited message");
+
+        const replayError = await common.RestAPI.patch({
+            url: common.Constants.Endpoints.MESSAGE(stored.channel_id, stored.id),
+            body,
+        }).then(() => "", (error: unknown) => String(error));
+
+        return {
+            editorPlaintextVisible,
+            message: {
+                attachments: (message.attachments ?? []).map((attachment: any) => ({
+                    contentType: typeof attachment.content_type === "string" ? attachment.content_type : null,
+                    filename: String(attachment.filename),
+                    id: String(attachment.id),
+                    proxyUrl: String(attachment.proxy_url),
+                    size: Number(attachment.size),
+                    url: String(attachment.url),
+                })),
+                authorId: String(message.author.id),
+                channelId: String(message.channel_id),
+                content: String(message.content),
+                editedTimestamp: message.edited_timestamp,
+                id: String(message.id),
+            },
+            plaintextWasTransformed: edit.content !== editedPlaintext,
+            replayBlocked: /blocked an unauthorized prefixed programmatic edit/iu.test(replayError),
+        };
+    }, {
+        channelId: original.channelId,
+        encryptedPrefix: ENCRYPTED_PREFIX,
+        editedPlaintext,
+        messageId: original.id,
+        originalPlaintext,
+        retainAttachmentIds,
+    });
 }
 
 async function sendAuthorizedRuntimeReply(page: Page, content: string, referencedMessageId: string): Promise<RawDiscordMessage> {
@@ -864,13 +960,34 @@ async function verifyRenderedEncryptedAttachment(page: Page, message: RawDiscord
         // The structured diagnostic below is more useful than Puppeteer's generic timeout.
     }
 
-    const proof = await page.evaluate(({ channelId, encryptedFilename, messageId, plaintext }) => {
+    const proof = await page.evaluate(async ({ channelId, encryptedFilename, messageId, plaintext, pngBase64 }) => {
         const global = globalThis as any;
         const item = document.getElementById(`chat-messages-${channelId}-${messageId}`);
         const image = item?.querySelector<HTMLImageElement>("img[src^='blob:']");
         const storedMessage = global.Vencord?.Webpack?.Common?.MessageStore?.getMessage?.(channelId, messageId);
+        const passiveOwner = { forceUpdate: Function.prototype };
         const projectedMessage = storedMessage
-            ? global.Vencord?.Plugins?.plugins?.SecureMessaging?.patchEncryptedAttachments?.(storedMessage, { forceUpdate() { } })
+            ? global.Vencord?.Plugins?.plugins?.SecureMessaging?.patchEncryptedAttachments?.(storedMessage, passiveOwner)
+            : null;
+        const projectedAttachment = projectedMessage?.attachments?.[0];
+        let downloadedBase64 = "";
+        if (typeof projectedAttachment?.url === "string" && projectedAttachment.url.startsWith("blob:")) {
+            const response = await fetch(projectedAttachment.url);
+            const bytes = new Uint8Array(await response.arrayBuffer());
+            let binary = "";
+            for (let offset = 0; offset < bytes.length; offset += 8_192)
+                binary += String.fromCharCode(...bytes.subarray(offset, offset + 8_192));
+            downloadedBase64 = btoa(binary);
+        }
+        const refreshedMessage = storedMessage?.set?.("attachments", storedMessage.attachments.map((attachment: any) => {
+            const url = new URL(attachment.url);
+            url.searchParams.set("ex", "0");
+            const proxyUrl = new URL(attachment.proxy_url);
+            proxyUrl.searchParams.set("ex", "0");
+            return { ...attachment, url: url.toString(), proxy_url: proxyUrl.toString() };
+        }));
+        const refreshedProjection = refreshedMessage
+            ? global.Vencord?.Plugins?.plugins?.SecureMessaging?.patchEncryptedAttachments?.(refreshedMessage, passiveOwner)
             : null;
         let imageObscured = false;
         for (let ancestor: HTMLElement | null = image?.parentElement ?? null; ancestor && ancestor !== item; ancestor = ancestor.parentElement) {
@@ -893,8 +1010,12 @@ async function verifyRenderedEncryptedAttachment(page: Page, message: RawDiscord
             imageUsesLocalAuthenticatedUrl: image?.src.startsWith("blob:") ?? false,
             imageWidth: image?.naturalWidth ?? 0,
             localContentScanVersion: projectedMessage?.attachments?.[0]?.content_scan_version ?? null,
+            downloadBytesMatch: downloadedBase64 === pngBase64,
+            downloadFilename: projectedAttachment?.filename ?? "",
+            downloadMimeType: projectedAttachment?.content_type ?? "",
             plaintextVisible: item?.querySelector(".pc-secure-card-plaintext")?.textContent?.includes(plaintext) ?? false,
             rawEncryptedFilenameHidden: !(item?.textContent ?? "").includes(encryptedFilename),
+            signedUrlRefreshCacheStable: refreshedProjection?.attachments?.[0]?.url === projectedAttachment?.url,
             text: item?.textContent?.slice(0, 2_000) ?? "",
         };
     }, {
@@ -902,6 +1023,7 @@ async function verifyRenderedEncryptedAttachment(page: Page, message: RawDiscord
         encryptedFilename: message.attachments[0]?.filename ?? "",
         messageId: message.id,
         plaintext,
+        pngBase64: PROOF_PNG_BASE64,
     });
     if (!proof.imageUsesLocalAuthenticatedUrl || proof.imageWidth < 1 || proof.imageHeight < 1)
         throw new Error(`Encrypted attachment native-render diagnostic: ${JSON.stringify(proof)}`);
@@ -1226,6 +1348,35 @@ async function main(): Promise<void> {
         assert.equal(recipientAttachment.metadata.height, 3);
         assert.equal(Buffer.from(recipientAttachment.data).toString("base64"), PROOF_PNG_BASE64);
 
+        const editedAttachmentPlaintext = `Secure Messaging edited attachment proof ${crypto.randomUUID()} ε`;
+        const attachmentEditProof = await editEncryptedMessageThroughRuntime(
+            page,
+            attachmentSend.message,
+            attachmentPlaintext,
+            editedAttachmentPlaintext,
+            attachmentSend.message.attachments.map(attachment => attachment.id),
+        );
+        assert.equal(attachmentEditProof.editorPlaintextVisible, true, "the encrypted attachment editor must open with plaintext, never ciphertext");
+        assert.equal(attachmentEditProof.plaintextWasTransformed, true, "edited attachment text must be re-encrypted before REST");
+        assert.equal(attachmentEditProof.replayBlocked, true, "an authorized encrypted attachment edit must remain one-use");
+        assert.equal(attachmentEditProof.message.attachments.length, 1, "editing text must retain the encrypted attachment");
+        const recipientEditedAttachmentEnvelope = await decryptMessage({
+            channelId: TEST_CHANNEL_ID,
+            content: attachmentEditProof.message.content,
+            discordAuthorId: preflight.localUserId,
+            identity: temporaryRecipient,
+            localUserId: EXPECTED_RECIPIENT_ID,
+            senderIdentity: localPublicIdentity,
+        });
+        const recipientEditedAttachment = parseSecurePlaintext(recipientEditedAttachmentEnvelope.plaintext);
+        assert.equal(recipientEditedAttachment.text, editedAttachmentPlaintext);
+        assert.deepEqual(
+            recipientEditedAttachment.attachments,
+            recipientAttachmentPlaintext.attachments,
+            "an encrypted text edit must retain the exact authenticated attachment bundle descriptor",
+        );
+        attachmentSend.message = attachmentEditProof.message;
+
         const restPlaintext = `Secure Messaging REST-guard proof ${crypto.randomUUID()} β`;
         const restMessage = await sendThroughRestGuard(page, restPlaintext);
         sentMessageIds.add(restMessage.id);
@@ -1243,6 +1394,27 @@ async function main(): Promise<void> {
         });
         assert.equal(restDecrypted.plaintext, restPlaintext, "the selected recipient must decrypt the guarded REST send exactly");
 
+        const editedRestPlaintext = `Secure Messaging edited-text proof ${crypto.randomUUID()} ζ`;
+        const textEditProof = await editEncryptedMessageThroughRuntime(
+            page,
+            restMessage,
+            restPlaintext,
+            editedRestPlaintext,
+        );
+        assert.equal(textEditProof.editorPlaintextVisible, true, "the encrypted editor must show the original plaintext without ciphertext flicker");
+        assert.equal(textEditProof.plaintextWasTransformed, true, "edited plaintext must be encrypted before REST");
+        assert.equal(textEditProof.replayBlocked, true, "an encrypted edit authorization must be one-use");
+        assert.ok(textEditProof.message.editedTimestamp, "Discord must record an authoritative edited timestamp");
+        const recipientEditedText = await decryptMessage({
+            channelId: TEST_CHANNEL_ID,
+            content: textEditProof.message.content,
+            discordAuthorId: preflight.localUserId,
+            identity: temporaryRecipient,
+            localUserId: EXPECTED_RECIPIENT_ID,
+            senderIdentity: localPublicIdentity,
+        });
+        assert.equal(recipientEditedText.plaintext, editedRestPlaintext, "the selected recipient must decrypt the edited text exactly");
+
         const renderProof = await verifyRenderedMessage(page, runtimeProof.message, runtimePlaintext);
         assert.equal(renderProof.plaintextVisible, true, "locally decrypted plaintext must render");
         assert.equal(renderProof.rawCiphertextHidden, true, "raw Discord ciphertext must be hidden in the message row");
@@ -1257,7 +1429,7 @@ async function main(): Promise<void> {
         assert.equal(replyPreviewProof.plaintextVisible, true, "an encrypted reply preview must show the referenced plaintext");
         assert.equal(replyPreviewProof.ciphertextHidden, true, "an encrypted reply preview must never show the referenced ciphertext envelope");
 
-        const attachmentRenderProof = await verifyRenderedEncryptedAttachment(page, attachmentSend.message, attachmentPlaintext);
+        const attachmentRenderProof = await verifyRenderedEncryptedAttachment(page, attachmentSend.message, editedAttachmentPlaintext);
         assert.equal(attachmentRenderProof.plaintextVisible, true, "encrypted attachment text must render locally");
         assert.equal(attachmentRenderProof.imageUsesLocalAuthenticatedUrl, true, "Discord's native renderer must receive a local authenticated blob URL");
         assert.equal(attachmentRenderProof.imageWidth, 2, "Discord's native image renderer must decode the original width");
@@ -1265,8 +1437,12 @@ async function main(): Promise<void> {
         assert.equal(attachmentRenderProof.imageObscured, false, "decrypted E2EE media must not be mistaken for a pending Discord content scan");
         assert.equal(attachmentRenderProof.localContentScanVersion, -1, "decrypted E2EE media must carry Discord's local unscanned sentinel");
         assert.equal(attachmentRenderProof.rawEncryptedFilenameHidden, true, "the opaque Discord filename must not be shown to the user");
+        assert.equal(attachmentRenderProof.downloadBytesMatch, true, "the projected Discord attachment must download the exact authenticated plaintext bytes");
+        assert.equal(attachmentRenderProof.downloadFilename, PROOF_PNG_FILENAME, "the projected download must restore the authenticated filename");
+        assert.equal(attachmentRenderProof.downloadMimeType, "image/png", "safe raster images must retain their native Discord preview type");
+        assert.equal(attachmentRenderProof.signedUrlRefreshCacheStable, true, "signed Discord URL refreshes must not invalidate decrypted blobs or flicker");
 
-        const screenshotModeProof = await verifyScreenshotMode(page, attachmentSend.message, attachmentPlaintext);
+        const screenshotModeProof = await verifyScreenshotMode(page, attachmentSend.message, editedAttachmentPlaintext);
         assert.equal(screenshotModeProof.rootCaptureClassApplied, true, "screenshot mode must apply its capture-safe root class");
         assert.equal(screenshotModeProof.plaintextHidden, true, "screenshot mode must hide decrypted text");
         assert.equal(screenshotModeProof.attachmentPixelsHidden, true, "screenshot mode must hide decrypted attachment pixels");
@@ -1296,12 +1472,23 @@ async function main(): Promise<void> {
                 nativeImageRendererUsed: attachmentRenderProof.imageUsesLocalAuthenticatedUrl,
                 nativeImageWidth: attachmentRenderProof.imageWidth,
                 localContentScanVersion: attachmentRenderProof.localContentScanVersion,
+                downloadBytesMatch: attachmentRenderProof.downloadBytesMatch,
+                downloadFilename: attachmentRenderProof.downloadFilename,
                 originalFilenameRestored: recipientAttachment.metadata.name,
                 rawEncryptedFilenameHidden: attachmentRenderProof.rawEncryptedFilenameHidden,
+                signedUrlRefreshCacheStable: attachmentRenderProof.signedUrlRefreshCacheStable,
                 wireContentLength: attachmentSend.wireContentLength,
             },
             authorizedAttachmentBlockedBeforeCapabilityConsumption: runtimeProof.attachmentBearingPayloadBlocked,
-            editBlocked: failClosed.editBlocked,
+            encryptedEdits: {
+                attachmentDescriptorRetained: JSON.stringify(recipientEditedAttachment.attachments) === JSON.stringify(recipientAttachmentPlaintext.attachments),
+                attachmentEditorPlaintext: attachmentEditProof.editorPlaintextVisible,
+                attachmentRetained: attachmentEditProof.message.attachments.length === 1,
+                textDecryptedBySelectedRecipient: recipientEditedText.plaintext === editedRestPlaintext,
+                textEditorPlaintext: textEditProof.editorPlaintextVisible,
+                oneShotAuthorization: textEditProof.replayBlocked && attachmentEditProof.replayBlocked,
+            },
+            unauthorizedEditBlocked: failClosed.editBlocked,
             localIdentityFingerprintMatched: true,
             missingChannelStoreFailedClosed: persistedProof.missingChannelBlocked,
             nativeTamperRejected: rejectionProof.tamperedStatus === "invalid_message",

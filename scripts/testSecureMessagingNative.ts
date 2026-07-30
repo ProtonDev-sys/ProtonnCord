@@ -719,6 +719,46 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     });
     expectStatus(senderMessageIdCollision, "replay_detected", "sender still rejects different ciphertext reusing a Discord message ID");
 
+    const editableDm = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        plaintext: "native secret before edit",
+        snapshot: aliceDm,
+    });
+    expectStatus(editableDm, "encrypted", "Alice encrypts a message that will be edited");
+    const editableDmInput = {
+        ...bobDmInput,
+        content: editableDm.content,
+        discordMessageId: messageId(16),
+    };
+    decrypted = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, editableDmInput);
+    expectStatus(decrypted, "decrypted", "Bob decrypts the original editable message");
+
+    const editedDm = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        plaintext: "edited native secret",
+        snapshot: aliceDm,
+    });
+    expectStatus(editedDm, "encrypted", "Alice encrypts a legitimate message edit");
+    const editedDmInput = {
+        ...editableDmInput,
+        content: editedDm.content,
+        discordEditedTimestamp: "2026-01-01T00:00:01.000Z",
+    };
+    decrypted = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, editedDmInput);
+    expectStatus(decrypted, "decrypted", "a freshly signed higher-counter Discord edit decrypts");
+    assert.equal(decrypted.plaintext, "edited native secret");
+    decrypted = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, editedDmInput);
+    expectStatus(decrypted, "decrypted", "an exact edited-message rerender remains idempotent");
+    const rolledBackEdit = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, {
+        ...editableDmInput,
+        discordEditedTimestamp: "2026-01-01T00:00:02.000Z",
+    });
+    expectStatus(rolledBackEdit, "replay_detected", "an older encrypted version cannot roll back an edited Discord message");
+    const outOfOrderEdit = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, {
+        ...editableDmInput,
+        content: secondDm.content,
+        discordEditedTimestamp: "2026-01-01T00:00:03.000Z",
+    });
+    expectStatus(outOfOrderEdit, "replay_detected", "a lower-counter edit arriving after a newer edit is rejected");
+
     conversation = await native.configureConversation(DISCORD_EVENT, ALICE_ID, {
         enabled: true,
         selectedRecipientIds: [BOB_ID],
