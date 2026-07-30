@@ -660,7 +660,9 @@ async function editEncryptedMessageThroughRuntime(
         const stored = common.MessageStore.getMessage(channelId, messageId);
         if (!stored) throw new Error("The encrypted edit target is absent from MessageStore");
 
-        common.MessageActions.startEditMessage(stored.channel_id, stored.id, stored.content);
+        // Discord's visible context-menu edit button and up-arrow shortcut both use the
+        // record action, so exercise that exact path rather than only the lower-level action.
+        common.MessageActions.startEditMessageRecord(stored.channel_id, stored, "secure-messaging-live-proof");
         const editorDeadline = Date.now() + 10_000;
         let editorPlaintextVisible = false;
         while (Date.now() < editorDeadline) {
