@@ -15,6 +15,7 @@ interface WireAuthorization {
 }
 
 const authorizations = new Map<string, WireAuthorization>();
+const editAuthorizations = new Map<string, WireAuthorization>();
 const uploadAuthorizations = new Map<string, WireAuthorization>();
 
 export interface AuthorizedAttachmentFile {
@@ -28,6 +29,10 @@ function authorizationKey(channelId: string, content: string, attachmentFilename
 
 function uploadAuthorizationKey(channelId: string, file: AuthorizedAttachmentFile): string {
     return `${channelId}\0${file.filename}\0${file.size}`;
+}
+
+function editAuthorizationKey(channelId: string, messageId: string, content: string): string {
+    return `${channelId}\0${messageId}\0${content}`;
 }
 
 function pruneAuthorizationMap(values: Map<string, WireAuthorization>, now: number): void {
@@ -80,6 +85,35 @@ export function consumeWirePayloadAuthorization(
     return true;
 }
 
+export function authorizeWireEdit(channelId: string, messageId: string, content: string, now = Date.now()): void {
+    pruneAuthorizationMap(editAuthorizations, now);
+    const key = editAuthorizationKey(channelId, messageId, content);
+    const existing = editAuthorizations.get(key);
+    editAuthorizations.set(key, {
+        count: (existing?.count ?? 0) + 1,
+        expiresAt: now + AUTHORIZATION_LIFETIME_MS,
+    });
+}
+
+export function consumeWireEditAuthorization(
+    channelId: string,
+    messageId: string,
+    content: string,
+    now = Date.now(),
+): boolean {
+    const key = editAuthorizationKey(channelId, messageId, content);
+    const authorization = editAuthorizations.get(key);
+    if (!authorization || authorization.expiresAt <= now) {
+        editAuthorizations.delete(key);
+        return false;
+    }
+    if (authorization.count > 1)
+        editAuthorizations.set(key, { ...authorization, count: authorization.count - 1 });
+    else
+        editAuthorizations.delete(key);
+    return true;
+}
+
 export function authorizeAttachmentUploadReservations(
     channelId: string,
     files: readonly AuthorizedAttachmentFile[],
@@ -125,5 +159,6 @@ export function consumeAttachmentUploadReservations(
 
 export function clearWirePayloadAuthorizations(): void {
     authorizations.clear();
+    editAuthorizations.clear();
     uploadAuthorizations.clear();
 }
