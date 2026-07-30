@@ -212,7 +212,7 @@ export default definePlugin({
             find: "QUEST_HOME)},[]),",
             predicate: () => !getQuestifySettings().disableQuestsEverything && getQuestifySettings().disableSponsoredBanner,
             replacement: {
-                match: /(?<=,{questHomeHero:(\i),isLoading:(\i),confirmedEmpty:\i}=.{0,300}?ORBS_BALANCE_MENU}\)},\[\]\);)/,
+                match: /(?<=,{questHomeHero:(\i),isLoading:(\i),confirmedEmpty:(\i)}=.{0,300}?ORBS_BALANCE_MENU}\)},\[\]\);)/,
                 replace: "$1=null;$2=false;$3=true;"
             }
         },
