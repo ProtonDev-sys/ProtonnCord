@@ -7,6 +7,7 @@
 interface DiscordMessageMetadata {
     edited_timestamp?: unknown;
     editedTimestamp?: unknown;
+    nonce?: unknown;
 }
 
 function normalizeTimestamp(value: unknown): string | null {
@@ -24,4 +25,10 @@ export function discordEditedTimestamp(message: DiscordMessageMetadata): string 
     if (Object.prototype.hasOwnProperty.call(message, "edited_timestamp"))
         return normalizeTimestamp(message.edited_timestamp);
     return normalizeTimestamp(message.editedTimestamp);
+}
+
+export function discordMessageNonce(message: DiscordMessageMetadata): string | null {
+    return typeof message.nonce === "string" && /^\d{17,20}$/u.test(message.nonce)
+        ? message.nonce
+        : null;
 }
