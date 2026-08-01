@@ -61,8 +61,15 @@ interface AttachmentCacheEntry {
     statusListeners: Set<() => void>;
 }
 
+interface DownloadReference {
+    attachmentId: string;
+    isMedia: boolean;
+    localUserId: string;
+    message: Message;
+}
+
 const cache = new Map<string, AttachmentCacheEntry>();
-const downloadReferences = new Map<string, { attachmentId: string; localUserId: string; message: Message; }>();
+const downloadReferences = new Map<string, DownloadReference>();
 let cachedBytes = 0;
 let inFlightBytes = 0;
 let inFlightLoads = 0;
@@ -316,7 +323,12 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
                 flags: (metadata.spoiler ? SPOILER_FLAG : 0) |
                     (contentType === "image/gif" ? ANIMATED_FLAG : 0),
             });
-            downloadReferences.set(objectUrl, { attachmentId: attachment.id, localUserId, message });
+            downloadReferences.set(objectUrl, {
+                attachmentId: attachment.id,
+                isMedia: contentType.startsWith("audio/") || contentType.startsWith("image/") || contentType.startsWith("video/"),
+                localUserId,
+                message,
+            });
         }
     } catch (error) {
         for (const objectUrl of objectUrls) {
@@ -381,6 +393,10 @@ function objectUrl(value: string): string {
 
 export function isEncryptedAttachmentDownloadUrl(value: string): boolean {
     return downloadReferences.has(objectUrl(value));
+}
+
+export function isEncryptedAttachmentMediaUrl(value: string): boolean {
+    return downloadReferences.get(objectUrl(value))?.isMedia ?? false;
 }
 
 export async function downloadEncryptedAttachmentUrl(value: string): Promise<DownloadIncomingAttachmentResult | null> {

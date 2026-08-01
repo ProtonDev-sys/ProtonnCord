@@ -55,6 +55,7 @@ import {
     encryptedMediaAttachments,
     type ExtendedAttachment,
     isEncryptedAttachmentDownloadUrl,
+    isEncryptedAttachmentMediaUrl,
     patchEncryptedMessageAttachments,
     retryEncryptedAttachmentLoad,
     subscribeEncryptedAttachmentStatus,
@@ -151,7 +152,7 @@ function handleEncryptedAttachmentDownload(event: MouseEvent): void {
     if (event.button !== 0 || event.defaultPrevented || !(event.target instanceof Element)) return;
     if (event.target.closest("img, video, audio")) return;
     const link = event.target.closest<HTMLAnchorElement>("a[href]");
-    if (!link || !isEncryptedAttachmentDownloadUrl(link.href)) return;
+    if (!link || !isEncryptedAttachmentDownloadUrl(link.href) || isEncryptedAttachmentMediaUrl(link.href)) return;
 
     event.preventDefault();
     event.stopImmediatePropagation();
