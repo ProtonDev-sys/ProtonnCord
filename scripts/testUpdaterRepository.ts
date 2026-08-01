@@ -3,8 +3,11 @@ import { readFileSync } from "node:fs";
 
 const repository = "ProtonDev-sys/ProtonnCord";
 const patcher = readFileSync("dist/desktop/patcher.js", "utf8");
+const gitUpdater = readFileSync("src/main/updater/git.ts", "utf8");
+const gitOperations = readFileSync("src/main/updater/gitOperations.ts", "utf8");
 const workflow = readFileSync(".github/workflows/build.yml", "utf8");
 
+assert.match(patcher, /\/\/ Standalone: true/u, "the repository test must inspect a freshly built standalone updater");
 assert.ok(
     patcher.includes("https://api.github.com/repos/") && patcher.includes(repository),
     "the production updater checks the Protonn Cord GitHub repository",
@@ -18,8 +21,22 @@ assert.equal(
     false,
     "the production updater never falls back to the upstream Equicord repository",
 );
+assert.match(gitUpdater, /inspectGitUpdates\(git, UPDATE_REPOSITORY, lastBuiltHead\)/u);
+assert.match(gitUpdater, /pullGitUpdates\(git, UPDATE_REPOSITORY, lastBuiltHead\)/u);
+assert.match(gitUpdater, /GIT_TERMINAL_PROMPT: "0"/u);
+assert.match(gitUpdater, /timeout: GIT_TIMEOUT_MS/u);
+assert.match(gitUpdater, /timeout: BUILD_TIMEOUT_MS/u);
+assert.match(gitOperations, /"rev-list",\s*"--left-right",\s*"--count"/u);
+assert.match(gitOperations, /git\("pull", "--ff-only", repository, state\.branch\)/u);
+assert.match(gitOperations, /git\("status", "--porcelain=v1", "--untracked-files=all"\)/u);
+assert.doesNotMatch(gitUpdater, /origin\/\$\{branch\}/u);
+assert.doesNotMatch(gitOperations, /origin\/\$\{branch\}/u);
 assert.match(workflow, /gh release create latest[^\n]+Protonn Cord \$GITHUB_SHA/);
-assert.match(workflow, /gh release edit latest --title "Protonn Cord \$GITHUB_SHA" --latest/);
+assert.match(workflow, /concurrency:\s+group: protonn-cord-release-\$\{\{ github\.ref \}\}\s+cancel-in-progress: false/u);
+assert.match(workflow, /git fetch origin main/u);
+assert.match(workflow, /git rev-parse HEAD[^\n]+git rev-parse origin\/main/u);
+assert.match(workflow, /git push origin refs\/tags\/latest --force/u);
+assert.match(workflow, /gh release edit latest --target "\$GITHUB_SHA" --title "Protonn Cord \$GITHUB_SHA" --latest/);
 assert.match(workflow, /gh release upload latest --clobber dist\/release\/\*/);
 assert.match(workflow, /cp ProtonnCord\.user\.\{js,js\.LEGAL\.txt\} release/);
 assert.doesNotMatch(workflow, /cp Equicord\.user/);

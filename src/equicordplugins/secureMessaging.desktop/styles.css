@@ -17,6 +17,14 @@
     display: none;
 }
 
+.pc-secure-screenshot-mode img[src^="blob:"],
+.pc-secure-screenshot-mode video[src^="blob:"],
+.pc-secure-screenshot-mode audio[src^="blob:"],
+.pc-secure-screenshot-mode video:has(source[src^="blob:"]),
+.pc-secure-screenshot-mode audio:has(source[src^="blob:"]) {
+    visibility: hidden !important; /* Override Discord's media-modal visibility while screenshot mode is active. */
+}
+
 .pc-secure-screenshot-mode .pc-secure-message::after {
     content: "Encrypted message hidden while screenshots are allowed.";
     color: var(--text-muted);
@@ -66,6 +74,23 @@
     gap: 0.5rem;
     align-items: center;
     margin-top: 0.55rem;
+}
+
+.pc-secure-media-attachment {
+    display: grid;
+    gap: 0.35rem;
+    margin-top: 0.5rem;
+}
+
+.pc-secure-media-player {
+    width: min(100%, 34rem);
+    max-height: 24rem;
+    border-radius: 0.5rem;
+    background: black;
+}
+
+.pc-secure-audio-player {
+    width: min(100%, 34rem);
 }
 
 .pc-secure-fingerprint {

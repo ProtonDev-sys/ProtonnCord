@@ -17,69 +17,58 @@
 */
 
 import { IpcEvents } from "@shared/IpcEvents";
+import type { UpdaterDiagnostics } from "@shared/Updater";
 import { execFile as cpExecFile } from "child_process";
 import { ipcMain } from "electron";
-import { join } from "path";
+import { join, resolve } from "path";
 import { promisify } from "util";
 
+import gitHash from "~git-hash";
+import gitRemote from "~git-remote";
+
 import { serializeErrors } from "./common";
+import { type GitCommandResult, inspectGitUpdates, pullGitUpdates } from "./gitOperations";
 
 const VENCORD_SRC_DIR = join(__dirname, "..");
 const PROTONN_CORD_DIR = join(__dirname, "../../");
 
 const execFile = promisify(cpExecFile);
+const UPDATE_REPOSITORY = `https://github.com/${gitRemote}.git`;
+const GIT_TIMEOUT_MS = 60_000;
+const BUILD_TIMEOUT_MS = 10 * 60_000;
+let lastBuiltHead = gitHash;
 
 const isFlatpak = process.platform === "linux" && !!process.env.FLATPAK_ID;
 
 if (process.platform === "darwin") process.env.PATH = `/usr/local/bin:${process.env.PATH}`;
 
-function git(...args: string[]) {
-    const opts = { cwd: VENCORD_SRC_DIR };
+async function git(...args: string[]): Promise<GitCommandResult> {
+    const opts = {
+        cwd: VENCORD_SRC_DIR,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+        timeout: GIT_TIMEOUT_MS,
+    };
 
-    if (isFlatpak) return execFile("flatpak-spawn", ["--host", "git", ...args], opts);
-    else return execFile("git", args, opts);
+    const result = isFlatpak
+        ? await execFile("flatpak-spawn", ["--host", "git", ...args], opts)
+        : await execFile("git", args, opts);
+    return { stderr: String(result.stderr), stdout: String(result.stdout) };
 }
 
 async function getRepo() {
-    const res = await git("remote", "get-url", "origin");
-    const remote = res.stdout.trim()
-        .replace(/git@(.+):/, "https://$1/")
-        .replace(/\.git$/, "");
-    return remote === "https://github.com/Equicord/Equicord"
-        ? "https://github.com/ProtonDev-sys/ProtonnCord"
-        : remote;
+    return UPDATE_REPOSITORY.replace(/\.git$/u, "");
 }
 
 async function calculateGitChanges() {
-    await git("fetch");
-
-    const branch = (await git("branch", "--show-current")).stdout.trim();
-
-    const existsOnOrigin = (await git("ls-remote", "origin", branch)).stdout.length > 0;
-    if (!existsOnOrigin) return [];
-
-    const res = await git("log", `HEAD...origin/${branch}`, "--pretty=format:%an/%H/%s");
-
-    const commits = res.stdout.trim();
-    return commits ? commits.split("\n").map(line => {
-        const [author, hash, ...rest] = line.split("/");
-        return {
-            hash, author,
-            message: rest.join("/").split("\n")[0]
-        };
-    }) : [];
+    return (await inspectGitUpdates(git, UPDATE_REPOSITORY, lastBuiltHead)).changes;
 }
 
 async function pull() {
-    const before = (await git("rev-parse", "HEAD")).stdout.trim();
-    await git("pull", "--ff-only");
-    const after = (await git("rev-parse", "HEAD")).stdout.trim();
-
-    return before !== after;
+    return pullGitUpdates(git, UPDATE_REPOSITORY, lastBuiltHead);
 }
 
 async function build() {
-    const opts = { cwd: PROTONN_CORD_DIR };
+    const opts = { cwd: PROTONN_CORD_DIR, timeout: BUILD_TIMEOUT_MS };
 
     const command = isFlatpak ? "flatpak-spawn" : "node";
     const args = isFlatpak ? ["--host", "node", "scripts/build/build.mjs"] : ["scripts/build/build.mjs"];
@@ -87,11 +76,24 @@ async function build() {
     if (IS_DEV) args.push("--dev");
 
     const res = await execFile(command, args, opts);
+    const succeeded = !res.stderr.includes("Build failed");
+    if (succeeded) lastBuiltHead = (await git("rev-parse", "HEAD")).stdout.trim();
 
-    return !res.stderr.includes("Build failed");
+    return succeeded;
+}
+
+async function getDiagnostics(): Promise<UpdaterDiagnostics> {
+    const branch = (await git("branch", "--show-current")).stdout.trim() || null;
+    return {
+        backend: "git",
+        branch,
+        builtHead: lastBuiltHead,
+        sourceRoot: resolve(PROTONN_CORD_DIR),
+    };
 }
 
 ipcMain.handle(IpcEvents.GET_REPO, serializeErrors(getRepo));
 ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors(calculateGitChanges));
 ipcMain.handle(IpcEvents.UPDATE, serializeErrors(pull));
 ipcMain.handle(IpcEvents.BUILD, serializeErrors(build));
+ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors(getDiagnostics));

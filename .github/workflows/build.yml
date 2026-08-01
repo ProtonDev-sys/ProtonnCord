@@ -11,6 +11,10 @@ env:
 permissions:
     contents: write
 
+concurrency:
+    group: protonn-cord-release-${{ github.ref }}
+    cancel-in-progress: false
+
 jobs:
     Build:
         name: Build Protonn Cord
@@ -73,8 +77,15 @@ jobs:
             - name: Upload Protonn Cord Stable
               if: github.repository == 'ProtonDev-sys/ProtonnCord' && vars.ACT != 'true'
               run: |
+                  git fetch origin main
+                  if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+                      echo "Skipping stale release build for $GITHUB_SHA; origin/main has advanced."
+                      exit 0
+                  fi
                   if gh release view latest >/dev/null 2>&1; then
-                      gh release edit latest --title "Protonn Cord $GITHUB_SHA" --latest
+                      git tag --force latest "$GITHUB_SHA"
+                      git push origin refs/tags/latest --force
+                      gh release edit latest --target "$GITHUB_SHA" --title "Protonn Cord $GITHUB_SHA" --latest
                   else
                       gh release create latest --target "$GITHUB_SHA" --title "Protonn Cord $GITHUB_SHA" --notes "Automatically built from Protonn Cord main."
                   fi

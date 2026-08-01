@@ -58,9 +58,9 @@ export async function update() {
     const res = await Unwrap(VencordNative.updater.update());
 
     if (res) {
-        isOutdated = false;
         if (!await Unwrap(VencordNative.updater.rebuild()))
             throw new Error("The Build failed. Please try manually building the new update");
+        isOutdated = false;
     }
 
     return res;

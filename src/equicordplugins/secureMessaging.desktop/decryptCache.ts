@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { sleep } from "@utils/misc";
 import type { PluginNative } from "@utils/types";
 import type { Message } from "@vencord/discord-types";
 
@@ -12,6 +13,7 @@ import type { DecryptIncomingResult } from "./native";
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const MAX_CACHE_ENTRIES = 512;
+const TRANSIENT_RETRY_DELAYS = [0, 250, 1_000, 3_000] as const;
 
 interface DecryptCacheEntry {
     lastAccess: number;
@@ -20,10 +22,13 @@ interface DecryptCacheEntry {
 }
 
 const cache = new Map<string, DecryptCacheEntry>();
+let cacheGeneration = 0;
+let inFlightDecrypts = 0;
 
 export function decryptCacheKey(localUserId: string, message: Message): string {
     return [
         localUserId,
+        cacheGeneration,
         message.channel_id,
         message.id,
         message.author?.id ?? "",
@@ -32,13 +37,46 @@ export function decryptCacheKey(localUserId: string, message: Message): string {
     ].join("\0");
 }
 
-function pruneCache(protectedKey: string): void {
-    while (cache.size > MAX_CACHE_ENTRIES) {
+function isTransientFailure(result: DecryptIncomingResult): boolean {
+    return result.status === "failed" || result.status === "unavailable";
+}
+
+async function decryptWithRetry(
+    localUserId: string,
+    message: Message,
+    generation: number,
+    isCurrent: () => boolean,
+): Promise<DecryptIncomingResult> {
+    let result: DecryptIncomingResult = { status: "failed", error: "cryptographic_operation_failed" };
+    for (const retryDelay of TRANSIENT_RETRY_DELAYS) {
+        if (generation !== cacheGeneration || !isCurrent()) break;
+        if (retryDelay > 0) await sleep(retryDelay);
+        if (generation !== cacheGeneration || !isCurrent()) break;
+        result = await Native.decryptIncoming(localUserId, {
+            channelId: message.channel_id,
+            content: message.content,
+            discordAuthorId: message.author.id,
+            discordEditedTimestamp: discordEditedTimestamp(message),
+            discordMessageId: message.id,
+        }).catch((): DecryptIncomingResult => ({ status: "failed", error: "cryptographic_operation_failed" }));
+        if (generation !== cacheGeneration || !isCurrent())
+            return { status: "failed", error: "cryptographic_operation_failed" };
+        if (!isTransientFailure(result)) break;
+    }
+    return result;
+}
+
+function pruneCache(protectedKey: string, maximumEntries = MAX_CACHE_ENTRIES): void {
+    while (cache.size > maximumEntries) {
         let oldest: [string, DecryptCacheEntry] | null = null;
+        let oldestSettled: [string, DecryptCacheEntry] | null = null;
         for (const value of cache) {
-            if (value[0] === protectedKey || value[1].result === null) continue;
+            if (value[0] === protectedKey) continue;
             if (!oldest || value[1].lastAccess < oldest[1].lastAccess) oldest = value;
+            if (value[1].result !== null && (!oldestSettled || value[1].lastAccess < oldestSettled[1].lastAccess))
+                oldestSettled = value;
         }
+        oldest = oldestSettled ?? oldest;
         if (!oldest) break;
         cache.delete(oldest[0]);
     }
@@ -52,27 +90,28 @@ function ensureEntry(localUserId: string, message: Message): [string, DecryptCac
         return [key, existing];
     }
 
+    pruneCache("", MAX_CACHE_ENTRIES - 1);
     const entry: DecryptCacheEntry = {
         lastAccess: Date.now(),
         promise: Promise.resolve({ status: "failed", error: "cryptographic_operation_failed" }),
         result: null,
     };
-    entry.promise = Native.decryptIncoming(localUserId, {
-        channelId: message.channel_id,
-        content: message.content,
-        discordAuthorId: message.author.id,
-        discordEditedTimestamp: discordEditedTimestamp(message),
-        discordMessageId: message.id,
-    }).catch((): DecryptIncomingResult => ({ status: "failed", error: "cryptographic_operation_failed" }))
-        .then(result => {
+    cache.set(key, entry);
+    if (inFlightDecrypts >= MAX_CACHE_ENTRIES) {
+        entry.result = { status: "failed", error: "cryptographic_operation_failed" };
+        entry.promise = Promise.resolve(entry.result);
+        return [key, entry];
+    }
+    const generation = cacheGeneration;
+    inFlightDecrypts++;
+    entry.promise = decryptWithRetry(localUserId, message, generation, () => cache.get(key) === entry).then(result => {
             if (cache.get(key) === entry) {
                 entry.lastAccess = Date.now();
                 entry.result = result;
                 pruneCache(key);
             }
             return result;
-        });
-    cache.set(key, entry);
+        }).finally(() => { inFlightDecrypts--; });
     pruneCache(key);
     return [key, entry];
 }
@@ -89,5 +128,6 @@ export function decryptCachedMessage(localUserId: string, message: Message): Pro
 }
 
 export function clearEncryptedMessageDecryptCache(): void {
+    cacheGeneration++;
     cache.clear();
 }
