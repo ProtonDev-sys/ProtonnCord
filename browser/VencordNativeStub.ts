@@ -71,7 +71,11 @@ window.VencordNative = {
     },
 
     updater: {
-        getRepo: async () => ({ ok: true, value: "https://github.com/ProtonnCord/ProtonnCord" }),
+        getDiagnostics: async () => ({
+            ok: true,
+            value: { backend: "disabled" as const, branch: null, builtHead: "", sourceRoot: null },
+        }),
+        getRepo: async () => ({ ok: true, value: "https://github.com/ProtonDev-sys/ProtonnCord" }),
         getUpdates: async () => ({ ok: true, value: [] }),
         update: async () => ({ ok: true, value: false }),
         rebuild: async () => ({ ok: true, value: true }),

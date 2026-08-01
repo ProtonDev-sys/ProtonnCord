@@ -7,9 +7,9 @@
 import { DATA_DIR } from "@main/utils/constants";
 import { createHash, randomUUID } from "crypto";
 import { app, BrowserWindow, type IpcMainInvokeEvent, safeStorage } from "electron";
-import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "fs/promises";
+import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "fs/promises";
 import { createServer, type Server } from "net";
-import { dirname, join, resolve } from "path";
+import { dirname, extname, join, resolve } from "path";
 import { setTimeout as delay } from "timers/promises";
 
 import {
@@ -17,6 +17,7 @@ import {
     attachmentBundleRoot,
     type AttachmentMetadata,
     decryptAttachmentBytes,
+    MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENT_CIPHERTEXT_BYTES,
     MAX_ATTACHMENT_COUNT,
     MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES,
@@ -182,6 +183,12 @@ export type DecryptIncomingAttachmentsResult =
     | { status: "invalid_message" | "replay_detected" | "untrusted_author"; }
     | NativeFailure;
 
+export type DownloadIncomingAttachmentResult =
+    | { status: "saved"; filename: string; }
+    | { status: "invalid_message" | "replay_detected" | "untrusted_author"; }
+    | NativeFailure;
+export type LiveTestDownloadsDirectoryResult = { status: "ready"; path: string; } | NativeFailure;
+
 interface TrustedPeerRecord {
     announcedAt: number;
     identity: PublicIdentity;
@@ -287,6 +294,9 @@ const MAX_PEER_IDENTITY_HISTORY = 4;
 const MAX_PEER_HISTORY_USERS = MAX_TRUSTED_PEERS;
 const MAX_CONVERSATIONS = 2_000;
 const MAX_REPLAY_RECORDS = 4_096;
+const MAX_AUTHENTICATED_ATTACHMENT_CACHE_BYTES = 256 * 1024 * 1024;
+const MAX_AUTHENTICATED_ATTACHMENT_CACHE_ENTRIES = 128;
+const AUTHENTICATED_ATTACHMENT_CACHE_TTL_MS = 10 * 60 * 1_000;
 const MAX_PENDING_REVIEWS = 100;
 const MAX_QUARANTINED_PEERS = MAX_ACCOUNTS * MAX_TRUSTED_PEERS;
 const REVIEW_LIFETIME_MS = 10 * 60 * 1_000;
@@ -302,6 +312,18 @@ const ALLOWED_RENDERER_ORIGINS = new Set([
     "https://discord.com",
     "https://ptb.discord.com",
 ]);
+
+interface AuthenticatedAttachmentCacheEntry {
+    data: Uint8Array;
+    expiresAt: number;
+    filename: string;
+    lastAccess: number;
+}
+
+const authenticatedAttachmentCache = new Map<string, AuthenticatedAttachmentCacheEntry>();
+let authenticatedAttachmentCacheBytes = 0;
+let authenticatedAttachmentCacheCleanupTimer: NodeJS.Timeout | null = null;
+let staleTemporaryFilesCleaned = false;
 const ALLOWED_ATTACHMENT_HOSTS = new Set(["cdn.discordapp.com", "media.discordapp.net"]);
 const ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 60_000;
 const MAX_ATTACHMENT_REDIRECTS = 3;
@@ -463,10 +485,14 @@ function parseConversation(value: unknown): ConversationRecord | null {
 }
 
 function parseReplayRecord(value: unknown): ReplayRecord | null {
-    if (!isRecord(value) || !hasExactKeys(value, [
+    if (!isRecord(value) || (!hasExactKeys(value, [
+        "channelId", "contentDigest", "counter", "discordMessageId", "discordMessageIdReplacementUsed", "envelopeId", "seenAt",
+        "senderFingerprint", "senderUserId",
+    ]) && !hasExactKeys(value, [
         "channelId", "contentDigest", "counter", "discordMessageId", "envelopeId", "seenAt", "senderFingerprint", "senderUserId",
-    ]) || !isSnowflake(value.channelId) || !isEncodedKey(value.contentDigest, 32) ||
+    ])) || !isSnowflake(value.channelId) || !isEncodedKey(value.contentDigest, 32) ||
         !Number.isSafeInteger(value.counter) || (value.counter as number) < 1 || !isSnowflake(value.discordMessageId) ||
+        (value.discordMessageIdReplacementUsed !== undefined && typeof value.discordMessageIdReplacementUsed !== "boolean") ||
         !isEnvelopeId(value.envelopeId) || !isTimestamp(value.seenAt) ||
         !isEncodedKey(value.senderFingerprint, 32) || !isSnowflake(value.senderUserId))
         return null;
@@ -636,6 +662,14 @@ async function syncVaultDirectoryEntry(): Promise<void> {
 async function ensureVaultDirectory(): Promise<void> {
     await mkdir(VAULT_DIR, { recursive: true, mode: 0o700 });
     await chmod(VAULT_DIR, 0o700).catch(() => undefined);
+    if (!staleTemporaryFilesCleaned) {
+        const entries = await readdir(VAULT_DIR, { withFileTypes: true });
+        for (const entry of entries) {
+            if (entry.isFile() && /^(?:quarantine|vault)\.[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}\.tmp$/iu.test(entry.name))
+                await rm(join(VAULT_DIR, entry.name), { force: true });
+        }
+        staleTemporaryFilesCleaned = true;
+    }
     if (process.platform !== "win32") {
         await syncDirectory(DATA_DIR);
         await syncDirectory(dirname(DATA_DIR));
@@ -888,6 +922,14 @@ async function loadVault(): Promise<VaultFile> {
                 await validateIdentityKeyPairs(historical.identity);
                 if ((await publicIdentity(historical.identity, accountUserId)).fingerprint !== fingerprint)
                     throw new VaultOperationError("vault_unreadable");
+            }
+            for (const peer of Object.values(account.trustedPeers)) {
+                const computed = await fingerprintPublicKeys(
+                    peer.identity.userId,
+                    peer.identity.signingPublicKey,
+                    peer.identity.hpkePublicKey,
+                );
+                if (computed !== peer.identity.fingerprint) throw new VaultOperationError("vault_unreadable");
             }
             for (const history of Object.values(account.peerIdentityHistory)) {
                 for (const [fingerprint, historical] of Object.entries(history)) {
@@ -1149,12 +1191,20 @@ function validateDecryptAttachmentsInput(value: unknown): ValidationResult<Decry
     return { ok: true, value: { ...message.value, attachments } };
 }
 
-async function downloadAttachmentUrl(initialUrl: URL, expectedSize: number, channelId: string, attachmentId: string): Promise<Uint8Array> {
+async function downloadAttachmentUrl(
+    initialUrl: URL,
+    expectedSize: number,
+    channelId: string,
+    attachmentId: string,
+    deadline: number,
+): Promise<Uint8Array> {
     let current = initialUrl;
     for (let redirect = 0; redirect <= MAX_ATTACHMENT_REDIRECTS; redirect++) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new Error("Encrypted attachment download timed out");
         const response = await fetch(current, {
             redirect: "manual",
-            signal: AbortSignal.timeout(ATTACHMENT_DOWNLOAD_TIMEOUT_MS),
+            signal: AbortSignal.timeout(remaining),
         });
         if ([301, 302, 303, 307, 308].includes(response.status)) {
             const location = response.headers.get("location");
@@ -1186,18 +1236,210 @@ async function downloadAttachmentUrl(initialUrl: URL, expectedSize: number, chan
     throw new Error("Encrypted attachment redirected too many times");
 }
 
-async function downloadEncryptedAttachment(reference: EncryptedAttachmentReference, channelId: string): Promise<Uint8Array> {
+interface DownloadedEncryptedAttachment {
+    ciphertext: Uint8Array;
+    hadDownloadFailure: boolean;
+    nextCandidateIndex: number;
+}
+
+class EncryptedAttachmentDownloadError extends Error {
+    constructor(readonly hadDownloadFailure: boolean) {
+        super("Encrypted attachment download failed");
+    }
+}
+
+async function downloadEncryptedAttachment(
+    reference: EncryptedAttachmentReference,
+    channelId: string,
+    startCandidateIndex = 0,
+    deadline = Date.now() + ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
+): Promise<DownloadedEncryptedAttachment> {
     const urls = [...new Set([reference.url, reference.proxyUrl])];
-    for (const value of urls) {
+    let hadDownloadFailure = false;
+    for (let index = startCandidateIndex; index < urls.length; index++) {
+        const value = urls[index];
         const url = validateAttachmentUrl(value, channelId, reference.id);
         if (!url) continue;
         try {
-            return await downloadAttachmentUrl(url, reference.size, channelId, reference.id);
+            return {
+                ciphertext: await downloadAttachmentUrl(url, reference.size, channelId, reference.id, deadline),
+                hadDownloadFailure,
+                nextCandidateIndex: index + 1,
+            };
         } catch {
+            hadDownloadFailure = true;
             continue;
         }
     }
-    throw new Error("Encrypted attachment download failed");
+    throw new EncryptedAttachmentDownloadError(hadDownloadFailure);
+}
+
+function truncateUtf8(value: string, maximumBytes: number): string {
+    let result = "";
+    for (const character of value) {
+        if (Buffer.byteLength(result) + Buffer.byteLength(character) > maximumBytes) break;
+        result += character;
+    }
+    return result;
+}
+
+function safeDownloadFilename(value: string, duplicate: number): string {
+    let filename = value.normalize("NFC")
+        .replace(/[<>:"/\\|?*\u0000-\u001f]/gu, "_")
+        .replace(/[. ]+$/gu, "");
+    if (!filename || filename === "." || filename === "..") filename = "encrypted-attachment";
+    if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(filename)) filename = `_${filename}`;
+
+    const extension = truncateUtf8(extname(filename), 32);
+    const stem = filename.slice(0, filename.length - extname(filename).length);
+    const suffix = duplicate === 0 ? "" : ` (${duplicate})`;
+    return `${truncateUtf8(stem, 220 - Buffer.byteLength(extension) - Buffer.byteLength(suffix))}${suffix}${extension}`;
+}
+
+async function saveAuthenticatedAttachment(filename: string, data: Uint8Array): Promise<string> {
+    if (data.byteLength < 1 || data.byteLength > MAX_ATTACHMENT_BYTES) throw new Error("Invalid decrypted attachment size");
+    const downloadsDirectory = resolve(app.getPath("downloads"));
+    await mkdir(downloadsDirectory, { recursive: true });
+
+    for (let duplicate = 0; duplicate < 10_000; duplicate++) {
+        const candidateName = safeDownloadFilename(filename, duplicate);
+        const candidatePath = resolve(join(downloadsDirectory, candidateName));
+        if (dirname(candidatePath) !== downloadsDirectory) throw new Error("Unsafe attachment download path");
+
+        let file;
+        try {
+            file = await open(candidatePath, "wx", 0o600);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+            throw error;
+        }
+        try {
+            await file.writeFile(data);
+            await file.sync();
+            await file.close();
+            return candidateName;
+        } catch (error) {
+            await file.close().catch(() => undefined);
+            await rm(candidatePath, { force: true }).catch(() => undefined);
+            throw error;
+        }
+    }
+    throw new Error("Too many attachment filename collisions");
+}
+
+function comparableFilesystemPath(value: string): string {
+    const absolute = resolve(value);
+    return process.platform === "win32" ? absolute.toLocaleLowerCase("en-US") : absolute;
+}
+
+export async function getLiveTestDownloadsDirectory(
+    event: IpcMainInvokeEvent,
+): Promise<LiveTestDownloadsDirectoryResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    const acknowledged = process.env.PROTONN_CORD_SECURE_MESSAGING_LIVE_TEST === "I_UNDERSTAND_THIS_IS_DISPOSABLE";
+    const declaredDataDirectory = process.env.PROTONN_CORD_SECURE_MESSAGING_LIVE_DATA_DIR;
+    if (!acknowledged || !declaredDataDirectory ||
+        comparableFilesystemPath(declaredDataDirectory) !== comparableFilesystemPath(DATA_DIR) ||
+        !/secure-messaging-live/iu.test(declaredDataDirectory))
+        return invalidInput("The live-test Downloads directory is available only to an acknowledged disposable profile");
+    return { status: "ready", path: resolve(app.getPath("downloads")) };
+}
+
+function authenticatedAttachmentCacheKey(
+    localUserId: string,
+    input: DecryptIncomingAttachmentsInput,
+    attachmentId: string,
+): string {
+    return createHash("sha256")
+        .update(localUserId, "utf8")
+        .update("\0")
+        .update(input.channelId, "utf8")
+        .update("\0")
+        .update(input.discordMessageId, "utf8")
+        .update("\0")
+        .update(input.discordAuthorId, "utf8")
+        .update("\0")
+        .update(input.discordEditedTimestamp ?? "")
+        .update("\0")
+        .update(createHash("sha256").update(input.content, "utf8").digest())
+        .update("\0")
+        .update(input.attachments.map(attachment => `${attachment.id}:${attachment.size}`).join("\0"), "utf8")
+        .update("\0")
+        .update(attachmentId, "utf8")
+        .digest("base64url");
+}
+
+function removeAuthenticatedAttachmentCacheEntry(key: string, entry: AuthenticatedAttachmentCacheEntry): void {
+    if (authenticatedAttachmentCache.get(key) !== entry) return;
+    authenticatedAttachmentCache.delete(key);
+    authenticatedAttachmentCacheBytes -= entry.data.byteLength;
+    entry.data.fill(0);
+}
+
+function pruneAuthenticatedAttachmentCache(now: number, incomingBytes = 0): void {
+    for (const [key, entry] of authenticatedAttachmentCache) {
+        if (entry.expiresAt <= now) removeAuthenticatedAttachmentCacheEntry(key, entry);
+    }
+    while (authenticatedAttachmentCache.size >= MAX_AUTHENTICATED_ATTACHMENT_CACHE_ENTRIES ||
+        authenticatedAttachmentCacheBytes + incomingBytes > MAX_AUTHENTICATED_ATTACHMENT_CACHE_BYTES) {
+        let oldest: [string, AuthenticatedAttachmentCacheEntry] | null = null;
+        for (const candidate of authenticatedAttachmentCache) {
+            if (!oldest || candidate[1].lastAccess < oldest[1].lastAccess) oldest = candidate;
+        }
+        if (!oldest) break;
+        removeAuthenticatedAttachmentCacheEntry(...oldest);
+    }
+}
+
+function scheduleAuthenticatedAttachmentCacheCleanup(): void {
+    if (authenticatedAttachmentCacheCleanupTimer !== null) clearTimeout(authenticatedAttachmentCacheCleanupTimer);
+    authenticatedAttachmentCacheCleanupTimer = null;
+    let nextExpiry = Number.POSITIVE_INFINITY;
+    for (const entry of authenticatedAttachmentCache.values()) nextExpiry = Math.min(nextExpiry, entry.expiresAt);
+    if (!Number.isFinite(nextExpiry)) return;
+    authenticatedAttachmentCacheCleanupTimer = setTimeout(() => {
+        authenticatedAttachmentCacheCleanupTimer = null;
+        pruneAuthenticatedAttachmentCache(Date.now());
+        scheduleAuthenticatedAttachmentCacheCleanup();
+    }, Math.max(0, nextExpiry - Date.now()));
+    authenticatedAttachmentCacheCleanupTimer.unref();
+}
+
+function cacheAuthenticatedAttachment(
+    localUserId: string,
+    input: DecryptIncomingAttachmentsInput,
+    attachment: { data: Uint8Array; id: string; metadata: AttachmentMetadata; },
+): void {
+    if (attachment.data.byteLength > MAX_AUTHENTICATED_ATTACHMENT_CACHE_BYTES) return;
+    const key = authenticatedAttachmentCacheKey(localUserId, input, attachment.id);
+    const previous = authenticatedAttachmentCache.get(key);
+    if (previous) removeAuthenticatedAttachmentCacheEntry(key, previous);
+    const now = Date.now();
+    pruneAuthenticatedAttachmentCache(now, attachment.data.byteLength);
+    const entry = {
+        data: Uint8Array.from(attachment.data),
+        expiresAt: now + AUTHENTICATED_ATTACHMENT_CACHE_TTL_MS,
+        filename: attachment.metadata.name,
+        lastAccess: now,
+    };
+    authenticatedAttachmentCache.set(key, entry);
+    authenticatedAttachmentCacheBytes += entry.data.byteLength;
+    scheduleAuthenticatedAttachmentCacheCleanup();
+}
+
+function cachedAuthenticatedAttachment(
+    localUserId: string,
+    input: DecryptIncomingAttachmentsInput,
+    attachmentId: string,
+): { data: Uint8Array; filename: string; } | null {
+    const now = Date.now();
+    pruneAuthenticatedAttachmentCache(now);
+    scheduleAuthenticatedAttachmentCacheCleanup();
+    const entry = authenticatedAttachmentCache.get(authenticatedAttachmentCacheKey(localUserId, input, attachmentId));
+    if (!entry) return null;
+    entry.lastAccess = now;
+    return { data: Uint8Array.from(entry.data), filename: entry.filename };
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
@@ -1604,10 +1846,13 @@ export async function trustReviewedKey(
     return runSerialized(async (): Promise<TrustResult> => {
         expirePendingReviews();
         const review = pendingReviews.get(reviewToken);
-        pendingReviews.delete(reviewToken);
         if (!review || review.localUserId !== user.value || review.identity.userId !== peerId.value)
             return { status: "review_expired" };
-        if (review.identity.fingerprint !== expectedFingerprint) return { status: "fingerprint_mismatch" };
+        const complete = (result: TrustResult): TrustResult => {
+            pendingReviews.delete(reviewToken);
+            return result;
+        };
+        if (review.identity.fingerprint !== expectedFingerprint) return complete({ status: "fingerprint_mismatch" });
 
         const context = await loadAccount(user.value);
         if (context.created) await saveVault(context.vault);
@@ -1621,21 +1866,21 @@ export async function trustReviewedKey(
         if (existing) {
             const sameIdentity = existing.identity.fingerprint === review.identity.fingerprint;
             if (sameIdentity && !existing.keyChanged)
-                return { status: "already_trusted", identity };
+                return complete({ status: "already_trusted", identity });
             const predatesTrustedIdentity = existing.publishedAt !== null && review.publishedAt <= existing.publishedAt;
             if (!existing.keyChanged && predatesTrustedIdentity) {
-                return {
+                return complete({
                     status: "stale_announcement",
                     identity,
                     trustedIdentity: peerSummary(existing),
-                };
+                });
             }
             if (existing.keyChanged && (sameIdentity || predatesTrustedIdentity)) {
-                return {
+                return complete({
                     status: "key_changed",
                     identity,
                     trustedIdentity: peerSummary(existing),
-                };
+                });
             }
             const detectedAt = await quarantinePeer(user.value, peerId.value, review.publishedAt);
             if (!existing.keyChanged || existing.keyChangedAt === null) {
@@ -1644,7 +1889,7 @@ export async function trustReviewedKey(
                 disablePeerConversations(context.account, peerId.value);
                 await saveVault(context.vault);
             }
-            return { status: "key_changed", identity, trustedIdentity: peerSummary(existing) };
+            return complete({ status: "key_changed", identity, trustedIdentity: peerSummary(existing) });
         }
         const completingInterruptedForget = isPeerQuarantined(user.value, peerId.value);
         if (Object.keys(context.account.trustedPeers).length >= MAX_TRUSTED_PEERS)
@@ -1663,7 +1908,7 @@ export async function trustReviewedKey(
         makePeerIdentityCurrent(context.account, peerId.value, review.identity.fingerprint);
         await saveVault(context.vault);
         if (completingInterruptedForget) await clearPeerQuarantine(user.value, peerId.value);
-        return { status: "trusted", identity };
+        return complete({ status: "trusted", identity });
     });
 }
 
@@ -1993,23 +2238,21 @@ export async function decryptIncoming(
 
         const contentDigest = createHash("sha256").update(checkedInput.value.content, "utf8").digest("base64url");
         const collisions = context.account.replayCache.filter(replay => replayCollides(replay, checkedInput.value, envelope));
-        if (collisions.some(replay => replayMatches(replay, checkedInput.value, envelope, contentDigest)))
+        const exactReplay = collisions.find(replay => replayMatches(replay, checkedInput.value, envelope, contentDigest));
+        const exactReplayWasSuperseded = exactReplay != null && context.account.replayCache.some(replay =>
+            replay.discordMessageId === exactReplay.discordMessageId && replay.senderUserId === exactReplay.senderUserId &&
+            replay.counter > exactReplay.counter);
+        if (exactReplay && !exactReplayWasSuperseded)
             return { status: "decrypted", plaintext, attachmentBundle, stickers, counter: envelope.q, envelopeId: envelope.i };
-        if (checkedInput.value.discordAuthorId === user.value &&
-            collisions.some(replay => replayEnvelopeMatches(replay, checkedInput.value, envelope, contentDigest)))
-            return { status: "decrypted", plaintext, attachmentBundle, stickers, counter: envelope.q, envelopeId: envelope.i };
-
         const sameDiscordMessage = collisions.filter(replay => replay.discordMessageId === checkedInput.value.discordMessageId);
         const reusedEnvelope = collisions.some(replay => replay.discordMessageId !== checkedInput.value.discordMessageId);
         if (reusedEnvelope) return { status: "replay_detected" };
         if (sameDiscordMessage.length > 0) {
-            // A Discord edit must carry a freshly signed, monotonically newer envelope. Replacing the
-            // stored record makes any older edit a rollback instead of allowing both versions forever.
+            // A Discord edit must carry a freshly signed, monotonically newer envelope. Retaining the
+            // superseded record as a tombstone makes an older edit a rollback and blocks copying it later.
             if (checkedInput.value.discordEditedTimestamp === null || sameDiscordMessage.some(replay =>
                 replay.senderFingerprint === envelope.k && replay.counter >= envelope.q))
                 return { status: "replay_detected" };
-            context.account.replayCache = context.account.replayCache.filter(replay =>
-                replay.discordMessageId !== checkedInput.value.discordMessageId);
         }
 
         context.account.replayCache.push({
@@ -2046,30 +2289,77 @@ export async function decryptIncomingAttachments(
     if (!decrypted.attachmentBundle || decrypted.attachmentBundle.count !== attachments.length)
         return { status: "invalid_message" };
 
-    let ciphertexts: Uint8Array[];
-    try {
-        ciphertexts = await Promise.all(attachments.map(attachment => downloadEncryptedAttachment(attachment, message.channelId)));
-    } catch {
-        return { status: "failed", error: "attachment_download_failed" };
-    }
-
     const bundle = decrypted.attachmentBundle;
+    const ciphertexts: Uint8Array[] = [];
     try {
-        if (await attachmentBundleRoot(bundle.id, ciphertexts) !== bundle.root) return { status: "invalid_message" };
         const masterKey = decodeBase64Url(bundle.key, 32);
         try {
-            const resolved = await Promise.all(ciphertexts.map(async (ciphertext, index) => ({
+            const outcomes = await Promise.all(attachments.map(async (attachment, index) => {
+                let candidateIndex = 0;
+                let hadAuthenticationFailure = false;
+                let hadDownloadFailure = false;
+                const deadline = Date.now() + ATTACHMENT_DOWNLOAD_TIMEOUT_MS;
+                while (true) {
+                    let downloaded: DownloadedEncryptedAttachment;
+                    try {
+                        downloaded = await downloadEncryptedAttachment(attachment, message.channelId, candidateIndex, deadline);
+                        hadDownloadFailure ||= downloaded.hadDownloadFailure;
+                    } catch (error) {
+                        hadDownloadFailure ||= error instanceof EncryptedAttachmentDownloadError && error.hadDownloadFailure;
+                        return {
+                            status: hadAuthenticationFailure && !hadDownloadFailure
+                                ? "invalid" as const
+                                : "download_failed" as const,
+                        };
+                    }
+                    try {
+                        return {
+                            status: "decrypted" as const,
+                            ciphertext: downloaded.ciphertext,
+                            value: await decryptAttachmentBytes({
+                                bundleId: bundle.id,
+                                channelId: message.channelId,
+                                ciphertext: downloaded.ciphertext,
+                                count: bundle.count,
+                                index,
+                                masterKey,
+                                senderUserId: message.discordAuthorId,
+                            }),
+                        };
+                    } catch {
+                        hadAuthenticationFailure = true;
+                        downloaded.ciphertext.fill(0);
+                        candidateIndex = downloaded.nextCandidateIndex;
+                    }
+                }
+            }));
+            const authenticated = outcomes.filter(outcome => outcome.status === "decrypted");
+            const clearAuthenticatedOutcomes = () => {
+                for (const outcome of authenticated) {
+                    outcome.ciphertext.fill(0);
+                    outcome.value.data.fill(0);
+                }
+            };
+            if (outcomes.some(outcome => outcome.status === "download_failed")) {
+                clearAuthenticatedOutcomes();
+                return { status: "failed", error: "attachment_download_failed" };
+            }
+            if (outcomes.some(outcome => outcome.status !== "decrypted")) {
+                clearAuthenticatedOutcomes();
+                return { status: "invalid_message" };
+            }
+
+            ciphertexts.push(...authenticated.map(outcome => outcome.ciphertext));
+            if (await attachmentBundleRoot(bundle.id, ciphertexts) !== bundle.root) {
+                for (const outcome of authenticated) outcome.value.data.fill(0);
+                return { status: "invalid_message" };
+            }
+            const resolved = authenticated.map((outcome, index) => ({
                 id: attachments[index].id,
-                ...await decryptAttachmentBytes({
-                    bundleId: bundle.id,
-                    channelId: message.channelId,
-                    ciphertext,
-                    count: bundle.count,
-                    index,
-                    masterKey,
-                    senderUserId: message.discordAuthorId,
-                }),
-            })));
+                ...outcome.value,
+            }));
+            for (const attachment of resolved)
+                cacheAuthenticatedAttachment(user.value, checkedInput.value, attachment);
             return { status: "decrypted", plaintext: decrypted.plaintext, attachments: resolved };
         } finally {
             masterKey.fill(0);
@@ -2078,6 +2368,51 @@ export async function decryptIncomingAttachments(
         return { status: "invalid_message" };
     } finally {
         for (const ciphertext of ciphertexts) ciphertext.fill(0);
+    }
+}
+
+export async function downloadIncomingAttachment(
+    event: IpcMainInvokeEvent,
+    localUserId: string,
+    input: DecryptIncomingAttachmentsInput,
+    attachmentId: string,
+): Promise<DownloadIncomingAttachmentResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    const user = validateLocalUserId(localUserId);
+    if (!user.ok) return invalidInput(user.error);
+    const checkedInput = validateDecryptAttachmentsInput(input);
+    if (!checkedInput.ok) return invalidInput(checkedInput.error);
+    if (!isSnowflake(attachmentId) || !checkedInput.value.attachments.some(attachment => attachment.id === attachmentId))
+        return invalidInput("attachmentId must identify an encrypted Discord attachment in this message");
+
+    const cached = cachedAuthenticatedAttachment(user.value, checkedInput.value, attachmentId);
+    if (cached) {
+        try {
+            return {
+                status: "saved",
+                filename: await saveAuthenticatedAttachment(cached.filename, cached.data),
+            };
+        } catch {
+            return { status: "failed", error: "storage_error" };
+        } finally {
+            cached.data.fill(0);
+        }
+    }
+
+    const decrypted = await decryptIncomingAttachments(event, user.value, checkedInput.value);
+    if (decrypted.status !== "decrypted") return decrypted;
+    try {
+        const attachment = decrypted.attachments.find(candidate => candidate.id === attachmentId);
+        if (!attachment) return { status: "invalid_message" };
+        return {
+            status: "saved",
+            filename: await saveAuthenticatedAttachment(attachment.metadata.name, attachment.data),
+        };
+    } catch {
+        return { status: "failed", error: "storage_error" };
+    } finally {
+        for (const attachment of decrypted.attachments) attachment.data.fill(0);
     }
 }
 
@@ -2090,9 +2425,18 @@ let screenCaptureProtectionOperation: Promise<void> = Promise.resolve();
 
 async function setEncryptedContentHidden(windows: BrowserWindow[], hidden: boolean): Promise<void> {
     const operation = hidden ? "add" : "remove";
+    const closeDetachedMedia = hidden
+        ? "for(const media of document.querySelectorAll('video,audio')){" +
+        "const source=media.currentSrc||media.src||media.querySelector('source')?.src||'';if(source.startsWith('blob:'))media.pause();}" +
+        "const exits=[];if(document.pictureInPictureElement&&document.exitPictureInPicture)" +
+        "exits.push(document.exitPictureInPicture());if(document.fullscreenElement&&document.exitFullscreen)" +
+        "exits.push(document.exitFullscreen());Promise.allSettled(exits).then(finish);"
+        : "finish();";
     await Promise.all(windows.map(window => window.webContents.executeJavaScript(
-        `new Promise(resolve=>{document.documentElement.classList.${operation}(${JSON.stringify(SCREENSHOT_MODE_CLASS)});` +
-        "requestAnimationFrame(()=>requestAnimationFrame(resolve));})",
+        `new Promise(resolve=>{const finish=()=>{document.documentElement.classList.${operation}(${JSON.stringify(SCREENSHOT_MODE_CLASS)});` +
+        "let settled=false;const complete=()=>{if(settled)return;settled=true;resolve();};" +
+        "if(document.visibilityState==='visible'){requestAnimationFrame(()=>requestAnimationFrame(complete));setTimeout(complete,250);}" +
+        `else complete();};${closeDetachedMedia}})`,
         true,
     )));
 }

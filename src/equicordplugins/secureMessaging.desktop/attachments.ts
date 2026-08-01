@@ -301,14 +301,16 @@ export async function encryptAttachmentBytes(input: {
     const plaintext = concatBytes(uint32(metadataBytes.byteLength), metadataBytes, input.data);
     const aad = attachmentAad(input.channelId, input.senderUserId, input.bundleId, input.index, input.count);
     const { key, nonce } = await attachmentKeyAndNonce(input.masterKey, input.bundleId, aad);
-    const encrypted = await crypto.subtle.encrypt({
-        name: "AES-GCM",
-        iv: cryptoBytes(nonce),
-        additionalData: cryptoBytes(aad),
-        tagLength: 128,
-    }, key, cryptoBytes(plaintext));
-    plaintext.fill(0);
-    return new Uint8Array(encrypted);
+    try {
+        return new Uint8Array(await crypto.subtle.encrypt({
+            name: "AES-GCM",
+            iv: cryptoBytes(nonce),
+            additionalData: cryptoBytes(aad),
+            tagLength: 128,
+        }, key, cryptoBytes(plaintext)));
+    } finally {
+        plaintext.fill(0);
+    }
 }
 
 export async function decryptAttachmentBytes(input: {

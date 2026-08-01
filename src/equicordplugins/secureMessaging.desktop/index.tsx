@@ -27,6 +27,7 @@ import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/d
 import {
     ChannelStore,
     Checkbox,
+    closeAllModals,
     CloudUploader,
     Constants,
     MessageActions,
@@ -46,11 +47,18 @@ import {
 
 import {
     clearEncryptedAttachmentCache,
+    downloadEncryptedAttachmentUrl,
     encryptedAttachmentCacheKey,
+    encryptedAttachmentDownloads,
     encryptedAttachmentStatus,
+    encryptedMediaAttachments,
+    type ExtendedAttachment,
+    isEncryptedAttachmentDownloadUrl,
     patchEncryptedMessageAttachments,
+    retryEncryptedAttachmentLoad,
     subscribeEncryptedAttachmentStatus,
 } from "./attachmentCache";
+import { unchangedEncryptedAttachmentIds } from "./attachmentEditValidation";
 import {
     MAX_STICKER_COUNT,
     type SecureStickerItem,
@@ -82,15 +90,18 @@ import type {
     IdentitySummary,
     NativeFailure,
 } from "./native";
-import { isEncryptedMessage, isKeyAnnouncement } from "./protocol";
+import { isEncryptedMessage, isKeyAnnouncement, parseEncryptedEnvelope } from "./protocol";
 import {
-    authorizeAttachmentUploadReservations,
-    authorizeWireEdit,
+    authorizeScopedAttachmentUploadReservations,
+    authorizeScopedWireEdit,
+    authorizeScopedWirePayload,
     authorizeWirePayload,
     clearWirePayloadAuthorizations,
-    consumeAttachmentUploadReservations,
-    consumeWireEditAuthorization,
+    consumeScopedAttachmentUploadReservations,
+    consumeScopedWireEditAuthorization,
+    consumeScopedWirePayloadAuthorization,
     consumeWirePayloadAuthorization,
+    revokeAnyAttachmentUploadReservations,
 } from "./wireAuthorizations";
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
@@ -113,9 +124,38 @@ interface ReplyPreviewState {
 
 let screenCaptureProtectionStatus: ScreenCaptureProtectionStatus = "disabled";
 let screenCaptureProtectionGeneration = 0;
+let secureOperationGeneration = 0;
 let secureMessageListenersInstalled = false;
 const screenCaptureProtectionListeners = new Set<(status: ScreenCaptureProtectionStatus) => void>();
 const pendingEncryptedRenderOwners = new Set<{ forceUpdate(): void; }>();
+
+async function saveEncryptedAttachment(url: string): Promise<void> {
+    try {
+        const result = await downloadEncryptedAttachmentUrl(url);
+        if (!result) {
+            showToast("The decrypted attachment is no longer available. Reopen the message and try again.", Toasts.Type.FAILURE);
+        } else if (result.status === "saved") {
+            showToast(`${result.filename} was saved to Downloads.`, Toasts.Type.SUCCESS);
+        } else if (isNativeFailure(result) && result.status === "failed" && result.error === "storage_error") {
+            showToast("The decrypted attachment could not be saved to Downloads.", Toasts.Type.FAILURE);
+        } else {
+            showToast("The encrypted attachment could not be authenticated for download.", Toasts.Type.FAILURE);
+        }
+    } catch {
+        showToast("The encrypted attachment could not be saved to Downloads.", Toasts.Type.FAILURE);
+    }
+}
+
+function handleEncryptedAttachmentDownload(event: MouseEvent): void {
+    if (event.button !== 0 || event.defaultPrevented || !(event.target instanceof Element)) return;
+    if (event.target.closest("img, video, audio")) return;
+    const link = event.target.closest<HTMLAnchorElement>("a[href]");
+    if (!link || !isEncryptedAttachmentDownloadUrl(link.href)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    void saveEncryptedAttachment(link.href);
+}
 
 function setScreenCaptureProtectionStatus(status: ScreenCaptureProtectionStatus): void {
     screenCaptureProtectionStatus = status;
@@ -171,6 +211,25 @@ async function applyScreenCaptureProtection(enabled: boolean): Promise<boolean> 
 async function setScreenshotMode(enabled: boolean): Promise<boolean> {
     if (enabled ? screenCaptureProtectionStatus !== "ready" :
         screenCaptureProtectionStatus !== "screenshot" && screenCaptureProtectionStatus !== "failed") return false;
+    if (enabled) {
+        try {
+            closeAllModals();
+        } catch {
+            // Discord's lazy modal API can become stale. The native root class below is the
+            // authoritative privacy boundary and hides any modal that remains mounted.
+        }
+        try {
+            if (document.pictureInPictureElement) await document.exitPictureInPicture();
+            if (document.fullscreenElement) await document.exitFullscreen();
+            for (const media of document.querySelectorAll<HTMLMediaElement>("video,audio")) {
+                const source = media.currentSrc || media.src || media.querySelector<HTMLSourceElement>("source")?.src || "";
+                if (source.startsWith("blob:")) media.pause();
+            }
+        } catch {
+            showToast("Secure Messaging could not close decrypted media before screenshot mode.", Toasts.Type.FAILURE);
+            return false;
+        }
+    }
     const generation = ++screenCaptureProtectionGeneration;
     setScreenCaptureProtectionStatus(enabled ? "screenshot" : "pending");
     invalidateSecureRenderCaches();
@@ -247,19 +306,38 @@ const permittedAnnouncements = new Map<string, number>();
 const keyReviewGate = new KeyReviewGate();
 type RestMethod = (request: Record<string, any>, ...args: any[]) => Promise<any>;
 let networkGuardEnabled = false;
+let networkGuardGeneration = 0;
 let originalRestPost: RestMethod | null = null;
 let originalRestPatch: RestMethod | null = null;
 let guardedRestPost: RestMethod | null = null;
 let guardedRestPatch: RestMethod | null = null;
 let originalAttachmentUpload: CloudUpload["upload"] | null = null;
 let guardedAttachmentUpload: CloudUpload["upload"] | null = null;
-let approvedAttachmentUploads = new WeakSet<CloudUpload>();
+let attachmentGuardGeneration = 0;
+let approvedAttachmentUploads = new WeakMap<CloudUpload, { file: File; scope: string; }>();
+let preparedOutgoingMessages = new WeakMap<object, { ciphertext: string; plaintext: string; }>();
+let requestAuthorizationScopes = new WeakMap<object, string>();
+let secureRuntimeUserId: string | null = null;
 type StartEditMessage = (...args: any[]) => any;
 type StartEditMessageRecord = (channelId: string, message: Message, source?: unknown) => any;
 let originalStartEditMessage: StartEditMessage | null = null;
 let guardedStartEditMessage: StartEditMessage | null = null;
 let originalStartEditMessageRecord: StartEditMessageRecord | null = null;
 let guardedStartEditMessageRecord: StartEditMessageRecord | null = null;
+let editStarterGeneration = 0;
+
+function secureOperationIsCurrent(generation: number, localUserId?: string): boolean {
+    return generation === secureOperationGeneration &&
+        (localUserId === undefined || UserStore.getCurrentUser()?.id === localUserId);
+}
+
+function revokePreparedSecureOperations(): void {
+    clearWirePayloadAuthorizations();
+    permittedAnnouncements.clear();
+    approvedAttachmentUploads = new WeakMap();
+    preparedOutgoingMessages = new WeakMap();
+    requestAuthorizationScopes = new WeakMap();
+}
 
 function announcementKey(channelId: string, content: string): string {
     return `${channelId}\0${content}`;
@@ -399,6 +477,57 @@ function requiresFailClosedSend(result: ConversationResult): boolean {
     return isNativeFailure(result) || (result.status !== "unconfigured" && result.status !== "disabled");
 }
 
+function conversationAuthorizationScope(localUserId: string, conversation: ConversationResult): string | null {
+    if (isNativeFailure(conversation) || conversation.status !== "enabled") return null;
+    const selected = conversation.selectedRecipientIds.map(userId => {
+        const participant = conversation.participants.find(candidate =>
+            candidate.status !== "untrusted" && candidate.identity.userId === userId);
+        return participant?.status === "trusted" ? `${userId}:${participant.identity.fingerprint}` : null;
+    });
+    if (selected.some(value => value === null)) return null;
+    return JSON.stringify([
+        localUserId,
+        conversation.snapshot.channelId,
+        conversation.snapshot.kind,
+        conversation.snapshot.participantUserIds,
+        selected,
+    ]);
+}
+
+async function authorizedEnvelopeMatchesConversation(
+    content: string,
+    localUserId: string,
+    conversation: ConversationResult,
+): Promise<boolean> {
+    if (isNativeFailure(conversation) || conversation.status !== "enabled") return false;
+    const identity = await Native.getIdentity(localUserId);
+    if (UserStore.getCurrentUser()?.id !== localUserId || identity.status !== "ready") return false;
+    try {
+        const envelope = parseEncryptedEnvelope(content, {
+            channelId: conversation.snapshot.channelId,
+            discordAuthorId: localUserId,
+        });
+        const expectedRecipients = [...conversation.selectedRecipientIds, localUserId]
+            .filter((value, index, values) => values.indexOf(value) === index)
+            .sort((left, right) => left.localeCompare(right));
+        return envelope.k === identity.identity.fingerprint &&
+            envelope.r.length === expectedRecipients.length &&
+            envelope.r.every((recipient, index) => recipient.u === expectedRecipients[index]);
+    } catch {
+        return false;
+    }
+}
+
+function enforceMessageNonce(request: Record<string, any>): void {
+    if (!request.body || typeof request.body !== "object") return;
+    const body = request.body as Record<string, any>;
+    if (typeof body.nonce !== "string" && (!Number.isSafeInteger(body.nonce) || body.nonce < 0)) {
+        const random = crypto.getRandomValues(new Uint32Array(1))[0] & 0x3f_ffff;
+        body.nonce = ((BigInt(Date.now()) << 22n) | BigInt(random)).toString();
+    }
+    body.enforce_nonce = true;
+}
+
 function conversationStatusMessage(result: ConversationResult): string {
     if (isNativeFailure(result)) return failureMessage(result);
     if (result.status === "enabled") return "Encryption is enabled for the selected recipients.";
@@ -487,6 +616,20 @@ function messageAttachmentFilenames(body: Record<string, any>): string[] | null 
     return filenames;
 }
 
+function forwardedMessageReference(body: unknown): { channelId: string; messageId: string; } | null {
+    if (!body || typeof body !== "object") return null;
+    const request = body as Record<string, unknown>;
+    const reference = request.message_reference ?? request.messageReference;
+    if (!reference || typeof reference !== "object") return null;
+    const value = reference as Record<string, unknown>;
+    const channelId = value.channel_id ?? value.channelId;
+    const messageId = value.message_id ?? value.messageId;
+    return value.type === 1 && typeof channelId === "string" && /^\d{17,20}$/u.test(channelId) &&
+        typeof messageId === "string" && /^\d{17,20}$/u.test(messageId)
+        ? { channelId, messageId }
+        : null;
+}
+
 function messageEndpoint(url: unknown, edit: boolean): { channelId: string; messageId: string | null; } | null {
     if (typeof url !== "string" || url.length > 500) return null;
     let pathname: string;
@@ -523,6 +666,11 @@ type ConversationProtection =
         conversation: ConversationResult;
     };
 
+function requiresProtectedNetworkGuard(protection: ConversationProtection): boolean {
+    return protection.kind === "persisted_protected" ||
+        (protection.kind === "snapshot" && requiresFailClosedSend(protection.conversation));
+}
+
 async function resolveConversationProtection(channelId: string): Promise<ConversationProtection> {
     const localUserId = UserStore.getCurrentUser()?.id;
     if (!localUserId) throw new Error("Secure Messaging could not identify the authenticated account");
@@ -531,28 +679,49 @@ async function resolveConversationProtection(channelId: string): Promise<Convers
     const snapshot = snapshotForChannel(channel, localUserId);
     if (snapshot) {
         const context = { localUserId, snapshot };
-        return { kind: "snapshot", context, conversation: await Native.getConversation(localUserId, snapshot) };
+        const conversation = await Native.getConversation(localUserId, snapshot);
+        if (UserStore.getCurrentUser()?.id !== localUserId)
+            throw new Error("Secure Messaging cancelled an operation after the authenticated account changed");
+        return { kind: "snapshot", context, conversation };
     }
 
     const loadedNonPrivateChannel = typeof channel?.guild_id === "string" && /^\d{17,20}$/u.test(channel.guild_id);
     if (loadedNonPrivateChannel) return { kind: "unprotected" };
 
     const persisted: ChannelProtectionResult = await Native.getChannelProtection(localUserId, channelId);
+    if (UserStore.getCurrentUser()?.id !== localUserId)
+        throw new Error("Secure Messaging cancelled an operation after the authenticated account changed");
     if (isNativeFailure(persisted)) throw new Error(`Secure Messaging could not establish channel protection: ${failureMessage(persisted)}`);
     return persisted.status === "protected" ? { kind: "persisted_protected" } : { kind: "unprotected" };
 }
 
 function installAttachmentUploadGuard(): void {
     if (guardedAttachmentUpload) return;
+    const generation = ++attachmentGuardGeneration;
     const original = CloudUploader.prototype.upload;
     originalAttachmentUpload = original;
     guardedAttachmentUpload = async function (this: CloudUpload) {
-        if (approvedAttachmentUploads.has(this)) return original.call(this);
+        if (generation !== attachmentGuardGeneration) return original.call(this);
+        const approval = approvedAttachmentUploads.get(this);
         let protection: ConversationProtection;
         try {
             protection = await resolveConversationProtection(this.channelId);
         } catch {
             return;
+        }
+        if (generation !== attachmentGuardGeneration) return;
+        if (approval) {
+            const scope = protection.kind === "snapshot"
+                ? conversationAuthorizationScope(protection.context.localUserId, protection.conversation)
+                : null;
+            if (approval.file !== this.item.file || approval.scope !== scope || screenCaptureProtectionStatus !== "ready" ||
+                protection.kind !== "snapshot" || isNativeFailure(protection.conversation) ||
+                protection.conversation.status !== "enabled" ||
+                hasSelectedKeyReviewBlock(protection.context.localUserId, protection.conversation)) {
+                approvedAttachmentUploads.delete(this);
+                return;
+            }
+            return original.call(this);
         }
         if (protection.kind === "unprotected" ||
             (protection.kind === "snapshot" && !requiresFailClosedSend(protection.conversation)))
@@ -562,11 +731,12 @@ function installAttachmentUploadGuard(): void {
 }
 
 function uninstallAttachmentUploadGuard(): void {
+    attachmentGuardGeneration++;
     if (guardedAttachmentUpload && CloudUploader.prototype.upload === guardedAttachmentUpload && originalAttachmentUpload)
         CloudUploader.prototype.upload = originalAttachmentUpload;
     originalAttachmentUpload = null;
     guardedAttachmentUpload = null;
-    approvedAttachmentUploads = new WeakSet();
+    approvedAttachmentUploads = new WeakMap();
 }
 
 async function protectProgrammaticPost(request: Record<string, any>): Promise<Record<string, any>> {
@@ -575,14 +745,42 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
     const endpoint = message ?? attachment;
     if (!endpoint) return request;
     const protection = await resolveConversationProtection(endpoint.channelId);
+    const forward = message ? forwardedMessageReference(request.body) : null;
+    if (forward) {
+        const source = MessageStore.getMessage(forward.channelId, forward.messageId);
+        const sourceProtection = source && isEncryptedMessage(source.content)
+            ? { kind: "persisted_protected" as const }
+            : await resolveConversationProtection(forward.channelId);
+        if (requiresProtectedNetworkGuard(sourceProtection) || requiresProtectedNetworkGuard(protection)) {
+            showToast(
+                "Forwarding is unavailable for protected conversations. Copy the content and send it as a new encrypted message.",
+                Toasts.Type.FAILURE,
+            );
+            throw new Error("Secure Messaging blocked forwarding into or out of a protected conversation");
+        }
+    }
     if (protection.kind === "unprotected") return request;
     if (screenCaptureProtectionStatus !== "ready")
         throw new Error("Secure Messaging blocked a protected send while encrypted content is hidden for screenshot mode");
     if (attachment) {
-        if (protection.kind === "persisted_protected" || requiresFailClosedSend(protection.conversation)) {
+        if (protection.kind === "snapshot" && !requiresFailClosedSend(protection.conversation)) {
             const files = reservationFiles(request.body);
-            if (!files || !consumeAttachmentUploadReservations(endpoint.channelId, files))
+            if (files && revokeAnyAttachmentUploadReservations(endpoint.channelId, files))
+                throw new Error("Secure Messaging blocked a stale encrypted attachment upload reservation");
+            return request;
+        }
+        if (protection.kind === "persisted_protected" || requiresFailClosedSend(protection.conversation)) {
+            if (protection.kind !== "snapshot" || isNativeFailure(protection.conversation) ||
+                protection.conversation.status !== "enabled" ||
+                hasSelectedKeyReviewBlock(protection.context.localUserId, protection.conversation))
+                throw new Error("Secure Messaging blocked a stale attachment upload reservation");
+            const files = reservationFiles(request.body);
+            const scope = protection.kind === "snapshot"
+                ? conversationAuthorizationScope(protection.context.localUserId, protection.conversation)
+                : null;
+            if (!files || !scope || !consumeScopedAttachmentUploadReservations(endpoint.channelId, files, scope))
                 throw new Error("Secure Messaging blocked an unauthorized attachment upload reservation in a protected conversation");
+            requestAuthorizationScopes.set(request, scope);
         }
         return request;
     }
@@ -593,14 +791,37 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
     const body = request.body as Record<string, any>;
     const content = typeof body.content === "string" ? body.content : "";
     const { context, conversation } = protection;
-    if (!requiresFailClosedSend(conversation)) return request;
+    if (!requiresFailClosedSend(conversation)) {
+        const attachmentFilenames = messageAttachmentFilenames(body);
+        if (attachmentFilenames !== null && isEncryptedMessage(content)) {
+            clearWirePayloadAuthorizations();
+            throw new Error("Secure Messaging blocked stale encrypted content after the conversation changed");
+        }
+        return request;
+    }
     if (hasSelectedKeyReviewBlock(context.localUserId, conversation))
         throw new Error("Secure Messaging blocked a send while a selected recipient key announcement is being verified");
     const attachmentFilenames = messageAttachmentFilenames(body);
     if (!content || attachmentFilenames === null || (Array.isArray(body.sticker_ids) && body.sticker_ids.length > 0) || body.poll != null)
         throw new Error("Secure Messaging blocked a malformed or unsupported programmatic send in a protected conversation");
-    if (isEncryptedMessage(content) || isKeyAnnouncement(content)) {
-        if (consumeWirePayloadAuthorization(endpoint.channelId, content, attachmentFilenames)) return request;
+    if (isEncryptedMessage(content)) {
+        const scope = conversationAuthorizationScope(context.localUserId, conversation);
+        if (isNativeFailure(conversation) || conversation.status !== "enabled" ||
+            hasSelectedKeyReviewBlock(context.localUserId, conversation) || !scope ||
+            !await authorizedEnvelopeMatchesConversation(content, context.localUserId, conversation))
+            throw new Error("Secure Messaging blocked stale encrypted content after the conversation changed");
+        if (consumeScopedWirePayloadAuthorization(endpoint.channelId, content, attachmentFilenames, scope)) {
+            requestAuthorizationScopes.set(request, scope);
+            enforceMessageNonce(request);
+            return request;
+        }
+        throw new Error("Secure Messaging blocked an unauthorized prefixed programmatic payload");
+    }
+    if (isKeyAnnouncement(content)) {
+        if (consumeWirePayloadAuthorization(endpoint.channelId, content, attachmentFilenames)) {
+            enforceMessageNonce(request);
+            return request;
+        }
         throw new Error("Secure Messaging blocked an unauthorized prefixed programmatic payload");
     }
     if (attachmentFilenames.length > 0)
@@ -615,18 +836,16 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
             : conversationStatusMessage(encrypted.conversation);
         throw new Error(`Secure Messaging blocked a programmatic send: ${reason}`);
     }
-    return { ...request, body: { ...body, content: encrypted.content } };
+    const scope = conversationAuthorizationScope(context.localUserId, conversation);
+    if (!scope) throw new Error("Secure Messaging blocked a programmatic send after its recipient state changed");
+    body.content = encrypted.content;
+    requestAuthorizationScopes.set(request, scope);
+    enforceMessageNonce(request);
+    return request;
 }
 
-function unchangedEncryptedAttachments(body: Record<string, any>, message: Message): boolean {
-    if (body.attachments == null) return true;
-    if (!Array.isArray(body.attachments)) return false;
-    const retainedIds = body.attachments.map((attachment: any) => attachment?.id);
-    if (retainedIds.some((id: unknown) => typeof id !== "string" || !/^\d{17,20}$/u.test(id))) return false;
-    const originalIds = message.attachments.map(attachment => attachment.id);
-    return retainedIds.length === originalIds.length &&
-        retainedIds.every((id: string) => originalIds.includes(id)) &&
-        originalIds.every(id => retainedIds.includes(id));
+function unchangedEncryptedAttachments(body: Record<string, unknown>, message: Message): boolean {
+    return unchangedEncryptedAttachmentIds(body.attachments, message.attachments.map(attachment => attachment.id));
 }
 
 async function encryptEditedMessage(
@@ -680,7 +899,7 @@ async function protectProgrammaticPatch(request: Record<string, any>): Promise<R
     const protection = await resolveConversationProtection(endpoint.channelId);
     const original = MessageStore.getMessage(endpoint.channelId, endpoint.messageId);
     const originallyEncrypted = Boolean(original && isEncryptedMessage(original.content));
-    if (protection.kind === "unprotected" && !originallyEncrypted) return request;
+    if (!requiresProtectedNetworkGuard(protection) && !originallyEncrypted) return request;
     if (protection.kind === "persisted_protected")
         throw new Error("Secure Messaging blocked an edit because the protected conversation snapshot is unavailable");
     if (protection.kind === "unprotected")
@@ -694,7 +913,15 @@ async function protectProgrammaticPatch(request: Record<string, any>): Promise<R
 
     const { content } = request.body;
     if (isEncryptedMessage(content) || isKeyAnnouncement(content)) {
-        if (isEncryptedMessage(content) && consumeWireEditAuthorization(endpoint.channelId, endpoint.messageId, content)) return request;
+        const scope = conversationAuthorizationScope(protection.context.localUserId, protection.conversation);
+        if (isEncryptedMessage(content) && !isNativeFailure(protection.conversation) &&
+            protection.conversation.status === "enabled" &&
+            !hasSelectedKeyReviewBlock(protection.context.localUserId, protection.conversation) &&
+            scope && await authorizedEnvelopeMatchesConversation(content, protection.context.localUserId, protection.conversation) &&
+            consumeScopedWireEditAuthorization(endpoint.channelId, endpoint.messageId, content, scope)) {
+            requestAuthorizationScopes.set(request, scope);
+            return request;
+        }
         throw new Error("Secure Messaging blocked an unauthorized prefixed programmatic edit");
     }
     const encryptedContent = await encryptEditedMessage(
@@ -703,7 +930,43 @@ async function protectProgrammaticPatch(request: Record<string, any>): Promise<R
         endpoint.messageId,
         content,
     );
-    return { ...request, body: { ...request.body, content: encryptedContent } };
+    const scope = conversationAuthorizationScope(protection.context.localUserId, protection.conversation);
+    if (!scope) throw new Error("Secure Messaging blocked an edit after its recipient state changed");
+    request.body.content = encryptedContent;
+    requestAuthorizationScopes.set(request, scope);
+    return request;
+}
+
+function restorePostAuthorization(request: Record<string, any>): void {
+    const message = messageEndpoint(request?.url, false);
+    if (message && request.body && typeof request.body === "object") {
+        const body = request.body as Record<string, any>;
+        const content = typeof body.content === "string" ? body.content : "";
+        const attachmentFilenames = messageAttachmentFilenames(body);
+        if (attachmentFilenames !== null) {
+            const scope = requestAuthorizationScopes.get(request);
+            if (isEncryptedMessage(content) && scope)
+                authorizeScopedWirePayload(message.channelId, content, attachmentFilenames, scope);
+            else if (isKeyAnnouncement(content))
+                authorizeWirePayload(message.channelId, content, attachmentFilenames);
+        }
+        return;
+    }
+    const attachment = attachmentReservationEndpoint(request?.url);
+    const files = attachment ? reservationFiles(request.body) : null;
+    const scope = requestAuthorizationScopes.get(request);
+    if (attachment && files && scope)
+        authorizeScopedAttachmentUploadReservations(attachment.channelId, files, scope);
+}
+
+function restorePatchAuthorization(request: Record<string, any>): void {
+    const endpoint = messageEndpoint(request?.url, true);
+    const content = request.body && typeof request.body === "object" && typeof request.body.content === "string"
+        ? request.body.content
+        : "";
+    const scope = requestAuthorizationScopes.get(request);
+    if (endpoint?.messageId && isEncryptedMessage(content) && scope)
+        authorizeScopedWireEdit(endpoint.channelId, endpoint.messageId, content, scope);
 }
 
 function installNetworkGuard(): void {
@@ -713,22 +976,55 @@ function installNetworkGuard(): void {
     if (typeof post !== "function" || typeof patch !== "function")
         throw new Error("Discord REST message methods are unavailable");
 
+    const generation = ++networkGuardGeneration;
     networkGuardEnabled = true;
     originalRestPost = post;
     originalRestPatch = patch;
     guardedRestPost = async (request, ...args) => {
-        const guardedRequest = networkGuardEnabled ? await protectProgrammaticPost(request) : request;
-        return post.call(rest, guardedRequest, ...args);
+        if (!networkGuardEnabled || generation !== networkGuardGeneration) return post.call(rest, request, ...args);
+        const localUserId = UserStore.getCurrentUser()?.id;
+        const guardedRequest = await protectProgrammaticPost(request);
+        if (!networkGuardEnabled || generation !== networkGuardGeneration || UserStore.getCurrentUser()?.id !== localUserId) {
+            revokePreparedSecureOperations();
+            throw new Error("Secure Messaging cancelled an in-flight send after its account or network guard changed");
+        }
+        try {
+            return await post.call(rest, guardedRequest, ...args);
+        } catch (error) {
+            if (networkGuardEnabled && generation === networkGuardGeneration && UserStore.getCurrentUser()?.id === localUserId)
+                restorePostAuthorization(guardedRequest);
+            else
+                revokePreparedSecureOperations();
+            throw error;
+        }
     };
     guardedRestPatch = async (request, ...args) => {
-        const guardedRequest = networkGuardEnabled ? await protectProgrammaticPatch(request) : request;
-        return patch.call(rest, guardedRequest, ...args);
+        if (!networkGuardEnabled || generation !== networkGuardGeneration) return patch.call(rest, request, ...args);
+        const localUserId = UserStore.getCurrentUser()?.id;
+        const guardedRequest = await protectProgrammaticPatch(request);
+        if (!networkGuardEnabled || generation !== networkGuardGeneration || UserStore.getCurrentUser()?.id !== localUserId) {
+            revokePreparedSecureOperations();
+            throw new Error("Secure Messaging cancelled an in-flight edit after its account or network guard changed");
+        }
+        try {
+            return await patch.call(rest, guardedRequest, ...args);
+        } catch (error) {
+            if (networkGuardEnabled && generation === networkGuardGeneration && UserStore.getCurrentUser()?.id === localUserId)
+                restorePatchAuthorization(guardedRequest);
+            else
+                revokePreparedSecureOperations();
+            throw error;
+        }
     };
     rest.post = guardedRestPost;
     rest.patch = guardedRestPatch;
 }
 
-function openEncryptedMessageEditor(message: Message, openEditor: (plaintext: string) => void): void {
+function openEncryptedMessageEditor(
+    message: Message,
+    openEditor: (plaintext: string) => void,
+    generation: number,
+): void {
     const localUserId = UserStore.getCurrentUser()?.id;
     if (!localUserId || message.author?.id !== localUserId) {
         showToast("Only your own encrypted messages can be edited.", Toasts.Type.FAILURE);
@@ -740,6 +1036,8 @@ function openEncryptedMessageEditor(message: Message, openEditor: (plaintext: st
     }
 
     const finish = (result: DecryptIncomingResult) => {
+        if (generation !== editStarterGeneration || UserStore.getCurrentUser()?.id !== localUserId ||
+            screenCaptureProtectionStatus !== "ready") return;
         if (result.status !== "decrypted") {
             showToast("The encrypted message could not be authenticated for editing.", Toasts.Type.FAILURE);
             return;
@@ -754,6 +1052,7 @@ function openEncryptedMessageEditor(message: Message, openEditor: (plaintext: st
 
 function installEncryptedEditStarter(): void {
     if (guardedStartEditMessage || guardedStartEditMessageRecord) return;
+    const generation = ++editStarterGeneration;
     const actions = MessageActions as unknown as Record<string, any>;
     const original = actions.startEditMessage;
     const originalRecord = actions.startEditMessageRecord;
@@ -762,20 +1061,23 @@ function installEncryptedEditStarter(): void {
     originalStartEditMessage = original;
     originalStartEditMessageRecord = originalRecord;
     guardedStartEditMessage = function (channelId: string, messageId: string, content: string, ...args: any[]) {
+        if (generation !== editStarterGeneration) return original.call(actions, channelId, messageId, content, ...args);
         const message = MessageStore.getMessage(channelId, messageId);
         if (!message || !isEncryptedMessage(message.content)) return original.call(actions, channelId, messageId, content, ...args);
-        openEncryptedMessageEditor(message, plaintext => original.call(actions, channelId, messageId, plaintext, ...args));
+        openEncryptedMessageEditor(message, plaintext => original.call(actions, channelId, messageId, plaintext, ...args), generation);
     };
     guardedStartEditMessageRecord = function (channelId: string, message: Message, source?: unknown) {
+        if (generation !== editStarterGeneration) return originalRecord.call(actions, channelId, message, source);
         const stored = MessageStore.getMessage(channelId, message.id);
         if (!stored || !isEncryptedMessage(stored.content)) return originalRecord.call(actions, channelId, message, source);
-        openEncryptedMessageEditor(stored, plaintext => original.call(actions, channelId, stored.id, plaintext, source));
+        openEncryptedMessageEditor(stored, plaintext => original.call(actions, channelId, stored.id, plaintext, source), generation);
     };
     actions.startEditMessage = guardedStartEditMessage;
     actions.startEditMessageRecord = guardedStartEditMessageRecord;
 }
 
 function uninstallEncryptedEditStarter(): void {
+    editStarterGeneration++;
     const actions = MessageActions as unknown as Record<string, any>;
     if (guardedStartEditMessage && actions.startEditMessage === guardedStartEditMessage && originalStartEditMessage)
         actions.startEditMessage = originalStartEditMessage;
@@ -789,6 +1091,7 @@ function uninstallEncryptedEditStarter(): void {
 
 function uninstallNetworkGuard(): void {
     networkGuardEnabled = false;
+    networkGuardGeneration++;
     const rest = RestAPI as unknown as Record<string, any>;
     if (guardedRestPost && rest.post === guardedRestPost && originalRestPost) rest.post = originalRestPost;
     if (guardedRestPatch && rest.patch === guardedRestPatch && originalRestPatch) rest.patch = originalRestPatch;
@@ -799,6 +1102,7 @@ function uninstallNetworkGuard(): void {
 }
 
 const outgoingListener: MessageSendListener = async (channelId, message, options, props) => {
+    const generation = secureOperationGeneration;
     try {
         const context = currentSnapshot(props.channel);
         if (!context || context.snapshot.channelId !== channelId) return;
@@ -806,6 +1110,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
         if (takePermittedAnnouncement(channelId, message.content)) return { stop: true };
 
         const conversation = await Native.getConversation(context.localUserId, context.snapshot);
+        if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         if (!requiresFailClosedSend(conversation)) return;
 
         if (isNativeFailure(conversation)) {
@@ -821,36 +1126,45 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             return { cancel: true };
         }
 
+        const preparedMessage = preparedOutgoingMessages.get(message);
+        const plaintext = preparedMessage?.ciphertext === message.content ? preparedMessage.plaintext : message.content;
         const stickerIds = selectedOutgoingStickerIds(options, props);
-        const blockedReason = blockedOutgoingReason(message.content, options, props, stickerIds);
+        const blockedReason = blockedOutgoingReason(plaintext, options, props, stickerIds);
         if (blockedReason) {
             showToast(blockedReason, Toasts.Type.FAILURE);
             return { cancel: true };
         }
 
         const stickers = await resolveSelectedStickers(stickerIds ?? []);
+        if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         const uploads = Array.isArray(options.uploads) ? options.uploads : [];
         const preparedAttachments = uploads.length > 0
-            ? await prepareEncryptedAttachments(uploads, message.content, channelId, context.localUserId, stickers)
+            ? await prepareEncryptedAttachments(uploads, plaintext, channelId, context.localUserId, stickers)
             : null;
+        if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         const encrypted = await Native.encryptOutgoing(context.localUserId, {
-            plaintext: preparedAttachments?.plaintext ?? serializeSecurePlaintext(message.content, null, stickers),
+            plaintext: preparedAttachments?.plaintext ?? serializeSecurePlaintext(plaintext, null, stickers),
             snapshot: context.snapshot,
         });
+        if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         if (encrypted.status !== "encrypted") {
             if (isNativeFailure(encrypted)) showFailure(encrypted);
             else showToast(conversationStatusMessage(encrypted.conversation), Toasts.Type.FAILURE);
             return { cancel: true };
         }
 
-        void prefetchEncryptedMessageEmbeds(message.content);
+        void prefetchEncryptedMessageEmbeds(plaintext);
         preparedAttachments?.apply();
         clearOutgoingStickers(options);
         const attachmentFilenames = preparedAttachments?.files.map(file => file.filename) ?? [];
-        if (preparedAttachments) authorizeAttachmentUploadReservations(channelId, preparedAttachments.files);
-        authorizeWirePayload(channelId, encrypted.content, attachmentFilenames);
+        const scope = conversationAuthorizationScope(context.localUserId, conversation);
+        if (!scope) return { cancel: true };
+        if (preparedAttachments)
+            authorizeScopedAttachmentUploadReservations(channelId, preparedAttachments.files, scope);
+        authorizeScopedWirePayload(channelId, encrypted.content, attachmentFilenames, scope);
         message.content = encrypted.content;
-        for (const upload of uploads) approvedAttachmentUploads.add(upload);
+        preparedOutgoingMessages.set(message, { ciphertext: encrypted.content, plaintext });
+        for (const upload of uploads) approvedAttachmentUploads.set(upload, { file: upload.item.file, scope });
         return { stop: true };
     } catch {
         showToast("Secure Messaging stopped the send because encryption failed unexpectedly.", Toasts.Type.FAILURE);
@@ -859,16 +1173,21 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
 };
 
 const editListener: MessageEditListener = async (channelId, messageId, message) => {
+    const generation = secureOperationGeneration;
     try {
         const channel = ChannelStore.getChannel(channelId);
         const context = currentSnapshot(channel);
         if (!context) return;
         const conversation = await Native.getConversation(context.localUserId, context.snapshot);
+        if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         const original = MessageStore.getMessage(channelId, messageId);
         if (!requiresFailClosedSend(conversation) && !isEncryptedMessage(original?.content)) return;
 
         const encryptedContent = await encryptEditedMessage(context, conversation, messageId, message.content);
-        authorizeWireEdit(channelId, messageId, encryptedContent);
+        if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
+        const scope = conversationAuthorizationScope(context.localUserId, conversation);
+        if (!scope) return { cancel: true };
+        authorizeScopedWireEdit(channelId, messageId, encryptedContent, scope);
         message.content = encryptedContent;
         return { stop: true };
     } catch (error) {
@@ -893,6 +1212,11 @@ function LockIcon({ color }: Record<string, any>) {
 
 async function sendKeyAnnouncement(channelId: string, localUserId: string): Promise<void> {
     const announcement = await Native.createAnnouncement(localUserId);
+    if (UserStore.getCurrentUser()?.id !== localUserId) {
+        revokePreparedSecureOperations();
+        showToast("The key announcement was cancelled because the signed-in account changed.", Toasts.Type.FAILURE);
+        return;
+    }
     if (announcement.status !== "created") {
         showFailure(announcement);
         return;
@@ -908,6 +1232,16 @@ async function sendKeyAnnouncement(channelId: string, localUserId: string): Prom
     } finally {
         revokeAnnouncement(channelId, announcement.content);
     }
+}
+
+function handleSecureConnectionOpen(): void {
+    const localUserId = UserStore.getCurrentUser()?.id ?? null;
+    if (secureRuntimeUserId !== null && secureRuntimeUserId !== localUserId) {
+        secureOperationGeneration++;
+        revokePreparedSecureOperations();
+    }
+    secureRuntimeUserId = localUserId;
+    invalidateSecureRenderCaches();
 }
 
 function IdentityBlock({ identity }: { identity: IdentitySummary; }) {
@@ -996,6 +1330,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                 selectedRecipientIds,
                 snapshot: context.snapshot,
             });
+            revokePreparedSecureOperations();
             setConversation(result);
             if (result.status === "enabled" || result.status === "disabled") {
                 showToast(result.status === "enabled" ? "Encrypted sending enabled." : "Encrypted sending disabled.", Toasts.Type.SUCCESS);
@@ -1019,6 +1354,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
         try {
             const result = await Native.rotateIdentity(context.localUserId, readyIdentity.fingerprint);
             if (result.status === "rotated") {
+                revokePreparedSecureOperations();
                 invalidateSecureRenderCaches();
                 setIdentity({ status: "ready", identity: result.identity });
                 setEnableEncryption(false);
@@ -1042,7 +1378,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
         <Modal
             {...modalProps}
             size="medium"
-            title="Secure Messaging (experimental v1)"
+            title="Secure Messaging (PCEM2)"
             actions={[
                 { text: "Save", variant: "primary", onClick: () => void save(), disabled: busy || !details },
                 { text: "Cancel", variant: "secondary", onClick: modalProps.onClose, disabled: busy },
@@ -1142,7 +1478,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                 <section className="pc-secure-modal-section">
                     <Heading tag="h5">Important limitations</Heading>
                     <BaseText size="xs" color="text-muted">
-                        v1 encrypts text, GIF-picker links, sticker metadata, and ordinary file attachments. Received files are fully downloaded, authenticated, and decrypted locally before Discord's normal renderers display them. Your encrypted messages can be edited while retaining their existing encrypted attachments and stickers; attachment-set changes and commands remain blocked. Discord still sees who talks, when, ciphertext sizes, attachment counts, channel membership, edit timing, and reply metadata. Normal link and GIF previews disclose their URL to Discord's unfurl service; displaying a sticker requests its asset ID from Discord's media CDN. v1 has no forward secrecy or post-compromise healing, and a compromised client or plugin can read plaintext while it is displayed.
+                        The current PCEM2 protocol encrypts text, GIF-picker links, sticker metadata, and ordinary file attachments. Received files are fully downloaded, authenticated, and decrypted locally before Discord's normal renderers display them. Authentication proves the verified sender supplied the bytes, not that a file is harmless: Discord can scan only the opaque ciphertext, so keep normal operating-system and antivirus protections enabled. Your encrypted messages can be edited while retaining their existing encrypted attachments and stickers; attachment-set changes and commands remain blocked. Discord still sees who talks, when, ciphertext sizes, attachment counts, channel membership, edit timing, and reply metadata. Normal link and GIF previews disclose their URL to Discord's unfurl service; displaying a sticker requests its asset ID from Discord's media CDN. The protocol has no forward secrecy or post-compromise healing, and a compromised client or plugin can read plaintext while it is displayed.
                     </BaseText>
                 </section>
 
@@ -1218,6 +1554,45 @@ function encryptedStatusText(result: DecryptIncomingResult): string {
     return "";
 }
 
+function SecureMediaAttachment({ attachment }: { attachment: ExtendedAttachment; }) {
+    const [revealed, setRevealed] = useState(!attachment.spoiler);
+    const mimeType = attachment.content_type ?? "application/octet-stream";
+    const isVideo = mimeType.startsWith("video/");
+
+    return (
+        <div className="pc-secure-media-attachment">
+            <BaseText size="xs">{attachment.filename}</BaseText>
+            {attachment.description && <BaseText size="xs">{attachment.description}</BaseText>}
+            {revealed ? isVideo ? (
+                <video
+                    aria-label={attachment.filename}
+                    className="pc-secure-media-player"
+                    controls
+                    controlsList="nodownload"
+                    height={attachment.height}
+                    playsInline
+                    preload="metadata"
+                    src={attachment.url}
+                    width={attachment.width}
+                />
+            ) : (
+                <audio
+                    aria-label={attachment.filename}
+                    className="pc-secure-audio-player"
+                    controls
+                    controlsList="nodownload"
+                    preload="metadata"
+                    src={attachment.url}
+                />
+            ) : (
+                <Button size="xs" onClick={() => setRevealed(true)}>
+                    Reveal spoiler attachment
+                </Button>
+            )}
+        </div>
+    );
+}
+
 function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: number; message: Message; }) {
     const [, setRevision] = useState(0);
     const attachmentKey = encryptedAttachmentCacheKey(message);
@@ -1234,13 +1609,42 @@ function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: 
     }
     if (expectedCount === 0) return null;
     const status = encryptedAttachmentStatus(message);
-    if (status.status === "idle" || status.status === "ready") return null;
-    const messageText = status.status === "loading"
-        ? "Authenticating and decrypting attachments locally…"
-        : "reason" in status ? status.reason : "The encrypted attachments could not be loaded.";
+    if (status.status === "ready") {
+        const mediaAttachments = encryptedMediaAttachments(message);
+        return (
+            <>
+                {mediaAttachments.map(attachment => <SecureMediaAttachment key={attachment.id} attachment={attachment} />)}
+                <div className="pc-secure-card-actions">
+                    {encryptedAttachmentDownloads(message).map(attachment => (
+                        <Button
+                            key={attachment.id}
+                            className="pc-secure-download"
+                            size="xs"
+                            onClick={() => void saveEncryptedAttachment(attachment.url)}
+                        >
+                            Download {attachment.filename}
+                        </Button>
+                    ))}
+                </div>
+            </>
+        );
+    }
+    if (status.status === "idle") return null;
+    if (status.status === "failed") {
+        return (
+            <div className="pc-secure-card-actions">
+                <BaseText size="xs" className="pc-secure-status-danger">
+                    {status.reason}
+                </BaseText>
+                <Button size="xs" onClick={() => retryEncryptedAttachmentLoad(message)}>
+                    Retry attachment
+                </Button>
+            </div>
+        );
+    }
     return (
-        <BaseText size="xs" className={status.status === "failed" ? "pc-secure-status-danger" : undefined}>
-            {messageText}
+        <BaseText size="xs">
+            Authenticating and decrypting attachments locally…
         </BaseText>
     );
 }
@@ -1570,19 +1974,24 @@ export default definePlugin({
     },
 
     flux: {
+        CONNECTION_OPEN: handleSecureConnectionOpen,
         MESSAGE_CREATE: handleKeyAnnouncementDispatch,
         MESSAGE_UPDATE: handleKeyAnnouncementDispatch,
         LOAD_MESSAGES_SUCCESS: handleLoadedKeyAnnouncements,
     },
 
     start() {
+        secureOperationGeneration++;
+        secureRuntimeUserId = UserStore.getCurrentUser()?.id ?? null;
         const generation = ++screenCaptureProtectionGeneration;
         setScreenCaptureProtectionStatus("pending");
         try {
             installAttachmentUploadGuard();
             installNetworkGuard();
             installEncryptedEditStarter();
+            document.addEventListener("click", handleEncryptedAttachmentDownload, true);
         } catch (error) {
+            document.removeEventListener("click", handleEncryptedAttachmentDownload, true);
             uninstallEncryptedEditStarter();
             uninstallNetworkGuard();
             uninstallAttachmentUploadGuard();
@@ -1609,8 +2018,11 @@ export default definePlugin({
     },
 
     stop() {
+        secureOperationGeneration++;
+        secureRuntimeUserId = null;
         screenCaptureProtectionGeneration++;
         setScreenCaptureProtectionStatus("disabled");
+        document.removeEventListener("click", handleEncryptedAttachmentDownload, true);
         uninstallEncryptedEditStarter();
         uninstallAttachmentUploadGuard();
         uninstallNetworkGuard();
@@ -1621,7 +2033,7 @@ export default definePlugin({
             secureMessageListenersInstalled = false;
         }
         permittedAnnouncements.clear();
-        clearWirePayloadAuthorizations();
+        revokePreparedSecureOperations();
         clearEncryptedAttachmentCache();
         clearEncryptedEmbedCache();
         clearEncryptedMessageDecryptCache();
@@ -1631,7 +2043,11 @@ export default definePlugin({
     patchEncryptedAttachments(message: Message, owner: { forceUpdate(): void; }) {
         const ready = screenCaptureProtectionStatus === "ready";
         if (!ready) pendingEncryptedRenderOwners.add(owner);
-        return patchEncryptedMessageAttachments(message, () => owner.forceUpdate(), ready);
+        return patchEncryptedMessageAttachments(message, owner, ready);
+    },
+
+    getEncryptedMediaAttachments(message: Message) {
+        return encryptedMediaAttachments(message);
     },
 
     patchEncryptedEmbeds(message: Message, owner: { forceUpdate(): void; }) {

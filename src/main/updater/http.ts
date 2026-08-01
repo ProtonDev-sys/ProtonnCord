@@ -16,68 +16,76 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { fetchBuffer, fetchJson } from "@main/utils/http";
+import { randomUUID } from "node:crypto";
+
 import { IpcEvents } from "@shared/IpcEvents";
+import type { UpdaterDiagnostics } from "@shared/Updater";
 import { VENCORD_USER_AGENT } from "@shared/vencordUserAgent";
 import { ipcMain } from "electron";
-import { writeFileSync } from "original-fs";
+import { renameSync, unlinkSync, writeFileSync } from "original-fs";
 
 import gitHash from "~git-hash";
 import gitRemote from "~git-remote";
 
 import { ASAR_FILE, serializeErrors } from "./common";
+import {
+    applyPendingHttpUpdate,
+    findHttpUpdate,
+    inspectHttpUpdates,
+    type PendingHttpUpdate,
+    replaceAsarAtomically,
+    requestBytes,
+    requestJson,
+} from "./httpOperations";
 
 const API_BASE = `https://api.github.com/repos/${gitRemote}`;
-let PendingUpdate: string | null = null;
+const API_TIMEOUT = 15_000;
+const API_SIZE_LIMIT = 2 * 1024 * 1024;
+const DOWNLOAD_TIMEOUT = 60_000;
+const DOWNLOAD_SIZE_LIMIT = 64 * 1024 * 1024;
+let PendingUpdate: PendingHttpUpdate | null = null;
 
-async function githubGet<T = any>(endpoint: string) {
-    return fetchJson<T>(API_BASE + endpoint, {
+async function githubGet(endpoint: string): Promise<unknown> {
+    return requestJson(fetch, API_BASE + endpoint, {
         headers: {
             Accept: "application/vnd.github+json",
             // "All API requests MUST include a valid User-Agent header.
             // Requests with no User-Agent header will be rejected."
             "User-Agent": VENCORD_USER_AGENT
         }
-    });
+    }, API_TIMEOUT, API_SIZE_LIMIT);
 }
 
 async function calculateGitChanges() {
-    const isOutdated = await fetchUpdates();
-    if (!isOutdated) return [];
-
-    const data = await githubGet(`/compare/${gitHash}...HEAD`);
-
-    return data.commits.map((c: any) => ({
-        hash: c.sha,
-        author: c.author?.login ?? c.commit?.author?.name ?? "Unknown Author",
-        message: c.commit.message.split("\n")[0]
-    }));
+    const inspection = await inspectHttpUpdates(githubGet, gitHash, ASAR_FILE);
+    PendingUpdate = inspection.pending;
+    return inspection.changes;
 }
 
 async function fetchUpdates() {
-    const data = await githubGet("/releases/latest");
-
-    const hash = String(data.name ?? "").trim().split(/\s+/).at(-1);
-    if (!hash || !/^[a-f0-9]{40}$/i.test(hash))
-        throw new Error("The latest Protonn Cord release does not identify its source commit");
-    if (hash === gitHash)
-        return false;
-
-    const asset = data.assets.find(a => a.name === ASAR_FILE);
-    if (!asset?.browser_download_url)
-        throw new Error(`The latest Protonn Cord release is missing ${ASAR_FILE}`);
-    PendingUpdate = asset.browser_download_url;
-
-    return true;
+    const pending = await findHttpUpdate(githubGet, gitHash, ASAR_FILE);
+    PendingUpdate = pending;
+    return pending !== null;
 }
 
 async function applyUpdates() {
-    if (!PendingUpdate) return true;
-
-    const data = await fetchBuffer(PendingUpdate);
-    writeFileSync(__dirname, data, { flush: true });
-
-    PendingUpdate = null;
+    PendingUpdate = await applyPendingHttpUpdate(
+        PendingUpdate,
+        url => requestBytes(fetch, url, {}, DOWNLOAD_TIMEOUT, DOWNLOAD_SIZE_LIMIT),
+        data => replaceAsarAtomically(__dirname, `${__dirname}.${process.pid}.${randomUUID()}.tmp`, data, {
+            remove(path) {
+                try {
+                    unlinkSync(path);
+                } catch (error) {
+                    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+                }
+            },
+            rename: renameSync,
+            write(path, contents) {
+                writeFileSync(path, contents, { flag: "wx", flush: true });
+            },
+        }),
+    );
 
     return true;
 }
@@ -86,3 +94,9 @@ ipcMain.handle(IpcEvents.GET_REPO, serializeErrors(() => `https://github.com/${g
 ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors(calculateGitChanges));
 ipcMain.handle(IpcEvents.UPDATE, serializeErrors(fetchUpdates));
 ipcMain.handle(IpcEvents.BUILD, serializeErrors(applyUpdates));
+ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors((): UpdaterDiagnostics => ({
+    backend: "http",
+    branch: null,
+    builtHead: gitHash,
+    sourceRoot: null,
+})));

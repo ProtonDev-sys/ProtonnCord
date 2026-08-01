@@ -29,6 +29,7 @@ const UNFURL_RETRY_DELAYS = [0, 250, 1_000, 3_000] as const;
 
 interface EmbedCacheEntry {
     embeds: Embed[];
+    expiresAt: number;
     lastAccess: number;
     listeners: Set<() => void>;
     status: "loading" | "ready";
@@ -45,7 +46,7 @@ const cache = new Map<string, EmbedCacheEntry>();
 const unfurlCache = new Map<string, UnfurlCacheEntry>();
 
 function cacheKey(message: Message): string {
-    return `${message.channel_id}\0${message.id}\0${message.author?.id ?? ""}\0${discordEditedTimestamp(message) ?? ""}\0${message.content}`;
+    return `${UserStore.getCurrentUser()?.id ?? ""}\0${message.channel_id}\0${message.id}\0${message.author?.id ?? ""}\0${discordEditedTimestamp(message) ?? ""}\0${message.content}`;
 }
 
 function cloneWithEmbeds(message: Message, embeds: Embed[]): Message {
@@ -151,8 +152,9 @@ async function unfurlEmbeds(urls: string[]): Promise<Record<string, unknown>[]> 
     return (await Promise.all(urls.map(unfurlUrl))).flat();
 }
 
-function finishEntry(key: string, entry: EmbedCacheEntry): void {
+function finishEntry(key: string, entry: EmbedCacheEntry, expiresAt = Number.POSITIVE_INFINITY): void {
     if (cache.get(key) !== entry) return;
+    entry.expiresAt = expiresAt;
     entry.lastAccess = Date.now();
     entry.status = "ready";
     notify(entry);
@@ -199,19 +201,25 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
     }
     if (cache.get(key) !== entry) return;
     entry.embeds = converted;
-    finishEntry(key, entry);
+    finishEntry(
+        key,
+        entry,
+        rawEmbeds.length > 0 ? Date.now() + SUCCESSFUL_UNFURL_TTL : Date.now() + EMPTY_UNFURL_TTL,
+    );
 }
 
 function ensureEntry(message: Message): EmbedCacheEntry | null {
     if (!isEncryptedMessage(message.content)) return null;
     const key = cacheKey(message);
     const existing = cache.get(key);
-    if (existing) {
+    if (existing && (existing.status === "loading" || existing.expiresAt > Date.now())) {
         existing.lastAccess = Date.now();
         return existing;
     }
+    if (existing) cache.delete(key);
     const entry: EmbedCacheEntry = {
         embeds: [],
+        expiresAt: Number.POSITIVE_INFINITY,
         lastAccess: Date.now(),
         listeners: new Set(),
         status: "loading",

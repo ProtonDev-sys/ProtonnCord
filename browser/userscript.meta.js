@@ -3,9 +3,9 @@
 // @description     A Discord client mod - Web version
 // @version         %version%
 // @author          Protonn Cord
-// @namespace       https://github.com/ProtonnCord/ProtonnCord
-// @supportURL      https://github.com/ProtonnCord/ProtonnCord
-// @icon            https://raw.githubusercontent.com/ProtonnCord/ProtonnCord/refs/heads/main/browser/icon.png
+// @namespace       https://github.com/ProtonDev-sys/ProtonnCord
+// @supportURL      https://github.com/ProtonDev-sys/ProtonnCord
+// @icon            https://raw.githubusercontent.com/ProtonDev-sys/ProtonnCord/refs/heads/main/browser/icon.png
 // @license         GPL-3.0
 // @match           *://*.discord.com/*
 // @grant           GM_xmlhttpRequest

@@ -15,7 +15,12 @@ import { pathToFileURL } from "node:url";
 import { build, type Plugin } from "esbuild";
 import type { IpcMainInvokeEvent } from "electron";
 
-import { generateAttachmentBundleMaterial, serializeSecurePlaintext } from "../src/equicordplugins/secureMessaging.desktop/attachments";
+import {
+    attachmentBundleRoot,
+    encryptAttachmentBytes,
+    generateAttachmentBundleMaterial,
+    serializeSecurePlaintext,
+} from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import type { ConversationSnapshot } from "../src/equicordplugins/secureMessaging.desktop/native";
 
 type NativeModule = typeof import("../src/equicordplugins/secureMessaging.desktop/native");
@@ -33,6 +38,7 @@ class AuthenticatedProtector {
     available = true;
     backend = "kwallet6";
     failFinalFileSync = false;
+    failDownloadWrite = false;
     failParentDirectorySync = false;
     failVaultDirectorySync = false;
     finalFileSyncCalls = 0;
@@ -168,6 +174,10 @@ const runtimeStubs: Plugin = {
                     getAllWindows: () => runtime.browserWindows ?? [],
                 };
                 export const app = {
+                    getPath: name => {
+                        if (name !== "downloads") throw new Error("Unexpected app path request");
+                        return runtime.dataDir + "/Downloads";
+                    },
                     on: (event, listener) => {
                         (runtime.appListeners ??= []).push([event, listener]);
                     },
@@ -186,7 +196,14 @@ const runtimeStubs: Plugin = {
                 export async function open(path, flags, mode) {
                     const handle = await fs.open(path, flags, mode);
                     const runtime = globalThis.__secureMessagingNativeHarness;
-                    if (flags === "r" && (await fs.stat(path)).isDirectory()) {
+                    if (flags === "wx" && String(path).replaceAll("\\\\", "/").includes("/Downloads/") &&
+                        runtime.protector.failDownloadWrite) {
+                        handle.writeFile = async () => {
+                            const error = new Error("Injected download write failure");
+                            error.code = "EIO";
+                            throw error;
+                        };
+                    } else if (flags === "r" && (await fs.stat(path)).isDirectory()) {
                         const vaultDirectory = String(path).replaceAll("\\\\", "/").endsWith("/secure-messaging");
                         handle.sync = async () => {
                             if (vaultDirectory) runtime.protector.vaultDirectorySyncCalls++;
@@ -277,6 +294,40 @@ async function trustAnnouncement(
 
 async function testInvalidInputs(native: NativeModule): Promise<void> {
     const hostileEvent = discordEvent("https://example.com/channels/@me/200000000000000001");
+    const acknowledgementName = "PROTONN_CORD_SECURE_MESSAGING_LIVE_TEST";
+    const dataDirectoryName = "PROTONN_CORD_SECURE_MESSAGING_LIVE_DATA_DIR";
+    const previousAcknowledgement = process.env[acknowledgementName];
+    const previousDataDirectory = process.env[dataDirectoryName];
+    try {
+        delete process.env[acknowledgementName];
+        delete process.env[dataDirectoryName];
+        expectStatus(
+            await native.getLiveTestDownloadsDirectory(DISCORD_EVENT),
+            "invalid_input",
+            "ordinary production renderers cannot query the Downloads path",
+        );
+        process.env[acknowledgementName] = "I_UNDERSTAND_THIS_IS_DISPOSABLE";
+        process.env[dataDirectoryName] = join(harnessGlobal.__secureMessagingNativeHarness.dataDir, "secure-messaging-live-mismatch");
+        expectStatus(
+            await native.getLiveTestDownloadsDirectory(DISCORD_EVENT),
+            "invalid_input",
+            "a mismatched disposable data directory cannot query the Downloads path",
+        );
+        expectStatus(
+            await native.getLiveTestDownloadsDirectory(hostileEvent),
+            "invalid_input",
+            "a non-Discord IPC caller cannot query the live-test Downloads path",
+        );
+        process.env[dataDirectoryName] = harnessGlobal.__secureMessagingNativeHarness.dataDir;
+        const downloadsDirectory = await native.getLiveTestDownloadsDirectory(DISCORD_EVENT);
+        expectStatus(downloadsDirectory, "ready", "an acknowledged disposable profile can query its Downloads path");
+        assert.equal(downloadsDirectory.path, resolve(harnessGlobal.__secureMessagingNativeHarness.dataDir, "Downloads"));
+    } finally {
+        if (previousAcknowledgement === undefined) delete process.env[acknowledgementName];
+        else process.env[acknowledgementName] = previousAcknowledgement;
+        if (previousDataDirectory === undefined) delete process.env[dataDirectoryName];
+        else process.env[dataDirectoryName] = previousDataDirectory;
+    }
     expectStatus(await native.setScreenCaptureProtection(hostileEvent, true), "invalid_input", "non-Discord capture-protection IPC origin");
     expectStatus(
         await native.setScreenCaptureProtection(DISCORD_EVENT, "true" as never),
@@ -380,6 +431,8 @@ async function testScreenCaptureProtection(native: NativeModule): Promise<void> 
     assert.equal(enabled.enabled, true);
     assert.equal(enabled.windowCount, 1);
     assert.ok(primary.scripts.at(-1)?.includes("classList.remove"), "encrypted DOM content is revealed after visibility restoration");
+    assert.ok(primary.scripts.at(-1)?.includes("document.visibilityState==='visible'"), "hidden Discord windows cannot deadlock visibility restoration");
+    assert.ok(primary.scripts.at(-1)?.includes("setTimeout(complete,250)"), "falsely visible Discord windows cannot deadlock visibility restoration");
     assert.equal(runtime.appListeners?.filter(([event]) => event === "browser-window-created").length, 1, "future-window hook installs once");
 
     const futureWindow = captureWindow();
@@ -406,6 +459,9 @@ async function testScreenCaptureProtection(native: NativeModule): Promise<void> 
     expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, true), "applied", "visibility recovers after a future-window failure");
     expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, false), "applied", "screenshot mode enables cleanly");
     assert.ok(primary.scripts.at(-1)?.includes("classList.add"), "screenshot mode hides encrypted DOM content");
+    assert.ok(primary.scripts.at(-1)?.includes("querySelectorAll('video,audio')"), "screenshot mode pauses detached blob media");
+    assert.ok(primary.scripts.at(-1)?.includes("exitPictureInPicture"), "screenshot mode exits picture-in-picture media");
+    assert.ok(primary.scripts.at(-1)?.includes("exitFullscreen"), "screenshot mode exits fullscreen media");
     expectStatus(await native.setScreenCaptureProtection(DISCORD_EVENT, true), "applied", "encrypted content becomes visible serially");
     assert.ok(primary.scripts.at(-1)?.includes("classList.remove"), "encrypted DOM content is revealed after screenshot mode");
     assert.ok(primary.values.every(value => value === false), "every screenshot-mode transition keeps Discord capturable");
@@ -520,11 +576,19 @@ async function testStorageFailures(bundlePath: string, linuxBundlePath: string, 
 }
 
 async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise<void> {
+    const vaultDirectory = join(dataDir, "secure-messaging");
+    const staleVaultTemporary = join(vaultDirectory, "vault.00000000-0000-4000-8000-000000000001.tmp");
+    const staleQuarantineTemporary = join(vaultDirectory, "quarantine.00000000-0000-4000-8000-000000000002.tmp");
+    await mkdir(vaultDirectory, { recursive: true });
+    await writeFile(staleVaultTemporary, "interrupted vault write");
+    await writeFile(staleQuarantineTemporary, "interrupted quarantine write");
     const native = await loadNative(bundlePath, dataDir);
     await testInvalidInputs(native);
     await testScreenCaptureProtection(native);
 
     const aliceIdentity = await native.getIdentity(DISCORD_EVENT, ALICE_ID);
+    await assert.rejects(readFile(staleVaultTemporary), "startup removes an orphaned encrypted-vault temporary file");
+    await assert.rejects(readFile(staleQuarantineTemporary), "startup removes an orphaned quarantine temporary file");
     const bobIdentity = await native.getIdentity(DISCORD_EVENT, BOB_ID);
     const carolIdentity = await native.getIdentity(DISCORD_EVENT, CAROL_ID);
     const outsiderIdentity = await native.getIdentity(DISCORD_EVENT, OUTSIDER_ID);
@@ -593,6 +657,23 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         snapshot: aliceGroup,
     });
     expectStatus(conversation, "enabled", "selected group recipient configuration");
+    const groupPlaintext = "one shared group envelope";
+    const encryptedGroup = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        plaintext: groupPlaintext,
+        snapshot: aliceGroup,
+    });
+    expectStatus(encryptedGroup, "encrypted", "one encryption call creates the shared group envelope");
+    for (const [recipientId, label] of [[BOB_ID, "Bob"], [CAROL_ID, "Carol"]] as const) {
+        const groupDecryption = await native.decryptIncoming(DISCORD_EVENT, recipientId, {
+            channelId: GROUP_CHANNEL_ID,
+            content: encryptedGroup.content,
+            discordAuthorId: ALICE_ID,
+            discordEditedTimestamp: null,
+            discordMessageId: messageId(8),
+        });
+        expectStatus(groupDecryption, "decrypted", `${label} decrypts the same shared group envelope`);
+        assert.equal(groupDecryption.plaintext, groupPlaintext);
+    }
 
     const bobHistoricalPlaintext = "Bob message before either key rotation";
     const bobBeforeReplacement = await native.encryptOutgoing(DISCORD_EVENT, BOB_ID, {
@@ -635,8 +716,12 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         ...aliceOwnDmInput,
         discordMessageId: messageId(13),
     });
-    expectStatus(decrypted, "decrypted", "sender decrypts own message after Discord replaces its optimistic message ID");
-    assert.equal(decrypted.plaintext, dmPlaintext);
+    expectStatus(decrypted, "replay_detected", "a copied sender envelope is rejected under a different Discord message ID");
+    const repeatedSenderCopy = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        ...aliceOwnDmInput,
+        discordMessageId: messageId(14),
+    });
+    expectStatus(repeatedSenderCopy, "replay_detected", "every additional sender-envelope copy remains rejected");
 
     const attachmentMaterial = generateAttachmentBundleMaterial(2);
     const encryptedAttachmentMessage = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
@@ -698,6 +783,331 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     });
     expectStatus(oneOfTwoAttachments, "invalid_message", "missing ciphertext attachments fail before any download");
 
+    const incomingAttachmentBytes = new TextEncoder().encode("authenticated incoming attachment bytes");
+    const incomingAttachmentMaterial = generateAttachmentBundleMaterial(1);
+    const incomingAttachmentCiphertext = await encryptAttachmentBytes({
+        bundleId: incomingAttachmentMaterial.descriptor.id,
+        channelId: DM_CHANNEL_ID,
+        count: 1,
+        data: incomingAttachmentBytes,
+        index: 0,
+        masterKey: incomingAttachmentMaterial.keyBytes,
+        metadata: {
+            description: null,
+            duration: null,
+            height: null,
+            mimeType: "text/plain",
+            name: "incoming-secret.txt",
+            size: incomingAttachmentBytes.byteLength,
+            spoiler: false,
+            width: null,
+        },
+        senderUserId: ALICE_ID,
+    });
+    const incomingAttachmentRoot = await attachmentBundleRoot(
+        incomingAttachmentMaterial.descriptor.id,
+        [incomingAttachmentCiphertext],
+    );
+    const incomingAttachmentMessage = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        plaintext: serializeSecurePlaintext("incoming file", {
+            ...incomingAttachmentMaterial.descriptor,
+            root: incomingAttachmentRoot,
+        }),
+        snapshot: aliceDm,
+    });
+    incomingAttachmentMaterial.keyBytes.fill(0);
+    expectStatus(incomingAttachmentMessage, "encrypted", "Alice encrypts a downloadable attachment");
+    const incomingAttachmentId = messageId(102);
+    const incomingAttachmentInput = {
+        channelId: DM_CHANNEL_ID,
+        content: incomingAttachmentMessage.content,
+        discordAuthorId: ALICE_ID,
+        discordEditedTimestamp: null,
+        discordMessageId: messageId(103),
+        attachments: [{
+            id: incomingAttachmentId,
+            proxyUrl: `https://media.discordapp.net/attachments/${DM_CHANNEL_ID}/${incomingAttachmentId}/encrypted.pcaf`,
+            size: incomingAttachmentCiphertext.byteLength,
+            url: `https://cdn.discordapp.com/attachments/${DM_CHANNEL_ID}/${incomingAttachmentId}/encrypted.pcaf`,
+        }],
+    };
+    const originalFetch = globalThis.fetch;
+    try {
+        globalThis.fetch = async () => { throw new Error("Injected attachment connection failure"); };
+        const disconnectedDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(disconnectedDownload, "failed", "attachment downloads fail closed while disconnected");
+        assert.equal(disconnectedDownload.error, "attachment_download_failed");
+
+        globalThis.fetch = async () => new Response(Buffer.from(incomingAttachmentCiphertext), { status: 503 });
+        const unavailableDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(unavailableDownload, "failed", "attachment downloads reject non-success responses");
+        assert.equal(unavailableDownload.error, "attachment_download_failed");
+
+        globalThis.fetch = async () => new Response(null, { status: 200 });
+        const bodylessDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(bodylessDownload, "failed", "attachment downloads reject a missing response body");
+        assert.equal(bodylessDownload.error, "attachment_download_failed");
+
+        globalThis.fetch = async () => new Response(Buffer.from(incomingAttachmentCiphertext), {
+            headers: { "content-length": String(incomingAttachmentCiphertext.byteLength + 1) },
+        });
+        const changedLengthDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(changedLengthDownload, "failed", "attachment downloads reject changed declared lengths");
+        assert.equal(changedLengthDownload.error, "attachment_download_failed");
+
+        globalThis.fetch = async () => new Response(Buffer.from(incomingAttachmentCiphertext.subarray(0, -1)));
+        const truncatedDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(truncatedDownload, "failed", "attachment downloads reject truncated streams");
+        assert.equal(truncatedDownload.error, "attachment_download_failed");
+
+        globalThis.fetch = async () => new Response(Buffer.concat([Buffer.from(incomingAttachmentCiphertext), Buffer.from([0])]));
+        const oversizedDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(oversizedDownload, "failed", "attachment downloads reject oversized streams");
+        assert.equal(oversizedDownload.error, "attachment_download_failed");
+
+        globalThis.fetch = async () => new Response(null, {
+            headers: { location: "https://example.com/stolen.pcaf" },
+            status: 302,
+        });
+        const unsafeRedirectDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(unsafeRedirectDownload, "failed", "attachment downloads reject redirects away from Discord CDN hosts");
+        assert.equal(unsafeRedirectDownload.error, "attachment_download_failed");
+
+        const tamperedAttachmentCiphertext = Uint8Array.from(incomingAttachmentCiphertext);
+        tamperedAttachmentCiphertext[tamperedAttachmentCiphertext.length - 1] ^= 1;
+        globalThis.fetch = async () => new Response(Buffer.from(tamperedAttachmentCiphertext), {
+            headers: { "content-length": String(tamperedAttachmentCiphertext.byteLength) },
+        });
+        const tamperedDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(tamperedDownload, "invalid_message", "downloaded attachment ciphertext must authenticate before saving");
+
+        globalThis.fetch = async input => {
+            if (String(input).startsWith("https://cdn.discordapp.com/")) throw new Error("Injected primary CDN failure");
+            return new Response(Buffer.from(tamperedAttachmentCiphertext), {
+                headers: { "content-length": String(tamperedAttachmentCiphertext.byteLength) },
+            });
+        };
+        const failedPrimaryInvalidProxy = await native.decryptIncomingAttachments(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+        );
+        expectStatus(
+            failedPrimaryInvalidProxy,
+            "failed",
+            "a failed primary plus unauthenticated proxy remains retryable after connectivity recovers",
+        );
+        assert.equal(failedPrimaryInvalidProxy.error, "attachment_download_failed");
+
+        globalThis.fetch = async input => {
+            if (String(input).startsWith("https://cdn.discordapp.com/")) {
+                return new Response(Buffer.from(tamperedAttachmentCiphertext), {
+                    headers: { "content-length": String(tamperedAttachmentCiphertext.byteLength) },
+                });
+            }
+            throw new Error("Injected proxy CDN failure");
+        };
+        const invalidPrimaryFailedProxy = await native.decryptIncomingAttachments(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+        );
+        expectStatus(
+            invalidPrimaryFailedProxy,
+            "failed",
+            "an unauthenticated primary plus failed proxy remains retryable after connectivity recovers",
+        );
+        assert.equal(invalidPrimaryFailedProxy.error, "attachment_download_failed");
+
+        const originalSetTimeout = globalThis.setTimeout;
+        const originalClearTimeout = globalThis.clearTimeout;
+        const authenticatedCacheTimerCapture: { callback?: () => void; } = {};
+        const authenticatedCacheTimer = { unref: () => authenticatedCacheTimer } as NodeJS.Timeout;
+        globalThis.setTimeout = ((callback: () => void, delay?: number) => {
+            if ((delay ?? 0) >= 9 * 60_000) {
+                authenticatedCacheTimerCapture.callback = callback;
+                return authenticatedCacheTimer;
+            }
+            return originalSetTimeout(callback, delay);
+        }) as typeof setTimeout;
+        globalThis.clearTimeout = ((timer?: NodeJS.Timeout | number) => {
+            if (timer === authenticatedCacheTimer) {
+                delete authenticatedCacheTimerCapture.callback;
+                return;
+            }
+            originalClearTimeout(timer);
+        }) as typeof clearTimeout;
+        try {
+        let cacheMissDownloadAttempts = 0;
+        globalThis.fetch = async () => {
+            cacheMissDownloadAttempts++;
+            return new Response(Buffer.from(incomingAttachmentCiphertext), {
+                headers: { "content-length": String(incomingAttachmentCiphertext.byteLength) },
+            });
+        };
+        const cacheMissDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(cacheMissDownload, "saved", "a cache-miss download authenticates, decrypts, and saves in one operation");
+        assert.equal(cacheMissDownloadAttempts, 1, "a cache-miss download fetches the ciphertext bundle once");
+        assert.equal(cacheMissDownload.filename, "incoming-secret.txt");
+        assert.deepEqual(
+            await readFile(join(dataDir, "Downloads", cacheMissDownload.filename)),
+            Buffer.from(incomingAttachmentBytes),
+            "a cache-miss download writes only authenticated plaintext bytes",
+        );
+        await rm(join(dataDir, "Downloads", cacheMissDownload.filename), { force: true });
+
+        let mismatchedPrimaryAttempts = 0;
+        globalThis.fetch = async input => {
+            mismatchedPrimaryAttempts++;
+            const bytes = String(input).startsWith("https://cdn.discordapp.com/")
+                ? tamperedAttachmentCiphertext
+                : incomingAttachmentCiphertext;
+            return new Response(Buffer.from(bytes), {
+                headers: { "content-length": String(bytes.byteLength) },
+            });
+        };
+        const authenticatedProxyFallback = await native.decryptIncomingAttachments(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+        );
+        expectStatus(
+            authenticatedProxyFallback,
+            "decrypted",
+            "a same-length stale primary CDN response falls back to the authenticated proxy response",
+        );
+        assert.equal(mismatchedPrimaryAttempts, 2);
+        assert.deepEqual(authenticatedProxyFallback.attachments[0].data, incomingAttachmentBytes);
+
+        let cachedDownloadFetchAttempts = 0;
+        globalThis.fetch = async () => {
+            cachedDownloadFetchAttempts++;
+            throw new Error("An already-authenticated attachment download must work offline");
+        };
+        const firstDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(firstDownload, "saved", "Bob saves Alice's authenticated attachment");
+        assert.equal(cachedDownloadFetchAttempts, 0, "saving an already-rendered authenticated attachment performs no network request");
+        assert.equal(firstDownload.filename, "incoming-secret.txt");
+        assert.deepEqual(
+            await readFile(join(dataDir, "Downloads", firstDownload.filename)),
+            Buffer.from(incomingAttachmentBytes),
+            "the Downloads file exactly matches the authenticated plaintext bytes",
+        );
+        const duplicateDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(duplicateDownload, "saved", "a repeated attachment download remains safe");
+        assert.equal(cachedDownloadFetchAttempts, 0, "repeated authenticated downloads do not multiply bundle requests");
+        assert.equal(duplicateDownload.filename, "incoming-secret (1).txt");
+        assert.deepEqual(await readFile(join(dataDir, "Downloads", duplicateDownload.filename)), Buffer.from(incomingAttachmentBytes));
+        const unknownAttachment = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            messageId(104),
+        );
+        expectStatus(unknownAttachment, "invalid_input", "download requests are bound to an authenticated attachment ID");
+
+        protector.failDownloadWrite = true;
+        const storageFailure = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(storageFailure, "failed", "attachment storage failures are reported safely");
+        assert.equal(storageFailure.error, "storage_error");
+        await assert.rejects(
+            readFile(join(dataDir, "Downloads", "incoming-secret (2).txt")),
+            "a failed attachment write must not leave a partial download",
+        );
+        const expireAuthenticatedCache = authenticatedCacheTimerCapture.callback;
+        assert.ok(expireAuthenticatedCache, "authenticated attachment plaintext schedules an eager expiry timer");
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
+        const originalDateNow = Date.now;
+        Date.now = () => originalDateNow() + 11 * 60_000;
+        try {
+            expireAuthenticatedCache();
+        } finally {
+            Date.now = originalDateNow;
+        }
+        let expiredCacheFetchAttempts = 0;
+        globalThis.fetch = async () => {
+            expiredCacheFetchAttempts++;
+            throw new Error("Expired authenticated plaintext must be fetched and authenticated again");
+        };
+        const expiredCacheDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            incomingAttachmentInput,
+            incomingAttachmentId,
+        );
+        expectStatus(expiredCacheDownload, "failed", "authenticated attachment plaintext expires without another cache operation");
+        assert.equal(expiredCacheDownload.error, "attachment_download_failed");
+        assert.ok(expiredCacheFetchAttempts > 0, "an expired plaintext cache entry is never reused offline");
+        } finally {
+            globalThis.setTimeout = originalSetTimeout;
+            globalThis.clearTimeout = originalClearTimeout;
+        }
+    } finally {
+        protector.failDownloadWrite = false;
+        globalThis.fetch = originalFetch;
+    }
+
     decrypted = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, bobDmInput);
     expectStatus(decrypted, "decrypted", "exact message rerender is idempotent");
     const copiedReplay = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, {
@@ -752,6 +1162,16 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         discordEditedTimestamp: "2026-01-01T00:00:02.000Z",
     });
     expectStatus(rolledBackEdit, "replay_detected", "an older encrypted version cannot roll back an edited Discord message");
+    const copiedRolledBackEdit = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, {
+        ...editableDmInput,
+        discordEditedTimestamp: null,
+        discordMessageId: messageId(105),
+    });
+    expectStatus(
+        copiedRolledBackEdit,
+        "replay_detected",
+        "a superseded encrypted version remains a replay when copied under a fresh Discord message ID",
+    );
     const outOfOrderEdit = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, {
         ...editableDmInput,
         content: secondDm.content,
@@ -778,6 +1198,34 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         discordMessageId: messageId(20),
     });
     expectStatus(unselected, "invalid_message", "trusted but unselected participant cannot decrypt");
+    conversation = await native.configureConversation(DISCORD_EVENT, ALICE_ID, {
+        enabled: true,
+        selectedRecipientIds: [BOB_ID, CAROL_ID],
+        snapshot: aliceGroup,
+    });
+    expectStatus(conversation, "enabled", "group is explicitly reconfigured after selecting Carol");
+    const oldMessageAfterSelection = await native.decryptIncoming(DISCORD_EVENT, CAROL_ID, {
+        channelId: GROUP_CHANNEL_ID,
+        content: selectedOnly.content,
+        discordAuthorId: ALICE_ID,
+        discordEditedTimestamp: null,
+        discordMessageId: messageId(20),
+    });
+    expectStatus(oldMessageAfterSelection, "invalid_message", "a newly selected participant receives no key for old group history");
+    const selectedAfterJoin = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        plaintext: "Bob and Carol after selection",
+        snapshot: aliceGroup,
+    });
+    expectStatus(selectedAfterJoin, "encrypted", "one new group envelope is created after the recipient change");
+    const newlySelected = await native.decryptIncoming(DISCORD_EVENT, CAROL_ID, {
+        channelId: GROUP_CHANNEL_ID,
+        content: selectedAfterJoin.content,
+        discordAuthorId: ALICE_ID,
+        discordEditedTimestamp: null,
+        discordMessageId: messageId(106),
+    });
+    expectStatus(newlySelected, "decrypted", "the newly selected participant decrypts only subsequent group messages");
+    assert.equal(newlySelected.plaintext, "Bob and Carol after selection");
 
     const outsiderDm = dmSnapshot(OUTSIDER_CHANNEL_ID, ALICE_ID);
     conversation = await native.configureConversation(DISCORD_EVENT, OUTSIDER_ID, {
@@ -1144,7 +1592,7 @@ async function main(): Promise<void> {
         await buildNativeBundle(linuxBundlePath, "linux");
         await buildNativeBundle(windowsBundlePath, "win32");
         await testStorageFailures(bundlePath, linuxBundlePath, windowsBundlePath, root);
-        await testNativeLifecycle(bundlePath, join(root, "lifecycle"));
+        await testNativeLifecycle(bundlePath, join(root, "secure-messaging-live-lifecycle"));
         console.log("secure-messaging native IPC checks passed");
     } finally {
         await rm(root, { force: true, recursive: true });

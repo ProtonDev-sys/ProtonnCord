@@ -17,8 +17,10 @@
 */
 
 import { IpcEvents } from "@shared/IpcEvents";
+import type { UpdaterDiagnostics } from "@shared/Updater";
 import { ipcMain } from "electron";
 
+import gitHash from "~git-hash";
 import gitRemote from "~git-remote";
 
 import { serializeErrors } from "./common";
@@ -28,4 +30,10 @@ if (!IS_UPDATER_DISABLED) {
 } else {
     ipcMain.handle(IpcEvents.GET_REPO, serializeErrors(() => `https://github.com/${gitRemote}`));
     ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors(() => []));
+    ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors((): UpdaterDiagnostics => ({
+        backend: "disabled",
+        branch: null,
+        builtHead: gitHash,
+        sourceRoot: null,
+    })));
 }

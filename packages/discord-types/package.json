@@ -9,7 +9,7 @@
     "type": "module",
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/ProtonnCord/ProtonnCord.git",
+        "url": "git+https://github.com/ProtonDev-sys/ProtonnCord.git",
         "directory": "packages/discord-types"
     },
     "dependencies": {
