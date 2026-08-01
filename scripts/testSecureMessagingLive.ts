@@ -821,9 +821,12 @@ async function prepareThroughRuntimeMessageEvents(page: Page, plaintext: string)
 }
 
 async function sendThroughActualComposer(page: Page, plaintext: string): Promise<{
+    localPlaintextVisible: boolean;
+    localSenderDecrypted: boolean;
     message: RawDiscordMessage;
     messagePostCount: number;
     messageStoreCiphertextMatched: boolean;
+    optimisticNonceDifferentFromServerId: boolean;
 }> {
     await page.evaluate(({ channelId, proofName, registryName }) => {
         const global = globalThis as any;
@@ -834,12 +837,17 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
         const proof = {
             messagePostCount: 0,
             originalPost,
+            requestNonce: "",
             response: null as any,
         };
         global[proofName] = proof;
         rest.post = async function (request: Record<string, unknown>, ...args: unknown[]) {
             const isMessagePost = request?.url === endpoint;
-            if (isMessagePost) proof.messagePostCount++;
+            if (isMessagePost) {
+                proof.messagePostCount++;
+                const nonce = (request as any)?.body?.nonce;
+                if (typeof nonce === "string" || typeof nonce === "number") proof.requestNonce = String(nonce);
+            }
             const response = await originalPost.call(rest, request, ...args);
             if (isMessagePost && response?.body?.id) {
                 proof.response = response.body;
@@ -871,13 +879,40 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
             { timeout: 30_000 },
             PAGE_COMPOSER_PROOF,
         );
-        return await page.evaluate(({ proofName }) => {
+        await page.waitForFunction(
+            expectedPlaintext => document.body.innerText.includes(expectedPlaintext),
+            { timeout: 30_000 },
+            plaintext,
+        );
+        return await page.evaluate(async ({ proofName }) => {
             const global = globalThis as any;
             const common = global.Vencord.Webpack.Common;
             const proof = global[proofName];
             const response = proof.response;
             const stored = common.MessageStore.getMessage(String(response.channel_id), String(response.id));
+            const native = global.VencordNative.pluginHelpers.SecureMessaging;
+            const localUserId = String(common.UserStore.getCurrentUser().id);
+            const requestNonce = proof.requestNonce;
+            if (!/^\d{17,20}$/u.test(requestNonce)) throw new Error("the actual composer did not provide a Discord nonce");
+            await native.decryptIncoming(localUserId, {
+                channelId: String(response.channel_id),
+                content: String(response.content),
+                discordAuthorId: String(response.author.id),
+                discordEditedTimestamp: typeof response.edited_timestamp === "string" ? response.edited_timestamp : null,
+                discordMessageId: requestNonce,
+                discordNonce: requestNonce,
+            });
+            const canonicalDecryption = await native.decryptIncoming(localUserId, {
+                channelId: String(response.channel_id),
+                content: String(response.content),
+                discordAuthorId: String(response.author.id),
+                discordEditedTimestamp: typeof response.edited_timestamp === "string" ? response.edited_timestamp : null,
+                discordMessageId: String(response.id),
+                discordNonce: requestNonce,
+            });
             return {
+                localPlaintextVisible: true,
+                localSenderDecrypted: canonicalDecryption.status === "decrypted",
                 message: {
                     attachments: [],
                     authorId: String(response.author.id),
@@ -888,6 +923,7 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
                 },
                 messagePostCount: proof.messagePostCount,
                 messageStoreCiphertextMatched: stored?.content === response.content,
+                optimisticNonceDifferentFromServerId: requestNonce !== String(response.id),
             };
         }, { proofName: PAGE_COMPOSER_PROOF });
     } finally {
@@ -1903,6 +1939,9 @@ async function main(): Promise<void> {
         sentMessageIds.add(composerProof.message.id);
         assert.equal(composerProof.messagePostCount, 1, "the real chat composer must create exactly one Discord message POST");
         assert.equal(composerProof.messageStoreCiphertextMatched, true, "MessageStore must retain the server's ciphertext envelope");
+        assert.equal(composerProof.optimisticNonceDifferentFromServerId, true, "Discord must confirm the optimistic nonce under a distinct server message ID");
+        assert.equal(composerProof.localSenderDecrypted, true, "the sender must decrypt the confirmed message after optimistic-ID reconciliation");
+        assert.equal(composerProof.localPlaintextVisible, true, "the sender must see plaintext in the real Discord message row");
         assert.ok(composerProof.message.content.startsWith(ENCRYPTED_PREFIX), "the real chat composer must store ciphertext on Discord");
         assert.equal(composerProof.message.content.includes(composerPlaintext), false, "the real chat composer must never send its unique plaintext");
         const composerDecrypted = await decryptMessage({
@@ -2363,8 +2402,11 @@ async function main(): Promise<void> {
             attachmentReservationBlocked: failClosed.attachmentReservationBlocked,
             actualComposer: {
                 decryptedBySelectedRecipient: composerDecrypted.plaintext === composerPlaintext,
+                localPlaintextVisible: composerProof.localPlaintextVisible,
+                localSenderDecrypted: composerProof.localSenderDecrypted,
                 messagePostCount: composerProof.messagePostCount,
                 messageStoreCiphertextMatched: composerProof.messageStoreCiphertextMatched,
+                optimisticNonceDifferentFromServerId: composerProof.optimisticNonceDifferentFromServerId,
                 plaintextAbsentFromWire: !composerProof.message.content.includes(composerPlaintext),
             },
             encryptedAttachment: {

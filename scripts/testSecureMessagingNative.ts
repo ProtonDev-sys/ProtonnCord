@@ -708,6 +708,7 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     const aliceOwnDmInput = {
         ...bobDmInput,
         discordMessageId: messageId(11),
+        discordNonce: messageId(11),
     };
     decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, aliceOwnDmInput);
     expectStatus(decrypted, "decrypted", "sender decrypts own message");
@@ -715,13 +716,27 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
         ...aliceOwnDmInput,
         discordMessageId: messageId(13),
+        discordNonce: messageId(11),
     });
-    expectStatus(decrypted, "replay_detected", "a copied sender envelope is rejected under a different Discord message ID");
+    expectStatus(decrypted, "decrypted", "sender decrypts the canonical message after Discord replaces its optimistic nonce ID");
+    assert.equal(decrypted.plaintext, dmPlaintext);
+    decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        ...aliceOwnDmInput,
+        discordMessageId: messageId(13),
+        discordNonce: messageId(11),
+    });
+    expectStatus(decrypted, "decrypted", "the canonical sender message remains idempotent after nonce reconciliation");
     const repeatedSenderCopy = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
         ...aliceOwnDmInput,
         discordMessageId: messageId(14),
     });
-    expectStatus(repeatedSenderCopy, "replay_detected", "every additional sender-envelope copy remains rejected");
+    expectStatus(repeatedSenderCopy, "replay_detected", "a copied sender envelope remains rejected after nonce reconciliation");
+    const forgedReplacement = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        ...aliceOwnDmInput,
+        discordMessageId: messageId(15),
+        discordNonce: messageId(11),
+    });
+    expectStatus(forgedReplacement, "replay_detected", "the optimistic nonce can reconcile exactly one server message ID");
 
     const attachmentMaterial = generateAttachmentBundleMaterial(2);
     const encryptedAttachmentMessage = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
@@ -1126,8 +1141,56 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     const senderMessageIdCollision = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
         ...aliceOwnDmInput,
         content: secondDm.content,
+        discordMessageId: messageId(13),
+        discordNonce: messageId(11),
     });
     expectStatus(senderMessageIdCollision, "replay_detected", "sender still rejects different ciphertext reusing a Discord message ID");
+    const canonicalOwnMessage = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        ...aliceOwnDmInput,
+        content: secondDm.content,
+        discordMessageId: messageId(17),
+        discordNonce: messageId(16),
+    });
+    expectStatus(canonicalOwnMessage, "decrypted", "sender decrypts a message first observed under its canonical server ID");
+    const canonicalOwnMessageCopy = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        ...aliceOwnDmInput,
+        content: secondDm.content,
+        discordMessageId: messageId(18),
+        discordNonce: messageId(17),
+    });
+    expectStatus(canonicalOwnMessageCopy, "replay_detected", "a canonical sender record is never eligible for optimistic-ID replacement");
+
+    const historyPlaintext = "sender history after Discord discarded its nonce";
+    const encryptedHistory = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        plaintext: historyPlaintext,
+        snapshot: aliceDm,
+    });
+    expectStatus(encryptedHistory, "encrypted", "Alice encrypts a sender-history compatibility message");
+    const historyEnvelopeTimestamp = JSON.parse(encryptedHistory.content.slice("PCEM2:".length))[1] as number;
+    const optimisticHistoryId = messageIdAt(historyEnvelopeTimestamp + 5);
+    const canonicalHistoryId = messageIdAt(historyEnvelopeTimestamp - 700);
+    decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        ...aliceOwnDmInput,
+        content: encryptedHistory.content,
+        discordMessageId: optimisticHistoryId,
+        discordNonce: optimisticHistoryId,
+    });
+    expectStatus(decrypted, "decrypted", "sender decrypts the optimistic history row");
+    decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        ...aliceOwnDmInput,
+        content: encryptedHistory.content,
+        discordMessageId: canonicalHistoryId,
+        discordNonce: null,
+    });
+    expectStatus(decrypted, "decrypted", "older canonical ID reconciles after Discord history discards the nonce");
+    assert.equal(decrypted.plaintext, historyPlaintext);
+    const copiedHistory = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        ...aliceOwnDmInput,
+        content: encryptedHistory.content,
+        discordMessageId: messageIdAt(historyEnvelopeTimestamp + 1_000),
+        discordNonce: null,
+    });
+    expectStatus(copiedHistory, "replay_detected", "a later copy cannot use the nonce-less history compatibility path");
 
     const editableDm = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
         plaintext: "native secret before edit",
@@ -1342,6 +1405,12 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     );
     decrypted = await freshlyLoaded.decryptIncoming(DISCORD_EVENT, BOB_ID, bobDmInput);
     expectStatus(decrypted, "decrypted", "exact replay remains allowed after reload");
+    decrypted = await freshlyLoaded.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        ...aliceOwnDmInput,
+        discordMessageId: messageId(13),
+        discordNonce: messageId(11),
+    });
+    expectStatus(decrypted, "decrypted", "reconciled sender message ID remains canonical after reload");
     const persistedReplay = await freshlyLoaded.decryptIncoming(DISCORD_EVENT, BOB_ID, {
         ...bobDmInput,
         discordMessageId: messageId(13),

@@ -60,7 +60,7 @@ import {
     revokeAnyAttachmentUploadReservations,
 } from "../src/equicordplugins/secureMessaging.desktop/wireAuthorizations";
 import { availableSelectedRecipientIds } from "../src/equicordplugins/secureMessaging.desktop/conversationSelection";
-import { discordEditedTimestamp } from "../src/equicordplugins/secureMessaging.desktop/messageMetadata";
+import { discordEditedTimestamp, discordMessageNonce } from "../src/equicordplugins/secureMessaging.desktop/messageMetadata";
 import { KeyReviewGate } from "../src/equicordplugins/secureMessaging.desktop/keyReviewGate";
 import { extractSecureEmbedUrls } from "../src/equicordplugins/secureMessaging.desktop/embedUrls";
 
@@ -226,6 +226,8 @@ async function main(): Promise<void> {
     assert.equal(discordEditedTimestamp({ editedTimestamp: new Date("2026-01-02T03:04:05.006Z") }), "2026-01-02T03:04:05.006Z");
     assert.equal(discordEditedTimestamp({ edited_timestamp: null, editedTimestamp: new Date() }), null, "raw null takes precedence");
     assert.equal(discordEditedTimestamp({ edited_timestamp: "not-a-timestamp" }), "not-a-timestamp", "invalid non-null metadata fails native validation instead of becoming unedited");
+    assert.equal(discordMessageNonce({ nonce: "1533116353970569440" }), "1533116353970569440");
+    assert.equal(discordMessageNonce({ nonce: "not-a-snowflake" }), null, "invalid Discord nonces fail closed");
 
     const trustedBob = {
         status: "trusted" as const,
