@@ -1476,6 +1476,58 @@ async function verifyRenderedEncryptedAttachment(page: Page, message: RawDiscord
     return proof;
 }
 
+async function verifyEncryptedImageModal(page: Page, message: RawDiscordMessage): Promise<{
+    imageClickDidNotDownload: boolean;
+    modalOpened: boolean;
+}> {
+    const downloadsDirectory = await page.evaluate(async () => {
+        const native = (globalThis as any).VencordNative.pluginHelpers.SecureMessaging;
+        const result = await native.getLiveTestDownloadsDirectory();
+        if (result.status !== "ready") throw new Error(`The disposable client did not expose its Downloads directory: ${result.status}`);
+        return result.path as string;
+    });
+    const beforeDownloads = (await readdir(downloadsDirectory))
+        .filter(candidate => isDownloadFilenameVariant(candidate, PROOF_PNG_FILENAME));
+
+    const clickPoint = await page.evaluate(({ channelId, messageId }) => {
+        const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+        const image = row?.querySelector<HTMLImageElement>("img[src^='blob:']");
+        if (!image) throw new Error("The authenticated encrypted image is missing");
+        image.scrollIntoView({ block: "center" });
+        const rect = image.getBoundingClientRect();
+        const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        const link = target?.closest<HTMLAnchorElement>("a[href^='blob:']");
+        if (!link || link.dataset.role !== "img")
+            throw new Error(`Discord's encrypted-image overlay is unavailable: ${target?.outerHTML.slice(0, 500) ?? "no target"}`);
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }, { channelId: message.channelId, messageId: message.id });
+    await page.mouse.click(clickPoint.x, clickPoint.y);
+    await page.waitForFunction(({ channelId, messageId }) => {
+        const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+        return [...document.querySelectorAll<HTMLImageElement>("img[src^='blob:']")]
+            .some(image => !row?.contains(image) && image.getBoundingClientRect().width > 0);
+    }, { timeout: 10_000 }, { channelId: message.channelId, messageId: message.id });
+
+    await new Promise(resolve => setTimeout(resolve, 1_000));
+    const modalOpened = await page.evaluate(({ channelId, messageId }) => {
+        const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+        return [...document.querySelectorAll<HTMLImageElement>("img[src^='blob:']")]
+            .some(image => !row?.contains(image) && image.getBoundingClientRect().width > 0);
+    }, { channelId: message.channelId, messageId: message.id });
+    const afterDownloads = (await readdir(downloadsDirectory))
+        .filter(candidate => isDownloadFilenameVariant(candidate, PROOF_PNG_FILENAME));
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(({ channelId, messageId }) => {
+        const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+        return ![...document.querySelectorAll<HTMLImageElement>("img[src^='blob:']")]
+            .some(image => !row?.contains(image) && image.getBoundingClientRect().width > 0);
+    }, { timeout: 10_000 }, { channelId: message.channelId, messageId: message.id });
+    return {
+        imageClickDidNotDownload: JSON.stringify(afterDownloads) === JSON.stringify(beforeDownloads),
+        modalOpened,
+    };
+}
+
 function isDownloadFilenameVariant(candidate: string, expectedFilename: string): boolean {
     if (candidate === expectedFilename) return true;
     const extension = extname(expectedFilename);
@@ -2264,6 +2316,10 @@ async function main(): Promise<void> {
         assert.equal(attachmentRenderProof.downloadMimeType, "image/png", "safe raster images must retain their native Discord preview type");
         assert.equal(attachmentRenderProof.signedUrlRefreshCacheStable, true, "signed Discord URL refreshes must not invalidate decrypted blobs or flicker");
 
+        const imageModalProof = await verifyEncryptedImageModal(page, attachmentSend.message);
+        assert.equal(imageModalProof.modalOpened, true, "clicking an encrypted image must open Discord's media viewer");
+        assert.equal(imageModalProof.imageClickDidNotDownload, true, "clicking an encrypted image must not save it to Downloads");
+
         const videoRenderProof = await verifyRenderedEncryptedVideo(page, videoSend.message, videoPlaintext);
         assert.equal(videoRenderProof.plaintextVisible, true, "encrypted video text must render locally");
         assert.equal(videoRenderProof.projectedMimeType, "video/webm", "authenticated WebM media must retain Discord's native video type");
@@ -2415,9 +2471,11 @@ async function main(): Promise<void> {
                 decryptedBySelectedRecipient: recipientAttachment.metadata.name === PROOF_PNG_FILENAME,
                 eagerPlaintextUploadDeferred: attachmentSend.eagerPlaintextUploadDeferred,
                 nativeImageHeight: attachmentRenderProof.imageHeight,
+                nativeImageModalOpened: imageModalProof.modalOpened,
                 nativeImageObscured: attachmentRenderProof.imageObscured,
                 nativeImageRendererUsed: attachmentRenderProof.imageUsesLocalAuthenticatedUrl,
                 nativeImageWidth: attachmentRenderProof.imageWidth,
+                nativeImageClickDidNotDownload: imageModalProof.imageClickDidNotDownload,
                 localContentScanVersion: attachmentRenderProof.localContentScanVersion,
                 downloadBytesMatch: attachmentRenderProof.downloadBytesMatch,
                 downloadedToDownloadsDirectory: true,
