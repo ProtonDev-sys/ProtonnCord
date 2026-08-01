@@ -1476,7 +1476,11 @@ async function verifyRenderedEncryptedAttachment(page: Page, message: RawDiscord
     return proof;
 }
 
-async function verifyEncryptedImageModal(page: Page, message: RawDiscordMessage): Promise<{
+async function verifyEncryptedImageModal(
+    page: Page,
+    message: RawDiscordMessage,
+    downloadedProofPaths: Set<string>,
+): Promise<{
     imageClickDidNotDownload: boolean;
     modalOpened: boolean;
 }> {
@@ -1486,44 +1490,49 @@ async function verifyEncryptedImageModal(page: Page, message: RawDiscordMessage)
         if (result.status !== "ready") throw new Error(`The disposable client did not expose its Downloads directory: ${result.status}`);
         return result.path as string;
     });
-    const beforeDownloads = (await readdir(downloadsDirectory))
-        .filter(candidate => isDownloadFilenameVariant(candidate, PROOF_PNG_FILENAME));
+    const beforeDownloads = new Set(await readdir(downloadsDirectory));
 
     const clickPoint = await page.evaluate(({ channelId, messageId }) => {
         const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
         const image = row?.querySelector<HTMLImageElement>("img[src^='blob:']");
         if (!image) throw new Error("The authenticated encrypted image is missing");
         image.scrollIntoView({ block: "center" });
-        const rect = image.getBoundingClientRect();
-        const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        const link = target?.closest<HTMLAnchorElement>("a[href^='blob:']");
-        if (!link || link.dataset.role !== "img")
-            throw new Error(`Discord's encrypted-image overlay is unavailable: ${target?.outerHTML.slice(0, 500) ?? "no target"}`);
-        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        const link = row?.querySelector<HTMLAnchorElement>("a[data-role='img'][href^='blob:']");
+        if (!link) throw new Error("Discord's encrypted-image overlay is unavailable");
+        const rect = link.getBoundingClientRect();
+        const sampleOffsets = [0.05, 0.2, 0.5, 0.8, 0.95];
+        const point = sampleOffsets.flatMap(y => sampleOffsets.map(x => ({
+            x: rect.left + rect.width * x,
+            y: rect.top + rect.height * y,
+        }))).find(({ x, y }) => document.elementFromPoint(x, y)?.closest("a[data-role='img']") === link);
+        if (!point) {
+            const blockers = sampleOffsets.map(offset =>
+                document.elementFromPoint(rect.left + rect.width * offset, rect.top + rect.height * offset)?.outerHTML.slice(0, 200));
+            throw new Error(`Discord's encrypted-image overlay has no exposed click point: ${JSON.stringify(blockers)}`);
+        }
+        return {
+            source: image.currentSrc || image.src,
+            ...point,
+        };
     }, { channelId: message.channelId, messageId: message.id });
     await page.mouse.click(clickPoint.x, clickPoint.y);
-    await page.waitForFunction(({ channelId, messageId }) => {
-        const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
-        return [...document.querySelectorAll<HTMLImageElement>("img[src^='blob:']")]
-            .some(image => !row?.contains(image) && image.getBoundingClientRect().width > 0);
-    }, { timeout: 10_000 }, { channelId: message.channelId, messageId: message.id });
+    await page.waitForFunction(source => [...document.querySelectorAll<HTMLImageElement>("[role='dialog'] img")]
+        .some(image => (image.currentSrc || image.src) === source && image.getBoundingClientRect().width > 0),
+    { timeout: 10_000 }, clickPoint.source);
 
     await new Promise(resolve => setTimeout(resolve, 1_000));
-    const modalOpened = await page.evaluate(({ channelId, messageId }) => {
-        const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
-        return [...document.querySelectorAll<HTMLImageElement>("img[src^='blob:']")]
-            .some(image => !row?.contains(image) && image.getBoundingClientRect().width > 0);
-    }, { channelId: message.channelId, messageId: message.id });
-    const afterDownloads = (await readdir(downloadsDirectory))
-        .filter(candidate => isDownloadFilenameVariant(candidate, PROOF_PNG_FILENAME));
+    const modalOpened = await page.evaluate(source => [...document.querySelectorAll<HTMLImageElement>("[role='dialog'] img")]
+        .some(image => (image.currentSrc || image.src) === source && image.getBoundingClientRect().width > 0),
+    clickPoint.source);
+    const newDownloads = (await readdir(downloadsDirectory))
+        .filter(candidate => !beforeDownloads.has(candidate));
+    for (const candidate of newDownloads) downloadedProofPaths.add(join(downloadsDirectory, candidate));
     await page.keyboard.press("Escape");
-    await page.waitForFunction(({ channelId, messageId }) => {
-        const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
-        return ![...document.querySelectorAll<HTMLImageElement>("img[src^='blob:']")]
-            .some(image => !row?.contains(image) && image.getBoundingClientRect().width > 0);
-    }, { timeout: 10_000 }, { channelId: message.channelId, messageId: message.id });
+    await page.waitForFunction(source => ![...document.querySelectorAll<HTMLImageElement>("[role='dialog'] img")]
+        .some(image => (image.currentSrc || image.src) === source && image.getBoundingClientRect().width > 0),
+    { timeout: 10_000 }, clickPoint.source);
     return {
-        imageClickDidNotDownload: JSON.stringify(afterDownloads) === JSON.stringify(beforeDownloads),
+        imageClickDidNotDownload: newDownloads.length === 0,
         modalOpened,
     };
 }
@@ -2316,7 +2325,7 @@ async function main(): Promise<void> {
         assert.equal(attachmentRenderProof.downloadMimeType, "image/png", "safe raster images must retain their native Discord preview type");
         assert.equal(attachmentRenderProof.signedUrlRefreshCacheStable, true, "signed Discord URL refreshes must not invalidate decrypted blobs or flicker");
 
-        const imageModalProof = await verifyEncryptedImageModal(page, attachmentSend.message);
+        const imageModalProof = await verifyEncryptedImageModal(page, attachmentSend.message, downloadedProofPaths);
         assert.equal(imageModalProof.modalOpened, true, "clicking an encrypted image must open Discord's media viewer");
         assert.equal(imageModalProof.imageClickDidNotDownload, true, "clicking an encrypted image must not save it to Downloads");
 
