@@ -8,7 +8,7 @@ import { sleep } from "@utils/misc";
 import type { PluginNative } from "@utils/types";
 import type { Message } from "@vencord/discord-types";
 
-import { discordEditedTimestamp } from "./messageMetadata";
+import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
 import type { DecryptIncomingResult } from "./native";
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
@@ -33,6 +33,7 @@ export function decryptCacheKey(localUserId: string, message: Message): string {
         message.id,
         message.author?.id ?? "",
         discordEditedTimestamp(message) ?? "",
+        discordMessageNonce(message) ?? "",
         message.content,
     ].join("\0");
 }
@@ -58,6 +59,7 @@ async function decryptWithRetry(
             discordAuthorId: message.author.id,
             discordEditedTimestamp: discordEditedTimestamp(message),
             discordMessageId: message.id,
+            discordNonce: discordMessageNonce(message),
         }).catch((): DecryptIncomingResult => ({ status: "failed", error: "cryptographic_operation_failed" }));
         if (generation !== cacheGeneration || !isCurrent())
             return { status: "failed", error: "cryptographic_operation_failed" };

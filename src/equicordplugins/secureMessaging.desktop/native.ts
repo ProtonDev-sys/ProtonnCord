@@ -115,6 +115,7 @@ export interface DecryptIncomingInput {
     discordAuthorId: string;
     discordEditedTimestamp: string | null;
     discordMessageId: string;
+    discordNonce?: string | null;
 }
 
 export interface EncryptedAttachmentReference {
@@ -228,6 +229,7 @@ interface ReplayRecord {
     contentDigest: string;
     counter: number;
     discordMessageId: string;
+    discordMessageIdReplacementUsed: boolean;
     envelopeId: string;
     seenAt: number;
     senderFingerprint: string;
@@ -294,6 +296,8 @@ const MAX_PEER_IDENTITY_HISTORY = 4;
 const MAX_PEER_HISTORY_USERS = MAX_TRUSTED_PEERS;
 const MAX_CONVERSATIONS = 2_000;
 const MAX_REPLAY_RECORDS = 4_096;
+const OPTIMISTIC_ID_ENVELOPE_WINDOW_MS = 30_000;
+const CANONICAL_ID_ENVELOPE_LEAD_MS = 5 * 60_000;
 const MAX_AUTHENTICATED_ATTACHMENT_CACHE_BYTES = 256 * 1024 * 1024;
 const MAX_AUTHENTICATED_ATTACHMENT_CACHE_ENTRIES = 128;
 const AUTHENTICATED_ATTACHMENT_CACHE_TTL_MS = 10 * 60 * 1_000;
@@ -501,6 +505,7 @@ function parseReplayRecord(value: unknown): ReplayRecord | null {
         contentDigest: value.contentDigest,
         counter: value.counter as number,
         discordMessageId: value.discordMessageId,
+        discordMessageIdReplacementUsed: value.discordMessageIdReplacementUsed ?? false,
         envelopeId: value.envelopeId,
         seenAt: value.seenAt,
         senderFingerprint: value.senderFingerprint,
@@ -1121,10 +1126,13 @@ function discordSnowflakeTimestamp(discordMessageId: string): number {
 }
 
 function validateDecryptInput(value: unknown): ValidationResult<DecryptIncomingInput> {
-    if (!isRecord(value) || !hasExactKeys(value, [
+    if (!isRecord(value) || (!hasExactKeys(value, [
+        "channelId", "content", "discordAuthorId", "discordEditedTimestamp", "discordMessageId", "discordNonce",
+    ]) && !hasExactKeys(value, [
         "channelId", "content", "discordAuthorId", "discordEditedTimestamp", "discordMessageId",
-    ]) ||
+    ])) ||
         !isSnowflake(value.channelId) || !isSnowflake(value.discordAuthorId) || !isSnowflake(value.discordMessageId) ||
+        (value.discordNonce !== undefined && value.discordNonce !== null && !isSnowflake(value.discordNonce)) ||
         (value.discordEditedTimestamp !== null && !isCanonicalEditedTimestamp(value.discordEditedTimestamp)) ||
         typeof value.content !== "string" || value.content.length === 0 || value.content.length > MAX_DISCORD_MESSAGE_LENGTH)
         return { ok: false, error: "Invalid encrypted Discord message details" };
@@ -1136,6 +1144,7 @@ function validateDecryptInput(value: unknown): ValidationResult<DecryptIncomingI
             discordAuthorId: value.discordAuthorId,
             discordEditedTimestamp: value.discordEditedTimestamp,
             discordMessageId: value.discordMessageId,
+            discordNonce: value.discordNonce ?? null,
         },
     };
 }
@@ -1154,9 +1163,11 @@ function validateAttachmentUrl(value: string, channelId: string, attachmentId: s
 }
 
 function validateDecryptAttachmentsInput(value: unknown): ValidationResult<DecryptIncomingAttachmentsInput> {
-    if (!isRecord(value) || !hasExactKeys(value, [
+    if (!isRecord(value) || (!hasExactKeys(value, [
+        "attachments", "channelId", "content", "discordAuthorId", "discordEditedTimestamp", "discordMessageId", "discordNonce",
+    ]) && !hasExactKeys(value, [
         "attachments", "channelId", "content", "discordAuthorId", "discordEditedTimestamp", "discordMessageId",
-    ]) || !Array.isArray(value.attachments))
+    ])) || !Array.isArray(value.attachments))
         return { ok: false, error: "Invalid encrypted Discord attachment details" };
     const message = validateDecryptInput({
         channelId: value.channelId,
@@ -1164,6 +1175,7 @@ function validateDecryptAttachmentsInput(value: unknown): ValidationResult<Decry
         discordAuthorId: value.discordAuthorId,
         discordEditedTimestamp: value.discordEditedTimestamp,
         discordMessageId: value.discordMessageId,
+        discordNonce: value.discordNonce,
     });
     if (!message.ok) return message;
     if (value.attachments.length < 1 || value.attachments.length > MAX_ATTACHMENT_COUNT)
@@ -2118,6 +2130,42 @@ function replayCollides(replay: ReplayRecord, input: DecryptIncomingInput, envel
         (replay.senderFingerprint === envelope.k && (replay.envelopeId === envelope.i || replay.counter === envelope.q));
 }
 
+function isConfirmedOptimisticMessage(
+    replay: ReplayRecord,
+    input: DecryptIncomingInput,
+    envelope: EncryptedEnvelope,
+    contentDigest: string,
+    localUserId: string,
+): boolean {
+    return input.discordAuthorId === localUserId && input.discordNonce === replay.discordMessageId &&
+        input.discordMessageId !== replay.discordMessageId && !replay.discordMessageIdReplacementUsed &&
+        replayEnvelopeMatches(replay, input, envelope, contentDigest);
+}
+
+function isNonceLessConfirmedOptimisticMessage(
+    replay: ReplayRecord,
+    input: DecryptIncomingInput,
+    envelope: EncryptedEnvelope,
+    contentDigest: string,
+    localUserId: string,
+): boolean {
+    if (input.discordAuthorId !== localUserId || input.discordNonce !== null ||
+        input.discordMessageId === replay.discordMessageId || replay.discordMessageIdReplacementUsed ||
+        !replayEnvelopeMatches(replay, input, envelope, contentDigest))
+        return false;
+
+    const provisionalTimestamp = discordSnowflakeTimestamp(replay.discordMessageId);
+    const canonicalTimestamp = discordSnowflakeTimestamp(input.discordMessageId);
+    return canonicalTimestamp < provisionalTimestamp &&
+        canonicalTimestamp >= envelope.d - CANONICAL_ID_ENVELOPE_LEAD_MS && canonicalTimestamp <= envelope.d &&
+        Math.abs(provisionalTimestamp - envelope.d) <= OPTIMISTIC_ID_ENVELOPE_WINDOW_MS &&
+        Math.abs(replay.seenAt - envelope.d) <= OPTIMISTIC_ID_ENVELOPE_WINDOW_MS;
+}
+
+function isOptimisticLocalMessage(input: DecryptIncomingInput, localUserId: string): boolean {
+    return input.discordAuthorId === localUserId && input.discordNonce === input.discordMessageId;
+}
+
 function predatesRetirement(
     discordMessageId: string,
     discordEditedTimestamp: string | null,
@@ -2242,8 +2290,30 @@ export async function decryptIncoming(
         const exactReplayWasSuperseded = exactReplay != null && context.account.replayCache.some(replay =>
             replay.discordMessageId === exactReplay.discordMessageId && replay.senderUserId === exactReplay.senderUserId &&
             replay.counter > exactReplay.counter);
-        if (exactReplay && !exactReplayWasSuperseded)
+        if (exactReplay && !exactReplayWasSuperseded) {
+            if (!exactReplay.discordMessageIdReplacementUsed && !isOptimisticLocalMessage(checkedInput.value, user.value)) {
+                // Old vaults did not record whether an ID was optimistic. Seeing the same record under a
+                // canonical message shape makes it permanently ineligible for a later ID replacement.
+                exactReplay.discordMessageIdReplacementUsed = true;
+                exactReplay.seenAt = Date.now();
+                await saveVault(context.vault);
+            }
             return { status: "decrypted", plaintext, attachmentBundle, stickers, counter: envelope.q, envelopeId: envelope.i };
+        }
+        const optimisticReplay = collisions.find(replay =>
+            isConfirmedOptimisticMessage(replay, checkedInput.value, envelope, contentDigest, user.value) ||
+            isNonceLessConfirmedOptimisticMessage(replay, checkedInput.value, envelope, contentDigest, user.value));
+        if (optimisticReplay) {
+            // Discord first renders a locally authored message under its request nonce, then replaces that
+            // optimistic ID with the server ID. Current Message records carry the original nonce. History may
+            // omit it, so a tightly bounded older-canonical/newer-provisional timestamp ordering is the only
+            // compatibility fallback. Either proof permits one transition and unrelated copies remain blocked.
+            optimisticReplay.discordMessageId = checkedInput.value.discordMessageId;
+            optimisticReplay.discordMessageIdReplacementUsed = true;
+            optimisticReplay.seenAt = Date.now();
+            await saveVault(context.vault);
+            return { status: "decrypted", plaintext, attachmentBundle, stickers, counter: envelope.q, envelopeId: envelope.i };
+        }
         const sameDiscordMessage = collisions.filter(replay => replay.discordMessageId === checkedInput.value.discordMessageId);
         const reusedEnvelope = collisions.some(replay => replay.discordMessageId !== checkedInput.value.discordMessageId);
         if (reusedEnvelope) return { status: "replay_detected" };
@@ -2260,6 +2330,7 @@ export async function decryptIncoming(
             contentDigest,
             counter: envelope.q,
             discordMessageId: checkedInput.value.discordMessageId,
+            discordMessageIdReplacementUsed: !isOptimisticLocalMessage(checkedInput.value, user.value),
             envelopeId: envelope.i,
             seenAt: Date.now(),
             senderFingerprint: envelope.k,

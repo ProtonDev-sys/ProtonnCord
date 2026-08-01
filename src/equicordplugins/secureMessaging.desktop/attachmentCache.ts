@@ -8,7 +8,7 @@ import type { PluginNative } from "@utils/types";
 import type { Message, MessageAttachment } from "@vencord/discord-types";
 import { Constants, RestAPI, UserStore } from "@webpack/common";
 
-import { discordEditedTimestamp } from "./messageMetadata";
+import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
 import type {
     DecryptIncomingAttachmentsInput,
     DecryptIncomingAttachmentsResult,
@@ -252,6 +252,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
         discordAuthorId: message.author.id,
         discordEditedTimestamp: discordEditedTimestamp(message),
         discordMessageId: message.id,
+        discordNonce: discordMessageNonce(message),
         attachments: message.attachments.map(attachment => ({
             id: attachment.id,
             proxyUrl: refreshedUrls.get(attachment.proxy_url) ?? attachment.proxy_url,
@@ -395,6 +396,7 @@ export async function downloadEncryptedAttachmentUrl(value: string): Promise<Dow
         discordAuthorId: message.author.id,
         discordEditedTimestamp: discordEditedTimestamp(message),
         discordMessageId: message.id,
+        discordNonce: discordMessageNonce(message),
         attachments: message.attachments.map(attachment => ({
             id: attachment.id,
             proxyUrl: refreshedUrls.get(attachment.proxy_url) ?? attachment.proxy_url,

@@ -37,6 +37,7 @@ import {
     Parser,
     RestAPI,
     showToast,
+    SnowflakeUtils,
     StickersStore,
     Toasts,
     useCallback,
@@ -522,8 +523,7 @@ function enforceMessageNonce(request: Record<string, any>): void {
     if (!request.body || typeof request.body !== "object") return;
     const body = request.body as Record<string, any>;
     if (typeof body.nonce !== "string" && (!Number.isSafeInteger(body.nonce) || body.nonce < 0)) {
-        const random = crypto.getRandomValues(new Uint32Array(1))[0] & 0x3f_ffff;
-        body.nonce = ((BigInt(Date.now()) << 22n) | BigInt(random)).toString();
+        body.nonce = SnowflakeUtils.fromTimestamp(Date.now());
     }
     body.enforce_nonce = true;
 }
