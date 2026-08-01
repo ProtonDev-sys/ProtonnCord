@@ -96,7 +96,7 @@ function testCurrentDiscordSendPatch(): void {
     assert(replacement, "the MessageEvents chat-input replacement exists");
     assert.equal(typeof replacement.replace, "function");
 
-    const source = `class ChatInput {handleSendMessage=async e=>{let _=tU.Ay.parse(h,t);_.tts=_.tts||A,null!=o&&(_.content="",_.components=o);let I={...x.A.getSendMessageOptions({content:t,channelId:h.id,uploads:n,stickers:l,command:i,isGif:a,pendingReply:m,alsoForwardToChannelId:p?h.parent_id??void 0:void 0,scheduledTimestamp:this.props.pendingScheduledMessage?.scheduledTimestamp}),location:nB.Hx.CHAT_INPUT};if(null!=n&&n.length>0)I.attachmentsToUpload=n;return{shouldClear:true}}};const chatInput=new ChatInput(),view={handleSendMessage:chatInput.handleSendMessage,onResize:null};`;
+    const source = `class ChatInput {handleSendMessage=async e=>{return(0,nb.i)({openWarningPopout:e=>this.setState({contentWarningProps:e}),type:this.props.chatInputType,content:t,hasStickers:null!=l&&l.length>0,hasAttachments:null!=n&&n.length>0,channel:h}).then(async e=>{let _=tU.Ay.parse(h,t);_.tts=_.tts||A,null!=o&&(_.content="",_.components=o);let I={...x.A.getSendMessageOptions({content:t,channelId:h.id,uploads:n,stickers:l,command:i,isGif:a,pendingReply:m,alsoForwardToChannelId:p?h.parent_id??void 0:void 0,scheduledTimestamp:this.props.pendingScheduledMessage?.scheduledTimestamp}),location:nB.Hx.CHAT_INPUT};null!=c&&(I.announcementSendOptions=c),null!=r&&(I.gifMetadata=r),null!=o&&(I.flags=(0,u.UI)(I.flags??0,eM.pr7.IS_COMPONENTS_V2));if(null!=n&&n.length>0)I.attachmentsToUpload=n;return{shouldClear:true}})}};const chatInput=new ChatInput(),view={handleSendMessage:chatInput.handleSendMessage,onResize:null};`;
     const patched = source.replace(canonicalizeMatch(replacement.match), replacement.replace);
 
     assert.notEqual(patched, source, "the current Discord chat-input source must match the MessageEvents patch");
@@ -105,7 +105,11 @@ function testCurrentDiscordSendPatch(): void {
         1,
         "the current Discord chat-input send path invokes MessageEvents exactly once",
     );
-    assert.match(patched, /hasAttachments:\(vcContentOptions\.uploads\?\.length\?\?0\)>0/);
+    assert.match(
+        patched,
+        /_handlePreSend\(h\.id,_,I,\{openWarningPopout:.+?channel:h\},\{content:t,channelId:h\.id,uploads:n,.+?scheduledTimestamp:.+?\}\)/,
+        "the patch forwards Discord's validation props and raw pending-upload options",
+    );
     assert.doesNotThrow(() => Function(patched), "the patched current Discord chat-input source must remain valid JavaScript");
 }
 

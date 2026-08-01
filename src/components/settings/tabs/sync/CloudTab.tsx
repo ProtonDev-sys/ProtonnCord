@@ -39,7 +39,7 @@ import { Alerts, SearchableSelect, Select, useState } from "@webpack/common";
 const ICON_STYLE: React.CSSProperties = { width: 20, height: 20, borderRadius: 4, verticalAlign: "middle" };
 
 function ProtonnCordIcon() {
-    return <img src="https://raw.githubusercontent.com/ProtonnCord/ProtonnCord/refs/heads/main/browser/icon.png" alt="Protonn Cord" style={ICON_STYLE} />;
+    return <img src="https://raw.githubusercontent.com/ProtonDev-sys/ProtonnCord/refs/heads/main/browser/icon.png" alt="Protonn Cord" style={ICON_STYLE} />;
 }
 
 function VencordIcon() {

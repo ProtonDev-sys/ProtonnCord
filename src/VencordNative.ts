@@ -9,6 +9,7 @@ import type { CspRequestResult } from "@main/csp/manager";
 import type { PluginIpcMappings } from "@main/ipcPlugins";
 import { UserThemeHeader } from "@main/themes";
 import { IpcEvents } from "@shared/IpcEvents";
+import type { UpdaterDiagnostics } from "@shared/Updater";
 import type { IpcRes } from "@utils/types";
 import { ipcRenderer } from "electron/renderer";
 
@@ -46,6 +47,7 @@ export default {
     },
 
     updater: {
+        getDiagnostics: () => invoke<IpcRes<UpdaterDiagnostics>>(IpcEvents.GET_UPDATER_DIAGNOSTICS),
         getUpdates: () => invoke<IpcRes<Record<"hash" | "author" | "message", string>[]>>(IpcEvents.GET_UPDATES),
         update: () => invoke<IpcRes<boolean>>(IpcEvents.UPDATE),
         rebuild: () => invoke<IpcRes<boolean>>(IpcEvents.BUILD),

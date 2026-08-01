@@ -92,13 +92,13 @@ export function PluginCard({ plugin, disabled, onRestartNeeded, onMouseEnter, on
     const pluginInfo = [
         {
             condition: isModifiedPlugin,
-            src: "https://raw.githubusercontent.com/ProtonnCord/ProtonnCord/refs/heads/main/browser/icon.png",
+            src: "https://raw.githubusercontent.com/ProtonDev-sys/ProtonnCord/refs/heads/main/browser/icon.png",
             alt: "Modified",
             title: "Modified Vencord Plugin"
         },
         {
             condition: isEquicordPlugin,
-            src: "https://raw.githubusercontent.com/ProtonnCord/ProtonnCord/refs/heads/main/browser/icon.png",
+            src: "https://raw.githubusercontent.com/ProtonDev-sys/ProtonnCord/refs/heads/main/browser/icon.png",
             alt: "Protonn Cord",
             title: "Protonn Cord Plugin"
         },
@@ -110,7 +110,7 @@ export function PluginCard({ plugin, disabled, onRestartNeeded, onMouseEnter, on
         },
         {
             condition: isUserPlugin,
-            src: "https://raw.githubusercontent.com/ProtonnCord/ProtonnCord/refs/heads/main/browser/icon.png",
+            src: "https://raw.githubusercontent.com/ProtonDev-sys/ProtonnCord/refs/heads/main/browser/icon.png",
             alt: "User",
             title: "User Plugin"
         }
