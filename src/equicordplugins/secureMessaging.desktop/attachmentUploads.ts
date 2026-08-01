@@ -177,7 +177,7 @@ async function metadataForUpload(upload: CloudUpload, source: UploadSource): Pro
         description: upload.description,
         width: metadata.width,
         height: metadata.height,
-        duration: validDuration(upload.durationSecs) ?? metadata.duration,
+        duration: validMediaDuration(upload.durationSecs) ?? metadata.duration,
     };
 }
 
@@ -196,6 +196,7 @@ export async function prepareEncryptedAttachments(
     if (totalSize > MAX_TOTAL_ATTACHMENT_BYTES)
         throw new Error("Secure Messaging attachments exceed the 200 MiB per-message safety limit");
 
+    const metadata = await Promise.all(uploads.map((upload, index) => metadataForUpload(upload, sources[index])));
     const { descriptor, keyBytes } = generateAttachmentBundleMaterial(uploads.length);
     const ciphertexts: Uint8Array[] = [];
     try {
@@ -211,7 +212,7 @@ export async function prepareEncryptedAttachments(
                     data: plaintext,
                     index,
                     masterKey: keyBytes,
-                    metadata: await metadataForUpload(upload, source),
+                    metadata: metadata[index],
                     senderUserId,
                 }));
             } finally {

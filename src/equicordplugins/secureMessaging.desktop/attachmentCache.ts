@@ -342,8 +342,9 @@ function startEntryLoad(message: Message, key: string, entry: AttachmentCacheEnt
     entry.retryTimer = null;
     if (inFlightLoads >= MAX_IN_FLIGHT_LOADS) {
         entry.status = { status: "failed", reason: "The encrypted attachment cache is busy. Retry in a moment." };
-        entry.retryAt = null;
+        prepareTransientRetry(entry);
         notifyStatus(entry);
+        scheduleRetry(message, key, entry, localUserId);
         pruneCache(key);
         return;
     }

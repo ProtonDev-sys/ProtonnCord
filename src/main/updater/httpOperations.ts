@@ -147,21 +147,37 @@ export async function requestBytes(
 
     try {
         const response = await Promise.race([fetcher(url, { ...init, signal }), timeout]);
+        const discard = async () => {
+            try {
+                await Promise.race([response.body?.cancel() ?? Promise.resolve(), timeout]);
+            } catch {
+                // The body is already closed, errored, or the request timed out.
+            }
+        };
 
-        if (!response.ok)
+        if (!response.ok) {
+            await discard();
             throw new Error(`GET ${url}: ${response.status} ${response.statusText}`);
+        }
 
         const declaredLength = response.headers.get("Content-Length");
         if (declaredLength !== null) {
             const length = Number(declaredLength);
-            if (!Number.isSafeInteger(length) || length < 0)
+            if (!Number.isSafeInteger(length) || length < 0) {
+                await discard();
                 throw new Error(`GET ${url} returned an invalid content length`);
-            if (length > maximumBytes)
+            }
+            if (length > maximumBytes) {
+                await discard();
                 throw new Error(`GET ${url} exceeded the ${maximumBytes} byte limit`);
+            }
         }
 
         const reader = response.body?.getReader();
-        if (!reader) throw new Error(`GET ${url} returned an empty response body`);
+        if (!reader) {
+            await discard();
+            throw new Error(`GET ${url} returned an empty response body`);
+        }
 
         const chunks: Buffer[] = [];
         let total = 0;
@@ -291,7 +307,11 @@ export function replaceAsarAtomically(
         files.write(temporaryPath, data);
         files.rename(temporaryPath, targetPath);
     } catch (error) {
-        files.remove(temporaryPath);
+        try {
+            files.remove(temporaryPath);
+        } catch {
+            // Preserve the original write or rename failure for diagnostics.
+        }
         throw error;
     }
 }

@@ -108,9 +108,12 @@ async function main(): Promise<void> {
     );
     assert.deepEqual(fetched, bytes);
 
+    let earlyResponseCancelled = false;
     await assert.rejects(
         requestBytes(
-            async () => new Response(bytes, { headers: { "Content-Length": "100" } }),
+            async () => new Response(new ReadableStream<Uint8Array>({
+                cancel() { earlyResponseCancelled = true; },
+            }), { headers: { "Content-Length": "100" } }),
             "https://example.invalid/oversize",
             {},
             1_000,
@@ -118,6 +121,7 @@ async function main(): Promise<void> {
         ),
         /exceeded the 99 byte limit/iu,
     );
+    assert.equal(earlyResponseCancelled, true, "an early response rejection cancels its unread body");
 
     const streamingOversize: HttpFetcher = async () => new Response(new ReadableStream<Uint8Array>({
         start(controller) {
@@ -182,6 +186,21 @@ async function main(): Promise<void> {
         );
         assert.deepEqual(await readFile(target), original);
         assert.equal(existsSync(temporary), false);
+
+        const cleanupFailure: AtomicFileOperations = {
+            ...fileOperations(),
+            write() {
+                throw new Error("primary write failure");
+            },
+            remove() {
+                throw new Error("secondary cleanup failure");
+            },
+        };
+        assert.throws(
+            () => replaceAsarAtomically(target, temporary, validAsar, cleanupFailure),
+            /primary write failure/iu,
+            "temporary-file cleanup cannot hide the original install failure",
+        );
 
         const renameFailure: AtomicFileOperations = {
             ...fileOperations(),

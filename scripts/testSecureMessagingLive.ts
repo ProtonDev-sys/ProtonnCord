@@ -538,6 +538,16 @@ async function verifyScreenshotMode(
             .find(media => !imageRow?.contains(media) && media.getBoundingClientRect().width > 0);
         if (!modalMedia) throw new Error("The encrypted-media modal disappeared before screenshot mode was enabled");
         let screenshotModeEnabled = false;
+        let restoreFailed = false;
+        let proof: {
+            attachmentPixelsHidden: boolean;
+            encryptedPlaceholderVisible: boolean;
+            mediaModalClosed: boolean;
+            plaintextHidden: boolean;
+            playingVideoStopped: boolean;
+            rootCaptureClassApplied: boolean;
+            visibleBlobMediaCount: number;
+        } | undefined;
         const videoRow = document.getElementById(`chat-messages-${videoMessage.channelId}-${videoMessage.id}`);
         const playingVideo = videoRow?.querySelector<HTMLVideoElement>("video");
         if (!playingVideo) throw new Error("The encrypted video is unavailable for the screenshot-mode playback proof");
@@ -571,7 +581,7 @@ async function verifyScreenshotMode(
                     return style.display !== "none" && style.visibility !== "hidden" && media.getBoundingClientRect().width > 0;
                 });
             const modalStyle = modalMedia.isConnected ? getComputedStyle(modalMedia) : null;
-            return {
+            proof = {
                 attachmentPixelsHidden: [...attachmentSiblings].every(element => getComputedStyle(element).display === "none"),
                 encryptedPlaceholderVisible: row?.innerText.includes("Screenshot mode is on") ?? false,
                 mediaModalClosed: !modalMedia.isConnected || modalStyle?.display === "none" ||
@@ -583,10 +593,15 @@ async function verifyScreenshotMode(
             };
         } finally {
             if (screenshotModeEnabled || plugin.getScreenCaptureProtectionStatus?.() === "failed") {
-                const restored = await plugin.setScreenshotMode(false);
-                if (!restored) throw new Error("SecureMessaging did not restore encrypted-content visibility");
+                try {
+                    restoreFailed = !await plugin.setScreenshotMode(false);
+                } catch {
+                    restoreFailed = true;
+                }
             }
         }
+        if (!proof) throw new Error("SecureMessaging did not produce a screenshot-mode proof");
+        return { ...proof, restoreFailed };
     }, { message, plaintext, videoMessage });
 }
 
@@ -1433,15 +1448,16 @@ function isDownloadFilenameVariant(candidate: string, expectedFilename: string):
     return /^\d+$/.test(candidate.slice(stem.length + 2, -(extension.length + 1)));
 }
 
-async function waitForDownloadedFile(downloadPath: string, timeoutMs = 30_000): Promise<Buffer> {
+async function waitForDownloadedFile(downloadPath: string, expectedBytes: number, timeoutMs = 30_000): Promise<Buffer> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         try {
-            return await readFile(downloadPath);
+            const bytes = await readFile(downloadPath);
+            if (bytes.byteLength === expectedBytes) return bytes;
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-            await new Promise(resolve => setTimeout(resolve, 250));
         }
+        await new Promise(resolve => setTimeout(resolve, 250));
     }
     throw new Error(`The intercepted download did not appear within ${timeoutMs}ms: ${downloadPath}`);
 }
@@ -1573,7 +1589,7 @@ async function verifyAuthenticatedDownloadButton(page: Page, message: RawDiscord
         return label;
     }, { channelId: message.channelId, messageId: message.id });
 
-    const bytes = await waitForDownloadedFile(downloadPath);
+    const bytes = await waitForDownloadedFile(downloadPath, Buffer.from(PROOF_PNG_BASE64, "base64").byteLength);
     assert.equal(bytes.toString("base64"), PROOF_PNG_BASE64, "the Downloads file must contain authenticated plaintext bytes");
     await new Promise(resolve => setTimeout(resolve, 1_000));
     const matchingFiles = (await readdir(downloadsDirectory))
@@ -1621,7 +1637,7 @@ async function verifyNativeAttachmentAnchorDownload(
     }, { channelId: message.channelId, messageId: message.id });
     assert.equal(intercepted, true, "the native generic-file link must never navigate to an Open As dialog");
 
-    const downloaded = await waitForDownloadedFile(downloadPath);
+    const downloaded = await waitForDownloadedFile(downloadPath, Buffer.from(expectedBase64, "base64").byteLength);
     assert.equal(downloaded.toString("base64"), expectedBase64);
 
     await new Promise(resolve => setTimeout(resolve, 1_000));
@@ -2262,6 +2278,7 @@ async function main(): Promise<void> {
         assert.equal(screenshotModeProof.encryptedPlaceholderVisible, true, "screenshot mode must leave a clear protected placeholder");
         assert.equal(screenshotModeProof.mediaModalClosed, true, "screenshot mode must close an open encrypted-media modal");
         assert.equal(screenshotModeProof.playingVideoStopped, true, "screenshot mode must stop decrypted video playback");
+        assert.equal(screenshotModeProof.restoreFailed, false, "screenshot mode must restore encrypted-content visibility");
         assert.equal(screenshotModeProof.visibleBlobMediaCount, 0, "screenshot mode must hide blob-backed media across the renderer");
         assert.equal(await waitForScreenCaptureProtection(page), "ready", "encrypted-content visibility must restore after the screenshot-mode proof");
 

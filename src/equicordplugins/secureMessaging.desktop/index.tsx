@@ -221,6 +221,10 @@ async function setScreenshotMode(enabled: boolean): Promise<boolean> {
         try {
             if (document.pictureInPictureElement) await document.exitPictureInPicture();
             if (document.fullscreenElement) await document.exitFullscreen();
+            for (const media of document.querySelectorAll<HTMLMediaElement>("video,audio")) {
+                const source = media.currentSrc || media.src || media.querySelector<HTMLSourceElement>("source")?.src || "";
+                if (source.startsWith("blob:")) media.pause();
+            }
         } catch {
             showToast("Secure Messaging could not close decrypted media before screenshot mode.", Toasts.Type.FAILURE);
             return false;

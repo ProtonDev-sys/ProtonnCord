@@ -77,8 +77,8 @@ jobs:
             - name: Upload Protonn Cord Stable
               if: github.repository == 'ProtonDev-sys/ProtonnCord' && vars.ACT != 'true'
               run: |
-                  git fetch origin main
-                  if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+                  git fetch --no-tags origin main
+                  if [[ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]]; then
                       echo "Skipping stale release build for $GITHUB_SHA; origin/main has advanced."
                       exit 0
                   fi

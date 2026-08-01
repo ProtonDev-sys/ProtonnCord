@@ -284,13 +284,15 @@ export function revokeAnyAttachmentUploadReservations(
     now = Date.now(),
 ): boolean {
     pruneAuthorizationMap(uploadAuthorizations, now);
-    const matchedKeys: string[] = [];
+    const candidates = [...uploadAuthorizations.keys()];
+    const matchedKeys = new Set<string>();
     for (const file of files) {
         const base = uploadAuthorizationKey(channelId, file);
-        const key = [...uploadAuthorizations.keys()].find(candidate =>
-            candidate === base || candidate.startsWith(`${base}\0scope:`));
+        const key = candidates.find(candidate =>
+            !matchedKeys.has(candidate) &&
+            (candidate === base || candidate.startsWith(`${base}\0scope:`)));
         if (!key) return false;
-        matchedKeys.push(key);
+        matchedKeys.add(key);
     }
     for (const key of matchedKeys) uploadAuthorizations.delete(key);
     return true;

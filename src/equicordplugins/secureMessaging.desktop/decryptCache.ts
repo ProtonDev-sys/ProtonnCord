@@ -96,12 +96,12 @@ function ensureEntry(localUserId: string, message: Message): [string, DecryptCac
         promise: Promise.resolve({ status: "failed", error: "cryptographic_operation_failed" }),
         result: null,
     };
-    cache.set(key, entry);
     if (inFlightDecrypts >= MAX_CACHE_ENTRIES) {
         entry.result = { status: "failed", error: "cryptographic_operation_failed" };
         entry.promise = Promise.resolve(entry.result);
         return [key, entry];
     }
+    cache.set(key, entry);
     const generation = cacheGeneration;
     inFlightDecrypts++;
     entry.promise = decryptWithRetry(localUserId, message, generation, () => cache.get(key) === entry).then(result => {

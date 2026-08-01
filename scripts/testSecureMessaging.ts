@@ -308,6 +308,7 @@ async function main(): Promise<void> {
     );
     const originalScope = "bob:fingerprint-one";
     const changedScope = "bob:fingerprint-two";
+    const scopedEditMessageId = "100000000000000003";
     authorizeScopedWirePayload(CHANNEL_ID, "PCEM2:scoped", [], originalScope, 8_000);
     assert.equal(
         consumeScopedWirePayloadAuthorization(CHANNEL_ID, "PCEM2:scoped", [], changedScope, 8_001),
@@ -315,13 +316,13 @@ async function main(): Promise<void> {
         "a recipient-key change cannot consume a stale message capability",
     );
     assert.equal(consumeScopedWirePayloadAuthorization(CHANNEL_ID, "PCEM2:scoped", [], originalScope, 8_002), true);
-    authorizeScopedWireEdit(CHANNEL_ID, ALICE_ID, "PCEM2:scoped-edit", originalScope, 9_000);
+    authorizeScopedWireEdit(CHANNEL_ID, scopedEditMessageId, "PCEM2:scoped-edit", originalScope, 9_000);
     assert.equal(
-        consumeScopedWireEditAuthorization(CHANNEL_ID, ALICE_ID, "PCEM2:scoped-edit", changedScope, 9_001),
+        consumeScopedWireEditAuthorization(CHANNEL_ID, scopedEditMessageId, "PCEM2:scoped-edit", changedScope, 9_001),
         false,
         "a recipient-key change cannot consume a stale edit capability",
     );
-    assert.equal(consumeScopedWireEditAuthorization(CHANNEL_ID, ALICE_ID, "PCEM2:scoped-edit", originalScope, 9_002), true);
+    assert.equal(consumeScopedWireEditAuthorization(CHANNEL_ID, scopedEditMessageId, "PCEM2:scoped-edit", originalScope, 9_002), true);
     authorizeScopedAttachmentUploadReservations(CHANNEL_ID, protectedFiles, originalScope, 10_000);
     assert.equal(
         consumeScopedAttachmentUploadReservations(CHANNEL_ID, protectedFiles, changedScope, 10_001),
@@ -334,6 +335,13 @@ async function main(): Promise<void> {
         "a disabled conversation can revoke its stale scoped attachment reservation",
     );
     assert.equal(consumeScopedAttachmentUploadReservations(CHANNEL_ID, protectedFiles, originalScope, 10_003), false);
+    authorizeAttachmentUploadReservations(CHANNEL_ID, protectedFiles, 10_004);
+    assert.equal(
+        revokeAnyAttachmentUploadReservations(CHANNEL_ID, [protectedFiles[0], protectedFiles[0]], 10_005),
+        false,
+        "duplicate files cannot reuse one attachment reservation",
+    );
+    assert.equal(revokeAnyAttachmentUploadReservations(CHANNEL_ID, protectedFiles, 10_006), true);
     clearWirePayloadAuthorizations();
 
     const pngHeader = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB", "base64");
@@ -359,6 +367,21 @@ async function main(): Promise<void> {
         unchangedEncryptedAttachmentIds([...originalAttachmentIds.map(id => ({ id })), { id: "100000000000000013" }], originalAttachmentIds),
         false,
         "an encrypted edit cannot append an attachment",
+    );
+    assert.equal(
+        unchangedEncryptedAttachmentIds(undefined, originalAttachmentIds),
+        true,
+        "an edit body without an attachments field keeps the existing attachment set",
+    );
+    assert.equal(
+        unchangedEncryptedAttachmentIds([null, { id: originalAttachmentIds[1] }], originalAttachmentIds),
+        false,
+        "an encrypted edit cannot supply a non-object attachment entry",
+    );
+    assert.equal(
+        unchangedEncryptedAttachmentIds([{ id: "not-a-snowflake" }, { id: originalAttachmentIds[1] }], originalAttachmentIds),
+        false,
+        "an encrypted edit cannot supply a malformed attachment ID",
     );
 
     const firstAttachment = new TextEncoder().encode("private attachment bytes α");

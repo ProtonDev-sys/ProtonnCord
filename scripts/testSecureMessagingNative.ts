@@ -318,6 +318,10 @@ async function testInvalidInputs(native: NativeModule): Promise<void> {
             "invalid_input",
             "a non-Discord IPC caller cannot query the live-test Downloads path",
         );
+        process.env[dataDirectoryName] = harnessGlobal.__secureMessagingNativeHarness.dataDir;
+        const downloadsDirectory = await native.getLiveTestDownloadsDirectory(DISCORD_EVENT);
+        expectStatus(downloadsDirectory, "ready", "an acknowledged disposable profile can query its Downloads path");
+        assert.equal(downloadsDirectory.path, resolve(harnessGlobal.__secureMessagingNativeHarness.dataDir, "Downloads"));
     } finally {
         if (previousAcknowledgement === undefined) delete process.env[acknowledgementName];
         else process.env[acknowledgementName] = previousAcknowledgement;
@@ -1588,7 +1592,7 @@ async function main(): Promise<void> {
         await buildNativeBundle(linuxBundlePath, "linux");
         await buildNativeBundle(windowsBundlePath, "win32");
         await testStorageFailures(bundlePath, linuxBundlePath, windowsBundlePath, root);
-        await testNativeLifecycle(bundlePath, join(root, "lifecycle"));
+        await testNativeLifecycle(bundlePath, join(root, "secure-messaging-live-lifecycle"));
         console.log("secure-messaging native IPC checks passed");
     } finally {
         await rm(root, { force: true, recursive: true });
