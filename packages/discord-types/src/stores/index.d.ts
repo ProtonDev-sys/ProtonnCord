@@ -9,6 +9,7 @@ export * from "./ApplicationStreamPreviewStore";
 export * from "./AuthenticationStore";
 export * from "./AuthorizedAppsStore";
 export * from "./AuthSessionsStore";
+export * from "./BasicGuildStore";
 export * from "./CallStore";
 export * from "./ChannelMemberStore";
 export * from "./ChannelRTCStore";
