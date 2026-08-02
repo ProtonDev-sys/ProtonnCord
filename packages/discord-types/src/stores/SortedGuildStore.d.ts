@@ -1,12 +1,4 @@
-import { FluxStore } from "..";
-
-export interface GuildFolder {
-    folderId: number | null;
-    folderName: string | null;
-    folderColor: number | null;
-    guildIds: string[];
-    expanded?: boolean;
-}
+import { FluxStore, GuildFolder } from "..";
 
 export class SortedGuildStore extends FluxStore {
     getFlattenedGuildIds(): string[];
