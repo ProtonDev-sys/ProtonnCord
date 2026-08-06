@@ -13,7 +13,7 @@ import { cleanUrl } from "./cleanUrl";
 import { isAudio } from "./isAudio";
 import { uuidv4 } from "./uuidv4";
 
-const PAGE_URL_PROVIDERS = ["tenor", "klipy"];
+const embedProviders = ["tenor", "klipy"];
 
 function isValidSnowflake(snowflake: string): boolean {
     return !Number.isNaN(SnowflakeUtils.extractTimestamp(snowflake));
@@ -72,7 +72,7 @@ function getGifByMessageAndUrl(url: string, message: Message): Gif | null {
                 height: embed.video.height,
                 width: embed.video.width,
                 src: embed.video.proxyURL,
-                url: embed.provider?.name && PAGE_URL_PROVIDERS.includes(embed.provider.name.toLowerCase()) ? embed.url ?? embed.video.url : embed.video.url,
+                url: embed.provider?.name && embedProviders.includes(embed.provider.name.toLowerCase()) ? embed.url ?? embed.video.url : embed.video.url,
             };
         }
         if (embed.thumbnail?.proxyURL) {
