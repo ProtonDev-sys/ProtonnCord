@@ -23,7 +23,9 @@ import { dirname, join } from "path";
 import { RendererSettings } from "./settings";
 import { patchTrayMenu } from "./trayMenu";
 import { IS_VANILLA } from "./utils/constants";
+import { installStdioBrokenPipeGuards } from "./utils/stdio";
 
+installStdioBrokenPipeGuards();
 console.log("[Protonn Cord] Starting up...");
 
 // Our injector file at app/index.js
