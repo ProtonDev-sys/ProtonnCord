@@ -58,6 +58,8 @@ pnpm test
 
 That gate builds the standalone desktop artifact, type-checks, verifies the updater against a disposable Git remote, checks updater repository/release selection, exercises Secure Messaging protocol and native fault cases, checks message-event ordering, runs linters, and regenerates plugin metadata. Restore a normal local desktop build afterwards with `pnpm build` when required.
 
+Use `pnpm build --dev` (or the existing `pnpm dev` watcher) while developing. Development builds use the separate development data directory and compile the Protonn Cord updater completely disabled, so an in-progress local build cannot check out, rebuild, or replace itself. Use `--disable-updater` without `--dev` when testing against the normal local data directory while retaining the same updater-off guarantee.
+
 Two additional scripts exercise a running Discord client through its remote-debugging endpoint:
 
 - `pnpm testSecureMessagingLive` sends, edits, forwards, downloads, retries, renders, opens encrypted images in Discord's media viewer without downloading them, and deletes real proof messages in its explicitly authorized DM. It refuses to run without `PROTONN_CORD_SECURE_MESSAGING_LIVE_TEST=I_UNDERSTAND_THIS_IS_DISPOSABLE` and matching absolute `PROTONN_CORD_SECURE_MESSAGING_LIVE_DATA_DIR` / `PROTONN_CORD_USER_DATA_DIR` values whose directory name contains `secure-messaging-live`. The Discord process must use that directory, have Secure Messaging enabled before startup when attachment patch coverage is required, and expose its debugging endpoint.

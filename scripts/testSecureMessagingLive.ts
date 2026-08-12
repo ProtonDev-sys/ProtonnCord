@@ -18,7 +18,10 @@ import {
 } from "../src/equicordplugins/secureMessaging.desktop/crypto";
 import {
     attachmentBundleRoot,
+    DETACHED_TEXT_FILENAME,
+    DETACHED_TEXT_MIME_TYPE,
     decryptAttachmentBytes,
+    encryptedAttachmentCiphertextSize,
     parseSecurePlaintext,
 } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import { decodeBase64Url } from "../src/equicordplugins/secureMessaging.desktop/protocol";
@@ -325,11 +328,13 @@ async function configureSyntheticConversation(page: Page) {
         const native = global.VencordNative.pluginHelpers.SecureMessaging;
         const localUserId = common.UserStore.getCurrentUser()?.id;
         if (!localUserId) throw new Error("Discord has no authenticated user");
-        return native.configureConversation(localUserId, {
+        const configured = await native.configureConversation(localUserId, {
             enabled: true,
             selectedRecipientIds: [recipientId],
             snapshot: { channelId, kind: "DM", participantUserIds: [recipientId] },
         });
+        await global.Vencord.Plugins.plugins.SecureMessaging.refreshMessageLengthBypassState();
+        return configured;
     }, { channelId: TEST_CHANNEL_ID, recipientId: EXPECTED_RECIPIENT_ID });
 }
 
@@ -340,11 +345,13 @@ async function disableSyntheticConversationForTransition(page: Page) {
         const native = global.VencordNative.pluginHelpers.SecureMessaging;
         const localUserId = common.UserStore.getCurrentUser()?.id;
         if (!localUserId) throw new Error("Discord has no authenticated user");
-        return native.configureConversation(localUserId, {
+        const configured = await native.configureConversation(localUserId, {
             enabled: false,
             selectedRecipientIds: [],
             snapshot: { channelId, kind: "DM", participantUserIds: [recipientId] },
         });
+        await global.Vencord.Plugins.plugins.SecureMessaging.refreshMessageLengthBypassState();
+        return configured;
     }, { channelId: TEST_CHANNEL_ID, recipientId: EXPECTED_RECIPIENT_ID });
 }
 
@@ -827,6 +834,7 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
     messagePostCount: number;
     messageStoreCiphertextMatched: boolean;
     optimisticNonceDifferentFromServerId: boolean;
+    uploadLimitBytes: number;
 }> {
     await page.evaluate(({ channelId, proofName, registryName }) => {
         const global = globalThis as any;
@@ -879,12 +887,14 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
             { timeout: 30_000 },
             PAGE_COMPOSER_PROOF,
         );
+        const visibleStart = plaintext.slice(0, 96);
+        const visibleEnd = plaintext.slice(-96);
         await page.waitForFunction(
-            expectedPlaintext => document.body.innerText.includes(expectedPlaintext),
+            ({ visibleEnd, visibleStart }) => document.body.innerText.includes(visibleStart) && document.body.innerText.includes(visibleEnd),
             { timeout: 30_000 },
-            plaintext,
+            { visibleEnd, visibleStart },
         );
-        return await page.evaluate(async ({ proofName }) => {
+        return await page.evaluate(async ({ plaintext, proofName }) => {
             const global = globalThis as any;
             const common = global.Vencord.Webpack.Common;
             const proof = global[proofName];
@@ -902,19 +912,39 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
                 discordMessageId: requestNonce,
                 discordNonce: requestNonce,
             });
-            const canonicalDecryption = await native.decryptIncoming(localUserId, {
+            const canonicalInput = {
                 channelId: String(response.channel_id),
                 content: String(response.content),
                 discordAuthorId: String(response.author.id),
                 discordEditedTimestamp: typeof response.edited_timestamp === "string" ? response.edited_timestamp : null,
                 discordMessageId: String(response.id),
                 discordNonce: requestNonce,
-            });
+            };
+            const canonicalDecryption = (response.attachments ?? []).length > 0
+                ? await native.decryptIncomingAttachments(localUserId, {
+                    ...canonicalInput,
+                    attachments: (response.attachments ?? []).map((attachment: any) => ({
+                        id: String(attachment.id),
+                        proxyUrl: String(attachment.proxy_url),
+                        size: Number(attachment.size),
+                        url: String(attachment.url),
+                    })),
+                })
+                : await native.decryptIncoming(localUserId, canonicalInput);
+            const uploadLimits = global.Vencord.Webpack.findByProps("getUserMaxFileSize");
             return {
-                localPlaintextVisible: true,
-                localSenderDecrypted: canonicalDecryption.status === "decrypted",
+                localPlaintextVisible: document.body.innerText.includes(plaintext.slice(0, 96)) &&
+                    document.body.innerText.includes(plaintext.slice(-96)),
+                localSenderDecrypted: canonicalDecryption.status === "decrypted" && canonicalDecryption.plaintext === plaintext,
                 message: {
-                    attachments: [],
+                    attachments: (response.attachments ?? []).map((attachment: any) => ({
+                        contentType: typeof attachment.content_type === "string" ? attachment.content_type : null,
+                        filename: String(attachment.filename),
+                        id: String(attachment.id),
+                        proxyUrl: String(attachment.proxy_url),
+                        size: Number(attachment.size),
+                        url: String(attachment.url),
+                    })),
                     authorId: String(response.author.id),
                     channelId: String(response.channel_id),
                     content: String(response.content),
@@ -924,8 +954,9 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
                 messagePostCount: proof.messagePostCount,
                 messageStoreCiphertextMatched: stored?.content === response.content,
                 optimisticNonceDifferentFromServerId: requestNonce !== String(response.id),
+                uploadLimitBytes: Number(uploadLimits.getUserMaxFileSize(common.UserStore.getCurrentUser())),
             };
-        }, { proofName: PAGE_COMPOSER_PROOF });
+        }, { plaintext, proofName: PAGE_COMPOSER_PROOF });
     } finally {
         await page.evaluate(proofName => {
             const global = globalThis as any;
@@ -1871,11 +1902,13 @@ async function disableSyntheticConversation(page: Page) {
         const native = global.VencordNative.pluginHelpers.SecureMessaging;
         const localUserId = common.UserStore.getCurrentUser()?.id;
         if (!localUserId) throw new Error("Discord has no authenticated user during conversation cleanup");
-        return native.configureConversation(localUserId, {
+        const configured = await native.configureConversation(localUserId, {
             enabled: false,
             selectedRecipientIds: [],
             snapshot: { channelId, kind: "DM", participantUserIds: [recipientId] },
         });
+        await global.Vencord.Plugins.plugins.SecureMessaging.refreshMessageLengthBypassState();
+        return configured;
     }, { channelId: TEST_CHANNEL_ID, recipientId: EXPECTED_RECIPIENT_ID });
 }
 
@@ -1994,6 +2027,11 @@ async function main(): Promise<void> {
         syntheticConversationCreated = configured.status === "enabled";
         assert.equal(configured.status, "enabled", `protected DM configuration failed: ${configured.status}`);
         assert.deepEqual(configured.selectedRecipientIds, [EXPECTED_RECIPIENT_ID]);
+        assert.equal(
+            await page.evaluate(() => (globalThis as any).Vencord.Api.MessageEvents._shouldBypassMessageLengthLimit()),
+            true,
+            "the local Discord length popup must yield to the protected pre-send pipeline",
+        );
 
         const composerPlaintext = `Secure Messaging actual composer proof ${crypto.randomUUID()}`;
         const composerProof = await sendThroughActualComposer(page, composerPlaintext);
@@ -2014,6 +2052,72 @@ async function main(): Promise<void> {
             senderIdentity: localPublicIdentity,
         });
         assert.equal(composerDecrypted.plaintext, composerPlaintext, "the selected recipient must decrypt the actual composer message");
+
+        const detachedPlaintext = `Secure Messaging detached composer proof ${crypto.randomUUID()} ${"large encrypted body ".repeat(180)}END`;
+        const detachedPlaintextBytes = new TextEncoder().encode(detachedPlaintext);
+        assert.ok(detachedPlaintextBytes.byteLength > 2_000, "the detached composer fixture must exceed Discord's message limit");
+        const detachedProof = await sendThroughActualComposer(page, detachedPlaintext);
+        sentMessageIds.add(detachedProof.message.id);
+        assert.equal(detachedProof.messagePostCount, 1, "detached text must create exactly one Discord message POST");
+        assert.equal(detachedProof.messageStoreCiphertextMatched, true, "MessageStore must retain the detached-text ciphertext envelope");
+        assert.equal(detachedProof.optimisticNonceDifferentFromServerId, true, "detached text must reconcile its optimistic nonce to Discord's message ID");
+        assert.equal(detachedProof.localSenderDecrypted, true, "the sender must decrypt detached text after optimistic-ID reconciliation");
+        assert.equal(detachedProof.localPlaintextVisible, true, "the sender must see reconstructed detached plaintext in Discord");
+        assert.ok(detachedProof.message.content.startsWith(ENCRYPTED_PREFIX), "the detached composer send must store a ciphertext envelope");
+        assert.equal(detachedProof.message.content.includes(detachedPlaintext), false, "detached plaintext must never appear in the Discord message body");
+        assert.equal(detachedProof.message.attachments.length, 1, "detached text must use one encrypted transport attachment");
+        assert.match(detachedProof.message.attachments[0].filename, /^pc-[A-Za-z0-9_-]{22}-0\.pcaf$/u);
+        assert.ok(
+            detachedProof.message.attachments[0].contentType === null ||
+                detachedProof.message.attachments[0].contentType === "application/octet-stream",
+            "Discord must store detached text as opaque ciphertext",
+        );
+        assert.ok(
+            detachedProof.message.attachments[0].size <= detachedProof.uploadLimitBytes,
+            "the complete encrypted attachment must fit the signed-in account's Discord upload limit",
+        );
+
+        const recipientDetachedEnvelope = await decryptMessage({
+            channelId: TEST_CHANNEL_ID,
+            content: detachedProof.message.content,
+            discordAuthorId: preflight.localUserId,
+            identity: temporaryRecipient,
+            localUserId: EXPECTED_RECIPIENT_ID,
+            senderIdentity: localPublicIdentity,
+        });
+        const recipientDetachedPlaintext = parseSecurePlaintext(recipientDetachedEnvelope.plaintext);
+        assert.equal(recipientDetachedPlaintext.text, "", "detached text must not be duplicated inside the encrypted message envelope");
+        assert.equal(recipientDetachedPlaintext.detachedTextIndex, 0, "the encrypted envelope must bind the detached-text attachment slot");
+        assert.ok(recipientDetachedPlaintext.attachments, "the selected recipient must receive the detached attachment descriptor");
+        assert.equal(recipientDetachedPlaintext.attachments.count, 1);
+        const rawDetachedResponse = await fetch(detachedProof.message.attachments[0].url);
+        assert.equal(rawDetachedResponse.ok, true, "Discord must return the detached ciphertext bytes");
+        const rawDetachedBytes = new Uint8Array(await rawDetachedResponse.arrayBuffer());
+        assert.equal(rawDetachedBytes.byteLength, detachedProof.message.attachments[0].size);
+        assert.equal(
+            await attachmentBundleRoot(recipientDetachedPlaintext.attachments.id, [rawDetachedBytes]),
+            recipientDetachedPlaintext.attachments.root,
+            "the recipient must authenticate the exact detached attachment bundle",
+        );
+        const recipientDetachedMasterKey = decodeBase64Url(recipientDetachedPlaintext.attachments.key, 32);
+        const recipientDetached = await decryptAttachmentBytes({
+            bundleId: recipientDetachedPlaintext.attachments.id,
+            channelId: TEST_CHANNEL_ID,
+            ciphertext: rawDetachedBytes,
+            count: recipientDetachedPlaintext.attachments.count,
+            index: 0,
+            masterKey: recipientDetachedMasterKey,
+            senderUserId: preflight.localUserId,
+        });
+        recipientDetachedMasterKey.fill(0);
+        assert.equal(recipientDetached.metadata.name, DETACHED_TEXT_FILENAME);
+        assert.equal(recipientDetached.metadata.mimeType, DETACHED_TEXT_MIME_TYPE);
+        assert.equal(recipientDetached.metadata.size, detachedPlaintextBytes.byteLength);
+        assert.equal(encryptedAttachmentCiphertextSize(recipientDetached.metadata), rawDetachedBytes.byteLength);
+        assert.equal(new TextDecoder("utf-8", { fatal: true }).decode(recipientDetached.data), detachedPlaintext);
+        detachedPlaintextBytes.fill(0);
+        recipientDetached.data.fill(0);
+        rawDetachedBytes.fill(0);
 
         const persistedProof = await assertPersistedProtectionAndMissingChannelFailClosed(page);
         assert.equal(persistedProof.persistedStatus, "protected", "native persisted protection lookup must identify the test DM");
@@ -2402,6 +2506,11 @@ async function main(): Promise<void> {
         const disabledTransition = await disableSyntheticConversationForTransition(page);
         assert.equal(disabledTransition.status, "disabled", "the protected DM must disable for the ordinary-message transition proof");
         assert.deepEqual(disabledTransition.selectedRecipientIds, []);
+        assert.equal(
+            await page.evaluate(() => (globalThis as any).Vencord.Api.MessageEvents._shouldBypassMessageLengthLimit()),
+            false,
+            "disabling encryption must restore Discord's normal local message-length handling",
+        );
         const staleSendBlocked = await page.evaluate(async ({ channelId, content, registryName }) => {
             const global = globalThis as any;
             const common = global.Vencord.Webpack.Common;
@@ -2467,6 +2576,13 @@ async function main(): Promise<void> {
             attachmentReservationBlocked: failClosed.attachmentReservationBlocked,
             actualComposer: {
                 decryptedBySelectedRecipient: composerDecrypted.plaintext === composerPlaintext,
+                detachedText: {
+                    ciphertextBytes: detachedProof.message.attachments[0].size,
+                    decryptedBySelectedRecipient: recipientDetached.metadata.name === DETACHED_TEXT_FILENAME,
+                    exactSizePreflightMatched: encryptedAttachmentCiphertextSize(recipientDetached.metadata) === detachedProof.message.attachments[0].size,
+                    plaintextAbsentFromWire: !detachedProof.message.content.includes(detachedPlaintext),
+                    uploadLimitBytes: detachedProof.uploadLimitBytes,
+                },
                 localPlaintextVisible: composerProof.localPlaintextVisible,
                 localSenderDecrypted: composerProof.localSenderDecrypted,
                 messagePostCount: composerProof.messagePostCount,

@@ -10,18 +10,21 @@ export const LEGACY_ATTACHMENT_PAYLOAD_PREFIX = "PCEA1:";
 export const LEGACY_RICH_CONTENT_PAYLOAD_PREFIX = "PCER1:";
 export const ATTACHMENT_PAYLOAD_PREFIX = "PCEA2:";
 export const RICH_CONTENT_PAYLOAD_PREFIX = "PCER2:";
+export const DETACHED_TEXT_PAYLOAD_PREFIX = "PCET1:";
 export const ENCRYPTED_ATTACHMENT_EXTENSION = ".pcaf";
+export const DETACHED_TEXT_FILENAME = "message.txt";
+export const DETACHED_TEXT_MIME_TYPE = "application/vnd.protonn-cord.secure-message";
 export const MAX_ATTACHMENT_COUNT = 10;
-export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
-export const MAX_TOTAL_ATTACHMENT_BYTES = 200 * 1024 * 1024;
+export const MAX_ATTACHMENT_CIPHERTEXT_BYTES = 500 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_CIPHERTEXT_BYTES - 20;
+export const MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES = MAX_ATTACHMENT_CIPHERTEXT_BYTES;
+export const MAX_DETACHED_TEXT_BYTES = MAX_ATTACHMENT_BYTES;
 export const MAX_STICKER_COUNT = 3;
 
 const ATTACHMENT_VERSION = 1 as const;
 const BASE64URL_16 = /^[A-Za-z0-9_-]{22}$/u;
 const BASE64URL_32 = /^[A-Za-z0-9_-]{43}$/u;
 const MAX_ATTACHMENT_METADATA_BYTES = 8 * 1024;
-export const MAX_ATTACHMENT_CIPHERTEXT_BYTES = MAX_ATTACHMENT_BYTES + MAX_ATTACHMENT_METADATA_BYTES + 20;
-export const MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES = MAX_TOTAL_ATTACHMENT_BYTES + MAX_ATTACHMENT_COUNT * (MAX_ATTACHMENT_METADATA_BYTES + 20);
 const ATTACHMENT_KDF_PREFIX = new TextEncoder().encode("ProtonnCord/SecureMessaging/v1/attachment-kdf\0");
 
 export interface AttachmentBundleDescriptor {
@@ -44,6 +47,7 @@ export interface AttachmentMetadata {
 
 export interface SecurePlaintext {
     attachments: AttachmentBundleDescriptor | null;
+    detachedTextIndex: number | null;
     stickers: SecureStickerItem[];
     text: string;
 }
@@ -145,6 +149,19 @@ function canonicalMetadata(metadata: AttachmentMetadata): SerializedAttachmentMe
         h: metadata.height,
         t: metadata.duration,
     };
+}
+
+function encodedAttachmentMetadata(metadata: AttachmentMetadata): Uint8Array {
+    const metadataBytes = new TextEncoder().encode(JSON.stringify(canonicalMetadata(metadata)));
+    if (metadataBytes.byteLength > MAX_ATTACHMENT_METADATA_BYTES) throw new Error("Attachment metadata is too large");
+    return metadataBytes;
+}
+
+export function encryptedAttachmentCiphertextSize(metadata: AttachmentMetadata): number {
+    const size = 4 + encodedAttachmentMetadata(metadata).byteLength + metadata.size + 16;
+    if (!Number.isSafeInteger(size) || size > MAX_ATTACHMENT_CIPHERTEXT_BYTES)
+        throw new Error("Encrypted attachment exceeds the protocol safety limit");
+    return size;
 }
 
 function attachmentAad(channelId: string, senderUserId: string, bundleId: string, index: number, count: number): Uint8Array {
@@ -296,18 +313,20 @@ export async function encryptAttachmentBytes(input: {
 }): Promise<Uint8Array> {
     validateAttachmentMetadata(input.metadata);
     if (input.data.byteLength !== input.metadata.size) throw new Error("Attachment byte length does not match its metadata");
-    const metadataBytes = new TextEncoder().encode(JSON.stringify(canonicalMetadata(input.metadata)));
-    if (metadataBytes.byteLength > MAX_ATTACHMENT_METADATA_BYTES) throw new Error("Attachment metadata is too large");
+    const metadataBytes = encodedAttachmentMetadata(input.metadata);
+    const expectedCiphertextSize = encryptedAttachmentCiphertextSize(input.metadata);
     const plaintext = concatBytes(uint32(metadataBytes.byteLength), metadataBytes, input.data);
     const aad = attachmentAad(input.channelId, input.senderUserId, input.bundleId, input.index, input.count);
     const { key, nonce } = await attachmentKeyAndNonce(input.masterKey, input.bundleId, aad);
     try {
-        return new Uint8Array(await crypto.subtle.encrypt({
+        const ciphertext = new Uint8Array(await crypto.subtle.encrypt({
             name: "AES-GCM",
             iv: cryptoBytes(nonce),
             additionalData: cryptoBytes(aad),
             tagLength: 128,
         }, key, cryptoBytes(plaintext)));
+        if (ciphertext.byteLength !== expectedCiphertextSize) throw new Error("Encrypted attachment size calculation failed");
+        return ciphertext;
     } finally {
         plaintext.fill(0);
     }
@@ -388,11 +407,24 @@ export function serializeSecurePlaintext(
     text: string,
     attachments: AttachmentBundleDescriptor | null = null,
     stickers: SecureStickerItem[] = [],
+    detachedTextIndex: number | null = null,
 ): string {
     if (typeof text !== "string" || text.length > 2_000) throw new Error("Secure message text is invalid");
     validateStickers(stickers);
+    if (detachedTextIndex !== null) {
+        if (text.length > 0 || !attachments || !Number.isInteger(detachedTextIndex) ||
+            detachedTextIndex < 0 || detachedTextIndex >= attachments.count)
+            throw new Error("Detached secure message text is invalid");
+        validateBundleDescriptor(attachments);
+        return `${DETACHED_TEXT_PAYLOAD_PREFIX}${JSON.stringify([
+            [attachments.id, attachments.key, attachments.count, attachments.root],
+            detachedTextIndex,
+            ...(stickers.length > 0 ? [stickers.map(sticker => [sticker.id, sticker.name, sticker.formatType])] : []),
+        ])}`;
+    }
     if (attachments === null && stickers.length === 0 &&
         !text.startsWith(ATTACHMENT_PAYLOAD_PREFIX) && !text.startsWith(RICH_CONTENT_PAYLOAD_PREFIX) &&
+        !text.startsWith(DETACHED_TEXT_PAYLOAD_PREFIX) &&
         !text.startsWith(LEGACY_ATTACHMENT_PAYLOAD_PREFIX) && !text.startsWith(LEGACY_RICH_CONTENT_PAYLOAD_PREFIX)) return text;
     if (attachments) validateBundleDescriptor(attachments);
     const compactAttachment = attachments
@@ -410,6 +442,44 @@ export function serializeSecurePlaintext(
 
 export function parseSecurePlaintext(value: string): SecurePlaintext {
     if (typeof value !== "string") throw new Error("Secure plaintext is invalid");
+    if (value.startsWith(DETACHED_TEXT_PAYLOAD_PREFIX)) {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(value.slice(DETACHED_TEXT_PAYLOAD_PREFIX.length));
+        } catch {
+            throw new Error("Detached secure content payload is malformed");
+        }
+        if (!Array.isArray(parsed) || (parsed.length !== 2 && parsed.length !== 3) ||
+            !Array.isArray(parsed[0]) || parsed[0].length !== 4 ||
+            typeof parsed[0][0] !== "string" || typeof parsed[0][1] !== "string" ||
+            typeof parsed[0][2] !== "number" || typeof parsed[0][3] !== "string" ||
+            !Number.isInteger(parsed[1]))
+            throw new Error("Detached secure content payload is invalid");
+        const attachments = { id: parsed[0][0], key: parsed[0][1], count: parsed[0][2], root: parsed[0][3] };
+        validateBundleDescriptor(attachments);
+        const detachedTextIndex = parsed[1] as number;
+        if (detachedTextIndex < 0 || detachedTextIndex >= attachments.count)
+            throw new Error("Detached secure message index is invalid");
+        const stickers: SecureStickerItem[] = [];
+        if (parsed.length === 3) {
+            if (!Array.isArray(parsed[2]) || parsed[2].length === 0) throw new Error("Secure sticker list is invalid");
+            for (const sticker of parsed[2]) {
+                if (!Array.isArray(sticker) || sticker.length !== 3 ||
+                    typeof sticker[0] !== "string" || typeof sticker[1] !== "string" || typeof sticker[2] !== "number")
+                    throw new Error("Secure sticker item is invalid");
+                stickers.push({ id: sticker[0], name: sticker[1], formatType: sticker[2] });
+            }
+            validateStickers(stickers);
+        }
+        const canonical = [
+            [attachments.id, attachments.key, attachments.count, attachments.root],
+            detachedTextIndex,
+            ...(stickers.length > 0 ? [stickers.map(sticker => [sticker.id, sticker.name, sticker.formatType])] : []),
+        ];
+        if (JSON.stringify(canonical) !== value.slice(DETACHED_TEXT_PAYLOAD_PREFIX.length))
+            throw new Error("Detached secure content payload is not canonical");
+        return { text: "", attachments, detachedTextIndex, stickers };
+    }
     const compactRich = value.startsWith(RICH_CONTENT_PAYLOAD_PREFIX);
     const compactAttachment = value.startsWith(ATTACHMENT_PAYLOAD_PREFIX);
     if (compactRich || compactAttachment) {
@@ -449,11 +519,12 @@ export function parseSecurePlaintext(value: string): SecurePlaintext {
             ...(compactRich ? [stickers.map(sticker => [sticker.id, sticker.name, sticker.formatType])] : []),
         ];
         if (JSON.stringify(canonical) !== value.slice(prefix.length)) throw new Error("Secure content payload is not canonical");
-        return { text: parsed[0], attachments, stickers };
+        return { text: parsed[0], attachments, detachedTextIndex: null, stickers };
     }
 
     const rich = value.startsWith(LEGACY_RICH_CONTENT_PAYLOAD_PREFIX);
-    if (!rich && !value.startsWith(LEGACY_ATTACHMENT_PAYLOAD_PREFIX)) return { text: value, attachments: null, stickers: [] };
+    if (!rich && !value.startsWith(LEGACY_ATTACHMENT_PAYLOAD_PREFIX))
+        return { text: value, attachments: null, detachedTextIndex: null, stickers: [] };
     const prefix = rich ? LEGACY_RICH_CONTENT_PAYLOAD_PREFIX : LEGACY_ATTACHMENT_PAYLOAD_PREFIX;
     let parsed: unknown;
     try {
@@ -492,5 +563,5 @@ export function parseSecurePlaintext(value: string): SecurePlaintext {
         ...(rich ? { s: stickers.map(sticker => ({ i: sticker.id, n: sticker.name, f: sticker.formatType })) } : {}),
     };
     if (JSON.stringify(canonical) !== value.slice(prefix.length)) throw new Error("Secure content payload is not canonical");
-    return { text: parsed.m, attachments, stickers };
+    return { text: parsed.m, attachments, detachedTextIndex: null, stickers };
 }
