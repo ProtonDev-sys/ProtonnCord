@@ -24,6 +24,7 @@ import { readdir, writeFile } from "fs/promises";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
+import { getPluginTarget } from "../utils.mjs";
 import { BUILD_TIMESTAMP, commonOpts, exists, globPlugins, IS_DEV, IS_REPORTER, IS_COMPANION_TEST, IS_STANDALONE, IS_UPDATER_DISABLED, resolvePluginName, VERSION, commonRendererPlugins, watch, buildOrWatchAll, stringifyValues, IS_ANTI_CRASH_TEST } from "./common.mjs";
 
 const defines = stringifyValues({
@@ -97,6 +98,8 @@ const globNativesPlugin = {
                     watchFiles.push(resolve(nativePath), resolve(indexNativePath));
 
                     if (!(await exists(nativePath)) && !(await exists(indexNativePath)))
+                        continue;
+                    if (getPluginTarget(fileName) === "dev" && !IS_DEV && !IS_REPORTER)
                         continue;
 
                     const pluginName = await resolvePluginName(dirPath, file);
