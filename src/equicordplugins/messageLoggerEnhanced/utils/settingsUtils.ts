@@ -221,7 +221,7 @@ async function* iterateLogItems(): AsyncGenerator<any> {
             return decoder.decode(value, { stream: true });
         });
     } else {
-        const settings = await Native.getSettings();
+        const settings = await Native.getSettingsNative();
         const fileId = await Native.startNativeLogImport(settings.logsDir);
 
         try {
