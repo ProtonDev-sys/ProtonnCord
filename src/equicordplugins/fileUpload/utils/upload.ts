@@ -6,7 +6,7 @@
 
 import { normalizeCorsProxyUrl, toProxiedUrl } from "@equicordplugins/fileUpload/constants";
 import { settings } from "@equicordplugins/fileUpload/settings";
-import { fallbackServiceOrder, serviceLabels, ServiceType, ShareXUploaderConfig, UploadResponse } from "@equicordplugins/fileUpload/types";
+import { CustomEndpointApprovalRequest, fallbackServiceOrder, serviceLabels, ServiceType, ShareXUploaderConfig, UploadResponse } from "@equicordplugins/fileUpload/types";
 import { copyToClipboard } from "@utils/clipboard";
 import { insertTextIntoChatInputBox } from "@utils/discord";
 import { Logger } from "@utils/Logger";
@@ -985,7 +985,18 @@ function buildWebdavAuthHeader(): string | null {
     return null;
 }
 
-async function createWebdavShare(relativePath: string, serverOrigin: string, filename: string): Promise<string> {
+interface ApprovedWebdavEndpoint {
+    approvalId: string;
+    request: CustomEndpointApprovalRequest & { kind: "webdav"; };
+    uploadReceipt: string;
+}
+
+async function createWebdavShare(
+    relativePath: string,
+    serverOrigin: string,
+    filename: string,
+    approvedEndpoint?: ApprovedWebdavEndpoint
+): Promise<string> {
     const { webdavServerType, webdavShareType } = settings.store as {
         webdavServerType?: string;
         webdavShareType?: string;
@@ -1013,7 +1024,15 @@ async function createWebdavShare(relativePath: string, serverOrigin: string, fil
     let shareUrl: string | undefined;
 
     if (Native) {
-        const result = await Native.createWebdavShare(ocsUrl, ocsHeaders, body);
+        if (!approvedEndpoint) throw new Error("WebDAV endpoint was not approved");
+        const result = await Native.createWebdavShare(
+            ocsUrl,
+            ocsHeaders,
+            body,
+            approvedEndpoint.approvalId,
+            approvedEndpoint.request,
+            approvedEndpoint.uploadReceipt
+        );
         if (!result.success) {
             throw new Error(result.error || "Failed to create public share");
         }
@@ -1097,11 +1116,37 @@ async function uploadToWebdav(fileBlob: Blob, filename: string): Promise<string>
     }
 
     if (Native) {
+        const approvalRequest = { baseUrl: webdavUrl, kind: "webdav" } as const;
+        const approval = await Native.approveCustomEndpoint(approvalRequest);
+        if (!approval.success || !approval.approvalId)
+            throw new Error(approval.error || "WebDAV endpoint was not approved");
         const arrayBuffer = await fileBlob.arrayBuffer();
-        const result = await Native.uploadToWebdav(arrayBuffer, uploadUrl, requestHeaders);
+        const result = await Native.uploadToWebdav(
+            arrayBuffer,
+            uploadUrl,
+            requestHeaders,
+            approval.approvalId,
+            approvalRequest
+        );
         if (!result.success) {
             throw new Error(result.error || "Upload failed");
         }
+
+        if (serverType === "generic") return uploadUrl;
+        if (!result.receipt) throw new Error("No WebDAV upload receipt was returned");
+        const approvedEndpoint: ApprovedWebdavEndpoint = {
+            approvalId: approval.approvalId,
+            request: approvalRequest,
+            uploadReceipt: result.receipt
+        };
+
+        let serverOrigin: string;
+        try {
+            serverOrigin = new URL(webdavUrl).origin;
+        } catch {
+            throw new Error("Invalid WebDAV server URL");
+        }
+        return await createWebdavShare(relativePath, serverOrigin, filename, approvedEndpoint);
     } else {
         const response = await uploadRequestWithTimeout(uploadUrl, {
             method: "PUT",
@@ -1115,9 +1160,7 @@ async function uploadToWebdav(fileBlob: Blob, filename: string): Promise<string>
         }
     }
 
-    if (serverType === "generic") {
-        return uploadUrl;
-    }
+    if (serverType === "generic") return uploadUrl;
 
     let serverOrigin: string;
     try {
@@ -1501,12 +1544,7 @@ export async function uploadFile(url: string): Promise<void> {
                 contentType = res.contentType || "";
                 blob = new Blob([res.data], { type: contentType });
             } else {
-                const response = await fetch(fetchUrl);
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch file: ${response.status}`);
-                }
-                contentType = response.headers.get("content-type") || "";
-                blob = await response.blob();
+                throw new Error(res.error || "Remote media fetch was blocked");
             }
         } else {
             const response = await fetchWithTimeout(fetchUrl, {

@@ -6,6 +6,7 @@
 
 import { toProxiedUrl } from "@equicordplugins/fileUpload/constants";
 import { settings } from "@equicordplugins/fileUpload/settings";
+import { CustomEndpointApprovalRequest } from "@equicordplugins/fileUpload/types";
 import { PluginNative } from "@utils/types";
 
 type S3Store = {
@@ -220,8 +221,23 @@ export async function uploadToS3(
     }
 
     if (native) {
+        const approvalRequest: CustomEndpointApprovalRequest = {
+            baseUrl: endpoint.toString(),
+            bucket: s3Bucket,
+            forcePathStyle: s3ForcePathStyle,
+            kind: "s3"
+        };
+        const approval = await native.approveCustomEndpoint(approvalRequest);
+        if (!approval.success || !approval.approvalId)
+            throw new Error(approval.error || "S3 endpoint was not approved");
         const arrayBuffer = await fileBlob.arrayBuffer();
-        const result = await native.uploadToS3(arrayBuffer, uploadUrl.toString(), requestHeaders);
+        const result = await native.uploadToS3(
+            arrayBuffer,
+            uploadUrl.toString(),
+            requestHeaders,
+            approval.approvalId,
+            approvalRequest
+        );
         if (!result.success) {
             throw new Error(result.error || "Upload failed");
         }

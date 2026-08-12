@@ -115,9 +115,26 @@ export interface NestUploadResponse {
 }
 
 export interface NativeUploadResult {
+    receipt?: string;
     success: boolean;
     url?: string;
     error?: string;
+}
+
+export type CustomEndpointApprovalRequest = {
+    baseUrl: string;
+    bucket: string;
+    forcePathStyle: boolean;
+    kind: "s3";
+} | {
+    baseUrl: string;
+    kind: "webdav";
+};
+
+export interface NativeEndpointApprovalResult {
+    approvalId?: string;
+    error?: string;
+    success: boolean;
 }
 
 export interface ShareXUploaderConfig {
