@@ -24,6 +24,7 @@ import { addMessage } from "./LoggedMessageManager";
 import { settings } from "./settings";
 import { FetchMessagesResponse, LoadMessagePayload, LoggedMessage, LoggedMessageJSON, MessageCreatePayload, MessageDeleteBulkPayload, MessageDeletePayload, MessageUpdatePayload } from "./types";
 import { cleanUpCachedMessage, cleanupUserObject, getNative, isGhostPinged, mapTimestamp, messageJsonToMessageClass, reAddDeletedMessages } from "./utils";
+import { DEFAULT_ATTACHMENT_SIZE_LIMIT_MEGABYTES, MAX_ATTACHMENT_SIZE_LIMIT_MEGABYTES } from "./utils/constants";
 import { removeContextMenuBindings, setupContextMenuPatches } from "./utils/contextMenu";
 import { hasWhitelistedId, shouldIgnore } from "./utils/index";
 import { LimitedMap } from "./utils/LimitedMap";
@@ -399,7 +400,14 @@ export default definePlugin({
             });
         };
 
-        Native.init();
+        const configuredAttachmentSizeLimit = settings.store.attachmentSizeLimitInMegabytes;
+        const safeAttachmentSizeLimit = Number.isSafeInteger(configuredAttachmentSizeLimit)
+            && configuredAttachmentSizeLimit >= 1
+            && configuredAttachmentSizeLimit <= MAX_ATTACHMENT_SIZE_LIMIT_MEGABYTES
+            ? configuredAttachmentSizeLimit
+            : DEFAULT_ATTACHMENT_SIZE_LIMIT_MEGABYTES;
+        const attachmentSizeLimitInMegabytes = await Native.updateAttachmentSizeLimit(safeAttachmentSizeLimit);
+        await Native.init();
 
         if (settings.store.clearLogsOnRestart && !didClearLogsOnStartup) {
             try {
@@ -410,10 +418,11 @@ export default definePlugin({
             }
         }
 
-        const { imageCacheDir, logsDir, attachmentFileExtensions } = await Native.getSettings();
+        const { imageCacheDir, logsDir, attachmentFileExtensions } = await Native.getSettingsNative();
         settings.store.imageCacheDir = imageCacheDir;
         settings.store.logsDir = logsDir;
         settings.store.attachmentFileExtensions = attachmentFileExtensions ?? "none";
+        settings.store.attachmentSizeLimitInMegabytes = attachmentSizeLimitInMegabytes;
 
         setupContextMenuPatches();
     },

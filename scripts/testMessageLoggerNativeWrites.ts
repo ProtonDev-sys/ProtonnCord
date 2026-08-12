@@ -12,10 +12,12 @@ import path from "node:path";
 
 import {
     createImageCacheFile,
+    getBoundedImageCacheFileSize,
     getImageCachePath,
     normalizeAttachmentExtension,
     normalizeAttachmentId,
-    parseImageCacheFilename
+    parseImageCacheFilename,
+    readBoundedImageCacheFile
 } from "../src/equicordplugins/messageLoggerEnhanced/native/cacheFile";
 
 assert.equal(normalizeAttachmentId("123456789012345678"), "123456789012345678");
@@ -108,6 +110,10 @@ async function runFileChecks() {
         const original = Uint8Array.from([1, 2, 3, 4]);
         assert.equal(await createImageCacheFile(cacheRoot, "123456789012345678", "png", original), imagePath);
         assert.deepEqual(await readFile(imagePath), Buffer.from(original));
+        assert.equal(await getBoundedImageCacheFileSize(imagePath, 4), 4);
+        assert.deepEqual(await readBoundedImageCacheFile(imagePath, 4), Buffer.from(original));
+        await assert.rejects(readBoundedImageCacheFile(imagePath, 3), /safe size/u,
+            "bounded cache reads must reject oversized files before allocating them");
 
         await assert.rejects(
             createImageCacheFile(cacheRoot, "123456789012345678", "png", Uint8Array.from([9, 9, 9])),
@@ -157,6 +163,58 @@ async function runFileChecks() {
             createImageCacheFile(cacheRoot, "234567890123456789", "png", "not bytes" as unknown as Uint8Array),
             /Invalid image cache content/u
         );
+
+        const quotaRoot = path.join(cacheRoot, "quota");
+        await mkdir(quotaRoot);
+        await writeFile(path.join(quotaRoot, "ignored-invalid-name"), Buffer.alloc(64));
+        await createImageCacheFile(quotaRoot, "111111111111111111", "png", Buffer.alloc(4, 1), {
+            maxBytes: 6,
+            maxEntries: 2
+        });
+        await assert.rejects(
+            createImageCacheFile(quotaRoot, "222222222222222222", "png", Buffer.alloc(3, 2), {
+                maxBytes: 6,
+                maxEntries: 2
+            }),
+            /byte quota/u,
+            "the aggregate cache quota must reject a write that would exceed the remaining bytes"
+        );
+        assert.equal(existsSync(getImageCachePath(quotaRoot, "222222222222222222", "png")), false,
+            "quota failures must not leave partial cache files");
+        await createImageCacheFile(quotaRoot, "222222222222222222", "png", Buffer.alloc(2, 2), {
+            maxBytes: 6,
+            maxEntries: 2
+        });
+        await assert.rejects(
+            createImageCacheFile(quotaRoot, "333333333333333333", "png", Buffer.alloc(1, 3), {
+                maxBytes: 6,
+                maxEntries: 2
+            }),
+            /entry quota/u
+        );
+
+        const concurrentQuotaRoot = path.join(cacheRoot, "concurrent-quota");
+        const concurrentQuotaWrites = await Promise.allSettled([
+            createImageCacheFile(concurrentQuotaRoot, "444444444444444444", "png", Buffer.alloc(4, 4), {
+                maxBytes: 4,
+                maxEntries: 10
+            }),
+            createImageCacheFile(concurrentQuotaRoot, "555555555555555555", "png", Buffer.alloc(4, 5), {
+                maxBytes: 4,
+                maxEntries: 10
+            })
+        ]);
+        assert.equal(concurrentQuotaWrites.filter(result => result.status === "fulfilled").length, 1,
+            "serialized quota accounting must permit only one competing write");
+        assert.equal(concurrentQuotaWrites.filter(result => result.status === "rejected").length, 1);
+        const concurrentQuotaFiles = await Promise.all(
+            ["444444444444444444", "555555555555555555"]
+                .map(id => getImageCachePath(concurrentQuotaRoot, id, "png"))
+                .filter(existsSync)
+                .map(file => readFile(file))
+        );
+        assert.equal(concurrentQuotaFiles.reduce((total, file) => total + file.byteLength, 0), 4,
+            "concurrent writes must never push the on-disk cache above quota");
     } finally {
         await rm(cacheRoot, { recursive: true, force: true });
     }
@@ -167,7 +225,7 @@ assert.doesNotMatch(nativeSource, /export async function writeImageNative/u,
     "the unused renderer-controlled filename write bridge must stay removed");
 assert.doesNotMatch(readFileSync("src/equicordplugins/messageLoggerEnhanced/utils/misc.ts", "utf8"), /writeImageNative/u,
     "renderer native stubs must not preserve the removed write capability");
-assert.match(nativeSource, /createImageCacheFile\(imageCacheDir, attachmentId, cleanExt/u,
+assert.match(nativeSource, /createImageCacheFile\(cacheDir, attachmentId, extension, content/u,
     "attachment downloads must use the contained exclusive-write helper");
 assert.match(nativeSource, /if \(!file\.isFile\(\)\) continue/u,
     "cache indexing must ignore directories and symbolic links");
