@@ -10,6 +10,7 @@ import { CogWheel, DeleteIcon, FolderIcon } from "@components/Icons";
 import { Link } from "@components/Link";
 import { OnlineThemeCard } from "@components/settings/OnlineThemeCard";
 import { UserThemeHeader } from "@main/themes";
+import { parseExternalHttpsUrl } from "@shared/externalUrls";
 import { classNameFactory } from "@utils/css";
 import { openInviteModal } from "@utils/discord";
 import { findComponentByCodeLazy } from "@webpack";
@@ -106,6 +107,7 @@ export interface ThemeCardProps {
 }
 
 export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton, onEditName, disabled, onPin, isPinned, onRefresh, onOpenFolder, onCopyUrl, onDownload, themeLink, isLocal, activationMode = "always", onActivationModeChange }: ThemeCardProps) {
+    const website = parseExternalHttpsUrl(theme.website);
     const openThemeMenu = (e: React.MouseEvent) => {
         ContextMenuApi.openContextMenu(e, () => (
             <ThemeActivationMenu
@@ -121,12 +123,12 @@ export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton
                         action={onPin}
                     />
                 )}
-                {theme.website && (
+                {website && (
                     <Menu.MenuItem
                         id="open-website"
                         label="Open Website"
                         icon={HomeIcon}
-                        action={() => window.open(theme.website, "_blank")}
+                        action={() => VencordNative.native.openExternal(website)}
                     />
                 )}
                 {theme.invite && (
@@ -234,8 +236,8 @@ export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton
                             )}
                         </Tooltip>
                     )}
-                    {!!theme.website && <Link href={theme.website}>Website</Link>}
-                    {!!(theme.website && theme.invite) && (
+                    {!!website && <Link href={website}>Website</Link>}
+                    {!!(website && theme.invite) && (
                         <span style={{ color: "var(--text-muted)" }}>•</span>
                     )}
                     {!!theme.invite && (
@@ -254,7 +256,7 @@ export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton
                     )}
                     {activationMode !== "always" && (
                         <>
-                            {!!(theme.website || theme.invite) && <span style={{ color: "var(--text-muted)" }}>•</span>}
+                            {!!(website || theme.invite) && <span style={{ color: "var(--text-muted)" }}>•</span>}
                             <span style={{ color: "var(--text-muted)" }}>{getThemeActivationModeLabel(activationMode)}</span>
                         </>
                     )}
