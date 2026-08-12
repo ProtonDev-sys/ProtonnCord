@@ -101,16 +101,9 @@ function resolveQuestCTA(taskType?: QuestTaskType): string | undefined {
     return !taskType ? undefined : [QuestTaskType.ACHIEVEMENT_IN_ACTIVITY, QuestTaskType.PLAY_ACTIVITY, QuestTaskType.WATCH_VIDEO].includes(taskType) ? QuestCTA.START_QUEST : QuestCTA.ACCEPT_QUEST;
 }
 
-async function getActivityReferrer(appId: string): Promise<string | undefined> {
+async function getActivityProxyTicket(appId: string): Promise<string | undefined> {
     try {
-        const proxyTicket = await getApplicationProxyTicket(appId);
-        const referrer = new URL(`https://${appId}.discordsays.com/`);
-
-        referrer.searchParams.set("instance_id", "example-cl-instance");
-        referrer.searchParams.set("platform", "desktop");
-        referrer.searchParams.set("discord_proxy_ticket", proxyTicket);
-
-        return referrer.toString();
+        return await getApplicationProxyTicket(appId);
     } catch (error) {
         QL.error("AUTO_COMPLETE_ACHIEVEMENT_PROXY_TICKET_FAILED", { appId, error });
     }
@@ -929,7 +922,7 @@ async function runAchievementQuest(quest: Quest, entry: AutoCompleteEntry, targe
         return false;
     }
 
-    const result = await QuestifyNative.complete(appId, authCode, target.adjusted, quest.id, await getActivityReferrer(appId));
+    const result = await QuestifyNative.complete(appId, authCode, target.adjusted, quest.id, await getActivityProxyTicket(appId));
     const success = result.success === true;
 
     setQuestAutoCompleteProgress(quest, success ? target.adjusted : 0);
