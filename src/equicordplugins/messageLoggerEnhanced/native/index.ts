@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { readdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { DATA_DIR } from "@main/utils/constants";
@@ -17,7 +17,13 @@ export * from "./import";
 import { blockedExts } from "../list";
 import { LoggedAttachment } from "../types";
 import { DEFAULT_ATTACHMENT_FILE_EXTENSIONS, LOGS_DATA_FILENAME } from "../utils/constants";
-import { ensureDirectoryExists, getAttachmentIdFromFilename, sleep } from "./utils";
+import {
+    createImageCacheFile,
+    normalizeAttachmentExtension,
+    normalizeAttachmentId,
+    parseImageCacheFilename
+} from "./cacheFile";
+import { ensureDirectoryExists, sleep } from "./utils";
 
 export { getSettings };
 export function messageLoggerEnhancedUniqueIdThingyIdkMan() { }
@@ -43,10 +49,13 @@ export async function init(_event: IpcMainInvokeEvent) {
     const imageDir = await getImageCacheDir();
 
     await ensureDirectoryExists(imageDir);
-    const files = await readdir(imageDir);
-    for (const filename of files) {
-        const attachmentId = getAttachmentIdFromFilename(filename);
-        nativeSavedImages.set(attachmentId, path.join(imageDir, filename));
+    const canonicalImageDir = await realpath(imageDir);
+    const files = await readdir(canonicalImageDir, { withFileTypes: true });
+    for (const file of files) {
+        if (!file.isFile()) continue;
+        const parsed = parseImageCacheFilename(file.name);
+        if (!parsed) continue;
+        nativeSavedImages.set(parsed.attachmentId, path.join(canonicalImageDir, file.name));
     }
 }
 
@@ -60,21 +69,6 @@ export async function getImageNative(_event: IpcMainInvokeEvent, attachmentId: s
         console.error(error);
         return null;
     }
-}
-
-export async function writeImageNative(_event: IpcMainInvokeEvent, filename: string, content: Uint8Array) {
-    if (!filename || !content) return;
-    const imageDir = await getImageCacheDir();
-    const attachmentId = getAttachmentIdFromFilename(filename);
-
-    const existingImage = nativeSavedImages.get(attachmentId);
-    if (existingImage) return;
-
-    const imagePath = path.join(imageDir, filename);
-    await ensureDirectoryExists(imageDir);
-    await writeFile(imagePath, content);
-
-    nativeSavedImages.set(attachmentId, imagePath);
 }
 
 export async function deleteFileNative(_event: IpcMainInvokeEvent, attachmentId: string) {
@@ -144,8 +138,13 @@ export async function downloadAttachment(_event: IpcMainInvokeEvent, attachment:
         if (!attachment?.url || !attachment.oldUrl || !attachment?.id)
             return { error: "Invalid Attachment", path: null };
 
-        if (attachment.id.match(/[\\/.]/)) {
-            return { error: "Invalid Attachment ID", path: null };
+        let attachmentId: string;
+        let cleanExt: string;
+        try {
+            attachmentId = normalizeAttachmentId(attachment.id);
+            cleanExt = normalizeAttachmentExtension(attachment.fileExtension);
+        } catch {
+            return { error: "Invalid attachment filename", path: null };
         }
 
         const settings = await getSettings();
@@ -154,14 +153,19 @@ export async function downloadAttachment(_event: IpcMainInvokeEvent, attachment:
             return { error: "All attachment downloads are currently blocked by settings configurations.", path: null };
         }
 
-        const allowedList = allowedExtensionsStr.split(",").map((ext: string) => ext.trim().toLowerCase());
-        const cleanExt = attachment.fileExtension?.replace(".", "").toLowerCase();
+        const allowedList = allowedExtensionsStr.split(",").flatMap(extension => {
+            try {
+                return [normalizeAttachmentExtension(extension.trim())];
+            } catch {
+                return [];
+            }
+        }).filter(extension => !blockedExts.includes(extension));
 
-        if (!cleanExt || !allowedList.includes(cleanExt)) {
+        if (!allowedList.includes(cleanExt)) {
             return { error: `File type .${cleanExt} is blocked by settings configurations.`, path: null };
         }
 
-        const existingImage = nativeSavedImages.get(attachment.id);
+        const existingImage = nativeSavedImages.get(attachmentId);
         if (existingImage)
             return {
                 error: null,
@@ -188,12 +192,9 @@ export async function downloadAttachment(_event: IpcMainInvokeEvent, attachment:
 
         const ab = await res.arrayBuffer();
         const imageCacheDir = await getImageCacheDir();
-        await ensureDirectoryExists(imageCacheDir);
+        const finalPath = await createImageCacheFile(imageCacheDir, attachmentId, cleanExt, Buffer.from(ab));
 
-        const finalPath = path.join(imageCacheDir, `${attachment.id}${attachment.fileExtension}`);
-        await writeFile(finalPath, Buffer.from(ab));
-
-        nativeSavedImages.set(attachment.id, finalPath);
+        nativeSavedImages.set(attachmentId, finalPath);
 
         return {
             error: null,
@@ -218,8 +219,14 @@ export async function updateAllowedExtensions(_event: IpcMainInvokeEvent, cleanE
 
     const validatedExtensions = incomingRaw
         .split(",")
-        .map(ext => ext.trim().toLowerCase())
-        .filter(ext => ext.length > 0 && !blockedExts.includes(ext));
+        .flatMap(extension => {
+            try {
+                return [normalizeAttachmentExtension(extension.trim())];
+            } catch {
+                return [];
+            }
+        })
+        .filter(extension => !blockedExts.includes(extension));
 
     if (validatedExtensions.length === 0) {
         settings.attachmentFileExtensions = "none";
