@@ -157,7 +157,6 @@ export function getNative(): PluginNative<typeof import("../native")> {
             getNativeSavedImages: async () => new Map(),
             messageLoggerEnhancedUniqueIdThingyIdkMan: async () => { },
             showItemInFolder: async () => { },
-            writeImageNative: async () => { },
             chooseFile: async () => "",
             downloadAttachment: async () => ({ error: "web", path: null }),
             startNativeLogExport: async () => "" as any,
