@@ -155,7 +155,10 @@ async function startTestServer(): Promise<{
     const address = server.address();
     assert.ok(address && typeof address === "object");
     return {
-        close: () => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())),
+        close: () => new Promise<void>((resolve, reject) => {
+            server.closeAllConnections();
+            server.close(error => error ? reject(error) : resolve());
+        }),
         origin: `http://127.0.0.1:${address.port}`,
         requests
     };
@@ -189,6 +192,11 @@ async function testEventBoundary(native: NativeModule): Promise<void> {
             discordEvent("https://discord.com/channels/@me/1", false),
             {} as IpcMainInvokeEvent
         ];
+        const disposedFrame = discordEvent("https://discord.com/channels/@me/1");
+        Object.defineProperty(disposedFrame.senderFrame, "url", {
+            get() { throw new Error("Render frame was disposed"); }
+        });
+        invalidEvents.push(disposedFrame);
         for (const event of invalidEvents) {
             const result = await native.uploadTo0x0(event, new ArrayBuffer(1), "file.txt");
             assert.equal(result.success, false);
@@ -309,6 +317,13 @@ async function testS3Boundary(
     assert.equal(wrongScope.success, false);
     assert.equal(requests.length, beforeWrongScope);
 
+    const duplicateCaseHeaders = await native.uploadToS3(event, new ArrayBuffer(1), uploadUrl, {
+        ...headers,
+        authorization: "duplicate"
+    }, approvalId, approvalRequest);
+    assert.equal(duplicateCaseHeaders.success, false);
+    assert.equal(requests.length, beforeWrongScope);
+
     const beforeBadHeaders = requests.length;
     const badHeaders = await native.uploadToS3(event, new ArrayBuffer(1), uploadUrl, {
         ...headers,
@@ -407,8 +422,13 @@ async function testWebdavBoundary(native: NativeModule, origin: string, requests
 async function testFixedResponseCap(native: NativeModule): Promise<void> {
     const originalFetch = globalThis.fetch;
     let cancelled = false;
+    let pulls = 0;
     globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
         pull(controller) {
+            if (++pulls > 2) {
+                controller.close();
+                return;
+            }
             controller.enqueue(new Uint8Array(1024 * 1024));
             controller.enqueue(Uint8Array.of(1));
         },

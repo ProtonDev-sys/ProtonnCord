@@ -97,19 +97,24 @@ class BoundedNetworkLimiter {
 
     constructor(private readonly maximumActive: number, private readonly maximumQueued: number) { }
 
-    private release = () => {
-        this.active--;
-        const waiter = this.waiters.shift();
-        if (!waiter) return;
-        clearTimeout(waiter.timer);
-        this.active++;
-        waiter.resolve(this.release);
-    };
+    private createRelease(): () => void {
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            this.active--;
+            const waiter = this.waiters.shift();
+            if (!waiter) return;
+            clearTimeout(waiter.timer);
+            this.active++;
+            waiter.resolve(this.createRelease());
+        };
+    }
 
     acquire(deadline: number): Promise<() => void> {
         if (this.active < this.maximumActive) {
             this.active++;
-            return Promise.resolve(this.release);
+            return Promise.resolve(this.createRelease());
         }
         if (this.waiters.length >= this.maximumQueued)
             return Promise.reject(new Error("Too many FileUpload network operations are queued"));
@@ -476,11 +481,11 @@ export async function fixedFetch(
 
 export function isTrustedFileUploadEvent(event: IpcMainInvokeEvent): boolean {
     if (RendererSettings.store.plugins?.FileUpload?.enabled !== true) return false;
-    const frame = event?.senderFrame;
-    if (!frame || !event?.sender || frame !== event.sender.mainFrame) return false;
-    const rawUrl = frame.url;
-    if (typeof rawUrl !== "string" || rawUrl.length < 1 || rawUrl.length > MAX_NATIVE_URL_LENGTH) return false;
     try {
+        const frame = event?.senderFrame;
+        if (!frame || !event?.sender || frame !== event.sender.mainFrame) return false;
+        const rawUrl = frame.url;
+        if (typeof rawUrl !== "string" || rawUrl.length < 1 || rawUrl.length > MAX_NATIVE_URL_LENGTH) return false;
         const url = new URL(rawUrl);
         return url.protocol === "https:" && !url.username && !url.password && !url.port
             && TRUSTED_RENDERER_ORIGINS.has(url.origin);

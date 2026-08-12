@@ -254,7 +254,7 @@ export function assertS3Destination(profile: ApprovalProfile, destinationValue: 
     if (destination.protocol !== base.protocol || destination.port !== base.port)
         throw new Error("S3 destination escaped its approved endpoint");
 
-    const expectedHostname = profile.forcePathStyle ? base.hostname : `${profile.bucket}.${base.hostname}`;
+    const expectedHostname = profile.forcePathStyle ? base.hostname : `${profile.bucket}.${base.hostname}`.toLowerCase();
     if (destination.hostname !== expectedHostname) throw new Error("S3 destination escaped its approved host");
     let expectedPrefix = base.pathname.replace(/\/+$/u, "") || "/";
     if (profile.forcePathStyle) expectedPrefix = `${expectedPrefix === "/" ? "" : expectedPrefix}/${encodeURIComponent(profile.bucket)}`;
