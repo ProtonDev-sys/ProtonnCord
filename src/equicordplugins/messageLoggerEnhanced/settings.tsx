@@ -14,7 +14,13 @@ import { clearLogs, Native } from ".";
 import { ImageCacheDir, LogsDir } from "./components/FolderSelectInput";
 import { openLogModal } from "./components/LogsModal";
 import { blockedExts } from "./list";
-import { DEFAULT_IMAGE_CACHE_DIR } from "./utils/constants";
+import {
+    DEFAULT_ATTACHMENT_FILE_EXTENSIONS,
+    DEFAULT_ATTACHMENT_SIZE_LIMIT_MEGABYTES,
+    DEFAULT_IMAGE_CACHE_DIR,
+    MAX_ATTACHMENT_SIZE_LIMIT_MEGABYTES,
+    SUPPORTED_ATTACHMENT_FILE_EXTENSIONS
+} from "./utils/constants";
 import { exportLogs, importLogs } from "./utils/settingsUtils";
 
 function ImportLogsButton() {
@@ -181,25 +187,40 @@ export const settings = definePluginSettings({
     },
 
     attachmentSizeLimitInMegabytes: {
-        default: 12,
+        default: DEFAULT_ATTACHMENT_SIZE_LIMIT_MEGABYTES,
         type: OptionType.NUMBER,
-        description: "Maximum size of an attachment in megabytes to save. Attachments larger than this size will not be saved."
+        description: `Maximum size of an attachment in megabytes to save (1-${MAX_ATTACHMENT_SIZE_LIMIT_MEGABYTES}). Attachments larger than this size will not be saved.`,
+        isValid: (value: number) => Number.isSafeInteger(value) && value >= 1 && value <= MAX_ATTACHMENT_SIZE_LIMIT_MEGABYTES
+            || `Attachment size must be a whole number from 1 to ${MAX_ATTACHMENT_SIZE_LIMIT_MEGABYTES} MB.`,
+        onChange: (value: number) => {
+            Native.updateAttachmentSizeLimit(value).catch((err: any) => {
+                console.error("Failed to sync attachment size limit natively:", err);
+            });
+        }
     },
 
     attachmentFileExtensions: {
-        default: "png,jpg,jpeg,gif,webp,mp4,webm,mp3,ogg,wav",
+        default: DEFAULT_ATTACHMENT_FILE_EXTENSIONS,
         type: OptionType.STRING,
-        description: "Comma separated list of file extensions to save. Attachments with file extensions not in this list will not be saved.",
+        description: `Comma separated list of media extensions to save. Supported: ${SUPPORTED_ATTACHMENT_FILE_EXTENSIONS.join(", ")}.`,
+        isValid: (value: string) => {
+            if (!value?.trim()) return true;
+            const supported = new Set<string>(SUPPORTED_ATTACHMENT_FILE_EXTENSIONS);
+            const invalid = value.split(",").map(ext => ext.trim().toLowerCase())
+                .filter(ext => !supported.has(ext) || blockedExts.includes(ext));
+            return invalid.length === 0 || `Unsupported attachment extensions: ${invalid.join(", ")}`;
+        },
         onChange: (value: string) => {
             let processedValue = "";
 
             if (value) {
                 const exts = value.split(",").map(ext => ext.trim().toLowerCase());
-                const invalid = exts.filter(ext => blockedExts.includes(ext));
+                const supported = new Set<string>(SUPPORTED_ATTACHMENT_FILE_EXTENSIONS);
+                const invalid = exts.filter(ext => blockedExts.includes(ext) || !supported.has(ext));
 
                 if (invalid.length > 0) {
                     console.warn("Rejected invalid file extensions:", invalid);
-                    processedValue = exts.filter(ext => !blockedExts.includes(ext)).join(",");
+                    processedValue = exts.filter(ext => !blockedExts.includes(ext) && supported.has(ext)).join(",");
                 } else {
                     processedValue = exts.join(",");
                 }
