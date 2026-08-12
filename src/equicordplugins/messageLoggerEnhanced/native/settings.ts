@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import fs from "fs/promises";
-import path from "path";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 import { getDefaultAttachmentFileExtensions, getDefaultNativeDataDir, getDefaultNativeImageDir } from ".";
 import { attachmentSizeLimitMegabytesOrDefault, parseAllowedAttachmentExtensions } from "./attachmentDownload";
@@ -72,7 +73,14 @@ async function readSettingsFile(): Promise<unknown> {
 async function writeSettingsFile(settings: MLSettings): Promise<void> {
     const serialized = JSON.stringify(settings, null, 4);
     if (Buffer.byteLength(serialized) > MAX_SETTINGS_BYTES) throw new Error("Message Logger settings exceed their safe size");
-    await fs.writeFile(await getSettingsFilePath(), serialized, "utf8");
+    const settingsPath = await getSettingsFilePath();
+    const temporaryPath = `${settingsPath}.${randomUUID()}.tmp`;
+    try {
+        await fs.writeFile(temporaryPath, serialized, { encoding: "utf8", flag: "wx", mode: 0o600 });
+        await fs.rename(temporaryPath, settingsPath);
+    } finally {
+        await fs.unlink(temporaryPath).catch(() => undefined);
+    }
 }
 
 export async function getSettings(): Promise<MLSettings> {

@@ -22,7 +22,7 @@ import { ChannelStore, moment, UserStore } from "@webpack/common";
 
 import { DBMessageStatus } from "../db";
 import { LoggedMessageJSON } from "../types";
-import { DEFAULT_ATTACHMENT_FILE_EXTENSIONS, DEFAULT_IMAGE_CACHE_DIR } from "./constants";
+import { DEFAULT_ATTACHMENT_FILE_EXTENSIONS, DEFAULT_ATTACHMENT_SIZE_LIMIT_MEGABYTES, DEFAULT_IMAGE_CACHE_DIR } from "./constants";
 import { DISCORD_EPOCH } from "./index";
 import { memoize } from "./memoize";
 
@@ -155,7 +155,7 @@ export function getNative(): PluginNative<typeof import("../native")> {
                 imageCacheDir: DEFAULT_IMAGE_CACHE_DIR,
                 logsDir: "",
                 attachmentFileExtensions: DEFAULT_ATTACHMENT_FILE_EXTENSIONS,
-                attachmentSizeLimitInMegabytes: 12
+                attachmentSizeLimitInMegabytes: DEFAULT_ATTACHMENT_SIZE_LIMIT_MEGABYTES
             }),
             init: async () => { },
             getImageNative: async (x: string) => new Uint8Array(0),

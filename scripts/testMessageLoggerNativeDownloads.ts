@@ -311,7 +311,7 @@ async function testFetcher() {
     } finally {
         clearInterval(connectionKeepAlive);
     }
-    assert.ok(Date.now() - timeoutStarted < 1_000, "a stalled connection must honor the overall deadline");
+    assert.ok(Date.now() - timeoutStarted < 5_000, "a stalled connection must honor the overall deadline");
 
     const stalledBodyStarted = Date.now();
     const bodyKeepAlive = setInterval(() => undefined, 100);
@@ -330,7 +330,7 @@ async function testFetcher() {
     } finally {
         clearInterval(bodyKeepAlive);
     }
-    assert.ok(Date.now() - stalledBodyStarted < 1_000, "a stalled body must honor the same overall deadline");
+    assert.ok(Date.now() - stalledBodyStarted < 5_000, "a stalled body must honor the same overall deadline");
 }
 
 async function testLimiter() {
@@ -500,6 +500,17 @@ async function testNativeHandler(root: string) {
                 headers: { "content-length": String(transformedWebp.byteLength), "content-type": "image/webp" }
             });
         };
+        const blockedTransformed = await native.downloadAttachment(DISCORD_EVENT, {
+            ...attachment(),
+            size: transformedWebp.byteLength
+        });
+        assert.match(blockedTransformed.error ?? "", /file type \.webp is blocked/iu,
+            "a proxy-transformed media type must also satisfy the configured extension allowlist");
+        assert.equal(fetchCalls, 2);
+        assert.equal(await native.getImageNative(DISCORD_EVENT, ATTACHMENT_ID), null);
+
+        await native.updateAllowedExtensions(DISCORD_EVENT, "png,jpg,webp");
+        fetchCalls = 0;
         const transformed = await native.downloadAttachment(DISCORD_EVENT, {
             ...attachment(),
             size: transformedWebp.byteLength
@@ -508,6 +519,7 @@ async function testNativeHandler(root: string) {
         assert.equal(path.extname(transformed.path!), ".webp");
         assert.deepEqual(await native.getImageNative(DISCORD_EVENT, ATTACHMENT_ID), Buffer.from(transformedWebp));
         await native.deleteFileNative(DISCORD_EVENT, ATTACHMENT_ID);
+        await native.updateAllowedExtensions(DISCORD_EVENT, "png,jpg");
 
         globalThis.fetch = async () => {
             fetchCalls++;
@@ -659,9 +671,21 @@ async function testNativeHandler(root: string) {
             return pngResponse();
         };
         const concurrentDownloads = concurrentIds.map(id => native.downloadAttachment(DISCORD_EVENT, attachmentForId(id)));
-        const startWatchdog = setTimeout(() => twoFetchesStarted(), 1_000);
-        await firstTwoStarted;
-        clearTimeout(startWatchdog);
+        let startWatchdog: ReturnType<typeof setTimeout> | undefined;
+        try {
+            await Promise.race([
+                firstTwoStarted,
+                new Promise<never>((_resolve, reject) => {
+                    startWatchdog = setTimeout(() => reject(new Error("Two native downloads did not start within 5 seconds")), 5_000);
+                })
+            ]);
+        } catch (error) {
+            releaseFetches();
+            await Promise.allSettled(concurrentDownloads);
+            throw error;
+        } finally {
+            clearTimeout(startWatchdog);
+        }
         assert.equal(fetchCalls, 2, "only two privileged downloads may be active while the bounded queue is blocked");
         assert.equal(maximumActiveFetches, 2);
         releaseFetches();

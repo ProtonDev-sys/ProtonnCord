@@ -365,7 +365,6 @@ export async function fetchDiscordAttachment(
 }
 
 interface OperationWaiter {
-    reject(error: Error): void;
     resolve(release: () => void): void;
     timer: ReturnType<typeof setTimeout>;
 }
@@ -399,7 +398,6 @@ export class BoundedOperationLimiter {
 
         return new Promise((resolve, reject) => {
             const waiter: OperationWaiter = {
-                reject,
                 resolve,
                 timer: setTimeout(() => {
                     const index = this.waiters.indexOf(waiter);
