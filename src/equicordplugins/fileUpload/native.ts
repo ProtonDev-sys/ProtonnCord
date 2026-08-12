@@ -443,7 +443,7 @@ export async function uploadToBuzzheavier(
         try {
             const data = JSON.parse(text) as { code?: number; data?: { id?: string; }; };
             if (data.code === 201 && data.data?.id) {
-                return { success: true, url: `https://buzzheavier.com/${data.data.id}` };
+                return { success: true, url: validateReturnedUrl(`https://buzzheavier.com/${data.data.id}`) };
             }
         } catch {
         }
