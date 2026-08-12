@@ -15,8 +15,8 @@ const OUTPUTS = [
 ] as const;
 const DEV_NATIVE = "src/equicordplugins/userpluginInstaller.dev/native.ts";
 
-function build(dev = false) {
-    execFileSync(process.execPath, [BUILD_SCRIPT, "--standalone", ...dev ? ["--dev"] : []], { stdio: "inherit" });
+function build(...args: string[]) {
+    execFileSync(process.execPath, [BUILD_SCRIPT, "--standalone", ...args], { stdio: "inherit" });
 }
 
 function normalizedSources(sourceMapPath: string): string[] {
@@ -25,13 +25,22 @@ function normalizedSources(sourceMapPath: string): string[] {
 }
 
 try {
-    build(true);
+    build("--dev");
 
     for (const [bundlePath, sourceMapPath] of OUTPUTS) {
         const bundle = readFileSync(bundlePath, "utf8");
         const sources = normalizedSources(sourceMapPath);
         assert.ok(sources.some(source => source.endsWith(DEV_NATIVE)), `${bundlePath} must include development natives in a development build`);
         assert.ok(bundle.includes("UserpluginInstaller"), `${bundlePath} must register development natives in a development build`);
+    }
+
+    build("--reporter");
+
+    for (const [bundlePath, sourceMapPath] of OUTPUTS) {
+        const bundle = readFileSync(bundlePath, "utf8");
+        const sources = normalizedSources(sourceMapPath);
+        assert.ok(sources.some(source => source.endsWith(DEV_NATIVE)), `${bundlePath} must include development natives in a reporter build`);
+        assert.ok(bundle.includes("UserpluginInstaller"), `${bundlePath} must register development natives in a reporter build`);
     }
 } finally {
     build();
