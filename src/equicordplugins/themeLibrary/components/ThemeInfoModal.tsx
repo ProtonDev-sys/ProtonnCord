@@ -10,6 +10,7 @@ import { Heart } from "@components/Heart";
 import { Paragraph } from "@components/Paragraph";
 import { Theme, ThemeInfoModalProps } from "@equicordplugins/themeLibrary/types";
 import { ClockIcon, WarningIcon } from "@equicordplugins/themeLibrary/utils/Icons";
+import { getThemeMetadataHttpsUrl } from "@shared/externalUrls";
 import { copyToClipboard } from "@utils/clipboard";
 import { openInviteModal } from "@utils/discord";
 import { Margins } from "@utils/margins";
@@ -37,7 +38,7 @@ export const ThemeInfoModal: React.FC<ThemeInfoModalProps> = ({ author, theme, .
 
     const themeContent = window.atob(content);
     const metadata = themeContent.match(/\/\*\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+\//g)?.[0] || "";
-    const donate = metadata.match(/@donate\s+(.+)/)?.[1] || "";
+    const donate = getThemeMetadataHttpsUrl(themeContent, "donate");
     const version = metadata.match(/@version\s+(.+)/)?.[1] || "";
     const invite = metadata.match(/@invite\s+(.+)/)?.[1] || "";
 

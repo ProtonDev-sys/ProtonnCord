@@ -30,6 +30,8 @@ import { localStorage } from "@utils/localStorage";
 import { getStylusWebStoreUrl } from "@utils/web";
 import { EXTENSION_BASE_URL, metaReady, RENDERER_CSS_URL } from "@utils/web-metadata";
 
+import { openExternalInBrowser } from "./externalLinks";
+
 // listeners for ipc.on
 const cssListeners = new Set<(css: string) => void>();
 const NOOP = () => { };
@@ -56,7 +58,7 @@ window.VencordNative = {
     native: {
         getVersions: () => ({}),
         supportsWindowsMaterial: () => false,
-        openExternal: async (url) => void open(url, "_blank"),
+        openExternal: async url => void openExternalInBrowser(url),
         getRendererCss: async () => {
             if (IS_USERSCRIPT)
                 // need to wait for next tick for _vcUserScriptRendererCss to be set
@@ -96,7 +98,7 @@ window.VencordNative = {
             if (IS_USERSCRIPT) {
                 const shouldOpenWebStore = confirm("QuickCSS is not supported on the Userscript. You can instead use the Stylus extension.\n\nDo you want to open the Stylus web store page?");
                 if (shouldOpenWebStore) {
-                    window.open(getStylusWebStoreUrl(), "_blank");
+                    openExternalInBrowser(getStylusWebStoreUrl());
                 }
                 return;
             }

@@ -11,6 +11,7 @@ import { Card } from "@components/Card";
 import { HeadingPrimary } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import type { Theme, ThemeLikeProps } from "@equicordplugins/themeLibrary/types";
+import { getThemeMetadataHttpsUrl } from "@shared/externalUrls";
 import { Margins } from "@utils/margins";
 import { User } from "@vencord/discord-types";
 import { FluxDispatcher, Modal, openModal, Parser, React, UserStore, UserUtils } from "@webpack/common";
@@ -100,8 +101,7 @@ export const ThemeCard: React.FC<ThemeCardProps> = ({ theme, themeLinks, likedTh
 
     const handleViewSource = () => {
         const content = window.atob(theme.content);
-        const metadata = content.match(/\/\*\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+\//g)?.[0] || "";
-        const source = metadata.match(/@source\s+(.+)/)?.[1] || "";
+        const source = getThemeMetadataHttpsUrl(content, "source");
 
         if (source) {
             VencordNative.native.openExternal(source);
