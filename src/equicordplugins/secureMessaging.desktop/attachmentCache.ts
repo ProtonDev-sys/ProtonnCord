@@ -167,6 +167,24 @@ async function refreshedAttachmentUrls(message: Message): Promise<Map<string, st
     }
 }
 
+export async function encryptedAttachmentInput(message: Message): Promise<DecryptIncomingAttachmentsInput> {
+    const refreshedUrls = await refreshedAttachmentUrls(message);
+    return {
+        channelId: message.channel_id,
+        content: message.content,
+        discordAuthorId: message.author.id,
+        discordEditedTimestamp: discordEditedTimestamp(message),
+        discordMessageId: message.id,
+        discordNonce: discordMessageNonce(message),
+        attachments: message.attachments.map(attachment => ({
+            id: attachment.id,
+            proxyUrl: refreshedUrls.get(attachment.proxy_url) ?? attachment.proxy_url,
+            size: attachment.size,
+            url: refreshedUrls.get(attachment.url) ?? attachment.url,
+        })),
+    };
+}
+
 function safeInlineMimeType(value: string | null): string {
     const normalized = value?.split(";", 1)[0].trim().toLowerCase() ?? "";
     return SAFE_INLINE_MIME_TYPES.has(normalized) ? normalized : "application/octet-stream";
@@ -247,26 +265,13 @@ function failureReason(result: DecryptIncomingAttachmentsResult): string {
 }
 
 async function loadEntry(message: Message, key: string, entry: AttachmentCacheEntry, localUserId: string): Promise<void> {
-    const refreshedUrls = await refreshedAttachmentUrls(message);
+    const input = await encryptedAttachmentInput(message);
     if (entry.disposed) return;
     if (UserStore.getCurrentUser()?.id !== localUserId) {
         removeEntry(key, entry);
         return;
     }
-    const result = await Native.decryptIncomingAttachments(localUserId, {
-        channelId: message.channel_id,
-        content: message.content,
-        discordAuthorId: message.author.id,
-        discordEditedTimestamp: discordEditedTimestamp(message),
-        discordMessageId: message.id,
-        discordNonce: discordMessageNonce(message),
-        attachments: message.attachments.map(attachment => ({
-            id: attachment.id,
-            proxyUrl: refreshedUrls.get(attachment.proxy_url) ?? attachment.proxy_url,
-            size: attachment.size,
-            url: refreshedUrls.get(attachment.url) ?? attachment.url,
-        })),
-    });
+    const result = await Native.decryptIncomingAttachments(localUserId, input);
     if (entry.disposed) return;
     if (UserStore.getCurrentUser()?.id !== localUserId) {
         removeEntry(key, entry);
@@ -404,22 +409,8 @@ export async function downloadEncryptedAttachmentUrl(value: string): Promise<Dow
     const localUserId = syncCacheAccount();
     if (!reference || !localUserId || reference.localUserId !== localUserId) return null;
     const { message, attachmentId } = reference;
-    const refreshedUrls = await refreshedAttachmentUrls(message);
+    const input = await encryptedAttachmentInput(message);
     if (UserStore.getCurrentUser()?.id !== localUserId) return null;
-    const input: DecryptIncomingAttachmentsInput = {
-        channelId: message.channel_id,
-        content: message.content,
-        discordAuthorId: message.author.id,
-        discordEditedTimestamp: discordEditedTimestamp(message),
-        discordMessageId: message.id,
-        discordNonce: discordMessageNonce(message),
-        attachments: message.attachments.map(attachment => ({
-            id: attachment.id,
-            proxyUrl: refreshedUrls.get(attachment.proxy_url) ?? attachment.proxy_url,
-            size: attachment.size,
-            url: refreshedUrls.get(attachment.url) ?? attachment.url,
-        })),
-    };
     return Native.downloadIncomingAttachment(localUserId, input, attachmentId);
 }
 

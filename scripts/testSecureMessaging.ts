@@ -1,14 +1,25 @@
 import assert from "node:assert/strict";
+import EventEmitter from "node:events";
+
+import type { CloudUpload } from "@vencord/discord-types";
+import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 
 import {
     attachmentBundleRoot,
+    DETACHED_TEXT_FILENAME,
+    DETACHED_TEXT_MIME_TYPE,
     decryptAttachmentBytes,
     encodedImageDimensions,
+    encryptedAttachmentCiphertextSize,
     encryptAttachmentBytes,
     generateAttachmentBundleMaterial,
     parseSecurePlaintext,
     serializeSecurePlaintext,
 } from "../src/equicordplugins/secureMessaging.desktop/attachments";
+import {
+    EncryptedAttachmentUploadLimitError,
+    prepareEncryptedAttachments,
+} from "../src/equicordplugins/secureMessaging.desktop/attachmentUploads";
 import { unchangedEncryptedAttachmentIds } from "../src/equicordplugins/secureMessaging.desktop/attachmentEditValidation";
 import {
     createKeyAnnouncement,
@@ -438,6 +449,7 @@ async function main(): Promise<void> {
     assert.deepEqual(parseSecurePlaintext(securePlaintext), {
         text: "message with files",
         attachments: { ...bundleMaterial.descriptor, root: attachmentRoot },
+        detachedTextIndex: null,
         stickers: [],
     });
     const legacySecurePlaintext = `PCEA1:${JSON.stringify({
@@ -455,11 +467,17 @@ async function main(): Promise<void> {
         `compact attachment descriptor should save at least 20 characters, saved ${attachmentPayloadBytesSaved}`);
     assert.deepEqual(parseSecurePlaintext(legacySecurePlaintext), parseSecurePlaintext(securePlaintext),
         "existing PCEA1 attachment descriptors remain parseable");
-    assert.deepEqual(parseSecurePlaintext("legacy message"), { text: "legacy message", attachments: null, stickers: [] });
+    assert.deepEqual(parseSecurePlaintext("legacy message"), {
+        text: "legacy message",
+        attachments: null,
+        detachedTextIndex: null,
+        stickers: [],
+    });
     const sticker = { formatType: 3, id: "749054660769218631", name: "Wave" };
     assert.deepEqual(parseSecurePlaintext(serializeSecurePlaintext("", null, [sticker])), {
         text: "",
         attachments: null,
+        detachedTextIndex: null,
         stickers: [sticker],
     }, "sticker metadata round-trips through the authenticated rich-content payload");
     const compactStickerPlaintext = serializeSecurePlaintext("", null, [sticker]);
@@ -480,13 +498,138 @@ async function main(): Promise<void> {
     }, [sticker])), {
         text: "sticker and file",
         attachments: { ...bundleMaterial.descriptor, root: attachmentRoot },
+        detachedTextIndex: null,
         stickers: [sticker],
     }, "stickers compose with encrypted attachment descriptors");
     assert.deepEqual(parseSecurePlaintext(serializeSecurePlaintext("PCER1:literal text")), {
         text: "PCER1:literal text",
         attachments: null,
+        detachedTextIndex: null,
         stickers: [],
     }, "rich-content prefix collisions round-trip as ordinary text");
+    const detachedTextPlaintext = serializeSecurePlaintext("", {
+        ...bundleMaterial.descriptor,
+        root: attachmentRoot,
+    }, [sticker], 1);
+    assert.ok(detachedTextPlaintext.startsWith("PCET1:"), "detached text uses its compact authenticated marker");
+    assert.deepEqual(parseSecurePlaintext(detachedTextPlaintext), {
+        text: "",
+        attachments: { ...bundleMaterial.descriptor, root: attachmentRoot },
+        detachedTextIndex: 1,
+        stickers: [sticker],
+    }, "detached message text composes with attachments and stickers");
+    assert.deepEqual(parseSecurePlaintext(serializeSecurePlaintext("PCET1:literal text")), {
+        text: "PCET1:literal text",
+        attachments: null,
+        detachedTextIndex: null,
+        stickers: [],
+    }, "detached-text prefix collisions round-trip as ordinary text");
+    assert.throws(
+        () => serializeSecurePlaintext("inline text", { ...bundleMaterial.descriptor, root: attachmentRoot }, [], 0),
+        /Detached secure message text is invalid/,
+        "detached text markers cannot ambiguously carry inline text",
+    );
+    assert.throws(
+        () => serializeSecurePlaintext("", { ...bundleMaterial.descriptor, root: attachmentRoot }, [], 2),
+        /Detached secure message text is invalid/,
+        "detached text markers are bound to an existing bundle index",
+    );
+    const largeMessageText = `large encrypted body ${"text ".repeat(600)}`;
+    const largeMessageFile = new File([largeMessageText], DETACHED_TEXT_FILENAME, { type: DETACHED_TEXT_MIME_TYPE });
+    const largeMessageUpload = Object.assign(new EventEmitter(), {
+        channelId: CHANNEL_ID,
+        classification: "unknown",
+        clip: null,
+        contentHash: null,
+        currentSize: largeMessageFile.size,
+        description: null,
+        durationSecs: undefined,
+        etag: undefined,
+        error: null,
+        filename: largeMessageFile.name,
+        id: "0",
+        isImage: false,
+        status: "NOT_STARTED" as const,
+        isThumbnail: false,
+        isVideo: false,
+        uploadedFilename: "",
+        responseUrl: "",
+        item: { file: largeMessageFile, origin: "test", platform: CloudUploadPlatform.WEB },
+        loaded: 0,
+        mimeType: largeMessageFile.type,
+        origin: "test",
+        postCompressionSize: undefined,
+        preCompressionSize: largeMessageFile.size,
+        sensitive: false,
+        spoiler: false,
+        startTime: 0,
+        uniqueId: "test",
+        waveform: undefined,
+        async upload() { },
+        cancel() { },
+        async delete() { },
+        getSize() { return this.currentSize; },
+        async maybeConvertToWebP() { },
+        removeFromMsgDraft() { },
+        setFilename(value: string) { this.filename = value; },
+    }) satisfies CloudUpload;
+    const largeMessageMetadata = {
+        description: null,
+        duration: null,
+        height: null,
+        mimeType: DETACHED_TEXT_MIME_TYPE,
+        name: DETACHED_TEXT_FILENAME,
+        size: largeMessageFile.size,
+        spoiler: false,
+        width: null,
+    };
+    const plannedLargeMessageBytes = encryptedAttachmentCiphertextSize(largeMessageMetadata);
+    await assert.rejects(
+        prepareEncryptedAttachments(
+            [largeMessageUpload],
+            "",
+            CHANNEL_ID,
+            ALICE_ID,
+            [],
+            0,
+            plannedLargeMessageBytes - 1,
+        ),
+        (error: unknown) => error instanceof EncryptedAttachmentUploadLimitError &&
+            error.encryptedBytes === plannedLargeMessageBytes && error.limitBytes === plannedLargeMessageBytes - 1,
+        "the exact encrypted file size is rejected before an upload exceeds Discord's current limit",
+    );
+    assert.equal(largeMessageUpload.item.file, largeMessageFile, "failed size preflight leaves the plaintext draft upload untouched");
+    const preparedLargeMessage = await prepareEncryptedAttachments(
+        [largeMessageUpload],
+        "",
+        CHANNEL_ID,
+        ALICE_ID,
+        [],
+        0,
+    );
+    const preparedLargeDescriptor = parseSecurePlaintext(preparedLargeMessage.plaintext);
+    assert.equal(preparedLargeDescriptor.detachedTextIndex, 0);
+    assert.ok(preparedLargeDescriptor.attachments);
+    preparedLargeMessage.apply();
+    const largeMessageCiphertext = new Uint8Array(await largeMessageUpload.item.file.arrayBuffer());
+    assert.equal(preparedLargeMessage.totalUploadBytes, plannedLargeMessageBytes,
+        "the complete encrypted upload size is known exactly before send");
+    assert.equal(largeMessageCiphertext.byteLength, plannedLargeMessageBytes,
+        "the preflighted ciphertext size matches the bytes handed to Discord");
+    assert.equal(new TextDecoder().decode(largeMessageCiphertext).includes(largeMessageText), false,
+        "detached text is never present in its uploaded ciphertext bytes");
+    const openedLargeMessage = await decryptAttachmentBytes({
+        bundleId: preparedLargeDescriptor.attachments.id,
+        channelId: CHANNEL_ID,
+        ciphertext: largeMessageCiphertext,
+        count: preparedLargeDescriptor.attachments.count,
+        index: 0,
+        masterKey: decodeBase64Url(preparedLargeDescriptor.attachments.key, 32),
+        senderUserId: ALICE_ID,
+    });
+    assert.equal(new TextDecoder("utf-8", { fatal: true }).decode(openedLargeMessage.data), largeMessageText);
+    assert.equal(openedLargeMessage.metadata.name, DETACHED_TEXT_FILENAME);
+    assert.equal(openedLargeMessage.metadata.mimeType, DETACHED_TEXT_MIME_TYPE);
     assert.throws(
         () => serializeSecurePlaintext("", null, [sticker, sticker]),
         /duplicates/,

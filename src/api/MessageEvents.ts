@@ -45,6 +45,7 @@ export interface MessageContentOptions {
 }
 
 export interface SendMessageOptions extends MessageContentOptions {
+    attachmentsToUpload?: CloudUpload[];
     messageReference?: Message["messageReference"];
     allowedMentions?: {
         parse: string[];
@@ -77,6 +78,7 @@ export interface MessageEventListenerOptions {
 
 export type MessageSendListener = (channelId: string, messageObj: MessageObject, options: SendMessageOptions, props: SendMessageProps) => Promisable<void | MessageEventListenerResult>;
 export type MessageEditListener = (channelId: string, messageId: string, messageObj: MessageObject) => Promisable<void | MessageEventListenerResult>;
+export type MessageLengthBypassListener = () => boolean;
 
 type MessageEventListener = (...args: any[]) => Promisable<void | MessageEventListenerResult>;
 
@@ -145,15 +147,29 @@ async function runListeners<Listener extends MessageEventListener>(
 
 const sendListeners = createListenerStore<MessageSendListener>();
 const editListeners = createListenerStore<MessageEditListener>();
+const messageLengthBypassListeners = new Set<MessageLengthBypassListener>();
+
+export function _shouldBypassMessageLengthLimit(): boolean {
+    for (const listener of messageLengthBypassListeners) {
+        try {
+            if (listener()) return true;
+        } catch (error) {
+            MessageEventsLogger.error("MessageLengthBypassHandler: Listener encountered an unknown error\n", error);
+        }
+    }
+    return false;
+}
 
 export async function _handlePreSend(channelId: string, messageObj: MessageObject, options: SendMessageOptions, props: SendMessageProps, contentOptions: MessageContentOptions) {
-    options = { ...contentOptions, ...options };
+    const listenerOptions = { ...contentOptions, ...options };
 
-    return runListeners(
+    const cancelled = await runListeners(
         sendListeners,
-        listener => listener(channelId, messageObj, options, props),
+        listener => listener(channelId, messageObj, listenerOptions, props),
         "MessageSendHandler: Listener encountered an unknown error\n",
     );
+    if (listenerOptions.attachmentsToUpload) options.attachmentsToUpload = listenerOptions.attachmentsToUpload;
+    return cancelled;
 }
 
 export async function _handlePreEdit(channelId: string, messageId: string, messageObj: MessageObject) {
@@ -185,6 +201,13 @@ export function removeMessagePreSendListener(listener: MessageSendListener) {
 }
 export function removeMessagePreEditListener(listener: MessageEditListener) {
     return editListeners.registrations.delete(listener);
+}
+export function addMessageLengthBypassListener(listener: MessageLengthBypassListener) {
+    messageLengthBypassListeners.add(listener);
+    return listener;
+}
+export function removeMessageLengthBypassListener(listener: MessageLengthBypassListener) {
+    return messageLengthBypassListeners.delete(listener);
 }
 
 // Message clicks

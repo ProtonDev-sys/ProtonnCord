@@ -17,9 +17,12 @@ import {
     attachmentBundleRoot,
     type AttachmentMetadata,
     decryptAttachmentBytes,
+    DETACHED_TEXT_FILENAME,
+    DETACHED_TEXT_MIME_TYPE,
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENT_CIPHERTEXT_BYTES,
     MAX_ATTACHMENT_COUNT,
+    MAX_DETACHED_TEXT_BYTES,
     MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES,
     parseSecurePlaintext,
     type SecureStickerItem,
@@ -167,6 +170,7 @@ export type DecryptIncomingResult =
     | {
         status: "decrypted";
         attachmentBundle: AttachmentBundleDescriptor | null;
+        detachedTextIndex: number | null;
         plaintext: string;
         stickers: SecureStickerItem[];
         counter: number;
@@ -319,9 +323,10 @@ const ALLOWED_RENDERER_ORIGINS = new Set([
 
 interface AuthenticatedAttachmentCacheEntry {
     data: Uint8Array;
+    downloadable: boolean;
     expiresAt: number;
-    filename: string;
     lastAccess: number;
+    metadata: AttachmentMetadata;
 }
 
 const authenticatedAttachmentCache = new Map<string, AuthenticatedAttachmentCacheEntry>();
@@ -1422,6 +1427,7 @@ function cacheAuthenticatedAttachment(
     localUserId: string,
     input: DecryptIncomingAttachmentsInput,
     attachment: { data: Uint8Array; id: string; metadata: AttachmentMetadata; },
+    downloadable = true,
 ): void {
     if (attachment.data.byteLength > MAX_AUTHENTICATED_ATTACHMENT_CACHE_BYTES) return;
     const key = authenticatedAttachmentCacheKey(localUserId, input, attachment.id);
@@ -1431,9 +1437,10 @@ function cacheAuthenticatedAttachment(
     pruneAuthenticatedAttachmentCache(now, attachment.data.byteLength);
     const entry = {
         data: Uint8Array.from(attachment.data),
+        downloadable,
         expiresAt: now + AUTHENTICATED_ATTACHMENT_CACHE_TTL_MS,
-        filename: attachment.metadata.name,
         lastAccess: now,
+        metadata: { ...attachment.metadata },
     };
     authenticatedAttachmentCache.set(key, entry);
     authenticatedAttachmentCacheBytes += entry.data.byteLength;
@@ -1444,14 +1451,14 @@ function cachedAuthenticatedAttachment(
     localUserId: string,
     input: DecryptIncomingAttachmentsInput,
     attachmentId: string,
-): { data: Uint8Array; filename: string; } | null {
+): { data: Uint8Array; downloadable: boolean; metadata: AttachmentMetadata; } | null {
     const now = Date.now();
     pruneAuthenticatedAttachmentCache(now);
     scheduleAuthenticatedAttachmentCacheCleanup();
     const entry = authenticatedAttachmentCache.get(authenticatedAttachmentCacheKey(localUserId, input, attachmentId));
     if (!entry) return null;
     entry.lastAccess = now;
-    return { data: Uint8Array.from(entry.data), filename: entry.filename };
+    return { data: Uint8Array.from(entry.data), downloadable: entry.downloadable, metadata: { ...entry.metadata } };
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
@@ -2260,6 +2267,7 @@ export async function decryptIncoming(
 
         let plaintext: string | null = null;
         let attachmentBundle: AttachmentBundleDescriptor | null = null;
+        let detachedTextIndex: number | null = null;
         let stickers: SecureStickerItem[] = [];
         for (const identity of localIdentities) {
             try {
@@ -2275,10 +2283,12 @@ export async function decryptIncoming(
                 plaintext = securePlaintext.text;
                 attachmentBundle = securePlaintext.attachments;
                 stickers = securePlaintext.stickers;
+                detachedTextIndex = securePlaintext.detachedTextIndex;
                 break;
             } catch {
                 plaintext = null;
                 attachmentBundle = null;
+                detachedTextIndex = null;
                 stickers = [];
             }
         }
@@ -2298,7 +2308,7 @@ export async function decryptIncoming(
                 exactReplay.seenAt = Date.now();
                 await saveVault(context.vault);
             }
-            return { status: "decrypted", plaintext, attachmentBundle, stickers, counter: envelope.q, envelopeId: envelope.i };
+            return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, counter: envelope.q, envelopeId: envelope.i };
         }
         const optimisticReplay = collisions.find(replay =>
             isConfirmedOptimisticMessage(replay, checkedInput.value, envelope, contentDigest, user.value) ||
@@ -2312,7 +2322,7 @@ export async function decryptIncoming(
             optimisticReplay.discordMessageIdReplacementUsed = true;
             optimisticReplay.seenAt = Date.now();
             await saveVault(context.vault);
-            return { status: "decrypted", plaintext, attachmentBundle, stickers, counter: envelope.q, envelopeId: envelope.i };
+            return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, counter: envelope.q, envelopeId: envelope.i };
         }
         const sameDiscordMessage = collisions.filter(replay => replay.discordMessageId === checkedInput.value.discordMessageId);
         const reusedEnvelope = collisions.some(replay => replay.discordMessageId !== checkedInput.value.discordMessageId);
@@ -2339,8 +2349,35 @@ export async function decryptIncoming(
         if (context.account.replayCache.length > MAX_REPLAY_RECORDS)
             context.account.replayCache.splice(0, context.account.replayCache.length - MAX_REPLAY_RECORDS);
         await saveVault(context.vault);
-        return { status: "decrypted", plaintext, attachmentBundle, stickers, counter: envelope.q, envelopeId: envelope.i };
+        return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, counter: envelope.q, envelopeId: envelope.i };
     });
+}
+
+function resolveDetachedMessageText(
+    decrypted: Extract<DecryptIncomingResult, { status: "decrypted"; }>,
+    attachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }>,
+    clearDetachedData = true,
+): { attachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }>; plaintext: string; } | null {
+    if (decrypted.detachedTextIndex === null) return { attachments, plaintext: decrypted.plaintext };
+    const detached = attachments[decrypted.detachedTextIndex];
+    if (!detached || decrypted.plaintext.length > 0 || detached.data.byteLength < 1 ||
+        detached.data.byteLength > MAX_DETACHED_TEXT_BYTES ||
+        detached.metadata.name !== DETACHED_TEXT_FILENAME || detached.metadata.mimeType !== DETACHED_TEXT_MIME_TYPE ||
+        detached.metadata.size !== detached.data.byteLength || detached.metadata.spoiler ||
+        detached.metadata.description !== null || detached.metadata.width !== null || detached.metadata.height !== null ||
+        detached.metadata.duration !== null)
+        return null;
+    try {
+        const plaintext = new TextDecoder("utf-8", { fatal: true }).decode(detached.data);
+        if (plaintext.length === 0) return null;
+        if (clearDetachedData) detached.data.fill(0);
+        return {
+            attachments: attachments.filter((_, index) => index !== decrypted.detachedTextIndex),
+            plaintext,
+        };
+    } catch {
+        return null;
+    }
 }
 
 export async function decryptIncomingAttachments(
@@ -2361,6 +2398,21 @@ export async function decryptIncomingAttachments(
         return { status: "invalid_message" };
 
     const bundle = decrypted.attachmentBundle;
+    if (decrypted.detachedTextIndex !== null) {
+        const cachedAttachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }> = [];
+        for (const attachment of attachments) {
+            const cached = cachedAuthenticatedAttachment(user.value, checkedInput.value, attachment.id);
+            if (!cached) break;
+            cachedAttachments.push({ id: attachment.id, ...cached });
+        }
+        if (cachedAttachments.length === attachments.length) {
+            const visible = resolveDetachedMessageText(decrypted, cachedAttachments);
+            if (visible) return { status: "decrypted", plaintext: visible.plaintext, attachments: visible.attachments };
+            for (const attachment of cachedAttachments) attachment.data.fill(0);
+            return { status: "invalid_message" };
+        }
+        for (const attachment of cachedAttachments) attachment.data.fill(0);
+    }
     const ciphertexts: Uint8Array[] = [];
     try {
         const masterKey = decodeBase64Url(bundle.key, 32);
@@ -2429,9 +2481,15 @@ export async function decryptIncomingAttachments(
                 id: attachments[index].id,
                 ...outcome.value,
             }));
-            for (const attachment of resolved)
-                cacheAuthenticatedAttachment(user.value, checkedInput.value, attachment);
-            return { status: "decrypted", plaintext: decrypted.plaintext, attachments: resolved };
+            const visible = resolveDetachedMessageText(decrypted, resolved, false);
+            if (!visible) {
+                for (const attachment of resolved) attachment.data.fill(0);
+                return { status: "invalid_message" };
+            }
+            for (const [index, attachment] of resolved.entries())
+                cacheAuthenticatedAttachment(user.value, checkedInput.value, attachment, index !== decrypted.detachedTextIndex);
+            if (decrypted.detachedTextIndex !== null) resolved[decrypted.detachedTextIndex].data.fill(0);
+            return { status: "decrypted", plaintext: visible.plaintext, attachments: visible.attachments };
         } finally {
             masterKey.fill(0);
         }
@@ -2460,9 +2518,10 @@ export async function downloadIncomingAttachment(
     const cached = cachedAuthenticatedAttachment(user.value, checkedInput.value, attachmentId);
     if (cached) {
         try {
+            if (!cached.downloadable) return { status: "invalid_message" };
             return {
                 status: "saved",
-                filename: await saveAuthenticatedAttachment(cached.filename, cached.data),
+                filename: await saveAuthenticatedAttachment(cached.metadata.name, cached.data),
             };
         } catch {
             return { status: "failed", error: "storage_error" };
