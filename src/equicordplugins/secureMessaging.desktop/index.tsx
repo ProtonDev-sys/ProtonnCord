@@ -8,10 +8,12 @@ import "./styles.css";
 
 import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
 import {
+    addMessageLengthBypassListener,
     addMessagePreEditListener,
     addMessagePreSendListener,
     MessageEditListener,
     MessageSendListener,
+    removeMessageLengthBypassListener,
     removeMessagePreEditListener,
     removeMessagePreSendListener,
 } from "@api/MessageEvents";
@@ -24,6 +26,8 @@ import { EquicordDevs } from "@utils/constants";
 import { sendMessage } from "@utils/discord";
 import definePlugin, { PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/discord-types";
+import { CloudUploadPlatform } from "@vencord/discord-types/enums";
+import { findByPropsLazy } from "@webpack";
 import {
     ChannelStore,
     Checkbox,
@@ -36,6 +40,7 @@ import {
     openModal,
     Parser,
     RestAPI,
+    SelectedChannelStore,
     showToast,
     SnowflakeUtils,
     StickersStore,
@@ -62,11 +67,20 @@ import {
 } from "./attachmentCache";
 import { unchangedEncryptedAttachmentIds } from "./attachmentEditValidation";
 import {
+    DETACHED_TEXT_FILENAME,
+    DETACHED_TEXT_MIME_TYPE,
+    MAX_ATTACHMENT_CIPHERTEXT_BYTES,
+    MAX_ATTACHMENT_COUNT,
+    MAX_DETACHED_TEXT_BYTES,
     MAX_STICKER_COUNT,
     type SecureStickerItem,
     serializeSecurePlaintext,
 } from "./attachments";
-import { prepareEncryptedAttachments } from "./attachmentUploads";
+import {
+    EncryptedAttachmentUploadLimitError,
+    type PreparedEncryptedAttachments,
+    prepareEncryptedAttachments,
+} from "./attachmentUploads";
 import { availableSelectedRecipientIds } from "./conversationSelection";
 import {
     clearEncryptedMessageDecryptCache,
@@ -88,11 +102,12 @@ import type {
     ConversationResult,
     ConversationSnapshot,
     DecryptIncomingResult,
+    EncryptOutgoingResult,
     IdentityResult,
     IdentitySummary,
     NativeFailure,
 } from "./native";
-import { isEncryptedMessage, isKeyAnnouncement, parseEncryptedEnvelope } from "./protocol";
+import { isEncryptedMessage, isKeyAnnouncement, MAX_DISCORD_MESSAGE_LENGTH, parseEncryptedEnvelope } from "./protocol";
 import {
     authorizeScopedAttachmentUploadReservations,
     authorizeScopedWireEdit,
@@ -108,6 +123,9 @@ import {
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const SECURE_LISTENER_PRIORITY = 1_000_000;
+const UploadLimits = findByPropsLazy("getUserMaxFileSize") as {
+    getUserMaxFileSize(user: unknown): unknown;
+};
 
 type ScreenCaptureProtectionStatus = "disabled" | "failed" | "pending" | "ready" | "screenshot";
 
@@ -317,6 +335,7 @@ let originalAttachmentUpload: CloudUpload["upload"] | null = null;
 let guardedAttachmentUpload: CloudUpload["upload"] | null = null;
 let attachmentGuardGeneration = 0;
 let approvedAttachmentUploads = new WeakMap<CloudUpload, { file: File; scope: string; }>();
+let detachedTextUploads = new WeakSet<CloudUpload>();
 let preparedOutgoingMessages = new WeakMap<object, { ciphertext: string; plaintext: string; }>();
 let requestAuthorizationScopes = new WeakMap<object, string>();
 let secureRuntimeUserId: string | null = null;
@@ -327,16 +346,88 @@ let guardedStartEditMessage: StartEditMessage | null = null;
 let originalStartEditMessageRecord: StartEditMessageRecord | null = null;
 let guardedStartEditMessageRecord: StartEditMessageRecord | null = null;
 let editStarterGeneration = 0;
+let messageLengthBypassGeneration = 0;
+let selectedChannelListenerInstalled = false;
+const messageLengthBypassKeys = new Set<string>();
 
 function secureOperationIsCurrent(generation: number, localUserId?: string): boolean {
     return generation === secureOperationGeneration &&
         (localUserId === undefined || UserStore.getCurrentUser()?.id === localUserId);
 }
 
+function messageLengthBypassKey(localUserId: string, channelId: string): string {
+    return `${localUserId}\0${channelId}`;
+}
+
+function updateMessageLengthBypass(
+    context: { localUserId: string; snapshot: ConversationSnapshot; },
+    conversation: ConversationResult,
+): boolean {
+    const key = messageLengthBypassKey(context.localUserId, context.snapshot.channelId);
+    const enabled = !isNativeFailure(conversation) && conversation.status === "enabled";
+    if (enabled) messageLengthBypassKeys.add(key);
+    else messageLengthBypassKeys.delete(key);
+    return enabled;
+}
+
+async function refreshMessageLengthBypassState(channelId = SelectedChannelStore.getChannelId()): Promise<boolean> {
+    const generation = ++messageLengthBypassGeneration;
+    const localUserId = UserStore.getCurrentUser()?.id;
+    if (!localUserId || !channelId) return false;
+    const snapshot = snapshotForChannel(ChannelStore.getChannel(channelId), localUserId);
+    if (!snapshot) {
+        messageLengthBypassKeys.delete(messageLengthBypassKey(localUserId, channelId));
+        return false;
+    }
+    const context = { localUserId, snapshot };
+    try {
+        const conversation = await Native.getConversation(localUserId, snapshot);
+        if (generation !== messageLengthBypassGeneration || UserStore.getCurrentUser()?.id !== localUserId)
+            return false;
+        return updateMessageLengthBypass(context, conversation);
+    } catch {
+        if (generation === messageLengthBypassGeneration)
+            messageLengthBypassKeys.delete(messageLengthBypassKey(localUserId, channelId));
+        return false;
+    }
+}
+
+function shouldBypassMessageLengthLimit(): boolean {
+    const localUserId = UserStore.getCurrentUser()?.id;
+    const channelId = SelectedChannelStore.getChannelId();
+    return screenCaptureProtectionStatus === "ready" && Boolean(
+        localUserId && channelId && messageLengthBypassKeys.has(messageLengthBypassKey(localUserId, channelId)),
+    );
+}
+
+function handleSelectedChannelChange(): void {
+    void refreshMessageLengthBypassState();
+}
+
+function installMessageLengthBypass(): void {
+    if (!selectedChannelListenerInstalled) {
+        SelectedChannelStore.addChangeListener(handleSelectedChannelChange);
+        selectedChannelListenerInstalled = true;
+    }
+    addMessageLengthBypassListener(shouldBypassMessageLengthLimit);
+    void refreshMessageLengthBypassState();
+}
+
+function uninstallMessageLengthBypass(): void {
+    messageLengthBypassGeneration++;
+    if (selectedChannelListenerInstalled) {
+        SelectedChannelStore.removeChangeListener(handleSelectedChannelChange);
+        selectedChannelListenerInstalled = false;
+    }
+    removeMessageLengthBypassListener(shouldBypassMessageLengthLimit);
+    messageLengthBypassKeys.clear();
+}
+
 function revokePreparedSecureOperations(): void {
     clearWirePayloadAuthorizations();
     permittedAnnouncements.clear();
     approvedAttachmentUploads = new WeakMap();
+    detachedTextUploads = new WeakSet();
     preparedOutgoingMessages = new WeakMap();
     requestAuthorizationScopes = new WeakMap();
 }
@@ -390,7 +481,10 @@ function reviewKeyAnnouncementInBackground(message: Message | undefined): void {
             if (isNativeFailure(result)) keyReviewGate.fail(localUserId, peerUserId, attemptId);
             else {
                 keyReviewGate.succeed(localUserId, peerUserId, attemptId);
-                if (result.status === "key_changed") invalidateSecureRenderCaches();
+                if (result.status === "key_changed") {
+                    invalidateSecureRenderCaches();
+                    void refreshMessageLengthBypassState();
+                }
             }
         })
         .catch(() => keyReviewGate.fail(localUserId, peerUserId, attemptId))
@@ -430,7 +524,7 @@ function failureMessage(failure: NativeFailure): string {
     }
     if (failure.error === "attachment_download_failed") return "The encrypted attachment could not be downloaded from Discord.";
     if (failure.error === "attachment_too_large") return "The encrypted attachment exceeds Secure Messaging's safety limit.";
-    if (failure.error === "message_too_long") return "The encrypted envelope would exceed Discord's 2,000 character limit. Shorten the message or select fewer recipients.";
+    if (failure.error === "message_too_long") return "The encrypted header still exceeds Discord's 2,000 character limit. Select fewer recipients.";
     if (failure.error === "counter_exhausted") return "This identity's message counter is exhausted. Rotate the identity before sending again.";
     if (failure.error === "capacity_exceeded") return "The encrypted vault reached a safety limit.";
     if (failure.error === "cryptographic_operation_failed") return "The cryptographic operation failed.";
@@ -589,6 +683,59 @@ function blockedOutgoingReason(
     if (!messageContent && (!Array.isArray(options.uploads) || options.uploads.length === 0) && stickerIds.length === 0)
         return "Enter text, choose a GIF or sticker, or attach a file to send an encrypted message.";
     return null;
+}
+
+function detachedTextUploadIndex(uploads: CloudUpload[], plaintext: string): number | null {
+    const marked = uploads.map((upload, index) => detachedTextUploads.has(upload) ? index : -1).filter(index => index !== -1);
+    if (marked.length > 1) throw new Error("Secure Messaging found conflicting encrypted message text attachments");
+    if (marked.length === 1) return marked[0];
+    if (plaintext.length > 0) return null;
+
+    const candidates = uploads.map((upload, index) => {
+        const file = upload.item?.file;
+        const filename = upload.filename || file?.name;
+        const mimeType = file?.type.split(";", 1)[0].trim().toLowerCase();
+        return file instanceof File && file.size > MAX_DISCORD_MESSAGE_LENGTH &&
+            typeof filename === "string" && filename.toLowerCase() === DETACHED_TEXT_FILENAME && mimeType === "text/plain"
+            ? index
+            : -1;
+    }).filter(index => index !== -1);
+    if (candidates.length !== 1) return null;
+    detachedTextUploads.add(uploads[candidates[0]]);
+    return candidates[0];
+}
+
+function appendDetachedTextUpload(uploads: CloudUpload[], plaintext: string, channelId: string): number | string {
+    if (uploads.length >= MAX_ATTACHMENT_COUNT)
+        return `Large encrypted messages need one free attachment slot. Remove a file and keep at most ${MAX_ATTACHMENT_COUNT - 1}.`;
+    const file = new File([plaintext], DETACHED_TEXT_FILENAME, {
+        type: DETACHED_TEXT_MIME_TYPE,
+        lastModified: Date.now(),
+    });
+    if (file.size < 1 || file.size > MAX_DETACHED_TEXT_BYTES)
+        return `Encrypted message text must be smaller than ${formatUploadBytes(MAX_ATTACHMENT_CIPHERTEXT_BYTES)} before encryption.`;
+    const upload = new CloudUploader({ file, platform: CloudUploadPlatform.WEB }, channelId);
+    uploads.push(upload);
+    detachedTextUploads.add(upload);
+    return uploads.length - 1;
+}
+
+function discordUploadLimitBytes(): number {
+    const user = UserStore.getCurrentUser();
+    const value = user ? UploadLimits.getUserMaxFileSize(user) : null;
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 21)
+        throw new Error("Discord's attachment upload limit is unavailable");
+    return Math.min(value, MAX_ATTACHMENT_CIPHERTEXT_BYTES);
+}
+
+function formatUploadBytes(value: number): string {
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) {
+        const kibibytes = value / 1024;
+        return `${kibibytes >= 10 ? kibibytes.toFixed(1) : kibibytes.toFixed(2)} KiB`;
+    }
+    const mebibytes = value / (1024 * 1024);
+    return `${mebibytes >= 10 ? mebibytes.toFixed(1) : mebibytes.toFixed(2)} MiB`;
 }
 
 function reservationFiles(body: unknown): Array<{ filename: string; size: number; }> | null {
@@ -875,6 +1022,8 @@ async function encryptEditedMessage(
         throw new Error(decrypted.status === "replay_detected"
             ? "The original encrypted message conflicts with its authenticated history."
             : "The original encrypted message could not be authenticated for editing.");
+    if (decrypted.detachedTextIndex !== null)
+        throw new Error("Large encrypted messages cannot be edited because Discord cannot replace their encrypted text attachment.");
     if ((decrypted.attachmentBundle?.count ?? 0) !== original.attachments.length)
         throw new Error("The encrypted attachment set is incomplete, so the message cannot be edited safely.");
     if (plaintext.length === 0 && !decrypted.attachmentBundle && (decrypted.stickers?.length ?? 0) === 0)
@@ -1043,6 +1192,10 @@ function openEncryptedMessageEditor(
             showToast("The encrypted message could not be authenticated for editing.", Toasts.Type.FAILURE);
             return;
         }
+        if (result.detachedTextIndex !== null) {
+            showToast("Large encrypted messages cannot be edited because Discord cannot replace their encrypted text attachment.", Toasts.Type.FAILURE);
+            return;
+        }
         if (MessageStore.getMessage(message.channel_id, message.id)?.content !== message.content) return;
         openEditor(result.plaintext);
     };
@@ -1104,6 +1257,8 @@ function uninstallNetworkGuard(): void {
 
 const outgoingListener: MessageSendListener = async (channelId, message, options, props) => {
     const generation = secureOperationGeneration;
+    let generatedDetachedUpload: { upload: CloudUpload; uploads: CloudUpload[]; } | null = null;
+    let generatedDetachedUploadCommitted = false;
     try {
         const context = currentSnapshot(props.channel);
         if (!context || context.snapshot.channelId !== channelId) return;
@@ -1112,6 +1267,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
 
         const conversation = await Native.getConversation(context.localUserId, context.snapshot);
         if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
+        updateMessageLengthBypass(context, conversation);
         if (!requiresFailClosedSend(conversation)) return;
 
         if (isNativeFailure(conversation)) {
@@ -1139,14 +1295,56 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
         const stickers = await resolveSelectedStickers(stickerIds ?? []);
         if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         const uploads = Array.isArray(options.uploads) ? options.uploads : [];
-        const preparedAttachments = uploads.length > 0
-            ? await prepareEncryptedAttachments(uploads, plaintext, channelId, context.localUserId, stickers)
+        const uploadLimitBytes = discordUploadLimitBytes();
+        let detachedTextIndex = detachedTextUploadIndex(uploads, plaintext);
+        if (detachedTextIndex === null && plaintext.length > MAX_DISCORD_MESSAGE_LENGTH) {
+            const appended = appendDetachedTextUpload(uploads, plaintext, channelId);
+            if (typeof appended === "string") {
+                showToast(appended, Toasts.Type.FAILURE);
+                return { cancel: true };
+            }
+            detachedTextIndex = appended;
+            generatedDetachedUpload = { upload: uploads[appended], uploads };
+        }
+        let preparedAttachments: PreparedEncryptedAttachments | null = uploads.length > 0
+            ? await prepareEncryptedAttachments(
+                uploads,
+                detachedTextIndex === null ? plaintext : "",
+                channelId,
+                context.localUserId,
+                stickers,
+                detachedTextIndex,
+                uploadLimitBytes,
+            )
             : null;
         if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
-        const encrypted = await Native.encryptOutgoing(context.localUserId, {
+        let encrypted: EncryptOutgoingResult = await Native.encryptOutgoing(context.localUserId, {
             plaintext: preparedAttachments?.plaintext ?? serializeSecurePlaintext(plaintext, null, stickers),
             snapshot: context.snapshot,
         });
+        if (encrypted.status === "failed" && encrypted.error === "message_too_long" && detachedTextIndex === null) {
+            const appended = appendDetachedTextUpload(uploads, plaintext, channelId);
+            if (typeof appended === "string") {
+                showToast(appended, Toasts.Type.FAILURE);
+                return { cancel: true };
+            }
+            detachedTextIndex = appended;
+            generatedDetachedUpload = { upload: uploads[appended], uploads };
+            preparedAttachments = await prepareEncryptedAttachments(
+                uploads,
+                "",
+                channelId,
+                context.localUserId,
+                stickers,
+                detachedTextIndex,
+                uploadLimitBytes,
+            );
+            if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
+            encrypted = await Native.encryptOutgoing(context.localUserId, {
+                plaintext: preparedAttachments.plaintext,
+                snapshot: context.snapshot,
+            });
+        }
         if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         if (encrypted.status !== "encrypted") {
             if (isNativeFailure(encrypted)) showFailure(encrypted);
@@ -1155,7 +1353,18 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
         }
 
         void prefetchEncryptedMessageEmbeds(plaintext);
+        if (detachedTextIndex !== null && preparedAttachments) {
+            const detachedBytes = preparedAttachments.files[detachedTextIndex].size;
+            showToast(
+                `Encrypted message text will upload ${formatUploadBytes(detachedBytes)} of Discord's ${formatUploadBytes(uploadLimitBytes)} per-file limit.`,
+                Toasts.Type.MESSAGE,
+            );
+        }
         preparedAttachments?.apply();
+        if (detachedTextIndex !== null) {
+            options.uploads = uploads;
+            options.attachmentsToUpload = uploads;
+        }
         clearOutgoingStickers(options);
         const attachmentFilenames = preparedAttachments?.files.map(file => file.filename) ?? [];
         const scope = conversationAuthorizationScope(context.localUserId, conversation);
@@ -1166,10 +1375,19 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
         message.content = encrypted.content;
         preparedOutgoingMessages.set(message, { ciphertext: encrypted.content, plaintext });
         for (const upload of uploads) approvedAttachmentUploads.set(upload, { file: upload.item.file, scope });
+        generatedDetachedUploadCommitted = true;
         return { stop: true };
-    } catch {
-        showToast("Secure Messaging stopped the send because encryption failed unexpectedly.", Toasts.Type.FAILURE);
+    } catch (error) {
+        showToast(error instanceof EncryptedAttachmentUploadLimitError
+            ? `Encrypted ${error.filename} would use ${formatUploadBytes(error.encryptedBytes)}; Discord allows ${formatUploadBytes(error.limitBytes)} per file.`
+            : "Secure Messaging stopped the send because encryption failed unexpectedly.", Toasts.Type.FAILURE);
         return { cancel: true };
+    } finally {
+        if (generatedDetachedUpload && !generatedDetachedUploadCommitted) {
+            const index = generatedDetachedUpload.uploads.indexOf(generatedDetachedUpload.upload);
+            if (index !== -1) generatedDetachedUpload.uploads.splice(index, 1);
+            detachedTextUploads.delete(generatedDetachedUpload.upload);
+        }
     }
 };
 
@@ -1292,6 +1510,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
             ]);
             setIdentity(nextIdentity);
             setConversation(nextConversation);
+            updateMessageLengthBypass(context, nextConversation);
             if (conversationHasDetails(nextConversation)) {
                 setSelectedRecipientIds(availableSelectedRecipientIds(nextConversation));
                 setEnableEncryption(nextConversation.status === "enabled");
@@ -1333,6 +1552,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
             });
             revokePreparedSecureOperations();
             setConversation(result);
+            updateMessageLengthBypass(context, result);
             if (result.status === "enabled" || result.status === "disabled") {
                 showToast(result.status === "enabled" ? "Encrypted sending enabled." : "Encrypted sending disabled.", Toasts.Type.SUCCESS);
                 modalProps.onClose();
@@ -1479,7 +1699,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                 <section className="pc-secure-modal-section">
                     <Heading tag="h5">Important limitations</Heading>
                     <BaseText size="xs" color="text-muted">
-                        The current PCEM2 protocol encrypts text, GIF-picker links, sticker metadata, and ordinary file attachments. Received files are fully downloaded, authenticated, and decrypted locally before Discord's normal renderers display them. Authentication proves the verified sender supplied the bytes, not that a file is harmless: Discord can scan only the opaque ciphertext, so keep normal operating-system and antivirus protections enabled. Your encrypted messages can be edited while retaining their existing encrypted attachments and stickers; attachment-set changes and commands remain blocked. Discord still sees who talks, when, ciphertext sizes, attachment counts, channel membership, edit timing, and reply metadata. Normal link and GIF previews disclose their URL to Discord's unfurl service; displaying a sticker requests its asset ID from Discord's media CDN. The protocol has no forward secrecy or post-compromise healing, and a compromised client or plugin can read plaintext while it is displayed.
+                        The current PCEM2 protocol encrypts text, GIF-picker links, sticker metadata, and ordinary file attachments. Short text stays inline; text that would overflow Discord's message limit uses one opaque encrypted attachment and is reconstructed locally as a normal message. Its exact encrypted size, including private metadata and authentication overhead, must fit the upload limit Discord reports for your account. Received files are fully downloaded, authenticated, and decrypted locally before Discord's normal renderers display them. Authentication proves the verified sender supplied the bytes, not that a file is harmless: Discord can scan only the opaque ciphertext, so keep normal operating-system and antivirus protections enabled. Inline encrypted messages can be edited while retaining their existing encrypted attachments and stickers; large detached text, attachment-set changes, and commands remain blocked from editing. Discord still sees who talks, when, ciphertext sizes, attachment counts, channel membership, edit timing, and reply metadata. Normal link and GIF previews disclose their URL to Discord's unfurl service; displaying a sticker requests its asset ID from Discord's media CDN. The protocol has no forward secrecy or post-compromise healing, and a compromised client or plugin can read plaintext while it is displayed.
                     </BaseText>
                 </section>
 
@@ -1522,7 +1742,12 @@ const SecureMessagingButton: ChatBarButtonFactory = ({ channel, isMainChat }) =>
         if (!context) return () => { active = false; };
         setStatus("loading");
         void Native.getConversation(context.localUserId, context.snapshot)
-            .then(result => { if (active) setStatus(result.status); })
+            .then(result => {
+                if (active) {
+                    updateMessageLengthBypass(context, result);
+                    setStatus(result.status);
+                }
+            })
             .catch(() => { if (active) setStatus("failed"); });
         return () => { active = false; };
     }, [channel.id, context?.localUserId, participantsKey]);
@@ -1612,11 +1837,12 @@ function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: 
     const status = encryptedAttachmentStatus(message);
     if (status.status === "ready") {
         const mediaAttachments = encryptedMediaAttachments(message);
+        const downloads = encryptedAttachmentDownloads(message);
         return (
             <>
                 {mediaAttachments.map(attachment => <SecureMediaAttachment key={attachment.id} attachment={attachment} />)}
-                <div className="pc-secure-card-actions">
-                    {encryptedAttachmentDownloads(message).map(attachment => (
+                {downloads.length > 0 && <div className="pc-secure-card-actions">
+                    {downloads.map(attachment => (
                         <Button
                             key={attachment.id}
                             className="pc-secure-download"
@@ -1626,7 +1852,7 @@ function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: 
                             Download {attachment.filename}
                         </Button>
                     ))}
-                </div>
+                </div>}
             </>
         );
     }
@@ -1990,9 +2216,11 @@ export default definePlugin({
             installAttachmentUploadGuard();
             installNetworkGuard();
             installEncryptedEditStarter();
+            installMessageLengthBypass();
             document.addEventListener("click", handleEncryptedAttachmentDownload, true);
         } catch (error) {
             document.removeEventListener("click", handleEncryptedAttachmentDownload, true);
+            uninstallMessageLengthBypass();
             uninstallEncryptedEditStarter();
             uninstallNetworkGuard();
             uninstallAttachmentUploadGuard();
@@ -2024,6 +2252,7 @@ export default definePlugin({
         screenCaptureProtectionGeneration++;
         setScreenCaptureProtectionStatus("disabled");
         document.removeEventListener("click", handleEncryptedAttachmentDownload, true);
+        uninstallMessageLengthBypass();
         uninstallEncryptedEditStarter();
         uninstallAttachmentUploadGuard();
         uninstallNetworkGuard();
@@ -2064,6 +2293,10 @@ export default definePlugin({
     },
 
     useSecureReplyPreview,
+
+    shouldBypassMessageLengthLimit,
+
+    refreshMessageLengthBypassState,
 
     getScreenCaptureProtectionStatus() {
         return screenCaptureProtectionStatus;

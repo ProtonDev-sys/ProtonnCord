@@ -2,12 +2,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const repository = "ProtonDev-sys/ProtonnCord";
+const buildCommon = readFileSync("scripts/build/common.mjs", "utf8");
 const patcher = readFileSync("dist/desktop/patcher.js", "utf8");
 const gitUpdater = readFileSync("src/main/updater/git.ts", "utf8");
 const gitOperations = readFileSync("src/main/updater/gitOperations.ts", "utf8");
 const workflow = readFileSync(".github/workflows/build.yml", "utf8");
 
 assert.match(patcher, /\/\/ Standalone: true/u, "the repository test must inspect a freshly built standalone updater");
+assert.match(
+    buildCommon,
+    /IS_UPDATER_DISABLED = IS_DEV \|\| process\.argv\.includes\("--disable-updater"\)/u,
+    "development builds must disable the updater even when --disable-updater was not passed separately",
+);
 assert.ok(
     patcher.includes("https://api.github.com/repos/") && patcher.includes(repository),
     "the production updater checks the Protonn Cord GitHub repository",

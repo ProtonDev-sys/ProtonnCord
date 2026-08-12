@@ -10,12 +10,17 @@ import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 import {
     attachmentBundleRoot,
     type AttachmentMetadata,
+    DETACHED_TEXT_FILENAME,
+    DETACHED_TEXT_MIME_TYPE,
     encodedImageDimensions,
     encryptAttachmentBytes,
+    encryptedAttachmentCiphertextSize,
     encryptedAttachmentFilename,
     generateAttachmentBundleMaterial,
+    MAX_ATTACHMENT_CIPHERTEXT_BYTES,
     MAX_ATTACHMENT_COUNT,
-    MAX_TOTAL_ATTACHMENT_BYTES,
+    MAX_DETACHED_TEXT_BYTES,
+    MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES,
     type SecureStickerItem,
     serializeSecurePlaintext,
 } from "./attachments";
@@ -45,6 +50,18 @@ export interface PreparedEncryptedAttachments {
     apply(): void;
     files: Array<{ filename: string; size: number; }>;
     plaintext: string;
+    totalUploadBytes: number;
+}
+
+export class EncryptedAttachmentUploadLimitError extends Error {
+    constructor(
+        public readonly filename: string,
+        public readonly encryptedBytes: number,
+        public readonly limitBytes: number,
+    ) {
+        super(`Encrypted attachment ${filename} requires ${encryptedBytes} bytes but Discord allows ${limitBytes}`);
+        this.name = "EncryptedAttachmentUploadLimitError";
+    }
 }
 
 function assertUpload(upload: CloudUpload): asserts upload is MutableCloudUpload {
@@ -187,16 +204,44 @@ export async function prepareEncryptedAttachments(
     channelId: string,
     senderUserId: string,
     stickers: SecureStickerItem[] = [],
+    detachedTextIndex: number | null = null,
+    maxEncryptedFileBytes = MAX_ATTACHMENT_CIPHERTEXT_BYTES,
 ): Promise<PreparedEncryptedAttachments> {
     if (uploads.length < 1 || uploads.length > MAX_ATTACHMENT_COUNT)
         throw new Error(`Secure Messaging supports 1 to ${MAX_ATTACHMENT_COUNT} attachments per message`);
+    if (!Number.isSafeInteger(maxEncryptedFileBytes) || maxEncryptedFileBytes < 21 ||
+        maxEncryptedFileBytes > MAX_ATTACHMENT_CIPHERTEXT_BYTES)
+        throw new Error("Discord's encrypted attachment upload limit is invalid");
     for (const upload of uploads) assertUpload(upload);
     const sources = uploads.map(sourceForUpload);
-    const totalSize = sources.reduce((total, source) => total + source.file.size, 0);
-    if (totalSize > MAX_TOTAL_ATTACHMENT_BYTES)
-        throw new Error("Secure Messaging attachments exceed the 200 MiB per-message safety limit");
 
+    if (detachedTextIndex !== null && (!Number.isInteger(detachedTextIndex) ||
+        detachedTextIndex < 0 || detachedTextIndex >= uploads.length || sources[detachedTextIndex].file.size > MAX_DETACHED_TEXT_BYTES))
+        throw new Error("The encrypted message text attachment is invalid or too large");
     const metadata = await Promise.all(uploads.map((upload, index) => metadataForUpload(upload, sources[index])));
+    if (detachedTextIndex !== null) {
+        metadata[detachedTextIndex] = {
+            name: DETACHED_TEXT_FILENAME,
+            mimeType: DETACHED_TEXT_MIME_TYPE,
+            size: sources[detachedTextIndex].file.size,
+            spoiler: false,
+            description: null,
+            width: null,
+            height: null,
+            duration: null,
+        };
+    }
+    const plannedSizes = metadata.map(encryptedAttachmentCiphertextSize);
+    const oversizedIndex = plannedSizes.findIndex(size => size > maxEncryptedFileBytes);
+    if (oversizedIndex !== -1)
+        throw new EncryptedAttachmentUploadLimitError(
+            metadata[oversizedIndex].name,
+            plannedSizes[oversizedIndex],
+            maxEncryptedFileBytes,
+        );
+    const totalUploadBytes = plannedSizes.reduce((total, size) => total + size, 0);
+    if (!Number.isSafeInteger(totalUploadBytes) || totalUploadBytes > MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES)
+        throw new Error("Secure Messaging encrypted attachments exceed the 500 MiB per-message safety limit");
     const { descriptor, keyBytes } = generateAttachmentBundleMaterial(uploads.length);
     const ciphertexts: Uint8Array[] = [];
     try {
@@ -247,7 +292,8 @@ export async function prepareEncryptedAttachments(
                 }
             },
             files: replacements.map(({ encryptedFile, filename }) => ({ filename, size: encryptedFile.size })),
-            plaintext: serializeSecurePlaintext(text, { ...descriptor, root }, stickers),
+            plaintext: serializeSecurePlaintext(text, { ...descriptor, root }, stickers, detachedTextIndex),
+            totalUploadBytes,
         };
     } finally {
         keyBytes.fill(0);

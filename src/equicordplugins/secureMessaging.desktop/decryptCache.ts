@@ -8,8 +8,9 @@ import { sleep } from "@utils/misc";
 import type { PluginNative } from "@utils/types";
 import type { Message } from "@vencord/discord-types";
 
+import { encryptedAttachmentInput } from "./attachmentCache";
 import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
-import type { DecryptIncomingResult } from "./native";
+import type { DecryptIncomingAttachmentsResult, DecryptIncomingResult } from "./native";
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const MAX_CACHE_ENTRIES = 512;
@@ -35,6 +36,7 @@ export function decryptCacheKey(localUserId: string, message: Message): string {
         discordEditedTimestamp(message) ?? "",
         discordMessageNonce(message) ?? "",
         message.content,
+        message.attachments.map(attachment => `${attachment.id}:${attachment.size}`).join(","),
     ].join("\0");
 }
 
@@ -61,6 +63,14 @@ async function decryptWithRetry(
             discordMessageId: message.id,
             discordNonce: discordMessageNonce(message),
         }).catch((): DecryptIncomingResult => ({ status: "failed", error: "cryptographic_operation_failed" }));
+        if (result.status === "decrypted" && result.detachedTextIndex !== null) {
+            const expanded = await encryptedAttachmentInput(message)
+                .then(input => Native.decryptIncomingAttachments(localUserId, input))
+                .catch((): DecryptIncomingAttachmentsResult => ({ status: "failed", error: "attachment_download_failed" }));
+            result = expanded.status === "decrypted"
+                ? { ...result, plaintext: expanded.plaintext }
+                : expanded;
+        }
         if (generation !== cacheGeneration || !isCurrent())
             return { status: "failed", error: "cryptographic_operation_failed" };
         if (!isTransientFailure(result)) break;

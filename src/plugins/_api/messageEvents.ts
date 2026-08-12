@@ -25,6 +25,13 @@ export default definePlugin({
     authors: [Devs.Arjix, Devs.hunt, Devs.Ven],
     patches: [
         {
+            find: 'type:"MESSAGE_LENGTH_UPSELL"',
+            replacement: {
+                match: /if\((\i)\.length>(\i)/,
+                replace: "if(!Vencord.Api.MessageEvents._shouldBypassMessageLengthLimit()&&$1.length>$2",
+            },
+        },
+        {
             find: "#{intl::EDIT_TEXTAREA_HELP}",
             replacement: {
                 match: /(?<=,channel:\i,message:\i\}\)\.then\().+?(?=\i\.content!==this\.props\.message\.content&&\i\((.+?)\)\})/,
