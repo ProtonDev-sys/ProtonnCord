@@ -9,6 +9,7 @@ import type {
     MessageContentOptions,
     MessageEditListener,
     MessageEventListenerOptions,
+    MessageLengthBypassListener,
     MessageObject,
     MessageSendListener,
     SendMessageOptions,
@@ -113,6 +114,37 @@ function testCurrentDiscordSendPatch(): void {
     assert.doesNotThrow(() => Function(patched), "the patched current Discord chat-input source must remain valid JavaScript");
 }
 
+function testCurrentDiscordMessageLengthPatch(): void {
+    const patch = messageEventsPlugin.patches?.find(candidate => candidate.find === 'type:"MESSAGE_LENGTH_UPSELL"');
+    assert(patch, "the MessageEvents message-length patch exists");
+    const replacement = Array.isArray(patch.replacement) ? patch.replacement[0] : patch.replacement;
+    assert(replacement, "the MessageEvents message-length replacement exists");
+
+    const source = 'function validate(content,limit){if(content.length>limit)return{type:"MESSAGE_LENGTH_UPSELL"};return null}';
+    const patched = source.replace(canonicalizeMatch(replacement.match), replacement.replace);
+    assert.notEqual(patched, source, "the current Discord message-length source must match the MessageEvents patch");
+    assert.match(patched, /!Vencord\.Api\.MessageEvents\._shouldBypassMessageLengthLimit\(\)&&content\.length>limit/);
+    assert.doesNotThrow(() => Function(patched), "the patched message-length check must remain valid JavaScript");
+}
+
+function testMessageLengthBypassListeners(events: MessageEventsModule): void {
+    const falseListener: MessageLengthBypassListener = () => false;
+    const throwingListener: MessageLengthBypassListener = () => { throw new Error("expected predicate failure"); };
+    const trueListener: MessageLengthBypassListener = () => true;
+
+    assert.equal(events._shouldBypassMessageLengthLimit(), false, "Discord's length limit remains active without an explicit listener");
+    assert.equal(events.addMessageLengthBypassListener(falseListener), falseListener);
+    events.addMessageLengthBypassListener(throwingListener);
+    assert.equal(events._shouldBypassMessageLengthLimit(), false, "false and throwing predicates fail closed");
+    events.addMessageLengthBypassListener(trueListener);
+    assert.equal(events._shouldBypassMessageLengthLimit(), true, "one explicit predicate can route oversized text through pre-send handling");
+    assert.equal(events.removeMessageLengthBypassListener(trueListener), true);
+    assert.equal(events.removeMessageLengthBypassListener(trueListener), false);
+    assert.equal(events._shouldBypassMessageLengthLimit(), false, "removing the true predicate restores Discord's normal length gate");
+    events.removeMessageLengthBypassListener(falseListener);
+    events.removeMessageLengthBypassListener(throwingListener);
+}
+
 async function testSendOrderingAndAsyncHandlers(events: MessageEventsModule): Promise<void> {
     const order: string[] = [];
     const listeners: MessageSendListener[] = [];
@@ -159,6 +191,25 @@ async function testSendStop(events: MessageEventsModule): Promise<void> {
     } finally {
         events.removeMessagePreSendListener(stopper);
         events.removeMessagePreSendListener(skipped);
+    }
+}
+
+async function testSendOptionMutationsReachDiscord(events: MessageEventsModule): Promise<void> {
+    const options: SendMessageOptions = {
+        ...contentOptions,
+        location: "mutation test",
+    };
+    const listener: MessageSendListener = (_channelId, _message, mutableOptions) => {
+        mutableOptions.attachmentsToUpload = [];
+        mutableOptions.uploads = [];
+        return { stop: true };
+    };
+    events.addMessagePreSendListener(listener);
+    try {
+        assert.equal(await events._handlePreSend("channel", messageObj, options, sendProps, contentOptions), false);
+        assert.deepEqual(options.attachmentsToUpload, [], "listeners can add an attachment upload to Discord's send options");
+    } finally {
+        events.removeMessagePreSendListener(listener);
     }
 }
 
@@ -427,9 +478,13 @@ async function testEditDuplicatePreservesOriginalFailClosedRegistration(events: 
 
 async function main(): Promise<void> {
     testCurrentDiscordSendPatch();
+    testCurrentDiscordMessageLengthPatch();
     const events = await loadMessageEvents();
 
+    testMessageLengthBypassListeners(events);
+
     await testSendOrderingAndAsyncHandlers(events);
+    await testSendOptionMutationsReachDiscord(events);
     await testSendStop(events);
     await testSendCancel(events);
     await testSendRemoval(events);

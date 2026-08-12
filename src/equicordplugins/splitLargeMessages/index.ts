@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import type { MessageSendListener } from "@api/MessageEvents";
+import {
+    addMessageLengthBypassListener,
+    type MessageSendListener,
+    removeMessageLengthBypassListener,
+} from "@api/MessageEvents";
 import { definePluginSettings } from "@api/Settings";
 import { EquicordDevs } from "@utils/constants";
 import { copyWithToast, getCurrentChannel, insertTextIntoChatInputBox, sendMessage } from "@utils/discord";
@@ -21,6 +25,7 @@ const NITRO_MESSAGE_LIMIT = 4000;
 const SLOWMODE_BUFFER_MS = 250;
 const logger = new Logger("SplitLargeMessages");
 const splitModes = new Set<SplitMode>(["characters", "spaces", "newlines"]);
+const bypassMessageLengthLimit = () => true;
 
 const settings = definePluginSettings({
     sendDelay: {
@@ -153,14 +158,15 @@ export default definePlugin({
     settings,
     onBeforeMessageSend: listener,
 
+    start() {
+        addMessageLengthBypassListener(bypassMessageLengthLimit);
+    },
+
+    stop() {
+        removeMessageLengthBypassListener(bypassMessageLengthLimit);
+    },
+
     patches: [
-        {
-            find: 'type:"MESSAGE_LENGTH_UPSELL"', // bypass message length check
-            replacement: {
-                match: /if\(\i.length>\i/,
-                replace: "if(false",
-            },
-        },
         {
             find: ".onHideAutocomplete?", // disable file conversion
             replacement: {

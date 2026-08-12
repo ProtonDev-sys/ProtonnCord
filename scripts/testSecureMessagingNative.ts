@@ -17,6 +17,8 @@ import type { IpcMainInvokeEvent } from "electron";
 
 import {
     attachmentBundleRoot,
+    DETACHED_TEXT_FILENAME,
+    DETACHED_TEXT_MIME_TYPE,
     encryptAttachmentBytes,
     generateAttachmentBundleMaterial,
     serializeSecurePlaintext,
@@ -1120,6 +1122,80 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         }
     } finally {
         protector.failDownloadWrite = false;
+        globalThis.fetch = originalFetch;
+    }
+
+    const detachedText = `detached encrypted message ${"large body ".repeat(600)}`;
+    const detachedTextBytes = new TextEncoder().encode(detachedText);
+    const detachedTextMaterial = generateAttachmentBundleMaterial(1);
+    const detachedTextCiphertext = await encryptAttachmentBytes({
+        bundleId: detachedTextMaterial.descriptor.id,
+        channelId: DM_CHANNEL_ID,
+        count: 1,
+        data: detachedTextBytes,
+        index: 0,
+        masterKey: detachedTextMaterial.keyBytes,
+        metadata: {
+            description: null,
+            duration: null,
+            height: null,
+            mimeType: DETACHED_TEXT_MIME_TYPE,
+            name: DETACHED_TEXT_FILENAME,
+            size: detachedTextBytes.byteLength,
+            spoiler: false,
+            width: null,
+        },
+        senderUserId: ALICE_ID,
+    });
+    const detachedTextRoot = await attachmentBundleRoot(detachedTextMaterial.descriptor.id, [detachedTextCiphertext]);
+    const detachedTextMessage = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        plaintext: serializeSecurePlaintext("", {
+            ...detachedTextMaterial.descriptor,
+            root: detachedTextRoot,
+        }, [], 0),
+        snapshot: aliceDm,
+    });
+    detachedTextMaterial.keyBytes.fill(0);
+    expectStatus(detachedTextMessage, "encrypted", "Alice encrypts a detached large text descriptor");
+    const detachedTextAttachmentId = messageId(105);
+    const detachedTextInput = {
+        channelId: DM_CHANNEL_ID,
+        content: detachedTextMessage.content,
+        discordAuthorId: ALICE_ID,
+        discordEditedTimestamp: null,
+        discordMessageId: messageId(106),
+        attachments: [{
+            id: detachedTextAttachmentId,
+            proxyUrl: `https://media.discordapp.net/attachments/${DM_CHANNEL_ID}/${detachedTextAttachmentId}/encrypted.pcaf`,
+            size: detachedTextCiphertext.byteLength,
+            url: `https://cdn.discordapp.com/attachments/${DM_CHANNEL_ID}/${detachedTextAttachmentId}/encrypted.pcaf`,
+        }],
+    };
+    const { attachments: _detachedAttachments, ...detachedTextMessageInput } = detachedTextInput;
+    const detachedDescriptor = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, detachedTextMessageInput);
+    expectStatus(detachedDescriptor, "decrypted", "Bob authenticates the detached large text descriptor");
+    assert.equal(detachedDescriptor.plaintext, "");
+    assert.equal(detachedDescriptor.detachedTextIndex, 0);
+    try {
+        globalThis.fetch = async () => new Response(Buffer.from(detachedTextCiphertext), {
+            headers: { "content-length": String(detachedTextCiphertext.byteLength) },
+        });
+        const expandedDetachedText = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, detachedTextInput);
+        expectStatus(expandedDetachedText, "decrypted", "Bob reconstructs detached large text after attachment authentication");
+        assert.equal(expandedDetachedText.plaintext, detachedText);
+        assert.deepEqual(expandedDetachedText.attachments, [], "the message text transport is hidden from ordinary attachment UI");
+        globalThis.fetch = async () => { throw new Error("Detached text should reuse the authenticated native cache"); };
+        const cachedDetachedText = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, detachedTextInput);
+        expectStatus(cachedDetachedText, "decrypted", "detached text is reused without downloading its ciphertext twice");
+        assert.equal(cachedDetachedText.plaintext, detachedText);
+        const blockedDetachedDownload = await native.downloadIncomingAttachment(
+            DISCORD_EVENT,
+            BOB_ID,
+            detachedTextInput,
+            detachedTextAttachmentId,
+        );
+        expectStatus(blockedDetachedDownload, "invalid_message", "detached text transport cannot be downloaded as an ordinary file");
+    } finally {
         globalThis.fetch = originalFetch;
     }
 
