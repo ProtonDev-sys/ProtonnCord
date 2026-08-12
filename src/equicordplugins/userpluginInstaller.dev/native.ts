@@ -16,8 +16,17 @@ import yaml from "yaml-js";
 import pluginValidateContent from "./misc/pluginValidate.txt"; // i would use HTML but esbuild is being whiny
 // @ts-ignore fuck off
 import setGitPathContent from "./misc/setGitPath.txt";
-// @ts-ignore fuck off
-import updateValidateContent from "./misc/updateValidate.txt"; // see above
+import {
+    createUpdateReviewModel,
+    createUpdateReviewPlan,
+    isUpdateReviewPlanCurrent,
+    MAX_DISPLAYED_UPDATE_COMMITS,
+    MAX_UPDATE_LOG_BYTES,
+    parseUpdateCommits,
+    runUpdateReview,
+    type UpdateCommit,
+    type UpdateReviewPlan
+} from "./updateReview";
 
 const PLUGIN_META_REGEX = /export default definePlugin\((?:\s|\/(?:\/|\*).*)*{\s*(?:\s|\/(?:\/|\*).*)*name:\s*(?:"|'|`)(.*)(?:"|'|`)(?:\s|\/(?:\/|\*).*)*,(?:\s|\/(?:\/|\*).*)*.+(?:\s|\/(?:\/|\*).*)*description:\s*(?:"|'|`)(.*)(?:"|'|`)(?:\s|\/(?:\/|\*).*)*/;
 // if edited, also edit in misc/constants.ts!!!
@@ -272,28 +281,121 @@ function generateReviewPluginContent(meta: {
     return `data:text/html;base64,${buf}`;
 }
 
-function generateUpdatePluginContent(meta: {
-    name: string;
-    description: string;
-    remote: string;
-    commit: string;
-}): string {
-    const template = updateValidateContent.replace("%PLUGINNAME%", meta.name.replaceAll("<", "&lt;")).replace("%PLUGINDESC%", meta.description.replaceAll("<", "&lt;")).replace("%REMOTE%", meta.remote).replace("%COMMITMESSAGE%", meta.commit.replaceAll("\n", "<br />"));
-    const buf = Buffer.from(template).toString("base64");
-    return `data:text/html;base64,${buf}`;
+function getGitRevision(pluginDir: string, revision: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const revisionProc = spawn("git", ["rev-parse", "--verify", `${revision}^{commit}`], { cwd: pluginDir });
+        let stdout = "";
+        let stderr = "";
+        let settled = false;
+        const settle = (callback: () => void) => {
+            if (settled) return;
+            settled = true;
+            callback();
+        };
+
+        revisionProc.stdout?.setEncoding("utf8");
+        revisionProc.stdout?.on("data", data => {
+            if (stdout.length < 256) stdout += String(data).slice(0, 256 - stdout.length);
+        });
+        revisionProc.stderr?.on("data", data => {
+            if (stderr.length < 8_192) stderr += String(data).slice(0, 8_192 - stderr.length);
+        });
+        revisionProc.once("error", error => settle(() => reject(error)));
+        revisionProc.once("close", exitCode => {
+            if (exitCode !== 0) return settle(() => reject(`Failed to resolve ${revision}. Git errors:\n\n${stderr.trim()}`));
+            settle(() => resolve(stdout.trim()));
+        });
+    });
 }
 
-function formatCommitMessages(rawOutput: string, remote: string): string {
-    const commitBaseUrl = remote.replace("plugins.nin0.dev", "git.nin0.dev/userplugins");
-    let output = "";
+async function getUpdateReviewPlan(pluginDir: string): Promise<UpdateReviewPlan> {
+    const localRevision = await getGitRevision(pluginDir, "HEAD");
+    const targetRevision = await getGitRevision(pluginDir, "origin/HEAD");
+    return createUpdateReviewPlan(localRevision, targetRevision);
+}
 
-    for (const line of rawOutput.split("\n")) {
-        const [user, shortCommit, longCommit, message] = line.split("////////");
-        if (output) output += "\n";
-        output += `${user} (<a href="${commitBaseUrl}/commit/${longCommit}" style="font-family: monospace;">${shortCommit}</a>) ~ ${message}`;
-    }
+function getUpdateCommits(pluginDir: string, logRange: string): Promise<UpdateCommit[]> {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const settle = (callback: () => void) => {
+            if (settled) return;
+            settled = true;
+            callback();
+        };
+        const commitProc = spawn("git", [
+            "log",
+            "-z",
+            `--max-count=${MAX_DISPLAYED_UPDATE_COMMITS + 1}`,
+            "--format=%an%x00%h%x00%H%x00%s",
+            logRange
+        ], { cwd: pluginDir });
+        let rawOutput = "";
+        let outputBytes = 0;
+        let outputTooLarge = false;
+        let stderr = "";
 
-    return output;
+        commitProc.stdout?.setEncoding("utf8");
+        commitProc.stdout?.on("data", data => {
+            outputBytes += Buffer.byteLength(data);
+            if (outputBytes > MAX_UPDATE_LOG_BYTES) {
+                outputTooLarge = true;
+                commitProc.kill();
+                return;
+            }
+            rawOutput += String(data);
+        });
+        commitProc.stderr?.on("data", data => {
+            if (stderr.length < 8_192) stderr += String(data).slice(0, 8_192 - stderr.length);
+        });
+        commitProc.once("error", error => settle(() => reject(error)));
+        commitProc.once("close", exitCode => {
+            if (outputTooLarge) return settle(() => reject("Git returned too much update metadata"));
+            if (exitCode !== 0) return settle(() => reject(`Failed to inspect the update. Git errors:\n\n${stderr.trim()}`));
+            try {
+                const commits = parseUpdateCommits(rawOutput);
+                settle(() => resolve(commits));
+            } catch (error) {
+                settle(() => reject((error as Error).message));
+            }
+        });
+    });
+}
+
+async function reviewPluginUpdate(metadata: { name: string; description: string; remote: string; }, commits: UpdateCommit[]): Promise<boolean> {
+    const review = createUpdateReviewModel(metadata, commits);
+    const options = {
+        type: "warning" as const,
+        title: review.title,
+        message: review.message,
+        detail: review.detail,
+        buttons: review.buttons,
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+    };
+
+    return runUpdateReview(review, {
+        async showReview() {
+            const parent = BrowserWindow.getAllWindows()[0];
+            const result = parent
+                ? await dialog.showMessageBox(parent, options)
+                : await dialog.showMessageBox(options);
+            return result.response;
+        },
+        openSource: sourceUrl => shell.openExternal(sourceUrl),
+        async showOpenSourceError(error) {
+            await dialog.showMessageBox({
+                type: "error",
+                title: "Unable to open source code",
+                message: "The repository could not be opened.",
+                detail: String(error),
+                buttons: ["OK"],
+                defaultId: 0,
+                cancelId: 0,
+                noLink: true
+            });
+        }
+    });
 }
 
 export async function getUserplugins() {
@@ -320,81 +422,48 @@ export async function updatePlugin(_, directory: string) {
         const pluginDir = join(vencordPath, "../src/userplugins", directory);
 
         async function doStuff() {
-            const pluginMeta = await getPluginMeta(pluginDir);
+            try {
+                const pluginMeta = await getPluginMeta(pluginDir);
+                const reviewPlan = await getUpdateReviewPlan(pluginDir);
+                const commits = await getUpdateCommits(pluginDir, reviewPlan.logRange);
+                if (!await reviewPluginUpdate(pluginMeta, commits)) return reject("Rejected by user");
 
-            const win = new BrowserWindow({
-                maximizable: false,
-                minimizable: false,
-                width: 560,
-                height: 600,
-                resizable: false,
-                webPreferences: {
-                    devTools: true
-                },
-                title: "Review userplugin",
-                modal: true,
-                parent: BrowserWindow.getAllWindows()[0],
-                show: false,
-                autoHideMenuBar: true
-            });
-            const reView /* haha got it */ = new WebContentsView({
-                webPreferences: {
-                    devTools: true,
-                    nodeIntegration: true
+                const currentRevision = await getGitRevision(pluginDir, "HEAD");
+                if (!isUpdateReviewPlanCurrent(reviewPlan, currentRevision)) {
+                    return reject("The plugin repository changed while the update was being reviewed. Review the update again.");
                 }
-            });
-            win.contentView.addChildView(reView);
 
-            const commitProc = exec("git log origin/HEAD...HEAD --oneline --pretty=format:%an////////%h////////%H////////%s", {
-                cwd: pluginDir
-            });
-            let rawOutput = "";
-            commitProc.stdout?.on("data", d => {
-                rawOutput += String(d);
-            });
-            commitProc.once("close", () => {
-                win.loadURL(generateUpdatePluginContent({
-                    name: pluginMeta.name,
-                    description: pluginMeta.description,
-                    remote: pluginMeta.remote,
-                    commit: formatCommitMessages(rawOutput, pluginMeta.remote)
-                }));
-                win.on("page-title-updated", async e => {
-                    if (win.webContents.getTitle().startsWith("openLink:")) {
-                        await shell.openExternal(win.webContents.getTitle().replace("openLink:", ""));
-                    }
-                    switch (win.webContents.getTitle() as "abortInstall" | "install") {
-                        case "abortInstall": {
-                            win.close();
-                            return reject("Rejected by user");
+                await new Promise<void>((resolveRebase, rejectRebase) => {
+                    const rebaseProc = spawn("git", ["rebase", reviewPlan.targetRevision], { cwd: pluginDir });
+                    let stderr = "";
+                    let settled = false;
+                    const settle = (callback: () => void) => {
+                        if (settled) return;
+                        settled = true;
+                        callback();
+                    };
+                    rebaseProc.stderr?.on("data", data => {
+                        if (stderr.length < 8_192) stderr += String(data).slice(0, 8_192 - stderr.length);
+                    });
+                    rebaseProc.once("error", error => settle(() => rejectRebase(error)));
+                    rebaseProc.once("close", exitCode => {
+                        if (exitCode !== 0) {
+                            const detail = stderr.trim() || `Git exited with code ${exitCode}`;
+                            return settle(() => rejectRebase(`Failed to apply the reviewed update. Git errors:\n\n${detail}`));
                         }
-                        case "install": {
-                            win.close();
-                            try {
-                                const otherProc = exec("git rebase origin/HEAD", {
-                                    cwd: pluginDir
-                                });
-                                let errored = "";
-                                otherProc.stderr?.on("data", d => { if (String(d).includes("Success")) return; errored += String(d); });
-                                otherProc.once("close", () => {
-                                    if (errored) if (!errored.includes("Success")) return reject(`Failed to apply the update, chances are you have local changes that conflict with your remote. Git errors:\n\n${errored}`);
-                                    build().then(() => resolve(JSON.stringify({
-                                        name: pluginMeta.name,
-                                        native: pluginMeta.usesNative
-                                    })));
-                                });
-                            }
-                            catch (e) {
-                                reject((e as Error).toString());
-                            }
-                            break;
-                        }
-                    }
+                        settle(resolveRebase);
+                    });
                 });
-            });
-            win.show();
+                await build();
+                resolve(JSON.stringify({
+                    name: pluginMeta.name,
+                    native: pluginMeta.usesNative
+                }));
+            } catch (error) {
+                reject(error instanceof Error ? error.toString() : error);
+            }
         }
-        doStuff();
+        void doStuff();
     });
 }
 
