@@ -406,7 +406,12 @@ export default definePlugin({
             && configuredAttachmentSizeLimit <= MAX_ATTACHMENT_SIZE_LIMIT_MEGABYTES
             ? configuredAttachmentSizeLimit
             : DEFAULT_ATTACHMENT_SIZE_LIMIT_MEGABYTES;
-        const attachmentSizeLimitInMegabytes = await Native.updateAttachmentSizeLimit(safeAttachmentSizeLimit);
+        let attachmentSizeLimitInMegabytes = safeAttachmentSizeLimit;
+        try {
+            attachmentSizeLimitInMegabytes = await Native.updateAttachmentSizeLimit(safeAttachmentSizeLimit);
+        } catch (e) {
+            Flogger.error("Failed to sync attachment size limit natively", e);
+        }
         await Native.init();
 
         if (settings.store.clearLogsOnRestart && !didClearLogsOnStartup) {

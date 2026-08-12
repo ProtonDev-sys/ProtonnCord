@@ -65,7 +65,7 @@ async function initDirs() {
     logsDir = ld || await getDefaultNativeDataDir();
     imageCacheDir = icd || await getDefaultNativeImageDir();
 }
-const dirsReady = initDirs();
+const dirsReady = initDirs().catch(() => undefined);
 const getImageCacheDir = async () => {
     await dirsReady;
     return imageCacheDir ?? await getDefaultNativeImageDir();
@@ -244,6 +244,7 @@ async function performAttachmentDownload(
     attachmentId: string,
     cleanExt: string,
     candidateUrls: URL[],
+    allowedExtensions: readonly string[],
     maxBytes: number,
     deadline: number
 ): Promise<DownloadAttachmentResult> {
@@ -261,6 +262,8 @@ async function performAttachmentDownload(
     for (const candidateUrl of candidateUrls) {
         try {
             const { content, extension } = await fetchDiscordAttachment(candidateUrl, attachmentId, cleanExt, { deadline, maxBytes });
+            if (!allowedExtensions.includes(extension))
+                throw new Error(`Returned file type .${extension} is blocked by settings configurations.`);
             const finalPath = await runCacheOperation(async () => {
                 const generation = cacheGeneration;
                 const cacheDir = await getImageCacheDir();
@@ -332,7 +335,7 @@ export async function downloadAttachment(event: IpcMainInvokeEvent, attachment: 
                 return { error: "All attachment downloads are currently blocked by settings configurations.", path: null };
             if (!allowedList.includes(cleanExt))
                 return { error: `File type .${cleanExt} is blocked by settings configurations.`, path: null };
-            return performAttachmentDownload(attachmentId, cleanExt, candidateUrls, configuredMaxBytes, deadline);
+            return performAttachmentDownload(attachmentId, cleanExt, candidateUrls, allowedList, configuredMaxBytes, deadline);
         });
         inFlightDownloads.set(attachmentId, download);
         try {

@@ -15,6 +15,7 @@ import { ImageCacheDir, LogsDir } from "./components/FolderSelectInput";
 import { openLogModal } from "./components/LogsModal";
 import { blockedExts } from "./list";
 import {
+    DEFAULT_ATTACHMENT_FILE_EXTENSIONS,
     DEFAULT_ATTACHMENT_SIZE_LIMIT_MEGABYTES,
     DEFAULT_IMAGE_CACHE_DIR,
     MAX_ATTACHMENT_SIZE_LIMIT_MEGABYTES,
@@ -199,7 +200,7 @@ export const settings = definePluginSettings({
     },
 
     attachmentFileExtensions: {
-        default: "png,jpg,jpeg,gif,webp,mp4,webm,mp3,ogg,wav",
+        default: DEFAULT_ATTACHMENT_FILE_EXTENSIONS,
         type: OptionType.STRING,
         description: `Comma separated list of media extensions to save. Supported: ${SUPPORTED_ATTACHMENT_FILE_EXTENSIONS.join(", ")}.`,
         isValid: (value: string) => {
