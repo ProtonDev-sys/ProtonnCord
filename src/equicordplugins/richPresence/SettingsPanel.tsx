@@ -171,9 +171,8 @@ function NavidromeSettings() {
             <TextSetting name="Username" description="Navidrome username." settingsKey="nd_username" />
             <TextSetting name="Password" description="Navidrome password." settingsKey="nd_password" />
             <TextSetting name="Client ID" description="Optional Discord Application Client ID." settingsKey="nd_clientId" placeholder="1470554657506984069" />
-            <SelectSetting name="Album Art Mode" description="How to fetch album art." settingsKey="nd_albumArtMode" options={[
+            <SelectSetting name="Album Art Mode" description="Navidrome-hosted art is unavailable because sending an authenticated image URL to Discord would disclose reusable server credentials." settingsKey="nd_albumArtMode" options={[
                 { label: "None", value: "none" },
-                { label: "Navidrome Instance (Exposes Server URL. One-time auth sent.)", value: "instance" },
                 { label: "Last.fm API (Sends Metadata to last.fm)", value: "lastfm" },
             ]} />
             {nd_albumArtMode === "lastfm" && (
