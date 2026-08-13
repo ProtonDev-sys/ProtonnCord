@@ -37,11 +37,11 @@ import { createAndAppendStyle } from "@utils/css";
 import { StartAt } from "@utils/types";
 import { SettingsRouter } from "@webpack/common";
 
-import { get as dsGet } from "./api/DataStore";
 import { popNotice, showNotice } from "./api/Notices";
 import { NotificationData, showNotification } from "./api/Notifications";
 import { initPluginManager, PMLogger, startAllPlugins } from "./api/PluginManager";
 import { PlainSettings, Settings, SettingsStore } from "./api/Settings";
+import { getCloudRequestContext, getCloudSyncScope } from "./api/SettingsSync/cloudSetup";
 import { areLocalSettingsDirty, getCloudSettings, getCloudSyncDirection, markLocalSettingsDirty, putCloudSettings, shouldCloudSync } from "./api/SettingsSync/cloudSync";
 import { relaunch } from "./utils/native";
 import { checkForUpdates, isOutdated as getIsOutdated, update, UpdateLogger } from "./utils/updater";
@@ -53,35 +53,61 @@ if (IS_REPORTER) {
 }
 
 async function syncSettings() {
-    const hasCloudAuth = await dsGet("Vencord_cloudSecret");
-    if (!hasCloudAuth) {
-        if (Settings.cloud.authenticated) {
-            // User switched to an account that isn't connected to cloud
-            showNotification({
-                title: "Cloud Settings",
-                body: "Cloud sync was disabled because this account isn't connected to the cloud App. You can enable it again by connecting this account in Cloud Settings. (note: it will store your preferences separately)",
-                color: "var(--yellow-360)",
-                onClick: () => SettingsRouter.openUserSettings("equicord_cloud_panel")
-            });
-            // Disable cloud sync globally
-            Settings.cloud.authenticated = false;
+    const saveSettingsOnFrequentAction = debounce(async () => {
+        if (Settings.cloud.settingsSync && Settings.cloud.authenticated && shouldCloudSync("push")) {
+            await putCloudSettings();
         }
-        return;
-    }
+    }, 60_000);
 
-    // pre-check for local shared settings
-    if (
-        Settings.cloud.authenticated &&
-        !hasCloudAuth // this has been enabled due to local settings share or some other bug
-    ) {
-        // show a notification letting them know and tell them how to fix it
+    SettingsStore.addGlobalChangeListener(() => {
+        markLocalSettingsDirty();
+        saveSettingsOnFrequentAction();
+    });
+    VencordNative.quickCss.addChangeListener(() => {
+        markLocalSettingsDirty();
+        saveSettingsOnFrequentAction();
+    });
+
+    async function disableMissingCurrentAuthorization() {
+        if (!Settings.cloud.authenticated) return;
+        let expectedScope: string;
+        try {
+            expectedScope = getCloudSyncScope();
+        } catch {
+            return;
+        }
+        try {
+            await getCloudRequestContext();
+            return;
+        } catch { }
+        try {
+            if (getCloudSyncScope() !== expectedScope || !Settings.cloud.authenticated) return;
+        } catch {
+            return;
+        }
         showNotification({
-            title: "Cloud Integrations",
-            body: "We've noticed you have cloud integrations enabled in another client! Due to limitations, you will " +
-                "need to re-authenticate to continue using them. Click here to go to the settings page to do so!",
+            title: "Cloud Settings",
+            body: "Cloud sync was disabled because this account isn't connected to the cloud App. You can enable it again by connecting this account in Cloud Settings. (note: it will store your preferences separately)",
             color: "var(--yellow-360)",
             onClick: () => SettingsRouter.openUserSettings("equicord_cloud_panel")
         });
+        Settings.cloud.authenticated = false;
+    }
+
+    let authenticationContext;
+    try {
+        authenticationContext = await getCloudRequestContext();
+    } catch { }
+    if (!authenticationContext) {
+        await disableMissingCurrentAuthorization();
+        return;
+    }
+    try {
+        const currentContext = await getCloudRequestContext();
+        if (currentContext.scope !== authenticationContext.scope || currentContext.origin !== authenticationContext.origin)
+            return;
+    } catch {
+        await disableMissingCurrentAuthorization();
         return;
     }
 
@@ -106,16 +132,6 @@ async function syncSettings() {
         }
     }
 
-    const saveSettingsOnFrequentAction = debounce(async () => {
-        if (Settings.cloud.settingsSync && Settings.cloud.authenticated && shouldCloudSync("push")) {
-            await putCloudSettings();
-        }
-    }, 60_000);
-
-    SettingsStore.addGlobalChangeListener(() => {
-        markLocalSettingsDirty();
-        saveSettingsOnFrequentAction();
-    });
 }
 
 let notifiedForUpdatesThisSession = false;
