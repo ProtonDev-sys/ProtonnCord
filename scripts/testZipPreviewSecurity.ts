@@ -83,6 +83,12 @@ function setEntryUncompressedSize(data: Uint8Array, entry: CentralEntryRef, size
     dataView.setUint32(entry.localHeaderOffset + 22, size, true);
 }
 
+function setEntryCrc32(data: Uint8Array, entry: CentralEntryRef, crc32: number): void {
+    const dataView = view(data);
+    dataView.setUint32(entry.cursor + 16, crc32, true);
+    dataView.setUint32(entry.localHeaderOffset + 14, crc32, true);
+}
+
 function entryDataOffset(data: Uint8Array, entry: CentralEntryRef): number {
     const dataView = view(data);
     return entry.localHeaderOffset
@@ -108,12 +114,14 @@ function expectRejected(data: Uint8Array, pattern: RegExp, label: string): void 
 }
 
 async function testNormalArchiveAndLazyExtraction(): Promise<void> {
+    const chunkedInput = pseudoRandomBytes(32 * 1024);
     const input = archive({
+        "chunked.bin": chunkedInput,
         "folder/readme.txt": strToU8("bounded ZIP preview\n"),
         "image.bin": Uint8Array.of(0, 1, 2, 3, 4),
     });
     const inspected = inspectZipArchive(arrayBuffer(input));
-    assert.deepEqual(inspected.entries.map(entry => entry.path).sort(), ["folder/readme.txt", "image.bin"]);
+    assert.deepEqual(inspected.entries.map(entry => entry.path).sort(), ["chunked.bin", "folder/readme.txt", "image.bin"]);
     assert.equal("data" in inspected.entries[0], false, "inspection must retain metadata rather than inflated bytes");
 
     const readme = inspected.entries.find(entry => entry.path === "folder/readme.txt");
@@ -121,6 +129,11 @@ async function testNormalArchiveAndLazyExtraction(): Promise<void> {
     const extraction = extractZipArchiveEntry(inspected, readme, 10 * 1024 * 1024);
     assert.ok(extraction instanceof Promise, "selected-entry extraction must be asynchronous");
     assert.equal(new TextDecoder().decode(await extraction), "bounded ZIP preview\n");
+
+    const chunked = inspected.entries.find(entry => entry.path === "chunked.bin");
+    assert.ok(chunked && chunked.compressedSize > 4 * 1024);
+    assert.deepEqual(await extractZipArchiveEntry(inspected, chunked, 1024 * 1024), chunkedInput,
+        "normal entries spanning multiple bounded input chunks must extract exactly");
 }
 
 async function testOnlySelectedEntryIsInflated(): Promise<void> {
@@ -138,7 +151,7 @@ async function testOnlySelectedEntryIsInflated(): Promise<void> {
     assert.equal(new TextDecoder().decode(await extractZipArchiveEntry(inspected, goodEntry, 1024)), "Only this entry should be inflated.");
     await assert.rejects(
         extractZipArchiveEntry(inspected, badEntry, 1024 * 1024),
-        /decompressed|integrity/u,
+        /decompressed|integrity|declared size/u,
         "corruption in an unselected entry must surface only when that entry is selected"
     );
 }
@@ -287,6 +300,24 @@ async function testIntegrityAndPreviewLimit(): Promise<void> {
     );
 }
 
+async function testForgedExpandedSizeCannotBeTruncated(): Promise<void> {
+    const forged = archive({ "forged-bomb.txt": new Uint8Array(4 * 1024 * 1024) }, 9);
+    assert.ok(forged.byteLength < 8 * 1024, "the forged fixture should remain a compact compression bomb");
+
+    const forgedEntry = entryByPath(forged, "forged-bomb.txt");
+    setEntryUncompressedSize(forged, forgedEntry, 1);
+    setEntryCrc32(forged, forgedEntry, 0xd202ef8d); // CRC32 of the one-byte prefix Uint8Array.of(0).
+
+    const inspected = inspectZipArchive(arrayBuffer(forged));
+    assert.equal(inspected.entries[0].uncompressedSize, 1,
+        "forged central-directory metadata should pass the pre-extraction inspection boundary");
+    await assert.rejects(
+        extractZipArchiveEntry(inspected, inspected.entries[0], 1024),
+        /expands beyond its declared size/u,
+        "actual output beyond the declared size must abort instead of being silently truncated and CRC-accepted"
+    );
+}
+
 async function testNoWholeArchiveInflationRegression(): Promise<void> {
     const source = await readFile("src/equicordplugins/zipPreview/utils.ts", "utf8");
     assert.doesNotMatch(source, /\bunzipSync\b/u, "ZIP Preview must not synchronously inflate the whole archive");
@@ -302,6 +333,7 @@ async function main(): Promise<void> {
     testEntryCountAndPaths();
     testMalformedArchives();
     await testIntegrityAndPreviewLimit();
+    await testForgedExpandedSizeCannotBeTruncated();
     await testNoWholeArchiveInflationRegression();
     console.log("ZIP Preview archive security checks passed");
 }

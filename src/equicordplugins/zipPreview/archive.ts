@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { inflate } from "fflate";
+import { AsyncInflate } from "fflate";
 
 export const MAX_ZIP_BYTES = 50 * 1024 * 1024;
 export const MAX_ZIP_ENTRIES = 1000;
@@ -20,6 +20,8 @@ const END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50;
 const LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
 const MAX_ZIP_COMMENT_BYTES = 0xffff;
 const MAX_EXTRACTION_TIME_MS = 15_000;
+// AsyncInflate reports output after each compressed push, so small pushes bound work before termination.
+const MAX_DEFLATE_INPUT_CHUNK_BYTES = 4 * 1024;
 const MIN_RATIO_CHECK_BYTES = 1024 * 1024;
 const UTF8_FLAG = 0x0800;
 const DATA_DESCRIPTOR_FLAG = 0x0008;
@@ -302,26 +304,64 @@ function decodeFileName(bytes: Uint8Array, utf8: boolean): string {
 
 function inflateEntry(data: Uint8Array, size: number): Promise<Uint8Array<ArrayBuffer>> {
     return new Promise((resolve, reject) => {
+        const result = new Uint8Array(size);
+        let inflater: AsyncInflate | undefined;
+        let inputOffset = 0;
+        let outputBytes = 0;
         let settled = false;
-        let terminate: (() => void) | undefined;
-        const timeout = setTimeout(() => {
+
+        const fail = (error: Error) => {
             if (settled) return;
             settled = true;
-            terminate?.();
-            reject(new Error("ZIP entry took too long to decompress."));
+            clearTimeout(timeout);
+            inflater?.terminate();
+            reject(error);
+        };
+
+        const timeout = setTimeout(() => {
+            fail(new Error("ZIP entry took too long to decompress."));
         }, MAX_EXTRACTION_TIME_MS);
+
+        const pushNextChunk = () => {
+            if (settled || !inflater) return;
+
+            const nextOffset = Math.min(inputOffset + MAX_DEFLATE_INPUT_CHUNK_BYTES, data.byteLength);
+            const isFinal = nextOffset === data.byteLength;
+            const chunk = data.slice(inputOffset, nextOffset);
+            inputOffset = nextOffset;
+            inflater.push(chunk, isFinal);
+        };
+
         try {
-            terminate = inflate(data, { size }, (error, output) => {
+            inflater = new AsyncInflate((error, output, final) => {
                 if (settled) return;
+                if (error) {
+                    fail(new Error("ZIP entry could not be decompressed."));
+                    return;
+                }
+
+                const nextOutputBytes = outputBytes + output.byteLength;
+                if (nextOutputBytes > size) {
+                    fail(new Error("ZIP entry expands beyond its declared size."));
+                    return;
+                }
+                result.set(output, outputBytes);
+                outputBytes = nextOutputBytes;
+
+                if (!final) return;
+                if (outputBytes !== size) {
+                    fail(new Error("ZIP entry could not be decompressed."));
+                    return;
+                }
+
                 settled = true;
                 clearTimeout(timeout);
-                if (error) reject(new Error("ZIP entry could not be decompressed."));
-                else resolve(output);
+                resolve(result);
             });
+            inflater.ondrain = pushNextChunk;
+            pushNextChunk();
         } catch {
-            settled = true;
-            clearTimeout(timeout);
-            reject(new Error("ZIP entry could not be decompressed."));
+            fail(new Error("ZIP entry could not be decompressed."));
         }
     });
 }
