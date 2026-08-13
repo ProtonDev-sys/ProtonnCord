@@ -221,7 +221,7 @@ function CloudTab() {
 
             <Heading className={Margins.top20}>Settings Sync</Heading>
             <Paragraph className={Margins.bottom16}>
-                Synchronize low-risk core preferences, plugin favorite state, explicitly cloud-safe plugin options, and QuickCSS. Plugin enabled state, structured credential fields, custom connection profiles, plugin-private data, and logs are excluded. QuickCSS is uploaded verbatim, so do not place secrets in it.
+                Synchronize low-risk core preferences, plugin favorite state, explicitly cloud-safe plugin options, and QuickCSS. Plugin enabled state, structured credential fields, custom connection profiles, plugin-private data, logs, and local DataStore records are never cloud synced. Use an explicit offline export if you need to back up DataStore. QuickCSS is uploaded verbatim, so do not place secrets in it.
             </Paragraph>
 
             <FormSwitch
