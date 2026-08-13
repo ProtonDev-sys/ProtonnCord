@@ -9,7 +9,7 @@ import { relaunch } from "@utils/native";
 import { Alerts } from "@webpack/common";
 
 // if edited, also edit in native.ts!!!
-export const CLONE_LINK_REGEX = /https:\/\/(?:((?:git(?:hub|lab)\.com|git\.(?:[a-zA-Z0-9]|\.)+|codeberg\.org))\/(?!user-attachments)((?:[a-zA-Z0-9]|-)+)\/((?:[a-zA-Z0-9]|-|\.)+)(?:\.git)?|(plugins\.(nin0)\.dev)\/((?:[a-zA-Z0-9]|-|\.)+))(?:\/)?/;
+export const CLONE_LINK_REGEX = /https:\/\/(?:((?:git(?:hub|lab)\.com|git\.(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,63}|codeberg\.org))\/(?!user-attachments)((?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,98}[a-zA-Z0-9])?))\/((?:[a-zA-Z0-9](?:[a-zA-Z0-9._-]{0,98}[a-zA-Z0-9])?))(?:\.git)?|(plugins\.(nin0)\.dev)\/((?:[a-zA-Z0-9](?:[a-zA-Z0-9._-]{0,98}[a-zA-Z0-9])?)))(?:\/)?/;
 export const WHITELISTED_SHARE_CHANNELS = ["1256395889354997771", "1032200195582197831", "1301947896601509900", "1322935137591365683"];
 export const cl = classNameFactory("vc-userplugininstaller-");
 
