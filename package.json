@@ -62,6 +62,7 @@
         "testExternalUrlBoundary": "tsx scripts/testExternalUrlBoundary.ts",
         "testCspPolicyBoundary": "tsx scripts/testCspPolicyBoundary.ts",
         "testExtensionPublishWorkflow": "tsx scripts/testExtensionPublishWorkflow.ts",
+        "testDevCompanionSecurity": "tsx scripts/testDevCompanionSecurity.ts",
         "testQuestifyNativeBoundary": "tsx scripts/testQuestifyNativeBoundary.ts",
         "testOrbolayBridgeSecurity": "tsx scripts/testOrbolayBridgeSecurity.ts",
         "testCloudSyncPrivacy": "tsx scripts/testCloudSyncPrivacy.ts",
@@ -73,7 +74,7 @@
         "testSecureMessagingLive": "tsx scripts/testSecureMessagingLive.ts",
         "createDiscordMcpVideo": "tsx scripts/createDiscordMcpVideo.ts",
         "benchmarkDiscord": "tsx scripts/benchmarkDiscord.ts",
-        "test": "pnpm testDevNativeBuild && pnpm testUserpluginUpdateReview && pnpm testUserpluginPathSafety && pnpm testMessageLoggerNativeWrites && pnpm testMessageLoggerNativeDownloads && pnpm testFileUploadNativeBoundary && pnpm testZipPreviewSecurity && pnpm testExternalUrlBoundary && pnpm testInstallerSecurity && pnpm testExtensionPublishWorkflow && pnpm testCspPolicyBoundary && pnpm testQuestifyNativeBoundary && pnpm testOrbolayBridgeSecurity && pnpm testCloudSyncPrivacy && pnpm testCloudDataStoreContract && pnpm testNavidromeAssetPrivacy && pnpm testReporterWorkflowIsolation && pnpm testTsc && pnpm testUpdaterClassification && pnpm testUpdaterGit && pnpm testUpdaterHttp && pnpm testUpdaterRepository:built && pnpm testMessageEventsPriority && pnpm testMainProcessStdio && pnpm testSecureMessaging && pnpm testSecureMessagingNative && pnpm lint:fix && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
+        "test": "pnpm testDevNativeBuild && pnpm testUserpluginUpdateReview && pnpm testUserpluginPathSafety && pnpm testMessageLoggerNativeWrites && pnpm testMessageLoggerNativeDownloads && pnpm testFileUploadNativeBoundary && pnpm testZipPreviewSecurity && pnpm testExternalUrlBoundary && pnpm testDevCompanionSecurity && pnpm testInstallerSecurity && pnpm testExtensionPublishWorkflow && pnpm testCspPolicyBoundary && pnpm testQuestifyNativeBoundary && pnpm testOrbolayBridgeSecurity && pnpm testCloudSyncPrivacy && pnpm testCloudDataStoreContract && pnpm testNavidromeAssetPrivacy && pnpm testReporterWorkflowIsolation && pnpm testTsc && pnpm testUpdaterClassification && pnpm testUpdaterGit && pnpm testUpdaterHttp && pnpm testUpdaterRepository:built && pnpm testMessageEventsPriority && pnpm testMainProcessStdio && pnpm testSecureMessaging && pnpm testSecureMessagingNative && pnpm lint:fix && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
         "testWeb": "pnpm lint:fix && pnpm buildWeb && pnpm testTsc",
         "testTsc": "tsc --noEmit",
         "testInstallerSecurity": "node scripts/testInstallerSecurity.mjs"
