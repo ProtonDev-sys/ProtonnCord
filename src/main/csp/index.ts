@@ -15,7 +15,6 @@ export const CssSrc = ["style-src", "font-src"];
 export const ImageAndMediaSrc = [...ImageSrc, "media-src"];
 export const ImageAndCssSrc = [...ImageSrc, ...CssSrc];
 export const ImageScriptsAndCssSrc = [...ImageAndCssSrc, "script-src", "worker-src"];
-export const CSPSrc = ["style-src", "connect-src", "img-src", "frame-src", "font-src", "media-src", "worker-src"];
 
 // Plugins can whitelist their own domains by importing this object in their native.ts
 // script and just adding to it. But generally, you should just edit this file instead
@@ -129,6 +128,9 @@ const patchCsp = (headers: PolicyMap) => {
         }
 
         for (const [host, directives] of Object.entries(CspPolicies)) {
+            // A global wildcard would nullify Discord's host containment for every
+            // directive. Features must declare the exact hosts they need instead.
+            if (host === "*") continue;
             for (const directive of directives) {
                 pushDirective(directive, host);
             }
