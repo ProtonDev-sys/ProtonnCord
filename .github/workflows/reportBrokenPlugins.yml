@@ -12,10 +12,7 @@ on:
                 default: both
             webhook_url:
                 type: string
-                description:
-                    "Webhook URL that the report will be posted to. This will be
-                    visible for everyone, so DO NOT pass sensitive webhooks like
-                    discord webhook. This is meant to be used by Equibot."
+                description: "Optional public Equibot endpoint. Secret Discord webhooks are not accepted here."
                 required: false
             repository:
                 type: string
@@ -23,44 +20,48 @@ on:
                 required: false
             ref:
                 type: string
-                description: "Git reference to test patches on. This can be a branch, tag, or commit SHA."
+                description: "Git reference to test patches on. This code runs without reporting secrets."
                 required: false
     schedule:
-        #   # Every day at midnight
         - cron: 0 0 * * *
+
+permissions:
+    contents: read
 
 env:
     FORCE_COLOR: true
 
 jobs:
-    TestPlugins:
-        name: Test Patches
+    generate:
+        name: Generate report (secretless)
         runs-on: ubuntu-latest
 
         steps:
-            - uses: actions/checkout@v7
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
-                  repository: ${{ inputs.pr_repo || github.repository }}
-                  ref: ${{ inputs.ref || (github.event_name == 'schedule' && 'dev' || github.ref) }}
+                  repository: ${{ inputs.repository || github.repository }}
+                  ref: ${{ inputs.ref || (github.event_name == 'schedule' && 'dev' || github.sha) }}
+                  persist-credentials: false
 
-            - uses: pnpm/action-setup@v6
+            - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
             - name: Use Node.js 24
-              uses: actions/setup-node@v6
+              uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
               with:
                   node-version: 24
                   cache: "pnpm"
 
             - name: Install dependencies
-              run: |
-                  pnpm install --frozen-lockfile --prefer-offline
+              run: pnpm install --frozen-lockfile --prefer-offline
 
-            - name: Build Equicord Reporter Version
+            - name: Build Protonn Cord Reporter Version
               run: pnpm buildReporter
 
-            - name: Run Reporter
+            - name: Generate report artifacts
               timeout-minutes: 10
+              shell: bash
               run: |
+                  set -euo pipefail
                   export PATH="$PWD/node_modules/.bin:$PATH"
                   export CHROMIUM_BIN=/usr/bin/google-chrome
 
@@ -68,21 +69,19 @@ jobs:
 
                   stable_output_file=$(mktemp)
                   canary_output_file=$(mktemp)
-
                   pids=""
-
                   branch="${{ inputs.discord_branch }}"
                   if [[ "${{ github.event_name }}" = "schedule" ]]; then
                     branch="both"
                   fi
 
                   if [[ "$branch" = "both" || "$branch" = "stable" ]]; then
-                    node dist/report.mjs > "$stable_output_file" &
+                    REPORT_WEBHOOK_BODY_FILE="$RUNNER_TEMP/report-stable.json" node dist/report.mjs > "$stable_output_file" &
                     pids+=" $!"
                   fi
 
                   if [[ "$branch" = "both" || "$branch" = "canary" ]]; then
-                    USE_CANARY=true node dist/report.mjs > "$canary_output_file" &
+                    USE_CANARY=true REPORT_WEBHOOK_BODY_FILE="$RUNNER_TEMP/report-canary.json" node dist/report.mjs > "$canary_output_file" &
                     pids+=" $!"
                   fi
 
@@ -93,8 +92,116 @@ jobs:
                       fi
                   done
 
-                  cat "$stable_output_file" "$canary_output_file" >> $GITHUB_STEP_SUMMARY
-                  exit $exit_code
+                  cat "$stable_output_file" "$canary_output_file" >> "$GITHUB_STEP_SUMMARY"
+                  exit "$exit_code"
+
+            - name: Upload inert report payloads
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: reporter-payloads
+                  path: ${{ runner.temp }}/report-*.json
+                  if-no-files-found: error
+                  retention-days: 1
+
+    publish:
+        name: Publish validated report
+        needs: generate
+        # Never expose reporting credentials to a workflow file run from a selectable ref.
+        if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+        runs-on: ubuntu-latest
+        environment: reporter-webhook
+
+        steps:
+            - name: Download inert report payloads
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+              with:
+                  name: reporter-payloads
+                  path: ${{ runner.temp }}/reporter-payloads
+
+            - name: Validate, sign, and publish without executing repository code
+              shell: bash
               env:
                   WEBHOOK_URL: ${{ inputs.webhook_url || secrets.WEBHOOK_URL }}
-                  WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+                  WEBHOOK_SECRET: ${{ inputs.webhook_url == '' && secrets.WEBHOOK_SECRET || '' }}
+                  PAYLOAD_DIR: ${{ runner.temp }}/reporter-payloads
+              run: |
+                  set -euo pipefail
+                  node <<'NODE'
+                  const { createHmac } = require("node:crypto");
+                  const { lstat, readdir, readFile, realpath } = require("node:fs/promises");
+                  const { join, relative, resolve } = require("node:path");
+
+                  const MAX_PAYLOAD_BYTES = 64 * 1024;
+                  const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
+                  const exactKeys = (value, keys) => Object.keys(value).every(key => keys.includes(key));
+                  const boundedString = (value, max) => typeof value === "string" && value.length <= max;
+
+                  function validateAuthor(author) {
+                      if (!isRecord(author) || !exactKeys(author, ["name", "url", "icon_url"])) return false;
+                      if (!boundedString(author.name, 256)) return false;
+                      for (const key of ["url", "icon_url"]) {
+                          if (author[key] === undefined) continue;
+                          if (!boundedString(author[key], 2048)) return false;
+                          const url = new URL(author[key]);
+                          if (url.protocol !== "https:" || url.username || url.password) return false;
+                      }
+                      return true;
+                  }
+
+                  function validatePayload(payload) {
+                      if (!isRecord(payload) || !exactKeys(payload, ["username", "embeds"])) return false;
+                      if (!/^Protonn Cord Reporter(?: \(Canary\))?$/.test(payload.username)) return false;
+                      if (!Array.isArray(payload.embeds) || payload.embeds.length < 1 || payload.embeds.length > 10) return false;
+                      return payload.embeds.every(embed => {
+                          if (!isRecord(embed) || !exactKeys(embed, ["author", "title", "color", "description"])) return false;
+                          if (embed.author !== undefined && !validateAuthor(embed.author)) return false;
+                          if (embed.title !== undefined && !boundedString(embed.title, 256)) return false;
+                          if (embed.description !== undefined && !boundedString(embed.description, 4096)) return false;
+                          return embed.color === undefined || Number.isInteger(embed.color) && embed.color >= 0 && embed.color <= 0xffffff;
+                      });
+                  }
+
+                  async function main() {
+                      if (!process.env.WEBHOOK_URL) {
+                          console.log("No report endpoint configured; generated artifacts were not published.");
+                          return;
+                      }
+                      const endpoint = new URL(process.env.WEBHOOK_URL);
+                      if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) throw new Error("The report endpoint must be credential-free HTTPS.");
+
+                      const payloadRoot = await realpath(process.env.PAYLOAD_DIR);
+                      const names = (await readdir(payloadRoot)).sort();
+                      if (names.length < 1 || names.length > 2 || names.some(name => !/^report-(?:stable|canary)\.json$/.test(name))) {
+                          throw new Error("Unexpected report artifact set.");
+                      }
+
+                      for (const name of names) {
+                          const path = join(payloadRoot, name);
+                          const metadata = await lstat(path);
+                          if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error("Report artifact must be a regular file.");
+                          const canonicalPath = await realpath(path);
+                          const pathFromRoot = relative(payloadRoot, canonicalPath);
+                          if (!pathFromRoot || pathFromRoot.startsWith("..") || resolve(payloadRoot, pathFromRoot) !== canonicalPath) {
+                              throw new Error("Report artifact escaped its directory.");
+                          }
+                          if (metadata.size > MAX_PAYLOAD_BYTES) throw new Error("Report payload exceeds its size limit.");
+                          const body = await readFile(path, "utf8");
+                          let payload;
+                          try { payload = JSON.parse(body); } catch { throw new Error("Report payload is not valid JSON."); }
+                          if (!validatePayload(payload)) throw new Error("Report payload failed schema validation.");
+
+                          const headers = { "Content-Type": "application/json" };
+                          if (process.env.WEBHOOK_SECRET) {
+                              headers["X-Signature"] = "sha256=" + createHmac("sha256", process.env.WEBHOOK_SECRET).update(body).digest("hex");
+                          }
+                          const response = await fetch(endpoint, { method: "POST", headers, body, redirect: "error" });
+                          if (!response.ok) throw new Error(`Report endpoint rejected ${name} with status ${response.status}.`);
+                          await response.body?.cancel();
+                      }
+                  }
+
+                  main().catch(error => {
+                      console.error(error instanceof Error ? error.message : "Report publication failed.");
+                      process.exitCode = 1;
+                  });
+                  NODE
