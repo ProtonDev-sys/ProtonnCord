@@ -159,17 +159,9 @@ function UserPluginsTab() {
                         className={cl("install-button")}
                         onClick={async () => {
                             const gitLink = url.match(CLONE_LINK_REGEX)!;
-                            const idpl = gitLink.includes("plugins.nin0.dev")
-                                ? 1
-                                : 0;
                             try {
                                 const { name, native } = JSON.parse(
-                                    await Native.initPluginInstall(
-                                        gitLink[0],
-                                        gitLink[[1, 4][idpl]],
-                                        gitLink[[2, 5][idpl]],
-                                        gitLink[[3, 6][idpl]],
-                                    ),
+                                    await Native.initPluginInstall(gitLink[0]),
                                 );
                                 showInstallFinishedAlert(name, native);
                             } catch (e: any) {
