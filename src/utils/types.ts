@@ -335,6 +335,8 @@ export interface PluginSettingStringDef extends PluginSettingDefCommon {
 export interface PluginSettingNumberDef extends PluginSettingDefCommon {
     type: OptionType.NUMBER;
     default?: number;
+    /** Explicitly allow this non-secret value in server-readable, untrusted cloud snapshots. */
+    cloudSync?: boolean;
 }
 export interface PluginSettingBigIntDef extends PluginSettingDefCommon {
     type: OptionType.BIGINT;
@@ -343,11 +345,15 @@ export interface PluginSettingBigIntDef extends PluginSettingDefCommon {
 export interface PluginSettingBooleanDef extends PluginSettingDefCommon {
     type: OptionType.BOOLEAN;
     default?: boolean;
+    /** Explicitly allow this non-secret value in server-readable, untrusted cloud snapshots. */
+    cloudSync?: boolean;
 }
 
 export interface PluginSettingSelectDef extends PluginSettingDefCommon {
     type: OptionType.SELECT;
     options: readonly PluginSettingSelectOption[];
+    /** Explicitly allow this non-secret value in server-readable, untrusted cloud snapshots. */
+    cloudSync?: boolean;
 }
 
 export interface PluginSettingSelectOption {
@@ -376,6 +382,8 @@ export interface PluginSettingSliderDef extends PluginSettingDefCommon {
      * If false, allow users to select values in-between your markers.
      */
     stickToMarkers?: boolean;
+    /** Explicitly allow this non-secret value in server-readable, untrusted cloud snapshots. */
+    cloudSync?: boolean;
 }
 
 export interface PluginSettingComponentDef extends Omit<PluginSettingDefCommon, "description" | "placeholder" | "displayName"> {

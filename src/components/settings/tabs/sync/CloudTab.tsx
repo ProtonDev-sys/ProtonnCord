@@ -16,9 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+import { showNotification } from "@api/Notifications";
 import { useSettings } from "@api/Settings";
-import { authorizeCloud, deauthorizeCloud } from "@api/SettingsSync/cloudSetup";
-import { deleteCloudSettings, eraseAllCloudData, getCloudSettings, putCloudSettings } from "@api/SettingsSync/cloudSync";
+import { parseCloudBackendUrl } from "@api/SettingsSync/cloudPolicy";
+import { authorizeCloud, cancelCloudAuthorization, deauthorizeCloud, getCloudUserId } from "@api/SettingsSync/cloudSetup";
+import { deleteCloudSettings, eraseAllCloudData, getCloudSettings, putCloudSettings, runCloudOperation } from "@api/SettingsSync/cloudSync";
 import { Button } from "@components/Button";
 import { CheckedTextInput } from "@components/CheckedTextInput";
 import { Divider } from "@components/Divider";
@@ -51,10 +53,10 @@ const TrashIcon = findComponentByCodeLazy("2.81h8.36a3");
 
 function validateUrl(url: string) {
     try {
-        new URL(url);
+        parseCloudBackendUrl(url);
         return true;
     } catch {
-        return "Invalid URL";
+        return "Enter an HTTPS origin without credentials, a path, query, or fragment";
     }
 }
 
@@ -70,30 +72,63 @@ const syncDirectionOptions = [
     { label: "Do not sync automatically (manual sync via buttons below only)", value: "manual" }
 ];
 
+function canonicalCloudUrl(value: string) {
+    try {
+        return parseCloudBackendUrl(value).href;
+    } catch {
+        return undefined;
+    }
+}
+
+function notifyCloudActionFailure() {
+    showNotification({
+        title: "Cloud Integration",
+        body: "The cloud action could not be completed.",
+        color: "var(--red-360)",
+        noPersist: true,
+    });
+}
+
 function CloudTab() {
     const settings = useSettings(["cloud.authenticated", "cloud.url", "cloud.settingsSync"]);
     const [inputKey, setInputKey] = useState(0);
     const forceUpdate = useForceUpdater();
 
     const { cloud } = settings;
+    const [pendingUrl, setPendingUrl] = useState(cloud.url);
     const isAuthenticated = cloud.authenticated;
     const syncEnabled = isAuthenticated && cloud.settingsSync;
 
-    async function changeUrl(url: string) {
-        cloud.url = url;
-        cloud.authenticated = false;
+    async function changeUrl(url: string, reauthorize: boolean) {
+        const initiatingUserId = getCloudUserId();
+        let previousOrigin: string | undefined;
+        try {
+            previousOrigin = new URL(cloud.url).origin;
+        } catch { }
+        return await runCloudOperation(async signal => {
+            if (getCloudUserId() !== initiatingUserId || previousOrigin && new URL(cloud.url).origin !== previousOrigin) return;
+            cancelCloudAuthorization();
+            const canonicalUrl = parseCloudBackendUrl(url).href;
+            if (canonicalUrl === canonicalCloudUrl(cloud.url)) {
+                setPendingUrl(canonicalUrl);
+                return;
+            }
 
-        await deauthorizeCloud();
-        await authorizeCloud();
+            cloud.url = canonicalUrl;
+            cloud.authenticated = false;
+            if (reauthorize && getCloudUserId() === initiatingUserId && new URL(cloud.url).href === canonicalUrl)
+                await authorizeCloud(signal);
 
-        setInputKey(prev => prev + 1);
+            setPendingUrl(canonicalUrl);
+            if (reauthorize) setInputKey(prev => prev + 1);
+        });
     }
 
     return (
         <SettingsTab>
             <Heading className={Margins.top16}>Cloud Integration</Heading>
             <Paragraph className={Margins.bottom16}>
-                Protonn Cord's cloud integration allows you to sync your settings across multiple devices and Discord installations. Your data is securely stored and can be easily restored at any time.
+                Sync a privacy-filtered subset of Protonn Cord preferences across devices. The cloud backend can read synced preferences and QuickCSS; credentials, private plugin configuration, and DataStore content stay on this device.
             </Paragraph>
 
             <Notice.Info className={Margins.bottom16}>
@@ -102,15 +137,21 @@ function CloudTab() {
                 The backend is BSD 3.0 licensed, so you can self-host if preferred.
             </Notice.Info>
 
+            <Notice.Warning className={Margins.bottom16}>
+                Older clients may have uploaded credentials that this client cannot verify or erase automatically. Update every client, request provider-side deletion on each former backend that is still reachable over a valid HTTPS origin, and rotate previously synced API keys, passwords, and tokens. Local-only fields must be entered again on each device.
+            </Notice.Warning>
+
             <FormSwitch
                 title="Enable Cloud Integration"
                 description="Connect to the cloud backend for settings synchronization. This will request authorization if you haven't set up cloud integration yet."
                 value={isAuthenticated}
                 onChange={v => {
-                    if (v)
-                        authorizeCloud();
-                    else
-                        cloud.authenticated = v;
+                    if (v) {
+                        void runCloudOperation(signal => authorizeCloud(signal)).catch(notifyCloudActionFailure);
+                    } else {
+                        cancelCloudAuthorization();
+                        cloud.authenticated = false;
+                    }
                 }}
                 hideBorder
             />
@@ -126,7 +167,7 @@ function CloudTab() {
                 <SearchableSelect
                     options={cloudBackendOptions}
                     value={cloudBackendOptions.find(o => o.value === cloud.url)?.value}
-                    onChange={v => changeUrl(v)}
+                    onChange={v => { void changeUrl(v, true).catch(notifyCloudActionFailure); }}
                     closeOnSelect={true}
                     renderOptionPrefix={o => o?.value?.includes("equicord") ? <ProtonnCordIcon /> : <VencordIcon />}
                 />
@@ -137,20 +178,36 @@ function CloudTab() {
                     <CheckedTextInput
                         key={`backendUrl-${inputKey}`}
                         initialValue={cloud.url}
-                        onChange={async v => {
-                            cloud.url = v;
-                            cloud.authenticated = false;
-                            await deauthorizeCloud();
-                        }}
+                        onChange={setPendingUrl}
                         validate={validateUrl}
                     />
                 </div>
                 <Button
+                    disabled={!canonicalCloudUrl(pendingUrl) || canonicalCloudUrl(pendingUrl) === canonicalCloudUrl(cloud.url)}
+                    onClick={() => { void changeUrl(pendingUrl, false).catch(notifyCloudActionFailure); }}
+                >
+                    Apply
+                </Button>
+                <Button
                     disabled={!isAuthenticated}
                     onClick={async () => {
-                        cloud.authenticated = false;
-                        await deauthorizeCloud();
-                        await authorizeCloud();
+                        try {
+                            const initiatingUserId = getCloudUserId();
+                            let initiatingOrigin: string | undefined;
+                            try {
+                                initiatingOrigin = new URL(cloud.url).origin;
+                            } catch { }
+                            await runCloudOperation(async signal => {
+                                if (getCloudUserId() !== initiatingUserId || !initiatingOrigin || new URL(cloud.url).origin !== initiatingOrigin) return;
+                                cancelCloudAuthorization();
+                                cloud.authenticated = false;
+                                await deauthorizeCloud(initiatingOrigin, initiatingUserId);
+                                if (getCloudUserId() === initiatingUserId && new URL(cloud.url).origin === initiatingOrigin)
+                                    await authorizeCloud(signal);
+                            });
+                        } catch {
+                            notifyCloudActionFailure();
+                        }
                     }}
                 >
                     <Flex gap="8px" alignItems="center">
@@ -164,7 +221,7 @@ function CloudTab() {
 
             <Heading className={Margins.top20}>Settings Sync</Heading>
             <Paragraph className={Margins.bottom16}>
-                Synchronize your Protonn Cord settings to the cloud. This makes it easy to keep your configuration consistent across multiple devices without manual import/export.
+                Synchronize low-risk core preferences, plugin favorite state, explicitly cloud-safe plugin options, and QuickCSS. Plugin enabled state, structured credential fields, custom connection profiles, plugin-private data, and logs are excluded. QuickCSS is uploaded verbatim, so do not place secrets in it.
             </Paragraph>
 
             <FormSwitch
@@ -227,14 +284,14 @@ function CloudTab() {
 
             <Heading className={Margins.top20}>Danger Zone</Heading>
             <Paragraph className={Margins.bottom16}>
-                Permanently delete all your data from the cloud. This action cannot be undone and will remove all synced settings and any other data stored on the cloud backend.
+                Request deletion from the current backend. Delete Cloud Settings requests removal of visible sync records; Delete Cloud Account requests full account erasure. Old clients may reintroduce data, and retained backups cannot be verified from this client, so rotate any credentials previously synced.
             </Paragraph>
 
             <Flex gap="8px">
                 <Button
                     variant="dangerPrimary"
                     size="medium"
-                    disabled={!syncEnabled}
+                    disabled={!isAuthenticated}
                     onClick={() => deleteCloudSettings()}
                 >
                     <Flex gap="8px" alignItems="center">
@@ -248,7 +305,7 @@ function CloudTab() {
                     disabled={!isAuthenticated}
                     onClick={() => Alerts.show({
                         title: "Delete Cloud Account",
-                        body: "Are you sure you want to permanently delete your cloud account and all associated data? This action cannot be undone.",
+                        body: "Request account erasure from the current backend? The client cannot verify retained backups, and older clients may reintroduce data. Rotate any credentials that were previously synced.",
                         onConfirm: eraseAllCloudData,
                         confirmText: "Delete Account",
                         confirmColor: "vc-cloud-erase-data-danger-btn",
