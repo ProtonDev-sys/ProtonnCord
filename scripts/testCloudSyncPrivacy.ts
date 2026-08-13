@@ -1731,7 +1731,7 @@ async function assertPrivacyWarningSource(): Promise<void> {
     assert.match(tabSource, /Old clients may reintroduce data/u);
     assert.match(tabSource, /onClick=\{\(\) => deleteCloudSettings\(\)\}/u);
     assert.match(tabSource, /onConfirm: eraseAllCloudData/u);
-    assert.match(tabSource, /Plugin enabled state, structured credential fields[^.]+are excluded/u);
+    assert.match(tabSource, /Plugin enabled state, structured credential fields[^.]+local DataStore records are never cloud synced/u);
     assert.match(tabSource, /disabled=\{!isAuthenticated\}[\s\S]+?Delete Cloud Settings/u, "deletion depends on account authorization, not sync enablement");
     assert.doesNotMatch(`${syncSource}\n${setupSource}\n${tabSource}`, /migrateCloudPrivacy|purgeLegacyCloudData/u);
     assert.doesNotMatch(tabSource, /legacy (?:data|credentials) (?:were|was|is|are) (?:purged|erased|deleted|removed)/iu);

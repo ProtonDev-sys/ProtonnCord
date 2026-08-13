@@ -8,6 +8,19 @@ const MAX_CLOUD_URL_LENGTH = 4096;
 const MAX_JSON_DEPTH = 32;
 const FORBIDDEN_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
+/**
+ * Cloud sync is deliberately limited to these two protocol values. Plugin
+ * DataStore records are local-only and may only be moved through an explicit
+ * offline export/import chosen by the user.
+ */
+export const CLOUD_SYNC_VALUE_KEYS = ["settings", "quickCss"] as const;
+export type CloudSyncValueKey = typeof CLOUD_SYNC_VALUE_KEYS[number];
+const CLOUD_SYNC_VALUE_KEY_SET = new Set<string>(CLOUD_SYNC_VALUE_KEYS);
+
+export function isCloudSyncValueKey(value: unknown): value is CloudSyncValueKey {
+    return typeof value === "string" && CLOUD_SYNC_VALUE_KEY_SET.has(value);
+}
+
 const CLOUD_SAFE_BOOLEAN_SETTING_KEYS = [
     "mainWindowFrameless",
     "frameless",

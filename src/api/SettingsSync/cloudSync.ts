@@ -18,6 +18,7 @@ import plugins from "~plugins";
 import {
     buildCloudDocument,
     type CloudPluginRegistry,
+    isCloudSyncValueKey,
     sanitizeCloudDocument,
     sanitizeCloudSettings,
 } from "./cloudPolicy";
@@ -42,7 +43,6 @@ const MAX_CLOUD_VALUE_BYTES = 4 * 1024 * 1024;
 const MAX_CLOUD_DOCUMENT_BYTES = 8 * 1024 * 1024;
 const MAX_JSON_BYTES = 16 * 1024 * 1024;
 const MAX_MANIFEST_ENTRIES = 4096;
-const CLOUD_KEYS = new Set(["settings", "quickCss"]);
 const MAX_ENCODED_VALUE_LENGTH = Math.ceil(MAX_CLOUD_VALUE_BYTES / 3) * 4;
 
 type ApiVersion = "v2" | "v1";
@@ -195,7 +195,7 @@ function projectManifest(value: unknown): ManifestEntry[] | null {
     const output: ManifestEntry[] = [];
     const keys = new Set<string>();
     for (const raw of value) {
-        if (!isRecord(raw) || typeof raw.key !== "string" || !CLOUD_KEYS.has(raw.key)) continue;
+        if (!isRecord(raw) || !isCloudSyncValueKey(raw.key)) continue;
         const { key, checksum, version } = raw;
         if (
             keys.has(key) || !isSafeChecksum(checksum) || !isSafeVersion(version)
@@ -219,7 +219,7 @@ function projectSyncResponse(value: unknown): SyncResponse | null {
     const downloads: SyncResponse["downloads"] = [];
     for (const raw of value.downloads) {
         if (!isRecord(raw) || typeof raw.key !== "string") return null;
-        if (!CLOUD_KEYS.has(raw.key)) continue;
+        if (!isCloudSyncValueKey(raw.key)) continue;
         const manifestEntry = manifestByKey.get(raw.key);
         if (
             downloadKeys.has(raw.key) || !manifestEntry ||
@@ -235,7 +235,7 @@ function projectSyncResponse(value: unknown): SyncResponse | null {
     const uploaded: SyncResponse["uploaded"] = [];
     for (const raw of value.uploaded) {
         if (!isRecord(raw) || typeof raw.key !== "string") return null;
-        if (!CLOUD_KEYS.has(raw.key)) continue;
+        if (!isCloudSyncValueKey(raw.key)) continue;
         const manifestEntry = manifestByKey.get(raw.key);
         if (
             uploadedKeys.has(raw.key) || !manifestEntry ||
@@ -508,7 +508,7 @@ async function putV2(context: CloudRequestContext, signal: AbortSignal, manual =
 
     // A put is a local/source operation. Never apply bundled server values. If the server
     // reports a stale non-uploaded key, establish its manifest then retry our local snapshot.
-    if (!retried && response.downloads.some(download => isRecord(download) && CLOUD_KEYS.has(download.key))) {
+    if (!retried && response.downloads.some(download => isRecord(download) && isCloudSyncValueKey(download.key))) {
         await saveManifest(context.scope, response.server_manifest);
         return await putV2(context, signal, manual, true);
     }
