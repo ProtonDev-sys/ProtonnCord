@@ -21,13 +21,26 @@ import { Devs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType, ReporterTestable } from "@utils/types";
 
+import { isValidAuthSecret } from "./auth";
 import { initWs, socket, stopWs } from "./initWs";
 export const PORT = 8485;
-export const CLIENT_VERSION: readonly [major: number, minor: number, patch: number] = [0, 1, 2];
+export const CLIENT_VERSION: readonly [major: number, minor: number, patch: number] = [0, 2, 0];
 
 export const logger = new Logger("DevCompanion");
 
 export const settings = definePluginSettings({
+    authSecret: {
+        description: "A cryptographically generated 32-byte secret, encoded as 64 lowercase hexadecimal characters and shared with an authenticated Dev Companion server. Empty disables all connections.",
+        type: OptionType.STRING,
+        default: "",
+        restartNeeded: true,
+        componentProps: {
+            type: "password"
+        },
+        isValid(value: string) {
+            return value === "" || isValidAuthSecret(value) || "Use a generated 32-byte secret encoded as exactly 64 lowercase hexadecimal characters.";
+        }
+    },
     notifyOnAutoConnect: {
         description: "Whether to notify when Dev Companion has automatically connected.",
         type: OptionType.BOOLEAN,
