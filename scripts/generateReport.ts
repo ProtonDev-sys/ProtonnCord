@@ -143,7 +143,7 @@ async function printReport() {
 
     console.log();
 
-    if (process.env.WEBHOOK_URL) {
+    if (process.env.WEBHOOK_URL || process.env.REPORT_WEBHOOK_BODY_FILE) {
         const patchesToEmbed = (title: string, patches: PatchInfo[], color: number) => ({
             title,
             color,
@@ -206,6 +206,15 @@ async function printReport() {
             username: "Protonn Cord Reporter" + (CANARY ? " (Canary)" : ""),
             embeds
         });
+
+        // CI generates this artifact in the untrusted, secretless build job. A
+        // separate fixed sender validates and signs it without executing any
+        // code from the selected report ref.
+        if (process.env.REPORT_WEBHOOK_BODY_FILE) {
+            writeFileSync(process.env.REPORT_WEBHOOK_BODY_FILE, body, { encoding: "utf8", flag: "wx" });
+        }
+
+        if (!process.env.WEBHOOK_URL) return;
 
         const headers = {
             "Content-Type": "application/json"
