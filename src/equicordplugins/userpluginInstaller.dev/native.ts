@@ -8,14 +8,15 @@ import { NativeSettings } from "@main/settings";
 import { exec, spawn } from "child_process";
 import { BrowserWindow, dialog, shell, WebContentsView } from "electron";
 import { existsSync, readdirSync, readFileSync } from "fs";
-import { mkdir, readdir, readFile, rm } from "fs/promises";
-import { basename, join } from "path";
+import { lstat, mkdir, readdir, readFile, rm } from "fs/promises";
+import { basename, join, resolve } from "path";
 import yaml from "yaml-js";
 
 // @ts-ignore fuck off
 import pluginValidateContent from "./misc/pluginValidate.txt"; // i would use HTML but esbuild is being whiny
 // @ts-ignore fuck off
 import setGitPathContent from "./misc/setGitPath.txt";
+import { parseUserpluginRepositoryUrl, resolveUserpluginDirectory } from "./repositorySafety";
 import {
     createUpdateReviewModel,
     createUpdateReviewPlan,
@@ -29,15 +30,23 @@ import {
 } from "./updateReview";
 
 const PLUGIN_META_REGEX = /export default definePlugin\((?:\s|\/(?:\/|\*).*)*{\s*(?:\s|\/(?:\/|\*).*)*name:\s*(?:"|'|`)(.*)(?:"|'|`)(?:\s|\/(?:\/|\*).*)*,(?:\s|\/(?:\/|\*).*)*.+(?:\s|\/(?:\/|\*).*)*description:\s*(?:"|'|`)(.*)(?:"|'|`)(?:\s|\/(?:\/|\*).*)*/;
-// if edited, also edit in misc/constants.ts!!!
-const CLONE_LINK_REGEX = /https:\/\/(?:((?:git(?:hub|lab)\.com|git\.(?:[a-zA-Z0-9]|\.)+|codeberg\.org))\/(?!user-attachments)((?:[a-zA-Z0-9]|-)+)\/((?:[a-zA-Z0-9]|-|\.)+)(?:\.git)?|(plugins\.(nin0)\.dev)\/((?:[a-zA-Z0-9]|-|\.)+))(?:\/)?/;
-
 const vencordPath = ["desktop", "equibop"].includes(basename(__dirname)) ? join(__dirname, "../") : __dirname;
+const userpluginsRoot = resolve(vencordPath, "../src/userplugins");
+
+function getUserpluginPath(name: string): string {
+    return resolveUserpluginDirectory(userpluginsRoot, name);
+}
+
+async function removeUserpluginDirectory(destination: string): Promise<void> {
+    // Never follow or recursively operate through a user-controlled reparse point.
+    if ((await lstat(destination)).isSymbolicLink()) throw new Error("Refusing to remove a linked plugin directory");
+    await rm(destination, { recursive: true });
+}
 
 export async function ensurePluginsDirectory(_: any) {
     if (!IS_DEV) return;
     try {
-        await mkdir(join(vencordPath, "../src/userplugins"), { recursive: true });
+        await mkdir(userpluginsRoot, { recursive: true });
     } catch(e) { }
 }
 
@@ -57,7 +66,7 @@ export async function rmPlugin(_, name: string): Promise<string> {
         });
 
         if (deleteReqDialog.response !== 1) return reject("User rejected");
-        await rm(join(vencordPath, "../src/userplugins", name), { recursive: true });
+        await removeUserpluginDirectory(getUserpluginPath(name));
 
         await build();
         resolve("Done");
@@ -66,7 +75,7 @@ export async function rmPlugin(_, name: string): Promise<string> {
 
 export async function isUpdateAvailableForPlugin(_, name: string): Promise<boolean> {
     return new Promise(resolve => {
-        const pluginDir = join(vencordPath, "../src/userplugins", name);
+        const pluginDir = getUserpluginPath(name);
         const otherProc = exec("git fetch", {
             cwd: pluginDir
         });
@@ -89,12 +98,13 @@ export async function isUpdateAvailableForPlugin(_, name: string): Promise<boole
     });
 }
 
-export function initPluginInstall(_, link: string, source: string, owner: string, repo: string): Promise<string> {
+export function initPluginInstall(_, link: string): Promise<string> {
     // eslint-disable-next-line
     return new Promise(async (resolve, reject) => {
-        const verifiedRegex = link.match(CLONE_LINK_REGEX)!;
-        const idpl = source === "plugins.nin0.dev" ? 1 : 0;
-        if (![4, 7].includes(verifiedRegex.length) || verifiedRegex[0] !== link || verifiedRegex[[1, 4][idpl]] !== source || verifiedRegex[[2, 5][idpl]] !== owner || verifiedRegex[[3, 6][idpl]] !== repo) return reject("Invalid link");
+        const repository = parseUserpluginRepositoryUrl(link);
+        if (!repository) return reject("Invalid link");
+        const { href: repositoryUrl, owner, repo, source } = repository;
+        const pluginPath = getUserpluginPath(repo);
 
         // Ask for clone
         const cloneDialog = await dialog.showMessageBox({
@@ -109,17 +119,17 @@ export function initPluginInstall(_, link: string, source: string, owner: string
                 return reject("Rejected by user");
             }
             case 1: {
-                await cloneRepo(link, repo);
+                await cloneRepo(repositoryUrl, repo);
                 break;
             }
             case 2: {
-                await shell.openExternal(link);
+                await shell.openExternal(repositoryUrl);
                 return reject("silentStop");
             }
         }
 
         // Get plugin meta
-        const meta = await getPluginMeta(join(vencordPath, "..", "src", "userplugins", repo));
+        const meta = await getPluginMeta(pluginPath);
 
         // Review plugin
         const win = new BrowserWindow({
@@ -149,9 +159,7 @@ export function initPluginInstall(_, link: string, source: string, owner: string
             switch (win.webContents.getTitle() as "abortInstall" | "reviewCode" | "install") {
                 case "abortInstall": {
                     win.close();
-                    await rm(join(vencordPath, "..", "src", "userplugins", repo), {
-                        recursive: true
-                    });
+                    await removeUserpluginDirectory(pluginPath);
                     return reject("Rejected by user");
                 }
                 case "install": {
@@ -244,25 +252,24 @@ async function getPluginMeta(path: string, extra: object = {}): Promise<{
 }
 
 async function cloneRepo(link: string, repo: string): Promise<void> {
+    const destination = getUserpluginPath(repo);
     return new Promise((resolve, reject) => {
-        const proc = spawn("git", ["clone", link], {
-            cwd: join(vencordPath, "..", "src", "userplugins")
+        const proc = spawn("git", ["clone", "--", link, destination], {
+            cwd: userpluginsRoot
         });
         proc.once("close", async () => {
             if (proc.exitCode !== 0) {
-                if (!existsSync(join(vencordPath, "..", "src", "userplugins", repo)))
+                if (!existsSync(destination))
                     return reject("Failed to clone");
                 const deleteReqDialog = await dialog.showMessageBox({
                     title: "Error",
                     message: "Plugin already exists",
                     type: "error",
-                    detail: `The plugin that you tried to clone already exists at ${join(vencordPath, "..", "src", "userplugins")}.\nWould you like to reclone it? Only do this if you want to reinstall or update the plugin.`,
+                    detail: `The plugin that you tried to clone already exists at ${destination}.\nWould you like to delete this exact directory and reclone it?`,
                     buttons: ["No", "Yes"]
                 });
                 if (deleteReqDialog.response !== 1) return reject("User rejected");
-                await rm(join(vencordPath, "..", "src", "userplugins", repo), {
-                    recursive: true
-                });
+                await removeUserpluginDirectory(destination);
                 await cloneRepo(link, repo);
             }
             resolve();
@@ -399,16 +406,20 @@ async function reviewPluginUpdate(metadata: { name: string; description: string;
 }
 
 export async function getUserplugins() {
-    const folderContents = await readdir(join(vencordPath, "..", "src", "userplugins"), {
+    const folderContents = await readdir(userpluginsRoot, {
         withFileTypes: true
     });
     const plugins = await Promise.allSettled(
         folderContents
             .filter(item => item.isDirectory())
-            .map(item => ({
-                path: join(item.parentPath, item.name),
-                directory: item.name
-            }))
+            .map(item => {
+                try {
+                    return { path: getUserpluginPath(item.name), directory: item.name };
+                } catch {
+                    return null;
+                }
+            })
+            .filter(item => item != null)
             .map(({ path, directory }) => getPluginMeta(path, { directory }))
     );
 
@@ -419,7 +430,12 @@ export async function getUserplugins() {
 
 export async function updatePlugin(_, directory: string) {
     return new Promise((resolve, reject) => {
-        const pluginDir = join(vencordPath, "../src/userplugins", directory);
+        let pluginDir: string;
+        try {
+            pluginDir = getUserpluginPath(directory);
+        } catch {
+            return reject("Invalid plugin directory");
+        }
 
         async function doStuff() {
             try {
