@@ -7,8 +7,8 @@
 import { NativeSettings } from "@main/settings";
 import { exec, spawn } from "child_process";
 import { BrowserWindow, dialog, shell, WebContentsView } from "electron";
-import { existsSync, readdirSync, readFileSync } from "fs";
-import { lstat, mkdir, readdir, readFile, rm } from "fs/promises";
+import { readdirSync, readFileSync } from "fs";
+import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm } from "fs/promises";
 import { basename, join, resolve } from "path";
 import yaml from "yaml-js";
 
@@ -16,7 +16,7 @@ import yaml from "yaml-js";
 import pluginValidateContent from "./misc/pluginValidate.txt"; // i would use HTML but esbuild is being whiny
 // @ts-ignore fuck off
 import setGitPathContent from "./misc/setGitPath.txt";
-import { parseUserpluginRepositoryUrl, resolveUserpluginDirectory } from "./repositorySafety";
+import { assertSafeExistingUserpluginDirectory, parseUserpluginRepositoryUrl, resolveUserpluginDirectory } from "./repositorySafety";
 import {
     createUpdateReviewModel,
     createUpdateReviewPlan,
@@ -38,9 +38,12 @@ function getUserpluginPath(name: string): string {
 }
 
 async function removeUserpluginDirectory(destination: string): Promise<void> {
-    // Never follow or recursively operate through a user-controlled reparse point.
-    if ((await lstat(destination)).isSymbolicLink()) throw new Error("Refusing to remove a linked plugin directory");
+    await assertSafeUserpluginDirectory(destination);
     await rm(destination, { recursive: true });
+}
+
+async function assertSafeUserpluginDirectory(destination: string): Promise<string> {
+    return assertSafeExistingUserpluginDirectory(userpluginsRoot, destination);
 }
 
 export async function ensurePluginsDirectory(_: any) {
@@ -74,8 +77,9 @@ export async function rmPlugin(_, name: string): Promise<string> {
 }
 
 export async function isUpdateAvailableForPlugin(_, name: string): Promise<boolean> {
-    return new Promise(resolve => {
-        const pluginDir = getUserpluginPath(name);
+    try {
+        const pluginDir = await assertSafeUserpluginDirectory(getUserpluginPath(name));
+        return await new Promise(resolve => {
         const otherProc = exec("git fetch", {
             cwd: pluginDir
         });
@@ -95,7 +99,10 @@ export async function isUpdateAvailableForPlugin(_, name: string): Promise<boole
             }
             doStuff();
         });
-    });
+        });
+    } catch {
+        return false;
+    }
 }
 
 export function initPluginInstall(_, link: string): Promise<string> {
@@ -253,28 +260,44 @@ async function getPluginMeta(path: string, extra: object = {}): Promise<{
 
 async function cloneRepo(link: string, repo: string): Promise<void> {
     const destination = getUserpluginPath(repo);
-    return new Promise((resolve, reject) => {
-        const proc = spawn("git", ["clone", "--", link, destination], {
-            cwd: userpluginsRoot
+    try {
+        await assertSafeUserpluginDirectory(destination);
+        const deleteReqDialog = await dialog.showMessageBox({
+            title: "Error",
+            message: "Plugin already exists",
+            type: "error",
+            detail: `The plugin that you tried to clone already exists at ${destination}.\nWould you like to delete this exact directory and reclone it?`,
+            buttons: ["No", "Yes"]
         });
-        proc.once("close", async () => {
-            if (proc.exitCode !== 0) {
-                if (!existsSync(destination))
-                    return reject("Failed to clone");
-                const deleteReqDialog = await dialog.showMessageBox({
-                    title: "Error",
-                    message: "Plugin already exists",
-                    type: "error",
-                    detail: `The plugin that you tried to clone already exists at ${destination}.\nWould you like to delete this exact directory and reclone it?`,
-                    buttons: ["No", "Yes"]
-                });
-                if (deleteReqDialog.response !== 1) return reject("User rejected");
-                await removeUserpluginDirectory(destination);
-                await cloneRepo(link, repo);
-            }
-            resolve();
+        if (deleteReqDialog.response !== 1) throw new Error("User rejected");
+        await removeUserpluginDirectory(destination);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+
+    // Clone into a directory that this operation created. An existing junction
+    // can therefore never redirect git outside the userplugins root.
+    const stagingDirectory = await mkdtemp(join(userpluginsRoot, ".clone-"));
+    try {
+        await new Promise<void>((resolveClone, rejectClone) => {
+            const proc = spawn("git", ["clone", "--", link, stagingDirectory], { cwd: userpluginsRoot });
+            proc.once("error", rejectClone);
+            proc.once("close", exitCode => exitCode === 0 ? resolveClone() : rejectClone(new Error("Failed to clone")));
         });
-    });
+        await assertSafeUserpluginDirectory(stagingDirectory);
+
+        try {
+            await lstat(destination);
+            throw new Error("The plugin destination appeared while cloning; refusing to replace it");
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+
+        await rename(stagingDirectory, destination);
+    } catch (error) {
+        await removeUserpluginDirectory(stagingDirectory).catch(() => undefined);
+        throw error;
+    }
 }
 
 function generateReviewPluginContent(meta: {
@@ -412,20 +435,24 @@ export async function getUserplugins() {
     const plugins = await Promise.allSettled(
         folderContents
             .filter(item => item.isDirectory())
-            .map(item => {
+            .map(async item => {
                 try {
-                    return { path: getUserpluginPath(item.name), directory: item.name };
+                    return {
+                        path: await assertSafeUserpluginDirectory(getUserpluginPath(item.name)),
+                        directory: item.name
+                    };
                 } catch {
                     return null;
                 }
             })
-            .filter(item => item != null)
-            .map(({ path, directory }) => getPluginMeta(path, { directory }))
+            .map(async item => {
+                const plugin = await item;
+                return plugin == null ? null : getPluginMeta(plugin.path, { directory: plugin.directory });
+            })
     );
 
     return plugins
-        .filter(p => p.status === "fulfilled")
-        .map(p => p.value);
+        .flatMap(p => p.status === "fulfilled" && p.value != null ? [p.value] : []);
 }
 
 export async function updatePlugin(_, directory: string) {
@@ -439,6 +466,7 @@ export async function updatePlugin(_, directory: string) {
 
         async function doStuff() {
             try {
+                pluginDir = await assertSafeUserpluginDirectory(pluginDir);
                 const pluginMeta = await getPluginMeta(pluginDir);
                 const reviewPlan = await getUpdateReviewPlan(pluginDir);
                 const commits = await getUpdateCommits(pluginDir, reviewPlan.logRange);

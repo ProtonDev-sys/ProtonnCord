@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { lstat, realpath } from "fs/promises";
 import path from "path";
 
 const SAFE_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,98}[A-Za-z0-9])?$/;
@@ -76,4 +77,15 @@ export function resolveUserpluginDirectory(
         throw new Error("Repository path escapes the userplugins directory");
 
     return destination;
+}
+
+export async function assertSafeExistingUserpluginDirectory(root: string, destination: string): Promise<string> {
+    const stats = await lstat(destination);
+    if (!stats.isDirectory() || stats.isSymbolicLink()) throw new Error("Refusing to use a linked plugin directory");
+
+    const [canonicalRoot, canonicalDestination] = await Promise.all([realpath(root), realpath(destination)]);
+    if (path.dirname(canonicalDestination) !== canonicalRoot)
+        throw new Error("Plugin directory escapes the userplugins root");
+
+    return canonicalDestination;
 }
