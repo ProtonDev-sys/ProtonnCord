@@ -12,6 +12,7 @@ import { ApplicationAssetUtils, FluxDispatcher } from "@webpack/common";
 import md5 from "md5";
 
 import { settings } from "../settings";
+import { normalizeNavidromeAlbumArtMode } from "./navidromePrivacy";
 
 function md5Hex(str: string): string {
     return md5(str);
@@ -229,7 +230,7 @@ async function getActivity(signal?: AbortSignal): Promise<Activity | null> {
         }
     }
 
-    const albumArtMode = settings.store.nd_albumArtMode ?? "none";
+    const albumArtMode = normalizeNavidromeAlbumArtMode(settings.store.nd_albumArtMode);
     let resolvedCoverArtUrl: string | null = null;
 
     if (albumArtMode === "lastfm" && track.artist) {
