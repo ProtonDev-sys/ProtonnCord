@@ -58,7 +58,7 @@
         "testMessageLoggerNativeDownloads": "tsx scripts/testMessageLoggerNativeDownloads.ts",
         "testFileUploadNativeBoundary": "tsx scripts/testFileUploadNativeBoundary.ts",
         "testExternalUrlBoundary": "tsx scripts/testExternalUrlBoundary.ts",
-        "testInstallerSecurity": "node scripts/testInstallerSecurity.mjs",
+        "testExtensionPublishWorkflow": "tsx scripts/testExtensionPublishWorkflow.ts",
         "testQuestifyNativeBoundary": "tsx scripts/testQuestifyNativeBoundary.ts",
         "testCloudSyncPrivacy": "tsx scripts/testCloudSyncPrivacy.ts",
         "testSecureMessaging": "tsx scripts/testSecureMessaging.ts",
@@ -66,9 +66,10 @@
         "testSecureMessagingLive": "tsx scripts/testSecureMessagingLive.ts",
         "createDiscordMcpVideo": "tsx scripts/createDiscordMcpVideo.ts",
         "benchmarkDiscord": "tsx scripts/benchmarkDiscord.ts",
-        "test": "pnpm testDevNativeBuild && pnpm testUserpluginUpdateReview && pnpm testMessageLoggerNativeWrites && pnpm testMessageLoggerNativeDownloads && pnpm testFileUploadNativeBoundary && pnpm testExternalUrlBoundary && pnpm testInstallerSecurity && pnpm testQuestifyNativeBoundary && pnpm testCloudSyncPrivacy && pnpm testTsc && pnpm testUpdaterClassification && pnpm testUpdaterGit && pnpm testUpdaterHttp && pnpm testUpdaterRepository:built && pnpm testMessageEventsPriority && pnpm testMainProcessStdio && pnpm testSecureMessaging && pnpm testSecureMessagingNative && pnpm lint:fix && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
+        "test": "pnpm testDevNativeBuild && pnpm testUserpluginUpdateReview && pnpm testMessageLoggerNativeWrites && pnpm testMessageLoggerNativeDownloads && pnpm testFileUploadNativeBoundary && pnpm testExternalUrlBoundary && pnpm testInstallerSecurity && pnpm testExtensionPublishWorkflow && pnpm testQuestifyNativeBoundary && pnpm testCloudSyncPrivacy && pnpm testTsc && pnpm testUpdaterClassification && pnpm testUpdaterGit && pnpm testUpdaterHttp && pnpm testUpdaterRepository:built && pnpm testMessageEventsPriority && pnpm testMainProcessStdio && pnpm testSecureMessaging && pnpm testSecureMessagingNative && pnpm lint:fix && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
         "testWeb": "pnpm lint:fix && pnpm buildWeb && pnpm testTsc",
-        "testTsc": "tsc --noEmit"
+        "testTsc": "tsc --noEmit",
+        "testInstallerSecurity": "node scripts/testInstallerSecurity.mjs"
     },
     "dependencies": {
         "@ffmpeg/ffmpeg": "^0.12.10",
@@ -92,6 +93,7 @@
     },
     "devDependencies": {
         "@electron/asar": "^4.2.0",
+        "@equicord/publish-browser-extension": "4.0.8",
         "@stylistic/eslint-plugin": "^5.10.0",
         "@types/chrome": "^0.2.0",
         "@types/lodash": "^4.17.24",
