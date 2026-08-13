@@ -599,9 +599,10 @@ async function loadPlugin(): Promise<OrbolayPlugin> {
 }
 
 async function waitUntil(predicate: () => boolean, label: string): Promise<void> {
-    for (let attempt = 0; attempt < 100; attempt++) {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
         if (predicate()) return;
-        await new Promise<void>(resolve => setImmediate(resolve));
+        await new Promise<void>(resolve => setTimeout(resolve, 5));
     }
     assert.fail(`Timed out waiting for ${label}`);
 }
