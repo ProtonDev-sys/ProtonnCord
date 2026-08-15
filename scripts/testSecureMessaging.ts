@@ -37,12 +37,15 @@ import {
     decodeBase64Url,
     encodeBase64Url,
     ENCRYPTED_MESSAGE_PREFIX,
+    extractMentionedUserIds,
     isEncryptedMessage,
     isKeyAnnouncement,
     KEY_ANNOUNCEMENT_PREFIX,
     LEGACY_ENCRYPTED_MESSAGE_PREFIX,
     MAX_DISCORD_MESSAGE_LENGTH,
     MAX_SELECTED_RECIPIENTS,
+    PREVIOUS_ENCRYPTED_MESSAGE_PREFIX,
+    PREVIOUS_ENCRYPTED_MESSAGE_VERSION,
     parseEncryptedEnvelope,
     parseKeyAnnouncement,
     serializeEncryptedEnvelope,
@@ -72,6 +75,10 @@ import {
 } from "../src/equicordplugins/secureMessaging.desktop/wireAuthorizations";
 import { availableSelectedRecipientIds } from "../src/equicordplugins/secureMessaging.desktop/conversationSelection";
 import { discordEditedTimestamp, discordMessageNonce } from "../src/equicordplugins/secureMessaging.desktop/messageMetadata";
+import {
+    encryptedAllowedMentions,
+    encryptedMessageMentionsUser,
+} from "../src/equicordplugins/secureMessaging.desktop/mentionNotifications";
 import {
     secureMessageGroupFlags,
     SecureMessageGroup,
@@ -857,7 +864,7 @@ async function main(): Promise<void> {
         /snowflake/,
     );
 
-    const plaintext = "Hello Bob and Carol 👋 — こんにちは — café — null:\u0000 — astral: 𠜎";
+    const plaintext = `Hello <@${ALICE_ID}> and <@${BOB_ID}> 👋 — こんにちは — café — null:\u0000 — astral: 𠜎`;
     const encrypted = await encryptMessage({
         channelId: CHANNEL_ID,
         identity: aliceIdentity,
@@ -866,6 +873,7 @@ async function main(): Promise<void> {
         senderUserId: ALICE_ID,
         now: NOW + 10,
         messageId: MESSAGE_ID,
+        mentionedUserIds: [ALICE_ID, BOB_ID],
         counter: 7,
     });
     const envelope = parseTestEnvelope(encrypted);
@@ -878,20 +886,74 @@ async function main(): Promise<void> {
     assert.equal(envelope.k, alicePublic.fingerprint);
     assert.equal(envelope.q, 7);
     assert.equal(envelope.i, MESSAGE_ID);
+    assert.deepEqual(envelope.m, [ALICE_ID, BOB_ID], "PCEM3 carries explicitly mentioned selected participants, including the author");
+    assert.ok(encrypted.includes(JSON.stringify(`<@${ALICE_ID}>`)), "the authenticated wire carries author mention state immediately");
+    assert.ok(encrypted.includes(JSON.stringify(`<@${BOB_ID}>`)), "the authenticated wire contains Discord mention syntax");
+    assert.deepEqual(
+        encryptedAllowedMentions(encrypted, { channelId: CHANNEL_ID, discordAuthorId: ALICE_ID }, {
+            parse: ["everyone", "roles", "users"],
+            replied_user: true,
+        }),
+        { parse: [], users: [BOB_ID], replied_user: true },
+        "the REST allowlist permits only authenticated user notifications while preserving reply notification intent",
+    );
+    assert.equal(
+        encryptedMessageMentionsUser(encrypted, { channelId: CHANNEL_ID, discordAuthorId: ALICE_ID }, ALICE_ID),
+        true,
+        "the sender's encrypted row can establish its mention highlight before decryption",
+    );
+    assert.equal(
+        encryptedMessageMentionsUser(encrypted, { channelId: CHANNEL_ID, discordAuthorId: ALICE_ID }, CAROL_ID),
+        false,
+        "unmentioned selected participants do not receive a mentioned-message highlight",
+    );
+    assert.deepEqual(
+        extractMentionedUserIds(`<@!${CAROL_ID}> <@${BOB_ID}> <@${BOB_ID}> <@&${ALICE_ID}>`),
+        [BOB_ID, CAROL_ID],
+        "user mentions are normalized, deduplicated, sorted, and role mentions are ignored",
+    );
     assert.deepEqual(
         envelope.r.map(recipient => recipient.u),
         [ALICE_ID, BOB_ID, CAROL_ID],
         "recipients are deduplicated, sorted, and always include the sender",
     );
+    const { m: _mentionedUserIds, ...envelopeWithoutMentions } = envelope;
+    const previousEquivalent = serializeEncryptedEnvelope({
+        ...envelopeWithoutMentions,
+        v: PREVIOUS_ENCRYPTED_MESSAGE_VERSION,
+    });
+    assert.ok(previousEquivalent.startsWith(PREVIOUS_ENCRYPTED_MESSAGE_PREFIX));
+    assert.equal(parseTestEnvelope(previousEquivalent).v, PREVIOUS_ENCRYPTED_MESSAGE_VERSION, "existing PCEM2 messages remain parseable");
+    assert.ok(isEncryptedMessage(previousEquivalent), "PCEM2 encrypted messages remain detectable");
+    assert.deepEqual(
+        encryptedAllowedMentions(previousEquivalent, { channelId: CHANNEL_ID, discordAuthorId: ALICE_ID }, null),
+        { parse: [], users: [] },
+        "older encrypted envelopes cannot acquire phantom notification targets",
+    );
+    assert.equal(
+        encryptedMessageMentionsUser(
+            previousEquivalent,
+            { channelId: CHANNEL_ID, discordAuthorId: ALICE_ID },
+            ALICE_ID,
+            plaintext,
+        ),
+        true,
+        "verified plaintext supplies mention state for older envelopes",
+    );
     const legacyEquivalent = serializeEncryptedEnvelope({
-        ...envelope,
+        ...envelopeWithoutMentions,
         v: 1,
         i: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     });
     const envelopeBytesSaved = legacyEquivalent.length - encrypted.length;
-    assert.ok(envelopeBytesSaved >= 100, `compact envelope should save at least 100 characters, saved ${envelopeBytesSaved}`);
+    assert.ok(envelopeBytesSaved >= 90, `compact envelope with two mention tokens should save at least 90 characters, saved ${envelopeBytesSaved}`);
     assert.equal(parseEncryptedEnvelope(legacyEquivalent).v, 1, "existing PCEM1 messages remain parseable");
     assert.ok(isEncryptedMessage(legacyEquivalent), "legacy encrypted messages remain detectable");
+    assert.throws(
+        () => parseEncryptedEnvelope(`${LEGACY_ENCRYPTED_MESSAGE_PREFIX}null`),
+        /malformed encrypted envelope/iu,
+        "a non-object PCEM1 root is rejected as malformed instead of throwing a property-access error",
+    );
 
     for (const [label, identity, userId] of [
         ["sender", aliceIdentity, ALICE_ID],
@@ -993,7 +1055,7 @@ async function main(): Promise<void> {
     );
 
     const badSignature = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
-        value[7] = mutateBase64Url(value[7]);
+        value[8] = mutateBase64Url(value[8]);
     });
     await assert.rejects(
         decryptMessage(makeDecryptInput(badSignature, bobIdentity, BOB_ID, alicePublic)),
@@ -1001,7 +1063,7 @@ async function main(): Promise<void> {
         "envelope signature tampering is rejected",
     );
     const nonCanonicalEnvelopeSignature = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
-        value[7] = makeNonCanonicalBase64Url(value[7]);
+        value[8] = makeNonCanonicalBase64Url(value[8]);
     });
     await assert.rejects(
         decryptMessage(makeDecryptInput(nonCanonicalEnvelopeSignature, bobIdentity, BOB_ID, alicePublic)),
@@ -1016,12 +1078,20 @@ async function main(): Promise<void> {
     );
 
     const unsignedContentTamper = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
-        value[6] = mutateBase64Url(value[6]);
+        value[7] = mutateBase64Url(value[7]);
     });
     await assert.rejects(
         decryptMessage(makeDecryptInput(unsignedContentTamper, bobIdentity, BOB_ID, alicePublic)),
         /signature is invalid/,
         "ciphertext is covered by the sender signature",
+    );
+    const mentionTamper = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
+        value[5][1] = `<@${CAROL_ID}>`;
+    });
+    await assert.rejects(
+        decryptMessage(makeDecryptInput(mentionTamper, bobIdentity, BOB_ID, alicePublic)),
+        /signature is invalid/,
+        "Discord mentioned users are covered by the sender signature",
     );
     const contentTamperEnvelope = clone(envelope);
     contentTamperEnvelope.x = mutateBase64Url(contentTamperEnvelope.x);
@@ -1068,13 +1138,13 @@ async function main(): Promise<void> {
 
     await assert.rejects(
         decryptMessage(makeDecryptInput(encrypted, bobIdentity, BOB_ID, alicePublic, CHANNEL_ID, BOB_ID)),
-        /sender does not match its Discord author/,
+        /sender does not match its Discord author|mentioned user/,
         "the observed Discord author must match the signed sender",
     );
     const observedAuthorTamper = { ...alicePublic, userId: BOB_ID };
     await assert.rejects(
         decryptMessage(makeDecryptInput(encrypted, bobIdentity, BOB_ID, observedAuthorTamper, CHANNEL_ID, BOB_ID)),
-        /unverified sender key|malformed|signature is invalid/,
+        /unverified sender key|malformed|signature is invalid|mentioned user/,
         "the authenticated Discord author context cannot be changed",
     );
 
@@ -1182,10 +1252,15 @@ async function main(): Promise<void> {
         ["oversized wrapped key", value => { value[4][0][2] = "A".repeat(129); }],
         ["duplicate recipients", value => { value[4][1][0] = value[4][0][0]; }],
         ["unsorted recipients", value => { [value[4][0], value[4][1]] = [value[4][1], value[4][0]]; }],
-        ["short nonce", value => { value[5] = value[5].slice(1); }],
-        ["short ciphertext", value => { value[6] = "A".repeat(21); }],
-        ["short envelope signature", value => { value[7] = value[7].slice(1); }],
-        ["invalid envelope signature alphabet", value => { value[7] = `!${value[7].slice(1)}`; }],
+        ["non-array mentioned-user list", value => { value[5] = {}; }],
+        ["non-canonical mention syntax", value => { value[5][0] = `<@!${ALICE_ID}>`; }],
+        ["duplicate mentioned users", value => { value[5].push(value[5][0]); }],
+        ["unsorted mentioned users", value => { [value[5][0], value[5][1]] = [value[5][1], value[5][0]]; }],
+        ["mentioned user outside recipients", value => { value[5][0] = `<@${MALLORY_ID}>`; }],
+        ["short nonce", value => { value[6] = value[6].slice(1); }],
+        ["short ciphertext", value => { value[7] = "A".repeat(21); }],
+        ["short envelope signature", value => { value[8] = value[8].slice(1); }],
+        ["invalid envelope signature alphabet", value => { value[8] = `!${value[8].slice(1)}`; }],
     ];
     for (const [label, mutate] of envelopeMutations) {
         const candidate = clone(validEnvelopeObject);

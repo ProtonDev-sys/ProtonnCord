@@ -227,6 +227,8 @@ export interface EncryptMessageInput {
     now?: number;
     messageId?: string;
     counter: number;
+    /** Selected encrypted participants explicitly mentioned by the plaintext. */
+    mentionedUserIds?: string[];
 }
 
 export async function encryptMessage(input: EncryptMessageInput): Promise<string> {
@@ -254,6 +256,17 @@ export async function encryptMessage(input: EncryptMessageInput): Promise<string
         recipientMap.set(recipient.userId, recipient);
     }
     const recipients = [...recipientMap.values()].sort((left, right) => left.userId.localeCompare(right.userId));
+    if (input.mentionedUserIds !== undefined && !Array.isArray(input.mentionedUserIds))
+        throw new Error("mentionedUserIds must be an array");
+    const mentionedUserIds = [...new Set(input.mentionedUserIds ?? [])]
+        .sort((left, right) => left.localeCompare(right));
+    if (mentionedUserIds.length > MAX_SELECTED_RECIPIENTS)
+        throw new Error(`mentionedUserIds must contain at most ${MAX_SELECTED_RECIPIENTS} users`);
+    for (const userId of mentionedUserIds) {
+        requireSnowflake(userId, "mentionedUserIds entry");
+        if (!recipientMap.has(userId))
+            throw new Error(`Mentioned user ${userId} is not a selected encrypted participant`);
+    }
     const skeletonRecipients: WrappedContentKey[] = recipients.map(recipient => ({ u: recipient.userId, e: "", x: "" }));
     const base = {
         v: ENCRYPTED_MESSAGE_VERSION,
@@ -265,6 +278,7 @@ export async function encryptMessage(input: EncryptMessageInput): Promise<string
         q: input.counter,
         k: self.fingerprint,
         r: skeletonRecipients,
+        m: mentionedUserIds,
     };
     const header = envelopeHeader(base);
     const contentKeyBytes = crypto.getRandomValues(new Uint8Array(32));
