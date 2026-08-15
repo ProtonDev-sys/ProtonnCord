@@ -24,6 +24,7 @@ import {
     serializeSecurePlaintext,
 } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import type { ConversationSnapshot } from "../src/equicordplugins/secureMessaging.desktop/native";
+import { parseEncryptedEnvelope } from "../src/equicordplugins/secureMessaging.desktop/protocol";
 
 type NativeModule = typeof import("../src/equicordplugins/secureMessaging.desktop/native");
 
@@ -694,9 +695,25 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     expectStatus(decrypted, "decrypted", "Alice initially decrypts Bob pre-replacement message");
     assert.equal(decrypted.plaintext, bobHistoricalPlaintext);
 
-    const dmPlaintext = "native DM secret α";
-    const encryptedDm = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, { plaintext: dmPlaintext, snapshot: aliceDm });
+    const dmPlaintext = `native DM secret <@${ALICE_ID}> <@${BOB_ID}> α`;
+    const encryptedDm = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        mentionedUserIds: [ALICE_ID, BOB_ID],
+        plaintext: dmPlaintext,
+        snapshot: aliceDm,
+    });
     expectStatus(encryptedDm, "encrypted", "Alice encrypts for Bob");
+    assert.deepEqual(
+        parseEncryptedEnvelope(encryptedDm.content, { channelId: DM_CHANNEL_ID, discordAuthorId: ALICE_ID }).m,
+        [ALICE_ID, BOB_ID],
+        "native encryption authenticates selected mentioned participants, including the author",
+    );
+    assert.ok(encryptedDm.content.includes(`<@${ALICE_ID}>`), "the author's local mentioned state is available before decryption");
+    assert.ok(encryptedDm.content.includes(`<@${BOB_ID}>`), "the recipient target is visible to Discord's mention parser");
+    expectStatus(await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        mentionedUserIds: [CAROL_ID],
+        plaintext: `must not ping <@${CAROL_ID}>`,
+        snapshot: aliceDm,
+    }), "invalid_input", "mentioned user outside selected encrypted participants");
     const bobDmInput = {
         channelId: DM_CHANNEL_ID,
         content: encryptedDm.content,

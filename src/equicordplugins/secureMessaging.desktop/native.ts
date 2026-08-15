@@ -42,6 +42,7 @@ import {
 import {
     decodeBase64Url,
     type EncryptedEnvelope,
+    extractMentionedUserIds,
     isEnvelopeId,
     isProtocolTimestamp,
     isSnowflake,
@@ -108,6 +109,7 @@ export interface ConfigureConversationInput {
 }
 
 export interface EncryptOutgoingInput {
+    mentionedUserIds?: string[];
     plaintext: string;
     snapshot: ConversationSnapshot;
 }
@@ -1110,12 +1112,27 @@ function validateConfigureInput(value: unknown, localUserId: string): Validation
 }
 
 function validateEncryptInput(value: unknown, localUserId: string): ValidationResult<EncryptOutgoingInput> {
-    if (!isRecord(value) || !hasExactKeys(value, ["plaintext", "snapshot"]) || typeof value.plaintext !== "string" ||
+    if (!isRecord(value) ||
+        (!hasExactKeys(value, ["plaintext", "snapshot"]) && !hasExactKeys(value, ["mentionedUserIds", "plaintext", "snapshot"])) ||
+        typeof value.plaintext !== "string" ||
         value.plaintext.length === 0 || value.plaintext.length > MAX_DISCORD_MESSAGE_LENGTH)
         return { ok: false, error: `plaintext must contain 1 to ${MAX_DISCORD_MESSAGE_LENGTH} characters` };
+    let mentionedUserIds: string[] | undefined;
+    if ("mentionedUserIds" in value) {
+        if (!Array.isArray(value.mentionedUserIds) || value.mentionedUserIds.length > MAX_SELECTED_RECIPIENTS)
+            return { ok: false, error: `mentionedUserIds must contain at most ${MAX_SELECTED_RECIPIENTS} Discord users` };
+        mentionedUserIds = [];
+        let previousUserId = "";
+        for (const userId of value.mentionedUserIds) {
+            if (!isSnowflake(userId) || userId <= previousUserId)
+                return { ok: false, error: "mentionedUserIds must be unique, sorted selected Discord users" };
+            mentionedUserIds.push(userId);
+            previousUserId = userId;
+        }
+    }
     const snapshot = validateSnapshot(value.snapshot, localUserId);
     if (!snapshot.ok) return snapshot;
-    return { ok: true, value: { plaintext: value.plaintext, snapshot: snapshot.value } };
+    return { ok: true, value: { mentionedUserIds, plaintext: value.plaintext, snapshot: snapshot.value } };
 }
 
 function isCanonicalEditedTimestamp(value: unknown): value is string {
@@ -2091,6 +2108,18 @@ export async function encryptOutgoing(
             recipients.push(peer.identity);
         }
 
+        const selectedRecipientIds = new Set([user.value, ...recipients.map(recipient => recipient.userId)]);
+        let mentionedUserIds: string[];
+        try {
+            mentionedUserIds = checkedInput.value.mentionedUserIds ??
+                extractMentionedUserIds(parseSecurePlaintext(checkedInput.value.plaintext).text)
+                    .filter(userId => selectedRecipientIds.has(userId));
+        } catch {
+            return cryptoFailure();
+        }
+        if (mentionedUserIds.some(userId => !selectedRecipientIds.has(userId)))
+            return invalidInput("Every mentioned user must be a selected encrypted participant");
+
         const counter = ++context.account.sendCounter;
         await saveVault(context.vault);
         try {
@@ -2098,6 +2127,7 @@ export async function encryptOutgoing(
                 channelId: checkedInput.value.snapshot.channelId,
                 counter,
                 identity: context.account.identity,
+                mentionedUserIds,
                 plaintext: checkedInput.value.plaintext,
                 recipients,
                 senderUserId: user.value,
