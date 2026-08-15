@@ -7,6 +7,7 @@
 import "./styles.css";
 
 import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
+import { addMessageAccessory, type MessageAccessoryFactory, removeMessageAccessory } from "@api/MessageAccessories";
 import {
     addMessageLengthBypassListener,
     addMessagePreEditListener,
@@ -2143,6 +2144,8 @@ function SecureMessageAccessory({ message }: { message: Message; }) {
     return null;
 }
 
+const renderSecureMessageAccessory: MessageAccessoryFactory = props => <SecureMessageAccessory message={props.message} />;
+
 export default definePlugin({
     name: "SecureMessaging",
     description: "Non-ratcheting end-to-end encrypted messages, stickers, GIF links, and file attachments for explicitly verified people in DMs and group DMs.",
@@ -2181,8 +2184,6 @@ export default definePlugin({
         icon: LockIcon,
         render: SecureMessagingButton,
     },
-
-    renderMessageAccessory: props => <SecureMessageAccessory message={props.message} />,
 
     toolboxActions: {
         async "Toggle encrypted screenshot hiding"() {
@@ -2226,6 +2227,7 @@ export default definePlugin({
             uninstallAttachmentUploadGuard();
             throw error;
         }
+        addMessageAccessory("SecureMessaging", renderSecureMessageAccessory, 0);
         void applyScreenCaptureProtection(true).then(applied => {
             if (generation !== screenCaptureProtectionGeneration) return;
             if (!applied) {
@@ -2247,6 +2249,7 @@ export default definePlugin({
     },
 
     stop() {
+        removeMessageAccessory("SecureMessaging");
         secureOperationGeneration++;
         secureRuntimeUserId = null;
         screenCaptureProtectionGeneration++;
