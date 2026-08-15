@@ -102,6 +102,7 @@ import {
 } from "./embedCache";
 import { extractSecureEmbedUrls } from "./embedUrls";
 import { KeyReviewGate } from "./keyReviewGate";
+import { encryptedAllowedMentions, encryptedMessageMentionsUser } from "./mentionNotifications";
 import { SecureMessageGroup, secureMessageGroupFlags } from "./messageGrouping";
 import { discordEditedTimestamp } from "./messageMetadata";
 import type {
@@ -115,7 +116,13 @@ import type {
     IdentitySummary,
     NativeFailure,
 } from "./native";
-import { isEncryptedMessage, isKeyAnnouncement, MAX_DISCORD_MESSAGE_LENGTH, parseEncryptedEnvelope } from "./protocol";
+import {
+    extractMentionedUserIds,
+    isEncryptedMessage,
+    isKeyAnnouncement,
+    MAX_DISCORD_MESSAGE_LENGTH,
+    parseEncryptedEnvelope,
+} from "./protocol";
 import {
     authorizeScopedAttachmentUploadReservations,
     authorizeScopedWireEdit,
@@ -734,6 +741,31 @@ function conversationStatusMessage(result: ConversationResult): string {
     return "This conversation has not been configured.";
 }
 
+function encryptedMentionedUserIds(
+    plaintext: string,
+    localUserId: string,
+    conversation: ConversationResult,
+): string[] {
+    if (isNativeFailure(conversation) || conversation.status !== "enabled") return [];
+    const selected = new Set(conversation.selectedRecipientIds);
+    selected.add(localUserId);
+    return extractMentionedUserIds(plaintext)
+        .filter(userId => selected.has(userId));
+}
+
+function applyEncryptedAllowedMentions(
+    body: Record<string, any>,
+    content: string,
+    channelId: string,
+    authorId: string,
+): void {
+    body.allowed_mentions = encryptedAllowedMentions(
+        content,
+        { channelId, discordAuthorId: authorId },
+        body.allowed_mentions,
+    );
+}
+
 function selectedOutgoingStickerIds(options: Record<string, any>, props: Record<string, any>): string[] | null {
     const ids: string[] = [];
     for (const source of [options.stickerIds, options.stickers]) {
@@ -1061,6 +1093,7 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
             !await authorizedEnvelopeMatchesConversation(content, context.localUserId, conversation))
             throw new Error("Secure Messaging blocked stale encrypted content after the conversation changed");
         if (consumeScopedWirePayloadAuthorization(endpoint.channelId, content, attachmentFilenames, scope)) {
+            applyEncryptedAllowedMentions(body, content, endpoint.channelId, context.localUserId);
             requestAuthorizationScopes.set(request, scope);
             enforceMessageNonce(request);
             return request;
@@ -1079,7 +1112,11 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
     if (isNativeFailure(conversation)) throw new Error(`Secure Messaging blocked a programmatic send: ${failureMessage(conversation)}`);
     if (conversation.status !== "enabled") throw new Error(`Secure Messaging blocked a programmatic send: ${conversationStatusMessage(conversation)}`);
 
-    const encrypted = await Native.encryptOutgoing(context.localUserId, { plaintext: content, snapshot: context.snapshot });
+    const encrypted = await Native.encryptOutgoing(context.localUserId, {
+        mentionedUserIds: encryptedMentionedUserIds(content, context.localUserId, conversation),
+        plaintext: content,
+        snapshot: context.snapshot,
+    });
     if (encrypted.status !== "encrypted") {
         const reason = isNativeFailure(encrypted)
             ? failureMessage(encrypted)
@@ -1090,6 +1127,7 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
     if (!scope) throw new Error("Secure Messaging blocked a programmatic send after its recipient state changed");
     rememberOptimisticOutgoingPlaintext(encrypted.content, content);
     body.content = encrypted.content;
+    applyEncryptedAllowedMentions(body, encrypted.content, endpoint.channelId, context.localUserId);
     requestAuthorizationScopes.set(request, scope);
     enforceMessageNonce(request);
     return request;
@@ -1133,6 +1171,7 @@ async function encryptEditedMessage(
         throw new Error("An encrypted text-only message cannot be edited to empty content.");
 
     const encrypted = await Native.encryptOutgoing(context.localUserId, {
+        mentionedUserIds: encryptedMentionedUserIds(plaintext, context.localUserId, conversation),
         plaintext: serializeSecurePlaintext(plaintext, decrypted.attachmentBundle, decrypted.stickers ?? []),
         snapshot: context.snapshot,
     });
@@ -1172,6 +1211,7 @@ async function protectProgrammaticPatch(request: Record<string, any>): Promise<R
             !hasSelectedKeyReviewBlock(protection.context.localUserId, protection.conversation) &&
             scope && await authorizedEnvelopeMatchesConversation(content, protection.context.localUserId, protection.conversation) &&
             consumeScopedWireEditAuthorization(endpoint.channelId, endpoint.messageId, content, scope)) {
+            applyEncryptedAllowedMentions(request.body, content, endpoint.channelId, protection.context.localUserId);
             requestAuthorizationScopes.set(request, scope);
             return request;
         }
@@ -1186,6 +1226,7 @@ async function protectProgrammaticPatch(request: Record<string, any>): Promise<R
     const scope = conversationAuthorizationScope(protection.context.localUserId, protection.conversation);
     if (!scope) throw new Error("Secure Messaging blocked an edit after its recipient state changed");
     request.body.content = encryptedContent;
+    applyEncryptedAllowedMentions(request.body, encryptedContent, endpoint.channelId, protection.context.localUserId);
     requestAuthorizationScopes.set(request, scope);
     return request;
 }
@@ -1422,6 +1463,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             : null;
         if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         let encrypted: EncryptOutgoingResult = await Native.encryptOutgoing(context.localUserId, {
+            mentionedUserIds: encryptedMentionedUserIds(plaintext, context.localUserId, conversation),
             plaintext: preparedAttachments?.plaintext ?? serializeSecurePlaintext(plaintext, null, stickers),
             snapshot: context.snapshot,
         });
@@ -1444,6 +1486,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             );
             if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
             encrypted = await Native.encryptOutgoing(context.localUserId, {
+                mentionedUserIds: encryptedMentionedUserIds(plaintext, context.localUserId, conversation),
                 plaintext: preparedAttachments.plaintext,
                 snapshot: context.snapshot,
             });
@@ -1705,7 +1748,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
         <Modal
             {...modalProps}
             size="medium"
-            title="Secure Messaging (PCEM2)"
+            title="Secure Messaging (PCEM3)"
             actions={[
                 { text: "Save", variant: "primary", onClick: () => void save(), disabled: busy || !details },
                 { text: "Cancel", variant: "secondary", onClick: modalProps.onClose, disabled: busy },
@@ -1805,7 +1848,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                 <section className="pc-secure-modal-section">
                     <Heading tag="h5">Important limitations</Heading>
                     <BaseText size="xs" color="text-muted">
-                        The current PCEM2 protocol encrypts text, GIF-picker links, sticker metadata, and ordinary file attachments. Short text stays inline; text that would overflow Discord's message limit uses one opaque encrypted attachment and is reconstructed locally as a normal message. Its exact encrypted size, including private metadata and authentication overhead, must fit the upload limit Discord reports for your account. Received files are fully downloaded, authenticated, and decrypted locally before Discord's normal renderers display them. Authentication proves the verified sender supplied the bytes, not that a file is harmless: Discord can scan only the opaque ciphertext, so keep normal operating-system and antivirus protections enabled. Inline encrypted messages can be edited while retaining their existing encrypted attachments and stickers; large detached text, attachment-set changes, and commands remain blocked from editing. Discord still sees who talks, when, ciphertext sizes, attachment counts, channel membership, edit timing, and reply metadata. Normal link and GIF previews disclose their URL to Discord's unfurl service; displaying a sticker requests its asset ID from Discord's media CDN. The protocol has no forward secrecy or post-compromise healing, and a compromised client or plugin can read plaintext while it is displayed.
+                        The current PCEM3 protocol encrypts text, GIF-picker links, sticker metadata, and ordinary file attachments. Short text stays inline; text that would overflow Discord's message limit uses one opaque encrypted attachment and is reconstructed locally as a normal message. Its exact encrypted size, including private metadata and authentication overhead, must fit the upload limit Discord reports for your account. Received files are fully downloaded, authenticated, and decrypted locally before Discord's normal renderers display them. Authentication proves the verified sender supplied the bytes, not that a file is harmless: Discord can scan only the opaque ciphertext, so keep normal operating-system and antivirus protections enabled. Inline encrypted messages can be edited while retaining their existing encrypted attachments and stickers; large detached text, attachment-set changes, and commands remain blocked from editing. Explicit mentions of selected encrypted participants expose those user IDs as authenticated mention metadata so Discord can deliver recipient pings and render mentioned-message highlighting without waiting for decryption; the surrounding message text remains encrypted, the author is excluded from Discord's notification allowlist, and role/everyone pings stay disabled. Discord still sees who talks, when, ciphertext sizes, attachment counts, channel membership, edit timing, reply metadata, and mentioned user IDs. Normal link and GIF previews disclose their URL to Discord's unfurl service; displaying a sticker requests its asset ID from Discord's media CDN. The protocol has no forward secrecy or post-compromise healing, and a compromised client or plugin can read plaintext while it is displayed.
                     </BaseText>
                 </section>
 
@@ -1993,6 +2036,16 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
     const captureProtection = useScreenCaptureProtectionStatus();
     const cachedResult = key && localUserId ? getCachedDecryption(localUserId, message) : null;
     const result = state?.key === key ? state.result : cachedResult;
+    const optimisticPlaintext = message.author?.id === localUserId
+        ? optimisticOutgoingPlaintexts.get(message.content)
+        : undefined;
+    const visiblePlaintext = result?.status === "decrypted" ? result.plaintext : optimisticPlaintext;
+    const mentionsLocalUser = Boolean(localUserId && message.author?.id && encryptedMessageMentionsUser(
+        message.content,
+        { channelId: message.channel_id, discordAuthorId: message.author.id },
+        localUserId,
+        visiblePlaintext,
+    ));
     const cardRef = useRef<HTMLDivElement>(null);
     const groupStartObservationOwner = useRef<object>({}).current;
     const groupingRevision = useSecureMessageGroupingRevision();
@@ -2017,6 +2070,7 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         "pc-secure-card",
         "pc-secure-message",
         "pc-secure-replaces-content",
+        mentionsLocalUser ? "pc-secure-message-mentioned" : null,
         groupFlags & SecureMessageGroup.Previous ? "pc-secure-message-joined-above" : null,
         groupFlags & SecureMessageGroup.Next ? "pc-secure-message-joined-below" : null,
     );
@@ -2056,16 +2110,19 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
             ? "Waiting for encrypted-content visibility to update…"
             : "Encrypted content visibility could not be updated safely.";
         return (
-            <div ref={cardRef} className={`pc-secure-card ${screenshotMode ? "pc-secure-card-warning" : "pc-secure-card-danger"} pc-secure-content-hidden pc-secure-replaces-content`}>
+            <div ref={cardRef} className={classes(
+                "pc-secure-card",
+                screenshotMode ? "pc-secure-card-warning" : "pc-secure-card-danger",
+                "pc-secure-content-hidden",
+                "pc-secure-replaces-content",
+                mentionsLocalUser ? "pc-secure-message-mentioned" : null,
+            )}>
                 <div className="pc-secure-card-header"><LockIcon color={screenshotMode ? "var(--status-warning)" : "var(--status-danger)"} /> Encrypted message protected</div>
                 <BaseText size="sm">{detail}</BaseText>
             </div>
         );
     }
 
-    const optimisticPlaintext = message.author?.id === localUserId
-        ? optimisticOutgoingPlaintexts.get(message.content)
-        : undefined;
     if (!result && optimisticPlaintext !== undefined) {
         return (
             <div ref={cardRef} className={cardClassName}>

@@ -24,7 +24,7 @@ import {
     encryptedAttachmentCiphertextSize,
     parseSecurePlaintext,
 } from "../src/equicordplugins/secureMessaging.desktop/attachments";
-import { decodeBase64Url } from "../src/equicordplugins/secureMessaging.desktop/protocol";
+import { decodeBase64Url, parseEncryptedEnvelope } from "../src/equicordplugins/secureMessaging.desktop/protocol";
 
 const TEST_CHANNEL_ID = "895063026686885909";
 const EXPECTED_RECIPIENT_ID = "710514340855545878";
@@ -32,7 +32,7 @@ const EXPECTED_RECIPIENT_ID = "710514340855545878";
 // The announcement is never posted, so the fixture supplies stable Discord provenance without creating another live message.
 const SYNTHETIC_ANNOUNCEMENT_MESSAGE_ID = "1456074443980800000";
 const DEBUG_URL = process.env.DISCORD_DEBUG_URL ?? "http://127.0.0.1:9222";
-const ENCRYPTED_PREFIX = "PCEM2:";
+const ENCRYPTED_PREFIX = "PCEM3:";
 const DISPOSABLE_ACKNOWLEDGEMENT = "I_UNDERSTAND_THIS_IS_DISPOSABLE";
 const DISPOSABLE_FLAG_ENV = "PROTONN_CORD_SECURE_MESSAGING_LIVE_TEST";
 const DISPOSABLE_DATA_DIR_ENV = "PROTONN_CORD_SECURE_MESSAGING_LIVE_DATA_DIR";
@@ -55,6 +55,7 @@ interface RawDiscordMessage {
     content: string;
     editedTimestamp: string | null;
     id: string;
+    mentionedUserIds?: string[];
 }
 
 interface RawDiscordAttachment {
@@ -630,7 +631,8 @@ async function verifyRenderedReplyPreview(
         const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
         const rowText = row?.innerText ?? "";
         return {
-            ciphertextHidden: !rowText.includes(ciphertext) && !rowText.includes("PCEM1:") && !rowText.includes("PCEM2:"),
+            ciphertextHidden: !rowText.includes(ciphertext) && !rowText.includes("PCEM1:") &&
+                !rowText.includes("PCEM2:") && !rowText.includes("PCEM3:"),
             plaintextVisible: rowText.includes(plaintext),
         };
     }, {
@@ -828,6 +830,8 @@ async function prepareThroughRuntimeMessageEvents(page: Page, plaintext: string)
 }
 
 async function sendThroughActualComposer(page: Page, plaintext: string): Promise<{
+    allowedMentionParse: string[];
+    allowedMentionUserIds: string[];
     localPlaintextVisible: boolean;
     localSenderDecrypted: boolean;
     message: RawDiscordMessage;
@@ -843,6 +847,8 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
         const originalPost = rest.post;
         const endpoint = common.Constants.Endpoints.MESSAGES(channelId);
         const proof = {
+            allowedMentionParse: [] as string[],
+            allowedMentionUserIds: [] as string[],
             messagePostCount: 0,
             originalPost,
             requestNonce: "",
@@ -857,6 +863,15 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
                 if (typeof nonce === "string" || typeof nonce === "number") proof.requestNonce = String(nonce);
             }
             const response = await originalPost.call(rest, request, ...args);
+            if (isMessagePost) {
+                const allowedMentions = (request as any)?.body?.allowed_mentions;
+                proof.allowedMentionParse = Array.isArray(allowedMentions?.parse)
+                    ? allowedMentions.parse.map(String)
+                    : [];
+                proof.allowedMentionUserIds = Array.isArray(allowedMentions?.users)
+                    ? allowedMentions.users.map(String)
+                    : [];
+            }
             if (isMessagePost && response?.body?.id) {
                 proof.response = response.body;
                 (global[registryName] ??= []).push(String(response.body.id));
@@ -933,6 +948,8 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
                 : await native.decryptIncoming(localUserId, canonicalInput);
             const uploadLimits = global.Vencord.Webpack.findByProps("getUserMaxFileSize");
             return {
+                allowedMentionParse: proof.allowedMentionParse,
+                allowedMentionUserIds: proof.allowedMentionUserIds,
                 localPlaintextVisible: document.body.innerText.includes(plaintext.slice(0, 96)) &&
                     document.body.innerText.includes(plaintext.slice(-96)),
                 localSenderDecrypted: canonicalDecryption.status === "decrypted" && canonicalDecryption.plaintext === plaintext,
@@ -950,6 +967,7 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
                     content: String(response.content),
                     editedTimestamp: typeof response.edited_timestamp === "string" ? response.edited_timestamp : null,
                     id: String(response.id),
+                    mentionedUserIds: (response.mentions ?? []).map((user: any) => String(user.id)).sort(),
                 },
                 messagePostCount: proof.messagePostCount,
                 messageStoreCiphertextMatched: stored?.content === response.content,
@@ -965,6 +983,27 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
             delete global[proofName];
         }, PAGE_COMPOSER_PROOF);
     }
+}
+
+async function verifyMentionHighlight(page: Page, message: RawDiscordMessage): Promise<{
+    backgroundColor: string;
+    markerBoxShadow: string;
+    mentionedClassApplied: boolean;
+}> {
+    await page.waitForFunction(({ channelId, messageId }) =>
+        Boolean(document.getElementById(`chat-messages-${channelId}-${messageId}`)
+            ?.querySelector(".pc-secure-message-mentioned")),
+    { timeout: 30_000 }, { channelId: message.channelId, messageId: message.id });
+    return page.evaluate(({ channelId, messageId }) => {
+        const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+        if (!row) throw new Error("the mentioned encrypted message row is unavailable");
+        const style = getComputedStyle(row);
+        return {
+            backgroundColor: style.backgroundColor,
+            markerBoxShadow: style.boxShadow,
+            mentionedClassApplied: Boolean(row.querySelector(".pc-secure-message-mentioned")),
+        };
+    }, { channelId: message.channelId, messageId: message.id });
 }
 
 async function sendAuthorizedRuntimePayload(page: Page, content: string): Promise<{
@@ -1420,7 +1459,7 @@ async function verifyRenderedMessage(page: Page, message: RawDiscordMessage, pla
         return {
             plaintextVisible: plaintextCard?.textContent?.includes(plaintext) ?? false,
             rawCiphertextHidden: rawContent ? getComputedStyle(rawContent).display === "none" : false,
-            verifiedHeader: item?.querySelector(".pc-secure-card-header")?.textContent?.includes("Verified encrypted message") ?? false,
+            redundantVerifiedHeaderAbsent: !item?.querySelector(".pc-secure-card-header")?.textContent?.includes("Verified encrypted message"),
         };
     }, { channelId: message.channelId, messageId: message.id, plaintext });
 }
@@ -2053,6 +2092,46 @@ async function main(): Promise<void> {
         });
         assert.equal(composerDecrypted.plaintext, composerPlaintext, "the selected recipient must decrypt the actual composer message");
 
+        const mentionPrefix = `Secure Messaging mention delivery proof ${crypto.randomUUID()} ${"prefix ".repeat(24)}`;
+        const mentionSuffix = ` ${"suffix ".repeat(24)}END`;
+        const mentionPlaintext = `${mentionPrefix}<@${preflight.localUserId}> <@${EXPECTED_RECIPIENT_ID}>${mentionSuffix}`;
+        const mentionProof = await sendThroughActualComposer(page, mentionPlaintext);
+        sentMessageIds.add(mentionProof.message.id);
+        const expectedMentionedParticipants = [preflight.localUserId, EXPECTED_RECIPIENT_ID].sort();
+        assert.deepEqual(
+            parseEncryptedEnvelope(mentionProof.message.content, {
+                channelId: TEST_CHANNEL_ID,
+                discordAuthorId: preflight.localUserId,
+            }).m,
+            expectedMentionedParticipants,
+            "the wire must authenticate both the author and recipient mention state",
+        );
+        assert.deepEqual(mentionProof.allowedMentionParse, [], "the REST request must keep automatic mention parsing disabled");
+        assert.deepEqual(
+            mentionProof.allowedMentionUserIds,
+            [EXPECTED_RECIPIENT_ID],
+            "the REST request must notify the mentioned recipient but never the author",
+        );
+        assert.deepEqual(
+            mentionProof.message.mentionedUserIds,
+            [EXPECTED_RECIPIENT_ID],
+            "Discord's authoritative response must record the recipient as mentioned",
+        );
+        const mentionHighlight = await verifyMentionHighlight(page, mentionProof.message);
+        assert.equal(mentionHighlight.mentionedClassApplied, true, "the encrypted row must receive mentioned-message styling");
+        assert.notEqual(mentionHighlight.backgroundColor, "rgba(0, 0, 0, 0)", "the mentioned row must have a visible background");
+        assert.notEqual(mentionHighlight.backgroundColor, "transparent", "the mentioned row background must not be transparent");
+        assert.match(mentionHighlight.markerBoxShadow, /inset/iu, "the mentioned row must render its inline warning marker");
+        const mentionDecrypted = await decryptMessage({
+            channelId: TEST_CHANNEL_ID,
+            content: mentionProof.message.content,
+            discordAuthorId: preflight.localUserId,
+            identity: temporaryRecipient,
+            localUserId: EXPECTED_RECIPIENT_ID,
+            senderIdentity: localPublicIdentity,
+        });
+        assert.equal(mentionDecrypted.plaintext, mentionPlaintext, "mention delivery must not change encrypted plaintext");
+
         const detachedPlaintext = `Secure Messaging detached composer proof ${crypto.randomUUID()} ${"large encrypted body ".repeat(180)}END`;
         const detachedPlaintextBytes = new TextEncoder().encode(detachedPlaintext);
         assert.ok(detachedPlaintextBytes.byteLength > 2_000, "the detached composer fixture must exceed Discord's message limit");
@@ -2405,7 +2484,7 @@ async function main(): Promise<void> {
         const renderProof = await verifyRenderedMessage(page, runtimeProof.message, runtimePlaintext);
         assert.equal(renderProof.plaintextVisible, true, "locally decrypted plaintext must render");
         assert.equal(renderProof.rawCiphertextHidden, true, "raw Discord ciphertext must be hidden in the message row");
-        assert.equal(renderProof.verifiedHeader, true, "rendered message must identify authenticated encrypted content");
+        assert.equal(renderProof.redundantVerifiedHeaderAbsent, true, "a normal encrypted message must not repeat a verified-message label");
 
         const replyPreviewProof = await verifyRenderedReplyPreview(
             page,
@@ -2590,6 +2669,16 @@ async function main(): Promise<void> {
                 optimisticNonceDifferentFromServerId: composerProof.optimisticNonceDifferentFromServerId,
                 plaintextAbsentFromWire: !composerProof.message.content.includes(composerPlaintext),
             },
+            mentionDelivery: {
+                allowedMentionParse: mentionProof.allowedMentionParse,
+                allowedMentionUserIds: mentionProof.allowedMentionUserIds,
+                backgroundColor: mentionHighlight.backgroundColor,
+                decryptedBySelectedRecipient: mentionDecrypted.plaintext === mentionPlaintext,
+                markerBoxShadow: mentionHighlight.markerBoxShadow,
+                mentionedClassApplied: mentionHighlight.mentionedClassApplied,
+                serverMentionedUserIds: mentionProof.message.mentionedUserIds,
+                wireMentionedParticipants: expectedMentionedParticipants,
+            },
             encryptedAttachment: {
                 ciphertextHidFileBytes: attachmentSend.ciphertextHidFileBytes,
                 ciphertextHidFilename: attachmentSend.ciphertextHidFilename,
@@ -2645,7 +2734,7 @@ async function main(): Promise<void> {
             pluginStarted: pluginStart.pluginStarted,
             prefixedPayloadBypassBlocked: failClosed.prefixedPayloadBlocked,
             rawCiphertextHidden: renderProof.rawCiphertextHidden,
-            rendererPlaintextVerified: renderProof.plaintextVisible && renderProof.verifiedHeader,
+            rendererPlaintextVerified: renderProof.plaintextVisible && renderProof.redundantVerifiedHeaderAbsent,
             replyPreview: replyPreviewProof,
             copiedSenderReplayBlocked: rejectionProof.copiedSenderEnvelopeStatus === "replay_detected",
             screenCaptureProtection,
