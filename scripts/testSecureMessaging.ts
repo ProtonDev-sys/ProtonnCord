@@ -72,6 +72,11 @@ import {
 } from "../src/equicordplugins/secureMessaging.desktop/wireAuthorizations";
 import { availableSelectedRecipientIds } from "../src/equicordplugins/secureMessaging.desktop/conversationSelection";
 import { discordEditedTimestamp, discordMessageNonce } from "../src/equicordplugins/secureMessaging.desktop/messageMetadata";
+import {
+    secureMessageGroupFlags,
+    SecureMessageGroup,
+    type SecureMessageGroupCandidate,
+} from "../src/equicordplugins/secureMessaging.desktop/messageGrouping";
 import { KeyReviewGate } from "../src/equicordplugins/secureMessaging.desktop/keyReviewGate";
 import { extractSecureEmbedUrls } from "../src/equicordplugins/secureMessaging.desktop/embedUrls";
 
@@ -197,7 +202,77 @@ function seededGarbage(seed: number, length: number): string {
     return result;
 }
 
+function groupedMessage(
+    id: string,
+    authorId: string,
+    offset: number,
+    overrides: Partial<SecureMessageGroupCandidate> = {},
+): SecureMessageGroupCandidate {
+    return {
+        attachments: [],
+        author: { id: authorId },
+        components: [],
+        content: `${ENCRYPTED_MESSAGE_PREFIX}fixture`,
+        embeds: [],
+        id,
+        reactions: [],
+        stickerItems: [],
+        timestamp: new Date(NOW + offset),
+        ...overrides,
+    };
+}
+
 async function main(): Promise<void> {
+    const groupedMessages = [
+        groupedMessage("group-1", ALICE_ID, 0),
+        groupedMessage("group-2", ALICE_ID, 1_000),
+        groupedMessage("group-3", ALICE_ID, 2_000),
+    ];
+    assert.equal(secureMessageGroupFlags(groupedMessages[0], groupedMessages), SecureMessageGroup.Next);
+    assert.equal(
+        secureMessageGroupFlags(groupedMessages[1], groupedMessages),
+        SecureMessageGroup.Previous | SecureMessageGroup.Next,
+    );
+    assert.equal(secureMessageGroupFlags(groupedMessages[2], groupedMessages), SecureMessageGroup.Previous);
+    assert.equal(
+        secureMessageGroupFlags(groupedMessages[0], groupedMessages, () => false),
+        0,
+        "failed decryptions split secure cards",
+    );
+    const differentAuthor = [groupedMessages[0], groupedMessage("different-author", BOB_ID, 1_000)];
+    assert.equal(secureMessageGroupFlags(differentAuthor[0], differentAuthor), 0, "different authors do not share a secure card");
+    const replyBoundary = [groupedMessages[0], groupedMessage("reply", ALICE_ID, 1_000, { messageReference: {} })];
+    assert.equal(secureMessageGroupFlags(replyBoundary[0], replyBoundary), 0, "reply previews split secure cards");
+    const previousReplyBoundary = [groupedMessage("previous-reply", ALICE_ID, 0, { messageReference: {} }), groupedMessages[1]];
+    assert.equal(secureMessageGroupFlags(previousReplyBoundary[1], previousReplyBoundary), 0, "messages after replies start a new secure card");
+    const reactionBoundary = [groupedMessage("reacted", ALICE_ID, 0, { reactions: [{}] }), groupedMessages[1]];
+    assert.equal(secureMessageGroupFlags(reactionBoundary[0], reactionBoundary), 0, "reactions stay below a closed secure card");
+    const nextAttachmentBoundary = [groupedMessages[0], groupedMessage("attached", ALICE_ID, 1_000, { attachments: [{}] })];
+    assert.equal(
+        secureMessageGroupFlags(nextAttachmentBoundary[0], nextAttachmentBoundary),
+        0,
+        "a following attachment starts a separate secure card",
+    );
+    const timeBoundary = [groupedMessages[0], groupedMessage("later", ALICE_ID, 5 * 60 * 1_000)];
+    assert.equal(secureMessageGroupFlags(timeBoundary[0], timeBoundary), 0, "separate Discord message groups stay separate");
+    const nativeGroupBoundary = [groupedMessages[0], groupedMessages[1]];
+    const isNativeGroupStart = (message: SecureMessageGroupCandidate) => message.id === groupedMessages[1].id;
+    assert.equal(
+        secureMessageGroupFlags(nativeGroupBoundary[0], nativeGroupBoundary, () => true, isNativeGroupStart),
+        0,
+        "a visible Discord author header closes the preceding secure card",
+    );
+    assert.equal(
+        secureMessageGroupFlags(nativeGroupBoundary[1], nativeGroupBoundary, () => true, isNativeGroupStart),
+        0,
+        "a visible Discord author header starts an independent secure card",
+    );
+    assert.equal(
+        secureMessageGroupFlags(nativeGroupBoundary[0], nativeGroupBoundary, () => true, () => null),
+        0,
+        "an unobserved neighboring row stays closed until its native layout is known",
+    );
+
     assert.deepEqual(extractSecureEmbedUrls([
         "Links:",
         "https://example.com/path?x=1.",
