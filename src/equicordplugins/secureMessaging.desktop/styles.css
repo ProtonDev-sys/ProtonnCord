@@ -32,13 +32,57 @@
 }
 
 .pc-secure-card {
+    --pc-secure-card-border: color-mix(in srgb, var(--status-positive) 45%, var(--border-subtle));
+    --pc-secure-card-background: color-mix(in srgb, var(--background-secondary) 92%, var(--status-positive));
+
+    position: relative;
     box-sizing: border-box;
     max-width: min(42rem, 100%);
     margin-top: 0.25rem;
     padding: 0.65rem 0.75rem;
-    border: 1px solid color-mix(in srgb, var(--status-positive) 45%, var(--border-subtle));
+    border: 1px solid var(--pc-secure-card-border);
     border-radius: 0.5rem;
-    background: color-mix(in srgb, var(--background-secondary) 92%, var(--status-positive));
+    background: var(--pc-secure-card-background);
+}
+
+.pc-secure-message-joined-below {
+    padding-bottom: 0.1rem;
+    border-bottom-color: transparent;
+    border-bottom-right-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+.pc-secure-message-joined-above {
+    margin-top: 0;
+    padding-top: 0.1rem;
+    border-top-color: transparent;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+
+.pc-secure-message-joined-above::before {
+    position: absolute;
+    right: -1px;
+    bottom: 100%;
+    left: -1px;
+    box-sizing: border-box;
+    height: 1rem;
+    border-right: 1px solid var(--pc-secure-card-border);
+    border-left: 1px solid var(--pc-secure-card-border);
+    background: var(--pc-secure-card-background);
+    content: "";
+    pointer-events: none;
+}
+
+.pc-secure-message-placeholder {
+    display: block;
+    width: 16rem;
+    height: 0.75rem;
+    max-width: 65%;
+    margin-top: 0.25rem;
+    border-radius: 0.25rem;
+    background: var(--background-modifier-accent);
+    opacity: 0.55;
 }
 
 .pc-secure-card-warning {
@@ -62,6 +106,8 @@
 }
 
 .pc-secure-card-plaintext {
+    flex: 1;
+    min-width: 0;
     overflow-wrap: anywhere;
     color: var(--text-default);
     white-space: break-spaces;
