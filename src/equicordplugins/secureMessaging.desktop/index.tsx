@@ -25,6 +25,7 @@ import { Span } from "@components/Span";
 import { copyToClipboard } from "@utils/clipboard";
 import { EquicordDevs } from "@utils/constants";
 import { sendMessage } from "@utils/discord";
+import { classes } from "@utils/misc";
 import definePlugin, { PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
@@ -40,6 +41,7 @@ import {
     Modal,
     openModal,
     Parser,
+    ReactDOM,
     RestAPI,
     SelectedChannelStore,
     showToast,
@@ -48,8 +50,11 @@ import {
     Toasts,
     useCallback,
     useEffect,
+    useLayoutEffect,
+    useRef,
     UserStore,
     useState,
+    useStateFromStores,
 } from "@webpack/common";
 
 import {
@@ -95,7 +100,9 @@ import {
     patchEncryptedMessageStickers,
     prefetchEncryptedMessageEmbeds,
 } from "./embedCache";
+import { extractSecureEmbedUrls } from "./embedUrls";
 import { KeyReviewGate } from "./keyReviewGate";
+import { SecureMessageGroup, secureMessageGroupFlags } from "./messageGrouping";
 import { discordEditedTimestamp } from "./messageMetadata";
 import type {
     AnnouncementReviewResult,
@@ -143,12 +150,96 @@ interface ReplyPreviewState {
     result: DecryptIncomingResult | null;
 }
 
+interface PendingRenderDecryption {
+    apply(result: DecryptIncomingResult): void;
+    promise: Promise<DecryptIncomingResult>;
+}
+
 let screenCaptureProtectionStatus: ScreenCaptureProtectionStatus = "disabled";
 let screenCaptureProtectionGeneration = 0;
 let secureOperationGeneration = 0;
 let secureMessageListenersInstalled = false;
 const screenCaptureProtectionListeners = new Set<(status: ScreenCaptureProtectionStatus) => void>();
+const secureMessageGroupingListeners = new Set<() => void>();
+const nativeMessageGroupStartObservations = new Map<string, Map<object, boolean>>();
 const pendingEncryptedRenderOwners = new Set<{ forceUpdate(): void; }>();
+let pendingRenderDecryptions: PendingRenderDecryption[] = [];
+let renderDecryptBatchScheduled = false;
+let secureMessageGroupingRevision = 0;
+
+function notifySecureMessageGroupingChanged(): void {
+    secureMessageGroupingRevision++;
+    for (const listener of secureMessageGroupingListeners) {
+        try {
+            listener();
+        } catch {
+            // A stale accessory must not prevent the rest of the visible group from settling.
+        }
+    }
+}
+
+function useSecureMessageGroupingRevision(): number {
+    const [revision, setRevision] = useState(secureMessageGroupingRevision);
+    useLayoutEffect(() => {
+        const listener = () => setRevision(secureMessageGroupingRevision);
+        secureMessageGroupingListeners.add(listener);
+        return () => { secureMessageGroupingListeners.delete(listener); };
+    }, []);
+    return revision;
+}
+
+function observedNativeMessageGroupStart(messageId: string): boolean | null {
+    const observations = nativeMessageGroupStartObservations.get(messageId);
+    if (!observations?.size) return null;
+    for (const groupStart of observations.values()) {
+        if (groupStart) return true;
+    }
+    return false;
+}
+
+function setNativeMessageGroupStartObservation(messageId: string, owner: object, groupStart: boolean): void {
+    const previous = observedNativeMessageGroupStart(messageId);
+    let observations = nativeMessageGroupStartObservations.get(messageId);
+    if (!observations) {
+        observations = new Map();
+        nativeMessageGroupStartObservations.set(messageId, observations);
+    }
+    observations.set(owner, groupStart);
+    if (previous !== observedNativeMessageGroupStart(messageId)) notifySecureMessageGroupingChanged();
+}
+
+function removeNativeMessageGroupStartObservation(messageId: string, owner: object): void {
+    const observations = nativeMessageGroupStartObservations.get(messageId);
+    if (!observations?.has(owner)) return;
+    const previous = observedNativeMessageGroupStart(messageId);
+    observations.delete(owner);
+    if (!observations.size) nativeMessageGroupStartObservations.delete(messageId);
+    if (previous !== observedNativeMessageGroupStart(messageId)) notifySecureMessageGroupingChanged();
+}
+
+function decryptCachedMessageForRender(
+    localUserId: string,
+    message: Message,
+    apply: (result: DecryptIncomingResult) => void,
+): void {
+    const promise = decryptCachedMessage(localUserId, message);
+    pendingRenderDecryptions.push({ apply, promise });
+    if (renderDecryptBatchScheduled) return;
+    renderDecryptBatchScheduled = true;
+    queueMicrotask(() => {
+        const batch = pendingRenderDecryptions;
+        const generation = secureOperationGeneration;
+        pendingRenderDecryptions = [];
+        renderDecryptBatchScheduled = false;
+        void Promise.all(batch.map(request => request.promise)).then(results => {
+            if (generation !== secureOperationGeneration) return;
+            ReactDOM.flushSync(() => {
+                for (let index = 0; index < batch.length; index++) batch[index].apply(results[index]);
+                notifySecureMessageGroupingChanged();
+            });
+        });
+    });
+}
 
 async function saveEncryptedAttachment(url: string): Promise<void> {
     try {
@@ -338,6 +429,7 @@ let attachmentGuardGeneration = 0;
 let approvedAttachmentUploads = new WeakMap<CloudUpload, { file: File; scope: string; }>();
 let detachedTextUploads = new WeakSet<CloudUpload>();
 let preparedOutgoingMessages = new WeakMap<object, { ciphertext: string; plaintext: string; }>();
+const optimisticOutgoingPlaintexts = new Map<string, string>();
 let requestAuthorizationScopes = new WeakMap<object, string>();
 let secureRuntimeUserId: string | null = null;
 type StartEditMessage = (...args: any[]) => any;
@@ -430,7 +522,16 @@ function revokePreparedSecureOperations(): void {
     approvedAttachmentUploads = new WeakMap();
     detachedTextUploads = new WeakSet();
     preparedOutgoingMessages = new WeakMap();
+    optimisticOutgoingPlaintexts.clear();
     requestAuthorizationScopes = new WeakMap();
+}
+
+function rememberOptimisticOutgoingPlaintext(ciphertext: string, plaintext: string): void {
+    optimisticOutgoingPlaintexts.delete(ciphertext);
+    optimisticOutgoingPlaintexts.set(ciphertext, plaintext);
+    if (optimisticOutgoingPlaintexts.size <= 128) return;
+    const oldest = optimisticOutgoingPlaintexts.keys().next().value;
+    if (oldest) optimisticOutgoingPlaintexts.delete(oldest);
 }
 
 function announcementKey(channelId: string, content: string): string {
@@ -987,6 +1088,7 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
     }
     const scope = conversationAuthorizationScope(context.localUserId, conversation);
     if (!scope) throw new Error("Secure Messaging blocked a programmatic send after its recipient state changed");
+    rememberOptimisticOutgoingPlaintext(encrypted.content, content);
     body.content = encrypted.content;
     requestAuthorizationScopes.set(request, scope);
     enforceMessageNonce(request);
@@ -1373,6 +1475,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
         if (preparedAttachments)
             authorizeScopedAttachmentUploadReservations(channelId, preparedAttachments.files, scope);
         authorizeScopedWirePayload(channelId, encrypted.content, attachmentFilenames, scope);
+        rememberOptimisticOutgoingPlaintext(encrypted.content, plaintext);
         message.content = encrypted.content;
         preparedOutgoingMessages.set(message, { ciphertext: encrypted.content, plaintext });
         for (const upload of uploads) approvedAttachmentUploads.set(upload, { file: upload.item.file, scope });
@@ -1403,11 +1506,13 @@ const editListener: MessageEditListener = async (channelId, messageId, message) 
         const original = MessageStore.getMessage(channelId, messageId);
         if (!requiresFailClosedSend(conversation) && !isEncryptedMessage(original?.content)) return;
 
-        const encryptedContent = await encryptEditedMessage(context, conversation, messageId, message.content);
+        const plaintext = message.content;
+        const encryptedContent = await encryptEditedMessage(context, conversation, messageId, plaintext);
         if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         const scope = conversationAuthorizationScope(context.localUserId, conversation);
         if (!scope) return { cancel: true };
         authorizeScopedWireEdit(channelId, messageId, encryptedContent, scope);
+        rememberOptimisticOutgoingPlaintext(encryptedContent, plaintext);
         message.content = encryptedContent;
         return { stop: true };
     } catch (error) {
@@ -1877,20 +1982,69 @@ function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: 
     );
 }
 
-function EncryptedMessageAccessory({ message }: { message: Message; }) {
-    const [state, setState] = useState<ReplyPreviewState | null>(null);
+function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Message; nativeGroupStart?: boolean; }) {
     const localUserId = UserStore.getCurrentUser()?.id;
-    const captureProtection = useScreenCaptureProtectionStatus();
     const key = localUserId && message.author?.id ? decryptCacheKey(localUserId, message) : null;
-    const result = key && localUserId
-        ? state?.key === key ? state.result : getCachedDecryption(localUserId, message)
-        : null;
+    const [state, setState] = useState<ReplyPreviewState | null>(() => {
+        if (!key || !localUserId) return null;
+        const cached = getCachedDecryption(localUserId, message);
+        return cached ? { key, result: cached } : null;
+    });
+    const captureProtection = useScreenCaptureProtectionStatus();
+    const cachedResult = key && localUserId ? getCachedDecryption(localUserId, message) : null;
+    const result = state?.key === key ? state.result : cachedResult;
+    const cardRef = useRef<HTMLDivElement>(null);
+    const groupStartObservationOwner = useRef<object>({}).current;
+    const groupingRevision = useSecureMessageGroupingRevision();
+    const groupFlags = useStateFromStores([MessageStore], () => {
+        if (!localUserId) return 0;
+        const messages = (MessageStore.getMessages(message.channel_id)?._array ?? []) as Message[];
+        return secureMessageGroupFlags(message, messages, (previous, next) => {
+            const previousResult = getCachedDecryption(localUserId, previous);
+            const nextResult = getCachedDecryption(localUserId, next);
+            if (!previousResult || previousResult.status !== "decrypted" ||
+                !nextResult || nextResult.status !== "decrypted")
+                return false;
+            return previousResult.attachmentBundle === null && previousResult.stickers.length === 0 &&
+                extractSecureEmbedUrls(previousResult.plaintext).length === 0 &&
+                nextResult.attachmentBundle === null && nextResult.stickers.length === 0 &&
+                extractSecureEmbedUrls(nextResult.plaintext).length === 0;
+        }, candidate => candidate.id === message.id && nativeGroupStart === true
+            ? true
+            : observedNativeMessageGroupStart(candidate.id));
+    }, [groupingRevision, key, nativeGroupStart, result]);
+    const cardClassName = classes(
+        "pc-secure-card",
+        "pc-secure-message",
+        "pc-secure-replaces-content",
+        groupFlags & SecureMessageGroup.Previous ? "pc-secure-message-joined-above" : null,
+        groupFlags & SecureMessageGroup.Next ? "pc-secure-message-joined-below" : null,
+    );
+
+    useLayoutEffect(() => {
+        const messageElement = cardRef.current?.closest<HTMLElement>('[id^="chat-messages-"]');
+        if (!messageElement) return;
+        const detectedGroupStart = nativeGroupStart === true ||
+            Boolean(messageElement.querySelector('[id^="message-username-"]'));
+        setNativeMessageGroupStartObservation(message.id, groupStartObservationOwner, detectedGroupStart);
+        return () => removeNativeMessageGroupStartObservation(message.id, groupStartObservationOwner);
+    }, [groupStartObservationOwner, message.id, nativeGroupStart]);
 
     useEffect(() => {
         let active = true;
-        setState(null);
         if (captureProtection !== "ready" || !key || !localUserId || !message.author?.id) return () => { active = false; };
-        void decryptCachedMessage(localUserId, message).then(next => { if (active) setState({ key, result: next }); });
+        const cached = getCachedDecryption(localUserId, message);
+        if (cached) {
+            optimisticOutgoingPlaintexts.delete(message.content);
+            setState(current => current?.key === key && current.result === cached ? current : { key, result: cached });
+            return () => { active = false; };
+        }
+        decryptCachedMessageForRender(localUserId, message, next => {
+            if (active) {
+                optimisticOutgoingPlaintexts.delete(message.content);
+                setState({ key, result: next });
+            }
+        });
         return () => { active = false; };
     }, [captureProtection, key, localUserId]);
 
@@ -1902,24 +2056,33 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
             ? "Waiting for encrypted-content visibility to update…"
             : "Encrypted content visibility could not be updated safely.";
         return (
-            <div className={`pc-secure-card ${screenshotMode ? "pc-secure-card-warning" : "pc-secure-card-danger"} pc-secure-content-hidden pc-secure-replaces-content`}>
+            <div ref={cardRef} className={`pc-secure-card ${screenshotMode ? "pc-secure-card-warning" : "pc-secure-card-danger"} pc-secure-content-hidden pc-secure-replaces-content`}>
                 <div className="pc-secure-card-header"><LockIcon color={screenshotMode ? "var(--status-warning)" : "var(--status-danger)"} /> Encrypted message protected</div>
                 <BaseText size="sm">{detail}</BaseText>
             </div>
         );
     }
 
+    const optimisticPlaintext = message.author?.id === localUserId
+        ? optimisticOutgoingPlaintexts.get(message.content)
+        : undefined;
+    if (!result && optimisticPlaintext !== undefined) {
+        return (
+            <div ref={cardRef} className={cardClassName}>
+                {optimisticPlaintext && <div className="pc-secure-card-plaintext">{Parser.parse(optimisticPlaintext)}</div>}
+            </div>
+        );
+    }
     if (!result) {
         return (
-            <div className="pc-secure-card pc-secure-replaces-content">
-                <div className="pc-secure-card-header"><LockIcon /> Authenticating and decrypting locally…</div>
+            <div ref={cardRef} aria-busy="true" aria-label="Decrypting encrypted message" className={cardClassName}>
+                <span aria-hidden="true" className="pc-secure-message-placeholder" />
             </div>
         );
     }
     if (result.status === "decrypted") {
         return (
-            <div className="pc-secure-card pc-secure-message pc-secure-replaces-content">
-                <div className="pc-secure-card-header"><LockIcon color="var(--status-positive)" /> Verified encrypted message · v1</div>
+            <div ref={cardRef} className={cardClassName}>
                 {result.plaintext && <div className="pc-secure-card-plaintext">{Parser.parse(result.plaintext)}</div>}
                 <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />
             </div>
@@ -1927,7 +2090,7 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
     }
 
     return (
-        <div className="pc-secure-card pc-secure-card-danger pc-secure-replaces-content">
+        <div ref={cardRef} className="pc-secure-card pc-secure-card-danger pc-secure-replaces-content">
             <div className="pc-secure-card-header"><LockIcon color="var(--status-danger)" /> Encrypted message blocked</div>
             <BaseText size="sm">{encryptedStatusText(result)}</BaseText>
         </div>
@@ -2138,13 +2301,18 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
     );
 }
 
-function SecureMessageAccessory({ message }: { message: Message; }) {
-    if (isEncryptedMessage(message.content)) return <EncryptedMessageAccessory message={message} />;
+function SecureMessageAccessory({ message, nativeGroupStart }: { message: Message; nativeGroupStart?: boolean; }) {
+    if (isEncryptedMessage(message.content)) return <EncryptedMessageAccessory message={message} nativeGroupStart={nativeGroupStart} />;
     if (isKeyAnnouncement(message.content)) return <KeyAnnouncementAccessory message={message} />;
     return null;
 }
 
-const renderSecureMessageAccessory: MessageAccessoryFactory = props => <SecureMessageAccessory message={props.message} />;
+const renderSecureMessageAccessory: MessageAccessoryFactory = props => (
+    <SecureMessageAccessory
+        message={props.message}
+        nativeGroupStart={typeof props.isGroupStart === "boolean" ? props.isGroupStart : undefined}
+    />
+);
 
 export default definePlugin({
     name: "SecureMessaging",
@@ -2266,6 +2434,10 @@ export default definePlugin({
             secureMessageListenersInstalled = false;
         }
         permittedAnnouncements.clear();
+        pendingRenderDecryptions = [];
+        renderDecryptBatchScheduled = false;
+        nativeMessageGroupStartObservations.clear();
+        notifySecureMessageGroupingChanged();
         revokePreparedSecureOperations();
         clearEncryptedAttachmentCache();
         clearEncryptedEmbedCache();
