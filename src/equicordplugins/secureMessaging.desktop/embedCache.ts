@@ -10,7 +10,11 @@ import { Constants, RestAPI, UserStore } from "@webpack/common";
 
 import type { SecureStickerItem } from "./attachments";
 import { decryptCachedMessage } from "./decryptCache";
-import { extractSecureEmbedUrls } from "./embedUrls";
+import {
+    extractSecureEmbedUrls,
+    isSecureInlineMediaEmbedType,
+    type SecureInlineEmbedStatus,
+} from "./embedUrls";
 import { discordEditedTimestamp } from "./messageMetadata";
 import type { DecryptIncomingResult } from "./native";
 import { isEncryptedMessage } from "./protocol";
@@ -23,6 +27,7 @@ const convertEmbed = findByCodeLazy(".uniqueId(\"embed_\")") as (
 const MAX_CACHE_ENTRIES = 256;
 const MAX_UNFURL_CACHE_ENTRIES = 128;
 const LOCAL_CONTENT_SCAN_VERSION = -1;
+const EMBED_SUPPRESSED = 1 << 2;
 const SUCCESSFUL_UNFURL_TTL = 30 * 60 * 1_000;
 const EMPTY_UNFURL_TTL = 30_000;
 const UNFURL_RETRY_DELAYS = [0, 250, 1_000, 3_000] as const;
@@ -236,6 +241,15 @@ export function patchEncryptedMessageEmbeds(message: Message, onReady: () => voi
     if (!entry) return message;
     if (entry.status === "loading") entry.listeners.add(onReady);
     return cloneWithEmbeds(message, entry.status === "ready" ? entry.embeds : []);
+}
+
+export function encryptedMessageInlineEmbedStatus(message: Message): SecureInlineEmbedStatus {
+    if (!isEncryptedMessage(message.content) || (message.flags & EMBED_SUPPRESSED) !== 0) return "absent";
+    const entry = cache.get(cacheKey(message));
+    if (!entry || entry.status === "loading" || entry.expiresAt <= Date.now()) return "pending";
+    return entry.embeds.some(embed => isSecureInlineMediaEmbedType(embed.type))
+        ? "present"
+        : "absent";
 }
 
 export function patchEncryptedMessageStickers(message: Message, onReady: () => void, canDecrypt = true): Message {

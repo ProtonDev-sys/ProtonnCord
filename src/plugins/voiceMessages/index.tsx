@@ -19,6 +19,7 @@
 import "./styles.css";
 
 import { NavContextMenuPatchCallback } from "@api/ContextMenu";
+import { _handlePreSend, type MessageContentOptions, type MessageObject, type SendMessageOptions, type SendMessageProps } from "@api/MessageEvents";
 import { definePluginSettings } from "@api/Settings";
 import { Card } from "@components/Card";
 import { Microphone } from "@components/Icons";
@@ -33,7 +34,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import { chooseFile } from "@utils/web";
 import { RenderModalProps } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
-import { Button, CloudUploader, Constants, FluxDispatcher, Forms, Menu, MessageActions, Modal, openModal, PendingReplyStore, PermissionsBits, PermissionStore, RestAPI, SelectedChannelStore, showToast, SnowflakeUtils, Toasts, useEffect, useState } from "@webpack/common";
+import { Button, ChannelStore, CloudUploader, FluxDispatcher, Forms, Menu, MessageActions, Modal, openModal, PendingReplyStore, PermissionsBits, PermissionStore, SelectedChannelStore, showToast, Toasts, useEffect, useState } from "@webpack/common";
 import { ComponentType } from "react";
 
 import { VoiceRecorderDesktop } from "./components/DesktopRecorder";
@@ -98,6 +99,7 @@ export default definePlugin({
     description: "Allows you to send voice messages like on mobile. To do so, right click the upload button and click Send Voice Message",
     tags: ["Voice"],
     authors: [Devs.Ven, Devs.Vap, Devs.Nickyux],
+    dependencies: ["MessageEventsAPI"],
     settings,
 
     patches: [
@@ -116,7 +118,9 @@ export default definePlugin({
 
     contextMenus: {
         "channel-attach": ctxMenuPatch
-    }
+    },
+
+    sendAudio,
 });
 
 type AudioMetadata = {
@@ -124,41 +128,58 @@ type AudioMetadata = {
     duration: number,
 };
 
-function sendAudio(blob: Blob, meta: AudioMetadata) {
+export async function sendAudio(blob: Blob, meta: AudioMetadata) {
     const channelId = SelectedChannelStore.getChannelId();
+    const channel = ChannelStore.getChannel(channelId);
+    if (!channel) {
+        showToast("Failed to find the selected channel", Toasts.Type.FAILURE);
+        return;
+    }
     const reply = PendingReplyStore.getPendingReply(channelId);
-    if (reply) FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId });
 
     const upload = new CloudUploader({
         file: new File([blob], "voice-message.ogg", { type: "audio/ogg; codecs=opus" }),
         isThumbnail: false,
         platform: CloudUploadPlatform.WEB,
     }, channelId);
+    upload.durationSecs = meta.duration;
+    upload.waveform = meta.waveform;
 
-    upload.on("complete", () => {
-        RestAPI.post({
-            url: Constants.Endpoints.MESSAGES(channelId),
-            body: {
-                flags: VOICE_MESSAGE_FLAG | (silentMessageEnabled ? SILENT_MESSAGE_FLAG : 0),
-                channel_id: channelId,
-                content: "",
-                nonce: SnowflakeUtils.fromTimestamp(Date.now()),
-                sticker_ids: [],
-                type: 0,
-                attachments: [{
-                    id: "0",
-                    filename: upload.filename,
-                    uploaded_filename: upload.uploadedFilename,
-                    waveform: meta.waveform,
-                    duration_secs: meta.duration,
-                }],
-                message_reference: reply ? MessageActions.getSendMessageOptionsForReply(reply)?.messageReference : null,
-            }
-        });
-    });
-    upload.on("error", () => showToast("Failed to upload voice message", Toasts.Type.FAILURE));
+    const message: MessageObject = {
+        content: "",
+        invalidEmojis: [],
+        tts: false,
+        validNonShortcutEmojis: [],
+    };
+    const contentOptions: MessageContentOptions = {
+        channelId,
+        command: null,
+        content: "",
+        uploads: [upload],
+    };
+    const options: SendMessageOptions = {
+        ...contentOptions,
+        ...(reply ? MessageActions.getSendMessageOptionsForReply(reply) ?? {} : {}),
+        attachmentsToUpload: [upload],
+        flags: VOICE_MESSAGE_FLAG | (silentMessageEnabled ? SILENT_MESSAGE_FLAG : 0),
+        location: "Voice Message",
+        stickerIds: [],
+    };
+    const props: SendMessageProps = {
+        channel,
+        content: "",
+        hasAttachments: true,
+        hasStickers: false,
+        openWarningPopout: () => undefined,
+    };
 
-    upload.upload();
+    try {
+        if (await _handlePreSend(channelId, message, options, props, contentOptions)) return;
+        if (reply) FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId });
+        await MessageActions.sendMessage(channelId, message, true, options);
+    } catch {
+        showToast("Failed to send voice message", Toasts.Type.FAILURE);
+    }
 }
 
 function useObjectUrl() {
