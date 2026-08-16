@@ -42,6 +42,7 @@ export interface AttachmentMetadata {
     name: string;
     size: number;
     spoiler: boolean;
+    waveform: string | null;
     width: number | null;
 }
 
@@ -68,6 +69,7 @@ interface SerializedAttachmentMetadata {
     w: number | null;
     h: number | null;
     t: number | null;
+    q?: string | null;
 }
 
 interface SerializedSecurePlaintext {
@@ -136,9 +138,9 @@ function uint32(value: number): Uint8Array {
     return result;
 }
 
-function canonicalMetadata(metadata: AttachmentMetadata): SerializedAttachmentMetadata {
+function canonicalMetadata(metadata: AttachmentMetadata, includeWaveform = true): SerializedAttachmentMetadata {
     validateAttachmentMetadata(metadata);
-    return {
+    const value: SerializedAttachmentMetadata = {
         v: ATTACHMENT_VERSION,
         n: metadata.name,
         m: metadata.mimeType,
@@ -149,6 +151,8 @@ function canonicalMetadata(metadata: AttachmentMetadata): SerializedAttachmentMe
         h: metadata.height,
         t: metadata.duration,
     };
+    if (includeWaveform) value.q = metadata.waveform;
+    return value;
 }
 
 function encodedAttachmentMetadata(metadata: AttachmentMetadata): Uint8Array {
@@ -217,6 +221,17 @@ function optionalDuration(value: unknown): value is number | null {
     return value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 604_800);
 }
 
+export function isValidAttachmentWaveform(value: unknown): value is string {
+    if (typeof value !== "string" || value.length < 4 || value.length > 344 || value.length % 4 !== 0 ||
+        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)) return false;
+    try {
+        const decoded = atob(value);
+        return decoded.length >= 1 && decoded.length <= 256 && btoa(decoded) === value;
+    } catch {
+        return false;
+    }
+}
+
 function validDimensions(width: number, height: number): { height: number; width: number; } | null {
     return Number.isInteger(width) && Number.isInteger(height) && width >= 1 && height >= 1 && width <= 32_768 && height <= 32_768
         ? { height, width }
@@ -280,7 +295,9 @@ export function validateAttachmentMetadata(metadata: AttachmentMetadata): void {
         throw new Error("Attachment size is invalid");
     if (typeof metadata.spoiler !== "boolean" ||
         (metadata.description !== null && (typeof metadata.description !== "string" || metadata.description.length > 1_024 || metadata.description.includes("\0"))) ||
-        !optionalDimension(metadata.width) || !optionalDimension(metadata.height) || !optionalDuration(metadata.duration))
+        !optionalDimension(metadata.width) || !optionalDimension(metadata.height) || !optionalDuration(metadata.duration) ||
+        (metadata.waveform !== null && (!isValidAttachmentWaveform(metadata.waveform) ||
+            !metadata.mimeType.toLowerCase().startsWith("audio/") || metadata.duration === null)))
         throw new Error("Attachment metadata is invalid");
     if ((metadata.width === null) !== (metadata.height === null)) throw new Error("Attachment dimensions are incomplete");
 }
@@ -363,11 +380,14 @@ export async function decryptAttachmentBytes(input: {
             throw new Error("Encrypted attachment metadata length is invalid");
         const metadataJson = new TextDecoder("utf-8", { fatal: true }).decode(plaintext.subarray(4, 4 + metadataLength));
         const value = JSON.parse(metadataJson) as unknown;
-        if (!isRecord(value) || !hasExactKeys(value, ["v", "n", "m", "s", "p", "d", "w", "h", "t"]) ||
+        const hasLegacyKeys = isRecord(value) && hasExactKeys(value, ["v", "n", "m", "s", "p", "d", "w", "h", "t"]);
+        const hasWaveformKeys = isRecord(value) && hasExactKeys(value, ["v", "n", "m", "s", "p", "d", "w", "h", "t", "q"]);
+        if (!isRecord(value) || (!hasLegacyKeys && !hasWaveformKeys) ||
             value.v !== ATTACHMENT_VERSION || typeof value.n !== "string" || typeof value.m !== "string" ||
             typeof value.s !== "number" || typeof value.p !== "boolean" ||
             (value.d !== null && typeof value.d !== "string") || !optionalDimension(value.w) ||
-            !optionalDimension(value.h) || !optionalDuration(value.t))
+            !optionalDimension(value.h) || !optionalDuration(value.t) ||
+            (hasWaveformKeys && value.q !== null && !isValidAttachmentWaveform(value.q)))
             throw new Error("Encrypted attachment metadata is invalid");
         const metadata: AttachmentMetadata = {
             name: value.n,
@@ -378,9 +398,10 @@ export async function decryptAttachmentBytes(input: {
             width: value.w,
             height: value.h,
             duration: value.t,
+            waveform: hasWaveformKeys ? value.q as string | null : null,
         };
         validateAttachmentMetadata(metadata);
-        if (JSON.stringify(canonicalMetadata(metadata)) !== metadataJson)
+        if (JSON.stringify(canonicalMetadata(metadata, hasWaveformKeys)) !== metadataJson)
             throw new Error("Encrypted attachment metadata is not canonical");
         const data = plaintext.slice(4 + metadataLength);
         if (data.byteLength !== metadata.size) throw new Error("Encrypted attachment content length is invalid");

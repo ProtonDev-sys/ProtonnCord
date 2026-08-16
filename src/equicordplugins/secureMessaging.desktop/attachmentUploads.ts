@@ -17,6 +17,7 @@ import {
     encryptedAttachmentCiphertextSize,
     encryptedAttachmentFilename,
     generateAttachmentBundleMaterial,
+    isValidAttachmentWaveform,
     MAX_ATTACHMENT_CIPHERTEXT_BYTES,
     MAX_ATTACHMENT_COUNT,
     MAX_DETACHED_TEXT_BYTES,
@@ -31,10 +32,12 @@ interface MutableCloudUpload extends CloudUpload {
 }
 
 interface UploadSource {
+    durationSecs: number | undefined;
     encryptedFile?: File;
     file: File;
     filename: string;
     mimeType: string;
+    waveform: string | undefined;
 }
 
 interface UploadMediaMetadata {
@@ -176,16 +179,21 @@ function sourceForUpload(upload: CloudUpload): UploadSource {
     if (existing?.encryptedFile === currentFile) return existing;
 
     const source = {
+        durationSecs: upload.durationSecs,
         file: currentFile,
         filename: upload.filename || currentFile.name,
         mimeType: currentFile.type || upload.mimeType || "application/octet-stream",
+        waveform: upload.waveform,
     };
     uploadSources.set(upload, source);
     return source;
 }
 
 async function metadataForUpload(upload: CloudUpload, source: UploadSource): Promise<AttachmentMetadata> {
-    const metadata = await mediaMetadata(source.file);
+    const providedDuration = validMediaDuration(source.durationSecs);
+    const metadata = providedDuration !== null && source.file.type.startsWith("audio/")
+        ? { duration: providedDuration, height: null, width: null }
+        : await mediaMetadata(source.file);
     return {
         name: source.filename,
         mimeType: source.mimeType,
@@ -194,7 +202,8 @@ async function metadataForUpload(upload: CloudUpload, source: UploadSource): Pro
         description: upload.description,
         width: metadata.width,
         height: metadata.height,
-        duration: validMediaDuration(upload.durationSecs) ?? metadata.duration,
+        duration: providedDuration ?? metadata.duration,
+        waveform: isValidAttachmentWaveform(source.waveform) ? source.waveform : null,
     };
 }
 
@@ -229,6 +238,7 @@ export async function prepareEncryptedAttachments(
             width: null,
             height: null,
             duration: null,
+            waveform: null,
         };
     }
     const plannedSizes = metadata.map(encryptedAttachmentCiphertextSize);
@@ -286,9 +296,11 @@ export async function prepareEncryptedAttachments(
                     upload.isImage = false;
                     upload.isVideo = false;
                     upload.allowOptimization = false;
+                    upload.durationSecs = undefined;
                     upload.currentSize = encryptedFile.size;
                     upload.preCompressionSize = encryptedFile.size;
                     upload.postCompressionSize = undefined;
+                    upload.waveform = undefined;
                 }
             },
             files: replacements.map(({ encryptedFile, filename }) => ({ filename, size: encryptedFile.size })),
