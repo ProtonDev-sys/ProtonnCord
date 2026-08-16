@@ -13,6 +13,7 @@ import {
     encryptedAttachmentCiphertextSize,
     encryptAttachmentBytes,
     generateAttachmentBundleMaterial,
+    isValidAttachmentWaveform,
     parseSecurePlaintext,
     serializeSecurePlaintext,
 } from "../src/equicordplugins/secureMessaging.desktop/attachments";
@@ -85,7 +86,12 @@ import {
     type SecureMessageGroupCandidate,
 } from "../src/equicordplugins/secureMessaging.desktop/messageGrouping";
 import { KeyReviewGate } from "../src/equicordplugins/secureMessaging.desktop/keyReviewGate";
-import { extractSecureEmbedUrls } from "../src/equicordplugins/secureMessaging.desktop/embedUrls";
+import {
+    extractSecureEmbedUrls,
+    isSecureInlineMediaEmbedType,
+    secureEmbedOnlyUrl,
+    shouldHideSecureEmbedOnlyPlaintext,
+} from "../src/equicordplugins/secureMessaging.desktop/embedUrls";
 
 const ALICE_ID = "100000000000000001";
 const BOB_ID = "100000000000000002";
@@ -297,6 +303,46 @@ async function main(): Promise<void> {
         10,
         "encrypted messages preserve Discord's ten-embed limit",
     );
+    const gifOnlyUrl = "https://media.tenor.com/example/video.mp4";
+    assert.equal(secureEmbedOnlyUrl(gifOnlyUrl), gifOnlyUrl, "a sole media URL is recognized as embed-only plaintext");
+    assert.equal(
+        secureEmbedOnlyUrl("  " + gifOnlyUrl + "\n"),
+        gifOnlyUrl,
+        "surrounding whitespace does not turn a sole media URL into visible message text",
+    );
+    assert.equal(secureEmbedOnlyUrl("watch this " + gifOnlyUrl), null, "a caption keeps its media URL visible");
+    assert.equal(secureEmbedOnlyUrl(gifOnlyUrl + " nice"), null, "trailing text keeps its media URL visible");
+    assert.equal(secureEmbedOnlyUrl(gifOnlyUrl + "."), null, "message punctuation is not discarded as redundant embed text");
+    assert.equal(secureEmbedOnlyUrl("<" + gifOnlyUrl + ">"), null, "Discord's explicit no-embed form remains visible");
+    assert.equal(
+        secureEmbedOnlyUrl(gifOnlyUrl + " https://example.com/second.gif"),
+        null,
+        "multiple media URLs remain visible as message text",
+    );
+    assert.equal(
+        shouldHideSecureEmbedOnlyPlaintext(gifOnlyUrl, "pending"),
+        true,
+        "an embed-only URL stays hidden while its native preview loads",
+    );
+    assert.equal(
+        shouldHideSecureEmbedOnlyPlaintext(gifOnlyUrl, "present"),
+        true,
+        "an embed-only URL stays hidden when Discord supplies inline media",
+    );
+    assert.equal(
+        shouldHideSecureEmbedOnlyPlaintext(gifOnlyUrl, "absent"),
+        false,
+        "the URL returns when Discord cannot supply inline media",
+    );
+    assert.equal(
+        shouldHideSecureEmbedOnlyPlaintext("caption " + gifOnlyUrl, "present"),
+        false,
+        "a caption and its link stay visible above inline media",
+    );
+    assert.equal(isSecureInlineMediaEmbedType("gifv"), true);
+    assert.equal(isSecureInlineMediaEmbedType("image"), true);
+    assert.equal(isSecureInlineMediaEmbedType("video"), true);
+    assert.equal(isSecureInlineMediaEmbedType("article"), false, "rich link cards keep their source URL visible");
     const reviewGate = new KeyReviewGate();
     reviewGate.begin(ALICE_ID, BOB_ID);
     reviewGate.fail(ALICE_ID, BOB_ID, "new-key-message");
@@ -491,6 +537,7 @@ async function main(): Promise<void> {
         width: null,
         height: null,
         duration: null,
+        waveform: null,
     };
     const encryptedAttachments = await Promise.all([
         encryptAttachmentBytes({
@@ -663,6 +710,7 @@ async function main(): Promise<void> {
         name: DETACHED_TEXT_FILENAME,
         size: largeMessageFile.size,
         spoiler: false,
+        waveform: null,
         width: null,
     };
     const plannedLargeMessageBytes = encryptedAttachmentCiphertextSize(largeMessageMetadata);
@@ -712,6 +760,93 @@ async function main(): Promise<void> {
     assert.equal(new TextDecoder("utf-8", { fatal: true }).decode(openedLargeMessage.data), largeMessageText);
     assert.equal(openedLargeMessage.metadata.name, DETACHED_TEXT_FILENAME);
     assert.equal(openedLargeMessage.metadata.mimeType, DETACHED_TEXT_MIME_TYPE);
+
+    const voiceWaveform = btoa(String.fromCharCode(...new Uint8Array([0, 16, 64, 128, 255])));
+    assert.equal(isValidAttachmentWaveform(voiceWaveform), true, "Discord voice waveforms use canonical bounded base64");
+    assert.equal(isValidAttachmentWaveform(voiceWaveform.replace(/=+$/u, "")), false, "non-canonical voice waveforms are rejected");
+    const voiceBytes = new Uint8Array([0x4f, 0x67, 0x67, 0x53, 0, 1, 2, 3, 4, 5]);
+    const voiceFile = new File([voiceBytes], "voice-message.ogg", { type: "audio/ogg; codecs=opus" });
+    const voiceUpload = Object.assign(new EventEmitter(), {
+        channelId: CHANNEL_ID,
+        classification: "unknown",
+        clip: null,
+        contentHash: null,
+        currentSize: voiceFile.size,
+        description: null,
+        durationSecs: 1.25,
+        etag: undefined,
+        error: null,
+        filename: voiceFile.name,
+        id: "0",
+        isImage: false,
+        status: "NOT_STARTED" as const,
+        isThumbnail: false,
+        isVideo: false,
+        uploadedFilename: "",
+        responseUrl: "",
+        item: { file: voiceFile, origin: "test", platform: CloudUploadPlatform.WEB },
+        loaded: 0,
+        mimeType: voiceFile.type,
+        origin: "test",
+        postCompressionSize: undefined,
+        preCompressionSize: voiceFile.size,
+        sensitive: false,
+        spoiler: false,
+        startTime: 0,
+        uniqueId: "voice-test",
+        waveform: voiceWaveform,
+        async upload() { },
+        cancel() { },
+        async delete() { },
+        getSize() { return this.currentSize; },
+        async maybeConvertToWebP() { },
+        removeFromMsgDraft() { },
+        setFilename(value: string) { this.filename = value; },
+    }) satisfies CloudUpload;
+    const preparedVoice = await prepareEncryptedAttachments([voiceUpload], "", CHANNEL_ID, ALICE_ID);
+    const voiceDescriptor = parseSecurePlaintext(preparedVoice.plaintext).attachments;
+    assert.ok(voiceDescriptor, "encrypted voice messages carry an authenticated attachment descriptor");
+    preparedVoice.apply();
+    assert.equal(voiceUpload.durationSecs, undefined, "Discord does not receive voice duration for opaque ciphertext");
+    assert.equal(voiceUpload.waveform, undefined, "Discord does not receive the encrypted voice waveform");
+    assert.equal(voiceUpload.item.file.type, "application/octet-stream", "Discord uploads opaque voice ciphertext");
+    const openedVoice = await decryptAttachmentBytes({
+        bundleId: voiceDescriptor.id,
+        channelId: CHANNEL_ID,
+        ciphertext: new Uint8Array(await voiceUpload.item.file.arrayBuffer()),
+        count: voiceDescriptor.count,
+        index: 0,
+        masterKey: decodeBase64Url(voiceDescriptor.key, 32),
+        senderUserId: ALICE_ID,
+    });
+    assert.deepEqual(openedVoice.data, voiceBytes);
+    assert.deepEqual(openedVoice.metadata, {
+        description: null,
+        duration: 1.25,
+        height: null,
+        mimeType: "audio/ogg; codecs=opus",
+        name: "voice-message.ogg",
+        size: voiceBytes.byteLength,
+        spoiler: false,
+        waveform: voiceWaveform,
+        width: null,
+    }, "voice duration and waveform are authenticated and restored for Discord's native player");
+    const preparedVoiceRetry = await prepareEncryptedAttachments([voiceUpload], "", CHANNEL_ID, ALICE_ID);
+    const voiceRetryDescriptor = parseSecurePlaintext(preparedVoiceRetry.plaintext).attachments;
+    assert.ok(voiceRetryDescriptor);
+    preparedVoiceRetry.apply();
+    const openedVoiceRetry = await decryptAttachmentBytes({
+        bundleId: voiceRetryDescriptor.id,
+        channelId: CHANNEL_ID,
+        ciphertext: new Uint8Array(await voiceUpload.item.file.arrayBuffer()),
+        count: voiceRetryDescriptor.count,
+        index: 0,
+        masterKey: decodeBase64Url(voiceRetryDescriptor.key, 32),
+        senderUserId: ALICE_ID,
+    });
+    assert.equal(openedVoiceRetry.metadata.duration, 1.25, "an encrypted voice retry retains its original authenticated duration");
+    assert.equal(openedVoiceRetry.metadata.waveform, voiceWaveform, "an encrypted voice retry retains its original authenticated waveform");
+    assert.deepEqual(openedVoiceRetry.data, voiceBytes, "an encrypted voice retry rebuilds from the original Ogg bytes");
     assert.throws(
         () => serializeSecurePlaintext("", null, [sticker, sticker]),
         /duplicates/,

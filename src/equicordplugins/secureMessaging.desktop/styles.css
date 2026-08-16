@@ -131,23 +131,6 @@
     margin-top: 0.55rem;
 }
 
-.pc-secure-media-attachment {
-    display: grid;
-    gap: 0.35rem;
-    margin-top: 0.5rem;
-}
-
-.pc-secure-media-player {
-    width: min(100%, 34rem);
-    max-height: 24rem;
-    border-radius: 0.5rem;
-    background: black;
-}
-
-.pc-secure-audio-player {
-    width: min(100%, 34rem);
-}
-
 .pc-secure-fingerprint {
     display: block;
     overflow-wrap: anywhere;

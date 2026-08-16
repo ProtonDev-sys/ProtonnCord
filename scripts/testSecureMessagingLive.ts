@@ -45,6 +45,9 @@ const PROOF_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAYAAAC56t6BAAAAFUlEQV
 const PROOF_PNG_FILENAME = `encrypted-proof-pixel-${process.pid}-${Date.now()}.png`;
 const PROOF_WEBM_BASE64 = "GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAKxEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHWTbuMU6uEElTDZ1OsggEjTbuMU6uEHFO7a1OsggKb7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsCrXsYMPQkBNgIxMYXZmNjIuMy4xMDBXQYxMYXZmNjIuMy4xMDBEiYhAj0AAAAAAABZUrmvIrgEAAAAAAAA/14EBc8WICC4QuYTfNmKcgQAitZyDdW5kiIEAhoVWX1ZQOYOBASPjg4QF9eEA4JCwgRC6gRCagQJVsIRVuYEBElTDZ0B/c3OfY8CAZ8iZRaOHRU5DT0RFUkSHjExhdmY2Mi4zLjEwMHNz2mPAi2PFiAguELmE3zZiZ8ilRaOHRU5DT0RFUkSHmExhdmM2Mi4xMS4xMDAgbGlidnB4LXZwOWfIoUWjiERVUkFUSU9ORIeTMDA6MDA6MDEuMDAwMDAwMDAwAB9DtnVA7eeBAKOrgQAAgIJJg0IAAPAA9gA4JBwYSgAAMGAAABC///cdr////1/f////8irAAKOTgQBkAIYAQJKcAFAAAAMgAABCQKOTgQDIAIYAQJKcAE7gAAMgAABCQKOTgQEsAIYAQJKcAFAAAAMgAABCQKOTgQGQAIYAQJKcAE1AAAMgAABCQKOTgQH0AIYAQJKcAFAAAAMgAABCQKOTgQJYAIYAQJKcAE7gAAMgAABCQKOTgQK8AIYAQJKcAFAAAAMgAABCQKOTgQMgAIYAQJKcAEogAAMgAABCQKOTgQOEAIYAQJKcAFAAAAMgAABCQBxTu2uRu4+zgQC3iveBAfGCAajwgQM=";
 const PROOF_WEBM_FILENAME = `encrypted-proof-video-${process.pid}-${Date.now()}.webm`;
+const PROOF_OGG_BASE64 = "T2dnUwACAAAAAAAAAABDmGvBAAAAAOSGNVgBE09wdXNIZWFkAQE4AYC7AAAAAABPZ2dTAAAAAAAAAAAAAEOYa8EBAAAAFLfx+wE9T3B1c1RhZ3MMAAAATGF2ZjYyLjMuMTAwAQAAAB0AAABlbmNvZGVyPUxhdmM2Mi4xMS4xMDAgbGlib3B1c09nZ1MABLgmAAAAAAAAQ5hrwQIAAADoaycTCw8PDw8PDw8PDw8PCwGDbd7jwiBoRNmb+7lAC0EBrppJBPq1qu5alcgACwGnIGKyp0OxSmnlAaEgCKNYVSDOBoRnE8I0fqP4CKE40Hcyql6OvXeHWhnICKGhI9TkcedAAGuHXKmACKLm54bhbO6mDoUVzw7gCKNsdwbZ29TtQPqJdk2GCKE40Hcyqla9W10gvp1ICJ/wcHcyql5SkclJN3VACAYbR1EoZ6c+0Q5y/ISs";
+const PROOF_VOICE_DURATION = 0.2;
+const PROOF_VOICE_WAVEFORM = "ABBAgP8=";
 const PROOF_GENERIC_BASE64 = "ZW5jcnlwdGVkIGdlbmVyaWMgYXR0YWNobWVudCBwcm9vZlxu";
 const PROOF_GENERIC_FILENAME = `encrypted-proof-file-${process.pid}-${Date.now()}.txt`;
 
@@ -55,16 +58,19 @@ interface RawDiscordMessage {
     content: string;
     editedTimestamp: string | null;
     id: string;
+    flags?: number;
     mentionedUserIds?: string[];
 }
 
 interface RawDiscordAttachment {
     contentType: string | null;
+    durationSecs?: number | null;
     filename: string;
     id: string;
     proxyUrl: string;
     size: number;
     url: string;
+    waveform?: string | null;
 }
 
 interface LivePreflight {
@@ -1416,6 +1422,72 @@ async function sendEncryptedAttachmentThroughRuntime(page: Page, plaintext: stri
     });
 }
 
+async function sendEncryptedVoiceThroughPlugin(page: Page): Promise<RawDiscordMessage> {
+    return page.evaluate(async ({ channelId, encryptedPrefix, fileBase64, registryName, voiceDuration, voiceWaveform }) => {
+        const global = globalThis as any;
+        const common = global.Vencord.Webpack.Common;
+        const plugin = global.Vencord?.Plugins?.plugins?.VoiceMessages;
+        if (typeof plugin?.sendAudio !== "function") throw new Error("The VoiceMessages encrypted-send route is unavailable");
+        if (common.SelectedChannelStore.getChannelId() !== channelId)
+            throw new Error("The disposable encrypted channel is not selected for the voice-message proof");
+
+        const pendingReply = common.PendingReplyStore.getPendingReply(channelId);
+        if (pendingReply) common.FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId });
+        const beforeResponse = await common.RestAPI.get({
+            url: common.Constants.Endpoints.MESSAGES(channelId),
+            query: { limit: 50 },
+        });
+        const beforeIds = new Set((beforeResponse.body ?? []).map((message: any) => String(message.id)));
+        const bytes = Uint8Array.from(atob(fileBase64), value => value.charCodeAt(0));
+        await plugin.sendAudio(new Blob([bytes], { type: "audio/ogg; codecs=opus" }), {
+            duration: voiceDuration,
+            waveform: voiceWaveform,
+        });
+
+        const localUserId = common.UserStore.getCurrentUser()?.id;
+        let sent: any = null;
+        for (let attempt = 0; attempt < 30 && !sent; attempt++) {
+            const response = await common.RestAPI.get({
+                url: common.Constants.Endpoints.MESSAGES(channelId),
+                query: { limit: 50 },
+            });
+            sent = (response.body ?? []).find((message: any) =>
+                !beforeIds.has(String(message.id)) && String(message.author?.id) === localUserId &&
+                String(message.content).startsWith(encryptedPrefix) && Array.isArray(message.attachments) &&
+                message.attachments.length === 1 && String(message.attachments[0]?.filename).endsWith(".pcaf"),
+            );
+            if (!sent) await new Promise(resolve => setTimeout(resolve, 250));
+        }
+        if (!sent) throw new Error("Discord did not return the encrypted voice message sent through VoiceMessages");
+        (global[registryName] ??= []).push(String(sent.id));
+        return {
+            attachments: sent.attachments.map((attachment: any) => ({
+                contentType: typeof attachment.content_type === "string" ? attachment.content_type : null,
+                durationSecs: typeof attachment.duration_secs === "number" ? attachment.duration_secs : null,
+                filename: String(attachment.filename),
+                id: String(attachment.id),
+                proxyUrl: String(attachment.proxy_url),
+                size: Number(attachment.size),
+                url: String(attachment.url),
+                waveform: typeof attachment.waveform === "string" ? attachment.waveform : null,
+            })),
+            authorId: String(sent.author.id),
+            channelId: String(sent.channel_id),
+            content: String(sent.content),
+            editedTimestamp: typeof sent.edited_timestamp === "string" ? sent.edited_timestamp : null,
+            flags: Number(sent.flags),
+            id: String(sent.id),
+        };
+    }, {
+        channelId: TEST_CHANNEL_ID,
+        encryptedPrefix: ENCRYPTED_PREFIX,
+        fileBase64: PROOF_OGG_BASE64,
+        registryName: PAGE_MESSAGE_REGISTRY,
+        voiceDuration: PROOF_VOICE_DURATION,
+        voiceWaveform: PROOF_VOICE_WAVEFORM,
+    });
+}
+
 async function sendThroughRestGuard(page: Page, plaintext: string): Promise<RawDiscordMessage> {
     return page.evaluate(async ({ channelId, plaintext, registryName }) => {
         const global = globalThis as any;
@@ -1706,6 +1778,7 @@ async function verifyRenderedEncryptedVideo(page: Page, message: RawDiscordMessa
         video.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0, cancelable: true }));
         const source = video.currentSrc || video.src || video.querySelector<HTMLSourceElement>("source")?.src || "";
         return {
+            customSecureMediaPresent: Boolean(item?.querySelector(".pc-secure-media-attachment, .pc-secure-media-player, .pc-secure-audio-player")),
             duration: video.duration,
             height: video.videoHeight,
             localContentScanVersion: projectedAttachment?.content_scan_version ?? null,
@@ -1725,6 +1798,63 @@ async function verifyRenderedEncryptedVideo(page: Page, message: RawDiscordMessa
     const mediaClickDownloadCalls = (await readdir(downloadsDirectory))
         .filter(candidate => isDownloadFilenameVariant(candidate, PROOF_WEBM_FILENAME)).length;
     return { ...proof, mediaClickDownloadCalls };
+}
+
+async function verifyRenderedEncryptedVoice(page: Page, message: RawDiscordMessage) {
+    try {
+        await page.waitForFunction(({ channelId, messageId, waveform }) => {
+            const global = globalThis as any;
+            const item = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+            const storedMessage = global.Vencord?.Webpack?.Common?.MessageStore?.getMessage?.(channelId, messageId);
+            const projectedAttachment = storedMessage
+                ? global.Vencord?.Plugins?.plugins?.SecureMessaging?.getEncryptedMediaAttachments?.(storedMessage)?.[0]
+                : null;
+            const nativeVoiceButton = [...(item?.querySelectorAll<HTMLElement>("button, [role='button']") ?? [])]
+                .find(button => /voice message/iu.test(button.getAttribute("aria-label") ?? ""));
+            return projectedAttachment?.waveform === waveform && projectedAttachment?.url?.startsWith("blob:") && nativeVoiceButton;
+        }, { timeout: 30_000 }, {
+            channelId: message.channelId,
+            messageId: message.id,
+            waveform: PROOF_VOICE_WAVEFORM,
+        });
+    } catch (error) {
+        const diagnostic = await page.evaluate(({ channelId, messageId }) => {
+            const global = globalThis as any;
+            const item = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+            const storedMessage = global.Vencord?.Webpack?.Common?.MessageStore?.getMessage?.(channelId, messageId);
+            return {
+                buttons: [...(item?.querySelectorAll<HTMLElement>("button, [role='button']") ?? [])].map(button => ({
+                    ariaLabel: button.getAttribute("aria-label"),
+                    text: button.textContent?.slice(0, 120) ?? "",
+                })),
+                html: item?.innerHTML.slice(0, 12_000) ?? "",
+                projected: storedMessage
+                    ? global.Vencord?.Plugins?.plugins?.SecureMessaging?.getEncryptedMediaAttachments?.(storedMessage)?.[0]
+                    : null,
+                rowExists: Boolean(item),
+            };
+        }, { channelId: message.channelId, messageId: message.id });
+        throw new Error(`Encrypted voice native-render diagnostic: ${JSON.stringify(diagnostic)}`, { cause: error });
+    }
+
+    return page.evaluate(({ channelId, messageId }) => {
+        const global = globalThis as any;
+        const item = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+        const storedMessage = global.Vencord?.Webpack?.Common?.MessageStore?.getMessage?.(channelId, messageId);
+        const projectedAttachment = storedMessage
+            ? global.Vencord?.Plugins?.plugins?.SecureMessaging?.getEncryptedMediaAttachments?.(storedMessage)?.[0]
+            : null;
+        const nativeVoiceButton = [...(item?.querySelectorAll<HTMLElement>("button, [role='button']") ?? [])]
+            .find(button => /voice message/iu.test(button.getAttribute("aria-label") ?? ""));
+        return {
+            customSecureMediaPresent: Boolean(item?.querySelector(".pc-secure-media-attachment, .pc-secure-media-player, .pc-secure-audio-player")),
+            nativeVoiceControlLabel: nativeVoiceButton?.getAttribute("aria-label") ?? "",
+            projectedDuration: projectedAttachment?.duration_secs ?? null,
+            projectedMimeType: projectedAttachment?.content_type ?? "",
+            projectedUrl: projectedAttachment?.url ?? "",
+            projectedWaveform: projectedAttachment?.waveform ?? "",
+        };
+    }, { channelId: message.channelId, messageId: message.id });
 }
 
 async function verifyAuthenticatedDownloadButton(page: Page, message: RawDiscordMessage): Promise<{
@@ -2401,6 +2531,49 @@ async function main(): Promise<void> {
         );
         assert.equal(Buffer.from(recipientVideo.data).toString("base64"), PROOF_WEBM_BASE64);
 
+        const voiceSend = await sendEncryptedVoiceThroughPlugin(page);
+        sentMessageIds.add(voiceSend.id);
+        assert.equal((voiceSend.flags! & (1 << 13)) !== 0, false, "Discord must not receive the voice flag for an encrypted-content message");
+        assert.equal(voiceSend.content.includes("voice-message.ogg"), false, "the encrypted voice envelope must hide its filename");
+        assert.equal(voiceSend.attachments[0].filename.endsWith(".pcaf"), true, "Discord must store only an opaque encrypted voice attachment");
+        assert.equal(voiceSend.attachments[0].durationSecs, null, "Discord must not receive encrypted voice duration metadata");
+        assert.equal(voiceSend.attachments[0].waveform, null, "Discord must not receive the encrypted voice waveform");
+        const recipientVoiceEnvelope = await decryptMessage({
+            channelId: TEST_CHANNEL_ID,
+            content: voiceSend.content,
+            discordAuthorId: preflight.localUserId,
+            identity: temporaryRecipient,
+            localUserId: EXPECTED_RECIPIENT_ID,
+            senderIdentity: localPublicIdentity,
+        });
+        const recipientVoicePlaintext = parseSecurePlaintext(recipientVoiceEnvelope.plaintext);
+        assert.equal(recipientVoicePlaintext.text, "", "a voice-only encrypted message must not add placeholder text");
+        assert.ok(recipientVoicePlaintext.attachments, "the selected recipient must receive the encrypted voice descriptor");
+        const rawVoiceResponse = await fetch(voiceSend.attachments[0].url);
+        assert.equal(rawVoiceResponse.ok, true, "Discord must return the stored encrypted voice bytes");
+        const rawVoiceBytes = new Uint8Array(await rawVoiceResponse.arrayBuffer());
+        assert.equal(
+            await attachmentBundleRoot(recipientVoicePlaintext.attachments.id, [rawVoiceBytes]),
+            recipientVoicePlaintext.attachments.root,
+            "the selected recipient must authenticate the exact encrypted voice attachment",
+        );
+        const recipientVoiceMasterKey = decodeBase64Url(recipientVoicePlaintext.attachments.key, 32);
+        const recipientVoice = await decryptAttachmentBytes({
+            bundleId: recipientVoicePlaintext.attachments.id,
+            channelId: TEST_CHANNEL_ID,
+            ciphertext: rawVoiceBytes,
+            count: recipientVoicePlaintext.attachments.count,
+            index: 0,
+            masterKey: recipientVoiceMasterKey,
+            senderUserId: preflight.localUserId,
+        });
+        recipientVoiceMasterKey.fill(0);
+        assert.equal(recipientVoice.metadata.name, "voice-message.ogg");
+        assert.equal(recipientVoice.metadata.mimeType, "audio/ogg; codecs=opus");
+        assert.equal(recipientVoice.metadata.duration, PROOF_VOICE_DURATION);
+        assert.equal(recipientVoice.metadata.waveform, PROOF_VOICE_WAVEFORM);
+        assert.equal(Buffer.from(recipientVoice.data).toString("base64"), PROOF_OGG_BASE64);
+
         const genericPlaintext = `Secure Messaging encrypted-generic-file proof ${crypto.randomUUID()} ξ`;
         const genericSend = await sendEncryptedAttachmentThroughRuntime(page, genericPlaintext, {
             base64: PROOF_GENERIC_BASE64,
@@ -2531,6 +2704,15 @@ async function main(): Promise<void> {
         assert.equal(videoRenderProof.projectedUrl.endsWith("#"), true, "the projected blob URL must preserve Discord's attachment URL shape");
         assert.equal(videoRenderProof.localContentScanVersion, -1, "decrypted video must carry Discord's local unscanned sentinel");
         assert.equal(videoRenderProof.mediaClickDownloadCalls, 0, "video controls must never trigger the encrypted-file download interceptor");
+        assert.equal(videoRenderProof.customSecureMediaPresent, false, "encrypted video must use Discord's native attachment renderer, not a plugin media player");
+
+        const voiceRenderProof = await verifyRenderedEncryptedVoice(page, voiceSend);
+        assert.equal(voiceRenderProof.customSecureMediaPresent, false, "encrypted voice must use Discord's native voice renderer");
+        assert.match(voiceRenderProof.nativeVoiceControlLabel, /voice message/iu, "Discord's native voice control must be present");
+        assert.equal(voiceRenderProof.projectedMimeType, "audio/ogg", "the native voice renderer must receive the authenticated Ogg type");
+        assert.equal(voiceRenderProof.projectedDuration, PROOF_VOICE_DURATION, "the native voice renderer must receive authenticated duration");
+        assert.equal(voiceRenderProof.projectedWaveform, PROOF_VOICE_WAVEFORM, "the native voice renderer must receive the authenticated waveform");
+        assert.equal(voiceRenderProof.projectedUrl.startsWith("blob:"), true, "the native voice renderer must use the authenticated local blob");
 
         const nativeAnchorDownload = await verifyNativeAttachmentAnchorDownload(
             page,
@@ -2702,9 +2884,18 @@ async function main(): Promise<void> {
                     authenticatedDuration: recipientVideo.metadata.duration,
                     authenticatedHeight: recipientVideo.metadata.height,
                     authenticatedWidth: recipientVideo.metadata.width,
+                    customMediaRendererAbsent: !videoRenderProof.customSecureMediaPresent,
                     mediaControlsUnintercepted: videoRenderProof.mediaClickDownloadCalls === 0,
                     nativePlaybackAdvanced: videoRenderProof.playbackTime > 0.01,
                     nativeVideoRendererUsed: videoRenderProof.source.startsWith("blob:"),
+                },
+                voice: {
+                    authenticatedDuration: recipientVoice.metadata.duration,
+                    authenticatedWaveform: recipientVoice.metadata.waveform,
+                    customMediaRendererAbsent: !voiceRenderProof.customSecureMediaPresent,
+                    nativeVoiceControlLabel: voiceRenderProof.nativeVoiceControlLabel,
+                    nativeVoiceRendererUsed: voiceRenderProof.projectedUrl.startsWith("blob:"),
+                    serverVoiceFlagSuppressed: (voiceSend.flags! & (1 << 13)) === 0,
                 },
                 wireContentLength: attachmentSend.wireContentLength,
             },

@@ -64,7 +64,6 @@ import {
     encryptedAttachmentDownloads,
     encryptedAttachmentStatus,
     encryptedMediaAttachments,
-    type ExtendedAttachment,
     isEncryptedAttachmentDownloadUrl,
     isEncryptedAttachmentMediaUrl,
     patchEncryptedMessageAttachments,
@@ -75,6 +74,7 @@ import { unchangedEncryptedAttachmentIds } from "./attachmentEditValidation";
 import {
     DETACHED_TEXT_FILENAME,
     DETACHED_TEXT_MIME_TYPE,
+    isValidAttachmentWaveform,
     MAX_ATTACHMENT_CIPHERTEXT_BYTES,
     MAX_ATTACHMENT_COUNT,
     MAX_DETACHED_TEXT_BYTES,
@@ -96,11 +96,12 @@ import {
 } from "./decryptCache";
 import {
     clearEncryptedEmbedCache,
+    encryptedMessageInlineEmbedStatus,
     patchEncryptedMessageEmbeds,
     patchEncryptedMessageStickers,
     prefetchEncryptedMessageEmbeds,
 } from "./embedCache";
-import { extractSecureEmbedUrls } from "./embedUrls";
+import { extractSecureEmbedUrls, shouldHideSecureEmbedOnlyPlaintext } from "./embedUrls";
 import { KeyReviewGate } from "./keyReviewGate";
 import { encryptedAllowedMentions, encryptedMessageMentionsUser } from "./mentionNotifications";
 import { SecureMessageGroup, secureMessageGroupFlags } from "./messageGrouping";
@@ -138,6 +139,7 @@ import {
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const SECURE_LISTENER_PRIORITY = 1_000_000;
+const VOICE_MESSAGE_FLAG = 1 << 13;
 const UploadLimits = findByPropsLazy("getUserMaxFileSize") as {
     getUserMaxFileSize(user: unknown): unknown;
 };
@@ -814,6 +816,16 @@ function blockedOutgoingReason(
     if (stickerIds === null) return "Secure Messaging could not resolve the selected stickers safely.";
     if (options.alsoForwardToChannelId) return "Forwarded messages are not encrypted by Secure Messaging v1.";
     if (options.command != null) return "Discord commands cannot be sent through an encrypted conversation.";
+    if ((Number(options.flags) & VOICE_MESSAGE_FLAG) !== 0) {
+        const uploads = Array.isArray(options.uploads) ? options.uploads : [];
+        const upload = uploads[0];
+        const duration = upload?.durationSecs;
+        const file = upload?.item?.file;
+        if (messageContent.length > 0 || stickerIds.length > 0 || uploads.length !== 1 || !(file instanceof File) ||
+            !file.type.toLowerCase().startsWith("audio/") || !isValidAttachmentWaveform(upload.waveform) ||
+            typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0 || duration > 604_800)
+            return "Encrypted voice messages require one valid audio recording without text or stickers.";
+    }
     if (!messageContent && (!Array.isArray(options.uploads) || options.uploads.length === 0) && stickerIds.length === 0)
         return "Enter text, choose a GIF or sticker, or attach a file to send an encrypted message.";
     return null;
@@ -1507,6 +1519,8 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             );
         }
         preparedAttachments?.apply();
+        if ((Number(options.flags) & VOICE_MESSAGE_FLAG) !== 0)
+            options.flags = Number(options.flags) & ~VOICE_MESSAGE_FLAG;
         if (detachedTextIndex !== null) {
             options.uploads = uploads;
             options.attachmentsToUpload = uploads;
@@ -1848,7 +1862,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                 <section className="pc-secure-modal-section">
                     <Heading tag="h5">Important limitations</Heading>
                     <BaseText size="xs" color="text-muted">
-                        The current PCEM3 protocol encrypts text, GIF-picker links, sticker metadata, and ordinary file attachments. Short text stays inline; text that would overflow Discord's message limit uses one opaque encrypted attachment and is reconstructed locally as a normal message. Its exact encrypted size, including private metadata and authentication overhead, must fit the upload limit Discord reports for your account. Received files are fully downloaded, authenticated, and decrypted locally before Discord's normal renderers display them. Authentication proves the verified sender supplied the bytes, not that a file is harmless: Discord can scan only the opaque ciphertext, so keep normal operating-system and antivirus protections enabled. Inline encrypted messages can be edited while retaining their existing encrypted attachments and stickers; large detached text, attachment-set changes, and commands remain blocked from editing. Explicit mentions of selected encrypted participants expose those user IDs as authenticated mention metadata so Discord can deliver recipient pings and render mentioned-message highlighting without waiting for decryption; the surrounding message text remains encrypted, the author is excluded from Discord's notification allowlist, and role/everyone pings stay disabled. Discord still sees who talks, when, ciphertext sizes, attachment counts, channel membership, edit timing, reply metadata, and mentioned user IDs. Normal link and GIF previews disclose their URL to Discord's unfurl service; displaying a sticker requests its asset ID from Discord's media CDN. The protocol has no forward secrecy or post-compromise healing, and a compromised client or plugin can read plaintext while it is displayed.
+                        The current PCEM3 protocol encrypts text, GIF-picker links, sticker metadata, ordinary file attachments, and voice-message audio. Short text stays inline; text that would overflow Discord's message limit uses one opaque encrypted attachment and is reconstructed locally as a normal message. Its exact encrypted size, including private metadata and authentication overhead, must fit the upload limit Discord reports for your account. Received files are fully downloaded, authenticated, and decrypted locally before Discord's normal renderers display them. Encrypted voice messages are stored as ordinary opaque attachments; their authenticated duration and waveform restore Discord's voice-message renderer only after local decryption. Authentication proves the verified sender supplied the bytes, not that a file is harmless: Discord can scan only the opaque ciphertext, so keep normal operating-system and antivirus protections enabled. Inline encrypted messages can be edited while retaining their existing encrypted attachments and stickers; large detached text, attachment-set changes, and commands remain blocked from editing. Explicit mentions of selected encrypted participants expose those user IDs as authenticated mention metadata so Discord can deliver recipient pings and render mentioned-message highlighting without waiting for decryption; the surrounding message text remains encrypted, the author is excluded from Discord's notification allowlist, and role/everyone pings stay disabled. Discord still sees who talks, when, ciphertext sizes, attachment counts, channel membership, edit timing, reply metadata, and mentioned user IDs. Normal link and GIF previews disclose their URL to Discord's unfurl service; displaying a sticker requests its asset ID from Discord's media CDN. The protocol has no forward secrecy or post-compromise healing, and a compromised client or plugin can read plaintext while it is displayed.
                     </BaseText>
                 </section>
 
@@ -1929,45 +1943,6 @@ function encryptedStatusText(result: DecryptIncomingResult): string {
     return "";
 }
 
-function SecureMediaAttachment({ attachment }: { attachment: ExtendedAttachment; }) {
-    const [revealed, setRevealed] = useState(!attachment.spoiler);
-    const mimeType = attachment.content_type ?? "application/octet-stream";
-    const isVideo = mimeType.startsWith("video/");
-
-    return (
-        <div className="pc-secure-media-attachment">
-            <BaseText size="xs">{attachment.filename}</BaseText>
-            {attachment.description && <BaseText size="xs">{attachment.description}</BaseText>}
-            {revealed ? isVideo ? (
-                <video
-                    aria-label={attachment.filename}
-                    className="pc-secure-media-player"
-                    controls
-                    controlsList="nodownload"
-                    height={attachment.height}
-                    playsInline
-                    preload="metadata"
-                    src={attachment.url}
-                    width={attachment.width}
-                />
-            ) : (
-                <audio
-                    aria-label={attachment.filename}
-                    className="pc-secure-audio-player"
-                    controls
-                    controlsList="nodownload"
-                    preload="metadata"
-                    src={attachment.url}
-                />
-            ) : (
-                <Button size="xs" onClick={() => setRevealed(true)}>
-                    Reveal spoiler attachment
-                </Button>
-            )}
-        </div>
-    );
-}
-
 function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: number; message: Message; }) {
     const [, setRevision] = useState(0);
     const attachmentKey = encryptedAttachmentCacheKey(message);
@@ -1985,25 +1960,20 @@ function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: 
     if (expectedCount === 0) return null;
     const status = encryptedAttachmentStatus(message);
     if (status.status === "ready") {
-        const mediaAttachments = encryptedMediaAttachments(message);
         const downloads = encryptedAttachmentDownloads(message);
-        return (
-            <>
-                {mediaAttachments.map(attachment => <SecureMediaAttachment key={attachment.id} attachment={attachment} />)}
-                {downloads.length > 0 && <div className="pc-secure-card-actions">
-                    {downloads.map(attachment => (
-                        <Button
-                            key={attachment.id}
-                            className="pc-secure-download"
-                            size="xs"
-                            onClick={() => void saveEncryptedAttachment(attachment.url)}
-                        >
-                            Download {attachment.filename}
-                        </Button>
-                    ))}
-                </div>}
-            </>
-        );
+        if (downloads.length === 0) return null;
+        return <div className="pc-secure-card-actions">
+            {downloads.map(attachment => (
+                <Button
+                    key={attachment.id}
+                    className="pc-secure-download"
+                    size="xs"
+                    onClick={() => void saveEncryptedAttachment(attachment.url)}
+                >
+                    Download {attachment.filename}
+                </Button>
+            ))}
+        </div>;
     }
     if (status.status === "idle") return null;
     if (status.status === "failed") {
@@ -2040,6 +2010,7 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         ? optimisticOutgoingPlaintexts.get(message.content)
         : undefined;
     const visiblePlaintext = result?.status === "decrypted" ? result.plaintext : optimisticPlaintext;
+    const inlineEmbedStatus = encryptedMessageInlineEmbedStatus(message);
     const mentionsLocalUser = Boolean(localUserId && message.author?.id && encryptedMessageMentionsUser(
         message.content,
         { channelId: message.channel_id, discordAuthorId: message.author.id },
@@ -2073,6 +2044,12 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         mentionsLocalUser ? "pc-secure-message-mentioned" : null,
         groupFlags & SecureMessageGroup.Previous ? "pc-secure-message-joined-above" : null,
         groupFlags & SecureMessageGroup.Next ? "pc-secure-message-joined-below" : null,
+    );
+    const embedOnlyClassName = classes(
+        "pc-secure-message",
+        "pc-secure-replaces-content",
+        "pc-secure-embed-only",
+        mentionsLocalUser ? "pc-secure-message-mentioned" : null,
     );
 
     useLayoutEffect(() => {
@@ -2124,9 +2101,11 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
     }
 
     if (!result && optimisticPlaintext !== undefined) {
+        const embedOnly = message.attachments.length === 0 && message.stickerItems.length === 0 &&
+            shouldHideSecureEmbedOnlyPlaintext(optimisticPlaintext, inlineEmbedStatus);
         return (
-            <div ref={cardRef} className={cardClassName}>
-                {optimisticPlaintext && <div className="pc-secure-card-plaintext">{Parser.parse(optimisticPlaintext)}</div>}
+            <div ref={cardRef} className={embedOnly ? embedOnlyClassName : cardClassName} hidden={embedOnly}>
+                {!embedOnly && optimisticPlaintext && <div className="pc-secure-card-plaintext">{Parser.parse(optimisticPlaintext)}</div>}
             </div>
         );
     }
@@ -2138,10 +2117,12 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         );
     }
     if (result.status === "decrypted") {
+        const embedOnly = result.attachmentBundle === null && result.stickers.length === 0 &&
+            shouldHideSecureEmbedOnlyPlaintext(result.plaintext, inlineEmbedStatus);
         return (
-            <div ref={cardRef} className={cardClassName}>
-                {result.plaintext && <div className="pc-secure-card-plaintext">{Parser.parse(result.plaintext)}</div>}
-                <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />
+            <div ref={cardRef} className={embedOnly ? embedOnlyClassName : cardClassName} hidden={embedOnly}>
+                {!embedOnly && result.plaintext && <div className="pc-secure-card-plaintext">{Parser.parse(result.plaintext)}</div>}
+                {!embedOnly && <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />}
             </div>
         );
     }
@@ -2373,7 +2354,7 @@ const renderSecureMessageAccessory: MessageAccessoryFactory = props => (
 
 export default definePlugin({
     name: "SecureMessaging",
-    description: "Non-ratcheting end-to-end encrypted messages, stickers, GIF links, and file attachments for explicitly verified people in DMs and group DMs.",
+    description: "Non-ratcheting end-to-end encrypted messages, voice messages, stickers, GIF links, and file attachments for explicitly verified people in DMs and group DMs.",
     tags: ["Chat", "Privacy", "Utility"],
     authors: [EquicordDevs.creations],
     dependencies: ["ChatInputButtonAPI", "MessageAccessoriesAPI", "MessageEventsAPI"],
@@ -2393,6 +2374,26 @@ export default definePlugin({
                 {
                     match: /renderStickersAccessories\((\i)\)\{/,
                     replace: "$&$1=$self.patchEncryptedStickers($1,this);",
+                },
+            ],
+        },
+        {
+            find: "ImageComponentForMessageAttachment",
+            replacement: {
+                match: /(\i)=(\i)\.A\.toURLSafe\((\i)\.proxy_url\)/,
+                replace: "$1=$self.encryptedMediaProxyUrl($3.proxy_url)??$2.A.toURLSafe($3.proxy_url)",
+            },
+        },
+        {
+            find: "contentScanMetadata:null==e.content_scan_version",
+            replacement: [
+                {
+                    match: /null!=(\i)\.A\.toURLSafe\((\i)\.proxyUrl\)/,
+                    replace: "null!=($self.encryptedMediaProxyUrl($2.proxyUrl)??$1.A.toURLSafe($2.proxyUrl))",
+                },
+                {
+                    match: /(\i)=(\i)\.A\.toURLSafe\((\i)\.proxyUrl\);return null==\1\?null:/,
+                    replace: "$1=$self.encryptedMediaProxyUrl($3.proxyUrl)??$2.A.toURLSafe($3.proxyUrl);return null==$1?null:",
                 },
             ],
         },
@@ -2510,6 +2511,14 @@ export default definePlugin({
 
     getEncryptedMediaAttachments(message: Message) {
         return encryptedMediaAttachments(message);
+    },
+
+    encryptedMediaProxyUrl(value: string) {
+        if (!isEncryptedAttachmentMediaUrl(value)) return null;
+        return {
+            searchParams: { append: () => undefined },
+            toString: () => value,
+        };
     },
 
     patchEncryptedEmbeds(message: Message, owner: { forceUpdate(): void; }) {
