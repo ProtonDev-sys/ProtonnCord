@@ -1,0 +1,764 @@
+name: Apply nightly secure fixes
+
+on:
+  push:
+    branches:
+      - fix/nightly-secure-render-forwarding-v2
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Build, verify, and publish candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch origin nightly fix/secure-forwarding
+          git switch --detach origin/nightly
+          git switch -c generated-nightly-secure-fixes
+          git checkout origin/fix/secure-forwarding -- \
+            src/equicordplugins/secureMessaging.desktop/forwarding.ts \
+            src/equicordplugins/secureMessagingForwarding.desktop/index.ts
+
+          cat > src/equicordplugins/secureMessaging.desktop/optimisticRendering.ts <<'EOF'
+          /*
+           * Vencord, a Discord client mod
+           * Copyright (c) 2026 Protonn Cord contributors
+           * SPDX-License-Identifier: GPL-3.0-or-later
+           */
+
+          const MAX_OPTIMISTIC_PLAINTEXTS = 128;
+          const OPTIMISTIC_PLAINTEXT_TTL_MS = 60_000;
+
+          interface OptimisticPlaintextEntry {
+              expiresAt: number;
+              plaintext: string;
+          }
+
+          const optimisticPlaintexts = new Map<string, OptimisticPlaintextEntry>();
+
+          function pruneOptimisticPlaintexts(now: number): void {
+              for (const [ciphertext, entry] of optimisticPlaintexts) {
+                  if (entry.expiresAt <= now) optimisticPlaintexts.delete(ciphertext);
+              }
+              while (optimisticPlaintexts.size > MAX_OPTIMISTIC_PLAINTEXTS) {
+                  const oldest = optimisticPlaintexts.keys().next().value;
+                  if (typeof oldest !== "string") break;
+                  optimisticPlaintexts.delete(oldest);
+              }
+          }
+
+          export function rememberOptimisticOutgoingPlaintext(
+              ciphertext: string,
+              plaintext: string,
+              now = Date.now(),
+          ): void {
+              pruneOptimisticPlaintexts(now);
+              optimisticPlaintexts.delete(ciphertext);
+              optimisticPlaintexts.set(ciphertext, {
+                  expiresAt: now + OPTIMISTIC_PLAINTEXT_TTL_MS,
+                  plaintext,
+              });
+              pruneOptimisticPlaintexts(now);
+          }
+
+          export function getOptimisticOutgoingPlaintext(ciphertext: string, now = Date.now()): string | undefined {
+              pruneOptimisticPlaintexts(now);
+              const entry = optimisticPlaintexts.get(ciphertext);
+              if (!entry) return undefined;
+              optimisticPlaintexts.delete(ciphertext);
+              optimisticPlaintexts.set(ciphertext, entry);
+              return entry.plaintext;
+          }
+
+          export function isProvisionalOutgoingMessage(messageId: string, nonce: string | null): boolean {
+              return nonce === messageId;
+          }
+
+          export function settleOptimisticOutgoingPlaintext(
+              ciphertext: string,
+              messageId: string,
+              nonce: string | null,
+          ): void {
+              // Discord first renders locally authored messages under the request nonce and then replaces the
+              // row with the canonical server ID. Clearing at the provisional stage creates a blank render
+              // between those two records. Keep the plaintext until the canonical record has authenticated.
+              if (!isProvisionalOutgoingMessage(messageId, nonce)) optimisticPlaintexts.delete(ciphertext);
+          }
+
+          export function clearOptimisticOutgoingPlaintexts(): void {
+              optimisticPlaintexts.clear();
+          }
+
+          export function optimisticOutgoingPlaintextCountForTest(now = Date.now()): number {
+              pruneOptimisticPlaintexts(now);
+              return optimisticPlaintexts.size;
+          }
+          EOF
+
+          cat > scripts/testSecureMessagingOptimisticRendering.ts <<'EOF'
+          /*
+           * Vencord, a Discord client mod
+           * Copyright (c) 2026 Protonn Cord contributors
+           * SPDX-License-Identifier: GPL-3.0-or-later
+           */
+
+          import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+
+          import { shouldHideSecureEmbedOnlyPlaintext } from "../src/equicordplugins/secureMessaging.desktop/embedUrls";
+          import {
+              clearOptimisticOutgoingPlaintexts,
+              getOptimisticOutgoingPlaintext,
+              isProvisionalOutgoingMessage,
+              optimisticOutgoingPlaintextCountForTest,
+              rememberOptimisticOutgoingPlaintext,
+              settleOptimisticOutgoingPlaintext,
+          } from "../src/equicordplugins/secureMessaging.desktop/optimisticRendering";
+
+          const provisionalId = "1460000000000000000";
+          const canonicalId = "1460000000000000001";
+          const ciphertext = "PCEM3:optimistic-render-fixture";
+
+          clearOptimisticOutgoingPlaintexts();
+          rememberOptimisticOutgoingPlaintext(ciphertext, "visible immediately", 1_000);
+          assert.equal(getOptimisticOutgoingPlaintext(ciphertext, 1_001), "visible immediately");
+          assert.equal(isProvisionalOutgoingMessage(provisionalId, provisionalId), true);
+          settleOptimisticOutgoingPlaintext(ciphertext, provisionalId, provisionalId);
+          assert.equal(
+              getOptimisticOutgoingPlaintext(ciphertext, 1_002),
+              "visible immediately",
+              "the provisional optimistic row must not consume the plaintext needed by the canonical row",
+          );
+
+          assert.equal(isProvisionalOutgoingMessage(canonicalId, provisionalId), false);
+          settleOptimisticOutgoingPlaintext(ciphertext, canonicalId, provisionalId);
+          assert.equal(
+              getOptimisticOutgoingPlaintext(ciphertext, 1_003),
+              undefined,
+              "the canonical authenticated row must release optimistic plaintext",
+          );
+
+          rememberOptimisticOutgoingPlaintext(ciphertext, "expires", 5_000);
+          assert.equal(getOptimisticOutgoingPlaintext(ciphertext, 64_999), "expires");
+          assert.equal(getOptimisticOutgoingPlaintext(ciphertext, 65_000), undefined);
+
+          clearOptimisticOutgoingPlaintexts();
+          for (let index = 0; index < 160; index++)
+              rememberOptimisticOutgoingPlaintext(`PCEM3:${index}`, String(index), 100_000 + index);
+          assert.equal(optimisticOutgoingPlaintextCountForTest(100_200), 128, "optimistic plaintext retention must stay bounded");
+          assert.equal(getOptimisticOutgoingPlaintext("PCEM3:0", 100_200), undefined, "oldest entries must be evicted first");
+          assert.equal(getOptimisticOutgoingPlaintext("PCEM3:159", 100_200), "159");
+
+          assert.equal(shouldHideSecureEmbedOnlyPlaintext("https://example.com/video", "pending"), false,
+              "a pending embed must keep its URL visible instead of creating an empty message row");
+          assert.equal(shouldHideSecureEmbedOnlyPlaintext("https://example.com/video", "present"), true);
+          assert.equal(shouldHideSecureEmbedOnlyPlaintext("https://example.com/video", "absent"), false);
+
+          const renderer = readFileSync(new URL(
+              "../src/equicordplugins/secureMessaging.desktop/index.tsx",
+              import.meta.url,
+          ), "utf8");
+          assert.match(renderer, /getOptimisticOutgoingPlaintext\(message\.content\)/u);
+          assert.match(renderer, /settleOptimisticOutgoingPlaintext\([\s\S]*discordMessageNonce\(message\)/u);
+          assert.doesNotMatch(renderer, /optimisticOutgoingPlaintexts\.delete/u,
+              "render effects must not delete optimistic plaintext before checking the provisional nonce");
+
+          console.log("Secure Messaging optimistic rendering checks passed");
+          EOF
+
+          cat > scripts/testSecureMessagingForwarding.ts <<'EOF'
+          /*
+           * Vencord, a Discord client mod
+           * Copyright (c) 2026 Protonn Cord contributors
+           * SPDX-License-Identifier: GPL-3.0-or-later
+           */
+
+          import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+
+          import {
+              composeSecureForwardText,
+              sanitizeForwardMentions,
+              secureForwardEmbedText,
+              secureForwardRoute,
+              validatedDiscordAttachmentUrl,
+          } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
+
+          const unprotected = { protected: false, ready: false } as const;
+          const protectedReady = { protected: true, ready: true } as const;
+          const protectedBlocked = { protected: true, ready: false, reason: "not ready" } as const;
+
+          assert.equal(secureForwardRoute(unprotected, unprotected), "native");
+          assert.equal(secureForwardRoute(unprotected, protectedReady), "secure");
+          assert.equal(secureForwardRoute(protectedReady, protectedReady), "secure");
+          assert.equal(secureForwardRoute(protectedReady, unprotected), "blocked");
+          assert.equal(secureForwardRoute(unprotected, protectedBlocked), "blocked");
+
+          const sanitized = sanitizeForwardMentions(
+              "hello <@123456789012345678> <@&223456789012345678> <#323456789012345678> @everyone @here",
+              {
+                  user: () => "Alice",
+                  role: () => "Moderators",
+                  channel: () => "general",
+              },
+          );
+          assert.equal(sanitized.includes("<@"), false);
+          assert.equal(sanitized.includes("@everyone"), false);
+          assert.equal(sanitized.includes("@here"), false);
+          assert.match(sanitized, /@\u200bAlice/u);
+          assert.match(sanitized, /@\u200bModerators/u);
+          assert.match(sanitized, /#general/u);
+
+          const embedText = secureForwardEmbedText([
+              { title: "ignored when a URL exists", url: "https://example.com/video" },
+              { title: "Text card", description: "description" },
+          ], [0]);
+          assert.equal(embedText, "https://example.com/video");
+
+          const composed = composeSecureForwardText({
+              authorLabel: "A *sender*",
+              content: "source text <@123456789012345678>",
+              embeds: [{ video: { url: "https://example.com/watch?v=1" } }],
+              mentionResolvers: { user: () => "Alice" },
+              timestampMs: 1_780_000_000_000,
+          });
+          assert.match(composed, /Forwarded copy from A \\*sender\\\*/u);
+          assert.match(composed, /source text @\u200bAlice/u);
+          assert.match(composed, /https:\/\/example\.com\/watch\?v=1/u);
+          assert.doesNotMatch(composed, /message_reference|messageReference/u);
+
+          const validAttachment = validatedDiscordAttachmentUrl(
+              "https://cdn.discordapp.com/attachments/123456789012345678/223456789012345678/file.png?ex=1",
+              "123456789012345678",
+              "223456789012345678",
+          );
+          assert.ok(validAttachment);
+          assert.equal(validatedDiscordAttachmentUrl(
+              "https://evil.example/attachments/123456789012345678/223456789012345678/file.png",
+              "123456789012345678",
+              "223456789012345678",
+          ), null);
+          assert.equal(validatedDiscordAttachmentUrl(
+              "https://cdn.discordapp.com/attachments/999456789012345678/223456789012345678/file.png",
+              "123456789012345678",
+              "223456789012345678",
+          ), null);
+
+          const runtime = readFileSync(new URL(
+              "../src/equicordplugins/secureMessagingForwarding.desktop/index.ts",
+              import.meta.url,
+          ), "utf8");
+          assert.match(runtime, /actions\.sendForward = guardedSendForward/u);
+          assert.match(runtime, /actions\.sendForwards = guardedSendForwards/u);
+          assert.match(runtime, /for \(const destinationChannelId of new Set\(destinationChannelIds\)\)/u);
+          assert.match(runtime, /const selective = options\.onlyAttachmentIds !== undefined \|\| options\.onlyEmbedIndices !== undefined/u);
+          assert.match(runtime, /const attachmentSelection = selective \? rawAttachmentSelection \?\? new Set<string>\(\) : null/u);
+          assert.match(runtime, /const embedSelection = selective \? rawEmbedSelection \?\? \[\] : undefined/u);
+          assert.match(runtime, /secureForwardRoute\(source, destination\)/u);
+          assert.match(runtime, /await secureForward\(message, destinationChannelId, options\)/u);
+          assert.match(runtime, /await sendMessage\(destinationChannelId/u);
+          assert.doesNotMatch(runtime, /message_reference|messageReference|alsoForwardToChannelId/u,
+              "secure forwarding must create a new encrypted message without a Discord source reference");
+          assert.doesNotMatch(runtime, /credentials:\s*["']include["']/u,
+              "attachment downloads must not attach Discord renderer credentials");
+
+          console.log("Secure Messaging forwarding checks passed");
+          EOF
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/equicordplugins/secureMessaging.desktop/index.tsx")
+          text = path.read_text()
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, got {count}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              'import { discordEditedTimestamp } from "./messageMetadata";',
+              'import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";',
+              "message metadata import",
+          )
+          replace_once(
+              'import type {\n    AnnouncementReviewResult,',
+              'import {\n    clearOptimisticOutgoingPlaintexts,\n    getOptimisticOutgoingPlaintext,\n    rememberOptimisticOutgoingPlaintext,\n    settleOptimisticOutgoingPlaintext,\n} from "./optimisticRendering";\nimport type {\n    AnnouncementReviewResult,',
+              "optimistic helper import",
+          )
+          replace_once('const optimisticOutgoingPlaintexts = new Map<string, string>();\n', '', "local optimistic map")
+          replace_once(
+              '''function rememberOptimisticOutgoingPlaintext(ciphertext: string, plaintext: string): void {
+              optimisticOutgoingPlaintexts.delete(ciphertext);
+              optimisticOutgoingPlaintexts.set(ciphertext, plaintext);
+              if (optimisticOutgoingPlaintexts.size <= 128) return;
+              const oldest = optimisticOutgoingPlaintexts.keys().next().value;
+              if (oldest) optimisticOutgoingPlaintexts.delete(oldest);
+          }
+
+          ''',
+              '',
+              "local optimistic remember function",
+          )
+          replace_once('    optimisticOutgoingPlaintexts.clear();', '    clearOptimisticOutgoingPlaintexts();', "optimistic clear")
+          replace_once(
+              '        ? optimisticOutgoingPlaintexts.get(message.content)\n',
+              '        ? getOptimisticOutgoingPlaintext(message.content)\n',
+              "optimistic getter",
+          )
+          replace_once(
+              '''        if (cached) {
+              optimisticOutgoingPlaintexts.delete(message.content);
+              setState(current => current?.key === key && current.result === cached ? current : { key, result: cached });
+              return () => { active = false; };
+          }
+          ''',
+              '''        if (cached) {
+              settleOptimisticOutgoingPlaintext(message.content, message.id, discordMessageNonce(message));
+              setState(current => current?.key === key && current.result === cached ? current : { key, result: cached });
+              return () => { active = false; };
+          }
+          ''',
+              "cached optimistic settlement",
+          )
+          replace_once(
+              '''            if (active) {
+                  optimisticOutgoingPlaintexts.delete(message.content);
+                  setState({ key, result: next });
+              }
+          ''',
+              '''            if (active) {
+                  settleOptimisticOutgoingPlaintext(message.content, message.id, discordMessageNonce(message));
+                  setState({ key, result: next });
+              }
+          ''',
+              "async optimistic settlement",
+          )
+          path.write_text(text)
+          PY
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/equicordplugins/secureMessaging.desktop/embedUrls.ts")
+          text = path.read_text()
+          old = '''export function shouldHideSecureEmbedOnlyPlaintext(
+              plaintext: string,
+              inlineEmbedStatus: SecureInlineEmbedStatus,
+          ): boolean {
+              return inlineEmbedStatus !== "absent" && secureEmbedOnlyUrl(plaintext) !== null;
+          }
+          '''
+          new = '''export function shouldHideSecureEmbedOnlyPlaintext(
+              plaintext: string,
+              inlineEmbedStatus: SecureInlineEmbedStatus,
+          ): boolean {
+              // Keep the URL visible while the local unfurl is pending. Hiding it before an embed actually
+              // exists creates an empty message row and a visible disappear/reappear cycle on outgoing sends.
+              return inlineEmbedStatus === "present" && secureEmbedOnlyUrl(plaintext) !== null;
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f"embed helper matches={text.count(old)}")
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/equicordplugins/secureMessagingForwarding.desktop/index.ts")
+          text = path.read_text()
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, got {count}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              '''type SendForward = (message: Message, destinationChannelId: string, options?: ForwardOptions) => Promise<void>;
+
+          interface ForwardActions {
+              sendForward: SendForward;
+              sendForwards(message: Message, destinationChannelIds: string[], options?: ForwardOptions): Promise<void>;
+          }
+          ''',
+              '''type SendForward = (message: Message, destinationChannelId: string, options?: ForwardOptions) => Promise<void>;
+          type SendForwards = (message: Message, destinationChannelIds: string[], options?: ForwardOptions) => Promise<void>;
+
+          interface ForwardActions {
+              sendForward: SendForward;
+              sendForwards: SendForwards;
+          }
+          ''',
+              "forward action types",
+          )
+          replace_once(
+              '''interface PreparedForward {
+              plaintext: string;
+              stickerIds: string[];
+              uploads: ForwardUpload[];
+          }
+
+          let generation = 0;
+          let patchedActions: ForwardActions | null = null;
+          let originalSendForward: SendForward | null = null;
+          let guardedSendForward: SendForward | null = null;
+          ''',
+              '''interface PreparedForward {
+              plaintext: string;
+              stickerIds: string[];
+              uploads: ForwardUpload[];
+          }
+
+          interface SecureMessagingPluginState {
+              getScreenCaptureProtectionStatus?(): string;
+              started?: boolean;
+          }
+
+          let generation = 0;
+          let patchedActions: ForwardActions | null = null;
+          let originalSendForward: SendForward | null = null;
+          let originalSendForwards: SendForwards | null = null;
+          let guardedSendForward: SendForward | null = null;
+          let guardedSendForwards: SendForwards | null = null;
+
+          function secureMessagingPlugin(): SecureMessagingPluginState | undefined {
+              return (plugins as unknown as Record<string, SecureMessagingPluginState>).SecureMessaging;
+          }
+          ''',
+              "forward globals and plugin state",
+          )
+          replace_once(
+              '''function secureMessagingRuntimeReady(): boolean {
+              const plugin = plugins.SecureMessaging as typeof plugins[string] & {
+                  getScreenCaptureProtectionStatus?(): string;
+              } | undefined;
+              return plugin?.started === true && plugin.getScreenCaptureProtectionStatus?.() === "ready";
+          }
+          ''',
+              '''function secureMessagingRuntimeReady(): boolean {
+              const plugin = secureMessagingPlugin();
+              return plugin?.started === true && plugin.getScreenCaptureProtectionStatus?.() === "ready";
+          }
+          ''',
+              "runtime ready helper",
+          )
+          replace_once(
+              '''async function inspectProtection(channelId: string, knownEncryptedMessage = false): Promise<ForwardProtection> {
+              if (knownEncryptedMessage) return { protected: true, ready: secureMessagingRuntimeReady() };
+          ''',
+              '''async function inspectProtection(channelId: string, knownEncryptedMessage = false): Promise<ForwardProtection> {
+              if (knownEncryptedMessage) {
+                  const ready = secureMessagingRuntimeReady();
+                  return {
+                      protected: true,
+                      ready,
+                      reason: ready ? undefined : "Show encrypted content and enable Secure Messaging before forwarding this message.",
+                  };
+              }
+          ''',
+              "encrypted source protection",
+          )
+          replace_once(
+              '''    try {
+              while (true) {
+                  const next = await reader.read();
+                  if (next.done) break;
+                  total += next.value.byteLength;
+                  if (total > expectedSize) throw new Error("Discord returned more attachment data than expected.");
+                  chunks.push(next.value);
+              }
+          } finally {
+              reader.releaseLock();
+          }
+          ''',
+              '''    try {
+              while (true) {
+                  const next = await reader.read();
+                  if (next.done) break;
+                  total += next.value.byteLength;
+                  if (total > expectedSize) throw new Error("Discord returned more attachment data than expected.");
+                  chunks.push(next.value);
+              }
+          } catch (error) {
+              await reader.cancel().catch(() => undefined);
+              throw error;
+          } finally {
+              reader.releaseLock();
+          }
+          ''',
+              "bounded response cancellation",
+          )
+          replace_once(
+              '''async function secureForward(message: Message, destinationChannelId: string, options: ForwardOptions = {}): Promise<void> {
+              const attachmentSelection = normalizeAttachmentSelection(options.onlyAttachmentIds);
+              const embedSelection = normalizeEmbedSelection(options.onlyEmbedIndices);
+              const selective = attachmentSelection !== null || embedSelection !== undefined;
+              const embeds = (message.embeds ?? []) as unknown as ForwardEmbed[];
+          ''',
+              '''async function secureForward(message: Message, destinationChannelId: string, options: ForwardOptions = {}): Promise<void> {
+              const rawAttachmentSelection = normalizeAttachmentSelection(options.onlyAttachmentIds);
+              const rawEmbedSelection = normalizeEmbedSelection(options.onlyEmbedIndices);
+              const selective = options.onlyAttachmentIds !== undefined || options.onlyEmbedIndices !== undefined;
+              const attachmentSelection = selective ? rawAttachmentSelection ?? new Set<string>() : null;
+              const embedSelection = selective ? rawEmbedSelection ?? [] : undefined;
+              const embeds = (message.embeds ?? []) as unknown as ForwardEmbed[];
+          ''',
+              "component selection semantics",
+          )
+          replace_once(
+              '''    const content = composeSecureForwardText({
+              attachmentSelection: attachmentSelection === null ? undefined : [...attachmentSelection],
+              authorLabel: authorLabel(message),
+              content: prepared.plaintext,
+              embedSelection,
+              embeds,
+              mentionResolvers: mentionResolvers(message),
+              timestampMs: timestampMs(message),
+          });
+          const uploads = prepared.uploads.map(upload => cloudUpload(destinationChannelId, upload));
+          await sendMessage(destinationChannelId, { content }, false, {
+              attachmentsToUpload: uploads,
+              stickerIds: prepared.stickerIds,
+              uploads,
+          } as never);
+
+          const note = typeof options.withMessage === "string" ? options.withMessage.trim() : "";
+          if (note) await sendMessage(destinationChannelId, { content: note }, false);
+          ''',
+              '''    const forwardedContent = composeSecureForwardText({
+              attachmentSelection: attachmentSelection === null ? undefined : [...attachmentSelection],
+              authorLabel: authorLabel(message),
+              content: prepared.plaintext,
+              embedSelection,
+              embeds,
+              mentionResolvers: mentionResolvers(message),
+              timestampMs: timestampMs(message),
+          });
+          const note = typeof options.withMessage === "string" ? options.withMessage.trim() : "";
+          const content = [note, forwardedContent].filter(Boolean).join("\\n\\n");
+          const uploads = prepared.uploads.map(upload => cloudUpload(destinationChannelId, upload));
+          await sendMessage(destinationChannelId, { content }, false, {
+              attachmentsToUpload: uploads,
+              stickerIds: prepared.stickerIds,
+              uploads,
+          } as never);
+          ''',
+              "combined forwarding note",
+          )
+          old_install = '''function installForwardGuard(actions: ForwardActions, expectedGeneration: number): void {
+              if (expectedGeneration !== generation || patchedActions) return;
+              const original = actions.sendForward;
+              if (typeof original !== "function") return;
+
+              originalSendForward = original;
+              guardedSendForward = async function (message, destinationChannelId, options) {
+                  if (expectedGeneration !== generation || !plugins.SecureMessaging?.started)
+                      return original.call(actions, message, destinationChannelId, options);
+                  try {
+                      const [source, destination] = await Promise.all([
+                          inspectProtection(message.channel_id, isEncryptedMessage(message.content)),
+                          inspectProtection(destinationChannelId),
+                      ]);
+                      const route = secureForwardRoute(source, destination);
+                      if (route === "native") return original.call(actions, message, destinationChannelId, options);
+                      if (route === "blocked") {
+                          const reason = destination.protected && !destination.ready
+                              ? destination.reason
+                              : "Protected messages can only be forwarded into another enabled protected conversation.";
+                          showToast(reason ?? "Secure Messaging blocked the forward safely.", Toasts.Type.FAILURE);
+                          return;
+                      }
+
+                      showToast("Preparing encrypted forward…", Toasts.Type.MESSAGE);
+                      await secureForward(message, destinationChannelId, options);
+                      showToast("Forwarded as a new encrypted message.", Toasts.Type.SUCCESS);
+                  } catch (error) {
+                      showToast(
+                          error instanceof Error ? error.message : "Secure Messaging could not forward this message safely.",
+                          Toasts.Type.FAILURE,
+                      );
+                  }
+              };
+              actions.sendForward = guardedSendForward;
+              patchedActions = actions;
+          }
+
+          function uninstallForwardGuard(): void {
+              generation++;
+              if (patchedActions && guardedSendForward && originalSendForward && patchedActions.sendForward === guardedSendForward)
+                  patchedActions.sendForward = originalSendForward;
+              patchedActions = null;
+              originalSendForward = null;
+              guardedSendForward = null;
+          }
+          '''
+          new_install = '''function installForwardGuard(actions: ForwardActions, expectedGeneration: number): void {
+              if (expectedGeneration !== generation || patchedActions) return;
+              const original = actions.sendForward;
+              const originalMany = actions.sendForwards;
+              if (typeof original !== "function" || typeof originalMany !== "function") return;
+
+              originalSendForward = original;
+              originalSendForwards = originalMany;
+              guardedSendForward = async function (message, destinationChannelId, options) {
+                  if (expectedGeneration !== generation)
+                      return original.call(actions, message, destinationChannelId, options);
+                  if (!SNOWFLAKE.test(destinationChannelId)) {
+                      showToast("Discord supplied an invalid forwarding destination.", Toasts.Type.FAILURE);
+                      return;
+                  }
+                  try {
+                      const [source, destination] = await Promise.all([
+                          inspectProtection(message.channel_id, isEncryptedMessage(message.content)),
+                          inspectProtection(destinationChannelId),
+                      ]);
+                      const route = secureForwardRoute(source, destination);
+                      if (route === "native") return original.call(actions, message, destinationChannelId, options);
+                      if (route === "blocked") {
+                          const reason = destination.protected && !destination.ready
+                              ? destination.reason
+                              : source.reason ?? "Protected messages can only be forwarded into another enabled protected conversation.";
+                          showToast(reason ?? "Secure Messaging blocked the forward safely.", Toasts.Type.FAILURE);
+                          return;
+                      }
+
+                      showToast("Preparing encrypted forward…", Toasts.Type.MESSAGE);
+                      await secureForward(message, destinationChannelId, options);
+                      showToast("Forwarded as a new encrypted message.", Toasts.Type.SUCCESS);
+                  } catch (error) {
+                      showToast(
+                          error instanceof Error ? error.message : "Secure Messaging could not forward this message safely.",
+                          Toasts.Type.FAILURE,
+                      );
+                  }
+              };
+              guardedSendForwards = async function (message, destinationChannelIds, options) {
+                  if (expectedGeneration !== generation)
+                      return originalMany.call(actions, message, destinationChannelIds, options);
+                  if (!Array.isArray(destinationChannelIds) ||
+                      destinationChannelIds.some(channelId => typeof channelId !== "string" || !SNOWFLAKE.test(channelId))) {
+                      showToast("Discord supplied invalid forwarding destinations.", Toasts.Type.FAILURE);
+                      return;
+                  }
+                  for (const destinationChannelId of new Set(destinationChannelIds))
+                      await guardedSendForward!.call(actions, message, destinationChannelId, options);
+              };
+              actions.sendForward = guardedSendForward;
+              actions.sendForwards = guardedSendForwards;
+              patchedActions = actions;
+          }
+
+          function uninstallForwardGuard(): void {
+              generation++;
+              if (patchedActions && guardedSendForward && originalSendForward && patchedActions.sendForward === guardedSendForward)
+                  patchedActions.sendForward = originalSendForward;
+              if (patchedActions && guardedSendForwards && originalSendForwards && patchedActions.sendForwards === guardedSendForwards)
+                  patchedActions.sendForwards = originalSendForwards;
+              patchedActions = null;
+              originalSendForward = null;
+              originalSendForwards = null;
+              guardedSendForward = null;
+              guardedSendForwards = null;
+          }
+          '''
+          replace_once(old_install, new_install, "forward interception")
+          path.write_text(text)
+          PY
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          package_path = Path("package.json")
+          package = json.loads(package_path.read_text())
+          if package["version"] != "1.15.1.3":
+              raise SystemExit(f"unexpected version {package['version']}")
+          package["version"] = "1.15.1.4"
+          scripts = package["scripts"]
+          scripts["testSecureMessagingForwarding"] = "tsx scripts/testSecureMessagingForwarding.ts"
+          scripts["testSecureMessagingOptimisticRendering"] = "tsx scripts/testSecureMessagingOptimisticRendering.ts"
+          needle = "pnpm testMainProcessStdio && pnpm testSecureMessagingRestGuard"
+          replacement = "pnpm testMainProcessStdio && pnpm testSecureMessagingOptimisticRendering && pnpm testSecureMessagingForwarding && pnpm testSecureMessagingRestGuard"
+          if scripts["test"].count(needle) != 1:
+              raise SystemExit("test chain needle missing")
+          scripts["test"] = scripts["test"].replace(needle, replacement, 1)
+          package_path.write_text(json.dumps(package, indent=4, ensure_ascii=False) + "\n")
+
+          marker_path = Path("src/components/settings/tabs/plugins/newPluginRelease.ts")
+          marker = marker_path.read_text()
+          if marker.count('version: "1.15.1.3"') != 1:
+              raise SystemExit("marker version missing")
+          marker_path.write_text(marker.replace('version: "1.15.1.3"', 'version: "1.15.1.4"', 1))
+
+          marker_test_path = Path("scripts/testPluginReleaseMarkers.ts")
+          marker_test = marker_test_path.read_text()
+          if marker_test.count('getReleaseNewPlugins("1.15.1.4"') != 1:
+              raise SystemExit("future marker fixture missing")
+          marker_test_path.write_text(marker_test.replace(
+              'getReleaseNewPlugins("1.15.1.4"',
+              'getReleaseNewPlugins("1.15.1.5"',
+              1,
+          ))
+          PY
+
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm test
+          pnpm build
+          pnpm testWeb
+          git diff --check
+
+          python - <<'PY'
+          import subprocess
+
+          expected = {
+              "package.json",
+              "scripts/testPluginReleaseMarkers.ts",
+              "scripts/testSecureMessagingForwarding.ts",
+              "scripts/testSecureMessagingOptimisticRendering.ts",
+              "src/components/settings/tabs/plugins/newPluginRelease.ts",
+              "src/equicordplugins/secureMessaging.desktop/embedUrls.ts",
+              "src/equicordplugins/secureMessaging.desktop/forwarding.ts",
+              "src/equicordplugins/secureMessaging.desktop/index.tsx",
+              "src/equicordplugins/secureMessaging.desktop/optimisticRendering.ts",
+              "src/equicordplugins/secureMessagingForwarding.desktop/index.ts",
+          }
+          tracked = set(filter(None, subprocess.check_output(["git", "diff", "--name-only"], text=True).splitlines()))
+          untracked = set(filter(None, subprocess.check_output(
+              ["git", "ls-files", "--others", "--exclude-standard"],
+              text=True,
+          ).splitlines()))
+          actual = tracked | untracked
+          if actual != expected:
+              raise SystemExit(f"unexpected changed files: missing={sorted(expected - actual)} extra={sorted(actual - expected)}")
+          PY
+
+          git config user.name "ProtonnCord Nightly CI"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Fix encrypted rendering and add secure forwarding" \
+            -m "Keep optimistic plaintext visible across Discord's provisional-to-canonical transition, avoid empty URL-only rows while embeds load, add fail-closed encrypted-copy forwarding for protected destinations, and bump nightly to 1.15.1.4."
+          git push --force origin HEAD:refs/heads/fix/nightly-secure-render-forwarding-v2
