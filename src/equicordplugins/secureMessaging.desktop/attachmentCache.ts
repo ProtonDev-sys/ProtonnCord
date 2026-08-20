@@ -8,6 +8,7 @@ import type { PluginNative } from "@utils/types";
 import type { Message, MessageAttachment } from "@vencord/discord-types";
 import { Constants, RestAPI, UserStore } from "@webpack/common";
 
+import { preserveEncryptedMessageScroll } from "./layoutStability";
 import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
 import type {
     DecryptIncomingAttachmentsInput,
@@ -155,17 +156,19 @@ function notifyStatus(entry: AttachmentCacheEntry): void {
     }
 }
 
-function notifyReady(entry: AttachmentCacheEntry): void {
-    notifyStatus(entry);
+function notifyReady(message: Message, entry: AttachmentCacheEntry): void {
     const owners = [...entry.renderOwners];
     entry.renderOwners.clear();
-    for (const owner of owners) {
-        try {
-            owner.forceUpdate();
-        } catch {
-            // Discord may dispose a message renderer before asynchronous decryption finishes.
+    preserveEncryptedMessageScroll(message, () => {
+        notifyStatus(entry);
+        for (const owner of owners) {
+            try {
+                owner.forceUpdate();
+            } catch {
+                // Discord may dispose a message renderer before asynchronous decryption finishes.
+            }
         }
-    }
+    });
 }
 
 function validatedAttachmentUrl(value: string, channelId: string, attachmentId: string): URL | null {
@@ -421,7 +424,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
     entry.retryAt = null;
     entry.status = { status: "ready" };
     cachedBytes += bytes;
-    notifyReady(entry);
+    notifyReady(message, entry);
     pruneCache(key);
 }
 

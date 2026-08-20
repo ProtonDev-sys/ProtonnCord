@@ -15,6 +15,7 @@ import {
     isSecureInlineMediaEmbedType,
     type SecureInlineEmbedStatus,
 } from "./embedUrls";
+import { preserveEncryptedMessageScroll } from "./layoutStability";
 import { discordEditedTimestamp } from "./messageMetadata";
 import type { DecryptIncomingResult } from "./native";
 import { isEncryptedMessage } from "./protocol";
@@ -70,14 +71,16 @@ function cloneWithStickers(message: Message, stickers: SecureStickerItem[]): Mes
     return clone;
 }
 
-function notify(entry: EmbedCacheEntry): void {
-    for (const listener of entry.listeners) {
-        try {
-            listener();
-        } catch {
-            // Discord may dispose a message renderer before an asynchronous unfurl finishes.
+function notify(message: Message, entry: EmbedCacheEntry): void {
+    preserveEncryptedMessageScroll(message, () => {
+        for (const listener of entry.listeners) {
+            try {
+                listener();
+            } catch {
+                // Discord may dispose a message renderer before an asynchronous unfurl finishes.
+            }
         }
-    }
+    });
     entry.listeners.clear();
 }
 
@@ -157,36 +160,36 @@ async function unfurlEmbeds(urls: string[]): Promise<Record<string, unknown>[]> 
     return (await Promise.all(urls.map(unfurlUrl))).flat();
 }
 
-function finishEntry(key: string, entry: EmbedCacheEntry, expiresAt = Number.POSITIVE_INFINITY): void {
+function finishEntry(message: Message, key: string, entry: EmbedCacheEntry, expiresAt = Number.POSITIVE_INFINITY): void {
     if (cache.get(key) !== entry) return;
     entry.expiresAt = expiresAt;
     entry.lastAccess = Date.now();
     entry.status = "ready";
-    notify(entry);
+    notify(message, entry);
     pruneCache(key);
 }
 
 async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry): Promise<void> {
     const localUserId = UserStore.getCurrentUser()?.id;
     if (!localUserId || !message.author?.id) {
-        finishEntry(key, entry);
+        finishEntry(message, key, entry);
         return;
     }
     let decrypted: DecryptIncomingResult;
     try {
         decrypted = await decryptCachedMessage(localUserId, message);
     } catch {
-        finishEntry(key, entry);
+        finishEntry(message, key, entry);
         return;
     }
     if (decrypted.status !== "decrypted") {
-        finishEntry(key, entry);
+        finishEntry(message, key, entry);
         return;
     }
     entry.stickers = decrypted.stickers ?? [];
     const urls = extractSecureEmbedUrls(decrypted.plaintext);
     if (urls.length === 0) {
-        finishEntry(key, entry);
+        finishEntry(message, key, entry);
         return;
     }
     // Matching Discord's native previews requires disclosing only the extracted URLs to its unfurl service.
@@ -207,6 +210,7 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
     if (cache.get(key) !== entry) return;
     entry.embeds = converted;
     finishEntry(
+        message,
         key,
         entry,
         rawEmbeds.length > 0 ? Date.now() + SUCCESSFUL_UNFURL_TTL : Date.now() + EMPTY_UNFURL_TTL,
