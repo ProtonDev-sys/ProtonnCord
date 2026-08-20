@@ -24,6 +24,10 @@ export const ActivityView = findComponentByCodeLazy<ActivityViewProps>('location
 
 export const cl = classNameFactory("vc-bactivities-");
 
+export function clearFetchedApplications() {
+    fetchedApplications.clear();
+}
+
 export function getActivityApplication(activity: Activity | null) {
     if (!activity) return undefined;
     const { application_id } = activity;
