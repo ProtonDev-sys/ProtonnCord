@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import {
     getReleaseNewPlugins,
@@ -38,5 +38,7 @@ assert.match(readFileSync(new URL(
     "../src/plugins/webPWA.browser/index.tsx",
     import.meta.url,
 ), "utf8"), /name:\s*"WebPWA"/u);
+assert.equal(existsSync(new URL("../src/plugins/favGifSearch/index.tsx", import.meta.url)), false,
+    "plugins removed by current Equicord must not remain in ProtonnCord");
 
 console.log("release-scoped plugin New marker checks passed");
