@@ -6,7 +6,7 @@
 
 import { createHash } from "node:crypto";
 
-import { updaterReleaseEndpoint, type UpdaterBranch } from "@shared/Updater";
+import { type UpdaterBranch,updaterReleaseEndpoint } from "@shared/Updater";
 
 export interface HttpChange {
     author: string;
