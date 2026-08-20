@@ -35,6 +35,15 @@ jobs:
               shell: bash
               run: |
                   set -euo pipefail
+                  python3 - <<'PY'
+                  from pathlib import Path
+
+                  script = Path(".github/scripts/apply_release_changes.py")
+                  content = script.read_text(encoding="utf-8")
+                  start = content.index("# Stable, staging, and nightly standalone release channels.")
+                  end = content.index("# Follow the upstream removal", start)
+                  script.write_text(content[:start] + content[end:], encoding="utf-8")
+                  PY
                   python3 .github/scripts/apply_release_changes.py
                   git diff --check
                   git show "$BASE_SHA:.github/workflows/test.yml" > .github/workflows/test.yml
@@ -45,7 +54,7 @@ jobs:
                   set -euo pipefail
                   git config user.name "ProtonnCord Release Automation"
                   git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
-                  git rm .github/scripts/apply_release_changes.py .github/workflows/apply-release-changes.yml
+                  git rm --ignore-unmatch .github/scripts/apply_release_changes.py .github/workflows/apply-release-changes.yml
                   git add --all
                   git commit -m "feat: add updater channels and release-scoped plugin markers"
                   git push origin HEAD:${{ github.head_ref }}
