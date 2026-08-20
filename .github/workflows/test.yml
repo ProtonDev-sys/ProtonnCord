@@ -4,10 +4,12 @@ on:
         branches:
             - main
             - dev
+            - nightly
     pull_request:
         branches:
             - main
             - dev
+            - nightly
 
 jobs:
     Test:
@@ -26,6 +28,9 @@ jobs:
 
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
+
+            - name: Benchmark Secure Messaging
+              run: pnpm exec tsx scripts/benchmarkSecureMessaging.ts
 
             - name: Lint & Test if desktop version compiles
               run: pnpm test
