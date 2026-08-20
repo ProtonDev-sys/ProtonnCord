@@ -68,6 +68,9 @@ jobs:
                       printf 'Conflicts: none\n' >> "$conflict_report"
                   fi
 
+                  sed -i 's/[[:space:]]\+$//' browser/content.js
+                  git add browser/content.js
+                  git commit --amend --no-edit
                   git diff --check HEAD^1..HEAD
 
                   git show "$BASE_SHA:.github/workflows/test.yml" > .github/workflows/test.yml
