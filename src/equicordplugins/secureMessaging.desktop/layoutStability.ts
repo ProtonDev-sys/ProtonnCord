@@ -19,7 +19,8 @@ export interface ScrollMetrics {
 
 interface PendingScrollRestore {
     anchorId: string;
-    anchorTop: number;
+    lastAnchorTop: number;
+    lastScrollTop: number;
     remainingFrames: number;
     scroller: HTMLElement;
 }
@@ -85,11 +86,12 @@ function selectAnchor(scroller: HTMLElement, target: HTMLElement): HTMLElement |
     if (!targetMayAffectViewport(targetRect.top, viewport.bottom)) return null;
 
     const rows = messageRows(scroller);
-    if (targetRect.bottom > viewport.top) {
+    if (targetRect.top < viewport.top && targetRect.bottom > viewport.top) {
         const targetIndex = rows.indexOf(target);
         for (let index = targetIndex + 1; index > 0 && index < rows.length; index++) {
             const row = rows[index];
-            if (row.getBoundingClientRect().bottom > viewport.top) return row;
+            const rect = row.getBoundingClientRect();
+            if (rect.bottom > viewport.top && rect.top < viewport.bottom) return row;
         }
     }
     return firstVisibleMessageRow(scroller, viewport.top, viewport.bottom) ?? target;
@@ -108,12 +110,22 @@ function restoreAnchor(pending: PendingScrollRestore): void {
         return;
     }
 
-    const nextScrollTop = compensatedScrollTop(
-        scroller.scrollTop,
-        pending.anchorTop,
-        anchor.getBoundingClientRect().top,
-    );
-    if (Math.abs(nextScrollTop - scroller.scrollTop) > SCROLL_EPSILON_PX) scroller.scrollTop = nextScrollTop;
+    const currentAnchorTop = anchor.getBoundingClientRect().top;
+    const currentScrollTop = scroller.scrollTop;
+    const anchorDelta = currentAnchorTop - pending.lastAnchorTop;
+    const scrollDelta = currentScrollTop - pending.lastScrollTop;
+    if (Math.abs(scrollDelta) > SCROLL_EPSILON_PX &&
+        Math.abs(scrollDelta + anchorDelta) <= SCROLL_EPSILON_PX) {
+        // A direct scroll moves the anchor by the equal and opposite amount. Stop compensating
+        // rather than fighting somebody who is still navigating the history.
+        pendingRestores.delete(scroller);
+        return;
+    }
+
+    const nextScrollTop = compensatedScrollTop(currentScrollTop, pending.lastAnchorTop, currentAnchorTop);
+    if (Math.abs(nextScrollTop - currentScrollTop) > SCROLL_EPSILON_PX) scroller.scrollTop = nextScrollTop;
+    pending.lastScrollTop = scroller.scrollTop;
+    pending.lastAnchorTop = anchor.getBoundingClientRect().top;
 
     pending.remainingFrames--;
     if (pending.remainingFrames > 0) requestAnimationFrame(() => restoreAnchor(pending));
@@ -150,7 +162,8 @@ export function preserveEncryptedMessageScroll(message: Message, mutateLayout: (
         }
         pending = {
             anchorId: anchor.id,
-            anchorTop: anchor.getBoundingClientRect().top,
+            lastAnchorTop: anchor.getBoundingClientRect().top,
+            lastScrollTop: scroller.scrollTop,
             remainingFrames: RESTORE_FRAME_COUNT,
             scroller,
         };
