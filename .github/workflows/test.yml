@@ -29,6 +29,9 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
+            - name: Test Secure Messaging crypto caches
+              run: pnpm exec tsx scripts/testSecureMessagingCryptoCache.ts
+
             - name: Benchmark Secure Messaging
               run: pnpm exec tsx scripts/benchmarkSecureMessaging.ts
 
