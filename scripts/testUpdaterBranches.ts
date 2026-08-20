@@ -161,6 +161,17 @@ async function main(): Promise<void> {
     assert.match(workflow, /- main[\s\S]*- staging[\s\S]*- nightly/u);
     assert.match(workflow, /tag="latest"/u);
     assert.match(workflow, /--prerelease/u);
+
+    const updaterSettings = await readFile(new URL(
+        "../src/components/settings/tabs/updater/index.tsx",
+        import.meta.url,
+    ), "utf8");
+    assert.match(updaterSettings, /<Select[\s\S]*options=\{UPDATE_BRANCH_OPTIONS\}/u,
+        "ProtonnCord settings must expose the update branch dropdown");
+    assert.match(updaterSettings, /settings\.updateBranch = branch/u,
+        "the branch dropdown must persist the locally selected channel");
+    assert.match(updaterSettings, /Main \(stable\)[\s\S]*Staging \(tested previews\)[\s\S]*Nightly \(latest previews\)/u);
+
     console.log("updater branch-channel checks passed");
 }
 
