@@ -54,7 +54,7 @@ jobs:
                   set -euo pipefail
                   git config user.name "ProtonnCord Release Automation"
                   git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
-                  git rm --ignore-unmatch .github/scripts/apply_release_changes.py .github/workflows/apply-release-changes.yml
+                  git rm -f --ignore-unmatch .github/scripts/apply_release_changes.py .github/workflows/apply-release-changes.yml
                   git add --all
                   git commit -m "feat: add updater channels and release-scoped plugin markers"
                   git push origin HEAD:${{ github.head_ref }}
