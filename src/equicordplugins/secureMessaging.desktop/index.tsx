@@ -124,6 +124,7 @@ import {
     MAX_DISCORD_MESSAGE_LENGTH,
     parseEncryptedEnvelope,
 } from "./protocol";
+import { settleGuardedRestFailure } from "./restGuardFailure";
 import {
     authorizeScopedAttachmentUploadReservations,
     authorizeScopedWireEdit,
@@ -1289,7 +1290,12 @@ function installNetworkGuard(): void {
     guardedRestPost = async (request, ...args) => {
         if (!networkGuardEnabled || generation !== networkGuardGeneration) return post.call(rest, request, ...args);
         const localUserId = UserStore.getCurrentUser()?.id;
-        const guardedRequest = await protectProgrammaticPost(request);
+        let guardedRequest: Record<string, any>;
+        try {
+            guardedRequest = await protectProgrammaticPost(request);
+        } catch (error) {
+            return settleGuardedRestFailure(error, args);
+        }
         if (!networkGuardEnabled || generation !== networkGuardGeneration || UserStore.getCurrentUser()?.id !== localUserId) {
             revokePreparedSecureOperations();
             throw new Error("Secure Messaging cancelled an in-flight send after its account or network guard changed");
@@ -1301,13 +1307,18 @@ function installNetworkGuard(): void {
                 restorePostAuthorization(guardedRequest);
             else
                 revokePreparedSecureOperations();
-            throw error;
+            return settleGuardedRestFailure(error, args);
         }
     };
     guardedRestPatch = async (request, ...args) => {
         if (!networkGuardEnabled || generation !== networkGuardGeneration) return patch.call(rest, request, ...args);
         const localUserId = UserStore.getCurrentUser()?.id;
-        const guardedRequest = await protectProgrammaticPatch(request);
+        let guardedRequest: Record<string, any>;
+        try {
+            guardedRequest = await protectProgrammaticPatch(request);
+        } catch (error) {
+            return settleGuardedRestFailure(error, args);
+        }
         if (!networkGuardEnabled || generation !== networkGuardGeneration || UserStore.getCurrentUser()?.id !== localUserId) {
             revokePreparedSecureOperations();
             throw new Error("Secure Messaging cancelled an in-flight edit after its account or network guard changed");
@@ -1319,7 +1330,7 @@ function installNetworkGuard(): void {
                 restorePatchAuthorization(guardedRequest);
             else
                 revokePreparedSecureOperations();
-            throw error;
+            return settleGuardedRestFailure(error, args);
         }
     };
     rest.post = guardedRestPost;

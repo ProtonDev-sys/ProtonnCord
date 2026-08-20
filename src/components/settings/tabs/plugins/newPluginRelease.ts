@@ -10,8 +10,8 @@ export interface NewPluginRelease {
 }
 
 export const NEW_PLUGIN_RELEASE = {
-    plugins: ["AutoJumpToMessage", "WebPWA"],
-    version: "1.15.1.1",
+    plugins: [],
+    version: "1.15.1.2",
 } as const satisfies NewPluginRelease;
 
 export function getReleaseNewPlugins(
