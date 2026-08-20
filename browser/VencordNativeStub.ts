@@ -26,6 +26,7 @@ import * as DataStore from "@api/DataStore";
 import type { Settings } from "@api/Settings";
 import { getThemeInfo } from "@main/themes";
 import { debounce } from "@shared/debounce";
+import type { UpdaterBranch } from "@shared/Updater";
 import { localStorage } from "@utils/localStorage";
 import { getStylusWebStoreUrl } from "@utils/web";
 import { EXTENSION_BASE_URL, metaReady, RENDERER_CSS_URL } from "@utils/web-metadata";
@@ -73,13 +74,13 @@ window.VencordNative = {
     },
 
     updater: {
-        getDiagnostics: async () => ({
+        getDiagnostics: async (branch: UpdaterBranch = "main") => ({
             ok: true,
-            value: { backend: "disabled" as const, branch: null, builtHead: "", sourceRoot: null },
+            value: { backend: "disabled" as const, branch, builtHead: "", sourceRoot: null },
         }),
         getRepo: async () => ({ ok: true, value: "https://github.com/ProtonDev-sys/ProtonnCord" }),
-        getUpdates: async () => ({ ok: true, value: [] }),
-        update: async () => ({ ok: true, value: false }),
+        getUpdates: async (_branch: UpdaterBranch = "main") => ({ ok: true, value: [] }),
+        update: async (_branch: UpdaterBranch = "main") => ({ ok: true, value: false }),
         rebuild: async () => ({ ok: true, value: true }),
     },
 

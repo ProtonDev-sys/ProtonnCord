@@ -16,6 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+import { Settings } from "@api/Settings";
+
 import gitHash from "~git-hash";
 
 import { Logger } from "./Logger";
@@ -27,7 +29,7 @@ export const UpdateLogger = /* #__PURE__*/ new Logger("Updater", "white");
 export let isOutdated = false;
 export let isNewer = false;
 export let updateError: any;
-export let changes: Record<"hash" | "author" | "message", string>[];
+export let changes: Record<"hash" | "author" | "message", string>[] = [];
 
 async function Unwrap<T>(p: Promise<IpcRes<T>>) {
     const res = await p;
@@ -38,8 +40,15 @@ async function Unwrap<T>(p: Promise<IpcRes<T>>) {
     throw res.error;
 }
 
+export function resetUpdateState() {
+    isOutdated = false;
+    isNewer = false;
+    updateError = undefined;
+    changes = [];
+}
+
 export async function checkForUpdates() {
-    changes = await Unwrap(VencordNative.updater.getUpdates());
+    changes = await Unwrap(VencordNative.updater.getUpdates(Settings.updateBranch));
 
     // we only want to check this for the git updater, not the http updater
     if (!IS_STANDALONE) {
@@ -55,7 +64,7 @@ export async function checkForUpdates() {
 export async function update() {
     if (!isOutdated) return true;
 
-    const res = await Unwrap(VencordNative.updater.update());
+    const res = await Unwrap(VencordNative.updater.update(Settings.updateBranch));
 
     if (res) {
         if (!await Unwrap(VencordNative.updater.rebuild()))

@@ -25,8 +25,7 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { Devs, EquicordDevs } from "@utils/constants";
 import { classNameFactory } from "@utils/css";
 import definePlugin, { OptionType } from "@utils/types";
-import { findStoreLazy } from "@webpack";
-import { GuildStore, PresenceStore, RelationshipStore, Tooltip, useStateFromStores } from "@webpack/common";
+import { GuildStore, PresenceStore, RelationshipStore, Tooltip, UserGuildJoinRequestStore, useStateFromStores } from "@webpack/common";
 
 const enum IndicatorType {
     SERVER = 1 << 0,
@@ -37,11 +36,7 @@ const enum IndicatorType {
 let onlineFriendsCount = 0;
 let guildCount = 0;
 
-const UserGuildJoinRequestStore = findStoreLazy("UserGuildJoinRequestStore");
-const indicatorClassNames = classNameFactory("vc-indicators-");
-const compactIndicatorClassNames = classNameFactory("vc-indicators-compact-");
-
-function FriendsIndicator({ useCompact }: { useCompact: boolean; }) {
+function FriendsIndicator() {
     onlineFriendsCount = useStateFromStores([RelationshipStore, PresenceStore], () => {
         let count = 0;
 
@@ -60,7 +55,7 @@ function FriendsIndicator({ useCompact }: { useCompact: boolean; }) {
 
     return (
         <div id="vc-friendcount">
-            {!useCompact &&
+            {!settings.store.useCompact &&
                 <svg
                     id="vc-friendcount-icon"
                     xmlns="http://www.w3.org/2000/svg"
@@ -80,28 +75,23 @@ function FriendsIndicator({ useCompact }: { useCompact: boolean; }) {
                 size="xs"
                 id="vc-friendcount-text">{onlineFriendsCount}
             </BaseText>
-            {useCompact && <BaseText size="xs" id="vc-friendcount-text-compact">Friends</BaseText>}
+            {!!settings.store.useCompact && <BaseText size="xs" id="vc-friendcount-text-compact">Friends</BaseText>}
         </div>
     );
 }
 
-function ServersIndicator({ useCompact }: { useCompact: boolean; }) {
+function ServersIndicator() {
     guildCount = useStateFromStores([GuildStore, UserGuildJoinRequestStore], () => {
         const guildJoinRequests: string[] = UserGuildJoinRequestStore.computeGuildIds();
         const guilds = GuildStore.getGuilds();
-        let pendingJoinRequestCount = 0;
 
         // Filter only pending guild join requests
-        for (const id of guildJoinRequests) {
-            if (guilds[id] == null) pendingJoinRequestCount++;
-        }
-
-        return GuildStore.getGuildCount() + pendingJoinRequestCount;
+        return GuildStore.getGuildCount() + guildJoinRequests.filter(id => guilds[id] == null).length;
     });
 
     return (
         <div id="vc-guildcount">
-            {!useCompact &&
+            {!settings.store.useCompact &&
                 <svg
                     id="vc-guildcount-icon"
                     aria-hidden="true"
@@ -121,7 +111,7 @@ function ServersIndicator({ useCompact }: { useCompact: boolean; }) {
                 size="xs"
                 id="vc-guildcount-text">{guildCount}
             </BaseText>
-            {useCompact && <BaseText size="xs" id="vc-guildcount-text-compact">Servers</BaseText>}
+            {!!settings.store.useCompact && <BaseText size="xs" id="vc-guildcount-text-compact">Servers</BaseText>}
         </div>
     );
 }
@@ -169,7 +159,7 @@ export default definePlugin({
                 break;
         }
 
-        const cl = useCompact ? compactIndicatorClassNames : indicatorClassNames;
+        const cl = useCompact ? classNameFactory("vc-indicators-compact-") : classNameFactory("vc-indicators-");
 
         return <ErrorBoundary noop>
             <div id={cl("container")}>
@@ -179,8 +169,8 @@ export default definePlugin({
                             id={cl("indicator-items")}
                             onMouseEnter={onMouseEnter}
                             onMouseLeave={onMouseLeave}>
-                            {!!(mode & IndicatorType.FRIEND) && <FriendsIndicator useCompact={useCompact} />}
-                            {!!(mode & IndicatorType.SERVER) && <ServersIndicator useCompact={useCompact} />}
+                            {!!(mode & IndicatorType.FRIEND) && <FriendsIndicator />}
+                            {!!(mode & IndicatorType.SERVER) && <ServersIndicator />}
                         </div>
                     )}
                 </Tooltip>

@@ -6,48 +6,23 @@
 
 import { classNameFactory } from "@utils/css";
 import { Activity, Application } from "@vencord/discord-types";
-import { findByPropsLazy, findComponentByCodeLazy, findStoreLazy } from "@webpack";
+import { findByPropsLazy, findComponentByCodeLazy } from "@webpack";
+import { ApplicationStore } from "@webpack/common";
 
 import { settings } from "./settings";
 import { ActivityViewProps, ApplicationIcon } from "./types";
-
-const ApplicationStore: {
-    getApplication: (id: string) => Application | null;
-} = findStoreLazy("ApplicationStore");
 
 const { fetchApplication }: {
     fetchApplication: (id: string) => Promise<Application | null>;
 } = findByPropsLazy("fetchApplication");
 
 const fetchedApplications = new Map<string, Application | null>();
-const MAX_FETCHED_APPLICATIONS = 500;
 
 const xboxUrl = "https://discord.com/assets/9a15d086141be29d9fcd.png"; // TODO: replace with "renderXboxImage"?
 
 export const ActivityView = findComponentByCodeLazy<ActivityViewProps>('location:"UserProfileActivityCard",');
 
 export const cl = classNameFactory("vc-bactivities-");
-
-function getFetchedApplication(id: string) {
-    if (!fetchedApplications.has(id)) return undefined;
-
-    const application = fetchedApplications.get(id) ?? null;
-    fetchedApplications.delete(id);
-    fetchedApplications.set(id, application);
-
-    return application;
-}
-
-function setFetchedApplication(id: string, application: Application | null) {
-    if (fetchedApplications.has(id)) fetchedApplications.delete(id);
-
-    fetchedApplications.set(id, application);
-    while (fetchedApplications.size > MAX_FETCHED_APPLICATIONS) {
-        const oldestKey = fetchedApplications.keys().next().value;
-        if (oldestKey === undefined) return;
-        fetchedApplications.delete(oldestKey);
-    }
-}
 
 export function clearFetchedApplications() {
     fetchedApplications.clear();
@@ -59,7 +34,7 @@ export function getActivityApplication(activity: Activity | null) {
     if (!application_id) return undefined;
     let application = ApplicationStore.getApplication(application_id);
     if (!application && fetchedApplications.has(application_id)) {
-        application = getFetchedApplication(application_id) ?? null;
+        application = fetchedApplications.get(application_id)!;
     }
     return application ?? undefined;
 }
@@ -117,17 +92,13 @@ export function getApplicationIcons(activities: Activity[], preferSmall = false)
         } else if (application_id) {
             let application = ApplicationStore.getApplication(application_id);
             if (!application) {
-                const fetchedApplication = getFetchedApplication(application_id);
-                if (fetchedApplication !== undefined) {
-                    application = fetchedApplication;
+                if (fetchedApplications.has(application_id)) {
+                    application = fetchedApplications.get(application_id)!;
                 } else {
-                    setFetchedApplication(application_id, null);
+                    fetchedApplications.set(application_id, null);
                     fetchApplication(application_id).then(app => {
-                        setFetchedApplication(application_id, app);
-                    }).catch(error => {
-                        fetchedApplications.delete(application_id);
-                        console.error(error);
-                    });
+                        fetchedApplications.set(application_id, app);
+                    }).catch(console.error);
                 }
             }
 
