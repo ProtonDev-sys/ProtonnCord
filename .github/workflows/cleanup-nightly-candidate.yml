@@ -1,0 +1,45 @@
+name: Clean generated nightly candidate
+
+on:
+  push:
+    branches:
+      - fix/nightly-secure-render-forwarding-v2
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Verify and remove temporary candidate files
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '"version": "1.15.1.4"' package.json
+          grep -q 'isProvisionalOutgoingMessage' src/equicordplugins/secureMessaging.desktop/optimisticRendering.ts
+          grep -q 'guardedSendForwards' src/equicordplugins/secureMessagingForwarding.desktop/index.ts
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm testSecureMessagingOptimisticRendering
+          pnpm testSecureMessagingForwarding
+          pnpm testTsc
+          rm -f .nightly-candidate-marker .github/workflows/cleanup-nightly-candidate.yml .github/workflows/apply-nightly-secure-fixes.yml
+          git config user.name "ProtonnCord Nightly CI"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Clean generated nightly candidate"
+          git push origin HEAD:refs/heads/fix/nightly-secure-render-forwarding-v2
