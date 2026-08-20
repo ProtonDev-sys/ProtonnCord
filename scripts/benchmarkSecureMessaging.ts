@@ -22,6 +22,7 @@ const ALICE_ID = "100000000000000001";
 const CHANNEL_ID = "200000000000000001";
 const NOW = 1_800_000_000_000;
 const MAX_RECIPIENTS = 24;
+const PLAINTEXT = "Secure Messaging performance proof <@100000000000000002> https://example.com/video.mp4 natural encrypted text";
 
 interface TimingSummary {
     iterations: number;
@@ -76,6 +77,32 @@ async function createRecipients(): Promise<{
     return { identities, publicIdentities };
 }
 
+async function practicalRecipientCapacity(
+    senderIdentity: PrivateIdentity,
+    recipients: PublicIdentity[],
+): Promise<number> {
+    let capacity = 0;
+    for (let recipientCount = 1; recipientCount <= recipients.length; recipientCount++) {
+        try {
+            await encryptMessage({
+                channelId: CHANNEL_ID,
+                counter: recipientCount,
+                identity: senderIdentity,
+                mentionedUserIds: [recipients[0].userId],
+                now: NOW,
+                plaintext: PLAINTEXT,
+                recipients: recipients.slice(0, recipientCount),
+                senderUserId: ALICE_ID,
+            });
+            capacity = recipientCount;
+        } catch (error) {
+            if (error instanceof Error && error.message.includes("exceeds Discord's 2,000 character limit")) break;
+            throw error;
+        }
+    }
+    return capacity;
+}
+
 async function benchmarkRecipientCount(
     senderIdentity: PrivateIdentity,
     senderPublicIdentity: PublicIdentity,
@@ -83,9 +110,8 @@ async function benchmarkRecipientCount(
     recipients: PublicIdentity[],
 ): Promise<void> {
     const recipientCount = recipients.length;
-    const encryptIterations = recipientCount === 1 ? 20 : recipientCount === 8 ? 10 : 5;
-    const plaintext = `Secure Messaging performance proof <@${recipients[0].userId}> https://example.com/video.mp4 ${"x".repeat(1_500)}`;
-    let counter = 1;
+    const encryptIterations = recipientCount === 1 ? 20 : recipientCount <= 8 ? 10 : 5;
+    let counter = 100;
     const encrypt = async () => {
         await encryptMessage({
             channelId: CHANNEL_ID,
@@ -93,7 +119,7 @@ async function benchmarkRecipientCount(
             identity: senderIdentity,
             mentionedUserIds: [recipients[0].userId],
             now: NOW,
-            plaintext,
+            plaintext: PLAINTEXT,
             recipients,
             senderUserId: ALICE_ID,
         });
@@ -107,7 +133,7 @@ async function benchmarkRecipientCount(
         identity: senderIdentity,
         mentionedUserIds: [recipients[0].userId],
         now: NOW,
-        plaintext,
+        plaintext: PLAINTEXT,
         recipients,
         senderUserId: ALICE_ID,
     });
@@ -120,7 +146,7 @@ async function benchmarkRecipientCount(
             localUserId: recipients[0].userId,
             senderIdentity: senderPublicIdentity,
         });
-        assert.equal(result.plaintext, plaintext);
+        assert.equal(result.plaintext, PLAINTEXT);
     };
     await decrypt();
     await decrypt();
@@ -138,7 +164,17 @@ async function main(): Promise<void> {
     const senderIdentity = await generateIdentity(NOW);
     const senderPublicIdentity = await publicIdentity(senderIdentity, ALICE_ID);
     const { identities, publicIdentities } = await createRecipients();
-    for (const recipientCount of [1, 8, MAX_RECIPIENTS]) {
+    const capacity = await practicalRecipientCapacity(senderIdentity, publicIdentities);
+    assert.ok(capacity > 0);
+    process.stdout.write(`${JSON.stringify({
+        benchmark: "secure-messaging-capacity",
+        configuredRecipientLimit: MAX_RECIPIENTS,
+        node: process.version,
+        practicalRecipientCapacity: capacity,
+        plaintextLength: PLAINTEXT.length,
+    })}\n`);
+    const recipientCounts = [...new Set([1, Math.min(8, capacity), capacity])];
+    for (const recipientCount of recipientCounts) {
         await benchmarkRecipientCount(
             senderIdentity,
             senderPublicIdentity,
