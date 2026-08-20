@@ -50,7 +50,7 @@ assert.match(gitOperations, /git\("status", "--porcelain=v1", "--untracked-files
 assert.doesNotMatch(gitUpdater, /origin\/\$\{branch\}/u);
 assert.doesNotMatch(gitOperations, /origin\/\$\{branch\}/u);
 
-assert.match(workflow, /branches:\s+\- main\s+\- staging\s+\- nightly/u);
+assert.match(workflow, /branches:\s+- main\s+- staging\s+- nightly/u);
 assert.match(workflow, /concurrency:\s+group: protonn-cord-release-\$\{\{ github\.ref \}\}\s+cancel-in-progress: false/u);
 assert.match(workflow, /branch="\$GITHUB_REF_NAME"/u);
 assert.match(workflow, /git fetch --no-tags origin "\$branch"/u);
