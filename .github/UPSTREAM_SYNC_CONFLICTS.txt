@@ -1,0 +1,4 @@
+Equicord upstream commit: d48e3d7bfc9731deda7654a82b8898b6e032dd16
+Merge base: 4b1c3eeaba15209f9829e2fe65ddd13e5598528b
+Conflicts resolved in favour of ProtonnCord for manual review:
+  src/plugins/favGifSearch/index.tsx
