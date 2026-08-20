@@ -14,9 +14,45 @@ on:
             - nightly
             - staging
 
+permissions:
+    contents: write
+
 jobs:
+    ApplyReleaseChanges:
+        name: Apply ProtonnCord 1.15.1.1 changes
+        if: github.event_name == 'pull_request' && github.head_ref == 'agent/sync-equicord-1.15.1' && github.actor != 'github-actions[bot]'
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+                  ref: ${{ github.head_ref }}
+
+            - name: Apply deterministic release changes
+              env:
+                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  python3 .github/scripts/apply_release_changes.py
+                  git diff --check
+                  git show "$BASE_SHA:.github/workflows/test.yml" > .github/workflows/test.yml
+
+            - name: Commit generated release changes
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  git config user.name "ProtonnCord Release Automation"
+                  git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+                  git rm .github/scripts/apply_release_changes.py .github/workflows/apply-release-changes.yml
+                  git add --all
+                  git commit -m "feat: add updater channels and release-scoped plugin markers"
+                  git push origin HEAD:${{ github.head_ref }}
+
     Test:
         name: Test
+        if: github.event_name != 'pull_request' || github.head_ref != 'agent/sync-equicord-1.15.1' || github.actor == 'github-actions[bot]'
         runs-on: ubuntu-latest
 
         steps:
