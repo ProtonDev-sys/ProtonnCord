@@ -16,8 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+import { isPluginEnabled } from "@api/PluginManager";
 import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
+import NoBlockedMessagesPlugin from "@plugins/noBlockedMessages";
 import { Devs } from "@utils/constants";
 import { sleep } from "@utils/misc";
 import { Queue } from "@utils/Queue";
@@ -37,15 +39,12 @@ interface ReactionProps {
     type: number;
 }
 
-const MAX_PENDING_REACTION_FETCHES = 50;
-
 let Scroll: any = null;
-const queue = new Queue(MAX_PENDING_REACTION_FETCHES);
-let fetchGeneration = 0;
+const queue = new Queue();
 let reactions: Record<string, ReactionCacheEntry> = {};
 
 function fetchReactions(msg: Message, emoji: ReactionEmoji, type: number) {
-    const key = getEmojiKey(emoji);
+    const key = emoji.name + (emoji.id ? `:${emoji.id}` : "");
     return RestAPI.get({
         url: Constants.Endpoints.REACTIONS(msg.channel_id, msg.id, key),
         query: {
@@ -75,19 +74,11 @@ function fetchReactions(msg: Message, emoji: ReactionEmoji, type: number) {
         .finally(() => sleep(250));
 }
 
-function getEmojiKey(emoji: Pick<ReactionEmoji, "id" | "name">) {
-    return emoji.name + (emoji.id ? `:${emoji.id}` : "");
-}
-
 function getReactionsWithQueue(msg: Message, e: ReactionEmoji, type: number) {
-    const key = `${msg.id}:${getEmojiKey(e)}:${type}`;
+    const key = `${msg.id}:${e.name}:${e.id ?? ""}:${type}`;
     const cache = reactions[key] ??= { fetched: false, users: new Map() };
     if (!cache.fetched) {
-        const generation = fetchGeneration;
-        queue.unshift(() => {
-            if (generation !== fetchGeneration) return;
-            return fetchReactions(msg, e, type);
-        });
+        queue.unshift(() => fetchReactions(msg, e, type));
         cache.fetched = true;
     }
 
@@ -98,33 +89,12 @@ function handleClickAvatar(event: React.UIEvent<HTMLElement, Event>) {
     event.stopPropagation();
 }
 
-function ReactionUsers({ message, emoji, type }: ReactionProps) {
-    const forceUpdate = useForceUpdater();
-    const emojiKey = getEmojiKey(emoji);
-
+function ReactionUsers({ message, users }: { message: Message, users: User[]; }) {
     useLayoutEffect(() => { // bc need to prevent autoscrolling
         if (Scroll?.scrollCounter > 0) {
             Scroll.setAutomaticAnchor(null);
         }
     });
-
-    useEffect(() => {
-        const cb = (e: any) => {
-            if (e?.messageId === message.id && e.reactionType === type && e.emoji && getEmojiKey(e.emoji) === emojiKey)
-                forceUpdate();
-        };
-        FluxDispatcher.subscribe("MESSAGE_REACTION_ADD_USERS", cb);
-
-        return () => FluxDispatcher.unsubscribe("MESSAGE_REACTION_ADD_USERS", cb);
-    }, [message.id, type, emojiKey, forceUpdate]);
-
-    const reactions = getReactionsWithQueue(message, emoji, type);
-    const users: User[] = [];
-
-    for (const id of reactions.keys()) {
-        const user = UserStore.getUser(id);
-        if (user) users.push(user);
-    }
 
     return (
         <div
@@ -161,7 +131,7 @@ export default definePlugin({
     name: "WhoReacted",
     description: "Renders the avatars of users who reacted to a message",
     tags: ["Reactions", "Chat", "Appearance"],
-    authors: [Devs.Ven, Devs.KannaDev, Devs.newwares],
+    authors: [Devs.Ven, Devs.KannaDev, Devs.newwares, Devs.paige],
     isModified: true,
     settings,
     patches: [
@@ -189,10 +159,33 @@ export default definePlugin({
         }
     ],
 
-    renderUsers: ErrorBoundary.wrap((props: ReactionProps) => {
-        return props.message.reactions.length > 10
+    renderUsers: ErrorBoundary.wrap(({ message, emoji, type }: ReactionProps) => {
+        const forceUpdate = useForceUpdater();
+
+        useEffect(() => {
+            const cb = (e: any) => {
+                if (e?.messageId === message.id)
+                    forceUpdate();
+            };
+            FluxDispatcher.subscribe("MESSAGE_REACTION_ADD_USERS", cb);
+
+            return () => FluxDispatcher.unsubscribe("MESSAGE_REACTION_ADD_USERS", cb);
+        }, [message.id, forceUpdate]);
+
+        if (message.reactions.length > 10) return null;
+
+        const reactionMap = getReactionsWithQueue(message, emoji, type);
+        let users = Array.from(reactionMap, ([id]) => UserStore.getUser(id)).filter(Boolean);
+
+        if (isPluginEnabled(NoBlockedMessagesPlugin.name))
+            users = users.filter(user => {
+                const { blocked, ignored } = NoBlockedMessagesPlugin.getRelationshipStatus(user);
+                return !(blocked || (ignored && NoBlockedMessagesPlugin.settings.store.alsoHideIgnoredUsers));
+            });
+
+        return users.length === 0
             ? null
-            : <ReactionUsers {...props} />;
+            : <ReactionUsers message={message} users={users} />;
     }, { noop: true }),
 
     setScrollObj(scroll: any) {
@@ -201,10 +194,5 @@ export default definePlugin({
 
     set reactions(value: any) {
         reactions = value;
-    },
-
-    stop() {
-        fetchGeneration++;
-        Scroll = null;
     }
 });

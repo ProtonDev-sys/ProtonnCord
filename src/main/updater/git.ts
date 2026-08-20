@@ -17,7 +17,7 @@
 */
 
 import { IpcEvents } from "@shared/IpcEvents";
-import type { UpdaterDiagnostics } from "@shared/Updater";
+import { parseUpdaterBranch, type UpdaterDiagnostics } from "@shared/Updater";
 import { execFile as cpExecFile } from "child_process";
 import { ipcMain } from "electron";
 import { join, resolve } from "path";
@@ -59,12 +59,17 @@ async function getRepo() {
     return UPDATE_REPOSITORY.replace(/\.git$/u, "");
 }
 
-async function calculateGitChanges() {
-    return (await inspectGitUpdates(git, UPDATE_REPOSITORY, lastBuiltHead)).changes;
+async function calculateGitChanges(branch: unknown) {
+    return (await inspectGitUpdates(
+        git,
+        UPDATE_REPOSITORY,
+        lastBuiltHead,
+        parseUpdaterBranch(branch),
+    )).changes;
 }
 
-async function pull() {
-    return pullGitUpdates(git, UPDATE_REPOSITORY, lastBuiltHead);
+async function pull(branch: unknown) {
+    return pullGitUpdates(git, UPDATE_REPOSITORY, lastBuiltHead, parseUpdaterBranch(branch));
 }
 
 async function build() {
@@ -82,11 +87,10 @@ async function build() {
     return succeeded;
 }
 
-async function getDiagnostics(): Promise<UpdaterDiagnostics> {
-    const branch = (await git("branch", "--show-current")).stdout.trim() || null;
+async function getDiagnostics(branch: unknown): Promise<UpdaterDiagnostics> {
     return {
         backend: "git",
-        branch,
+        branch: parseUpdaterBranch(branch),
         builtHead: lastBuiltHead,
         sourceRoot: resolve(PROTONN_CORD_DIR),
     };

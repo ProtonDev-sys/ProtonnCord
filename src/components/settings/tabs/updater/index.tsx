@@ -26,10 +26,11 @@ import { Heading, HeadingSecondary } from "@components/Heading";
 import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
 import { SettingsTab, wrapTab } from "@components/settings/tabs/BaseTab";
+import { UPDATER_BRANCHES, type UpdaterBranch } from "@shared/Updater";
 import { Margins } from "@utils/margins";
 import { useAwaiter } from "@utils/react";
-import { getRepo, isNewer, UpdateLogger } from "@utils/updater";
-import { React } from "@webpack/common";
+import { getRepo, isNewer, resetUpdateState, UpdateLogger } from "@utils/updater";
+import { React, Select } from "@webpack/common";
 
 import gitHash from "~git-hash";
 
@@ -39,6 +40,17 @@ interface CommonProps {
     repo: string;
     repoPending: boolean;
 }
+
+const UPDATE_BRANCH_LABELS: Record<UpdaterBranch, string> = {
+    main: "Main (stable)",
+    nightly: "Nightly (latest previews)",
+    staging: "Staging (tested previews)",
+};
+const UPDATE_BRANCH_OPTIONS = UPDATER_BRANCHES.map(branch => ({
+    default: branch === "main",
+    label: UPDATE_BRANCH_LABELS[branch],
+    value: branch,
+}));
 
 function EquibopSection() {
     if (!IS_EQUIBOP) return null;
@@ -69,7 +81,7 @@ function EquibopSection() {
 }
 
 function Updater() {
-    const settings = useSettings(["autoUpdate", "autoUpdateNotification"]);
+    const settings = useSettings(["autoUpdate", "autoUpdateNotification", "updateBranch"]);
 
     const [repo, err, repoPending] = useAwaiter(getRepo, { fallbackValue: "Loading..." });
 
@@ -90,6 +102,23 @@ function Updater() {
             <Paragraph className={Margins.bottom20}>
                 Control how Protonn Cord keeps itself up to date. You can choose to update automatically in the background or be notified when new updates are available.
             </Paragraph>
+
+            <HeadingSecondary>Update branch</HeadingSecondary>
+            <Paragraph className={Margins.bottom8}>
+                Main is the stable channel. Staging contains tested previews, while Nightly follows the latest preview work. Source installations switch Git branches safely when an update is applied; standalone installations use the matching signed release channel.
+            </Paragraph>
+            <Select
+                placeholder="Main (stable)"
+                options={UPDATE_BRANCH_OPTIONS}
+                closeOnSelect={true}
+                select={(branch: UpdaterBranch) => {
+                    if (settings.updateBranch === branch) return;
+                    settings.updateBranch = branch;
+                    resetUpdateState();
+                }}
+                isSelected={branch => branch === settings.updateBranch}
+                serialize={branch => branch}
+            />
 
             <FormSwitch
                 title="Automatically update"
@@ -130,7 +159,9 @@ function Updater() {
             <Divider className={Margins.top20} />
 
             <Heading className={Margins.top20}>Updates</Heading>
-            {isNewer ? <Newer {...commonProps} /> : <Updatable {...commonProps} />}
+            {isNewer
+                ? <Newer key={settings.updateBranch} {...commonProps} />
+                : <Updatable key={settings.updateBranch} {...commonProps} />}
         </SettingsTab>
     );
 }

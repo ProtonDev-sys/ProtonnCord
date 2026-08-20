@@ -6,6 +6,8 @@
 
 import { createHash } from "node:crypto";
 
+import { type UpdaterBranch,updaterReleaseEndpoint } from "@shared/Updater";
+
 export interface HttpChange {
     author: string;
     hash: string;
@@ -114,20 +116,26 @@ export async function inspectHttpUpdates(
     request: JsonRequest,
     currentHash: string,
     asarFile: string,
+    branch: UpdaterBranch = "main",
 ): Promise<HttpUpdateInspection> {
-    const release = parseRelease(await request("/releases/latest"), currentHash, asarFile);
+    const release = parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile);
     if (!release.pending) return { changes: [], pending: null };
 
     const comparison = await request(`/compare/${currentHash}...${release.hash}`);
-    return { changes: parseChanges(comparison), pending: release.pending };
+    const parsedChanges = parseChanges(comparison);
+    const changes = parsedChanges.length > 0
+        ? parsedChanges
+        : [{ author: "ProtonnCord", hash: release.hash, message: `Switch update branch to ${branch}` }];
+    return { changes, pending: release.pending };
 }
 
 export async function findHttpUpdate(
     request: JsonRequest,
     currentHash: string,
     asarFile: string,
+    branch: UpdaterBranch = "main",
 ): Promise<PendingHttpUpdate | null> {
-    return parseRelease(await request("/releases/latest"), currentHash, asarFile).pending;
+    return parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile).pending;
 }
 
 export async function requestBytes(
