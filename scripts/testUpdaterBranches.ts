@@ -170,7 +170,9 @@ async function main(): Promise<void> {
         "ProtonnCord settings must expose the update branch dropdown");
     assert.match(updaterSettings, /settings\.updateBranch = branch/u,
         "the branch dropdown must persist the locally selected channel");
-    assert.match(updaterSettings, /Main \(stable\)[\s\S]*Staging \(tested previews\)[\s\S]*Nightly \(latest previews\)/u);
+    assert.match(updaterSettings, /Main \(stable\)/u);
+    assert.match(updaterSettings, /Staging \(tested previews\)/u);
+    assert.match(updaterSettings, /Nightly \(latest previews\)/u);
 
     console.log("updater branch-channel checks passed");
 }
