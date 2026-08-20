@@ -36,14 +36,82 @@ import {
     WrappedContentKey,
 } from "./protocol";
 
-const HPKE_INFO_PREFIX = new TextEncoder().encode("ProtonnCord/SecureMessaging/v1/HPKE-wrap\0");
-const FINGERPRINT_PREFIX = new TextEncoder().encode("ProtonnCord/SecureMessaging/v1/fingerprint\0");
-const IDENTITY_CHECK = new TextEncoder().encode("ProtonnCord/SecureMessaging/v1/identity-check");
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder("utf-8", { fatal: true });
+const HPKE_INFO_PREFIX = textEncoder.encode("ProtonnCord/SecureMessaging/v1/HPKE-wrap\0");
+const FINGERPRINT_PREFIX = textEncoder.encode("ProtonnCord/SecureMessaging/v1/fingerprint\0");
+const IDENTITY_CHECK = textEncoder.encode("ProtonnCord/SecureMessaging/v1/identity-check");
+const MAX_CRYPTO_CACHE_ENTRIES = 256;
 const suite = new CipherSuite({
     kem: new DhkemX25519HkdfSha256(),
     kdf: new HkdfSha256(),
     aead: new Aes128Gcm(),
 });
+
+interface PrivateIdentityCacheEntry {
+    createdAt: number;
+    hpkePrivateKey: string;
+    hpkePrivateKeyValue?: Promise<CryptoKey>;
+    hpkePublicKey: string;
+    signingPrivateKey: string;
+    signingPrivateKeyValue?: Promise<CryptoKey>;
+    signingPublicKey: string;
+    validated: boolean;
+}
+
+const signingPublicKeyCache = new Map<string, Promise<CryptoKey>>();
+const hpkePublicKeyCache = new Map<string, Promise<CryptoKey>>();
+const fingerprintCache = new Map<string, Promise<string>>();
+const cryptoCacheCounters = {
+    fingerprintDigests: 0,
+    hpkePrivateKeyDeserializations: 0,
+    hpkePublicKeyDeserializations: 0,
+    signingPrivateKeyImports: 0,
+    signingPublicKeyImports: 0,
+};
+let privateIdentityCache = new WeakMap<PrivateIdentity, PrivateIdentityCacheEntry>();
+
+export function clearCryptoCachesForTesting(): void {
+    signingPublicKeyCache.clear();
+    hpkePublicKeyCache.clear();
+    fingerprintCache.clear();
+    privateIdentityCache = new WeakMap<PrivateIdentity, PrivateIdentityCacheEntry>();
+    cryptoCacheCounters.fingerprintDigests = 0;
+    cryptoCacheCounters.hpkePrivateKeyDeserializations = 0;
+    cryptoCacheCounters.hpkePublicKeyDeserializations = 0;
+    cryptoCacheCounters.signingPrivateKeyImports = 0;
+    cryptoCacheCounters.signingPublicKeyImports = 0;
+}
+
+export function getCryptoCacheStatsForTesting() {
+    return {
+        ...cryptoCacheCounters,
+        fingerprintEntries: fingerprintCache.size,
+        hpkePublicKeyEntries: hpkePublicKeyCache.size,
+        signingPublicKeyEntries: signingPublicKeyCache.size,
+    };
+}
+
+function cachedPromise<T>(cache: Map<string, Promise<T>>, key: string, create: () => Promise<T>): Promise<T> {
+    const existing = cache.get(key);
+    if (existing) {
+        cache.delete(key);
+        cache.set(key, existing);
+        return existing;
+    }
+
+    const created = create();
+    cache.set(key, created);
+    void created.catch(() => {
+        if (cache.get(key) === created) cache.delete(key);
+    });
+    while (cache.size > MAX_CRYPTO_CACHE_ENTRIES) {
+        const oldestKey = cache.keys().next().value;
+        if (oldestKey === undefined) break;
+        cache.delete(oldestKey);
+    }
+    return created;
+}
 
 function concatBytes(...values: Uint8Array[]): Uint8Array {
     const result = new Uint8Array(values.reduce((total, value) => total + value.byteLength, 0));
@@ -65,34 +133,112 @@ function unsignedEnvelope(envelope: EncryptedEnvelope): UnsignedEncryptedEnvelop
 }
 
 function hpkeContext(header: Uint8Array, recipientId: string): Uint8Array {
-    return concatBytes(HPKE_INFO_PREFIX, header, new TextEncoder().encode(`\0${recipientId}`));
+    return concatBytes(HPKE_INFO_PREFIX, header, textEncoder.encode(`\0${recipientId}`));
+}
+
+function getPrivateIdentityCacheEntry(identity: PrivateIdentity): PrivateIdentityCacheEntry {
+    const existing = privateIdentityCache.get(identity);
+    if (
+        existing
+        && existing.createdAt === identity.createdAt
+        && existing.signingPrivateKey === identity.signingPrivateKey
+        && existing.signingPublicKey === identity.signingPublicKey
+        && existing.hpkePrivateKey === identity.hpkePrivateKey
+        && existing.hpkePublicKey === identity.hpkePublicKey
+    ) return existing;
+
+    const created: PrivateIdentityCacheEntry = {
+        createdAt: identity.createdAt,
+        hpkePrivateKey: identity.hpkePrivateKey,
+        hpkePublicKey: identity.hpkePublicKey,
+        signingPrivateKey: identity.signingPrivateKey,
+        signingPublicKey: identity.signingPublicKey,
+        validated: false,
+    };
+    privateIdentityCache.set(identity, created);
+    return created;
+}
+
+function assertIdentityEncoding(identity: PrivateIdentity): void {
+    if (!identity || !isProtocolTimestamp(identity.createdAt)) throw new Error("Identity creation time is invalid");
+    const cacheEntry = getPrivateIdentityCacheEntry(identity);
+    if (cacheEntry.validated) return;
+    decodeBase64Url(identity.signingPrivateKey, 48);
+    decodeBase64Url(identity.signingPublicKey, 32);
+    decodeBase64Url(identity.hpkePrivateKey, 32);
+    decodeBase64Url(identity.hpkePublicKey, 32);
+    cacheEntry.validated = true;
 }
 
 async function importSigningPrivateKey(identity: PrivateIdentity): Promise<CryptoKey> {
-    return crypto.subtle.importKey(
+    assertIdentityEncoding(identity);
+    const cacheEntry = getPrivateIdentityCacheEntry(identity);
+    if (cacheEntry.signingPrivateKeyValue) return cacheEntry.signingPrivateKeyValue;
+
+    cryptoCacheCounters.signingPrivateKeyImports++;
+    const created = crypto.subtle.importKey(
         "pkcs8",
         cryptoBytes(decodeBase64Url(identity.signingPrivateKey, 48)),
         { name: "Ed25519" },
         false,
         ["sign"]
     );
+    cacheEntry.signingPrivateKeyValue = created;
+    try {
+        return await created;
+    } catch (error) {
+        if (cacheEntry.signingPrivateKeyValue === created) cacheEntry.signingPrivateKeyValue = undefined;
+        throw error;
+    }
 }
 
-function assertIdentityEncoding(identity: PrivateIdentity): void {
-    if (!identity || !isProtocolTimestamp(identity.createdAt)) throw new Error("Identity creation time is invalid");
-    decodeBase64Url(identity.signingPrivateKey, 48);
-    decodeBase64Url(identity.signingPublicKey, 32);
-    decodeBase64Url(identity.hpkePrivateKey, 32);
-    decodeBase64Url(identity.hpkePublicKey, 32);
+async function importSigningPublicKey(publicKey: string): Promise<CryptoKey> {
+    return cachedPromise(signingPublicKeyCache, publicKey, () => {
+        cryptoCacheCounters.signingPublicKeyImports++;
+        return crypto.subtle.importKey(
+            "raw",
+            cryptoBytes(decodeBase64Url(publicKey, 32)),
+            { name: "Ed25519" },
+            false,
+            ["verify"]
+        );
+    });
+}
+
+async function deserializeHpkePrivateKey(identity: PrivateIdentity): Promise<CryptoKey> {
+    assertIdentityEncoding(identity);
+    const cacheEntry = getPrivateIdentityCacheEntry(identity);
+    if (cacheEntry.hpkePrivateKeyValue) return cacheEntry.hpkePrivateKeyValue;
+
+    cryptoCacheCounters.hpkePrivateKeyDeserializations++;
+    const created = suite.kem.deserializePrivateKey(decodeBase64Url(identity.hpkePrivateKey, 32));
+    cacheEntry.hpkePrivateKeyValue = created;
+    try {
+        return await created;
+    } catch (error) {
+        if (cacheEntry.hpkePrivateKeyValue === created) cacheEntry.hpkePrivateKeyValue = undefined;
+        throw error;
+    }
+}
+
+async function deserializeHpkePublicKey(publicKey: string): Promise<CryptoKey> {
+    return cachedPromise(hpkePublicKeyCache, publicKey, () => {
+        cryptoCacheCounters.hpkePublicKeyDeserializations++;
+        return suite.kem.deserializePublicKey(decodeBase64Url(publicKey, 32));
+    });
 }
 
 export async function validateIdentityKeyPairs(identity: PrivateIdentity): Promise<void> {
     assertIdentityEncoding(identity);
     const [signature, signingPublicKey, hpkePrivateKey, hpkePublicKey] = await Promise.all([
-        crypto.subtle.sign("Ed25519", await importSigningPrivateKey(identity), cryptoBytes(IDENTITY_CHECK)),
+        importSigningPrivateKey(identity).then(privateKey => crypto.subtle.sign(
+            "Ed25519",
+            privateKey,
+            cryptoBytes(IDENTITY_CHECK)
+        )),
         importSigningPublicKey(identity.signingPublicKey),
-        suite.kem.deserializePrivateKey(decodeBase64Url(identity.hpkePrivateKey, 32)),
-        suite.kem.deserializePublicKey(decodeBase64Url(identity.hpkePublicKey, 32)),
+        deserializeHpkePrivateKey(identity),
+        deserializeHpkePublicKey(identity.hpkePublicKey),
     ]);
     const signingMatches = await crypto.subtle.verify(
         "Ed25519",
@@ -120,10 +266,6 @@ export async function validateIdentityKeyPairs(identity: PrivateIdentity): Promi
     }
 }
 
-async function importSigningPublicKey(publicKey: string): Promise<CryptoKey> {
-    return crypto.subtle.importKey("raw", cryptoBytes(decodeBase64Url(publicKey, 32)), { name: "Ed25519" }, false, ["verify"]);
-}
-
 export async function generateIdentity(now = Date.now()): Promise<PrivateIdentity> {
     if (!isProtocolTimestamp(now)) throw new Error("Identity creation time is invalid");
     const [signingKeys, hpkeKeys] = await Promise.all([
@@ -147,22 +289,24 @@ export async function generateIdentity(now = Date.now()): Promise<PrivateIdentit
 
 export async function fingerprintPublicKeys(userId: string, signingPublicKey: string, hpkePublicKey: string): Promise<string> {
     requireSnowflake(userId, "userId");
-    const digest = await crypto.subtle.digest("SHA-256", cryptoBytes(concatBytes(
-        FINGERPRINT_PREFIX,
-        new TextEncoder().encode(`${userId}\0`),
-        decodeBase64Url(signingPublicKey, 32),
-        decodeBase64Url(hpkePublicKey, 32)
-    )));
-    return encodeBase64Url(digest);
+    return cachedPromise(fingerprintCache, `${userId}\0${signingPublicKey}\0${hpkePublicKey}`, async () => {
+        cryptoCacheCounters.fingerprintDigests++;
+        const digest = await crypto.subtle.digest("SHA-256", cryptoBytes(concatBytes(
+            FINGERPRINT_PREFIX,
+            textEncoder.encode(`${userId}\0`),
+            decodeBase64Url(signingPublicKey, 32),
+            decodeBase64Url(hpkePublicKey, 32)
+        )));
+        return encodeBase64Url(digest);
+    });
 }
 
 export function formatFingerprint(fingerprint: string): string {
     const bytes = decodeBase64Url(fingerprint, 32);
-    return [...bytes]
+    const hexadecimal = [...bytes]
         .map(byte => byte.toString(16).padStart(2, "0").toUpperCase())
-        .join("")
-        .match(/.{1,4}/gu)!
-        .join(" ");
+        .join("");
+    return hexadecimal.match(/.{1,4}/gu)?.join(" ") ?? hexadecimal;
 }
 
 export async function publicIdentity(identity: PrivateIdentity, userId: string): Promise<PublicIdentity> {
@@ -187,7 +331,11 @@ export async function createKeyAnnouncement(identity: PrivateIdentity, userId: s
         s: identity.signingPublicKey,
         e: identity.hpkePublicKey,
     };
-    const signature = await crypto.subtle.sign("Ed25519", await importSigningPrivateKey(identity), cryptoBytes(canonicalKeyAnnouncement(unsigned)));
+    const signature = await crypto.subtle.sign(
+        "Ed25519",
+        await importSigningPrivateKey(identity),
+        cryptoBytes(canonicalKeyAnnouncement(unsigned))
+    );
     return serializeKeyAnnouncement({ ...unsigned, z: encodeBase64Url(signature) });
 }
 
@@ -247,9 +395,19 @@ export async function encryptMessage(input: EncryptMessageInput): Promise<string
 
     const self = await publicIdentity(input.identity, senderUserId);
     const recipientMap = new Map<string, PublicIdentity>([[self.userId, self]]);
-    for (const recipient of input.recipients) {
-        requireSnowflake(recipient.userId, "recipient.userId");
-        const expectedFingerprint = await fingerprintPublicKeys(recipient.userId, recipient.signingPublicKey, recipient.hpkePublicKey);
+    const recipientInputs = input.recipients.map(recipient => ({
+        ...recipient,
+        userId: requireSnowflake(recipient.userId, "recipient.userId"),
+    }));
+    const verifiedRecipients = await Promise.all(recipientInputs.map(async recipient => ({
+        expectedFingerprint: await fingerprintPublicKeys(
+            recipient.userId,
+            recipient.signingPublicKey,
+            recipient.hpkePublicKey
+        ),
+        recipient,
+    })));
+    for (const { expectedFingerprint, recipient } of verifiedRecipients) {
         if (recipient.fingerprint !== expectedFingerprint) throw new Error(`Recipient ${recipient.userId} has an invalid fingerprint`);
         const existing = recipientMap.get(recipient.userId);
         if (existing && existing.fingerprint !== recipient.fingerprint) throw new Error(`Conflicting keys for recipient ${recipient.userId}`);
@@ -287,7 +445,7 @@ export async function encryptMessage(input: EncryptMessageInput): Promise<string
     try {
         const wrappedRecipients = await Promise.all(recipients.map(async recipient => {
             const context = hpkeContext(header, recipient.userId);
-            const recipientPublicKey = await suite.kem.deserializePublicKey(decodeBase64Url(recipient.hpkePublicKey, 32));
+            const recipientPublicKey = await deserializeHpkePublicKey(recipient.hpkePublicKey);
             const wrapped = await suite.seal({ recipientPublicKey, info: context }, contentKeyBytes, context);
             return {
                 u: recipient.userId,
@@ -299,7 +457,7 @@ export async function encryptMessage(input: EncryptMessageInput): Promise<string
         const ciphertext = await crypto.subtle.encrypt(
             { name: "AES-GCM", iv: cryptoBytes(nonce), additionalData: cryptoBytes(header), tagLength: 128 },
             contentKey,
-            cryptoBytes(new TextEncoder().encode(input.plaintext))
+            cryptoBytes(textEncoder.encode(input.plaintext))
         );
         const unsigned: UnsignedEncryptedEnvelope = {
             ...base,
@@ -356,7 +514,7 @@ export async function decryptMessage(input: DecryptMessageInput): Promise<{ enve
     if (!recipient) throw new Error("This device is not an encrypted-message recipient");
     const header = envelopeHeader(envelope);
     const context = hpkeContext(header, localUserId);
-    const recipientKey = await suite.kem.deserializePrivateKey(decodeBase64Url(input.identity.hpkePrivateKey, 32));
+    const recipientKey = await deserializeHpkePrivateKey(input.identity);
     const contentKeyBytes = new Uint8Array(await suite.open({
         recipientKey,
         enc: decodeBase64Url(recipient.e, 32),
@@ -375,7 +533,7 @@ export async function decryptMessage(input: DecryptMessageInput): Promise<{ enve
             contentKey,
             cryptoBytes(decodeBase64Url(envelope.x))
         );
-        return { envelope, plaintext: new TextDecoder("utf-8", { fatal: true }).decode(plaintext) };
+        return { envelope, plaintext: textDecoder.decode(plaintext) };
     } catch (error) {
         if (error instanceof Error && error.message.startsWith("Encrypted message")) throw error;
         throw new Error("Encrypted message authentication failed");
