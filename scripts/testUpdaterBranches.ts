@@ -20,6 +20,7 @@ import {
     findHttpUpdate,
     inspectHttpUpdates,
 } from "../src/main/updater/httpOperations";
+import { serializeErrors } from "../src/main/updater/ipc";
 import {
     parseUpdaterBranch,
     updaterReleaseEndpoint,
@@ -50,6 +51,31 @@ async function commitFile(repository: string, filename: string, content: string,
     await run(repository, "add", "--", filename);
     await run(repository, "commit", "-m", message);
     return (await run(repository, "rev-parse", "HEAD")).stdout.trim();
+}
+
+async function testIpcBranchArguments(): Promise<void> {
+    const received: unknown[] = [];
+    const handler = serializeErrors((branch: unknown) => {
+        received.push(branch);
+        return parseUpdaterBranch(branch);
+    });
+    const fakeElectronEvent = { sender: { id: 1 } };
+
+    assert.throws(
+        () => parseUpdaterBranch(fakeElectronEvent),
+        /Unsupported Protonn Cord update branch/u,
+        "the Electron event object must never be interpreted as the selected branch",
+    );
+    assert.deepEqual(await handler(fakeElectronEvent, "main"), { ok: true, value: "main" });
+    assert.deepEqual(await handler(fakeElectronEvent, "staging"), { ok: true, value: "staging" });
+
+    const invalid = await handler(fakeElectronEvent, "beta");
+    assert.equal(invalid.ok, false);
+    const invalidError = "error" in invalid ? invalid.error : null;
+    assert.ok(invalidError && typeof invalidError === "object" && "message" in invalidError);
+    assert.match(String(invalidError.message), /Unsupported Protonn Cord update branch/u);
+    assert.deepEqual(received, ["main", "staging", "beta"],
+        "IPC handlers must receive only renderer arguments, without Electron's event metadata");
 }
 
 async function testGitBranches(): Promise<void> {
@@ -154,6 +180,7 @@ async function main(): Promise<void> {
     assert.equal(updaterReleaseEndpoint("main"), "/releases/latest");
     assert.equal(updaterReleaseEndpoint("nightly"), "/releases/tags/nightly");
 
+    await testIpcBranchArguments();
     await testGitBranches();
     await testHttpBranches();
 
