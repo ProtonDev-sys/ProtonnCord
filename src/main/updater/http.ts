@@ -19,7 +19,7 @@
 import { randomUUID } from "node:crypto";
 
 import { IpcEvents } from "@shared/IpcEvents";
-import type { UpdaterDiagnostics } from "@shared/Updater";
+import { parseUpdaterBranch, type UpdaterDiagnostics } from "@shared/Updater";
 import { VENCORD_USER_AGENT } from "@shared/vencordUserAgent";
 import { ipcMain } from "electron";
 import { renameSync, unlinkSync, writeFileSync } from "original-fs";
@@ -56,14 +56,19 @@ async function githubGet(endpoint: string): Promise<unknown> {
     }, API_TIMEOUT, API_SIZE_LIMIT);
 }
 
-async function calculateGitChanges() {
-    const inspection = await inspectHttpUpdates(githubGet, gitHash, ASAR_FILE);
+async function calculateGitChanges(branch: unknown) {
+    const inspection = await inspectHttpUpdates(
+        githubGet,
+        gitHash,
+        ASAR_FILE,
+        parseUpdaterBranch(branch),
+    );
     PendingUpdate = inspection.pending;
     return inspection.changes;
 }
 
-async function fetchUpdates() {
-    const pending = await findHttpUpdate(githubGet, gitHash, ASAR_FILE);
+async function fetchUpdates(branch: unknown) {
+    const pending = await findHttpUpdate(githubGet, gitHash, ASAR_FILE, parseUpdaterBranch(branch));
     PendingUpdate = pending;
     return pending !== null;
 }
@@ -94,9 +99,9 @@ ipcMain.handle(IpcEvents.GET_REPO, serializeErrors(() => `https://github.com/${g
 ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors(calculateGitChanges));
 ipcMain.handle(IpcEvents.UPDATE, serializeErrors(fetchUpdates));
 ipcMain.handle(IpcEvents.BUILD, serializeErrors(applyUpdates));
-ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors((): UpdaterDiagnostics => ({
+ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors((branch: unknown): UpdaterDiagnostics => ({
     backend: "http",
-    branch: null,
+    branch: parseUpdaterBranch(branch),
     builtHead: gitHash,
     sourceRoot: null,
 })));
