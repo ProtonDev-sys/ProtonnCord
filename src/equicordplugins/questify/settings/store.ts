@@ -39,6 +39,12 @@ export const settings = definePluginSettings({
         default: MIGRATION_TARGET,
         hidden: true,
     },
+    acknowledgedNotices: {
+        type: OptionType.CUSTOM,
+        description: "One-time notices that the user has acknowledged.",
+        default: { ...defaultAcknowledgedNotices },
+        hidden: true,
+    },
     questFeatures: {
         type: OptionType.COMPONENT,
         component: ErrorBoundary.wrap(QuestFeaturesSetting) as any,

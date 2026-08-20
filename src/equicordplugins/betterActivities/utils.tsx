@@ -6,14 +6,11 @@
 
 import { classNameFactory } from "@utils/css";
 import { Activity, Application } from "@vencord/discord-types";
-import { findByPropsLazy, findComponentByCodeLazy, findStoreLazy } from "@webpack";
+import { findByPropsLazy, findComponentByCodeLazy } from "@webpack";
+import { ApplicationStore } from "@webpack/common";
 
 import { settings } from "./settings";
 import { ActivityViewProps, ApplicationIcon } from "./types";
-
-const ApplicationStore: {
-    getApplication: (id: string) => Application | null;
-} = findStoreLazy("ApplicationStore");
 
 const { fetchApplication }: {
     fetchApplication: (id: string) => Promise<Application | null>;
