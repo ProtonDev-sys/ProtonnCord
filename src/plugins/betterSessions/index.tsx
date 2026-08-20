@@ -24,14 +24,13 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { Paragraph } from "@components/Paragraph";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
-import { findComponentByCodeLazy, findCssClassesLazy, findStoreLazy } from "@webpack";
-import { Constants, React, RestAPI, SettingsRouter, Tooltip } from "@webpack/common";
+import { findComponentByCodeLazy, findCssClassesLazy } from "@webpack";
+import { AuthSessionsStore, Constants, React, RestAPI, SettingsRouter, Tooltip } from "@webpack/common";
 
 import { NewButton, RenameButton } from "./components/RenameButton";
 import { Session, SessionInfo } from "./types";
 import { cl, fetchNamesFromDataStore, getDefaultName, GetOsColor, GetPlatformIcon, savedSessionsCache, saveSessionsToDataStore } from "./utils";
 
-const AuthSessionsStore = findStoreLazy("AuthSessionsStore");
 const TimestampClasses = findCssClassesLazy("timestamp", "blockquoteContainer");
 const BlobMask = findComponentByCodeLazy("!1,lowerBadgeSize:");
 
@@ -66,7 +65,7 @@ export default definePlugin({
             find: "#{intl::AUTH_SESSIONS_OS_UNKNOWN}",
             replacement: [
                 {
-                    match: /(#{intl::AUTH_SESSIONS_ACTIVE_RECENTLY}.{0,230}role:"listitem",children:\[.{0,15},\{Icon:)\i/,
+                    match: /(#{intl::AUTH_SESSIONS_ACTIVE_RECENTLY}.{0,230}role:"listitem",children:\[.{0,15},\{icon:)\i/,
                     replace: "$1()=>$self.renderIcon(arguments[0])"
                 },
                 {

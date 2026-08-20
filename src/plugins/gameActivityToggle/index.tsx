@@ -38,7 +38,6 @@ interface ConnectedAccountsStore extends FluxStore {
 }
 
 const Button = findComponentByCodeLazy(".GREEN,positionKeyStemOverride:");
-const ConnectedAccountsStore = findStoreLazy("ConnectedAccountsStore") as ConnectedAccountsStore;
 const ConnectedAccountActions = findByPropsLazy("setShowActivity");
 
 const ShowCurrentGame = getUserSettingLazy<boolean>("status", "showCurrentGame")!;
