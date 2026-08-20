@@ -34,10 +34,6 @@ import { cl, fetchNamesFromDataStore, getDefaultName, GetOsColor, GetPlatformIco
 const TimestampClasses = findCssClassesLazy("timestamp", "blockquoteContainer");
 const BlobMask = findComponentByCodeLazy("!1,lowerBadgeSize:");
 
-const MIN_BACKGROUND_CHECK_INTERVAL_MINUTES = 1;
-let checkNewSessionsPromise: Promise<void> | undefined;
-let lifecycleGeneration = 0;
-
 const settings = definePluginSettings({
     backgroundCheck: {
         type: OptionType.BOOLEAN,
@@ -153,66 +149,39 @@ export default definePlugin({
         );
     }, { noop: true }),
 
-    async checkNewSessions(generation = lifecycleGeneration) {
-        if (generation !== lifecycleGeneration) return;
-        if (checkNewSessionsPromise) return checkNewSessionsPromise;
+    async checkNewSessions() {
+        const data = await RestAPI.get({
+            url: Constants.Endpoints.AUTH_SESSIONS
+        });
 
-        const promise = (async () => {
-            const data = await RestAPI.get({
-                url: Constants.Endpoints.AUTH_SESSIONS
+        for (const session of data.body.user_sessions) {
+            if (savedSessionsCache.has(session.id_hash)) continue;
+
+            savedSessionsCache.set(session.id_hash, { name: "", isNew: true });
+            showNotification({
+                title: "BetterSessions",
+                body: `New session:\n${session.client_info.os} · ${session.client_info.platform} · ${session.client_info.location}`,
+                permanent: true,
+                onClick: () => SettingsRouter.openUserSettings("sessions_panel")
             });
-
-            if (generation !== lifecycleGeneration) return;
-
-            let hasNewSession = false;
-            for (const session of data.body.user_sessions) {
-                if (savedSessionsCache.has(session.id_hash)) continue;
-
-                savedSessionsCache.set(session.id_hash, { name: "", isNew: true });
-                hasNewSession = true;
-                showNotification({
-                    title: "BetterSessions",
-                    body: `New session:\n${session.client_info.os} · ${session.client_info.platform} · ${session.client_info.location}`,
-                    permanent: true,
-                    onClick: () => SettingsRouter.openUserSettings("sessions_panel")
-                });
-            }
-
-            if (hasNewSession) void saveSessionsToDataStore();
-        })();
-
-        checkNewSessionsPromise = promise;
-
-        try {
-            await promise;
-        } finally {
-            if (checkNewSessionsPromise === promise) checkNewSessionsPromise = undefined;
         }
+
+        saveSessionsToDataStore();
     },
 
     flux: {
         USER_SETTINGS_ACCOUNT_RESET_AND_CLOSE_FORM() {
-            const lastFetchedHashes = new Set<string>(
-                AuthSessionsStore.getSessions().map((session: SessionInfo["session"]) => session.id_hash)
-            );
+            const lastFetchedHashes: string[] = AuthSessionsStore.getSessions().map(session => session.id_hash);
 
             // Add new sessions to cache
-            let changed = false;
-
             lastFetchedHashes.forEach(idHash => {
-                if (savedSessionsCache.has(idHash)) return;
-
-                savedSessionsCache.set(idHash, { name: "", isNew: false });
-                changed = true;
+                if (!savedSessionsCache.has(idHash)) savedSessionsCache.set(idHash, { name: "", isNew: false });
             });
 
             // Delete removed sessions from cache
-            if (lastFetchedHashes.size > 0) {
+            if (lastFetchedHashes.length > 0) {
                 savedSessionsCache.forEach((_, idHash) => {
-                    if (lastFetchedHashes.has(idHash)) return;
-
-                    savedSessionsCache.delete(idHash);
-                    changed = true;
+                    if (!lastFetchedHashes.includes(idHash)) savedSessionsCache.delete(idHash);
                 });
             }
 
@@ -220,31 +189,22 @@ export default definePlugin({
             // Since the only way for a session to be marked as "NEW" is going to the Devices tab,
             // closing the settings means they've been viewed and are no longer considered new.
             savedSessionsCache.forEach(data => {
-                if (!data.isNew) return;
-
                 data.isNew = false;
-                changed = true;
             });
-            if (changed) void saveSessionsToDataStore();
+            saveSessionsToDataStore();
         }
     },
 
     async start() {
-        const generation = ++lifecycleGeneration;
-        await fetchNamesFromDataStore(() => generation === lifecycleGeneration);
-        if (generation !== lifecycleGeneration) return;
+        await fetchNamesFromDataStore();
 
-        void this.checkNewSessions(generation);
+        this.checkNewSessions();
         if (settings.store.backgroundCheck) {
-            const checkIntervalMinutes = Math.max(settings.store.checkInterval, MIN_BACKGROUND_CHECK_INTERVAL_MINUTES);
-            this.checkInterval = setInterval(() => void this.checkNewSessions(generation), checkIntervalMinutes * 60 * 1000);
+            this.checkInterval = setInterval(this.checkNewSessions, settings.store.checkInterval * 60 * 1000);
         }
     },
 
     stop() {
-        lifecycleGeneration++;
-        checkNewSessionsPromise = undefined;
         clearInterval(this.checkInterval);
-        this.checkInterval = undefined;
     }
 });

@@ -14,74 +14,9 @@ on:
             - nightly
             - staging
 
-permissions:
-    contents: write
-
 jobs:
-    ReconcileUpstream:
-        name: Reconcile current Equicord plugin files
-        if: github.event_name == 'pull_request' && github.head_ref == 'agent/sync-equicord-1.15.1' && github.actor != 'github-actions[bot]'
-        runs-on: ubuntu-latest
-
-        steps:
-            - uses: actions/checkout@v7
-              with:
-                  fetch-depth: 0
-                  ref: ${{ github.head_ref }}
-
-            - name: Restore exact current upstream plugin files
-              env:
-                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
-                  UPSTREAM_SHA: d48e3d7bfc9731deda7654a82b8898b6e032dd16
-              shell: bash
-              run: |
-                  set -euo pipefail
-                  git checkout "$UPSTREAM_SHA" -- \
-                      src/equicordplugins/betterActivities/utils.tsx \
-                      src/equicordplugins/betterPlusReacts/index.ts \
-                      src/equicordplugins/questify/components/questFeaturesSetting.tsx \
-                      src/equicordplugins/questify/settings/store.ts \
-                      src/plugins/betterSessions/index.tsx \
-                      src/plugins/customRPC/RpcSettings.tsx \
-                      src/plugins/gameActivityToggle/index.tsx \
-                      src/plugins/platformIndicators/index.tsx \
-                      src/plugins/serverListIndicators/index.tsx \
-                      src/plugins/showMeYourName/index.tsx \
-                      src/plugins/whoReacted/index.tsx
-
-                  python3 - <<'PY'
-                  from pathlib import Path
-
-                  message_logger = Path("src/equicordplugins/messageLoggerEnhanced/utils/index.ts")
-                  content = message_logger.read_text(encoding="utf-8")
-                  duplicate = 'const UserGuildSettingsStore = findStoreLazy("UserGuildSettingsStore");\n\n'
-                  if content.count(duplicate) != 1:
-                      raise SystemExit("MessageLoggerEnhanced store reconciliation target was not unique")
-                  message_logger.write_text(content.replace(duplicate, "", 1), encoding="utf-8")
-
-                  user_agent = Path("src/shared/vencordUserAgent.ts")
-                  content = user_agent.read_text(encoding="utf-8")
-                  if content.count("gitHash.slice(0, 7)") != 1:
-                      raise SystemExit("User-agent short hash reconciliation target was not unique")
-                  user_agent.write_text(content.replace("gitHash.slice(0, 7)", "gitHash.slice(0, 9)", 1), encoding="utf-8")
-                  PY
-
-                  git diff --check
-                  git show "$BASE_SHA:.github/workflows/test.yml" > .github/workflows/test.yml
-
-            - name: Commit reconciliation
-              shell: bash
-              run: |
-                  set -euo pipefail
-                  git config user.name "ProtonnCord Upstream Reconciliation"
-                  git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
-                  git add --all
-                  git commit -m "fix: reconcile current Equicord plugin implementations"
-                  git push origin HEAD:${{ github.head_ref }}
-
     Test:
         name: Test
-        if: github.event_name != 'pull_request' || github.head_ref != 'agent/sync-equicord-1.15.1' || github.actor == 'github-actions[bot]'
         runs-on: ubuntu-latest
 
         steps:
