@@ -14,9 +14,71 @@ on:
             - nightly
             - staging
 
+permissions:
+    contents: write
+
 jobs:
+    SyncEquicord:
+        name: Sync current Equicord main
+        if: github.event_name == 'pull_request' && github.head_ref == 'agent/sync-equicord-1.15.1' && github.actor != 'github-actions[bot]'
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+                  ref: ${{ github.head_ref }}
+
+            - name: Merge upstream with ProtonnCord conflict precedence
+              env:
+                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  git config user.name "ProtonnCord Upstream Sync"
+                  git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+                  git remote add upstream https://github.com/Equicord/Equicord.git
+                  git fetch --no-tags upstream main
+
+                  conflict_report=.github/UPSTREAM_SYNC_CONFLICTS.txt
+                  printf 'Equicord upstream commit: %s\n' "$(git rev-parse upstream/main)" > "$conflict_report"
+                  printf 'Merge base: %s\n' "$(git merge-base HEAD upstream/main)" >> "$conflict_report"
+
+                  set +e
+                  git merge --no-edit -X ours upstream/main
+                  merge_status=$?
+                  set -e
+
+                  if [[ $merge_status -ne 0 ]]; then
+                      mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+                      printf 'Conflicts resolved in favour of ProtonnCord for manual review:\n' >> "$conflict_report"
+                      printf '  %s\n' "${conflicts[@]}" >> "$conflict_report"
+
+                      for path in "${conflicts[@]}"; do
+                          if git cat-file -e "HEAD:$path" 2>/dev/null; then
+                              git checkout --ours -- "$path"
+                              git add -- "$path"
+                          else
+                              git rm --ignore-unmatch -- "$path"
+                          fi
+                      done
+
+                      git commit -m "merge: sync Equicord 1.15.1"
+                  else
+                      printf 'Conflicts: none\n' >> "$conflict_report"
+                  fi
+
+                  git diff --check HEAD^1..HEAD
+
+                  git show "$BASE_SHA:.github/workflows/test.yml" > .github/workflows/test.yml
+                  git rm -f .github/workflows/one-shot-equicord-sync.yml
+                  git add .github/workflows/test.yml "$conflict_report"
+                  git commit -m "chore: record Equicord sync review state"
+                  git push origin HEAD:${{ github.head_ref }}
+
     Test:
         name: Test
+        if: github.event_name != 'pull_request' || github.head_ref != 'agent/sync-equicord-1.15.1' || github.actor == 'github-actions[bot]'
         runs-on: ubuntu-latest
 
         steps:
