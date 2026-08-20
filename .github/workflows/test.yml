@@ -6,6 +6,7 @@ on:
             - dev
             - nightly
             - staging
+            - "agent/**"
     pull_request:
         branches:
             - main
