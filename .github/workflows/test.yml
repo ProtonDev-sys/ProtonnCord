@@ -4,10 +4,15 @@ on:
         branches:
             - main
             - dev
+            - nightly
+            - staging
+            - "agent/**"
     pull_request:
         branches:
             - main
             - dev
+            - nightly
+            - staging
 
 jobs:
     Test:
@@ -26,6 +31,15 @@ jobs:
 
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
+
+            - name: Test Secure Messaging crypto caches
+              run: pnpm exec tsx scripts/testSecureMessagingCryptoCache.ts
+
+            - name: Test Secure Messaging layout stability
+              run: pnpm exec tsx scripts/testSecureMessagingLayoutStability.ts
+
+            - name: Benchmark Secure Messaging
+              run: pnpm exec tsx scripts/benchmarkSecureMessaging.ts
 
             - name: Lint & Test if desktop version compiles
               run: pnpm test
