@@ -26,8 +26,8 @@ import { promisify } from "util";
 import gitHash from "~git-hash";
 import gitRemote from "~git-remote";
 
-import { serializeErrors } from "./common";
 import { type GitCommandResult, inspectGitUpdates, pullGitUpdates } from "./gitOperations";
+import { serializeErrors } from "./ipc";
 
 const VENCORD_SRC_DIR = join(__dirname, "..");
 const PROTONN_CORD_DIR = join(__dirname, "../../");
