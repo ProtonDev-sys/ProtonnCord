@@ -1,0 +1,38 @@
+name: Apply release changes
+
+on:
+    pull_request:
+        branches:
+            - staging
+
+permissions:
+    contents: write
+
+jobs:
+    Apply:
+        if: github.head_ref == 'agent/sync-equicord-1.15.1' && github.actor != 'github-actions[bot]'
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+                  ref: ${{ github.head_ref }}
+
+            - name: Apply release changes
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  python3 .github/scripts/apply_release_changes.py
+                  git diff --check
+
+            - name: Commit generated release changes
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  git config user.name "ProtonnCord Release Automation"
+                  git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+                  git rm .github/scripts/apply_release_changes.py .github/workflows/apply-release-changes.yml
+                  git add --all
+                  git commit -m "feat: add updater channels and release-scoped plugin markers"
+                  git push origin HEAD:${{ github.head_ref }}
