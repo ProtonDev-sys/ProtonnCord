@@ -3,6 +3,8 @@ on:
     push:
         branches:
             - main
+            - staging
+            - nightly
 
 env:
     FORCE_COLOR: true
@@ -58,13 +60,11 @@ jobs:
                   cp browser/browser.* release
                   cp ProtonnCord.user.{js,js.LEGAL.txt} release
 
-                  # copy the plugin data jsons, the extension zips and the desktop/equibop asars
                   release_files=(*.json *.zip *.asar)
                   if (( ${#release_files[@]} )); then
                       cp "${release_files[@]}" release
                   fi
 
-                  # legacy un-asared files
                   cp desktop/* release
                   for file in equibop/*; do
                     filename=$(basename "$file")
@@ -74,19 +74,33 @@ jobs:
                   find release -type f -size 0 -delete
                   rm -f release/package.json release/*.map
 
-            - name: Upload Protonn Cord Stable
+            - name: Upload Protonn Cord update channel
               if: github.repository == 'ProtonDev-sys/ProtonnCord' && vars.ACT != 'true'
+              shell: bash
               run: |
-                  git fetch --no-tags origin main
+                  set -euo pipefail
+                  branch="$GITHUB_REF_NAME"
+                  git fetch --no-tags origin "$branch"
                   if [[ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]]; then
-                      echo "Skipping stale release build for $GITHUB_SHA; origin/main has advanced."
+                      echo "Skipping stale release build for $GITHUB_SHA; origin/$branch has advanced."
                       exit 0
                   fi
-                  if gh release view latest >/dev/null 2>&1; then
-                      git tag --force latest "$GITHUB_SHA"
-                      git push origin refs/tags/latest --force
-                      gh release edit latest --target "$GITHUB_SHA" --title "Protonn Cord $GITHUB_SHA" --latest
+
+                  if [[ "$branch" == "main" ]]; then
+                      tag="latest"
+                      release_flags=(--latest)
                   else
-                      gh release create latest --target "$GITHUB_SHA" --title "Protonn Cord $GITHUB_SHA" --notes "Automatically built from Protonn Cord main."
+                      tag="$branch"
+                      release_flags=(--prerelease)
                   fi
-                  gh release upload latest --clobber dist/release/*
+                  title="Protonn Cord $branch $GITHUB_SHA"
+
+                  if gh release view "$tag" >/dev/null 2>&1; then
+                      git tag --force "$tag" "$GITHUB_SHA"
+                      git push origin "refs/tags/$tag" --force
+                      gh release edit "$tag" --target "$GITHUB_SHA" --title "$title" "${release_flags[@]}"
+                  else
+                      gh release create "$tag" --target "$GITHUB_SHA" --title "$title" \
+                          --notes "Automatically built from Protonn Cord $branch." "${release_flags[@]}"
+                  fi
+                  gh release upload "$tag" --clobber dist/release/*

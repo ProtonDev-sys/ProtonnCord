@@ -44,6 +44,13 @@ export const defaultDisableAccountPanelQuestProgress = false;
 export const defaultDisableOrbsAndQuestsBadges = false;
 export const defaultDisableFriendsListPromo = true;
 export const defaultDisableMembersListPromo = true;
+export const defaultResumeInterruptedQuests = false;
+export const defaultAllowChangingDangerousSettings = false; // true -> Risky
+export const defaultAcknowledgedNotices: Record<string, true> = {};
+export const defaultMakeMobileVideoQuestsDesktopCompatible = false; // true -> Risky
+export const defaultCompleteVideoQuestsQuicker = false; // true -> Risky
+export const defaultPreventVideoQuestsPausing = false; // true -> Risky
+export const defaultAutoCompleteQuestsSimultaneously = false; // true -> Risky
 export const defaultNotifyOnQuestComplete = true;
 export const defaultNotifyOnNewQuests = true;
 export const defaultNotifyOnNewExcludedQuests = false;
@@ -83,6 +90,12 @@ const desktopOnlyAutoCompleteQuestTypes = new Set<QuestTaskType>([
 export function isDesktopCompatible(questType: QuestTaskType): boolean {
     return IS_DISCORD_DESKTOP || !desktopOnlyAutoCompleteQuestTypes.has(questType);
 }
+
+export type AutoCompleteQuestTypes = Partial<Record<QuestTaskType, boolean>>;
+
+export const defaultAutoCompleteQuestTypes = Object.fromEntries(
+    autoCompleteQuestTaskTypes.map(questType => [questType, false])
+) as AutoCompleteQuestTypes;
 
 export type QuestButtonIncludedTypes = Record<QuestTaskType | QuestRewardType, boolean>;
 

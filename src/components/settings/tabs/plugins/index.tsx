@@ -18,7 +18,6 @@
 
 import "./styles.css";
 
-import * as DataStore from "@api/DataStore";
 import { isPluginEnabled, stopPlugin } from "@api/PluginManager";
 import { useSettings } from "@api/Settings";
 import { Button } from "@components/Button";
@@ -35,13 +34,14 @@ import { isTruthy } from "@utils/guards";
 import { Logger } from "@utils/Logger";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
-import { useAwaiter, useCleanupEffect, useIntersection } from "@utils/react";
+import { useCleanupEffect, useIntersection } from "@utils/react";
 import { PluginTag, PluginTags } from "@utils/types";
-import { Alerts, ConfirmModal, lodash, openModal, Parser, React, SearchableSelect, Select, TextInput, Toasts, Tooltip, useCallback, useMemo, useRef, useState } from "@webpack/common";
+import { Alerts, ConfirmModal, openModal, Parser, React, SearchableSelect, Select, TextInput, Toasts, Tooltip, useCallback, useMemo, useRef, useState } from "@webpack/common";
 import { JSX } from "react";
 
 import Plugins, { ExcludedPlugins, PluginMeta } from "~plugins";
 
+import { getReleaseNewPlugins } from "./newPluginRelease";
 import { PluginCard } from "./PluginCard";
 import { openWarningModal } from "./PluginModal";
 import { StockPluginsCard, UserPluginsCard } from "./PluginStatCards";
@@ -253,22 +253,7 @@ export default function PluginSettings() {
         );
     }, [searchValue, search]);
 
-    const [newPluginsSet] = useAwaiter(() => DataStore.get("Vencord_existingPlugins").then((cachedPlugins: Record<string, number> | undefined) => {
-        const now = Date.now() / 1000;
-        const existingTimestamps: Record<string, number> = {};
-        const sortedPluginNames = Object.values(sortedPlugins).map(plugin => plugin.name);
-
-        const newPlugins: string[] = [];
-        for (const { name: p } of sortedPlugins) {
-            const time = existingTimestamps[p] = cachedPlugins?.[p] ?? now;
-            if ((time + 60 * 60 * 24 * 2) > now) {
-                newPlugins.push(p);
-            }
-        }
-        DataStore.set("Vencord_existingPlugins", existingTimestamps);
-
-        return lodash.isEqual(newPlugins, sortedPluginNames) ? null : new Set(newPlugins);
-    }));
+    const newPluginsSet = getReleaseNewPlugins(VERSION, sortedPlugins.map(plugin => plugin.name));
 
     const handleRestartNeeded = useCallback((name: string, key: string) => changes.handleChange(`${name}:${key}`), [changes]);
 
