@@ -77,8 +77,6 @@ interface ShouldIgnoreArguments {
 
 const EPHEMERAL = 64;
 
-const UserGuildSettingsStore = findStoreLazy("UserGuildSettingsStore");
-
 export type ListType = "blacklistedIds" | "whitelistedIds";
 
 interface IdSetCache {
