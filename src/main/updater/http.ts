@@ -27,7 +27,7 @@ import { renameSync, unlinkSync, writeFileSync } from "original-fs";
 import gitHash from "~git-hash";
 import gitRemote from "~git-remote";
 
-import { ASAR_FILE, serializeErrors } from "./common";
+import { ASAR_FILE } from "./common";
 import {
     applyPendingHttpUpdate,
     findHttpUpdate,
@@ -37,6 +37,7 @@ import {
     requestBytes,
     requestJson,
 } from "./httpOperations";
+import { serializeErrors } from "./ipc";
 
 const API_BASE = `https://api.github.com/repos/${gitRemote}`;
 const API_TIMEOUT = 15_000;
