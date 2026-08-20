@@ -14,14 +14,21 @@ import {
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 assert.equal(NEW_PLUGIN_RELEASE.version, packageJson.version, "the New marker manifest must be updated with every version bump");
-assert.deepEqual(
-    [...getReleaseNewPlugins(packageJson.version, ["AutoJumpToMessage", "WebPWA", "SecureMessaging"])!].sort(),
-    ["AutoJumpToMessage", "WebPWA"],
+assert.equal(
+    getReleaseNewPlugins(packageJson.version, ["AutoJumpToMessage", "WebPWA", "SecureMessaging"]),
+    null,
+    "a patch release must not keep the previous release's New markers",
 );
-assert.equal(getReleaseNewPlugins("1.15.1.2", ["AutoJumpToMessage", "WebPWA"]), null,
-    "New markers must disappear as soon as the release version is bumped");
-assert.deepEqual([...getReleaseNewPlugins(packageJson.version, ["AutoJumpToMessage"])!], ["AutoJumpToMessage"],
-    "plugins excluded from the current client target must not create phantom cards");
+assert.equal(
+    getReleaseNewPlugins("1.15.1.1", ["AutoJumpToMessage", "WebPWA"]),
+    null,
+    "New markers must disappear as soon as the release version is bumped",
+);
+assert.equal(
+    getReleaseNewPlugins("1.15.1.3", ["AutoJumpToMessage"]),
+    null,
+    "versions without an explicit release manifest must not create phantom cards",
+);
 
 const pluginSettings = readFileSync(new URL(
     "../src/components/settings/tabs/plugins/index.tsx",
