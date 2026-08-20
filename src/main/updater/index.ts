@@ -23,7 +23,7 @@ import { ipcMain } from "electron";
 import gitHash from "~git-hash";
 import gitRemote from "~git-remote";
 
-import { serializeErrors } from "./common";
+import { serializeErrors } from "./ipc";
 
 if (!IS_UPDATER_DISABLED) {
     require(IS_STANDALONE ? "./http" : "./git");
