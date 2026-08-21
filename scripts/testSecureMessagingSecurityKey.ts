@@ -135,6 +135,17 @@ async function main(): Promise<void> {
         "WebAuthn PRF/hmac-secret output must derive the vault wrapping key");
     assert.match(implementation, /userVerification:"required"/u);
     assert.match(implementation, /authenticatorAttachment:"cross-platform"/u);
+    const setupStart = implementation.indexOf("export async function prepareSecurityKeyVaultSetup");
+    const setupEnd = implementation.indexOf("export async function prepareSecurityKeyVaultUnlock", setupStart);
+    const setup = implementation.slice(setupStart, setupEnd);
+    assert.match(setup, /if \(!registration\.prfEnabled\)\s+throw new SecurityKeyVaultError\("unsupported"\)/u,
+        "unsupported authenticators must stop after registration instead of requesting a second touch");
+    assert.match(setup, /if \(!prfFirst\)/u,
+        "supported authenticators without creation-time output must use one assertion fallback");
+    assert.doesNotMatch(setup, /!registration\.prfEnabled \|\| !prfFirst/u,
+        "lack of PRF support must not be conflated with lack of creation-time output");
+    assert.match(setup, /Finish Secure Messaging security-key setup \(2 of 2\)/u,
+        "the older-key fallback must explain the second interaction");
     assert.match(implementation, /session\.fromPartition\(`pc-secure-vault-/u);
     assert.match(implementation, /createCipheriv\("aes-256-gcm"/u);
     assert.match(implementation, /hkdfSync\(/u);

@@ -1,7 +1,7 @@
 {
     "name": "protonn-cord",
     "private": "true",
-    "version": "1.15.1.6",
+    "version": "1.15.1.7",
     "description": "Protonn Cord, a Discord client mod",
     "homepage": "https://github.com/ProtonDev-sys/ProtonnCord#readme",
     "bugs": {
