@@ -76,7 +76,7 @@ export type NativeFailure =
         status: "failed";
         error: "attachment_download_failed" | "attachment_too_large" | "capacity_exceeded" | "counter_exhausted" |
         "cryptographic_operation_failed" | "message_too_long" | "screen_capture_protection_failed" |
-        "security_key_cancelled" | "security_key_mismatch" | "storage_error";
+        "security_key_cancelled" | "security_key_mismatch" | "security_key_storage_failed" | "storage_error";
     };
 
 export interface IdentitySummary {
@@ -642,6 +642,8 @@ function mapOperationFailure(error: unknown): NativeFailure {
         if (error.code === "cancelled") return { status: "failed", error: "security_key_cancelled" };
         if (error.code === "credential_mismatch" || error.code === "invalid_profile")
             return { status: "failed", error: "security_key_mismatch" };
+        if (error.code === "large_blob_failed")
+            return { status: "failed", error: "security_key_storage_failed" };
         if (error.code === "corrupt") return unavailableFailure("vault_unreadable");
     }
     if (error instanceof VaultOperationError) {

@@ -25,7 +25,7 @@ assert.equal(
     "New markers must disappear as soon as the release version is bumped",
 );
 assert.equal(
-    getReleaseNewPlugins("1.15.1.8", ["AutoJumpToMessage"]),
+    getReleaseNewPlugins("1.15.1.9", ["AutoJumpToMessage"]),
     null,
     "versions without an explicit release manifest must not create phantom cards",
 );
