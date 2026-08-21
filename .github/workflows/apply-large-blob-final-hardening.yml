@@ -1,0 +1,222 @@
+name: Apply final large-blob security-key hardening
+
+on:
+    pull_request:
+        branches:
+            - nightly
+        paths:
+            - .trigger-large-blob-final
+
+permissions:
+    contents: write
+
+jobs:
+    harden:
+        if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/security-key-large-blob'
+        runs-on: ubuntu-24.04
+        timeout-minutes: 90
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  ref: feature/security-key-large-blob
+                  fetch-depth: 0
+
+            - uses: pnpm/action-setup@v6
+
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: pnpm
+
+            - name: Apply reviewed privacy and race hardening
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  python - <<'PY'
+                  import re
+                  from pathlib import Path
+
+                  def replace_once(text: str, old: str, new: str, label: str) -> str:
+                      count = text.count(old)
+                      if count != 1:
+                          raise SystemExit(f"{label}: expected one exact match, found {count}")
+                      return text.replace(old, new, 1)
+
+                  def regex_once(text: str, pattern: str, replacement: str, label: str, flags: int = 0) -> str:
+                      updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=flags)
+                      if count != 1:
+                          raise SystemExit(f"{label}: expected one regex match, found {count}")
+                      return updated
+
+                  vault_path = Path("src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts")
+                  vault = vault_path.read_text()
+
+                  vault = regex_once(
+                      vault,
+                      r'(interface RegistrationResult \{.*?\n    prfEnabled: boolean;)(\n    prfFirst:)',
+                      r'\1\n    residentKey: boolean;\2',
+                      "registration resident-key output",
+                      re.S,
+                  )
+                  vault = regex_once(
+                      vault,
+                      r'(interface RegisteredCredential \{.*?\n    publicKeySpki: string;)(\n    rootFingerprint:)',
+                      r'\1\n    residentKey: boolean;\2',
+                      "registered resident-key state",
+                      re.S,
+                  )
+
+                  old_matcher = '''function profilesMatch(left: SecurityKeyVaultProfile | null, right: SecurityKeyVaultProfile): boolean {
+    return left?.provider === right.provider && left.credentialId === right.credentialId &&
+        left.rootFingerprint === right.rootFingerprint && left.prfSalt === right.prfSalt;
+}'''
+                  new_matcher = '''export function securityKeyVaultProfilesMatch(
+    left: SecurityKeyVaultProfile | null,
+    right: SecurityKeyVaultProfile,
+): boolean {
+    return left?.algorithm === right.algorithm && left.createdAt === right.createdAt &&
+        left.credentialId === right.credentialId && left.provider === right.provider &&
+        left.prfSalt === right.prfSalt && left.publicKeySpki === right.publicKeySpki &&
+        left.rootFingerprint === right.rootFingerprint && left.transports.length === right.transports.length &&
+        left.transports.every((transport, index) => transport === right.transports[index]);
+}'''
+                  vault = replace_once(vault, old_matcher, new_matcher, "complete profile matcher")
+                  vault = vault.replace(
+                      'profilesMatch(activeProfile, envelope.profile)',
+                      'securityKeyVaultProfilesMatch(activeProfile, envelope.profile)',
+                  )
+
+                  vault = replace_once(
+                      vault,
+                      'function registrationScript(challenge: string, prfSalt: string, localUserId: string): string {',
+                      'function registrationScript(challenge: string, prfSalt: string): string {',
+                      "registration privacy signature",
+                  )
+                  vault = replace_once(
+                      vault,
+                      'name:${JSON.stringify(`ProtonnCord-${localUserId}`)},displayName:"ProtonnCord encrypted vault"',
+                      'name:"ProtonnCord Secure Messaging",displayName:"ProtonnCord encrypted vault"',
+                      "resident credential account privacy",
+                  )
+                  vault = replace_once(
+                      vault,
+                      'largeBlobSupported:extensions.largeBlob?.supported===true,prfEnabled:prf?.enabled===true,prfFirst:',
+                      'largeBlobSupported:extensions.largeBlob?.supported===true,prfEnabled:prf?.enabled===true,residentKey:extensions.credProps?.rk===true,prfFirst:',
+                      "resident-key extension output",
+                  )
+                  vault = replace_once(
+                      vault,
+                      '        publicKeySpki: result.publicKeySpki,\n        rootFingerprint:',
+                      '        publicKeySpki: result.publicKeySpki,\n        residentKey: result.residentKey === true,\n        rootFingerprint:',
+                      "registered resident-key assignment",
+                  )
+                  vault = replace_once(
+                      vault,
+                      '        registrationScript(challenge, prfSalt, localUserId),',
+                      '        registrationScript(challenge, prfSalt),',
+                      "registration privacy call",
+                  )
+                  vault = replace_once(
+                      vault,
+                      '    if (registered.largeBlobSupported) {',
+                      '    if (registered.largeBlobSupported && registered.residentKey) {',
+                      "large-blob resident-key enforcement",
+                  )
+
+                  vault = regex_once(
+                      vault,
+                      r'    if \(profile\.provider !== "large_blob" \|\| result\.largeBlob === null\)\n        throw new SecurityKeyVaultError\("credential_mismatch"\);\n    const payload = decodeBase64Url\(result\.largeBlob, LARGE_BLOB_PAYLOAD_BYTES, LARGE_BLOB_PAYLOAD_BYTES\);\n    try \{\n        return extractSecurityKeyLargeBlobSeed\(payload, profile\);\n    \} finally \{\n        payload\.fill\(0\);\n    \}',
+                      '''    if (profile.provider !== "large_blob" || result.largeBlob === null)
+        throw new SecurityKeyVaultError("large_blob_failed");
+    let payload: Buffer | null = null;
+    try {
+        payload = decodeBase64Url(result.largeBlob, LARGE_BLOB_PAYLOAD_BYTES, LARGE_BLOB_PAYLOAD_BYTES);
+        return extractSecurityKeyLargeBlobSeed(payload, profile);
+    } catch {
+        throw new SecurityKeyVaultError("large_blob_failed");
+    } finally {
+        payload?.fill(0);
+    }''',
+                      "large-blob read failure classification",
+                  )
+                  vault_path.write_text(vault)
+
+                  native_path = Path("src/equicordplugins/secureMessaging.desktop/native.ts")
+                  native = native_path.read_text()
+                  native = replace_once(
+                      native,
+                      '    securityKeyVaultProfileSummary,\n    type SecurityKeyVaultState,',
+                      '    securityKeyVaultProfileSummary,\n    securityKeyVaultProfilesMatch,\n    type SecurityKeyVaultState,',
+                      "native profile matcher import",
+                  )
+                  native = replace_once(
+                      native,
+                      '            if (!currentEnvelope || currentEnvelope.rootFingerprint !== prepared.profile.rootFingerprint)\n',
+                      '            if (!currentEnvelope || !securityKeyVaultProfilesMatch(currentEnvelope.profile, prepared.profile))\n',
+                      "complete unlock race check",
+                  )
+                  native_path.write_text(native)
+
+                  test_path = Path("scripts/testSecureMessagingSecurityKey.ts")
+                  test = test_path.read_text()
+                  anchor = '    assert.match(implementation, /residentKey:"required",requireResidentKey:true/u,\n        "large-blob credentials must be discoverable resident credentials");\n'
+                  if test.count(anchor) != 1:
+                      raise SystemExit("resident-key assertion anchor missing")
+                  test = test.replace(anchor, anchor + '''    assert.match(implementation, /residentKey:extensions\\.credProps\\?\\.rk===true/u,
+        "large-blob setup must verify that the created credential is discoverable");
+    assert.doesNotMatch(implementation, /ProtonnCord-\\$\\{localUserId\\}/u,
+        "discoverable credentials must not store a Discord account identifier");
+    assert.match(implementation, /export function securityKeyVaultProfilesMatch/u,
+        "unlock races must compare the complete hardware-vault provider profile");
+''', 1)
+
+                  native_anchor = '    assert.match(native, /wrapSecurityKeyVaultValue/u);\n'
+                  if test.count(native_anchor) != 1:
+                      raise SystemExit("native assertion anchor missing")
+                  test = test.replace(native_anchor, native_anchor + '''    assert.match(native, /securityKeyVaultProfilesMatch\\(currentEnvelope\\.profile, prepared\\.profile\\)/u,
+        "unlock must reject a vault-profile change that occurs during the hardware ceremony");
+''', 1)
+
+                  renderer_anchor = '    assert.match(renderer, /Native\\.unlockSecurityKeyVault/u);\n'
+                  if test.count(renderer_anchor) != 1:
+                      raise SystemExit("renderer assertion anchor missing")
+                  test = test.replace(renderer_anchor, renderer_anchor + '''    assert.match(renderer, /await Native\\.lockSecurityKeyVault\\(\\)/u,
+        "changing Discord accounts must clear the unlocked E2E vault key");
+    assert.match(renderer, /void Native\\.lockSecurityKeyVault\\(\\)/u,
+        "stopping the plugin must clear the unlocked E2E vault key");
+''', 1)
+                  test_path.write_text(test)
+
+                  Path(".trigger-large-blob-final").unlink(missing_ok=True)
+                  PY
+
+            - name: Install locked dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Run focused hardware-key checks
+              run: |
+                  pnpm lint:fix
+                  pnpm testWebAuthnLargeBlob
+                  pnpm testSecureMessagingSecurityKey
+                  pnpm testSecureMessagingNative
+                  pnpm testTsc
+                  pnpm lint-styles
+
+            - name: Run complete verification gate
+              run: |
+                  pnpm test
+                  pnpm build
+                  pnpm testWeb
+                  git diff --check
+
+            - name: Commit exact verified candidate
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  git config user.name "ProtonnCord Nightly CI"
+                  git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+                  git add -A
+                  git diff --cached --check
+                  git commit -m "Harden large-blob security-key support" \
+                    -m "Verify discoverable credentials before selecting large-blob storage, avoid persisting Discord account IDs in resident credentials, compare the complete provider profile across unlock races, classify missing or malformed blobs as storage failures, restore session-lock regressions, and keep the Chromium virtual-authenticator round trip in the complete gate."
+                  git push origin HEAD:refs/heads/feature/security-key-large-blob
