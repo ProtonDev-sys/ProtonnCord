@@ -74,7 +74,7 @@
         "testSecureMessagingLive": "tsx scripts/testSecureMessagingLive.ts",
         "createDiscordMcpVideo": "tsx scripts/createDiscordMcpVideo.ts",
         "benchmarkDiscord": "tsx scripts/benchmarkDiscord.ts",
-        "test": "pnpm testDevNativeBuild && pnpm testUserpluginUpdateReview && pnpm testUserpluginPathSafety && pnpm testMessageLoggerNativeWrites && pnpm testMessageLoggerNativeDownloads && pnpm testFileUploadNativeBoundary && pnpm testZipPreviewSecurity && pnpm testExternalUrlBoundary && pnpm testDevCompanionSecurity && pnpm testInstallerSecurity && pnpm testExtensionPublishWorkflow && pnpm testCspPolicyBoundary && pnpm testQuestifyNativeBoundary && pnpm testOrbolayBridgeSecurity && pnpm testCloudSyncPrivacy && pnpm testCloudDataStoreContract && pnpm testNavidromeAssetPrivacy && pnpm testReporterWorkflowIsolation && pnpm testUpdaterBranches && pnpm testPluginReleaseMarkers && pnpm testTsc && pnpm testUpdaterClassification && pnpm testUpdaterGit && pnpm testUpdaterHttp && pnpm testUpdaterRepository:built && pnpm testMessageEventsPriority && pnpm testMainProcessStdio && pnpm testSecureMessagingOptimisticRendering && pnpm testSecureMessagingForwarding && pnpm testSecureMessagingSecurityKey && pnpm testSecureMessagingRestGuard && pnpm testSecureMessaging && pnpm testSecureMessagingNative && pnpm lint:fix && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
+        "test": "pnpm testDevNativeBuild && pnpm testUserpluginUpdateReview && pnpm testUserpluginPathSafety && pnpm testMessageLoggerNativeWrites && pnpm testMessageLoggerNativeDownloads && pnpm testFileUploadNativeBoundary && pnpm testZipPreviewSecurity && pnpm testExternalUrlBoundary && pnpm testDevCompanionSecurity && pnpm testInstallerSecurity && pnpm testExtensionPublishWorkflow && pnpm testCspPolicyBoundary && pnpm testQuestifyNativeBoundary && pnpm testOrbolayBridgeSecurity && pnpm testCloudSyncPrivacy && pnpm testCloudDataStoreContract && pnpm testNavidromeAssetPrivacy && pnpm testReporterWorkflowIsolation && pnpm testUpdaterBranches && pnpm testPluginReleaseMarkers && pnpm testTsc && pnpm testUpdaterClassification && pnpm testUpdaterGit && pnpm testUpdaterHttp && pnpm testUpdaterRepository:built && pnpm testMessageEventsPriority && pnpm testMainProcessStdio && pnpm testSecureMessagingOptimisticRendering && pnpm testSecureMessagingForwarding && pnpm testWebAuthnLargeBlob && pnpm testSecureMessagingSecurityKey && pnpm testSecureMessagingRestGuard && pnpm testSecureMessaging && pnpm testSecureMessagingNative && pnpm lint:fix && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
         "testWeb": "pnpm lint:fix && pnpm buildWeb && pnpm testTsc",
         "testTsc": "tsc --noEmit",
         "testInstallerSecurity": "node scripts/testInstallerSecurity.mjs",
@@ -83,7 +83,8 @@
         "testSecureMessagingRestGuard": "tsx scripts/testSecureMessagingRestGuard.ts",
         "testSecureMessagingOptimisticRendering": "tsx scripts/testSecureMessagingOptimisticRendering.ts",
         "testSecureMessagingSecurityKey": "tsx scripts/testSecureMessagingSecurityKey.ts",
-        "testSecureMessagingForwarding": "tsx scripts/testSecureMessagingForwarding.ts"
+        "testSecureMessagingForwarding": "tsx scripts/testSecureMessagingForwarding.ts",
+        "testWebAuthnLargeBlob": "tsx scripts/testWebAuthnLargeBlob.ts"
     },
     "dependencies": {
         "@ffmpeg/ffmpeg": "^0.12.10",
