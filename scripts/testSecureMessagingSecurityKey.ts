@@ -19,8 +19,8 @@ type SecurityKeyVaultModule = typeof import("../src/equicordplugins/secureMessag
 const electronStub: Plugin = {
     name: "security-key-vault-electron-stub",
     setup(bundle) {
-        bundle.onResolve({ filter: /^electron$/u }, () => ({ path: "electron", namespace: "security-key-vault-test" }));
-        bundle.onLoad({ filter: /^electron$/u, namespace: "security-key-vault-test" }, () => ({
+        bundle.onResolve({ filter: /^electron$/ }, () => ({ path: "electron", namespace: "security-key-vault-test" }));
+        bundle.onLoad({ filter: /^electron$/, namespace: "security-key-vault-test" }, () => ({
             contents: `
                 export class BrowserWindow {
                     static fromWebContents() { return null; }

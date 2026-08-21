@@ -47,6 +47,7 @@ import {
     showToast,
     SnowflakeUtils,
     StickersStore,
+    TextArea,
     Toasts,
     useCallback,
     useEffect,
@@ -57,7 +58,6 @@ import {
     useStateFromStores,
 } from "@webpack/common";
 
-import { SECURITY_KEY_PROOF_PREFIX } from "../secureMessagingSecurityKey.desktop/protocol";
 import {
     clearEncryptedAttachmentCache,
     downloadEncryptedAttachmentUrl,
@@ -117,6 +117,7 @@ import type {
     IdentityResult,
     IdentitySummary,
     NativeFailure,
+    SecurityKeyVaultResult,
 } from "./native";
 import {
     clearOptimisticOutgoingPlaintexts,
@@ -630,6 +631,8 @@ function failureMessage(failure: NativeFailure): string {
         if (failure.reason === "encryption_unavailable") return "Your operating system's secure key storage is unavailable.";
         if (failure.reason === "unsafe_linux_backend") return "Secure Messaging refuses Linux's unencrypted basic_text key-storage backend.";
         if (failure.reason === "vault_unreadable") return "The encrypted Secure Messaging vault could not be read. It was not reset.";
+        if (failure.reason === "security_key_locked") return "Unlock the security key in Secure Messaging to read or send encrypted messages.";
+        if (failure.reason === "security_key_unsupported") return "This security key does not support the WebAuthn PRF extension required for vault encryption.";
         return "Secure key storage is unavailable.";
     }
     if (failure.error === "attachment_download_failed") return "The encrypted attachment could not be downloaded from Discord.";
@@ -639,6 +642,8 @@ function failureMessage(failure: NativeFailure): string {
     if (failure.error === "capacity_exceeded") return "The encrypted vault reached a safety limit.";
     if (failure.error === "cryptographic_operation_failed") return "The cryptographic operation failed.";
     if (failure.error === "screen_capture_protection_failed") return "Encrypted content visibility could not be updated safely.";
+    if (failure.error === "security_key_cancelled") return "The security-key operation was cancelled or timed out.";
+    if (failure.error === "security_key_mismatch") return "The wrong security key answered, or its profile no longer matches this vault.";
     return "The encrypted vault could not be saved.";
 }
 
@@ -1664,11 +1669,15 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
     const context = currentSnapshot(channel);
     const [identity, setIdentity] = useState<IdentityResult | null>(null);
     const [conversation, setConversation] = useState<ConversationResult | null>(null);
+    const [securityKey, setSecurityKey] = useState<SecurityKeyVaultResult | null>(null);
     const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
     const [enableEncryption, setEnableEncryption] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [confirmRotation, setConfirmRotation] = useState(false);
+    const [confirmRemoveKey, setConfirmRemoveKey] = useState(false);
+    const [showImport, setShowImport] = useState(false);
+    const [importProfile, setImportProfile] = useState("");
     const captureProtection = useScreenCaptureProtectionStatus();
 
     const load = useCallback(async () => {
@@ -1676,6 +1685,20 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
         setBusy(true);
         setError(null);
         try {
+            const nextSecurityKey = await Native.getSecurityKeyVaultState();
+            setSecurityKey(nextSecurityKey);
+            if (isNativeFailure(nextSecurityKey)) {
+                setIdentity(null);
+                setConversation(null);
+                setError(failureMessage(nextSecurityKey));
+                return;
+            }
+            if (nextSecurityKey.status === "locked") {
+                setIdentity(null);
+                setConversation(null);
+                return;
+            }
+
             const [nextIdentity, nextConversation] = await Promise.all([
                 Native.getIdentity(context.localUserId),
                 Native.getConversation(context.localUserId, context.snapshot),
@@ -1688,7 +1711,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                 setEnableEncryption(nextConversation.status === "enabled");
             }
         } catch {
-            setError("Secure Messaging could not load the encrypted conversation state.");
+            setError("Secure Messaging could not load its state.");
         } finally {
             setBusy(false);
         }
@@ -1702,6 +1725,28 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
 
     const details = conversation && conversationHasDetails(conversation) ? conversation : null;
     const readyIdentity = identity?.status === "ready" ? identity.identity : null;
+    const keyFailure = securityKey && isNativeFailure(securityKey) ? securityKey : null;
+    const keyState = securityKey && !keyFailure ? securityKey : null;
+    const vaultLocked = keyState?.status === "locked";
+
+    const runKeyAction = async (operation: () => Promise<SecurityKeyVaultResult>) => {
+        setBusy(true);
+        setError(null);
+        try {
+            const result = await operation();
+            setSecurityKey(result);
+            if (isNativeFailure(result)) setError(failureMessage(result));
+            else {
+                revokePreparedSecureOperations();
+                invalidateSecureRenderCaches();
+                await load();
+            }
+        } catch {
+            setError("The security-key operation failed.");
+        } finally {
+            setBusy(false);
+        }
+    };
 
     const toggleRecipient = (userId: string, checked: boolean) => {
         setSelectedRecipientIds(current => checked
@@ -1728,13 +1773,10 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
             if (result.status === "enabled" || result.status === "disabled") {
                 showToast(result.status === "enabled" ? "Encrypted sending enabled." : "Encrypted sending disabled.", Toasts.Type.SUCCESS);
                 modalProps.onClose();
-            } else if (isNativeFailure(result)) {
-                setError(failureMessage(result));
-            } else {
-                setError(conversationStatusMessage(result));
-            }
+            } else if (isNativeFailure(result)) setError(failureMessage(result));
+            else setError(conversationStatusMessage(result));
         } catch {
-            setError("Secure Messaging refused to save an unverified configuration.");
+            setError("Secure Messaging refused to save this configuration.");
         } finally {
             setBusy(false);
         }
@@ -1749,19 +1791,15 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
             if (result.status === "rotated") {
                 revokePreparedSecureOperations();
                 invalidateSecureRenderCaches();
-                setIdentity({ status: "ready", identity: result.identity });
-                setEnableEncryption(false);
                 setConfirmRotation(false);
                 showToast(`Identity rotated; ${result.disabledConversationCount} protected conversation(s) disabled.`, Toasts.Type.SUCCESS);
                 await load();
             } else if (result.status === "fingerprint_mismatch") {
                 setIdentity({ status: "ready", identity: result.identity });
-                setError("The identity changed before rotation. Review the new fingerprint first.");
-            } else {
-                setError(failureMessage(result));
-            }
+                setError("The identity changed before rotation.");
+            } else setError(failureMessage(result));
         } catch {
-            setError("Identity rotation failed safely; the previous identity remains in use.");
+            setError("Identity rotation failed safely.");
         } finally {
             setBusy(false);
         }
@@ -1771,125 +1809,152 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
         <Modal
             {...modalProps}
             size="medium"
-            title="Secure Messaging (PCEM3)"
+            title="Secure Messaging"
             actions={[
-                { text: "Save", variant: "primary", onClick: () => void save(), disabled: busy || !details },
+                { text: "Save", variant: "primary", onClick: () => void save(), disabled: busy || !details || vaultLocked },
                 { text: "Cancel", variant: "secondary", onClick: modalProps.onClose, disabled: busy },
             ]}
         >
             <div className="pc-secure-modal">
-                <BaseText size="sm">
-                    Non-ratcheting end-to-end encryption for selected people in this conversation. Everyone you select must install the plugin and verify fingerprints outside Discord.
-                </BaseText>
-
                 <section className="pc-secure-modal-section">
-                    <Heading tag="h5">Your identity</Heading>
-                    {identity == null && <BaseText size="sm">Loading OS-protected identity…</BaseText>}
-                    {identity && isNativeFailure(identity) && <BaseText size="sm" className="pc-secure-status-danger">{failureMessage(identity)}</BaseText>}
-                    {readyIdentity && (
+                    <Heading tag="h5">Security key</Heading>
+                    {securityKey == null && <BaseText size="sm">Loading…</BaseText>}
+                    {keyFailure && <BaseText size="sm" className="pc-secure-status-danger">{failureMessage(keyFailure)}</BaseText>}
+                    {keyState?.status === "not_configured" && (
                         <>
-                            <IdentityBlock identity={readyIdentity} />
-                            <Button size="small" onClick={() => void sendKeyAnnouncement(channel.id, context.localUserId)} disabled={busy}>
-                                Share public key in this chat
-                            </Button>
+                            <BaseText size="xs" color="text-muted">Optional. A PRF-capable FIDO2 key will be required to open the E2E key vault after setup.</BaseText>
+                            <div className="pc-secure-modal-actions">
+                                <Button size="small" variant="primary" disabled={busy} onClick={() => void runKeyAction(() => Native.setupSecurityKeyVault(context.localUserId))}>
+                                    Set up security key
+                                </Button>
+                                <Button size="small" disabled={busy} onClick={() => setShowImport(value => !value)}>
+                                    Use existing key
+                                </Button>
+                            </div>
+                            {showImport && (
+                                <>
+                                    <TextArea autosize value={importProfile} onChange={setImportProfile} placeholder="PCSKV1:…" disabled={busy} />
+                                    <Button size="small" disabled={busy || !importProfile.trim()} onClick={() => void runKeyAction(() => Native.importSecurityKeyVault(context.localUserId, importProfile))}>
+                                        Verify and import
+                                    </Button>
+                                </>
+                            )}
+                        </>
+                    )}
+                    {(keyState?.status === "locked" || keyState?.status === "unlocked") && (
+                        <>
+                            <code className="pc-secure-fingerprint">{keyState.profile.formattedRootFingerprint}</code>
+                            <div className="pc-secure-modal-actions">
+                                {keyState.status === "locked" ? (
+                                    <Button size="small" variant="primary" disabled={busy} onClick={() => void runKeyAction(() => Native.unlockSecurityKeyVault())}>
+                                        Unlock
+                                    </Button>
+                                ) : (
+                                    <>
+                                        <Button size="small" disabled={busy} onClick={() => {
+                                            copyToClipboard(keyState.profile.exportText);
+                                            showToast("Security-key profile copied.", Toasts.Type.SUCCESS);
+                                        }}>
+                                            Copy profile
+                                        </Button>
+                                        <Button size="small" disabled={busy} onClick={() => void runKeyAction(() => Native.lockSecurityKeyVault())}>
+                                            Lock
+                                        </Button>
+                                    </>
+                                )}
+                            </div>
+                            {keyState.status === "unlocked" && (
+                                <>
+                                    <Checkbox value={confirmRemoveKey} disabled={busy} onChange={(_event, checked) => setConfirmRemoveKey(checked)} size={20}>
+                                        <BaseText size="xs">Remove security-key protection from this vault.</BaseText>
+                                    </Checkbox>
+                                    <Button size="small" variant="dangerPrimary" disabled={!confirmRemoveKey || busy} onClick={() => void runKeyAction(() => Native.removeSecurityKeyVault())}>
+                                        Remove protection
+                                    </Button>
+                                </>
+                            )}
                         </>
                     )}
                 </section>
 
-                <section className="pc-secure-modal-section">
-                    <Heading tag="h5">Selected recipients</Heading>
-                    <BaseText size="xs" color="text-muted">
-                        Unselected group members can see the ciphertext and metadata but cannot decrypt the message text.
-                    </BaseText>
-                    {details?.participants.map(participant => {
-                        const userId = participant.status === "untrusted" ? participant.userId : participant.identity.userId;
-                        const trusted = participant.status === "trusted";
-                        return (
-                            <div className="pc-secure-participant" key={userId}>
-                                <Checkbox
-                                    value={trusted && selectedRecipientIds.includes(userId)}
-                                    disabled={!trusted || busy}
-                                    onChange={(_event, checked) => toggleRecipient(userId, checked)}
-                                    size={20}
-                                >
-                                    <div className="pc-secure-participant-identity">
-                                        <BaseText size="sm" weight="semibold">{userLabel(userId)}</BaseText>
-                                        <Span size="xs" color="text-muted">
-                                            {trusted ? participant.identity.formattedFingerprint :
-                                                participant.status === "key_changed" ? "Trusted key changed — review a new announcement" : "No verified key announcement"}
-                                        </Span>
+                {!vaultLocked && (
+                    <>
+                        <section className="pc-secure-modal-section">
+                            <Heading tag="h5">Identity</Heading>
+                            {identity == null && <BaseText size="sm">Loading…</BaseText>}
+                            {identity && isNativeFailure(identity) && <BaseText size="sm" className="pc-secure-status-danger">{failureMessage(identity)}</BaseText>}
+                            {readyIdentity && (
+                                <>
+                                    <IdentityBlock identity={readyIdentity} />
+                                    <Button size="small" onClick={() => void sendKeyAnnouncement(channel.id, context.localUserId)} disabled={busy}>
+                                        Share public key
+                                    </Button>
+                                </>
+                            )}
+                        </section>
+
+                        <section className="pc-secure-modal-section">
+                            <Heading tag="h5">Recipients</Heading>
+                            {details?.participants.map(participant => {
+                                const userId = participant.status === "untrusted" ? participant.userId : participant.identity.userId;
+                                const trusted = participant.status === "trusted";
+                                return (
+                                    <div className="pc-secure-participant" key={userId}>
+                                        <Checkbox
+                                            value={trusted && selectedRecipientIds.includes(userId)}
+                                            disabled={!trusted || busy}
+                                            onChange={(_event, checked) => toggleRecipient(userId, checked)}
+                                            size={20}
+                                        >
+                                            <div className="pc-secure-participant-identity">
+                                                <BaseText size="sm" weight="semibold">{userLabel(userId)}</BaseText>
+                                                <Span size="xs" color="text-muted">
+                                                    {trusted ? participant.identity.formattedFingerprint :
+                                                        participant.status === "key_changed" ? "Key changed" : "Not verified"}
+                                                </Span>
+                                            </div>
+                                        </Checkbox>
                                     </div>
+                                );
+                            })}
+                            {!details && !busy && <BaseText size="sm">Conversation state is unavailable.</BaseText>}
+                        </section>
+
+                        <section className="pc-secure-modal-section">
+                            <Checkbox value={enableEncryption} disabled={busy || !details} onChange={(_event, checked) => setEnableEncryption(checked)} size={20}>
+                                <BaseText size="sm" weight="semibold">Enable encryption</BaseText>
+                            </Checkbox>
+                            {conversation && <BaseText size="xs">{conversationStatusMessage(conversation)}</BaseText>}
+                        </section>
+
+                        <section className="pc-secure-modal-section">
+                            <Heading tag="h5">Visibility</Heading>
+                            <Button
+                                size="small"
+                                variant={captureProtection === "screenshot" ? "primary" : "secondary"}
+                                disabled={captureProtection === "pending" || captureProtection === "disabled"}
+                                onClick={() => void setScreenshotMode(captureProtection === "ready")}
+                            >
+                                {captureProtection === "screenshot" ? "Show encrypted content" :
+                                    captureProtection === "failed" ? "Retry visibility" : "Hide encrypted content"}
+                            </Button>
+                            <BaseText size="xs" color="text-muted">
+                                {captureProtection === "screenshot" ? "Hidden" : captureProtection === "ready" ? "Visible" : "Updating…"}
+                            </BaseText>
+                        </section>
+
+                        {readyIdentity && (
+                            <section className="pc-secure-modal-section">
+                                <Heading tag="h5">Reset identity</Heading>
+                                <Checkbox value={confirmRotation} disabled={busy} onChange={(_event, checked) => setConfirmRotation(checked)} size={20}>
+                                    <BaseText size="xs">Disable protected conversations and require re-verification.</BaseText>
                                 </Checkbox>
-                            </div>
-                        );
-                    })}
-                    {!details && !busy && <BaseText size="sm">Conversation state is unavailable.</BaseText>}
-                </section>
-
-                <section className="pc-secure-modal-section">
-                    <Checkbox
-                        value={enableEncryption}
-                        disabled={busy || !details}
-                        onChange={(_event, checked) => setEnableEncryption(checked)}
-                        size={20}
-                    >
-                        <BaseText size="sm" weight="semibold">Encrypt new messages and file attachments for the selected recipients</BaseText>
-                    </Checkbox>
-                    {conversation && (
-                        <BaseText
-                            size="xs"
-                            className={conversation.status === "enabled" ? "pc-secure-status-enabled" :
-                                conversation.status === "participant_changed" || conversation.status === "unverified_recipients" ? "pc-secure-status-warning" : undefined}
-                        >
-                            {conversationStatusMessage(conversation)}
-                        </BaseText>
-                    )}
-                </section>
-
-                <section className="pc-secure-modal-section">
-                    <Heading tag="h5">Screenshots and screen sharing</Heading>
-                    <BaseText size="xs" color="text-muted">
-                        Discord is always capturable. Screenshot mode temporarily replaces decrypted messages and attachments with protected placeholders before you capture or share the window.
-                    </BaseText>
-                    <Button
-                        size="small"
-                        variant={captureProtection === "screenshot" ? "primary" : "secondary"}
-                        disabled={captureProtection === "pending" || captureProtection === "disabled"}
-                        onClick={() => void setScreenshotMode(captureProtection === "ready")}
-                    >
-                        {captureProtection === "screenshot" ? "Protect encrypted messages again" :
-                            captureProtection === "failed" ? "Retry encrypted-content visibility" : "Hide encrypted content"}
-                    </Button>
-                    <BaseText size="xs" className={captureProtection === "screenshot" ? "pc-secure-status-warning" : undefined}>
-                        {captureProtection === "screenshot" ? "Encrypted content is hidden; screenshots remain available." :
-                            captureProtection === "ready" ? "Discord is capturable and encrypted content is visible." :
-                                captureProtection === "failed" ? "Encrypted content visibility could not be updated safely." :
-                                    "Updating encrypted-content visibility…"}
-                    </BaseText>
-                </section>
-
-                <section className="pc-secure-modal-section">
-                    <Heading tag="h5">Important limitations</Heading>
-                    <BaseText size="xs" color="text-muted">
-                        The current PCEM3 protocol encrypts text, GIF-picker links, sticker metadata, ordinary file attachments, and voice-message audio. Short text stays inline; text that would overflow Discord's message limit uses one opaque encrypted attachment and is reconstructed locally as a normal message. Its exact encrypted size, including private metadata and authentication overhead, must fit the upload limit Discord reports for your account. Received files are fully downloaded, authenticated, and decrypted locally before Discord's normal renderers display them. Encrypted voice messages are stored as ordinary opaque attachments; their authenticated duration and waveform restore Discord's voice-message renderer only after local decryption. Authentication proves the verified sender supplied the bytes, not that a file is harmless: Discord can scan only the opaque ciphertext, so keep normal operating-system and antivirus protections enabled. Inline encrypted messages can be edited while retaining their existing encrypted attachments and stickers; large detached text, attachment-set changes, and commands remain blocked from editing. Explicit mentions of selected encrypted participants expose those user IDs as authenticated mention metadata so Discord can deliver recipient pings and render mentioned-message highlighting without waiting for decryption; the surrounding message text remains encrypted, the author is excluded from Discord's notification allowlist, and role/everyone pings stay disabled. Discord still sees who talks, when, ciphertext sizes, attachment counts, channel membership, edit timing, reply metadata, and mentioned user IDs. Normal link and GIF previews disclose their URL to Discord's unfurl service; displaying a sticker requests its asset ID from Discord's media CDN. The protocol has no forward secrecy or post-compromise healing, and a compromised client or plugin can read plaintext while it is displayed.
-                    </BaseText>
-                </section>
-
-                {readyIdentity && (
-                    <section className="pc-secure-modal-section">
-                        <Heading tag="h5">Identity reset</Heading>
-                        <Checkbox
-                            value={confirmRotation}
-                            disabled={busy}
-                            onChange={(_event, checked) => setConfirmRotation(checked)}
-                            size={20}
-                        >
-                            <BaseText size="xs">I understand that rotating my key disables every protected conversation and requires everyone to verify me again.</BaseText>
-                        </Checkbox>
-                        <Button size="small" variant="dangerPrimary" disabled={!confirmRotation || busy} onClick={() => void rotate()}>
-                            Rotate my identity
-                        </Button>
-                    </section>
+                                <Button size="small" variant="dangerPrimary" disabled={!confirmRotation || busy} onClick={() => void rotate()}>
+                                    Rotate identity
+                                </Button>
+                            </section>
+                        )}
+                    </>
                 )}
 
                 {busy && <BaseText size="xs" color="text-muted">Working…</BaseText>}
@@ -2087,8 +2152,6 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         });
         return () => { active = false; };
     }, [captureProtection, key, localUserId]);
-
-    if (visiblePlaintext?.startsWith(SECURITY_KEY_PROOF_PREFIX)) return null;
 
     if (captureProtection !== "ready") {
         const screenshotMode = captureProtection === "screenshot";

@@ -10,9 +10,9 @@ import {
     createHash,
     createPublicKey,
     hkdfSync,
+    type KeyObject,
     randomBytes,
     randomUUID,
-    type KeyObject,
     verify as verifySignature,
 } from "node:crypto";
 import { createServer, type Server } from "node:http";
@@ -574,7 +574,7 @@ export async function prepareSecurityKeyVaultSetup(
     const profile = verifyRegistration(registration, challenge);
     profile.prfSalt = prfSalt;
     validateProfile(profile);
-    let prfFirst = registration.prfFirst;
+    let { prfFirst } = registration;
     if (!registration.prfEnabled || !prfFirst) {
         const assertionChallenge = randomChallenge();
         const assertion = await runCeremony<AssertionResult>(
