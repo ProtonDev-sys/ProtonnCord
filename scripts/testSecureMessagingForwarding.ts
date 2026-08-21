@@ -53,7 +53,8 @@ const composed = composeSecureForwardText({
     mentionResolvers: { user: () => "Alice" },
     timestampMs: 1_780_000_000_000,
 });
-assert.match(composed, /Forwarded copy from A \\*sender\\\*/u);
+assert.ok(composed.includes("Forwarded copy from A \\*sender\\*"),
+    "forward header must escape source-author markdown");
 assert.match(composed, /source text @\u200bAlice/u);
 assert.match(composed, /https:\/\/example\.com\/watch\?v=1/u);
 assert.doesNotMatch(composed, /message_reference|messageReference/u);
