@@ -1,0 +1,365 @@
+name: Harden integrated security-key vault candidate v3
+
+on:
+  pull_request:
+    branches:
+      - nightly
+    paths:
+      - .trigger-security-key-vault-hardening-v3
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/security-key-vault'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/security-key-vault
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Apply deterministic key-lifetime and session-lock hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_function(text: str, start_marker: str, end_marker: str, replacement: str, label: str) -> str:
+              if text.count(start_marker) != 1:
+                  raise SystemExit(f"{label}: start marker count was {text.count(start_marker)}")
+              start = text.index(start_marker)
+              end = text.index(end_marker, start)
+              return text[:start] + replacement.rstrip() + "\n" + text[end:]
+
+          vault_path = Path('src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts')
+          vault = vault_path.read_text()
+
+          vault = replace_function(
+              vault,
+              'function deriveVaultKey(',
+              '\nexport function activatePreparedSecurityKeyVault',
+              '''function deriveVaultKey(prfOutput: string, profile: SecurityKeyVaultProfile): Buffer {
+              const output = decodeBase64Url(prfOutput, 32, 32);
+              try {
+                  return Buffer.from(hkdfSync(
+                      "sha256",
+                      output,
+                      decodeBase64Url(profile.rootFingerprint, 32, 32),
+                      VAULT_KEY_INFO,
+                      32,
+                  ));
+              } finally {
+                  output.fill(0);
+              }
+          }''',
+              'deriveVaultKey',
+          )
+
+          vault = replace_function(
+              vault,
+              'export function activatePreparedSecurityKeyVault(',
+              '\nexport function clearSecurityKeyVaultSession',
+              '''export function activatePreparedSecurityKeyVault(prepared: PreparedSecurityKeyVault): void {
+              validateProfile(prepared.profile);
+              if (!Buffer.isBuffer(prepared.key) || prepared.key.byteLength !== 32)
+                  throw new SecurityKeyVaultError("credential_mismatch");
+              const nextKey = Buffer.from(prepared.key);
+              prepared.key.fill(0);
+              clearSecurityKeyVaultSession();
+              activeKey = nextKey;
+              activeProfile = structuredClone(prepared.profile);
+          }''',
+              'activatePreparedSecurityKeyVault',
+          )
+
+          vault = replace_function(
+              vault,
+              'export function wrapSecurityKeyVaultValue(',
+              '\nexport function unwrapSecurityKeyVaultValue',
+              '''export function wrapSecurityKeyVaultValue(value: unknown): unknown {
+              if (!activeKey || !activeProfile) return value;
+              const plaintext = Buffer.from(JSON.stringify(value), "utf8");
+              try {
+                  const nonce = randomBytes(12);
+                  const cipher = createCipheriv("aes-256-gcm", activeKey, nonce);
+                  cipher.setAAD(vaultAad(activeProfile.rootFingerprint));
+                  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+                  const tag = cipher.getAuthTag();
+                  if (ciphertext.byteLength < 1 || ciphertext.byteLength > MAX_ENCRYPTED_VAULT_BYTES)
+                      throw new SecurityKeyVaultError("corrupt");
+                  return {
+                      ciphertext: ciphertext.toString("base64url"),
+                      mode: "security_key",
+                      nonce: nonce.toString("base64url"),
+                      profile: structuredClone(activeProfile),
+                      rootFingerprint: activeProfile.rootFingerprint,
+                      tag: tag.toString("base64url"),
+                      version: ENVELOPE_VERSION,
+                  } satisfies SecurityKeyVaultEnvelope;
+              } finally {
+                  plaintext.fill(0);
+              }
+          }''',
+              'wrapSecurityKeyVaultValue',
+          )
+
+          vault = replace_function(
+              vault,
+              'export function unwrapSecurityKeyVaultValue(',
+              '\nfunction randomChallenge',
+              '''export function unwrapSecurityKeyVaultValue(value: unknown): unknown {
+              const envelope = parseSecurityKeyVaultEnvelope(value);
+              if (!envelope) return value;
+              if (!activeKey || activeProfile?.rootFingerprint !== envelope.rootFingerprint)
+                  throw new SecurityKeyVaultError("locked");
+              let plaintext: Buffer | null = null;
+              try {
+                  const decipher = createDecipheriv(
+                      "aes-256-gcm",
+                      activeKey,
+                      decodeBase64Url(envelope.nonce, 12, 12),
+                  );
+                  decipher.setAAD(vaultAad(envelope.rootFingerprint));
+                  decipher.setAuthTag(decodeBase64Url(envelope.tag, 16, 16));
+                  plaintext = Buffer.concat([
+                      decipher.update(decodeBase64Url(envelope.ciphertext, 1, MAX_ENCRYPTED_VAULT_BYTES)),
+                      decipher.final(),
+                  ]);
+                  return JSON.parse(plaintext.toString("utf8"));
+              } catch (error) {
+                  if (error instanceof SecurityKeyVaultError) throw error;
+                  throw new SecurityKeyVaultError("corrupt");
+              } finally {
+                  plaintext?.fill(0);
+              }
+          }''',
+              'unwrapSecurityKeyVaultValue',
+          )
+          vault_path.write_text(vault)
+
+          native_path = Path('src/equicordplugins/secureMessaging.desktop/native.ts')
+          native = native_path.read_text()
+
+          native = replace_function(
+              native,
+              'async function configureSecurityKeyVault(',
+              '\nexport async function getSecurityKeyVaultState',
+              '''async function configureSecurityKeyVault(
+              prepared: PreparedSecurityKeyVault,
+          ): Promise<SecurityKeyVaultResult> {
+              try {
+                  return await runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+                      const stored = await readVaultStoredValue();
+                      if (parseSecurityKeyVaultEnvelope(stored))
+                          return invalidInput("A security key already protects this Secure Messaging vault");
+                      const vault = await loadVault();
+                      activatePreparedSecurityKeyVault(prepared);
+                      cachedVault = null;
+                      try {
+                          await saveVault(vault);
+                          clearAuthenticatedAttachmentCache();
+                          return {
+                              status: "unlocked",
+                              profile: securityKeyVaultProfileSummary(prepared.profile),
+                          };
+                      } catch (error) {
+                          clearSecurityKeyVaultSession();
+                          cachedVault = null;
+                          throw error;
+                      }
+                  });
+              } finally {
+                  prepared.key.fill(0);
+              }
+          }''',
+              'configureSecurityKeyVault',
+          )
+
+          native = replace_function(
+              native,
+              'export async function unlockSecurityKeyVault(',
+              '\nexport async function lockSecurityKeyVault',
+              '''export async function unlockSecurityKeyVault(
+              event: IpcMainInvokeEvent,
+          ): Promise<SecurityKeyVaultResult> {
+              const callerFailure = validateIpcCaller(event);
+              if (callerFailure) return callerFailure;
+              let initialEnvelope;
+              try {
+                  validateStorageAvailability();
+                  initialEnvelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
+              } catch (error) {
+                  return mapOperationFailure(error);
+              }
+              if (!initialEnvelope) return invalidInput("This Secure Messaging vault is not protected by a security key");
+
+              let prepared: PreparedSecurityKeyVault;
+              try {
+                  prepared = await prepareSecurityKeyVaultUnlock(event, initialEnvelope.profile);
+              } catch (error) {
+                  return mapOperationFailure(error);
+              }
+              try {
+                  return await runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+                      const currentEnvelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
+                      if (!currentEnvelope || currentEnvelope.rootFingerprint !== prepared.profile.rootFingerprint)
+                          return { status: "failed", error: "security_key_mismatch" };
+                      activatePreparedSecurityKeyVault(prepared);
+                      cachedVault = null;
+                      try {
+                          await loadVault();
+                          clearAuthenticatedAttachmentCache();
+                          return {
+                              status: "unlocked",
+                              profile: securityKeyVaultProfileSummary(prepared.profile),
+                          };
+                      } catch (error) {
+                          clearSecurityKeyVaultSession();
+                          cachedVault = null;
+                          throw error;
+                      }
+                  });
+              } finally {
+                  prepared.key.fill(0);
+              }
+          }''',
+              'unlockSecurityKeyVault',
+          )
+          native_path.write_text(native)
+
+          renderer_path = Path('src/equicordplugins/secureMessaging.desktop/index.tsx')
+          renderer = renderer_path.read_text()
+          renderer = replace_function(
+              renderer,
+              'function handleSecureConnectionOpen()',
+              '\nfunction IdentityBlock',
+              '''async function handleSecureConnectionOpen(): Promise<void> {
+              const localUserId = UserStore.getCurrentUser()?.id ?? null;
+              const accountChanged = secureRuntimeUserId !== null && secureRuntimeUserId !== localUserId;
+              secureRuntimeUserId = localUserId;
+              if (accountChanged) {
+                  secureOperationGeneration++;
+                  revokePreparedSecureOperations();
+                  messageLengthBypassKeys.clear();
+                  invalidateSecureRenderCaches();
+                  try {
+                      await Native.lockSecurityKeyVault();
+                  } catch {
+                      // The native process still clears its in-memory key on process exit; renderer state fails closed.
+                  }
+              }
+              invalidateSecureRenderCaches();
+          }''',
+              'handleSecureConnectionOpen',
+          )
+          if renderer.count('Use existing key') != 1:
+              raise SystemExit(f"existing-key button label count was {renderer.count('Use existing key')}")
+          renderer = renderer.replace('Use existing key', 'Protect with existing key', 1)
+
+          stop_start = renderer.index('    stop() {')
+          stop_end = renderer.index('\n    patchEncryptedAttachments', stop_start)
+          stop_block = renderer[stop_start:stop_end]
+          marker = '        revokePreparedSecureOperations();\n'
+          if 'void Native.lockSecurityKeyVault();' not in stop_block:
+              if stop_block.count(marker) != 1:
+                  raise SystemExit(f"plugin-stop revocation marker count was {stop_block.count(marker)}")
+              stop_block = stop_block.replace(marker, marker + '        void Native.lockSecurityKeyVault();\n', 1)
+              renderer = renderer[:stop_start] + stop_block + renderer[stop_end:]
+          renderer_path.write_text(renderer)
+
+          test_path = Path('scripts/testSecureMessagingSecurityKey.ts')
+          test = test_path.read_text()
+          first = '        const key = randomBytes(32);\n        module.activatePreparedSecurityKeyVault({ key, profile });\n'
+          if test.count(first) != 1:
+              raise SystemExit(f"first activation block count was {test.count(first)}")
+          test = test.replace(
+              first,
+              '        const key = randomBytes(32);\n'
+              '        const firstPreparedKey = Buffer.from(key);\n'
+              '        module.activatePreparedSecurityKeyVault({ key: firstPreparedKey, profile });\n'
+              '        assert.equal(firstPreparedKey.every(byte => byte === 0), true,\n'
+              '            "the transferred prepared key must be wiped after activation");\n',
+              1,
+          )
+          second = '        module.activatePreparedSecurityKeyVault({ key, profile });\n        assert.deepEqual(module.unwrapSecurityKeyVaultValue(wrapped), plaintextVault);\n'
+          if test.count(second) != 1:
+              raise SystemExit(f"second activation block count was {test.count(second)}")
+          test = test.replace(
+              second,
+              '        module.activatePreparedSecurityKeyVault({ key: Buffer.from(key), profile });\n'
+              '        assert.deepEqual(module.unwrapSecurityKeyVaultValue(wrapped), plaintextVault);\n',
+              1,
+          )
+          hkdf_assertion = '    assert.match(implementation, /hkdfSync\\(/u);\n'
+          if test.count(hkdf_assertion) != 1:
+              raise SystemExit(f"HKDF assertion count was {test.count(hkdf_assertion)}")
+          test = test.replace(
+              hkdf_assertion,
+              hkdf_assertion +
+              '    assert.match(implementation, /output\\.fill\\(0\\)/u);\n'
+              '    assert.match(implementation, /plaintext\\?\\.fill\\(0\\)|plaintext\\.fill\\(0\\)/u);\n',
+              1,
+          )
+          unlock_assertion = '    assert.match(renderer, /Native\\.unlockSecurityKeyVault/u);\n'
+          if test.count(unlock_assertion) != 1:
+              raise SystemExit(f"unlock assertion count was {test.count(unlock_assertion)}")
+          test = test.replace(
+              unlock_assertion,
+              unlock_assertion +
+              '    assert.match(renderer, /await Native\\.lockSecurityKeyVault\\(\\)/u,\n'
+              '        "changing Discord accounts must clear the unlocked E2E vault key");\n'
+              '    assert.match(renderer, /void Native\\.lockSecurityKeyVault\\(\\)/u,\n'
+              '        "stopping the plugin must clear the unlocked E2E vault key");\n',
+              1,
+          )
+          test_path.write_text(test)
+
+          for cleanup in [
+              '.trigger-security-key-vault-hardening',
+              '.trigger-security-key-vault-hardening-v2',
+              '.trigger-security-key-vault-hardening-v3',
+          ]:
+              Path(cleanup).unlink(missing_ok=True)
+          PY
+          git add -A
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run focused security checks
+        run: |
+          pnpm lint:fix
+          pnpm testSecureMessagingSecurityKey
+          pnpm testSecureMessagingNative
+          pnpm testTsc
+          pnpm lint-styles
+
+      - name: Run complete verification gate
+        run: |
+          pnpm test
+          pnpm build
+          pnpm testWeb
+          git diff --check
+
+      - name: Commit exact verified hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ProtonnCord Nightly CI"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Harden security-key vault key lifetime" \
+            -m "Wipe PRF-derived and plaintext buffers, wipe prepared keys on every exit path, lock the E2E vault when Discord accounts change or the plugin stops, clarify the existing-key action, and retain the complete verification gates."
+          git push --force-with-lease origin HEAD:refs/heads/feature/security-key-vault
