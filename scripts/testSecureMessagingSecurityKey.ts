@@ -104,6 +104,11 @@ async function main(): Promise<void> {
         assert.deepEqual(module.parseSecurityKeyVaultProfile(legacy), prfProfile,
             "existing PCSKV1 PRF profiles must remain importable");
         assert.equal(module.formatSecurityKeyVaultFingerprint(prfProfile.rootFingerprint).split(" ").length, 16);
+        assert.equal(module.securityKeyVaultProfilesMatch(prfProfile, structuredClone(prfProfile)), true);
+        const otherCredential = structuredClone(prfProfile);
+        otherCredential.credentialId = randomBytes(32).toString("base64url");
+        assert.equal(module.securityKeyVaultProfilesMatch(prfProfile, otherCredential), false,
+            "hardware-vault profiles with the same root but another credential must not be interchangeable");
 
         const largeBlobSeed = randomBytes(32);
         const largeBlobPayload = module.createSecurityKeyLargeBlobPayload(largeBlobSeed, largeBlobProfile);
@@ -146,6 +151,12 @@ async function main(): Promise<void> {
         assert.equal(module.securityKeyVaultStateForValue(wrapped).status, "unlocked");
         assert.deepEqual(module.unwrapSecurityKeyVaultValue(wrapped), plaintextVault);
 
+        const changedProfileEnvelope = structuredClone(wrapped) as any;
+        changedProfileEnvelope.profile.credentialId = randomBytes(32).toString("base64url");
+        assert.equal(module.securityKeyVaultStateForValue(changedProfileEnvelope).status, "locked",
+            "a vault profile changed during unlock must not reuse an active key from the same public root");
+        assert.throws(() => module.unwrapSecurityKeyVaultValue(changedProfileEnvelope), /locked/u);
+
         const legacyEnvelope = structuredClone(wrapped) as any;
         delete legacyEnvelope.profile.provider;
         assert.equal(module.parseSecurityKeyVaultEnvelope(legacyEnvelope)?.profile.provider, "prf",
@@ -182,16 +193,23 @@ async function main(): Promise<void> {
         "registration must negotiate PRF and large-blob providers together");
     assert.match(implementation, /residentKey:"required",requireResidentKey:true/u,
         "large-blob credentials must be discoverable resident credentials");
+    assert.match(implementation, /residentKey:extensions\.credProps\?\.rk===true/u,
+        "large-blob setup must verify that the created credential is discoverable");
+    assert.doesNotMatch(implementation, /ProtonnCord-\$\{localUserId\}/u,
+        "discoverable credentials must not store a Discord account identifier");
+    assert.match(implementation, /registered\.largeBlobSupported && registered\.residentKey/u);
     assert.match(implementation, /extensions:\{largeBlob:\{write:/u,
         "setup must store the random vault seed with WebAuthn largeBlob.write");
     assert.match(implementation, /extensions:\{largeBlob:\{read:true\}\}/u,
         "unlock must retrieve the vault seed with WebAuthn largeBlob.read");
-    assert.match(implementation, /if \(registered\.prfEnabled\)[\s\S]*if \(registered\.largeBlobSupported\)/u,
+    assert.match(implementation, /if \(registered\.prfEnabled\)[\s\S]*if \(registered\.largeBlobSupported/u,
         "PRF remains preferred while large blob provides the compatibility fallback");
     assert.match(implementation, /largeBlobWritten !== true/u,
         "setup must fail closed unless the authenticator confirms the blob write");
     assert.match(implementation, /timingSafeEqual\(payloadRoot, expectedRoot\)/u,
         "large-blob payloads must be bound to the credential root");
+    assert.match(implementation, /export function securityKeyVaultProfilesMatch/u,
+        "an unlocked key must be bound to the complete provider profile");
     assert.match(implementation, /createCipheriv\("aes-256-gcm"/u);
     assert.match(implementation, /hkdfSync\(/u);
     assert.match(implementation, /seed\.fill\(0\)/u);
@@ -221,6 +239,10 @@ async function main(): Promise<void> {
     assert.match(renderer, /keyState\.profile\.provider === "large_blob"/u);
     assert.match(renderer, /Native\.setupSecurityKeyVault/u);
     assert.match(renderer, /Native\.unlockSecurityKeyVault/u);
+    assert.match(renderer, /await Native\.lockSecurityKeyVault\(\)/u,
+        "changing Discord accounts must clear the unlocked E2E vault key");
+    assert.match(renderer, /void Native\.lockSecurityKeyVault\(\)/u,
+        "stopping the plugin must clear the unlocked E2E vault key");
     assert.doesNotMatch(renderer, /title="Secure Messaging \(PCEM3\)"/u);
     assert.doesNotMatch(renderer, /<Heading tag="h5">Important limitations<\/Heading>/u);
 
