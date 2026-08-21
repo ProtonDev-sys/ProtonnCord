@@ -37,6 +37,7 @@ import {
     serializeSecurityKeyProfile,
     serializeSecurityKeyProof,
 } from "./protocol";
+import { removePeerFromSecurityKeyRoot } from "./rootLinks";
 import {
     securityKeyProofDigest,
     verifySecurityKeyProfile,
@@ -1050,6 +1051,8 @@ export async function trustSecurityKeyProof(
         const previous = account.peerRoots[peerUserId] ?? null;
         if (previous && previous !== expectedRootFingerprint && !replaceExisting)
             return { status: "key_changed" };
+        if (previous && previous !== expectedRootFingerprint)
+            removePeerFromSecurityKeyRoot(account.trustedRoots, previous, peerUserId);
         if (!account.trustedRoots[expectedRootFingerprint] &&
             Object.keys(account.trustedRoots).length >= MAX_TRUSTED_ROOTS)
             throw new SecurityKeyOperationError("capacity_exceeded");
@@ -1081,11 +1084,7 @@ export async function forgetSecurityKeyPeer(
         const fingerprint = account.peerRoots[peerUserId];
         if (!fingerprint) return { status: "not_found" as const };
         delete account.peerRoots[peerUserId];
-        const root = account.trustedRoots[fingerprint];
-        if (root) {
-            root.userIds = root.userIds.filter(candidate => candidate !== peerUserId);
-            if (root.userIds.length === 0) delete account.trustedRoots[fingerprint];
-        }
+        removePeerFromSecurityKeyRoot(account.trustedRoots, fingerprint, peerUserId);
         await saveVault(vault);
         return { status: "forgotten" as const };
     }) as Promise<{ status: "forgotten" | "not_found"; } | SecurityKeyFailure>;

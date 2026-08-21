@@ -80,6 +80,10 @@
     font-size: 0.75rem;
 }
 
+[id^="chat-messages-"]:has(.pc-security-key-proof) [class*="messageContent"] {
+    display: none;
+}
+
 [id^="chat-messages-"]:has(.pc-security-key-proof) .pc-secure-message {
     display: none;
 }
