@@ -1738,23 +1738,24 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
     const vaultLocked = keyState?.status === "locked";
 
     const runKeyAction = async (operation: () => Promise<SecurityKeyVaultResult>) => {
-        setBusy(true);
-        setError(null);
-        try {
-            const result = await operation();
+    setBusy(true);
+    setError(null);
+    try {
+        const result = await operation();
+        if (isNativeFailure(result)) {
+            setError(failureMessage(result));
+        } else {
             setSecurityKey(result);
-            if (isNativeFailure(result)) setError(failureMessage(result));
-            else {
-                revokePreparedSecureOperations();
-                invalidateSecureRenderCaches();
-                await load();
-            }
-        } catch {
-            setError("The security-key operation failed.");
-        } finally {
-            setBusy(false);
+            revokePreparedSecureOperations();
+            invalidateSecureRenderCaches();
+            await load();
         }
-    };
+    } catch {
+        setError("The security-key operation failed.");
+    } finally {
+        setBusy(false);
+    }
+};
 
     const toggleRecipient = (userId: string, checked: boolean) => {
         setSelectedRecipientIds(current => checked

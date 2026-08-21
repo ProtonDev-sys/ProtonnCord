@@ -1851,12 +1851,15 @@ export async function lockSecurityKeyVault(
 ): Promise<SecurityKeyVaultResult> {
     const callerFailure = validateIpcCaller(event);
     if (callerFailure) return callerFailure;
+
+    // Locking is a memory-safety boundary. Clear private material before any filesystem,
+    // mutex, or safeStorage operation that could fail or wait.
+    clearSecurityKeyVaultSession();
+    cachedVault = null;
+    clearAuthenticatedAttachmentCache();
+
     return runSerialized(async (): Promise<SecurityKeyVaultResult> => {
-        const stored = await readVaultStoredValue();
-        const envelope = parseSecurityKeyVaultEnvelope(stored);
-        clearSecurityKeyVaultSession();
-        cachedVault = null;
-        clearAuthenticatedAttachmentCache();
+        const envelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
         return envelope
             ? { status: "locked", profile: securityKeyVaultProfileSummary(envelope.profile) }
             : { status: "not_configured" };
