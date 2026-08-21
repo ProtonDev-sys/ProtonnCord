@@ -1,0 +1,194 @@
+name: Run hardware identity candidate generator v8
+
+on:
+  pull_request:
+    branches:
+      - nightly
+    paths:
+      - .trigger-security-key-v8
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/security-key-identity'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/security-key-identity
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Reapply focused reviewed candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin nightly fix/secure-forwarding
+          git show origin/nightly:.github/workflows/run-security-key-generator-v5.yml > /tmp/v5.yml
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('/tmp/v5.yml').read_text()
+          marker = '      - name: Apply focused reviewed source changes\n        shell: bash\n        run: |\n'
+          if source.count(marker) != 1:
+              raise SystemExit('focused apply block was not found exactly once')
+          payload = source.split(marker, 1)[1].split('\n      - name:', 1)[0]
+          output = []
+          for line in payload.splitlines():
+              if line.startswith('          '):
+                  output.append(line[10:])
+              elif not line.strip():
+                  output.append('')
+              else:
+                  raise SystemExit(f'unexpected apply-block indentation: {line!r}')
+          Path('/tmp/apply-focused-candidate.sh').write_text('\n'.join(output) + '\n')
+          PY
+          bash -n /tmp/apply-focused-candidate.sh
+          bash /tmp/apply-focused-candidate.sh
+
+      - name: Apply deterministic type-safety corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, got {count}")
+              return text.replace(old, new, 1)
+
+          ui_path = Path('src/equicordplugins/secureMessagingSecurityKey.desktop/index.tsx')
+          ui = ui_path.read_text()
+          trust_start = ui.index('            if (root.status !== "trusted") {\n')
+          trust_end = ui.index('            await trustEncryptionAnnouncement(\n', trust_start)
+          trust_replacement = (
+              '            if (root.status !== "trusted") {\n'
+              '                if (isSecurityKeyFailure(root))\n'
+              '                    setError(securityKeyFailureMessage(root));\n'
+              '                else if (root.status === "key_changed")\n'
+              '                    setError("A different hardware root is already associated with this Discord account.");\n'
+              '                else\n'
+              '                    setError("The hardware proof review expired. Close this window and review the message again.");\n'
+              '                return;\n'
+              '            }\n'
+          )
+          ui = ui[:trust_start] + trust_replacement + ui[trust_end:]
+
+          proof_start = ui.index('function ProofCard')
+          proof_end = ui.index('\nfunction SecurityKeyProofAccessory', proof_start)
+          proof = ui[proof_start:proof_end]
+          proof = replace_once(
+              proof,
+              '    if (isSecurityKeyFailure(review.security)) {\n',
+              '    const security = review.security;\n    if (isSecurityKeyFailure(security)) {\n',
+              'proof security local variable',
+          )
+          proof = proof.replace('review.security', 'security')
+          ui = ui[:proof_start] + proof + ui[proof_end:]
+          ui_path.write_text(ui)
+
+          native_path = Path('src/equicordplugins/secureMessagingSecurityKey.desktop/native.ts')
+          native = native_path.read_text()
+          native = replace_once(
+              native,
+              '    if (transports.length !== value.transports.length ||\n',
+              '    if (transports.length !== (value.transports as unknown[]).length ||\n',
+              'transport array narrowing',
+          )
+          native = replace_once(
+              native,
+              '    if (userIds.length !== value.userIds.length || userIds.some((userId, index) => userId !== value.userIds[index])) return null;\n',
+              '    if (userIds.length !== (value.userIds as unknown[]).length ||\n        userIds.some((userId, index) => userId !== (value.userIds as unknown[])[index])) return null;\n',
+              'user-id array narrowing',
+          )
+          native = replace_once(
+              native,
+              '            await handle.writeFile(`${process.pid}:${randomUUID()}\\n`, { flush: true });\n',
+              '            await handle.writeFile(`${process.pid}:${randomUUID()}\\n`);\n            await handle.sync();\n',
+              'lock-file durability',
+          )
+          native_path.write_text(native)
+
+          protocol_path = Path('src/equicordplugins/secureMessagingSecurityKey.desktop/protocol.ts')
+          protocol = protocol_path.read_text()
+          if 'function cryptoBytes(' not in protocol:
+              marker = 'export function encodeBase64Url'
+              if protocol.count(marker) != 1:
+                  raise SystemExit(f'encodeBase64Url marker count was {protocol.count(marker)}')
+              protocol = protocol.replace(
+                  marker,
+                  'function cryptoBytes(value: Uint8Array): ArrayBuffer {\n'
+                  '    return Uint8Array.from(value).buffer;\n'
+                  '}\n\n'
+                  + marker,
+                  1,
+              )
+          protocol = replace_once(
+              protocol,
+              '    const digest = await crypto.subtle.digest("SHA-256", concatBytes(\n        ROOT_FINGERPRINT_PREFIX,\n        new TextEncoder().encode(`${SECURITY_KEY_RP_ID}\\0${algorithm}\\0`),\n        decodeBase64Url(publicKeySpki),\n    ));\n',
+              '    const digest = await crypto.subtle.digest("SHA-256", cryptoBytes(concatBytes(\n        ROOT_FINGERPRINT_PREFIX,\n        new TextEncoder().encode(`${SECURITY_KEY_RP_ID}\\0${algorithm}\\0`),\n        decodeBase64Url(publicKeySpki),\n    )));\n',
+              'root digest BufferSource',
+          )
+          protocol = replace_once(
+              protocol,
+              '    return encodeBase64Url(await crypto.subtle.digest("SHA-256", concatBytes(PROOF_CHALLENGE_PREFIX, canonical)));\n',
+              '    return encodeBase64Url(await crypto.subtle.digest(\n        "SHA-256",\n        cryptoBytes(concatBytes(PROOF_CHALLENGE_PREFIX, canonical)),\n    ));\n',
+              'proof challenge BufferSource',
+          )
+          protocol = replace_once(
+              protocol,
+              '    return encodeBase64Url(await crypto.subtle.digest("SHA-256", concatBytes(IMPORT_CHALLENGE_PREFIX, canonical)));\n',
+              '    return encodeBase64Url(await crypto.subtle.digest(\n        "SHA-256",\n        cryptoBytes(concatBytes(IMPORT_CHALLENGE_PREFIX, canonical)),\n    ));\n',
+              'import challenge BufferSource',
+          )
+          protocol_path.write_text(protocol)
+
+          for path in [
+              '.github/workflows/run-security-key-generator-v6.yml',
+              '.github/workflows/run-security-key-generator-v7.yml',
+              '.github/workflows/run-security-key-generator-v8.yml',
+              '.trigger-security-key-v6',
+              '.trigger-security-key-v7',
+              '.trigger-security-key-v8',
+          ]:
+              Path(path).unlink(missing_ok=True)
+          PY
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run focused diagnostics
+        run: |
+          pnpm testSecureMessagingOptimisticRendering
+          pnpm testSecureMessagingSecurityKey
+          pnpm testTsc
+
+      - name: Run complete verification gate
+        run: |
+          pnpm test
+          pnpm build
+          pnpm testWeb
+          git diff --check
+
+      - name: Commit verified candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ProtonnCord Nightly CI"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Add hardware security-key identity continuity" \
+            -m "Bind per-device and per-account Secure Messaging identities to a user-verified roaming WebAuthn credential, add portable public profiles and signed account proofs, retain outgoing render continuity, add encrypted-copy forwarding, clean temporary delivery workflows, and bump nightly to 1.15.1.5."
+          git push --force-with-lease origin HEAD:refs/heads/feature/security-key-identity
