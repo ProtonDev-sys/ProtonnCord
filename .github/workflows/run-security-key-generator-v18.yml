@@ -1,0 +1,114 @@
+name: Finish Secure Messaging nightly candidate v18
+
+on:
+  pull_request:
+    branches:
+      - nightly
+    paths:
+      - .trigger-security-key-v18
+
+permissions:
+  contents: write
+
+jobs:
+  finish:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/security-key-identity'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/security-key-identity
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Reapply reviewed v17 source patch robustly
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin nightly
+          git show origin/nightly:.github/workflows/run-security-key-generator-v17.yml > /tmp/v17.yml
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('/tmp/v17.yml').read_text()
+          marker = '      - name: Complete encrypted-copy forwarding and clean proof rendering\n        shell: bash\n        run: |\n'
+          if source.count(marker) != 1:
+              raise SystemExit('v17 source patch block was not found exactly once')
+          payload = source.split(marker, 1)[1].split('\n      - name:', 1)[0]
+          lines = []
+          for line in payload.splitlines():
+              if line.startswith('          '):
+                  lines.append(line[10:])
+              elif not line.strip():
+                  lines.append('')
+              else:
+                  raise SystemExit(f'unexpected v17 indentation: {line!r}')
+          script = '\n'.join(lines) + '\n'
+
+          start_marker = "if 'await reader.cancel().catch(() => undefined);' not in source:"
+          end_marker = "if 'const rawAttachmentSelection =' not in source:"
+          start = script.index(start_marker)
+          end = script.index(end_marker, start)
+          robust = '''if 'await reader.cancel().catch(() => undefined);' not in source:
+              read_start = source.index('async function readBoundedResponse')
+              read_end = source.index('\\nasync function fetchCandidate', read_start)
+              read_block = source[read_start:read_end]
+              read_block, count = re.subn(
+                  r'\\n    \\} finally \\{\\n        reader\\.releaseLock\\(\\);\\n    \\}\\n',
+                  '\\n    } catch (error) {\\n        await reader.cancel().catch(() => undefined);\\n        throw error;\\n    } finally {\\n        reader.releaseLock();\\n    }\\n',
+                  read_block,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit(f'bounded response finally block count was {count}')
+              source = source[:read_start] + read_block + source[read_end:]
+
+          '''
+          script = script[:start] + robust + script[end:]
+          Path('/tmp/apply-v18.sh').write_text(script)
+          PY
+          bash -n /tmp/apply-v18.sh
+          bash /tmp/apply-v18.sh
+          rm -f \
+            .github/workflows/run-security-key-generator-v17.yml \
+            .github/workflows/run-security-key-generator-v18.yml \
+            .trigger-security-key-v17 \
+            .trigger-security-key-v18
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run focused diagnostics
+        run: |
+          pnpm lint:fix
+          pnpm testSecureMessagingForwarding
+          pnpm testSecureMessagingSecurityKey
+          pnpm testSecureMessagingOptimisticRendering
+          pnpm testTsc
+          pnpm lint-styles
+
+      - name: Run complete verification gate
+        run: |
+          pnpm test
+          pnpm build
+          pnpm testWeb
+          git diff --check
+
+      - name: Commit exact verified candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ProtonnCord Nightly CI"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Complete secure forwarding and hardware identity nightly" \
+            -m "Cover Discord's single and multi-destination forwarding actions, preserve component selection semantics, combine forward notes into the encrypted copy, cancel bounded attachment reads on failure, run forwarding in the full gate, and normalize the hardware-proof render path."
+          git push --force-with-lease origin HEAD:refs/heads/feature/security-key-identity
