@@ -1630,13 +1630,21 @@ async function sendKeyAnnouncement(channelId: string, localUserId: string): Prom
     }
 }
 
-function handleSecureConnectionOpen(): void {
+async function handleSecureConnectionOpen(): Promise<void> {
     const localUserId = UserStore.getCurrentUser()?.id ?? null;
-    if (secureRuntimeUserId !== null && secureRuntimeUserId !== localUserId) {
+    const accountChanged = secureRuntimeUserId !== null && secureRuntimeUserId !== localUserId;
+    secureRuntimeUserId = localUserId;
+    if (accountChanged) {
         secureOperationGeneration++;
         revokePreparedSecureOperations();
+        messageLengthBypassKeys.clear();
+        invalidateSecureRenderCaches();
+        try {
+            await Native.lockSecurityKeyVault();
+        } catch {
+            // The native process still clears its in-memory key on process exit; renderer state fails closed.
+        }
     }
-    secureRuntimeUserId = localUserId;
     invalidateSecureRenderCaches();
 }
 
@@ -1828,7 +1836,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                                     Set up security key
                                 </Button>
                                 <Button size="small" disabled={busy} onClick={() => setShowImport(value => !value)}>
-                                    Use existing key
+                                    Protect with existing key
                                 </Button>
                             </div>
                             {showImport && (
@@ -2571,6 +2579,7 @@ export default definePlugin({
         nativeMessageGroupStartObservations.clear();
         notifySecureMessageGroupingChanged();
         revokePreparedSecureOperations();
+        void Native.lockSecurityKeyVault();
         clearEncryptedAttachmentCache();
         clearEncryptedEmbedCache();
         clearEncryptedMessageDecryptCache();

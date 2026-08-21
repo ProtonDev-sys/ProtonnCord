@@ -298,21 +298,27 @@ function vaultAad(root: string): Buffer {
 
 function deriveVaultKey(prfOutput: string, profile: SecurityKeyVaultProfile): Buffer {
     const output = decodeBase64Url(prfOutput, 32, 32);
-    return Buffer.from(hkdfSync(
-        "sha256",
-        output,
-        decodeBase64Url(profile.rootFingerprint, 32, 32),
-        VAULT_KEY_INFO,
-        32,
-    ));
+    try {
+        return Buffer.from(hkdfSync(
+            "sha256",
+            output,
+            decodeBase64Url(profile.rootFingerprint, 32, 32),
+            VAULT_KEY_INFO,
+            32,
+        ));
+    } finally {
+        output.fill(0);
+    }
 }
 
 export function activatePreparedSecurityKeyVault(prepared: PreparedSecurityKeyVault): void {
     validateProfile(prepared.profile);
     if (!Buffer.isBuffer(prepared.key) || prepared.key.byteLength !== 32)
         throw new SecurityKeyVaultError("credential_mismatch");
+    const nextKey = Buffer.from(prepared.key);
+    prepared.key.fill(0);
     clearSecurityKeyVaultSession();
-    activeKey = Buffer.from(prepared.key);
+    activeKey = nextKey;
     activeProfile = structuredClone(prepared.profile);
 }
 
@@ -325,22 +331,26 @@ export function clearSecurityKeyVaultSession(): void {
 export function wrapSecurityKeyVaultValue(value: unknown): unknown {
     if (!activeKey || !activeProfile) return value;
     const plaintext = Buffer.from(JSON.stringify(value), "utf8");
-    const nonce = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", activeKey, nonce);
-    cipher.setAAD(vaultAad(activeProfile.rootFingerprint));
-    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    if (ciphertext.byteLength < 1 || ciphertext.byteLength > MAX_ENCRYPTED_VAULT_BYTES)
-        throw new SecurityKeyVaultError("corrupt");
-    return {
-        ciphertext: ciphertext.toString("base64url"),
-        mode: "security_key",
-        nonce: nonce.toString("base64url"),
-        profile: structuredClone(activeProfile),
-        rootFingerprint: activeProfile.rootFingerprint,
-        tag: tag.toString("base64url"),
-        version: ENVELOPE_VERSION,
-    } satisfies SecurityKeyVaultEnvelope;
+    try {
+        const nonce = randomBytes(12);
+        const cipher = createCipheriv("aes-256-gcm", activeKey, nonce);
+        cipher.setAAD(vaultAad(activeProfile.rootFingerprint));
+        const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+        const tag = cipher.getAuthTag();
+        if (ciphertext.byteLength < 1 || ciphertext.byteLength > MAX_ENCRYPTED_VAULT_BYTES)
+            throw new SecurityKeyVaultError("corrupt");
+        return {
+            ciphertext: ciphertext.toString("base64url"),
+            mode: "security_key",
+            nonce: nonce.toString("base64url"),
+            profile: structuredClone(activeProfile),
+            rootFingerprint: activeProfile.rootFingerprint,
+            tag: tag.toString("base64url"),
+            version: ENVELOPE_VERSION,
+        } satisfies SecurityKeyVaultEnvelope;
+    } finally {
+        plaintext.fill(0);
+    }
 }
 
 export function unwrapSecurityKeyVaultValue(value: unknown): unknown {
@@ -348,6 +358,7 @@ export function unwrapSecurityKeyVaultValue(value: unknown): unknown {
     if (!envelope) return value;
     if (!activeKey || activeProfile?.rootFingerprint !== envelope.rootFingerprint)
         throw new SecurityKeyVaultError("locked");
+    let plaintext: Buffer | null = null;
     try {
         const decipher = createDecipheriv(
             "aes-256-gcm",
@@ -356,7 +367,7 @@ export function unwrapSecurityKeyVaultValue(value: unknown): unknown {
         );
         decipher.setAAD(vaultAad(envelope.rootFingerprint));
         decipher.setAuthTag(decodeBase64Url(envelope.tag, 16, 16));
-        const plaintext = Buffer.concat([
+        plaintext = Buffer.concat([
             decipher.update(decodeBase64Url(envelope.ciphertext, 1, MAX_ENCRYPTED_VAULT_BYTES)),
             decipher.final(),
         ]);
@@ -364,6 +375,8 @@ export function unwrapSecurityKeyVaultValue(value: unknown): unknown {
     } catch (error) {
         if (error instanceof SecurityKeyVaultError) throw error;
         throw new SecurityKeyVaultError("corrupt");
+    } finally {
+        plaintext?.fill(0);
     }
 }
 

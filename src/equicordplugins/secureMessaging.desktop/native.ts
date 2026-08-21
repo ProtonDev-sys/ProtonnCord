@@ -1734,26 +1734,30 @@ function cryptoFailure(): NativeFailure {
 async function configureSecurityKeyVault(
     prepared: PreparedSecurityKeyVault,
 ): Promise<SecurityKeyVaultResult> {
-    return runSerialized(async (): Promise<SecurityKeyVaultResult> => {
-        const stored = await readVaultStoredValue();
-        if (parseSecurityKeyVaultEnvelope(stored))
-            return invalidInput("A security key already protects this Secure Messaging vault");
-        const vault = await loadVault();
-        activatePreparedSecurityKeyVault(prepared);
-        cachedVault = null;
-        try {
-            await saveVault(vault);
-            clearAuthenticatedAttachmentCache();
-            return {
-                status: "unlocked",
-                profile: securityKeyVaultProfileSummary(prepared.profile),
-            };
-        } catch (error) {
-            clearSecurityKeyVaultSession();
+    try {
+        return await runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+            const stored = await readVaultStoredValue();
+            if (parseSecurityKeyVaultEnvelope(stored))
+                return invalidInput("A security key already protects this Secure Messaging vault");
+            const vault = await loadVault();
+            activatePreparedSecurityKeyVault(prepared);
             cachedVault = null;
-            throw error;
-        }
-    });
+            try {
+                await saveVault(vault);
+                clearAuthenticatedAttachmentCache();
+                return {
+                    status: "unlocked",
+                    profile: securityKeyVaultProfileSummary(prepared.profile),
+                };
+            } catch (error) {
+                clearSecurityKeyVaultSession();
+                cachedVault = null;
+                throw error;
+            }
+        });
+    } finally {
+        prepared.key.fill(0);
+    }
 }
 
 export async function getSecurityKeyVaultState(
@@ -1817,25 +1821,29 @@ export async function unlockSecurityKeyVault(
     } catch (error) {
         return mapOperationFailure(error);
     }
-    return runSerialized(async (): Promise<SecurityKeyVaultResult> => {
-        const currentEnvelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
-        if (!currentEnvelope || currentEnvelope.rootFingerprint !== prepared.profile.rootFingerprint)
-            return { status: "failed", error: "security_key_mismatch" };
-        activatePreparedSecurityKeyVault(prepared);
-        cachedVault = null;
-        try {
-            await loadVault();
-            clearAuthenticatedAttachmentCache();
-            return {
-                status: "unlocked",
-                profile: securityKeyVaultProfileSummary(prepared.profile),
-            };
-        } catch (error) {
-            clearSecurityKeyVaultSession();
+    try {
+        return await runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+            const currentEnvelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
+            if (!currentEnvelope || currentEnvelope.rootFingerprint !== prepared.profile.rootFingerprint)
+                return { status: "failed", error: "security_key_mismatch" };
+            activatePreparedSecurityKeyVault(prepared);
             cachedVault = null;
-            throw error;
-        }
-    });
+            try {
+                await loadVault();
+                clearAuthenticatedAttachmentCache();
+                return {
+                    status: "unlocked",
+                    profile: securityKeyVaultProfileSummary(prepared.profile),
+                };
+            } catch (error) {
+                clearSecurityKeyVaultSession();
+                cachedVault = null;
+                throw error;
+            }
+        });
+    } finally {
+        prepared.key.fill(0);
+    }
 }
 
 export async function lockSecurityKeyVault(
