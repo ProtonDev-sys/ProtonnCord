@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     });
     await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
-        server.listen(0, "127.0.0.1", () => resolve());
+        server.listen(0, "localhost", () => resolve());
     });
     const address = server.address();
     assert.ok(address && typeof address !== "string");
@@ -72,7 +72,6 @@ async function main(): Promise<void> {
         try {
             const payload = Array.from({ length: 70 }, (_value, index) => (index * 29 + 7) & 0xff);
             const result = await page.evaluate(async storedPayload => {
-                const challenge = () => crypto.getRandomValues(new Uint8Array(32));
                 const credential = await navigator.credentials.create({
                     publicKey: {
                         attestation: "none",
@@ -82,7 +81,7 @@ async function main(): Promise<void> {
                             residentKey: "required",
                             userVerification: "required",
                         },
-                        challenge: challenge(),
+                        challenge: crypto.getRandomValues(new Uint8Array(32)),
                         extensions: {
                             credProps: true,
                             largeBlob: { support: "required" },
@@ -102,7 +101,7 @@ async function main(): Promise<void> {
                 const write = await navigator.credentials.get({
                     publicKey: {
                         allowCredentials: [{ id: credential.rawId, type: "public-key" }],
-                        challenge: challenge(),
+                        challenge: crypto.getRandomValues(new Uint8Array(32)),
                         extensions: {
                             largeBlob: { write: new Uint8Array(storedPayload) },
                         } as any,
@@ -116,7 +115,7 @@ async function main(): Promise<void> {
                 const read = await navigator.credentials.get({
                     publicKey: {
                         allowCredentials: [{ id: credential.rawId, type: "public-key" }],
-                        challenge: challenge(),
+                        challenge: crypto.getRandomValues(new Uint8Array(32)),
                         extensions: { largeBlob: { read: true } } as any,
                         rpId: "localhost",
                         timeout: 30_000,
