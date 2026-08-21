@@ -150,6 +150,13 @@ async function main(): Promise<void> {
     assert.match(native, /setupSecurityKeyVault/u);
     assert.match(native, /unlockSecurityKeyVault/u);
     assert.match(native, /lockSecurityKeyVault/u);
+    const lockFunctionStart = native.indexOf("export async function lockSecurityKeyVault");
+    const lockFunctionEnd = native.indexOf("export async function removeSecurityKeyVault", lockFunctionStart);
+    const lockFunction = native.slice(lockFunctionStart, lockFunctionEnd);
+    assert.ok(
+        lockFunction.indexOf("clearSecurityKeyVaultSession();") < lockFunction.indexOf("return runSerialized"),
+        "locking must clear the in-memory E2E key before fallible storage or mutex work",
+    );
     assert.match(native, /removeSecurityKeyVault/u);
 
     const renderer = readFileSync(new URL(
