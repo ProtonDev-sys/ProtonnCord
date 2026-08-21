@@ -632,7 +632,7 @@ function failureMessage(failure: NativeFailure): string {
         if (failure.reason === "unsafe_linux_backend") return "Secure Messaging refuses Linux's unencrypted basic_text key-storage backend.";
         if (failure.reason === "vault_unreadable") return "The encrypted Secure Messaging vault could not be read. It was not reset.";
         if (failure.reason === "security_key_locked") return "Unlock the security key in Secure Messaging to read or send encrypted messages.";
-        if (failure.reason === "security_key_unsupported") return "This security key does not support the WebAuthn PRF extension required for vault encryption.";
+        if (failure.reason === "security_key_unsupported") return "This security key and WebAuthn provider support neither PRF nor large-blob storage for vault encryption.";
         return "Secure key storage is unavailable.";
     }
     if (failure.error === "attachment_download_failed") return "The encrypted attachment could not be downloaded from Discord.";
@@ -644,6 +644,7 @@ function failureMessage(failure: NativeFailure): string {
     if (failure.error === "screen_capture_protection_failed") return "Encrypted content visibility could not be updated safely.";
     if (failure.error === "security_key_cancelled") return "The security-key operation was cancelled or timed out.";
     if (failure.error === "security_key_mismatch") return "The wrong security key answered, or its profile no longer matches this vault.";
+    if (failure.error === "security_key_storage_failed") return "The security key could not store the encrypted vault seed. Check its resident-key and large-blob capacity, then retry.";
     return "The encrypted vault could not be saved.";
 }
 
@@ -1831,7 +1832,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                     {keyFailure && <BaseText size="sm" className="pc-secure-status-danger">{failureMessage(keyFailure)}</BaseText>}
                     {keyState?.status === "not_configured" && (
                         <>
-                            <BaseText size="xs" color="text-muted">Optional. A PRF-capable FIDO2 key will be required to open the E2E key vault after setup.</BaseText>
+                            <BaseText size="xs" color="text-muted">Supports FIDO2 security keys with PRF or large-blob storage.</BaseText>
                             <div className="pc-secure-modal-actions">
                                 <Button size="small" variant="primary" disabled={busy} onClick={() => void runKeyAction(() => Native.setupSecurityKeyVault(context.localUserId))}>
                                     Set up security key
@@ -1853,6 +1854,9 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                     {(keyState?.status === "locked" || keyState?.status === "unlocked") && (
                         <>
                             <code className="pc-secure-fingerprint">{keyState.profile.formattedRootFingerprint}</code>
+                            <BaseText size="xs" color="text-muted">
+                                Mode: {keyState.profile.provider === "large_blob" ? "Large blob" : "PRF"}
+                            </BaseText>
                             <div className="pc-secure-modal-actions">
                                 {keyState.status === "locked" ? (
                                     <Button size="small" variant="primary" disabled={busy} onClick={() => void runKeyAction(() => Native.unlockSecurityKeyVault())}>
