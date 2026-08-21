@@ -1,0 +1,178 @@
+name: Fix security-key PRF setup flow
+
+on:
+    push:
+        branches:
+            - fix/security-key-prf-setup-flow
+
+permissions:
+    contents: write
+
+concurrency:
+    group: fix-security-key-prf-setup-flow
+    cancel-in-progress: false
+
+jobs:
+    fix:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  ref: fix/security-key-prf-setup-flow
+                  fetch-depth: 0
+
+            - uses: pnpm/action-setup@v6
+
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: pnpm
+
+            - name: Apply PRF setup-flow fix
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  python - <<'PY'
+                  from pathlib import Path
+
+                  def replace_once(text: str, old: str, new: str, label: str) -> str:
+                      count = text.count(old)
+                      if count != 1:
+                          raise SystemExit(f"{label}: expected exactly one match, got {count}")
+                      return text.replace(old, new, 1)
+
+                  vault_path = Path("src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts")
+                  vault = vault_path.read_text()
+                  vault = replace_once(
+                      vault,
+                      'authenticatorSelection:{authenticatorAttachment:"cross-platform",residentKey:"preferred",userVerification:"required"}',
+                      'authenticatorSelection:{authenticatorAttachment:"cross-platform",residentKey:"discouraged",userVerification:"required"}',
+                      "non-discoverable security-key credential",
+                  )
+                  vault = replace_once(
+                      vault,
+                      '''    let { prfFirst } = registration;
+                  if (!registration.prfEnabled || !prfFirst) {
+                      const assertionChallenge = randomChallenge();
+                      const assertion = await runCeremony<AssertionResult>(
+                          event,
+                          "Unlock Secure Messaging",
+                          assertionScript(assertionChallenge, profile),
+                      );
+                      prfFirst = verifyAssertion(assertion, profile, assertionChallenge);
+                  } else {
+                      decodeBase64Url(prfFirst, 32, 32);
+                  }
+                  ''',
+                      '''    if (!registration.prfEnabled)
+                      throw new SecurityKeyVaultError("unsupported");
+
+                  let { prfFirst } = registration;
+                  if (!prfFirst) {
+                      const assertionChallenge = randomChallenge();
+                      const assertion = await runCeremony<AssertionResult>(
+                          event,
+                          "Finish Secure Messaging security-key setup (2 of 2)",
+                          assertionScript(assertionChallenge, profile),
+                      );
+                      prfFirst = verifyAssertion(assertion, profile, assertionChallenge);
+                  } else {
+                      decodeBase64Url(prfFirst, 32, 32);
+                  }
+                  ''',
+                      "PRF support and fallback split",
+                  )
+                  vault_path.write_text(vault)
+
+                  renderer_path = Path("src/equicordplugins/secureMessaging.desktop/index.tsx")
+                  renderer = renderer_path.read_text()
+                  renderer = replace_once(
+                      renderer,
+                      'if (failure.reason === "security_key_unsupported") return "This security key does not support the WebAuthn PRF extension required for vault encryption.";',
+                      'if (failure.reason === "security_key_unsupported") return "This key, its firmware, or the current WebAuthn provider does not expose PRF/hmac-secret for vault encryption.";',
+                      "clearer PRF compatibility error",
+                  )
+                  renderer_path.write_text(renderer)
+
+                  test_path = Path("scripts/testSecureMessagingSecurityKey.ts")
+                  test = test_path.read_text()
+                  test = replace_once(
+                      test,
+                      '    assert.match(implementation, /authenticatorAttachment:"cross-platform"/u);\n',
+                      '''    assert.match(implementation, /authenticatorAttachment:"cross-platform"/u);
+                  assert.match(implementation, /residentKey:"discouraged"/u,
+                      "vault credentials should not consume a discoverable passkey slot");
+                  const setupStart = implementation.indexOf("export async function prepareSecurityKeyVaultSetup");
+                  const setupEnd = implementation.indexOf("export async function prepareSecurityKeyVaultUnlock", setupStart);
+                  const setup = implementation.slice(setupStart, setupEnd);
+                  assert.match(setup, /if \(!registration\.prfEnabled\)\s+throw new SecurityKeyVaultError\("unsupported"\)/u,
+                      "unsupported authenticators must stop after registration instead of requesting a second touch");
+                  assert.match(setup, /if \(!prfFirst\)/u,
+                      "supported authenticators without creation-time output must use one assertion fallback");
+                  assert.doesNotMatch(setup, /!registration\.prfEnabled \|\| !prfFirst/u,
+                      "lack of PRF support must not be conflated with lack of creation-time output");
+                  assert.match(setup, /Finish Secure Messaging security-key setup \(2 of 2\)/u,
+                      "the older-key fallback must explain the second interaction");
+                  ''',
+                      "PRF setup regression checks",
+                  )
+                  test_path.write_text(test)
+
+                  package_path = Path("package.json")
+                  package_text = package_path.read_text()
+                  package_path.write_text(replace_once(
+                      package_text,
+                      '"version": "1.15.1.6"',
+                      '"version": "1.15.1.7"',
+                      "package version",
+                  ))
+
+                  marker_path = Path("src/components/settings/tabs/plugins/newPluginRelease.ts")
+                  marker = marker_path.read_text()
+                  marker_path.write_text(replace_once(
+                      marker,
+                      'version: "1.15.1.6"',
+                      'version: "1.15.1.7"',
+                      "release marker version",
+                  ))
+
+                  marker_test_path = Path("scripts/testPluginReleaseMarkers.ts")
+                  marker_test = marker_test_path.read_text()
+                  marker_test_path.write_text(replace_once(
+                      marker_test,
+                      'getReleaseNewPlugins("1.15.1.7", ["AutoJumpToMessage"])',
+                      'getReleaseNewPlugins("1.15.1.8", ["AutoJumpToMessage"])',
+                      "next phantom release marker",
+                  ))
+
+                  Path(".github/workflows/fix-security-key-prf-setup-flow.yml").unlink()
+                  PY
+
+            - name: Install locked dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Run focused verification
+              run: |
+                  pnpm lint:fix
+                  pnpm testSecureMessagingSecurityKey
+                  pnpm testPluginReleaseMarkers
+                  pnpm testSecureMessagingNative
+                  pnpm testTsc
+                  pnpm lint-styles
+
+            - name: Run complete verification
+              run: |
+                  pnpm test
+                  pnpm build
+                  pnpm testWeb
+                  git diff --check
+
+            - name: Commit verified fix
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  git config user.name "ProtonnCord Nightly CI"
+                  git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+                  git add -A
+                  git commit -m "Fix YubiKey PRF setup flow" -m "Stop immediately when registration reports that PRF is unavailable, reserve the second PIN/touch only for supported older keys that need an assertion to derive hmac-secret, label that fallback as step 2 of 2, avoid consuming discoverable credential slots, improve the compatibility error, and bump nightly to 1.15.1.7."
+                  git push origin HEAD:fix/security-key-prf-setup-flow
