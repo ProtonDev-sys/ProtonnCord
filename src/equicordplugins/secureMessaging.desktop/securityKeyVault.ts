@@ -113,6 +113,7 @@ interface RegistrationResult {
     prfEnabled: boolean;
     prfFirst: string | null;
     publicKeySpki: string;
+    residentKey: boolean;
     transports: string[];
 }
 
@@ -124,6 +125,7 @@ interface RegisteredCredential {
     prfEnabled: boolean;
     prfFirst: string | null;
     publicKeySpki: string;
+    residentKey: boolean;
     rootFingerprint: string;
     transports: SecurityKeyTransport[];
 }
@@ -347,9 +349,15 @@ export function securityKeyVaultProfileSummary(profile: SecurityKeyVaultProfile)
     };
 }
 
-function profilesMatch(left: SecurityKeyVaultProfile | null, right: SecurityKeyVaultProfile): boolean {
-    return left?.provider === right.provider && left.credentialId === right.credentialId &&
-        left.rootFingerprint === right.rootFingerprint && left.prfSalt === right.prfSalt;
+export function securityKeyVaultProfilesMatch(
+    left: SecurityKeyVaultProfile | null,
+    right: SecurityKeyVaultProfile,
+): boolean {
+    return left?.algorithm === right.algorithm && left.createdAt === right.createdAt &&
+        left.credentialId === right.credentialId && left.provider === right.provider &&
+        left.prfSalt === right.prfSalt && left.publicKeySpki === right.publicKeySpki &&
+        left.rootFingerprint === right.rootFingerprint && left.transports.length === right.transports.length &&
+        left.transports.every((transport, index) => transport === right.transports[index]);
 }
 
 export function parseSecurityKeyVaultEnvelope(value: unknown): SecurityKeyVaultEnvelope | null {
@@ -380,7 +388,7 @@ export function securityKeyVaultStateForValue(value: unknown): SecurityKeyVaultS
     const envelope = parseSecurityKeyVaultEnvelope(value);
     if (!envelope) return { status: "not_configured" };
     return {
-        status: activeKey !== null && profilesMatch(activeProfile, envelope.profile) ? "unlocked" : "locked",
+        status: activeKey !== null && securityKeyVaultProfilesMatch(activeProfile, envelope.profile) ? "unlocked" : "locked",
         profile: securityKeyVaultProfileSummary(envelope.profile),
     };
 }
@@ -497,7 +505,7 @@ export function wrapSecurityKeyVaultValue(value: unknown): unknown {
 export function unwrapSecurityKeyVaultValue(value: unknown): unknown {
     const envelope = parseSecurityKeyVaultEnvelope(value);
     if (!envelope) return value;
-    if (!activeKey || !profilesMatch(activeProfile, envelope.profile))
+    if (!activeKey || !securityKeyVaultProfilesMatch(activeProfile, envelope.profile))
         throw new SecurityKeyVaultError("locked");
     let plaintext: Buffer | null = null;
     try {
@@ -637,8 +645,8 @@ async function runCeremony<T>(event: IpcMainInvokeEvent, title: string, script: 
 
 const BROWSER_HELPERS = "const b64=value=>{const bytes=new Uint8Array(value);let binary=\"\";for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(binary).replaceAll(\"+\",\"-\").replaceAll(\"/\",\"_\").replace(/=+$/u,\"\");};const from=value=>Uint8Array.from(atob(value.replaceAll(\"-\",\"+\").replaceAll(\"_\",\"/\").padEnd(Math.ceil(value.length/4)*4,\"=\")),c=>c.charCodeAt(0));const fail=error=>({__error:[\"PrfUnavailable\",\"LargeBlobUnavailable\",\"UnsupportedAuthenticator\"].includes(error?.message)?error.message:error?.name??\"SecurityError\"});";
 
-function registrationScript(challenge: string, prfSalt: string, localUserId: string): string {
-    return `(() => {${BROWSER_HELPERS}return navigator.credentials.create({publicKey:{challenge:from(${JSON.stringify(challenge)}),rp:{id:${JSON.stringify(RP_ID)},name:"ProtonnCord Secure Messaging"},user:{id:crypto.getRandomValues(new Uint8Array(32)),name:${JSON.stringify(`ProtonnCord-${localUserId}`)},displayName:"ProtonnCord encrypted vault"},pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-8},{type:"public-key",alg:-257}],authenticatorSelection:{authenticatorAttachment:"cross-platform",residentKey:"required",requireResidentKey:true,userVerification:"required"},attestation:"none",extensions:{credProps:true,largeBlob:{support:"preferred"},prf:{eval:{first:from(${JSON.stringify(prfSalt)})}}},timeout:${CEREMONY_TIMEOUT_MS}}}).then(credential=>{if(!(credential instanceof PublicKeyCredential))throw new Error("UnsupportedAuthenticator");const response=credential.response;const publicKey=response.getPublicKey?.();const algorithm=response.getPublicKeyAlgorithm?.();const authenticatorData=response.getAuthenticatorData?.();if(!publicKey||typeof algorithm!=="number"||!authenticatorData)throw new Error("UnsupportedAuthenticator");const extensions=credential.getClientExtensionResults?.()??{};const prf=extensions.prf;return{credentialId:b64(credential.rawId),authenticatorAttachment:credential.authenticatorAttachment,clientDataJson:b64(response.clientDataJSON),authenticatorData:b64(authenticatorData),publicKeySpki:b64(publicKey),algorithm,transports:response.getTransports?.()??[],largeBlobSupported:extensions.largeBlob?.supported===true,prfEnabled:prf?.enabled===true,prfFirst:prf?.results?.first?b64(prf.results.first):null};}).catch(fail);})()`;
+function registrationScript(challenge: string, prfSalt: string): string {
+    return `(() => {${BROWSER_HELPERS}return navigator.credentials.create({publicKey:{challenge:from(${JSON.stringify(challenge)}),rp:{id:${JSON.stringify(RP_ID)},name:"ProtonnCord Secure Messaging"},user:{id:crypto.getRandomValues(new Uint8Array(32)),name:"ProtonnCord Secure Messaging",displayName:"ProtonnCord encrypted vault"},pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-8},{type:"public-key",alg:-257}],authenticatorSelection:{authenticatorAttachment:"cross-platform",residentKey:"required",requireResidentKey:true,userVerification:"required"},attestation:"none",extensions:{credProps:true,largeBlob:{support:"preferred"},prf:{eval:{first:from(${JSON.stringify(prfSalt)})}}},timeout:${CEREMONY_TIMEOUT_MS}}}).then(credential=>{if(!(credential instanceof PublicKeyCredential))throw new Error("UnsupportedAuthenticator");const response=credential.response;const publicKey=response.getPublicKey?.();const algorithm=response.getPublicKeyAlgorithm?.();const authenticatorData=response.getAuthenticatorData?.();if(!publicKey||typeof algorithm!=="number"||!authenticatorData)throw new Error("UnsupportedAuthenticator");const extensions=credential.getClientExtensionResults?.()??{};const prf=extensions.prf;return{credentialId:b64(credential.rawId),authenticatorAttachment:credential.authenticatorAttachment,clientDataJson:b64(response.clientDataJSON),authenticatorData:b64(authenticatorData),publicKeySpki:b64(publicKey),algorithm,transports:response.getTransports?.()??[],largeBlobSupported:extensions.largeBlob?.supported===true,prfEnabled:prf?.enabled===true,prfFirst:prf?.results?.first?b64(prf.results.first):null,residentKey:extensions.credProps?.rk===true};}).catch(fail);})()`;
 }
 
 function assertionBase(profile: SecurityKeyVaultProfile): string {
@@ -713,6 +721,7 @@ function verifyRegistration(result: RegistrationResult, challenge: string): Regi
         prfEnabled: result.prfEnabled === true,
         prfFirst: result.prfFirst,
         publicKeySpki: result.publicKeySpki,
+        residentKey: result.residentKey === true,
         rootFingerprint: rootFingerprint(result.algorithm, result.publicKeySpki),
         transports: [...new Set(result.transports.filter(validTransport))]
             .sort((left, right) => left.localeCompare(right)),
@@ -788,12 +797,15 @@ function verifyLargeBlobReadAssertion(
 ): Buffer {
     verifyAssertionBase(result, profile, challenge);
     if (profile.provider !== "large_blob" || result.largeBlob === null)
-        throw new SecurityKeyVaultError("credential_mismatch");
-    const payload = decodeBase64Url(result.largeBlob, LARGE_BLOB_PAYLOAD_BYTES, LARGE_BLOB_PAYLOAD_BYTES);
+        throw new SecurityKeyVaultError("large_blob_failed");
+    let payload: Buffer | null = null;
     try {
+        payload = decodeBase64Url(result.largeBlob, LARGE_BLOB_PAYLOAD_BYTES, LARGE_BLOB_PAYLOAD_BYTES);
         return extractSecurityKeyLargeBlobSeed(payload, profile);
+    } catch {
+        throw new SecurityKeyVaultError("large_blob_failed");
     } finally {
-        payload.fill(0);
+        payload?.fill(0);
     }
 }
 
@@ -807,7 +819,7 @@ export async function prepareSecurityKeyVaultSetup(
     const registration = await runCeremony<RegistrationResult>(
         event,
         "Set up Secure Messaging security key",
-        registrationScript(challenge, prfSalt, localUserId),
+        registrationScript(challenge, prfSalt),
     );
     const registered = verifyRegistration(registration, challenge);
 
@@ -830,7 +842,7 @@ export async function prepareSecurityKeyVaultSetup(
         };
     }
 
-    if (registered.largeBlobSupported) {
+    if (registered.largeBlobSupported && registered.residentKey) {
         const profile = profileFromRegistration(registered, "large_blob", null);
         const seed = randomBytes(LARGE_BLOB_SEED_BYTES);
         const payload = createSecurityKeyLargeBlobPayload(seed, profile);
