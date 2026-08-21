@@ -94,7 +94,10 @@ async function main(): Promise<void> {
             version: 1,
         };
         const key = randomBytes(32);
-        module.activatePreparedSecurityKeyVault({ key, profile });
+        const firstPreparedKey = Buffer.from(key);
+        module.activatePreparedSecurityKeyVault({ key: firstPreparedKey, profile });
+        assert.equal(firstPreparedKey.every(byte => byte === 0), true,
+            "the transferred prepared key must be wiped after activation");
         const wrapped = module.wrapSecurityKeyVaultValue(plaintextVault);
         const envelope = module.parseSecurityKeyVaultEnvelope(wrapped);
         assert.ok(envelope, "an active security key must wrap the Secure Messaging vault");
@@ -108,7 +111,7 @@ async function main(): Promise<void> {
         assert.throws(() => module.unwrapSecurityKeyVaultValue(wrapped), /locked/u,
             "the E2E vault must be unavailable without the physical-key-derived session key");
 
-        module.activatePreparedSecurityKeyVault({ key, profile });
+        module.activatePreparedSecurityKeyVault({ key: Buffer.from(key), profile });
         assert.deepEqual(module.unwrapSecurityKeyVaultValue(wrapped), plaintextVault);
         const tampered = structuredClone(envelope!);
         const ciphertext = Buffer.from(tampered.ciphertext, "base64url");
@@ -135,6 +138,8 @@ async function main(): Promise<void> {
     assert.match(implementation, /session\.fromPartition\(`pc-secure-vault-/u);
     assert.match(implementation, /createCipheriv\("aes-256-gcm"/u);
     assert.match(implementation, /hkdfSync\(/u);
+    assert.match(implementation, /output\.fill\(0\)/u);
+    assert.match(implementation, /plaintext\?\.fill\(0\)|plaintext\.fill\(0\)/u);
 
     const native = readFileSync(new URL(
         "../src/equicordplugins/secureMessaging.desktop/native.ts",
@@ -154,6 +159,10 @@ async function main(): Promise<void> {
     assert.match(renderer, /<Heading tag="h5">Security key<\/Heading>/u);
     assert.match(renderer, /Native\.setupSecurityKeyVault/u);
     assert.match(renderer, /Native\.unlockSecurityKeyVault/u);
+    assert.match(renderer, /await Native\.lockSecurityKeyVault\(\)/u,
+        "changing Discord accounts must clear the unlocked E2E vault key");
+    assert.match(renderer, /void Native\.lockSecurityKeyVault\(\)/u,
+        "stopping the plugin must clear the unlocked E2E vault key");
     assert.doesNotMatch(renderer, /title="Secure Messaging \(PCEM3\)"/u);
     assert.doesNotMatch(renderer, /<Heading tag="h5">Important limitations<\/Heading>/u);
     assert.doesNotMatch(renderer, /Non-ratcheting end-to-end encryption for selected people/u);
