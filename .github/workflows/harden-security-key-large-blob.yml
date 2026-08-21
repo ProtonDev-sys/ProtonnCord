@@ -29,150 +29,99 @@ jobs:
                   node-version: 24
                   cache: pnpm
 
-            - name: Apply provider-negotiation and regression hardening
+            - name: Apply scoped security and regression hardening
               shell: bash
               run: |
                   set -euo pipefail
                   python - <<'PY'
                   import json
+                  import re
                   from pathlib import Path
 
                   def replace_once(text: str, old: str, new: str, label: str) -> str:
                       count = text.count(old)
                       if count != 1:
-                          raise SystemExit(f"{label}: expected one match, found {count}")
+                          raise SystemExit(f"{label}: expected one exact match, found {count}")
                       return text.replace(old, new, 1)
 
-                  path = Path("src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts")
-                  source = path.read_text()
+                  def regex_once(text: str, pattern: str, replacement: str, label: str, flags: int = 0) -> str:
+                      updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=flags)
+                      if count != 1:
+                          raise SystemExit(f"{label}: expected one regex match, found {count}")
+                      return updated
 
-                  source = replace_once(
-                      source,
-                      '    | "large_blob_failed"\n    | "locked"',
-                      '    | "large_blob_failed"\n    | "locked"\n    | "resident_key_unavailable"',
-                      "resident-key error code",
+                  vault_path = Path("src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts")
+                  vault = vault_path.read_text()
+
+                  vault = regex_once(
+                      vault,
+                      r'(interface RegistrationResult \{.*?\n    prfEnabled: boolean;)(\n    prfFirst:)',
+                      r'\1\n    residentKey: boolean;\2',
+                      "registration resident-key output",
+                      re.S,
                   )
-                  source = replace_once(
-                      source,
-                      '    largeBlobSupported: boolean;\n    prfEnabled: boolean;',
-                      '    largeBlobSupported: boolean;\n    prfEnabled: boolean;\n    residentKey: boolean;',
-                      "registration resident-key result",
-                  )
-                  source = replace_once(
-                      source,
-                      '    prfFirst: string | null;\n    publicKeySpki: string;\n    rootFingerprint: string;',
-                      '    prfFirst: string | null;\n    publicKeySpki: string;\n    residentKey: boolean;\n    rootFingerprint: string;',
+                  vault = regex_once(
+                      vault,
+                      r'(interface RegisteredCredential \{.*?\n    publicKeySpki: string;)(\n    rootFingerprint:)',
+                      r'\1\n    residentKey: boolean;\2',
                       "registered resident-key state",
+                      re.S,
                   )
-                  source = replace_once(
-                      source,
+
+                  vault = replace_once(
+                      vault,
                       'function profilesMatch(left: SecurityKeyVaultProfile | null, right: SecurityKeyVaultProfile): boolean {',
                       'export function securityKeyVaultProfilesMatch(left: SecurityKeyVaultProfile | null, right: SecurityKeyVaultProfile): boolean {',
-                      "export full profile comparison",
+                      "export profile matcher",
                   )
-                  source = source.replace('profilesMatch(activeProfile, envelope.profile)', 'securityKeyVaultProfilesMatch(activeProfile, envelope.profile)')
-
-                  source = replace_once(
-                      source,
-                      '''            if (result.__error === "PrfUnavailable" || result.__error === "LargeBlobUnavailable" ||
-                result.__error === "UnsupportedAuthenticator" || result.__error === "NotSupportedError" ||
-                result.__error === "ConstraintError")
-                throw new SecurityKeyVaultError("unsupported");
-          ''',
-                      '''            if (result.__error === "ConstraintError")
-                throw new SecurityKeyVaultError("resident_key_unavailable");
-            if (result.__error === "PrfUnavailable" || result.__error === "LargeBlobUnavailable" ||
-                result.__error === "UnsupportedAuthenticator" || result.__error === "NotSupportedError")
-                throw new SecurityKeyVaultError("unsupported");
-          ''',
-                      "resident-key failure classification",
+                  vault = vault.replace(
+                      'profilesMatch(activeProfile, envelope.profile)',
+                      'securityKeyVaultProfilesMatch(activeProfile, envelope.profile)',
                   )
 
-                  source = replace_once(
-                      source,
+                  vault = replace_once(
+                      vault,
                       'function registrationScript(challenge: string, prfSalt: string, localUserId: string): string {',
                       'function registrationScript(challenge: string, prfSalt: string): string {',
-                      "registration signature privacy",
+                      "registration function privacy",
                   )
-                  source = replace_once(
-                      source,
+                  vault = replace_once(
+                      vault,
                       'name:${JSON.stringify(`ProtonnCord-${localUserId}`)},displayName:"ProtonnCord encrypted vault"',
                       'name:"ProtonnCord Secure Messaging",displayName:"ProtonnCord encrypted vault"',
-                      "resident credential account privacy",
+                      "discoverable credential privacy",
                   )
-                  source = replace_once(
-                      source,
+                  vault = replace_once(
+                      vault,
                       'largeBlobSupported:extensions.largeBlob?.supported===true,prfEnabled:prf?.enabled===true,prfFirst:',
                       'largeBlobSupported:extensions.largeBlob?.supported===true,prfEnabled:prf?.enabled===true,residentKey:extensions.credProps?.rk===true,prfFirst:',
-                      "resident-key registration output",
+                      "resident-key extension output",
                   )
-
-                  assertion_marker = 'function assertionBase(profile: SecurityKeyVaultProfile): string {'
-                  prf_only = '''function prfOnlyRegistrationScript(challenge: string, prfSalt: string): string {
-    return `(() => {${BROWSER_HELPERS}return navigator.credentials.create({publicKey:{challenge:from(${JSON.stringify(challenge)}),rp:{id:${JSON.stringify(RP_ID)},name:"ProtonnCord Secure Messaging"},user:{id:crypto.getRandomValues(new Uint8Array(32)),name:"ProtonnCord Secure Messaging",displayName:"ProtonnCord encrypted vault"},pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-8},{type:"public-key",alg:-257}],authenticatorSelection:{authenticatorAttachment:"cross-platform",residentKey:"discouraged",requireResidentKey:false,userVerification:"required"},attestation:"none",extensions:{prf:{eval:{first:from(${JSON.stringify(prfSalt)})}}},timeout:${CEREMONY_TIMEOUT_MS}}}).then(credential=>{if(!(credential instanceof PublicKeyCredential))throw new Error("UnsupportedAuthenticator");const response=credential.response;const publicKey=response.getPublicKey?.();const algorithm=response.getPublicKeyAlgorithm?.();const authenticatorData=response.getAuthenticatorData?.();if(!publicKey||typeof algorithm!=="number"||!authenticatorData)throw new Error("UnsupportedAuthenticator");const prf=credential.getClientExtensionResults?.().prf;return{credentialId:b64(credential.rawId),authenticatorAttachment:credential.authenticatorAttachment,clientDataJson:b64(response.clientDataJSON),authenticatorData:b64(authenticatorData),publicKeySpki:b64(publicKey),algorithm,transports:response.getTransports?.()??[],largeBlobSupported:false,prfEnabled:prf?.enabled===true,residentKey:false,prfFirst:prf?.results?.first?b64(prf.results.first):null};}).catch(fail);})()`;
-}
-
-'''
-                  if source.count(assertion_marker) != 1:
-                      raise SystemExit("assertion-base insertion point missing")
-                  source = source.replace(assertion_marker, prf_only + assertion_marker, 1)
-
-                  source = replace_once(
-                      source,
-                      '        prfFirst: result.prfFirst,\n        publicKeySpki: result.publicKeySpki,\n        rootFingerprint:',
-                      '        prfFirst: result.prfFirst,\n        publicKeySpki: result.publicKeySpki,\n        residentKey: result.residentKey === true,\n        rootFingerprint:',
+                  vault = replace_once(
+                      vault,
+                      '        publicKeySpki: result.publicKeySpki,\n        rootFingerprint:',
+                      '        publicKeySpki: result.publicKeySpki,\n        residentKey: result.residentKey === true,\n        rootFingerprint:',
                       "registered resident-key assignment",
                   )
-
-                  source = replace_once(
-                      source,
-                      '''    const registration = await runCeremony<RegistrationResult>(
-        event,
-        "Set up Secure Messaging security key",
-        registrationScript(challenge, prfSalt, localUserId),
-    );
-    const registered = verifyRegistration(registration, challenge);
-          ''',
-                      '''    let registration: RegistrationResult;
-    try {
-        registration = await runCeremony<RegistrationResult>(
-            event,
-            "Set up Secure Messaging security key",
-            registrationScript(challenge, prfSalt),
-        );
-    } catch (error) {
-        if (!(error instanceof SecurityKeyVaultError) || error.code !== "resident_key_unavailable") throw error;
-        registration = await runCeremony<RegistrationResult>(
-            event,
-            "Try PRF-only security-key setup",
-            prfOnlyRegistrationScript(challenge, prfSalt),
-        );
-    }
-    const registered = verifyRegistration(registration, challenge);
-          ''',
-                      "resident-key fallback setup",
+                  vault = replace_once(
+                      vault,
+                      '        registrationScript(challenge, prfSalt, localUserId),',
+                      '        registrationScript(challenge, prfSalt),',
+                      "registration call privacy",
                   )
-                  source = replace_once(
-                      source,
+                  vault = replace_once(
+                      vault,
                       '    if (registered.largeBlobSupported) {',
                       '    if (registered.largeBlobSupported && registered.residentKey) {',
                       "large-blob resident-key enforcement",
                   )
 
-                  source = replace_once(
-                      source,
-                      '''    if (profile.provider !== "large_blob" || result.largeBlob === null)
-        throw new SecurityKeyVaultError("credential_mismatch");
-    const payload = decodeBase64Url(result.largeBlob, LARGE_BLOB_PAYLOAD_BYTES, LARGE_BLOB_PAYLOAD_BYTES);
-    try {
-        return extractSecurityKeyLargeBlobSeed(payload, profile);
-    } finally {
-        payload.fill(0);
-    }
-          ''',
+                  vault = regex_once(
+                      vault,
+                      r'    if \(profile\.provider !== "large_blob" \|\| result\.largeBlob === null\)\n        throw new SecurityKeyVaultError\("credential_mismatch"\);\n    const payload = decodeBase64Url\(result\.largeBlob, LARGE_BLOB_PAYLOAD_BYTES, LARGE_BLOB_PAYLOAD_BYTES\);\n    try \{\n        return extractSecurityKeyLargeBlobSeed\(payload, profile\);\n    \} finally \{\n        payload\.fill\(0\);\n    \}',
                       '''    if (profile.provider !== "large_blob" || result.largeBlob === null)
         throw new SecurityKeyVaultError("large_blob_failed");
-    let payload: Buffer;
+    let payload: Buffer | null = null;
     try {
         payload = decodeBase64Url(result.largeBlob, LARGE_BLOB_PAYLOAD_BYTES, LARGE_BLOB_PAYLOAD_BYTES);
         return extractSecurityKeyLargeBlobSeed(payload, profile);
@@ -180,12 +129,11 @@ jobs:
         throw new SecurityKeyVaultError("large_blob_failed");
     } finally {
         payload?.fill(0);
-    }
-          ''',
+    }''',
                       "large-blob read failure classification",
                   )
 
-                  path.write_text(source)
+                  vault_path.write_text(vault)
 
                   native_path = Path("src/equicordplugins/secureMessaging.desktop/native.ts")
                   native = native_path.read_text()
@@ -199,7 +147,7 @@ jobs:
                       native,
                       '            if (!currentEnvelope || currentEnvelope.rootFingerprint !== prepared.profile.rootFingerprint)\n',
                       '            if (!currentEnvelope || !securityKeyVaultProfilesMatch(currentEnvelope.profile, prepared.profile))\n',
-                      "unlock profile race check",
+                      "complete profile race check",
                   )
                   native_path.write_text(native)
 
@@ -226,25 +174,21 @@ jobs:
                   test = test_path.read_text()
                   anchor = '    assert.match(implementation, /residentKey:"required",requireResidentKey:true/u,\n        "large-blob credentials must be discoverable resident credentials");\n'
                   if test.count(anchor) != 1:
-                      raise SystemExit("security-key static assertion anchor missing")
-                  addition = '''    assert.match(implementation, /residentKey:extensions\\.credProps\\?\\.rk===true/u,
-        "large-blob fallback must verify that registration created a discoverable credential");
-    assert.match(implementation, /Try PRF-only security-key setup/u,
-        "keys without resident-key capacity must retain the non-resident PRF fallback");
+                      raise SystemExit("resident-key assertion anchor missing")
+                  test = test.replace(anchor, anchor + '''    assert.match(implementation, /residentKey:extensions\\.credProps\\?\\.rk===true/u,
+        "large-blob setup must verify that the credential is discoverable");
     assert.doesNotMatch(implementation, /ProtonnCord-\\$\\{localUserId\\}/u,
-        "discoverable credentials must not store the Discord account ID on the security key");
-'''
-                  test = test.replace(anchor, anchor + addition, 1)
+        "discoverable credentials must not store a Discord account ID");
+''', 1)
 
                   renderer_anchor = '    assert.match(renderer, /Native\\.unlockSecurityKeyVault/u);\n'
                   if test.count(renderer_anchor) != 1:
                       raise SystemExit("renderer assertion anchor missing")
-                  renderer_addition = '''    assert.match(renderer, /await Native\\.lockSecurityKeyVault\\(\\)/u,
+                  test = test.replace(renderer_anchor, renderer_anchor + '''    assert.match(renderer, /await Native\\.lockSecurityKeyVault\\(\\)/u,
         "changing Discord accounts must clear the unlocked E2E vault key");
     assert.match(renderer, /void Native\\.lockSecurityKeyVault\\(\\)/u,
         "stopping the plugin must clear the unlocked E2E vault key");
-'''
-                  test = test.replace(renderer_anchor, renderer_anchor + renderer_addition, 1)
+''', 1)
                   test_path.write_text(test)
 
                   Path(".github/workflows/harden-security-key-large-blob.yml").unlink(missing_ok=True)
@@ -277,6 +221,6 @@ jobs:
                   git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
                   git add -A
                   git diff --cached --check
-                  git commit -m "Harden security-key provider negotiation" \
-                    -m "Verify resident credentials before large-blob use, preserve a PRF-only fallback for keys without resident-key capacity, avoid storing Discord IDs in discoverable credentials, classify missing/corrupt blobs as storage failures, compare the complete provider profile after unlock, and add a Chromium virtual-authenticator large-blob round-trip test to the full gate."
+                  git commit -m "Harden large-blob security-key handling" \
+                    -m "Verify discoverable credentials before large-blob use, avoid storing Discord IDs in resident credentials, classify unavailable or corrupt blobs as storage failures, compare the complete hardware provider profile after unlock, restore session-lock regressions, and add a Chromium virtual-authenticator large-blob round-trip to the full gate."
                   git push origin HEAD:refs/heads/feature/security-key-large-blob
