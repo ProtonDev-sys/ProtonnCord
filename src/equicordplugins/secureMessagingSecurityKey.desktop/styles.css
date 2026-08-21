@@ -1,0 +1,95 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Protonn Cord contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+.pc-security-key-modal {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1rem;
+}
+
+.pc-security-key-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding-bottom: 0.85rem;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.pc-security-key-section:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+
+.pc-security-key-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.pc-security-key-fingerprint {
+    display: block;
+    overflow-wrap: anywhere;
+    padding: 0.55rem;
+    border-radius: 0.35rem;
+    background: var(--background-tertiary);
+    color: var(--text-normal);
+    font-family: var(--font-code);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    user-select: text;
+}
+
+.pc-security-key-card {
+    box-sizing: border-box;
+    max-width: min(42rem, 100%);
+    margin-top: 0.25rem;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--status-positive) 45%, var(--border-subtle));
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--background-secondary) 92%, var(--status-positive));
+}
+
+.pc-security-key-card-warning {
+    border-color: color-mix(in srgb, var(--status-warning) 55%, var(--border-subtle));
+    background: color-mix(in srgb, var(--background-secondary) 93%, var(--status-warning));
+}
+
+.pc-security-key-card-danger {
+    border-color: color-mix(in srgb, var(--status-danger) 55%, var(--border-subtle));
+    background: color-mix(in srgb, var(--background-secondary) 93%, var(--status-danger));
+}
+
+.pc-security-key-card-header {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    margin-bottom: 0.35rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.pc-security-key-linked-users {
+    overflow-wrap: anywhere;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+[id^="chat-messages-"]:has(.pc-security-key-proof) .pc-secure-message {
+    display: none;
+}
+
+.pc-secure-screenshot-mode .pc-security-key-proof > * {
+    display: none;
+}
+
+.pc-secure-screenshot-mode .pc-security-key-proof::after {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    content: "Hardware identity proof hidden while screenshots are allowed.";
+}
