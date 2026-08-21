@@ -52,15 +52,31 @@ import {
     type PrivateIdentity,
     type PublicIdentity,
 } from "./protocol";
+import {
+    activatePreparedSecurityKeyVault,
+    clearSecurityKeyVaultSession,
+    parseSecurityKeyVaultEnvelope,
+    type PreparedSecurityKeyVault,
+    prepareSecurityKeyVaultImport,
+    prepareSecurityKeyVaultSetup,
+    prepareSecurityKeyVaultUnlock,
+    SecurityKeyVaultError,
+    securityKeyVaultProfileSummary,
+    type SecurityKeyVaultState,
+    securityKeyVaultStateForValue,
+    unwrapSecurityKeyVaultValue,
+    wrapSecurityKeyVaultValue,
+} from "./securityKeyVault";
 
-export type VaultUnavailableReason = "encryption_unavailable" | "unsafe_linux_backend" | "vault_unreadable";
+export type VaultUnavailableReason = "encryption_unavailable" | "security_key_locked" | "security_key_unsupported" | "unsafe_linux_backend" | "vault_unreadable";
 export type NativeFailure =
     | { status: "invalid_input"; error: string; }
     | { status: "unavailable"; reason: VaultUnavailableReason; }
     | {
         status: "failed";
         error: "attachment_download_failed" | "attachment_too_large" | "capacity_exceeded" | "counter_exhausted" |
-        "cryptographic_operation_failed" | "message_too_long" | "screen_capture_protection_failed" | "storage_error";
+        "cryptographic_operation_failed" | "message_too_long" | "screen_capture_protection_failed" |
+        "security_key_cancelled" | "security_key_mismatch" | "storage_error";
     };
 
 export interface IdentitySummary {
@@ -71,6 +87,7 @@ export interface IdentitySummary {
 }
 
 export type IdentityResult = { status: "ready"; identity: IdentitySummary; } | NativeFailure;
+export type SecurityKeyVaultResult = SecurityKeyVaultState | NativeFailure;
 export type RotateIdentityResult =
     | { status: "rotated"; identity: IdentitySummary; disabledConversationCount: number; }
     | { status: "fingerprint_mismatch"; identity: IdentitySummary; }
@@ -619,6 +636,14 @@ function unavailableFailure(reason: VaultUnavailableReason): NativeFailure {
 }
 
 function mapOperationFailure(error: unknown): NativeFailure {
+    if (error instanceof SecurityKeyVaultError) {
+        if (error.code === "locked") return unavailableFailure("security_key_locked");
+        if (error.code === "unsupported") return unavailableFailure("security_key_unsupported");
+        if (error.code === "cancelled") return { status: "failed", error: "security_key_cancelled" };
+        if (error.code === "credential_mismatch" || error.code === "invalid_profile")
+            return { status: "failed", error: "security_key_mismatch" };
+        if (error.code === "corrupt") return unavailableFailure("vault_unreadable");
+    }
     if (error instanceof VaultOperationError) {
         if (error.code === "encryption_unavailable" || error.code === "unsafe_linux_backend" || error.code === "vault_unreadable")
             return unavailableFailure(error.code);
@@ -895,37 +920,42 @@ async function acquireVaultLock(): Promise<() => Promise<void>> {
     }
 }
 
-async function loadVault(): Promise<VaultFile> {
-    if (cachedVault) return structuredClone(cachedVault);
+async function readVaultStoredValue(): Promise<unknown | null> {
     await ensureVaultDirectory();
     try {
         const vaultStat = await stat(VAULT_PATH);
         if (!vaultStat.isFile() || vaultStat.size === 0 || vaultStat.size > MAX_VAULT_BYTES)
             throw new VaultOperationError("vault_unreadable");
     } catch (error) {
-        if (hasErrorCode(error, "ENOENT")) {
-            cachedVault = { accounts: {}, version: VAULT_VERSION };
-            cachedVaultSignature = "missing";
-            return structuredClone(cachedVault);
-        }
+        if (hasErrorCode(error, "ENOENT")) return null;
         throw error;
     }
     await confirmEncryptedFileDurability(VAULT_PATH);
-
-    let plaintext: string;
     try {
         const ciphertext = await readFile(VAULT_PATH);
         if (ciphertext.byteLength === 0 || ciphertext.byteLength > MAX_VAULT_BYTES)
             throw new VaultOperationError("vault_unreadable");
-        plaintext = safeStorage.decryptString(ciphertext);
+        const plaintext = safeStorage.decryptString(ciphertext);
+        if (Buffer.byteLength(plaintext, "utf8") > MAX_VAULT_BYTES)
+            throw new VaultOperationError("vault_unreadable");
+        return JSON.parse(plaintext);
     } catch (error) {
         if (error instanceof VaultOperationError) throw error;
         throw new VaultOperationError("vault_unreadable");
     }
-    if (Buffer.byteLength(plaintext, "utf8") > MAX_VAULT_BYTES) throw new VaultOperationError("vault_unreadable");
+}
+
+async function loadVault(): Promise<VaultFile> {
+    if (cachedVault) return structuredClone(cachedVault);
+    const stored = await readVaultStoredValue();
+    if (stored === null) {
+        cachedVault = { accounts: {}, version: VAULT_VERSION };
+        cachedVaultSignature = "missing";
+        return structuredClone(cachedVault);
+    }
 
     try {
-        const parsed: unknown = JSON.parse(plaintext);
+        const parsed = unwrapSecurityKeyVaultValue(stored);
         const vault = parseVault(parsed);
         if (!vault) throw new VaultOperationError("vault_unreadable");
         for (const [accountUserId, account] of Object.entries(vault.accounts)) {
@@ -958,16 +988,18 @@ async function loadVault(): Promise<VaultFile> {
         cachedVaultSignature = await getVaultSignature();
         return structuredClone(vault);
     } catch (error) {
-        if (error instanceof VaultOperationError) throw error;
+        if (error instanceof VaultOperationError || error instanceof SecurityKeyVaultError) throw error;
         throw new VaultOperationError("vault_unreadable");
     }
 }
 
-async function saveVault(vault: VaultFile): Promise<void> {
+async function saveVault(vault: VaultFile, forcePlain = false): Promise<void> {
     let ciphertext: Buffer;
     try {
-        ciphertext = safeStorage.encryptString(JSON.stringify(vault));
-    } catch {
+        const stored = forcePlain ? vault : wrapSecurityKeyVaultValue(vault);
+        ciphertext = safeStorage.encryptString(JSON.stringify(stored));
+    } catch (error) {
+        if (error instanceof SecurityKeyVaultError) throw error;
         throw new VaultOperationError("storage_error");
     }
     if (ciphertext.byteLength === 0 || ciphertext.byteLength > MAX_VAULT_BYTES)
@@ -1426,6 +1458,14 @@ function pruneAuthenticatedAttachmentCache(now: number, incomingBytes = 0): void
     }
 }
 
+function clearAuthenticatedAttachmentCache(): void {
+    if (authenticatedAttachmentCacheCleanupTimer !== null) clearTimeout(authenticatedAttachmentCacheCleanupTimer);
+    authenticatedAttachmentCacheCleanupTimer = null;
+    for (const [key, entry] of authenticatedAttachmentCache)
+        removeAuthenticatedAttachmentCacheEntry(key, entry);
+    authenticatedAttachmentCacheBytes = 0;
+}
+
 function scheduleAuthenticatedAttachmentCacheCleanup(): void {
     if (authenticatedAttachmentCacheCleanupTimer !== null) clearTimeout(authenticatedAttachmentCacheCleanupTimer);
     authenticatedAttachmentCacheCleanupTimer = null;
@@ -1689,6 +1729,158 @@ function validateIpcCaller(event: IpcMainInvokeEvent): NativeFailure | null {
 
 function cryptoFailure(): NativeFailure {
     return { status: "failed", error: "cryptographic_operation_failed" };
+}
+
+async function configureSecurityKeyVault(
+    prepared: PreparedSecurityKeyVault,
+): Promise<SecurityKeyVaultResult> {
+    try {
+        return await runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+            const stored = await readVaultStoredValue();
+            if (parseSecurityKeyVaultEnvelope(stored))
+                return invalidInput("A security key already protects this Secure Messaging vault");
+            const vault = await loadVault();
+            activatePreparedSecurityKeyVault(prepared);
+            cachedVault = null;
+            try {
+                await saveVault(vault);
+                clearAuthenticatedAttachmentCache();
+                return {
+                    status: "unlocked",
+                    profile: securityKeyVaultProfileSummary(prepared.profile),
+                };
+            } catch (error) {
+                clearSecurityKeyVaultSession();
+                cachedVault = null;
+                throw error;
+            }
+        });
+    } finally {
+        prepared.key.fill(0);
+    }
+}
+
+export async function getSecurityKeyVaultState(
+    event: IpcMainInvokeEvent,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    return runSerialized(async (): Promise<SecurityKeyVaultResult> =>
+        securityKeyVaultStateForValue(await readVaultStoredValue()));
+}
+
+export async function setupSecurityKeyVault(
+    event: IpcMainInvokeEvent,
+    localUserId: string,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    const user = validateLocalUserId(localUserId);
+    if (!user.ok) return invalidInput(user.error);
+    try {
+        return configureSecurityKeyVault(await prepareSecurityKeyVaultSetup(event, user.value));
+    } catch (error) {
+        return mapOperationFailure(error);
+    }
+}
+
+export async function importSecurityKeyVault(
+    event: IpcMainInvokeEvent,
+    localUserId: string,
+    exportedProfile: string,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    const user = validateLocalUserId(localUserId);
+    if (!user.ok) return invalidInput(user.error);
+    if (typeof exportedProfile !== "string") return invalidInput("exportedProfile must be a security-key profile");
+    try {
+        return configureSecurityKeyVault(await prepareSecurityKeyVaultImport(event, exportedProfile));
+    } catch (error) {
+        return mapOperationFailure(error);
+    }
+}
+
+export async function unlockSecurityKeyVault(
+    event: IpcMainInvokeEvent,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    let initialEnvelope;
+    try {
+        validateStorageAvailability();
+        initialEnvelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
+    } catch (error) {
+        return mapOperationFailure(error);
+    }
+    if (!initialEnvelope) return invalidInput("This Secure Messaging vault is not protected by a security key");
+
+    let prepared: PreparedSecurityKeyVault;
+    try {
+        prepared = await prepareSecurityKeyVaultUnlock(event, initialEnvelope.profile);
+    } catch (error) {
+        return mapOperationFailure(error);
+    }
+    try {
+        return await runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+            const currentEnvelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
+            if (!currentEnvelope || currentEnvelope.rootFingerprint !== prepared.profile.rootFingerprint)
+                return { status: "failed", error: "security_key_mismatch" };
+            activatePreparedSecurityKeyVault(prepared);
+            cachedVault = null;
+            try {
+                await loadVault();
+                clearAuthenticatedAttachmentCache();
+                return {
+                    status: "unlocked",
+                    profile: securityKeyVaultProfileSummary(prepared.profile),
+                };
+            } catch (error) {
+                clearSecurityKeyVaultSession();
+                cachedVault = null;
+                throw error;
+            }
+        });
+    } finally {
+        prepared.key.fill(0);
+    }
+}
+
+export async function lockSecurityKeyVault(
+    event: IpcMainInvokeEvent,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+
+    // Locking is a memory-safety boundary. Clear private material before any filesystem,
+    // mutex, or safeStorage operation that could fail or wait.
+    clearSecurityKeyVaultSession();
+    cachedVault = null;
+    clearAuthenticatedAttachmentCache();
+
+    return runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+        const envelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
+        return envelope
+            ? { status: "locked", profile: securityKeyVaultProfileSummary(envelope.profile) }
+            : { status: "not_configured" };
+    });
+}
+
+export async function removeSecurityKeyVault(
+    event: IpcMainInvokeEvent,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    return runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+        const stored = await readVaultStoredValue();
+        if (!parseSecurityKeyVaultEnvelope(stored)) return { status: "not_configured" };
+        const vault = await loadVault();
+        await saveVault(vault, true);
+        clearSecurityKeyVaultSession();
+        cachedVault = null;
+        clearAuthenticatedAttachmentCache();
+        return { status: "not_configured" };
+    });
 }
 
 export async function getIdentity(event: IpcMainInvokeEvent, localUserId: string): Promise<IdentityResult> {

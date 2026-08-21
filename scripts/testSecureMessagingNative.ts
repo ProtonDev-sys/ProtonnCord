@@ -174,7 +174,14 @@ const runtimeStubs: Plugin = {
                     decryptString: value => runtime.protector.decryptString(value),
                 };
                 export const BrowserWindow = {
+                    fromWebContents: () => null,
                     getAllWindows: () => runtime.browserWindows ?? [],
+                };
+                export const session = {
+                    fromPartition: () => ({
+                        setPermissionRequestHandler() {},
+                        async clearStorageData() {},
+                    }),
                 };
                 export const app = {
                     getPath: name => {
