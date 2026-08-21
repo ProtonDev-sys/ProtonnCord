@@ -1,0 +1,122 @@
+name: Finalize Secure Messaging nightly candidate v21
+
+on:
+  pull_request:
+    branches:
+      - nightly
+    paths:
+      - .trigger-security-key-v21
+
+permissions:
+  contents: write
+
+jobs:
+  finish:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/security-key-identity'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/security-key-identity
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Reapply reviewed v19 candidate changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin nightly
+          git show origin/nightly:.github/workflows/run-security-key-generator-v19.yml > /tmp/v19.yml
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('/tmp/v19.yml').read_text()
+          marker = '      - name: Apply whole-function forwarding patches\n        shell: bash\n        run: |\n'
+          if source.count(marker) != 1:
+              raise SystemExit('v19 source patch block was not found exactly once')
+          payload = source.split(marker, 1)[1].split('\n      - name:', 1)[0]
+          lines = []
+          for line in payload.splitlines():
+              if line.startswith('          '):
+                  lines.append(line[10:])
+              elif not line.strip():
+                  lines.append('')
+              else:
+                  raise SystemExit(f'unexpected v19 indentation: {line!r}')
+          Path('/tmp/apply-v21.sh').write_text('\n'.join(lines) + '\n')
+          PY
+          bash -n /tmp/apply-v21.sh
+          bash /tmp/apply-v21.sh
+
+      - name: Correct forwarding assertion and remove delivery files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/testSecureMessagingForwarding.ts')
+          lines = path.read_text().splitlines()
+          matches = [index for index, line in enumerate(lines)
+              if line.strip().startswith('assert.match(composed, /Forwarded copy from A')]
+          if len(matches) != 1:
+              raise SystemExit(f'forward header assertion count was {len(matches)}')
+          index = matches[0]
+          lines[index:index + 1] = [
+              'assert.ok(composed.includes("Forwarded copy from A \\\\*sender\\\\*"),',
+              '    "forward header must escape source-author markdown");',
+          ]
+          path.write_text('\n'.join(lines) + '\n')
+
+          for cleanup in [
+              '.github/workflows/run-security-key-generator-v17.yml',
+              '.github/workflows/run-security-key-generator-v18.yml',
+              '.github/workflows/run-security-key-generator-v19.yml',
+              '.github/workflows/run-security-key-generator-v20.yml',
+              '.github/workflows/run-security-key-generator-v21.yml',
+              '.trigger-security-key-v17',
+              '.trigger-security-key-v18',
+              '.trigger-security-key-v19',
+              '.trigger-security-key-v20',
+              '.trigger-security-key-v21',
+          ]:
+              Path(cleanup).unlink(missing_ok=True)
+          PY
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run focused diagnostics
+        run: |
+          pnpm lint:fix
+          pnpm testSecureMessagingForwarding
+          pnpm testSecureMessagingSecurityKey
+          pnpm testSecureMessagingOptimisticRendering
+          pnpm testTsc
+          pnpm lint-styles
+
+      - name: Run complete verification gate
+        run: |
+          pnpm test
+          pnpm build
+          pnpm testWeb
+          git diff --check
+
+      - name: Commit exact verified candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ProtonnCord Nightly CI"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Complete secure forwarding and hardware identity nightly" \
+            -m "Cover Discord's single and multi-destination forwarding actions, preserve component selection semantics, combine forward notes into the encrypted copy, cancel bounded attachment reads on failure, and run forwarding in the full verification gate."
+          git push --force-with-lease origin HEAD:refs/heads/feature/security-key-identity
