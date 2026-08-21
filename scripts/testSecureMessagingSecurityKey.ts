@@ -17,6 +17,7 @@ import {
     createKeyAnnouncement,
     generateIdentity,
 } from "../src/equicordplugins/secureMessaging.desktop/crypto";
+import { removePeerFromSecurityKeyRoot } from "../src/equicordplugins/secureMessagingSecurityKey.desktop/rootLinks";
 import {
     decodeBase64Url,
     encodeBase64Url,
@@ -212,6 +213,17 @@ async function main(): Promise<void> {
         /timestamp is outside/iu,
     );
 
+    const linkedRoots = {
+    old: { userIds: [USER_ID, OTHER_USER_ID] },
+    replacement: { userIds: [] as string[] },
+};
+removePeerFromSecurityKeyRoot(linkedRoots, "old", USER_ID);
+assert.deepEqual(linkedRoots.old.userIds, [OTHER_USER_ID],
+    "replacing one account must remove it from the previous hardware root");
+removePeerFromSecurityKeyRoot(linkedRoots, "old", OTHER_USER_ID);
+assert.equal("old" in linkedRoots, false,
+    "an unreferenced previous hardware root must be removed");
+
     const sameRootOnAnotherAccount = await securityKeyRootFingerprint(key.algorithm, key.publicKeySpki);
     assert.equal(sameRootOnAnotherAccount, validProof.rootFingerprint,
         "hardware-root fingerprints must remain stable across explicitly linked Discord accounts");
@@ -249,6 +261,15 @@ async function main(): Promise<void> {
     assert.match(rendererSource, /Native\.reviewSecurityKeyProof/u);
     assert.match(rendererSource, /SecureNative\.trustReviewedKey/u);
     assert.match(rendererSource, /isSecurityKeyProof\(result\.plaintext\)/u);
+    assert.match(rendererSource, /getOptimisticOutgoingPlaintext\(message\.content\)/u,
+    "outgoing hardware proofs must render continuously through the optimistic message transition");
+
+const securityKeyStyles = readFileSync(new URL(
+    "../src/equicordplugins/secureMessagingSecurityKey.desktop/styles.css",
+    import.meta.url,
+), "utf8");
+assert.match(securityKeyStyles, /:has\(\.pc-security-key-proof\) \[class\*="messageContent"\]/u,
+    "raw proof payloads and encrypted envelopes must be hidden once the verified card is mounted");
 
     const secureRendererSource = readFileSync(new URL(
         "../src/equicordplugins/secureMessaging.desktop/index.tsx",

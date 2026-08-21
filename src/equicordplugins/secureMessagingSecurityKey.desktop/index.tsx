@@ -39,6 +39,7 @@ import type {
     AnnouncementReviewResult,
     NativeFailure,
 } from "../secureMessaging.desktop/native";
+import { getOptimisticOutgoingPlaintext } from "../secureMessaging.desktop/optimisticRendering";
 import { isEncryptedMessage } from "../secureMessaging.desktop/protocol";
 import type {
     SecurityKeyFailure,
@@ -710,8 +711,13 @@ function SecurityKeyProofAccessory({ message }: { message: Message; }) {
     const cacheKey = encrypted && localUserId && message.author?.id ? decryptCacheKey(localUserId, message) : message.content;
     const captureReady = useStateFromStores([MessageStore], () =>
         secureMessagingRuntime()?.getScreenCaptureProtectionStatus?.() === "ready");
-    const [plaintext, setPlaintext] = useState<string | null>(() =>
-        !encrypted && isSecurityKeyProof(message.content) ? message.content : null);
+    const [plaintext, setPlaintext] = useState<string | null>(() => {
+    if (!encrypted) return isSecurityKeyProof(message.content) ? message.content : null;
+    const optimistic = message.author?.id === localUserId
+        ? getOptimisticOutgoingPlaintext(message.content)
+        : undefined;
+    return optimistic && isSecurityKeyProof(optimistic) ? optimistic : null;
+});
 
     useEffect(() => {
         let active = true;
@@ -719,7 +725,10 @@ function SecurityKeyProofAccessory({ message }: { message: Message; }) {
             setPlaintext(isSecurityKeyProof(message.content) ? message.content : null);
             return () => { active = false; };
         }
-        setPlaintext(null);
+        const optimistic = message.author?.id === localUserId
+    ? getOptimisticOutgoingPlaintext(message.content)
+    : undefined;
+setPlaintext(optimistic && isSecurityKeyProof(optimistic) ? optimistic : null);
         if (!captureReady || !localUserId || !message.author?.id) return () => { active = false; };
         void decryptCachedMessage(localUserId, message).then(result => {
             if (active) setPlaintext(result.status === "decrypted" && isSecurityKeyProof(result.plaintext)
