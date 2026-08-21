@@ -88,9 +88,9 @@ jobs:
               shell: bash
               run: |
                   set -euo pipefail
-                  git fetch --no-tags origin nightly
-                  current_tree=$(git show "FETCH_HEAD^{tree}" --format=%T --no-patch)
-                  if [[ "$current_tree" != "$RELEASE_TREE" ]] && ! git diff --quiet "$RELEASE_COMMIT" FETCH_HEAD -- . ':!.github/workflows/publish-current-nightly.yml'; then
+                  git fetch --no-tags origin refs/heads/nightly:refs/remotes/origin/nightly
+                  current_tree=$(git show "refs/remotes/origin/nightly^{tree}" --format=%T --no-patch)
+                  if [[ "$current_tree" != "$RELEASE_TREE" ]] && ! git diff --quiet "$RELEASE_COMMIT" refs/remotes/origin/nightly -- . ':!.github/workflows/publish-current-nightly.yml'; then
                       echo "nightly source changed after verification; refusing to publish stale assets"
                       exit 1
                   fi
