@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import {
     createHash,
     generateKeyPairSync,
+    type KeyObject,
     sign,
 } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -60,7 +61,7 @@ function clientData(type: "webauthn.create" | "webauthn.get", challenge: string,
 
 interface TestKey {
     algorithm: SecurityKeyAlgorithm;
-    privateKey: ReturnType<typeof generateKeyPairSync>["privateKey"];
+    privateKey: KeyObject;
     publicKeySpki: string;
 }
 

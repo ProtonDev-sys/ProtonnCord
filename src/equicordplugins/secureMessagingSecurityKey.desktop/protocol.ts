@@ -97,6 +97,10 @@ function parseAfterPrefix(content: string, prefix: string, maximumLength: number
     }
 }
 
+function cryptoBytes(value: Uint8Array): ArrayBuffer {
+    return Uint8Array.from(value).buffer;
+}
+
 export function encodeBase64Url(value: ArrayBufferLike | ArrayBufferView): string {
     const bytes = ArrayBuffer.isView(value)
         ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
@@ -249,11 +253,11 @@ export async function securityKeyRootFingerprint(
 ): Promise<string> {
     if (!isAlgorithm(algorithm) || !isCanonicalBase64Url(publicKeySpki, 32, 1_024))
         throw new Error("Invalid security-key public key");
-    const digest = await crypto.subtle.digest("SHA-256", concatBytes(
+    const digest = await crypto.subtle.digest("SHA-256", cryptoBytes(concatBytes(
         ROOT_FINGERPRINT_PREFIX,
         new TextEncoder().encode(`${SECURITY_KEY_RP_ID}\0${algorithm}\0`),
         decodeBase64Url(publicKeySpki),
-    ));
+    )));
     return encodeBase64Url(digest);
 }
 
@@ -272,7 +276,10 @@ export async function securityKeyProofChallenge(binding: SecurityKeyProofBinding
         binding.announcement,
         binding.rootFingerprint,
     ]));
-    return encodeBase64Url(await crypto.subtle.digest("SHA-256", concatBytes(PROOF_CHALLENGE_PREFIX, canonical)));
+    return encodeBase64Url(await crypto.subtle.digest(
+        "SHA-256",
+        cryptoBytes(concatBytes(PROOF_CHALLENGE_PREFIX, canonical)),
+    ));
 }
 
 export async function securityKeyImportChallenge(
@@ -292,7 +299,10 @@ export async function securityKeyImportChallenge(
         nonce,
         serializeSecurityKeyProfile(profile),
     ]));
-    return encodeBase64Url(await crypto.subtle.digest("SHA-256", concatBytes(IMPORT_CHALLENGE_PREFIX, canonical)));
+    return encodeBase64Url(await crypto.subtle.digest(
+        "SHA-256",
+        cryptoBytes(concatBytes(IMPORT_CHALLENGE_PREFIX, canonical)),
+    ));
 }
 
 export function formatSecurityKeyFingerprint(fingerprint: string): string {

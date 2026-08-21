@@ -52,6 +52,7 @@ import {
     isSecurityKeyProof,
     parseSecurityKeyProof,
     type SecurityKeyProof,
+    serializeSecurityKeyProof,
 } from "./protocol";
 
 const Native = VencordNative.pluginHelpers.SecureMessagingSecurityKey as PluginNative<typeof import("./native")>;
@@ -433,11 +434,12 @@ function TrustProofModal({ announcementReview, message, modalProps, onComplete, 
                 replacingRoot,
             );
             if (root.status !== "trusted") {
-                setError(root.status === "key_changed"
-                    ? "A different hardware root is already associated with this Discord account."
-                    : root.status === "review_expired"
-                        ? "The hardware proof review expired. Close this window and review the message again."
-                        : securityKeyFailureMessage(root));
+                if (isSecurityKeyFailure(root))
+                    setError(securityKeyFailureMessage(root));
+                else if (root.status === "key_changed")
+                    setError("A different hardware root is already associated with this Discord account.");
+                else
+                    setError("The hardware proof review expired. Close this window and review the message again.");
                 return;
             }
             await trustEncryptionAnnouncement(
@@ -541,20 +543,7 @@ function ProofCard({ message, proof }: { message: Message; proof: SecurityKeyPro
         void Native.reviewSecurityKeyProof(
             localUserId,
             message.author.id,
-            SECURITY_KEY_PROOF_PREFIX + JSON.stringify([
-                1,
-                "s",
-                proof.userId,
-                proof.issuedAt,
-                proof.nonce,
-                proof.announcement,
-                proof.algorithm,
-                proof.publicKeySpki,
-                proof.rootFingerprint,
-                proof.clientDataJson,
-                proof.authenticatorData,
-                proof.signature,
-            ]),
+            serializeSecurityKeyProof(proof),
             message.id,
             discordEditedTimestamp(message),
         ).then(async security => {
@@ -596,20 +585,21 @@ function ProofCard({ message, proof }: { message: Message; proof: SecurityKeyPro
             </div>
         );
     }
-    if (isSecurityKeyFailure(review.security)) {
+    const { security } = review;
+    if (isSecurityKeyFailure(security)) {
         return (
             <div className="pc-security-key-card pc-security-key-card-danger pc-security-key-proof">
                 <div className="pc-security-key-card-header"><HardwareKeyIcon /> Hardware identity proof blocked</div>
-                <BaseText size="sm">{securityKeyFailureMessage(review.security)}</BaseText>
+                <BaseText size="sm">{securityKeyFailureMessage(security)}</BaseText>
             </div>
         );
     }
-    if (review.security.status === "invalid_proof" || review.security.status === "replay_detected") {
+    if (!validSecurityReview(security)) {
         return (
             <div className="pc-security-key-card pc-security-key-card-danger pc-security-key-proof">
                 <div className="pc-security-key-card-header"><HardwareKeyIcon /> Hardware identity proof blocked</div>
                 <BaseText size="sm">
-                    {review.security.status === "replay_detected"
+                    {security.status === "replay_detected"
                         ? "This hardware proof was copied to another message or conflicts with authenticated history."
                         : "The WebAuthn signature, user verification, account binding, or embedded encryption key is invalid."}
                 </BaseText>
@@ -617,9 +607,9 @@ function ProofCard({ message, proof }: { message: Message; proof: SecurityKeyPro
         );
     }
 
-    const announcement = review.announcement;
+    const { announcement } = review;
     const announcementTrusted = announcement?.status === "trusted";
-    const fullyTrusted = review.security.status === "trusted" && announcementTrusted;
+    const fullyTrusted = security.status === "trusted" && announcementTrusted;
     const announcementBlocked = announcement && (announcement.status === "invalid_announcement" ||
         announcement.status === "stale_announcement" || isCoreFailure(announcement));
     const warning = !fullyTrusted;
@@ -635,17 +625,17 @@ function ProofCard({ message, proof }: { message: Message; proof: SecurityKeyPro
                 <HardwareKeyIcon color={fullyTrusted ? "var(--status-positive)" : "var(--status-warning)"} />
                 {fullyTrusted
                     ? "Verified through trusted hardware security key"
-                    : review.security.status === "linked"
+                    : security.status === "linked"
                         ? "Recognized hardware key on an additional Discord account"
-                        : review.security.status === "key_changed"
+                        : security.status === "key_changed"
                             ? "Hardware identity changed"
-                            : review.security.status === "trusted" && announcement?.status === "key_changed"
+                            : security.status === "trusted" && announcement?.status === "key_changed"
                                 ? "Trusted hardware key with a new device encryption key"
                                 : "Hardware identity needs review"}
             </div>
-            <RootDetails root={review.security.root} />
+            <RootDetails root={security.root} />
             <BaseText size="xs" color="text-muted">
-                Proof author: {userLabel(message.author.id)} • {profileAlgorithmLabel(review.security.root.algorithm)} • user verification required
+                Proof author: {userLabel(message.author.id)} • {profileAlgorithmLabel(security.root.algorithm)} • user verification required
             </BaseText>
 
             {announcementBlocked && (
@@ -658,31 +648,31 @@ function ProofCard({ message, proof }: { message: Message; proof: SecurityKeyPro
                 </BaseText>
             )}
 
-            {!fullyTrusted && !announcementBlocked && announcement && review.security.status !== "trusted" && (
+            {!fullyTrusted && !announcementBlocked && announcement && security.status !== "trusted" && (
                 <div className="pc-security-key-actions">
                     <Button
                         size="xs"
-                        variant={review.security.status === "key_changed" ? "dangerPrimary" : "primary"}
+                        variant={security.status === "key_changed" ? "dangerPrimary" : "primary"}
                         onClick={() => openModal(modalProps => (
                             <TrustProofModal
                                 announcementReview={announcement}
                                 message={message}
                                 modalProps={modalProps}
                                 onComplete={() => setRevision(value => value + 1)}
-                                securityReview={review.security}
+                                securityReview={security}
                             />
                         ))}
                     >
-                        {review.security.status === "key_changed"
+                        {security.status === "key_changed"
                             ? "Review changed hardware identity"
-                            : review.security.status === "linked"
+                            : security.status === "linked"
                                 ? "Verify this linked account"
                                 : "Review & verify"}
                     </Button>
                 </div>
             )}
 
-            {!fullyTrusted && !announcementBlocked && announcement && review.security.status === "trusted" &&
+            {!fullyTrusted && !announcementBlocked && announcement && security.status === "trusted" &&
                 (announcement.status === "trust_required" || announcement.status === "key_changed") && (
                 <div className="pc-security-key-actions">
                     <Button
@@ -695,7 +685,7 @@ function ProofCard({ message, proof }: { message: Message; proof: SecurityKeyPro
                                     localUserId,
                                     message.author.id,
                                     message,
-                                    review.security.announcement,
+                                    security.announcement,
                                     announcement,
                                 );
                                 showToast("Encryption key accepted through the trusted hardware identity.", Toasts.Type.SUCCESS);

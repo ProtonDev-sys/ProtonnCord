@@ -14,13 +14,13 @@ import {
 import {
     decodeBase64Url,
     encodeBase64Url,
+    SECURITY_KEY_RP_ID,
     type SecurityKeyAlgorithm,
     type SecurityKeyProof,
     securityKeyProofBinding,
     securityKeyProofChallenge,
     type SecurityKeyPublicProfile,
     securityKeyRootFingerprint,
-    SECURITY_KEY_RP_ID,
     validateSecurityKeyProfile,
 } from "./protocol";
 
