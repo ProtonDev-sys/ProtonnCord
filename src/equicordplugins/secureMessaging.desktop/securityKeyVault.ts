@@ -587,12 +587,15 @@ export async function prepareSecurityKeyVaultSetup(
     const profile = verifyRegistration(registration, challenge);
     profile.prfSalt = prfSalt;
     validateProfile(profile);
+    if (!registration.prfEnabled)
+        throw new SecurityKeyVaultError("unsupported");
+
     let { prfFirst } = registration;
-    if (!registration.prfEnabled || !prfFirst) {
+    if (!prfFirst) {
         const assertionChallenge = randomChallenge();
         const assertion = await runCeremony<AssertionResult>(
             event,
-            "Unlock Secure Messaging",
+            "Finish Secure Messaging security-key setup (2 of 2)",
             assertionScript(assertionChallenge, profile),
         );
         prfFirst = verifyAssertion(assertion, profile, assertionChallenge);
