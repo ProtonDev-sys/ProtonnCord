@@ -10,6 +10,13 @@ import { createServer } from "node:http";
 
 import puppeteer from "puppeteer-core";
 
+interface LargeBlobRoundTripResult {
+    blob: number[] | null;
+    residentKey: boolean;
+    supported: boolean;
+    written: boolean;
+}
+
 function browserExecutable(): string | null {
     const candidates = [
         process.env.CHROMIUM_BIN,
@@ -71,7 +78,8 @@ async function main(): Promise<void> {
 
         try {
             const payload = Array.from({ length: 70 }, (_value, index) => (index * 29 + 7) & 0xff);
-            const result = await page.evaluate(async storedPayload => {
+            const result = await page.evaluate(`(async () => {
+                const storedPayload = ${JSON.stringify(payload)};
                 const credential = await navigator.credentials.create({
                     publicKey: {
                         attestation: "none",
@@ -79,59 +87,62 @@ async function main(): Promise<void> {
                             authenticatorAttachment: "cross-platform",
                             requireResidentKey: true,
                             residentKey: "required",
-                            userVerification: "required",
+                            userVerification: "required"
                         },
                         challenge: crypto.getRandomValues(new Uint8Array(32)),
                         extensions: {
                             credProps: true,
-                            largeBlob: { support: "required" },
-                        } as any,
+                            largeBlob: { support: "required" }
+                        },
                         pubKeyCredParams: [{ alg: -7, type: "public-key" }],
                         rp: { id: "localhost", name: "ProtonnCord Secure Messaging test" },
-                        timeout: 30_000,
+                        timeout: 30000,
                         user: {
                             displayName: "ProtonnCord test vault",
                             id: crypto.getRandomValues(new Uint8Array(32)),
-                            name: "ProtonnCord test vault",
-                        },
-                    },
-                }) as PublicKeyCredential;
-                const registrationExtensions = credential.getClientExtensionResults() as any;
+                            name: "ProtonnCord test vault"
+                        }
+                    }
+                });
+                if (!(credential instanceof PublicKeyCredential)) throw new Error("registration returned no public-key credential");
+                const registrationExtensions = credential.getClientExtensionResults();
 
                 const write = await navigator.credentials.get({
                     publicKey: {
                         allowCredentials: [{ id: credential.rawId, type: "public-key" }],
                         challenge: crypto.getRandomValues(new Uint8Array(32)),
                         extensions: {
-                            largeBlob: { write: new Uint8Array(storedPayload) },
-                        } as any,
+                            largeBlob: { write: new Uint8Array(storedPayload) }
+                        },
                         rpId: "localhost",
-                        timeout: 30_000,
-                        userVerification: "required",
-                    },
-                }) as PublicKeyCredential;
-                const writeExtensions = write.getClientExtensionResults() as any;
+                        timeout: 30000,
+                        userVerification: "required"
+                    }
+                });
+                if (!(write instanceof PublicKeyCredential)) throw new Error("write returned no public-key credential");
+                const writeExtensions = write.getClientExtensionResults();
 
                 const read = await navigator.credentials.get({
                     publicKey: {
                         allowCredentials: [{ id: credential.rawId, type: "public-key" }],
                         challenge: crypto.getRandomValues(new Uint8Array(32)),
-                        extensions: { largeBlob: { read: true } } as any,
+                        extensions: { largeBlob: { read: true } },
                         rpId: "localhost",
-                        timeout: 30_000,
-                        userVerification: "required",
-                    },
-                }) as PublicKeyCredential;
-                const readExtensions = read.getClientExtensionResults() as any;
+                        timeout: 30000,
+                        userVerification: "required"
+                    }
+                });
+                if (!(read instanceof PublicKeyCredential)) throw new Error("read returned no public-key credential");
+                const readExtensions = read.getClientExtensionResults();
                 const blob = readExtensions.largeBlob?.blob;
 
                 return {
                     blob: blob ? [...new Uint8Array(blob)] : null,
                     residentKey: registrationExtensions.credProps?.rk === true,
                     supported: registrationExtensions.largeBlob?.supported === true,
-                    written: writeExtensions.largeBlob?.written === true,
+                    written: writeExtensions.largeBlob?.written === true
                 };
-            }, payload);
+            })()`) as LargeBlobRoundTripResult;
 
             assert.equal(result.residentKey, true, "large-blob credentials must be discoverable");
             assert.equal(result.supported, true, "registration must report large-blob support");
