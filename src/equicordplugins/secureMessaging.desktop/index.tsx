@@ -57,6 +57,7 @@ import {
     useStateFromStores,
 } from "@webpack/common";
 
+import { SECURITY_KEY_PROOF_PREFIX } from "../secureMessagingSecurityKey.desktop/protocol";
 import {
     clearEncryptedAttachmentCache,
     downloadEncryptedAttachmentUrl,
@@ -105,7 +106,7 @@ import { extractSecureEmbedUrls, shouldHideSecureEmbedOnlyPlaintext } from "./em
 import { KeyReviewGate } from "./keyReviewGate";
 import { encryptedAllowedMentions, encryptedMessageMentionsUser } from "./mentionNotifications";
 import { SecureMessageGroup, secureMessageGroupFlags } from "./messageGrouping";
-import { discordEditedTimestamp } from "./messageMetadata";
+import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
 import type {
     AnnouncementReviewResult,
     ChannelProtectionResult,
@@ -117,6 +118,12 @@ import type {
     IdentitySummary,
     NativeFailure,
 } from "./native";
+import {
+    clearOptimisticOutgoingPlaintexts,
+    getOptimisticOutgoingPlaintext,
+    rememberOptimisticOutgoingPlaintext,
+    settleOptimisticOutgoingPlaintext,
+} from "./optimisticRendering";
 import {
     extractMentionedUserIds,
     isEncryptedMessage,
@@ -439,7 +446,6 @@ let attachmentGuardGeneration = 0;
 let approvedAttachmentUploads = new WeakMap<CloudUpload, { file: File; scope: string; }>();
 let detachedTextUploads = new WeakSet<CloudUpload>();
 let preparedOutgoingMessages = new WeakMap<object, { ciphertext: string; plaintext: string; }>();
-const optimisticOutgoingPlaintexts = new Map<string, string>();
 let requestAuthorizationScopes = new WeakMap<object, string>();
 let secureRuntimeUserId: string | null = null;
 type StartEditMessage = (...args: any[]) => any;
@@ -532,16 +538,8 @@ function revokePreparedSecureOperations(): void {
     approvedAttachmentUploads = new WeakMap();
     detachedTextUploads = new WeakSet();
     preparedOutgoingMessages = new WeakMap();
-    optimisticOutgoingPlaintexts.clear();
+    clearOptimisticOutgoingPlaintexts();
     requestAuthorizationScopes = new WeakMap();
-}
-
-function rememberOptimisticOutgoingPlaintext(ciphertext: string, plaintext: string): void {
-    optimisticOutgoingPlaintexts.delete(ciphertext);
-    optimisticOutgoingPlaintexts.set(ciphertext, plaintext);
-    if (optimisticOutgoingPlaintexts.size <= 128) return;
-    const oldest = optimisticOutgoingPlaintexts.keys().next().value;
-    if (oldest) optimisticOutgoingPlaintexts.delete(oldest);
 }
 
 function announcementKey(channelId: string, content: string): string {
@@ -2018,7 +2016,7 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
     const cachedResult = key && localUserId ? getCachedDecryption(localUserId, message) : null;
     const result = state?.key === key ? state.result : cachedResult;
     const optimisticPlaintext = message.author?.id === localUserId
-        ? optimisticOutgoingPlaintexts.get(message.content)
+        ? getOptimisticOutgoingPlaintext(message.content)
         : undefined;
     const visiblePlaintext = result?.status === "decrypted" ? result.plaintext : optimisticPlaintext;
     const inlineEmbedStatus = encryptedMessageInlineEmbedStatus(message);
@@ -2077,18 +2075,20 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         if (captureProtection !== "ready" || !key || !localUserId || !message.author?.id) return () => { active = false; };
         const cached = getCachedDecryption(localUserId, message);
         if (cached) {
-            optimisticOutgoingPlaintexts.delete(message.content);
+            settleOptimisticOutgoingPlaintext(message.content, message.id, discordMessageNonce(message));
             setState(current => current?.key === key && current.result === cached ? current : { key, result: cached });
             return () => { active = false; };
         }
         decryptCachedMessageForRender(localUserId, message, next => {
             if (active) {
-                optimisticOutgoingPlaintexts.delete(message.content);
+                settleOptimisticOutgoingPlaintext(message.content, message.id, discordMessageNonce(message));
                 setState({ key, result: next });
             }
         });
         return () => { active = false; };
     }, [captureProtection, key, localUserId]);
+
+    if (visiblePlaintext?.startsWith(SECURITY_KEY_PROOF_PREFIX)) return null;
 
     if (captureProtection !== "ready") {
         const screenshotMode = captureProtection === "screenshot";

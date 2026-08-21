@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { DATA_DIR } from "@main/utils/constants";
 import { randomBytes, randomUUID } from "node:crypto";
-import { createServer, type Server } from "node:http";
 import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+
+import { DATA_DIR } from "@main/utils/constants";
 import {
     BrowserWindow,
     type IpcMainInvokeEvent,
@@ -25,26 +26,25 @@ import {
     formatSecurityKeyFingerprint,
     parseSecurityKeyProfile,
     parseSecurityKeyProof,
+    SECURITY_KEY_RP_ID,
     type SecurityKeyAlgorithm,
-    type SecurityKeyProof,
     securityKeyImportChallenge,
-    securityKeyProofBinding,
+    type SecurityKeyProof,
     securityKeyProofChallenge,
     type SecurityKeyPublicProfile,
     securityKeyRootFingerprint,
-    SECURITY_KEY_RP_ID,
+    type SecurityKeyTransport,
     serializeSecurityKeyProfile,
     serializeSecurityKeyProof,
-    type SecurityKeyTransport,
 } from "./protocol";
 import {
     securityKeyProofDigest,
-    type WebAuthnAssertionResult,
-    type WebAuthnRegistrationResult,
     verifySecurityKeyProfile,
     verifySecurityKeyProof,
     verifyWebAuthnAssertion,
     verifyWebAuthnRegistration,
+    type WebAuthnAssertionResult,
+    type WebAuthnRegistrationResult,
 } from "./verification";
 
 export type SecurityKeyUnavailableReason =
@@ -235,8 +235,8 @@ function parseStoredProfile(value: unknown, fingerprint: string): StoredProfile 
         !Number.isSafeInteger(value.signCount) || (value.signCount as number) < 0 || (value.signCount as number) > 0xffff_ffff ||
         !Array.isArray(value.transports) || value.transports.some(transport => !isTransport(transport))) return null;
     const transports = [...new Set(value.transports as SecurityKeyTransport[])].sort((left, right) => left.localeCompare(right));
-    if (transports.length !== value.transports.length ||
-        transports.some((transport, index) => transport !== value.transports[index])) return null;
+    if (transports.length !== (value.transports as unknown[]).length ||
+        transports.some((transport, index) => transport !== (value.transports as unknown[])[index])) return null;
     return {
         algorithm: value.algorithm,
         createdAt: value.createdAt,
@@ -258,7 +258,8 @@ function parseTrustedRoot(value: unknown, fingerprint: string): TrustedRootRecor
         !Array.isArray(value.userIds) || value.userIds.length < 1 || value.userIds.length > MAX_ACCOUNTS ||
         value.userIds.some(userId => !isSnowflake(userId))) return null;
     const userIds = [...new Set(value.userIds as string[])].sort((left, right) => left.localeCompare(right));
-    if (userIds.length !== value.userIds.length || userIds.some((userId, index) => userId !== value.userIds[index])) return null;
+    if (userIds.length !== (value.userIds as unknown[]).length ||
+        userIds.some((userId, index) => userId !== (value.userIds as unknown[])[index])) return null;
     return {
         algorithm: value.algorithm,
         firstTrustedAt: value.firstTrustedAt,
@@ -350,7 +351,8 @@ async function acquireStoreLock(): Promise<() => Promise<void>> {
     while (true) {
         try {
             const handle = await open(LOCK_PATH, "wx", 0o600);
-            await handle.writeFile(`${process.pid}:${randomUUID()}\n`, { flush: true });
+            await handle.writeFile(`${process.pid}:${randomUUID()}\n`);
+            await handle.sync();
             return async () => {
                 await handle.close().catch(() => undefined);
                 await rm(LOCK_PATH, { force: true }).catch(() => undefined);
@@ -1005,7 +1007,7 @@ export async function reviewSecurityKeyProof(
             lastSignCount: signCount,
             publicKeySpki: proof.publicKeySpki,
             rootFingerprint: proof.rootFingerprint,
-            userIds: [discordAuthorId],
+            userIds: [],
         };
         if (known && (known.algorithm !== proof.algorithm || known.publicKeySpki !== proof.publicKeySpki))
             return { status: "invalid_proof" };
