@@ -1,0 +1,100 @@
+name: Run hardware identity candidate generator v3
+
+on:
+  pull_request:
+    branches:
+      - nightly
+    paths:
+      - .trigger-security-key-v3
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/security-key-identity'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/security-key-identity
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Execute reviewed generator with robust renderer scoping
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin nightly fix/secure-forwarding
+          git show origin/nightly:.github/workflows/generate-security-key-nightly.yml > /tmp/generator.yml
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('/tmp/generator.yml').read_text()
+          marker = '      - name: Apply reviewed Secure Messaging candidate patches\n        shell: bash\n        run: |\n'
+          if source.count(marker) != 1:
+              raise SystemExit('reviewed apply block was not found exactly once')
+          payload = source.split(marker, 1)[1].split('\n      - name:', 1)[0]
+          lines = []
+          for line in payload.splitlines():
+              if line.startswith('          '):
+                  lines.append(line[10:])
+              elif not line.strip():
+                  lines.append('')
+              else:
+                  raise SystemExit(f'unexpected generator indentation: {line!r}')
+          script = '\n'.join(lines) + '\n'
+
+          block_start = "if 'visiblePlaintext?.startsWith(SECURITY_KEY_PROOF_PREFIX)' not in renderer:"
+          block_end = 'renderer_path.write_text(renderer)'
+          if script.count(block_start) != 1 or script.count(block_end) != 1:
+              raise SystemExit('could not locate the renderer routing block')
+          start = script.index(block_start)
+          end = script.index(block_end, start)
+          replacement = '''if 'visiblePlaintext?.startsWith(SECURITY_KEY_PROOF_PREFIX)' not in renderer:
+              renderer = replace_once(
+                  renderer,
+                  '    }, [captureProtection, key, localUserId]);\\n\\n    if (captureProtection !== "ready") {\\n',
+                  '    }, [captureProtection, key, localUserId]);\\n\\n    if (visiblePlaintext?.startsWith(SECURITY_KEY_PROOF_PREFIX)) return null;\\n\\n    if (captureProtection !== "ready") {\\n',
+                  "security-key system plaintext routing",
+              )
+          '''
+          script = script[:start] + replacement + script[end:]
+          Path('/tmp/apply-reviewed-candidate.sh').write_text(script)
+          PY
+          bash -n /tmp/apply-reviewed-candidate.sh
+          bash /tmp/apply-reviewed-candidate.sh
+          rm -f \
+            .github/workflows/run-security-key-generator-v2.yml \
+            .github/workflows/run-security-key-generator-v3.yml \
+            .trigger-security-key-v2 \
+            .trigger-security-key-v3
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run complete verification gate
+        run: |
+          pnpm test
+          pnpm build
+          pnpm testWeb
+          git diff --check
+
+      - name: Commit verified candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ProtonnCord Nightly CI"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Add hardware security-key identity continuity" \
+            -m "Bind per-device and per-account Secure Messaging identities to a user-verified roaming WebAuthn credential, add portable public profiles and signed account proofs, retain outgoing render continuity, add encrypted-copy forwarding, clean temporary delivery workflows, and bump nightly to 1.15.1.5."
+          git push --force-with-lease origin HEAD:refs/heads/feature/security-key-identity
