@@ -50,7 +50,8 @@ export function shouldHideSecureEmbedOnlyPlaintext(
     plaintext: string,
     inlineEmbedStatus: SecureInlineEmbedStatus,
 ): boolean {
-    return inlineEmbedStatus !== "absent" && secureEmbedOnlyUrl(plaintext) !== null;
+    // Keep the URL visible until a real local embed exists; otherwise the outgoing row goes blank while unfurling.
+    return inlineEmbedStatus === "present" && secureEmbedOnlyUrl(plaintext) !== null;
 }
 
 export function isSecureInlineMediaEmbedType(type: string): boolean {
