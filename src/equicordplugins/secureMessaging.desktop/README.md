@@ -35,6 +35,7 @@ The protocol does not hide Discord metadata such as channel membership, sender, 
 ## Operational rules
 
 - Encryption is supported only in one-to-one DMs and group DMs.
+- Security-key vault protection supports OneKey Pro, Touch, and 1S devices with current firmware and a PIN over USB through FIDO2/WebAuthn PRF (`hmac-secret`). U2F-only OneKey models cannot provide the stable vault secret this feature requires and are not supported.
 - The cryptographic recipient set is explicit and can be smaller than the Discord group.
 - A Discord group membership change stops encrypted sends until the user reviews and saves the current participant snapshot.
 - Adding a participant does not retroactively give them keys for earlier messages. A newly selected participant can decrypt only messages sent after they were selected; content that they need from earlier history must be sent again as a new encrypted message.
