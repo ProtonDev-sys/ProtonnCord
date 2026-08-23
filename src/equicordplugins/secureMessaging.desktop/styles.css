@@ -164,6 +164,18 @@
     border-bottom: 0;
 }
 
+.pc-secure-onekey-guide {
+    margin: 0;
+    padding-left: 1.25rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    line-height: 1.45;
+}
+
+.pc-secure-onekey-guide li + li {
+    margin-top: 0.35rem;
+}
+
 .pc-secure-participant {
     display: flex;
     gap: 0.65rem;
