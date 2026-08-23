@@ -77,6 +77,7 @@ interface HarnessRuntime {
     appListeners?: Array<[string, (event: unknown, window: HarnessWindow) => void]>;
     browserWindows?: HarnessWindow[];
     dataDir: string;
+    oneKeySecret?: Buffer;
     protector: AuthenticatedProtector;
 }
 
@@ -164,6 +165,10 @@ const runtimeStubs: Plugin = {
         bundle.onResolve({ filter: /^electron$/ }, () => ({ path: "electron", namespace: "secure-native-test" }));
         bundle.onResolve({ filter: /^@main\/utils\/constants$/ }, () => ({ path: "constants", namespace: "secure-native-test" }));
         bundle.onResolve({ filter: /^fs\/promises$/ }, () => ({ path: "fs-promises", namespace: "secure-native-test" }));
+        bundle.onResolve({ filter: /^\.\/oneKeyWindowsVault$/ }, () => ({
+            path: "onekey-windows-vault",
+            namespace: "secure-native-test",
+        }));
         bundle.onLoad({ filter: /^electron$/, namespace: "secure-native-test" }, () => ({
             contents: `
                 const runtime = globalThis.__secureMessagingNativeHarness;
@@ -174,7 +179,14 @@ const runtimeStubs: Plugin = {
                     decryptString: value => runtime.protector.decryptString(value),
                 };
                 export const BrowserWindow = {
+                    fromWebContents: () => null,
                     getAllWindows: () => runtime.browserWindows ?? [],
+                };
+                export const session = {
+                    fromPartition: () => ({
+                        setPermissionRequestHandler() {},
+                        async clearStorageData() {},
+                    }),
                 };
                 export const app = {
                     getPath: name => {
@@ -190,6 +202,16 @@ const runtimeStubs: Plugin = {
         }));
         bundle.onLoad({ filter: /^constants$/, namespace: "secure-native-test" }, () => ({
             contents: "export const DATA_DIR = globalThis.__secureMessagingNativeHarness.dataDir;",
+            loader: "js",
+        }));
+        bundle.onLoad({ filter: /^onekey-windows-vault$/, namespace: "secure-native-test" }, () => ({
+            contents: `
+                import { Buffer } from "node:buffer";
+                export async function runOneKeyWindowsVaultCipher() {
+                    const configured = globalThis.__secureMessagingNativeHarness.oneKeySecret;
+                    return { ok: true, value: configured ? Buffer.from(configured) : Buffer.alloc(32, 0x51) };
+                }
+            `,
             loader: "js",
         }));
         bundle.onLoad({ filter: /^fs-promises$/, namespace: "secure-native-test" }, () => ({
@@ -256,8 +278,8 @@ async function buildNativeBundle(bundlePath: string, emulatePlatform?: "linux" |
 
 let loadSequence = 0;
 
-async function loadNative(bundlePath: string, dataDir: string): Promise<NativeModule> {
-    harnessGlobal.__secureMessagingNativeHarness = { dataDir, protector };
+async function loadNative(bundlePath: string, dataDir: string, oneKeySecret?: Buffer): Promise<NativeModule> {
+    harnessGlobal.__secureMessagingNativeHarness = { dataDir, oneKeySecret, protector };
     const url = pathToFileURL(bundlePath);
     url.searchParams.set("instance", String(++loadSequence));
     return import(url.href) as Promise<NativeModule>;
@@ -1683,7 +1705,7 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         snapshot: aliceDm,
     });
     expectStatus(rotationDisabled, "not_enabled", "local rotation disables sending");
-    assert.equal(rotationDisabled.reason, "unverified_recipients", "rotation review latch persists until reconfiguration");
+    assert.equal(rotationDisabled.reason, "local_identity_changed", "rotation review latch persists until reconfiguration");
 
     decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, aliceHistoricalInput);
     expectStatus(decrypted, "decrypted", "historical message survives both local rotation and peer replacement");
@@ -1746,6 +1768,108 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         assert.equal(vaultBytes.includes(Buffer.from(plaintext, "utf8")), false, "vault bytes do not expose message plaintext");
 }
 
+async function testOneKeyIdentityLifecycle(bundlePath: string, root: string): Promise<void> {
+    const oneKeySecret = Buffer.alloc(32, 0x6b);
+    const otherOneKeySecret = Buffer.alloc(32, 0x9d);
+    try {
+        const firstDataDir = join(root, "secure-messaging-live-onekey-identity-first");
+        const native = await loadNative(bundlePath, firstDataDir, oneKeySecret);
+        const aliceBefore = await native.getIdentity(DISCORD_EVENT, ALICE_ID);
+        const bobBefore = await native.getIdentity(DISCORD_EVENT, BOB_ID);
+        expectStatus(aliceBefore, "ready", "Alice software identity before OneKey migration");
+        expectStatus(bobBefore, "ready", "Bob software identity before OneKey migration");
+
+        await trustAnnouncement(native, ALICE_ID, BOB_ID, await createAnnouncement(native, BOB_ID));
+        const configured = await native.configureConversation(DISCORD_EVENT, ALICE_ID, {
+            enabled: true,
+            selectedRecipientIds: [BOB_ID],
+            snapshot: dmSnapshot(DM_CHANNEL_ID, BOB_ID),
+        });
+        expectStatus(configured, "enabled", "conversation enabled before OneKey identity migration");
+
+        const setupStartedAt = Date.now();
+        const setup = await native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID);
+        expectStatus(setup, "unlocked", "OneKey setup");
+        assert.equal(setup.profile.provider, "onekey");
+        assert.equal(setup.identityChanged, true, "setup reports deterministic identity installation");
+        assert.equal(setup.disabledConversationCount, 1, "setup disables conversations under replaced identities");
+
+        const aliceOneKey = await native.getIdentity(DISCORD_EVENT, ALICE_ID);
+        const bobOneKey = await native.getIdentity(DISCORD_EVENT, BOB_ID);
+        expectStatus(aliceOneKey, "ready", "Alice OneKey identity");
+        expectStatus(bobOneKey, "ready", "Bob OneKey identity");
+        assert.notEqual(aliceOneKey.identity.fingerprint, aliceBefore.identity.fingerprint);
+        assert.notEqual(bobOneKey.identity.fingerprint, bobBefore.identity.fingerprint,
+            "setup migrates every Discord account already stored in the shared vault");
+        const disabled = await native.getConversation(DISCORD_EVENT, ALICE_ID, dmSnapshot(DM_CHANNEL_ID, BOB_ID));
+        expectStatus(disabled, "local_identity_changed", "identity replacement requires explicit conversation review");
+
+        const blockedRotation = await native.rotateIdentity(
+            DISCORD_EVENT,
+            ALICE_ID,
+            aliceOneKey.identity.fingerprint,
+        );
+        expectStatus(blockedRotation, "invalid_input", "OneKey-derived identity rotation remains blocked while protected");
+
+        expectStatus(await native.lockSecurityKeyVault(DISCORD_EVENT), "locked", "OneKey vault lock");
+        const unlocked = await native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID);
+        expectStatus(unlocked, "unlocked", "OneKey vault unlock");
+        assert.equal(unlocked.identityChanged, undefined, "unlocking with the same OneKey does not rotate identities");
+        expectStatus(await native.removeSecurityKeyVault(DISCORD_EVENT), "not_configured", "remove OneKey protection");
+
+        const stored = JSON.parse(protector.decryptString(await readFile(
+            join(firstDataDir, "secure-messaging", "vault.bin"),
+        ))) as {
+            accounts: Record<string, {
+                identityHistory: Record<string, unknown>;
+                sendCounter: number;
+            }>;
+        };
+        for (const [userId, identity] of [[ALICE_ID, aliceOneKey], [BOB_ID, bobOneKey]] as const) {
+            assert.ok(stored.accounts[userId].sendCounter >= setupStartedAt * 1_000,
+                "OneKey migration seeds a portable monotonic send-counter floor");
+            assert.equal(identity.status, "ready");
+            assert.equal(identity.identity.fingerprint in stored.accounts[userId].identityHistory, false,
+                "the current deterministic fingerprint is not duplicated in retired-key history");
+        }
+
+        const repeatedSetup = await native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID);
+        expectStatus(repeatedSetup, "unlocked", "repeat setup with the same OneKey");
+        assert.equal(repeatedSetup.identityChanged, undefined, "repeat setup preserves the current deterministic identity");
+
+        const cleanNative = await loadNative(
+            bundlePath,
+            join(root, "secure-messaging-live-onekey-identity-clean"),
+            oneKeySecret,
+        );
+        expectStatus(await cleanNative.setupOneKeyVault(DISCORD_EVENT, ALICE_ID), "unlocked", "clean OneKey setup");
+        const cleanAlice = await cleanNative.getIdentity(DISCORD_EVENT, ALICE_ID);
+        const cleanBob = await cleanNative.getIdentity(DISCORD_EVENT, BOB_ID);
+        expectStatus(cleanAlice, "ready", "clean Alice OneKey identity");
+        expectStatus(cleanBob, "ready", "account first opened after OneKey setup");
+        assert.equal(cleanAlice.identity.fingerprint, aliceOneKey.identity.fingerprint,
+            "the same OneKey and Discord account restore Alice's fingerprint on a clean installation");
+        assert.equal(cleanBob.identity.fingerprint, bobOneKey.identity.fingerprint,
+            "an account first opened later is still derived from the active OneKey root");
+        assert.notEqual(cleanAlice.identity.fingerprint, cleanBob.identity.fingerprint,
+            "Discord account IDs domain-separate identities derived from one OneKey");
+
+        const otherNative = await loadNative(
+            bundlePath,
+            join(root, "secure-messaging-live-onekey-identity-other-key"),
+            otherOneKeySecret,
+        );
+        expectStatus(await otherNative.setupOneKeyVault(DISCORD_EVENT, ALICE_ID), "unlocked", "other OneKey setup");
+        const otherAlice = await otherNative.getIdentity(DISCORD_EVENT, ALICE_ID);
+        expectStatus(otherAlice, "ready", "other OneKey Alice identity");
+        assert.notEqual(otherAlice.identity.fingerprint, aliceOneKey.identity.fingerprint,
+            "a different physical OneKey derives a different public identity");
+    } finally {
+        oneKeySecret.fill(0);
+        otherOneKeySecret.fill(0);
+    }
+}
+
 async function main(): Promise<void> {
     const root = await mkdtemp(join(tmpdir(), "protonncord-secure-native-"));
     const bundlePath = join(root, "secure-messaging-native.mjs");
@@ -1757,6 +1881,7 @@ async function main(): Promise<void> {
         await buildNativeBundle(windowsBundlePath, "win32");
         await testStorageFailures(bundlePath, linuxBundlePath, windowsBundlePath, root);
         await testNativeLifecycle(bundlePath, join(root, "secure-messaging-live-lifecycle"));
+        await testOneKeyIdentityLifecycle(windowsBundlePath, root);
         console.log("secure-messaging native IPC checks passed");
     } finally {
         await rm(root, { force: true, recursive: true });

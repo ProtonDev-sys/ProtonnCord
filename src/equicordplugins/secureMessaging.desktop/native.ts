@@ -39,6 +39,7 @@ import {
     validateIdentityKeyPairs,
     verifyKeyAnnouncement,
 } from "./crypto";
+import { deriveOneKeyPrivateIdentity } from "./oneKeyVault";
 import {
     decodeBase64Url,
     type EncryptedEnvelope,
@@ -52,15 +53,35 @@ import {
     type PrivateIdentity,
     type PublicIdentity,
 } from "./protocol";
+import {
+    activatePreparedSecurityKeyVault,
+    clearSecurityKeyVaultSession,
+    deriveActiveOneKeyPrivateIdentity,
+    isOneKeySecurityKeyVaultActive,
+    parseSecurityKeyVaultEnvelope,
+    type PreparedSecurityKeyVault,
+    prepareOneKeySecurityKeyVaultSetup,
+    prepareSecurityKeyVaultImport,
+    prepareSecurityKeyVaultSetup,
+    prepareSecurityKeyVaultUnlock,
+    SecurityKeyVaultError,
+    securityKeyVaultProfileSummary,
+    type SecurityKeyVaultState,
+    securityKeyVaultStateForValue,
+    unwrapSecurityKeyVaultValue,
+    wrapSecurityKeyVaultValue,
+} from "./securityKeyVault";
 
-export type VaultUnavailableReason = "encryption_unavailable" | "unsafe_linux_backend" | "vault_unreadable";
+export type VaultUnavailableReason = "encryption_unavailable" | "security_key_locked" | "security_key_unsupported" | "unsafe_linux_backend" | "vault_unreadable";
 export type NativeFailure =
     | { status: "invalid_input"; error: string; }
     | { status: "unavailable"; reason: VaultUnavailableReason; }
     | {
         status: "failed";
         error: "attachment_download_failed" | "attachment_too_large" | "capacity_exceeded" | "counter_exhausted" |
-        "cryptographic_operation_failed" | "message_too_long" | "screen_capture_protection_failed" | "storage_error";
+        "cryptographic_operation_failed" | "message_too_long" | "screen_capture_protection_failed" |
+        "security_key_busy" | "security_key_cancelled" | "security_key_mismatch" | "security_key_storage_failed" |
+        "security_key_operation_failed" | "security_key_unavailable" | "storage_error";
     };
 
 export interface IdentitySummary {
@@ -71,6 +92,7 @@ export interface IdentitySummary {
 }
 
 export type IdentityResult = { status: "ready"; identity: IdentitySummary; } | NativeFailure;
+export type SecurityKeyVaultResult = SecurityKeyVaultState | NativeFailure;
 export type RotateIdentityResult =
     | { status: "rotated"; identity: IdentitySummary; disabledConversationCount: number; }
     | { status: "fingerprint_mismatch"; identity: IdentitySummary; }
@@ -147,6 +169,7 @@ interface ConversationDetails {
 
 export type ConversationResult =
     | ({ status: "unconfigured" | "disabled" | "enabled"; } & ConversationDetails)
+    | ({ status: "local_identity_changed"; } & ConversationDetails)
     | ({ status: "participant_changed"; previousParticipantUserIds: string[]; } & ConversationDetails)
     | ({ status: "unverified_recipients"; unverifiedRecipientIds: string[]; } & ConversationDetails)
     | NativeFailure;
@@ -163,7 +186,7 @@ export type EncryptOutgoingResult =
     | { status: "encrypted"; content: string; counter: number; }
     | {
         status: "not_enabled";
-        reason: "disabled" | "participant_changed" | "unconfigured" | "unverified_recipients";
+        reason: "disabled" | "local_identity_changed" | "participant_changed" | "unconfigured" | "unverified_recipients";
         conversation: Exclude<ConversationResult, NativeFailure>;
     }
     | NativeFailure;
@@ -225,7 +248,7 @@ interface ConversationRecord {
     enabled: boolean;
     kind: ConversationKind;
     participantUserIds: string[];
-    reviewRequired: "participant_changed" | "unverified_recipients" | null;
+    reviewRequired: "local_identity_changed" | "participant_changed" | "unverified_recipients" | null;
     selectedRecipients: SelectedRecipientRecord[];
     updatedAt: number;
 }
@@ -470,7 +493,8 @@ function parseConversation(value: unknown): ConversationRecord | null {
             !hasExactKeys(value, ["enabled", "kind", "participantUserIds", "selectedRecipients", "updatedAt"])) ||
         typeof value.enabled !== "boolean" || (value.kind !== "DM" && value.kind !== "GROUP_DM") ||
         (value.reviewRequired !== undefined && value.reviewRequired !== null &&
-            value.reviewRequired !== "participant_changed" && value.reviewRequired !== "unverified_recipients") ||
+            value.reviewRequired !== "local_identity_changed" && value.reviewRequired !== "participant_changed" &&
+            value.reviewRequired !== "unverified_recipients") ||
         !isOrderedSnowflakeList(value.participantUserIds, false) || !isTimestamp(value.updatedAt) || !Array.isArray(value.selectedRecipients) ||
         value.selectedRecipients.length > MAX_SELECTED_RECIPIENTS || (value.enabled && value.selectedRecipients.length === 0) ||
         (value.kind === "DM" && value.participantUserIds.length !== 1))
@@ -619,6 +643,19 @@ function unavailableFailure(reason: VaultUnavailableReason): NativeFailure {
 }
 
 function mapOperationFailure(error: unknown): NativeFailure {
+    if (error instanceof SecurityKeyVaultError) {
+        if (error.code === "locked") return unavailableFailure("security_key_locked");
+        if (error.code === "unsupported") return unavailableFailure("security_key_unsupported");
+        if (error.code === "busy") return { status: "failed", error: "security_key_busy" };
+        if (error.code === "cancelled") return { status: "failed", error: "security_key_cancelled" };
+        if (error.code === "operation_failed") return { status: "failed", error: "security_key_operation_failed" };
+        if (error.code === "unavailable") return { status: "failed", error: "security_key_unavailable" };
+        if (error.code === "credential_mismatch" || error.code === "invalid_profile")
+            return { status: "failed", error: "security_key_mismatch" };
+        if (error.code === "large_blob_failed")
+            return { status: "failed", error: "security_key_storage_failed" };
+        if (error.code === "corrupt") return unavailableFailure("vault_unreadable");
+    }
     if (error instanceof VaultOperationError) {
         if (error.code === "encryption_unavailable" || error.code === "unsafe_linux_backend" || error.code === "vault_unreadable")
             return unavailableFailure(error.code);
@@ -895,37 +932,42 @@ async function acquireVaultLock(): Promise<() => Promise<void>> {
     }
 }
 
-async function loadVault(): Promise<VaultFile> {
-    if (cachedVault) return structuredClone(cachedVault);
+async function readVaultStoredValue(): Promise<unknown | null> {
     await ensureVaultDirectory();
     try {
         const vaultStat = await stat(VAULT_PATH);
         if (!vaultStat.isFile() || vaultStat.size === 0 || vaultStat.size > MAX_VAULT_BYTES)
             throw new VaultOperationError("vault_unreadable");
     } catch (error) {
-        if (hasErrorCode(error, "ENOENT")) {
-            cachedVault = { accounts: {}, version: VAULT_VERSION };
-            cachedVaultSignature = "missing";
-            return structuredClone(cachedVault);
-        }
+        if (hasErrorCode(error, "ENOENT")) return null;
         throw error;
     }
     await confirmEncryptedFileDurability(VAULT_PATH);
-
-    let plaintext: string;
     try {
         const ciphertext = await readFile(VAULT_PATH);
         if (ciphertext.byteLength === 0 || ciphertext.byteLength > MAX_VAULT_BYTES)
             throw new VaultOperationError("vault_unreadable");
-        plaintext = safeStorage.decryptString(ciphertext);
+        const plaintext = safeStorage.decryptString(ciphertext);
+        if (Buffer.byteLength(plaintext, "utf8") > MAX_VAULT_BYTES)
+            throw new VaultOperationError("vault_unreadable");
+        return JSON.parse(plaintext);
     } catch (error) {
         if (error instanceof VaultOperationError) throw error;
         throw new VaultOperationError("vault_unreadable");
     }
-    if (Buffer.byteLength(plaintext, "utf8") > MAX_VAULT_BYTES) throw new VaultOperationError("vault_unreadable");
+}
+
+async function loadVault(): Promise<VaultFile> {
+    if (cachedVault) return structuredClone(cachedVault);
+    const stored = await readVaultStoredValue();
+    if (stored === null) {
+        cachedVault = { accounts: {}, version: VAULT_VERSION };
+        cachedVaultSignature = "missing";
+        return structuredClone(cachedVault);
+    }
 
     try {
-        const parsed: unknown = JSON.parse(plaintext);
+        const parsed = unwrapSecurityKeyVaultValue(stored);
         const vault = parseVault(parsed);
         if (!vault) throw new VaultOperationError("vault_unreadable");
         for (const [accountUserId, account] of Object.entries(vault.accounts)) {
@@ -958,16 +1000,18 @@ async function loadVault(): Promise<VaultFile> {
         cachedVaultSignature = await getVaultSignature();
         return structuredClone(vault);
     } catch (error) {
-        if (error instanceof VaultOperationError) throw error;
+        if (error instanceof VaultOperationError || error instanceof SecurityKeyVaultError) throw error;
         throw new VaultOperationError("vault_unreadable");
     }
 }
 
-async function saveVault(vault: VaultFile): Promise<void> {
+async function saveVault(vault: VaultFile, forcePlain = false): Promise<void> {
     let ciphertext: Buffer;
     try {
-        ciphertext = safeStorage.encryptString(JSON.stringify(vault));
-    } catch {
+        const stored = forcePlain ? vault : wrapSecurityKeyVaultValue(vault);
+        ciphertext = safeStorage.encryptString(JSON.stringify(stored));
+    } catch (error) {
+        if (error instanceof SecurityKeyVaultError) throw error;
         throw new VaultOperationError("storage_error");
     }
     if (ciphertext.byteLength === 0 || ciphertext.byteLength > MAX_VAULT_BYTES)
@@ -1028,8 +1072,11 @@ async function loadAccount(localUserId: string): Promise<AccountContext> {
     }
     if (Object.keys(vault.accounts).length >= MAX_ACCOUNTS) throw new VaultOperationError("capacity_exceeded");
     let identity: PrivateIdentity;
+    let oneKeyDerived = false;
     try {
-        identity = await generateIdentity();
+        const activeOneKeyIdentity = deriveActiveOneKeyPrivateIdentity(localUserId);
+        identity = activeOneKeyIdentity ?? await generateIdentity();
+        oneKeyDerived = activeOneKeyIdentity !== null;
         await validateIdentityKeyPairs(identity);
     } catch {
         throw new VaultOperationError("cryptographic_operation_failed");
@@ -1040,7 +1087,7 @@ async function loadAccount(localUserId: string): Promise<AccountContext> {
         identityHistory: {},
         peerIdentityHistory: {},
         replayCache: [],
-        sendCounter: 0,
+        sendCounter: oneKeyDerived ? oneKeySendCounterFloor() : 0,
         trustedPeers: {},
     };
     vault.accounts[localUserId] = account;
@@ -1426,6 +1473,14 @@ function pruneAuthenticatedAttachmentCache(now: number, incomingBytes = 0): void
     }
 }
 
+function clearAuthenticatedAttachmentCache(): void {
+    if (authenticatedAttachmentCacheCleanupTimer !== null) clearTimeout(authenticatedAttachmentCacheCleanupTimer);
+    authenticatedAttachmentCacheCleanupTimer = null;
+    for (const [key, entry] of authenticatedAttachmentCache)
+        removeAuthenticatedAttachmentCacheEntry(key, entry);
+    authenticatedAttachmentCacheBytes = 0;
+}
+
 function scheduleAuthenticatedAttachmentCacheCleanup(): void {
     if (authenticatedAttachmentCacheCleanupTimer !== null) clearTimeout(authenticatedAttachmentCacheCleanupTimer);
     authenticatedAttachmentCacheCleanupTimer = null;
@@ -1575,6 +1630,12 @@ function evaluateConversation(account: AccountRecord, snapshot: ConversationSnap
             result: { status: "unverified_recipients", ...details, unverifiedRecipientIds: [] },
         };
     }
+    if (conversation.reviewRequired === "local_identity_changed") {
+        return {
+            changed: false,
+            result: { status: "local_identity_changed", ...details },
+        };
+    }
     return {
         changed: false,
         result: { status: conversation.enabled ? "enabled" : "disabled", ...details },
@@ -1691,6 +1752,291 @@ function cryptoFailure(): NativeFailure {
     return { status: "failed", error: "cryptographic_operation_failed" };
 }
 
+function oneKeySendCounterFloor(): number {
+    const floor = Date.now() * 1_000;
+    if (!Number.isSafeInteger(floor)) throw new VaultOperationError("cryptographic_operation_failed");
+    return floor;
+}
+
+function samePrivateIdentityKeys(left: PrivateIdentity, right: PrivateIdentity): boolean {
+    return left.hpkePrivateKey === right.hpkePrivateKey && left.hpkePublicKey === right.hpkePublicKey &&
+        left.signingPrivateKey === right.signingPrivateKey && left.signingPublicKey === right.signingPublicKey;
+}
+
+interface OneKeyIdentityInstallResult {
+    changedUserIds: string[];
+    disabledConversationCount: number;
+    vaultChanged: boolean;
+}
+
+async function installOneKeyIdentities(
+    vault: VaultFile,
+    localUserId: string,
+    deriveIdentity: (userId: string) => PrivateIdentity,
+): Promise<OneKeyIdentityInstallResult> {
+    const counterFloor = oneKeySendCounterFloor();
+    const userIds = [...new Set([...Object.keys(vault.accounts), localUserId])].sort((left, right) =>
+        left.localeCompare(right));
+    if (!vault.accounts[localUserId] && userIds.length > MAX_ACCOUNTS)
+        throw new VaultOperationError("capacity_exceeded");
+
+    const changedUserIds: string[] = [];
+    let disabledConversationCount = 0;
+    let vaultChanged = false;
+    for (const userId of userIds) {
+        let replacement: PrivateIdentity;
+        try {
+            replacement = deriveIdentity(userId);
+            await validateIdentityKeyPairs(replacement);
+        } catch {
+            throw new VaultOperationError("cryptographic_operation_failed");
+        }
+
+        const existing = vault.accounts[userId];
+        if (!existing) {
+            vault.accounts[userId] = {
+                conversations: {},
+                identity: replacement,
+                identityHistory: {},
+                peerIdentityHistory: {},
+                replayCache: [],
+                sendCounter: counterFloor,
+                trustedPeers: {},
+            };
+            changedUserIds.push(userId);
+            vaultChanged = true;
+            continue;
+        }
+
+        const nextCounter = Math.max(existing.sendCounter, counterFloor);
+        if (nextCounter !== existing.sendCounter) {
+            existing.sendCounter = nextCounter;
+            vaultChanged = true;
+        }
+        if (samePrivateIdentityKeys(existing.identity, replacement)) continue;
+
+        let currentFingerprint: string;
+        let replacementFingerprint: string;
+        try {
+            [currentFingerprint, replacementFingerprint] = await Promise.all([
+                ownIdentitySummary(existing.identity, userId).then(summary => summary.fingerprint),
+                ownIdentitySummary(replacement, userId).then(summary => summary.fingerprint),
+            ]);
+        } catch {
+            throw new VaultOperationError("cryptographic_operation_failed");
+        }
+        delete existing.identityHistory[replacementFingerprint];
+        retainLocalIdentity(existing, currentFingerprint);
+        existing.identity = replacement;
+        changedUserIds.push(userId);
+        vaultChanged = true;
+        for (const conversation of Object.values(existing.conversations)) {
+            if (!conversation.enabled) continue;
+            conversation.enabled = false;
+            conversation.reviewRequired = "local_identity_changed";
+            conversation.updatedAt = Date.now();
+            disabledConversationCount++;
+        }
+    }
+    return { changedUserIds, disabledConversationCount, vaultChanged };
+}
+
+async function configureSecurityKeyVault(
+    prepared: PreparedSecurityKeyVault,
+    localUserId: string,
+): Promise<SecurityKeyVaultResult> {
+    try {
+        return await runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+            const stored = await readVaultStoredValue();
+            if (parseSecurityKeyVaultEnvelope(stored))
+                return invalidInput("A security key already protects this Secure Messaging vault");
+            const vault = await loadVault();
+            const identityResult = prepared.profile.provider === "onekey"
+                ? await installOneKeyIdentities(
+                    vault,
+                    localUserId,
+                    userId => deriveOneKeyPrivateIdentity(prepared.key, userId),
+                )
+                : { changedUserIds: [], disabledConversationCount: 0, vaultChanged: false };
+            activatePreparedSecurityKeyVault(prepared);
+            cachedVault = null;
+            try {
+                await saveVault(vault);
+                clearAuthenticatedAttachmentCache();
+                for (const changedUserId of identityResult.changedUserIds) clearPendingReviews(changedUserId);
+                return {
+                    status: "unlocked",
+                    profile: securityKeyVaultProfileSummary(prepared.profile),
+                    ...(identityResult.changedUserIds.length > 0 ? {
+                        disabledConversationCount: identityResult.disabledConversationCount,
+                        identityChanged: true,
+                    } : {}),
+                };
+            } catch (error) {
+                clearSecurityKeyVaultSession();
+                cachedVault = null;
+                throw error;
+            }
+        });
+    } finally {
+        prepared.key.fill(0);
+    }
+}
+
+export async function getSecurityKeyVaultState(
+    event: IpcMainInvokeEvent,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    return runSerialized(async (): Promise<SecurityKeyVaultResult> =>
+        securityKeyVaultStateForValue(await readVaultStoredValue()));
+}
+
+export async function setupSecurityKeyVault(
+    event: IpcMainInvokeEvent,
+    localUserId: string,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    const user = validateLocalUserId(localUserId);
+    if (!user.ok) return invalidInput(user.error);
+    try {
+        return configureSecurityKeyVault(await prepareSecurityKeyVaultSetup(event, user.value), user.value);
+    } catch (error) {
+        return mapOperationFailure(error);
+    }
+}
+
+export async function setupOneKeyVault(
+    event: IpcMainInvokeEvent,
+    localUserId: string,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    const user = validateLocalUserId(localUserId);
+    if (!user.ok) return invalidInput(user.error);
+    try {
+        return configureSecurityKeyVault(await prepareOneKeySecurityKeyVaultSetup(event, user.value), user.value);
+    } catch (error) {
+        return mapOperationFailure(error);
+    }
+}
+
+export async function importSecurityKeyVault(
+    event: IpcMainInvokeEvent,
+    localUserId: string,
+    exportedProfile: string,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    const user = validateLocalUserId(localUserId);
+    if (!user.ok) return invalidInput(user.error);
+    if (typeof exportedProfile !== "string") return invalidInput("exportedProfile must be a security-key profile");
+    try {
+        return configureSecurityKeyVault(await prepareSecurityKeyVaultImport(event, exportedProfile), user.value);
+    } catch (error) {
+        return mapOperationFailure(error);
+    }
+}
+
+export async function unlockSecurityKeyVault(
+    event: IpcMainInvokeEvent,
+    localUserId: string,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    const user = validateLocalUserId(localUserId);
+    if (!user.ok) return invalidInput(user.error);
+    let initialEnvelope;
+    try {
+        validateStorageAvailability();
+        initialEnvelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
+    } catch (error) {
+        return mapOperationFailure(error);
+    }
+    if (!initialEnvelope) return invalidInput("This Secure Messaging vault is not protected by a security key");
+
+    let prepared: PreparedSecurityKeyVault;
+    try {
+        prepared = await prepareSecurityKeyVaultUnlock(event, initialEnvelope.profile);
+    } catch (error) {
+        return mapOperationFailure(error);
+    }
+    try {
+        return await runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+            const currentEnvelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
+            if (!currentEnvelope || currentEnvelope.rootFingerprint !== prepared.profile.rootFingerprint)
+                return { status: "failed", error: "security_key_mismatch" };
+            activatePreparedSecurityKeyVault(prepared);
+            cachedVault = null;
+            try {
+                const vault = await loadVault();
+                const identityResult = prepared.profile.provider === "onekey"
+                    ? await installOneKeyIdentities(vault, user.value, userId => {
+                        const identity = deriveActiveOneKeyPrivateIdentity(userId);
+                        if (!identity) throw new SecurityKeyVaultError("locked");
+                        return identity;
+                    })
+                    : { changedUserIds: [], disabledConversationCount: 0, vaultChanged: false };
+                if (identityResult.vaultChanged) await saveVault(vault);
+                for (const changedUserId of identityResult.changedUserIds) clearPendingReviews(changedUserId);
+                clearAuthenticatedAttachmentCache();
+                return {
+                    status: "unlocked",
+                    profile: securityKeyVaultProfileSummary(prepared.profile),
+                    ...(identityResult.changedUserIds.length > 0 ? {
+                        disabledConversationCount: identityResult.disabledConversationCount,
+                        identityChanged: true,
+                    } : {}),
+                };
+            } catch (error) {
+                clearSecurityKeyVaultSession();
+                cachedVault = null;
+                throw error;
+            }
+        });
+    } finally {
+        prepared.key.fill(0);
+    }
+}
+
+export async function lockSecurityKeyVault(
+    event: IpcMainInvokeEvent,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+
+    // Locking is a memory-safety boundary. Clear private material before any filesystem,
+    // mutex, or safeStorage operation that could fail or wait.
+    clearSecurityKeyVaultSession();
+    cachedVault = null;
+    clearAuthenticatedAttachmentCache();
+
+    return runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+        const envelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
+        return envelope
+            ? { status: "locked", profile: securityKeyVaultProfileSummary(envelope.profile) }
+            : { status: "not_configured" };
+    });
+}
+
+export async function removeSecurityKeyVault(
+    event: IpcMainInvokeEvent,
+): Promise<SecurityKeyVaultResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    return runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+        const stored = await readVaultStoredValue();
+        if (!parseSecurityKeyVaultEnvelope(stored)) return { status: "not_configured" };
+        const vault = await loadVault();
+        await saveVault(vault, true);
+        clearSecurityKeyVaultSession();
+        cachedVault = null;
+        clearAuthenticatedAttachmentCache();
+        return { status: "not_configured" };
+    });
+}
+
 export async function getIdentity(event: IpcMainInvokeEvent, localUserId: string): Promise<IdentityResult> {
     const callerFailure = validateIpcCaller(event);
     if (callerFailure) return callerFailure;
@@ -1718,6 +2064,8 @@ export async function rotateIdentity(
     if (!user.ok) return invalidInput(user.error);
     if (!isEncodedKey(expectedFingerprint, 32)) return invalidInput("expectedFingerprint must be a secure-messaging fingerprint");
     return runSerialized(async (): Promise<RotateIdentityResult> => {
+        if (isOneKeySecurityKeyVaultActive())
+            return invalidInput("Remove OneKey protection before intentionally rotating this stable OneKey-derived identity");
         const context = await loadAccount(user.value);
         let currentSummary: IdentitySummary;
         try {
@@ -1746,7 +2094,7 @@ export async function rotateIdentity(
         for (const conversation of Object.values(context.account.conversations)) {
             if (!conversation.enabled) continue;
             conversation.enabled = false;
-            conversation.reviewRequired = "unverified_recipients";
+            conversation.reviewRequired = "local_identity_changed";
             conversation.updatedAt = Date.now();
             disabledConversationCount++;
         }
