@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { build, type Plugin } from "esbuild";
 
@@ -44,10 +44,10 @@ async function loadModule(): Promise<{ directory: string; module: SecurityKeyVau
     const output = join(directory, "security-key-vault.mjs");
     await build({
         bundle: true,
-        entryPoints: [new URL(
+        entryPoints: [fileURLToPath(new URL(
             "../src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts",
             import.meta.url,
-        ).pathname],
+        ))],
         format: "esm",
         outfile: output,
         platform: "node",
@@ -191,6 +191,8 @@ async function main(): Promise<void> {
     ), "utf8");
     assert.match(implementation, /extensions:\{credProps:true,largeBlob:\{support:"preferred"\},prf:/u,
         "registration must negotiate PRF and large-blob providers together");
+    assert.match(implementation, /pubKeyCredParams:\[\{type:"public-key",alg:-7\}/u,
+        "registration must retain the ES256 algorithm supported by OneKey FIDO2 firmware");
     assert.match(implementation, /residentKey:"required",requireResidentKey:true/u,
         "large-blob credentials must be discoverable resident credentials");
     assert.match(implementation, /residentKey:extensions\.credProps\?\.rk===true/u,
@@ -236,6 +238,8 @@ async function main(): Promise<void> {
         import.meta.url,
     ), "utf8");
     assert.match(renderer, /PRF or large-blob storage/u);
+    assert.match(renderer, /up-to-date, PIN-enabled Pro, Touch, or 1S over USB/u,
+        "the setup UI must state the supported OneKey models and transport");
     assert.match(renderer, /keyState\.profile\.provider === "large_blob"/u);
     assert.match(renderer, /Native\.setupSecurityKeyVault/u);
     assert.match(renderer, /Native\.unlockSecurityKeyVault/u);
@@ -245,6 +249,14 @@ async function main(): Promise<void> {
         "stopping the plugin must clear the unlocked E2E vault key");
     assert.doesNotMatch(renderer, /title="Secure Messaging \(PCEM3\)"/u);
     assert.doesNotMatch(renderer, /<Heading tag="h5">Important limitations<\/Heading>/u);
+
+    const documentation = readFileSync(new URL(
+        "../src/equicordplugins/secureMessaging.desktop/README.md",
+        import.meta.url,
+    ), "utf8");
+    assert.match(documentation, /OneKey Pro, Touch, and 1S devices with current firmware and a PIN over USB/u);
+    assert.match(documentation, /U2F-only OneKey models[\s\S]*not supported/u,
+        "OneKey support must not imply that U2F-only models can derive the vault key");
 
     assert.equal(existsSync(new URL(
         "../src/equicordplugins/secureMessagingSecurityKey.desktop/index.tsx",

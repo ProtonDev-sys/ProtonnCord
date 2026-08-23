@@ -1832,7 +1832,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                     {keyFailure && <BaseText size="sm" className="pc-secure-status-danger">{failureMessage(keyFailure)}</BaseText>}
                     {keyState?.status === "not_configured" && (
                         <>
-                            <BaseText size="xs" color="text-muted">Supports FIDO2 security keys with PRF or large-blob storage.</BaseText>
+                            <BaseText size="xs" color="text-muted">Supports FIDO2 security keys with PRF or large-blob storage. For OneKey, use an up-to-date, PIN-enabled Pro, Touch, or 1S over USB.</BaseText>
                             <div className="pc-secure-modal-actions">
                                 <Button size="small" variant="primary" disabled={busy} onClick={() => void runKeyAction(() => Native.setupSecurityKeyVault(context.localUserId))}>
                                     Set up security key
