@@ -80,7 +80,7 @@ jobs:
               run: |
                   set -euo pipefail
                   branch="$GITHUB_REF_NAME"
-                  git fetch --no-tags origin "$branch"
+                  git fetch --no-tags origin "refs/heads/$branch"
                   if [[ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]]; then
                       echo "Skipping stale release build for $GITHUB_SHA; origin/$branch has advanced."
                       exit 0

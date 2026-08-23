@@ -321,8 +321,8 @@ async function main(): Promise<void> {
     );
     assert.equal(
         shouldHideSecureEmbedOnlyPlaintext(gifOnlyUrl, "pending"),
-        true,
-        "an embed-only URL stays hidden while its native preview loads",
+        false,
+        "an embed-only URL remains visible until its native preview is ready",
     );
     assert.equal(
         shouldHideSecureEmbedOnlyPlaintext(gifOnlyUrl, "present"),

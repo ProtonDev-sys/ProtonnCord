@@ -16,11 +16,33 @@ Secure Messaging adds opt-in encrypted messages, stickers, GIF-picker links, and
 - The privileged native helper resolves recipients only through its persistent verified-key store. The receiver validates the Discord author/channel binding, pinned sender fingerprint, signature, AEAD tag, recipient entry, and persistent replay state before rendering plaintext.
 - Private key material and counters are stored in an encrypted vault protected by Electron `safeStorage`. The plugin refuses to operate if secure OS storage is unavailable, including Linux's `basic_text` backend.
 
-After the vault is validated, a decrypted copy is cached in the trusted Electron main process to avoid a disk and operating-system key-store round trip on every message. Identity keys therefore remain in main-process memory for the lifetime of Discord. The renderer API cannot export them, but malicious code already running in the main process remains outside the threat model.
+After the vault is validated, a decrypted copy is cached in the trusted Electron main process to avoid a disk and operating-system key-store round trip on every message. Identity keys therefore remain in main-process memory while an unprotected vault is in use or a protected vault is unlocked. The renderer API cannot export them, but malicious code already running in the main process remains outside the threat model.
 
 Key fingerprints bind the Discord user ID and both public keys. Users must compare the full fingerprint through a channel outside the Discord conversation before trusting it. A changed key is never accepted silently and disables affected conversation configuration until it is explicitly verified again.
 
 The client processes key announcements from Discord message events and loaded history independently of whether their React accessory is visible. Key-change quarantine is persisted before protected sends can resume. The exact Discord announcement publication time orders replacements, so replaying an older valid announcement cannot displace a newer verified key.
+
+## OneKey setup
+
+OneKey Classic 1S is supported through its hardware-vault interface with current firmware, a configured device PIN, and a USB connection. OneKey Pro and Touch can use the standard FIDO2 route on operating systems that expose PRF or large-blob storage. Bluetooth and U2F-only OneKey models are not supported.
+
+Windows 10 cannot return the FIDO2 PRF result that Secure Messaging needs. For OneKey Classic 1S, ProtonnCord therefore uses the device's separate Microsoft WinUSB interface and its hardware `CipherKeyValue` vault primitive automatically. This works from a normal Discord launch with no administrator rights, custom shortcut, launch arguments, bridge, or driver replacement.
+
+1. Update the OneKey firmware, configure its PIN, and connect it to the computer by USB.
+2. Open a DM or group DM and click the lock button beside the message box to open **Secure Messaging**.
+3. Fully quit OneKey Desktop or another wallet app from its system-tray menu so it releases the USB interface.
+4. Under **Security key**, click **Set up OneKey**. Enter the PIN on the OneKey when asked, then approve **ProtonnCord Secure Messaging** on its screen.
+5. When setup completes, compare or share the displayed identity fingerprint as usual. The same physical OneKey and Discord account deterministically restore the same fingerprint on a clean installation; no OneKey profile copy is needed.
+6. For every Discord account already stored in the shared vault, setup replaces a differing Secure Messaging identity, retains the previous key for bounded history access, and disables protected conversations for explicit review. Share the new fingerprint so recipients can verify it before trusting messages from the replacement identity. Accounts first opened later are derived from the unlocked OneKey root too.
+7. After a restart or manual lock, return to this panel, click **Unlock**, enter the device PIN if asked, and approve the request on the OneKey.
+
+OneKey Classic 1S firmware performs this operation with a secret inside that physical device's secure element. ProtonnCord uses the resulting device-bound root to deterministically derive separate Ed25519 and X25519 identity keys for each Discord account. This is not hardware-only signing: the derived private key material exists in the trusted Electron main-process memory while the vault is unlocked.
+
+Deterministic identity recovery restores the current fingerprint, not the rest of the vault. Keep an installation-local Secure Messaging state backup to preserve verified contacts, protected-conversation settings, exact counters, replay records, retired keys, and access to history that depends on those retired keys. The outer Electron `safeStorage` layer is bound to the operating-system account, so copying `vault.bin` alone is not a portable backup or export. The OneKey profile-copy control is intentionally hidden because its derivation input is fixed and a copied profile would not restore that state.
+
+A clean OneKey restore seeds its send counter from the current system clock because no prior counter is available. Keep that clock accurate and use only one active sending installation for the same physical OneKey and Discord account at a time. A correctly restored installation-local state backup preserves the exact send counters and replay records instead.
+
+The wallet recovery phrase does not recreate the physical device's secure-element secret. Before resetting, replacing, or losing the OneKey, unlock the vault and select **Remove protection**. Otherwise the locked vault can become permanently unreadable. While OneKey protection is active, deterministic identity rotation is hidden; remove protection first if rotation is required.
 
 ## Safety properties and limits
 
@@ -35,6 +57,10 @@ The protocol does not hide Discord metadata such as channel membership, sender, 
 ## Operational rules
 
 - Encryption is supported only in one-to-one DMs and group DMs.
+- Security-key vault protection uses FIDO2/WebAuthn PRF (`hmac-secret`) or large-blob storage where the operating-system provider supports it. On Windows 10, OneKey Classic 1S uses its vendor WinUSB interface and `CipherKeyValue` instead; the device requires its wallet PIN when locked and physical confirmation on every derivation. U2F-only devices cannot provide the stable vault secret this feature requires.
+- OneKey Desktop and other wallet software can hold the vendor USB interface exclusively. Fully quit that software from the system tray before setup or unlock if ProtonnCord reports that the OneKey is busy.
+- OneKey identity derivation is deterministic for the same physical device and Discord account. Protecting an existing shared vault reconciles every stored Discord account, replaces differing identities, and disables enabled protected conversations for explicit identity review; recipients must verify the user's new fingerprint on their own clients. An account first opened later is derived from the active OneKey root instead of receiving a random identity.
+- A clean deterministic restore seeds its monotonic send counter from the current clock. Keep the clock accurate and do not send concurrently from multiple installations using the same OneKey/account identity; restore the installation-local state backup when exact counter and replay continuity is required.
 - The cryptographic recipient set is explicit and can be smaller than the Discord group.
 - A Discord group membership change stops encrypted sends until the user reviews and saves the current participant snapshot.
 - Adding a participant does not retroactively give them keys for earlier messages. A newly selected participant can decrypt only messages sent after they were selected; content that they need from earlier history must be sent again as a new encrypted message.
