@@ -632,7 +632,7 @@ function failureMessage(failure: NativeFailure): string {
         if (failure.reason === "unsafe_linux_backend") return "Secure Messaging refuses Linux's unencrypted basic_text key-storage backend.";
         if (failure.reason === "vault_unreadable") return "The encrypted Secure Messaging vault could not be read. It was not reset.";
         if (failure.reason === "security_key_locked") return "Unlock the security key in Secure Messaging to read or send encrypted messages.";
-        if (failure.reason === "security_key_unsupported") return "This security key and WebAuthn provider support neither PRF nor large-blob storage for vault encryption.";
+        if (failure.reason === "security_key_unsupported") return "No supported hardware-vault route was available. On Windows 10, connect a PIN-enabled OneKey Classic 1S by USB; on other systems, use a security key with PRF or large-blob support.";
         return "Secure key storage is unavailable.";
     }
     if (failure.error === "attachment_download_failed") return "The encrypted attachment could not be downloaded from Discord.";
@@ -642,7 +642,10 @@ function failureMessage(failure: NativeFailure): string {
     if (failure.error === "capacity_exceeded") return "The encrypted vault reached a safety limit.";
     if (failure.error === "cryptographic_operation_failed") return "The cryptographic operation failed.";
     if (failure.error === "screen_capture_protection_failed") return "Encrypted content visibility could not be updated safely.";
+    if (failure.error === "security_key_busy") return "OneKey is busy. Fully quit OneKey Desktop or another wallet app from the system tray, then retry.";
     if (failure.error === "security_key_cancelled") return "The security-key operation was cancelled or timed out.";
+    if (failure.error === "security_key_operation_failed") return "OneKey could not complete the hardware-vault operation. Unlock the device and retry.";
+    if (failure.error === "security_key_unavailable") return "No OneKey Classic 1S was found. Connect it directly by USB, unlock it, and retry.";
     if (failure.error === "security_key_mismatch") return "The wrong security key answered, or its profile no longer matches this vault.";
     if (failure.error === "security_key_storage_failed") return "The security key could not store the encrypted vault seed. Check its resident-key and large-blob capacity, then retry.";
     return "The encrypted vault could not be saved.";
@@ -742,6 +745,7 @@ function enforceMessageNonce(request: Record<string, any>): void {
 function conversationStatusMessage(result: ConversationResult): string {
     if (isNativeFailure(result)) return failureMessage(result);
     if (result.status === "enabled") return "Encryption is enabled for the selected recipients.";
+    if (result.status === "local_identity_changed") return "Your identity changed. Share and verify the new fingerprint with recipients, then review and enable encryption again.";
     if (result.status === "participant_changed") return "Discord group membership changed. Review recipients and enable encryption again.";
     if (result.status === "unverified_recipients") return "A selected recipient key is missing or changed. Re-verify it before sending.";
     if (result.status === "disabled") return "Encryption is disabled for this conversation.";
@@ -1737,26 +1741,33 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
     const keyFailure = securityKey && isNativeFailure(securityKey) ? securityKey : null;
     const keyState = securityKey && !keyFailure ? securityKey : null;
     const vaultLocked = keyState?.status === "locked";
+    const oneKeyProtected = keyState?.status === "unlocked" && keyState.profile.provider === "onekey";
 
     const runKeyAction = async (operation: () => Promise<SecurityKeyVaultResult>) => {
-    setBusy(true);
-    setError(null);
-    try {
-        const result = await operation();
-        if (isNativeFailure(result)) {
-            setError(failureMessage(result));
-        } else {
-            setSecurityKey(result);
-            revokePreparedSecureOperations();
-            invalidateSecureRenderCaches();
-            await load();
+        setBusy(true);
+        setError(null);
+        try {
+            const result = await operation();
+            if (isNativeFailure(result)) {
+                setError(failureMessage(result));
+            } else {
+                setSecurityKey(result);
+                revokePreparedSecureOperations();
+                invalidateSecureRenderCaches();
+                if (result.status === "unlocked" && result.identityChanged) {
+                    showToast(
+                        `OneKey-derived identities installed; ${result.disabledConversationCount ?? 0} protected conversation(s) disabled for identity review.`,
+                        Toasts.Type.SUCCESS,
+                    );
+                }
+                await load();
+            }
+        } catch {
+            setError("The security-key operation failed.");
+        } finally {
+            setBusy(false);
         }
-    } catch {
-        setError("The security-key operation failed.");
-    } finally {
-        setBusy(false);
-    }
-};
+    };
 
     const toggleRecipient = (userId: string, checked: boolean) => {
         setSelectedRecipientIds(current => checked
@@ -1832,20 +1843,32 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                     {keyFailure && <BaseText size="sm" className="pc-secure-status-danger">{failureMessage(keyFailure)}</BaseText>}
                     {keyState?.status === "not_configured" && (
                         <>
-                            <BaseText size="xs" color="text-muted">Supports FIDO2 security keys with PRF or large-blob storage. For OneKey, use an up-to-date, PIN-enabled Pro, Touch, or 1S over USB.</BaseText>
+                            <BaseText size="xs" color="text-muted">Supports FIDO2 security keys with PRF or large-blob storage. On Windows 10, a PIN-enabled OneKey Classic 1S uses its built-in WinUSB connection automatically—no administrator rights, custom shortcut, or Discord launch arguments.</BaseText>
                             <BaseText size="xs" weight="semibold">Set up OneKey</BaseText>
                             <ol className="pc-secure-onekey-guide">
                                 <li>Update your OneKey, configure its PIN, and connect it by USB.</li>
-                                <li>Click <strong>Set up security key</strong>. In the system prompt, select the security-key option (often <strong>Use another device</strong>).</li>
-                                <li>Approve the request on your OneKey. If a “Finish Secure Messaging security-key setup (2 of 2)” prompt appears, approve the key again.</li>
-                                <li>After setup, click <strong>Copy profile</strong> and keep it safely if you plan to reuse this OneKey on another installation. It is not a vault backup.</li>
+                                <li>Fully quit OneKey Desktop from the system tray so it releases the device.</li>
+                                <li>Click <strong>Set up OneKey</strong>, enter the PIN on your OneKey when asked, and approve <strong>ProtonnCord Secure Messaging</strong> on its screen.</li>
+                                <li>The same physical OneKey and Discord account restore the same fingerprint on a clean installation. No OneKey profile copy is needed.</li>
                             </ol>
+                            <BaseText size="xs" color="text-muted">
+                                The device-bound OneKey root deterministically derives a separate identity for every Discord account stored in this vault. Setup replaces any differing identities and disables their protected conversations for review. Recipients should verify your new fingerprint before trusting it. Derived private keys exist in trusted desktop memory while the vault is unlocked.
+                            </BaseText>
+                            <BaseText size="xs" color="text-muted">
+                                Keep an installation-local state backup to preserve trusted contacts, conversation settings, exact counters, replay records, retired keys, and readable history. The OS-bound vault file alone is not a portable export.
+                            </BaseText>
+                            <BaseText size="xs" color="text-muted">
+                                A clean restore seeds its send counter from the current clock. Keep the system clock accurate and use only one active sending installation for this OneKey and Discord account at a time.
+                            </BaseText>
                             <BaseText size="xs" className="pc-secure-status-danger">
-                                Before resetting or replacing the OneKey, unlock the vault and remove its protection. A wallet recovery phrase does not recreate its FIDO credential, so losing or resetting the registered key while the vault is locked can make the vault unreadable.
+                                Before resetting or replacing the OneKey, unlock the vault and remove its protection. Hardware-vault mode is bound to this physical OneKey’s secure element; its wallet recovery phrase cannot recreate that device secret.
                             </BaseText>
                             <div className="pc-secure-modal-actions">
-                                <Button size="small" variant="primary" disabled={busy} onClick={() => void runKeyAction(() => Native.setupSecurityKeyVault(context.localUserId))}>
-                                    Set up security key
+                                <Button size="small" variant="primary" disabled={busy} onClick={() => void runKeyAction(() => Native.setupOneKeyVault(context.localUserId))}>
+                                    Set up OneKey
+                                </Button>
+                                <Button size="small" disabled={busy} onClick={() => void runKeyAction(() => Native.setupSecurityKeyVault(context.localUserId))}>
+                                    Set up another security key
                                 </Button>
                                 <Button size="small" disabled={busy} onClick={() => setShowImport(value => !value)}>
                                     Protect with existing key
@@ -1865,21 +1888,30 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                         <>
                             <code className="pc-secure-fingerprint">{keyState.profile.formattedRootFingerprint}</code>
                             <BaseText size="xs" color="text-muted">
-                                Mode: {keyState.profile.provider === "large_blob" ? "Large blob" : "PRF"}
+                                Mode: {keyState.profile.provider === "onekey"
+                                    ? "OneKey hardware vault"
+                                    : keyState.profile.provider === "large_blob" ? "Large blob" : "PRF"}
                             </BaseText>
+                            {keyState.profile.provider === "onekey" && (
+                                <BaseText size="xs" color="text-muted">
+                                    This physical OneKey and Discord account deterministically restore the same identity. An installation-local state backup preserves exact counters and replay records; the OS-bound vault file alone is not portable. Keep the clock accurate and use only one active sending installation at a time.
+                                </BaseText>
+                            )}
                             <div className="pc-secure-modal-actions">
                                 {keyState.status === "locked" ? (
-                                    <Button size="small" variant="primary" disabled={busy} onClick={() => void runKeyAction(() => Native.unlockSecurityKeyVault())}>
+                                    <Button size="small" variant="primary" disabled={busy} onClick={() => void runKeyAction(() => Native.unlockSecurityKeyVault(context.localUserId))}>
                                         Unlock
                                     </Button>
                                 ) : (
                                     <>
-                                        <Button size="small" disabled={busy} onClick={() => {
-                                            copyToClipboard(keyState.profile.exportText);
-                                            showToast("Security-key profile copied.", Toasts.Type.SUCCESS);
-                                        }}>
-                                            Copy profile
-                                        </Button>
+                                        {keyState.profile.provider !== "onekey" && (
+                                            <Button size="small" disabled={busy} onClick={() => {
+                                                copyToClipboard(keyState.profile.exportText);
+                                                showToast("Security-key profile copied.", Toasts.Type.SUCCESS);
+                                            }}>
+                                                Copy profile
+                                            </Button>
+                                        )}
                                         <Button size="small" disabled={busy} onClick={() => void runKeyAction(() => Native.lockSecurityKeyVault())}>
                                             Lock
                                         </Button>
@@ -1968,13 +2000,24 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
 
                         {readyIdentity && (
                             <section className="pc-secure-modal-section">
-                                <Heading tag="h5">Reset identity</Heading>
-                                <Checkbox value={confirmRotation} disabled={busy} onChange={(_event, checked) => setConfirmRotation(checked)} size={20}>
-                                    <BaseText size="xs">Disable protected conversations and require re-verification.</BaseText>
-                                </Checkbox>
-                                <Button size="small" variant="dangerPrimary" disabled={!confirmRotation || busy} onClick={() => void rotate()}>
-                                    Rotate identity
-                                </Button>
+                                {oneKeyProtected ? (
+                                    <>
+                                        <Heading tag="h5">OneKey identity</Heading>
+                                        <BaseText size="xs" color="text-muted">
+                                            Remove OneKey protection first if you need to rotate this deterministic identity.
+                                        </BaseText>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Heading tag="h5">Reset identity</Heading>
+                                        <Checkbox value={confirmRotation} disabled={busy} onChange={(_event, checked) => setConfirmRotation(checked)} size={20}>
+                                            <BaseText size="xs">Disable protected conversations for identity review; recipients must verify your new fingerprint.</BaseText>
+                                        </Checkbox>
+                                        <Button size="small" variant="dangerPrimary" disabled={!confirmRotation || busy} onClick={() => void rotate()}>
+                                            Rotate identity
+                                        </Button>
+                                    </>
+                                )}
                             </section>
                         )}
                     </>
