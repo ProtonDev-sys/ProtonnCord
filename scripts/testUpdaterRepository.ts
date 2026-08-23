@@ -53,7 +53,9 @@ assert.doesNotMatch(gitOperations, /origin\/\$\{branch\}/u);
 assert.match(workflow, /branches:\s+- main\s+- staging\s+- nightly/u);
 assert.match(workflow, /concurrency:\s+group: protonn-cord-release-\$\{\{ github\.ref \}\}\s+cancel-in-progress: false/u);
 assert.match(workflow, /branch="\$GITHUB_REF_NAME"/u);
-assert.match(workflow, /git fetch --no-tags origin "\$branch"/u);
+assert.match(workflow, /git fetch --no-tags origin "refs\/heads\/\$branch"/u);
+assert.doesNotMatch(workflow, /git fetch --no-tags origin "\$branch"/u,
+    "release freshness checks must not resolve a same-named channel tag");
 assert.match(workflow, /git rev-parse HEAD[^\n]+git rev-parse FETCH_HEAD/u);
 assert.doesNotMatch(workflow, /git rev-parse origin\/main/u);
 assert.match(workflow, /if \[\[ "\$branch" == "main" \]\]; then\s+tag="latest"\s+release_flags=\(--latest\)/u);
