@@ -22,6 +22,19 @@ Key fingerprints bind the Discord user ID and both public keys. Users must compa
 
 The client processes key announcements from Discord message events and loaded history independently of whether their React accessory is visible. Key-change quarantine is persisted before protected sends can resume. The exact Discord announcement publication time orders replacements, so replaying an older valid announcement cannot displace a newer verified key.
 
+## OneKey setup
+
+OneKey Pro, Touch, and 1S are supported with current firmware, a configured device PIN, and a USB connection. Bluetooth and U2F-only OneKey models are not supported.
+
+1. Update the OneKey firmware, configure its PIN, and connect it to the computer by USB.
+2. Open a DM or group DM and click the lock button beside the message box to open **Secure Messaging**.
+3. Under **Security key**, click **Set up security key**. In the system WebAuthn prompt, select the security-key option (often **Use another device**).
+4. Approve the request on the OneKey. If **Finish Secure Messaging security-key setup (2 of 2)** appears, approve the key a second time.
+5. When setup completes, click **Copy profile** and keep that profile safely if the same OneKey will be reused on another installation. The profile does not contain the encrypted vault and does not replace a vault backup.
+6. After a restart or manual lock, return to this panel, click **Unlock**, and approve the request on the OneKey.
+
+Before resetting or replacing the OneKey, unlock the vault and select **Remove protection**. A OneKey wallet recovery phrase does not recreate its FIDO credential; losing or resetting the registered device while the vault is locked can therefore make the vault unreadable.
+
 ## Safety properties and limits
 
 After fingerprints are compared and endpoints remain uncompromised, message versions 1 through 3 protect message text from Discord and from unselected chat participants and detect ciphertext modification, sender substitution, and channel copying. They also reject conflicting envelope IDs/counters and exact recorded-envelope replay while the persistent bounded replay record (the latest 4,096 accepted envelopes per local account) is retained. For a locally authored message, Discord's optimistic nonce ID may be reconciled once with the confirmed server message ID when the canonical message carries that exact nonce. If Discord later omits the nonce from loaded history, reconciliation additionally requires a tightly bounded older-canonical/newer-provisional snowflake ordering around the signed envelope time. Unrelated copies and any second replacement remain blocked.

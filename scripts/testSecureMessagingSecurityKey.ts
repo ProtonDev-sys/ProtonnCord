@@ -240,6 +240,10 @@ async function main(): Promise<void> {
     assert.match(renderer, /PRF or large-blob storage/u);
     assert.match(renderer, /up-to-date, PIN-enabled Pro, Touch, or 1S over USB/u,
         "the setup UI must state the supported OneKey models and transport");
+    assert.match(renderer, /Finish Secure Messaging security-key setup \(2 of 2\)/u,
+        "the setup UI must explain OneKey's possible second WebAuthn confirmation");
+    assert.match(renderer, /wallet recovery phrase does not recreate its FIDO credential/u,
+        "the setup UI must warn that resetting OneKey can make the vault unreadable");
     assert.match(renderer, /keyState\.profile\.provider === "large_blob"/u);
     assert.match(renderer, /Native\.setupSecurityKeyVault/u);
     assert.match(renderer, /Native\.unlockSecurityKeyVault/u);
@@ -255,6 +259,12 @@ async function main(): Promise<void> {
         import.meta.url,
     ), "utf8");
     assert.match(documentation, /OneKey Pro, Touch, and 1S devices with current firmware and a PIN over USB/u);
+    assert.match(documentation, /## OneKey setup[\s\S]*click the lock button beside the message box/u,
+        "the guide must explain where to open OneKey setup");
+    assert.match(documentation, /Finish Secure Messaging security-key setup \(2 of 2\)[\s\S]*approve the key a second time/u,
+        "the guide must explain the possible second WebAuthn confirmation");
+    assert.match(documentation, /wallet recovery phrase does not recreate its FIDO credential/u,
+        "the guide must warn that a seed phrase cannot recover the FIDO credential");
     assert.match(documentation, /U2F-only OneKey models[\s\S]*not supported/u,
         "OneKey support must not imply that U2F-only models can derive the vault key");
 

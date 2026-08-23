@@ -1833,6 +1833,16 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                     {keyState?.status === "not_configured" && (
                         <>
                             <BaseText size="xs" color="text-muted">Supports FIDO2 security keys with PRF or large-blob storage. For OneKey, use an up-to-date, PIN-enabled Pro, Touch, or 1S over USB.</BaseText>
+                            <BaseText size="xs" weight="semibold">Set up OneKey</BaseText>
+                            <ol className="pc-secure-onekey-guide">
+                                <li>Update your OneKey, configure its PIN, and connect it by USB.</li>
+                                <li>Click <strong>Set up security key</strong>. In the system prompt, select the security-key option (often <strong>Use another device</strong>).</li>
+                                <li>Approve the request on your OneKey. If a “Finish Secure Messaging security-key setup (2 of 2)” prompt appears, approve the key again.</li>
+                                <li>After setup, click <strong>Copy profile</strong> and keep it safely if you plan to reuse this OneKey on another installation. It is not a vault backup.</li>
+                            </ol>
+                            <BaseText size="xs" className="pc-secure-status-danger">
+                                Before resetting or replacing the OneKey, unlock the vault and remove its protection. A wallet recovery phrase does not recreate its FIDO credential, so losing or resetting the registered key while the vault is locked can make the vault unreadable.
+                            </BaseText>
                             <div className="pc-secure-modal-actions">
                                 <Button size="small" variant="primary" disabled={busy} onClick={() => void runKeyAction(() => Native.setupSecurityKeyVault(context.localUserId))}>
                                     Set up security key
