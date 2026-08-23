@@ -25,6 +25,17 @@ import {
     session,
 } from "electron";
 
+import {
+    createOneKeyCipherScript,
+    deriveOneKeyBindingPublicKey,
+    deriveOneKeyPrivateIdentity,
+    isOneKeyClassicDevice,
+    type OneKeyCipherResult,
+    oneKeyDeterministicProfileInput,
+} from "./oneKeyVault";
+import { runOneKeyWindowsVaultCipher } from "./oneKeyWindowsVault";
+import type { PrivateIdentity } from "./protocol";
+
 const LEGACY_PROFILE_PREFIX = "PCSKV1:";
 const PROFILE_PREFIX = "PCSKV2:";
 const LEGACY_PROFILE_VERSION = 1 as const;
@@ -42,6 +53,10 @@ const LARGE_BLOB_VAULT_KEY_INFO = Buffer.from(
     "ProtonnCord/SecureMessaging/security-key-vault-large-blob-key/v1",
     "utf8",
 );
+const ONEKEY_VAULT_KEY_INFO = Buffer.from(
+    "ProtonnCord/SecureMessaging/security-key-vault-onekey-key/v1",
+    "utf8",
+);
 const VAULT_AAD_PREFIX = "ProtonnCord/SecureMessaging/security-key-vault/v2";
 const LARGE_BLOB_MAGIC = Buffer.from("PCVLB1", "ascii");
 const LARGE_BLOB_SEED_BYTES = 32;
@@ -50,14 +65,17 @@ const SNOWFLAKE = /^\d{17,20}$/u;
 
 export type SecurityKeyAlgorithm = -8 | -7 | -257;
 export type SecurityKeyTransport = "ble" | "hybrid" | "internal" | "nfc" | "smart-card" | "usb";
-export type SecurityKeyVaultProvider = "large_blob" | "prf";
+export type SecurityKeyVaultProvider = "large_blob" | "onekey" | "prf";
 export type SecurityKeyVaultErrorCode =
+    | "busy"
     | "cancelled"
     | "corrupt"
     | "credential_mismatch"
     | "invalid_profile"
     | "large_blob_failed"
     | "locked"
+    | "operation_failed"
+    | "unavailable"
     | "unsupported";
 
 export class SecurityKeyVaultError extends Error {
@@ -96,7 +114,13 @@ export interface SecurityKeyVaultEnvelope {
 
 export type SecurityKeyVaultState =
     | { status: "not_configured"; }
-    | { status: "locked" | "unlocked"; profile: SecurityKeyVaultProfileSummary; };
+    | { status: "locked"; profile: SecurityKeyVaultProfileSummary; }
+    | {
+        status: "unlocked";
+        profile: SecurityKeyVaultProfileSummary;
+        disabledConversationCount?: number;
+        identityChanged?: boolean;
+    };
 
 export interface PreparedSecurityKeyVault {
     key: Buffer;
@@ -183,7 +207,7 @@ function validTransport(value: unknown): value is SecurityKeyTransport {
 }
 
 function validProvider(value: unknown): value is SecurityKeyVaultProvider {
-    return value === "large_blob" || value === "prf";
+    return value === "large_blob" || value === "onekey" || value === "prf";
 }
 
 function assertPublicKeyAlgorithm(algorithm: SecurityKeyAlgorithm, publicKeySpki: string): KeyObject {
@@ -216,13 +240,20 @@ function validateProfile(profile: SecurityKeyVaultProfile): void {
         !validProvider(profile.provider) || !Array.isArray(profile.transports) || profile.transports.length > 6 ||
         profile.transports.some(transport => !validTransport(transport)))
         throw new SecurityKeyVaultError("invalid_profile");
-    decodeBase64Url(profile.credentialId, 16, 1_024);
+    decodeBase64Url(
+        profile.credentialId,
+        profile.provider === "onekey" ? 32 : 16,
+        profile.provider === "onekey" ? 32 : 1_024,
+    );
     if (profile.provider === "prf") decodeBase64Url(profile.prfSalt, 32, 32);
     else if (profile.prfSalt !== null) throw new SecurityKeyVaultError("invalid_profile");
     decodeBase64Url(profile.publicKeySpki, 32, 1_024);
     decodeBase64Url(profile.rootFingerprint, 32, 32);
     const transports = [...new Set(profile.transports)].sort((left, right) => left.localeCompare(right));
-    if (transports.length !== profile.transports.length ||
+    if ((profile.provider === "onekey" &&
+        (profile.algorithm !== -8 || profile.credentialId !== oneKeyDeterministicProfileInput() ||
+            transports.length !== 1 || transports[0] !== "usb")) ||
+        transports.length !== profile.transports.length ||
         transports.some((transport, index) => transport !== profile.transports[index]) ||
         rootFingerprint(profile.algorithm, profile.publicKeySpki) !== profile.rootFingerprint)
         throw new SecurityKeyVaultError("invalid_profile");
@@ -407,7 +438,11 @@ function deriveVaultKey(secret: Buffer, profile: SecurityKeyVaultProfile): Buffe
             "sha256",
             secret,
             root,
-            profile.provider === "prf" ? PRF_VAULT_KEY_INFO : LARGE_BLOB_VAULT_KEY_INFO,
+            profile.provider === "prf"
+                ? PRF_VAULT_KEY_INFO
+                : profile.provider === "onekey"
+                    ? ONEKEY_VAULT_KEY_INFO
+                    : LARGE_BLOB_VAULT_KEY_INFO,
             32,
         ));
     } finally {
@@ -477,6 +512,16 @@ export function clearSecurityKeyVaultSession(): void {
     activeProfile = null;
 }
 
+export function deriveActiveOneKeyPrivateIdentity(localUserId: string): PrivateIdentity | null {
+    if (activeProfile?.provider !== "onekey") return null;
+    if (!activeKey) throw new SecurityKeyVaultError("locked");
+    return deriveOneKeyPrivateIdentity(activeKey, localUserId);
+}
+
+export function isOneKeySecurityKeyVaultActive(): boolean {
+    return activeKey !== null && activeProfile?.provider === "onekey";
+}
+
 export function wrapSecurityKeyVaultValue(value: unknown): unknown {
     if (!activeKey || !activeProfile) return value;
     const plaintext = Buffer.from(JSON.stringify(value), "utf8");
@@ -533,15 +578,18 @@ function randomChallenge(): string {
     return randomBytes(32).toString("base64url");
 }
 
-function ceremonyPage(title: string): string {
+function ceremonyPage(title: string, oneKeyUsb: boolean): string {
     const safeTitle = title.replace(/[<>&"']/gu, "");
-    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${safeTitle}</title><style>html{color-scheme:dark;font-family:system-ui;background:#151720;color:#f2f3f5}body{margin:0;padding:28px;display:flex;min-height:220px;box-sizing:border-box;align-items:center}main{max-width:520px}h1{font-size:20px;margin:0 0 12px}p{line-height:1.5;color:#c8c9d0}</style></head><body><main><h1>${safeTitle}</h1><p>Insert the security key and complete its PIN or biometric check.</p><p>Close this window to cancel.</p></main></body></html>`;
+    const instructions = oneKeyUsb
+        ? "Connect your OneKey by USB, enter its PIN on the device when asked, then approve ProtonnCord Secure Messaging on its screen. Fully quit OneKey Desktop first if the device is busy."
+        : "Insert the security key and complete its PIN or biometric check.";
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${safeTitle}</title><style>html{color-scheme:dark;font-family:system-ui;background:#151720;color:#f2f3f5}body{margin:0;padding:28px;display:flex;min-height:220px;box-sizing:border-box;align-items:center}main{max-width:520px}h1{font-size:20px;margin:0 0 12px}p{line-height:1.5;color:#c8c9d0}</style></head><body><main><h1>${safeTitle}</h1><p>${instructions}</p><p>Close this window to cancel.</p></main></body></html>`;
 }
 
-async function startCeremonyServer(title: string): Promise<{ server: Server; url: string; }> {
+async function startCeremonyServer(title: string, oneKeyUsb: boolean): Promise<{ server: Server; url: string; }> {
     const token = randomUUID();
     const pathname = `/${token}`;
-    const html = ceremonyPage(title);
+    const html = ceremonyPage(title, oneKeyUsb);
     const server = createServer((request, response) => {
         const host = String(request.headers.host ?? "").split(":", 1)[0].toLowerCase();
         if (request.method !== "GET" || request.url !== pathname || (host !== "localhost" && host !== "127.0.0.1")) {
@@ -575,8 +623,13 @@ function closeServer(server: Server): Promise<void> {
     return new Promise(resolve => server.close(() => resolve()));
 }
 
-async function runCeremony<T>(event: IpcMainInvokeEvent, title: string, script: string): Promise<T> {
-    const { server, url } = await startCeremonyServer(title);
+async function runCeremony<T>(
+    event: IpcMainInvokeEvent,
+    title: string,
+    script: string,
+    oneKeyUsb = false,
+): Promise<T> {
+    const { server, url } = await startCeremonyServer(title, oneKeyUsb);
     const parent = BrowserWindow.fromWebContents(event.sender);
     const isolatedSession = session.fromPartition(`pc-secure-vault-${randomUUID()}`, { cache: false });
     const window = new BrowserWindow({
@@ -597,9 +650,45 @@ async function runCeremony<T>(event: IpcMainInvokeEvent, title: string, script: 
             webSecurity: true,
         },
     });
-    isolatedSession.setPermissionRequestHandler((contents, permission, callback) => {
-        callback(contents === window.webContents && String(permission).startsWith("publickey-credentials"));
+    const isExpectedPage = (contents: Electron.WebContents | null) =>
+        contents === window.webContents && !contents.isDestroyed() && contents.getURL() === url;
+    // This random, non-persistent partition belongs only to this CSP-locked modal. Electron may omit
+    // WebContents and origin metadata for USB checks, so the live modal URL is the stable boundary.
+    const isExpectedSessionPage = () =>
+        !window.webContents.isDestroyed() && window.webContents.getURL() === url;
+    isolatedSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+        const exactFrame = isExpectedPage(contents) && details.isMainFrame &&
+            (!details.requestingUrl || details.requestingUrl === url);
+        callback(exactFrame && (String(permission).startsWith("publickey-credentials") ||
+            (oneKeyUsb && String(permission) === "usb")));
     });
+    const selectOneKey = (
+        selectionEvent: Electron.Event,
+        details: Electron.SelectUsbDeviceDetails,
+        callback: (deviceId?: string) => void,
+    ) => {
+        selectionEvent.preventDefault();
+        const matches = details.deviceList.filter(isOneKeyClassicDevice);
+        callback(matches.length === 1 ? matches[0].deviceId : undefined);
+    };
+    if (oneKeyUsb) {
+        isolatedSession.setPermissionCheckHandler((_contents, permission) =>
+            isExpectedSessionPage() && permission === "usb");
+        isolatedSession.setDevicePermissionHandler(details => {
+            const { device } = details;
+            const matches = details.deviceType === "usb" &&
+                typeof device.vendorId === "number" && typeof device.productId === "number" &&
+                isOneKeyClassicDevice({
+                    manufacturerName: "manufacturerName" in device && typeof device.manufacturerName === "string"
+                        ? device.manufacturerName
+                        : undefined,
+                    productId: device.productId,
+                    vendorId: device.vendorId,
+                });
+            return matches && isExpectedSessionPage();
+        });
+        isolatedSession.on("select-usb-device", selectOneKey);
+    }
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     const stopNavigation = (navigationEvent: Electron.Event, target: string) => {
         if (target !== url) navigationEvent.preventDefault();
@@ -624,11 +713,16 @@ async function runCeremony<T>(event: IpcMainInvokeEvent, title: string, script: 
             timeout,
         ]) as T | { __error?: unknown; };
         if (isRecord(result) && typeof result.__error === "string") {
-            if (result.__error === "NotAllowedError" || result.__error === "AbortError")
+            if (result.__error === "NotAllowedError" || result.__error === "AbortError" ||
+                result.__error === "OneKeyCancelled")
                 throw new SecurityKeyVaultError("cancelled");
+            if (result.__error === "OneKeyBusy") throw new SecurityKeyVaultError("busy");
+            if (result.__error === "OneKeyUnavailable") throw new SecurityKeyVaultError("unavailable");
+            if (/^OneKeyUnsupported:[a-z_]{1,32}$/u.test(result.__error))
+                throw new SecurityKeyVaultError("unsupported");
             if (result.__error === "PrfUnavailable" || result.__error === "LargeBlobUnavailable" ||
                 result.__error === "UnsupportedAuthenticator" || result.__error === "NotSupportedError" ||
-                result.__error === "ConstraintError")
+                result.__error === "ConstraintError" || result.__error === "OneKeyUnsupported")
                 throw new SecurityKeyVaultError("unsupported");
             throw new SecurityKeyVaultError("credential_mismatch");
         }
@@ -638,6 +732,10 @@ async function runCeremony<T>(event: IpcMainInvokeEvent, title: string, script: 
         throw new SecurityKeyVaultError("unsupported");
     } finally {
         await closeServer(server).catch(() => undefined);
+        isolatedSession.off("select-usb-device", selectOneKey);
+        isolatedSession.setPermissionRequestHandler(null);
+        isolatedSession.setPermissionCheckHandler(null);
+        isolatedSession.setDevicePermissionHandler(null);
         if (!window.isDestroyed()) window.destroy();
         await isolatedSession.clearStorageData().catch(() => undefined);
     }
@@ -809,6 +907,91 @@ function verifyLargeBlobReadAssertion(
     }
 }
 
+function verifyOneKeyCipherResult(result: OneKeyCipherResult): Buffer {
+    if (!isRecord(result) || !hasExactKeys(result, ["value"]))
+        throw new SecurityKeyVaultError("credential_mismatch");
+    const secret = decodeBase64Url(result.value, 32, 32);
+    if (secret.every(byte => byte === 0)) {
+        secret.fill(0);
+        throw new SecurityKeyVaultError("credential_mismatch");
+    }
+    return secret;
+}
+
+function oneKeyProfile(profileInput: string, secret: Buffer): SecurityKeyVaultProfile {
+    const input = decodeBase64Url(profileInput, 32, 32);
+    try {
+        const publicKeySpki = deriveOneKeyBindingPublicKey(secret, input);
+        const profile: SecurityKeyVaultProfile = {
+            algorithm: -8,
+            createdAt: Date.now(),
+            credentialId: profileInput,
+            provider: "onekey",
+            prfSalt: null,
+            publicKeySpki,
+            rootFingerprint: rootFingerprint(-8, publicKeySpki),
+            transports: ["usb"],
+        };
+        validateProfile(profile);
+        return profile;
+    } finally {
+        input.fill(0);
+    }
+}
+
+function verifyOneKeyProfileSecret(profile: SecurityKeyVaultProfile, secret: Buffer): void {
+    if (profile.provider !== "onekey") throw new SecurityKeyVaultError("invalid_profile");
+    const input = decodeBase64Url(profile.credentialId, 32, 32);
+    let actual: Buffer | null = null;
+    let expected: Buffer | null = null;
+    try {
+        actual = Buffer.from(deriveOneKeyBindingPublicKey(secret, input), "base64url");
+        expected = decodeBase64Url(profile.publicKeySpki, 32, 1_024);
+        if (actual.byteLength !== expected.byteLength || !timingSafeEqual(actual, expected))
+            throw new SecurityKeyVaultError("credential_mismatch");
+    } finally {
+        input.fill(0);
+        actual?.fill(0);
+        expected?.fill(0);
+    }
+}
+
+async function prepareOneKeyVault(
+    event: IpcMainInvokeEvent,
+    profileInput: string,
+    expectedProfile?: SecurityKeyVaultProfile,
+): Promise<PreparedSecurityKeyVault> {
+    let secret: Buffer;
+    if (process.platform === "win32") {
+        const result = await runOneKeyWindowsVaultCipher(profileInput);
+        if (!result.ok) {
+            if (result.error === "busy") throw new SecurityKeyVaultError("busy");
+            if (result.error === "cancelled" || result.error === "timeout")
+                throw new SecurityKeyVaultError("cancelled");
+            if (result.error === "unavailable") throw new SecurityKeyVaultError("unavailable");
+            if (result.error === "invalid_input") throw new SecurityKeyVaultError("invalid_profile");
+            if (result.error === "failure") throw new SecurityKeyVaultError("operation_failed");
+            throw new SecurityKeyVaultError("unsupported");
+        }
+        secret = result.value;
+    } else {
+        const result = await runCeremony<OneKeyCipherResult>(
+            event,
+            expectedProfile ? "Unlock Secure Messaging with OneKey" : "Set up Secure Messaging with OneKey",
+            createOneKeyCipherScript(profileInput),
+            true,
+        );
+        secret = verifyOneKeyCipherResult(result);
+    }
+    try {
+        const profile = expectedProfile ?? oneKeyProfile(profileInput, secret);
+        if (expectedProfile) verifyOneKeyProfileSecret(profile, secret);
+        return { key: deriveVaultKey(secret, profile), profile: structuredClone(profile) };
+    } finally {
+        secret.fill(0);
+    }
+}
+
 export async function prepareSecurityKeyVaultSetup(
     event: IpcMainInvokeEvent,
     localUserId: string,
@@ -864,11 +1047,20 @@ export async function prepareSecurityKeyVaultSetup(
     throw new SecurityKeyVaultError("unsupported");
 }
 
+export async function prepareOneKeySecurityKeyVaultSetup(
+    event: IpcMainInvokeEvent,
+    localUserId: string,
+): Promise<PreparedSecurityKeyVault> {
+    if (!SNOWFLAKE.test(localUserId)) throw new SecurityKeyVaultError("invalid_profile");
+    return prepareOneKeyVault(event, oneKeyDeterministicProfileInput());
+}
+
 export async function prepareSecurityKeyVaultUnlock(
     event: IpcMainInvokeEvent,
     profile: SecurityKeyVaultProfile,
 ): Promise<PreparedSecurityKeyVault> {
     validateProfile(profile);
+    if (profile.provider === "onekey") return prepareOneKeyVault(event, profile.credentialId, profile);
     const challenge = randomChallenge();
     if (profile.provider === "prf") {
         const assertion = await runCeremony<AssertionResult>(
