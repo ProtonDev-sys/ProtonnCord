@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import EventEmitter from "node:events";
+import { readFileSync } from "node:fs";
 
 import type { CloudUpload } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
@@ -236,6 +237,52 @@ function groupedMessage(
 }
 
 async function main(): Promise<void> {
+    const rendererSource = readFileSync(
+        new URL("../src/equicordplugins/secureMessaging.desktop/index.tsx", import.meta.url),
+        "utf8",
+    );
+    const sidebarChatSource = readFileSync(
+        new URL("../src/equicordplugins/sidebarChat/index.tsx", import.meta.url),
+        "utf8",
+    );
+    const messageManagerPatch = rendererSource.match(
+        /find: '"MessageManager"',[\s\S]{0,250}?match: \/(.+?)\/,[\s\S]{0,100}?replace: "([^"]+)"/,
+    );
+    assert.ok(messageManagerPatch, "protected DMs patch the shared MessageManager entry");
+    assert.doesNotMatch(messageManagerPatch[1], /\.\+|\.\*/, "the no-fetch patch must remain bounded");
+    const patchMatcher = new RegExp(messageManagerPatch[1].replaceAll("\\i", "(?:[A-Za-z_$][\\w$]*)"));
+    const managerFixture = 'let logger=new Logger("MessageManager");function M(e){let{isPreload,channelId,forceFetch}=e;return fetch(channelId)}return M({channelId:"42"});';
+    const patchedManager = managerFixture.replace(
+        patchMatcher,
+        messageManagerPatch[2].replace("$self.shouldSuppressChatLoad", "guard"),
+    );
+    assert.notEqual(patchedManager, managerFixture, "the no-fetch patch applies without relying on destructuring order");
+    const runPatchedManager = new Function("Logger", "guard", "fetch", patchedManager) as (
+        logger: new (name: string) => object,
+        guard: (channelId: string) => boolean,
+        fetch: (channelId: string) => string,
+    ) => unknown;
+    let fetchCount = 0;
+    const Logger = class { constructor(_name: string) { } };
+    assert.equal(runPatchedManager(Logger, () => true, () => { fetchCount++; return "loaded"; }), undefined);
+    assert.equal(fetchCount, 0, "a locked protected channel never reaches MessageManager fetch");
+    assert.equal(runPatchedManager(Logger, () => false, () => { fetchCount++; return "loaded"; }), "loaded");
+    assert.equal(fetchCount, 1, "an unlocked channel resumes normal MessageManager fetch");
+
+    assert.match(rendererSource, /function installChatLoadGuard\(\)[\s\S]{0,900}actions\.fetchMessages = guardedFetchMessages/, "direct chat fetch actions share the same fail-closed guard");
+    assert.match(rendererSource, /find: "Missing channel in Channel\.renderHeaderToolbar"[\s\S]{0,300}renderChatGate/, "protected DMs replace the whole chat before its message list and composer mount");
+    assert.match(rendererSource, /protectedChannelIds === null[\s\S]{0,100}hardwareVaultLocked \? "locked" : "unavailable"/, "legacy access state remains fail-closed");
+    assert.match(rendererSource, /<ConversationManager[\s\S]{0,200}unlockOnly/, "locked protected chats reuse the unlock-only conversation manager");
+    assert.match(rendererSource, /let chatAccessGateEnabled = true;/, "enabled builds fail closed before the plugin start hook runs");
+    assert.match(rendererSource, /function chatGateReason[\s\S]{0,200}!chatAccessGateEnabled/, "disabled lifecycle state cannot leave an injected chat gate active");
+    assert.equal(
+        sidebarChatSource.match(/if \(secureMessagingGated \|\| !channel\?\.id[\s\S]{0,200}?MessageActions\.fetchMessages/g)?.length,
+        2,
+        "sidebar and popout effects do not fetch while the secure gate is active",
+    );
+    assert.match(sidebarChatSource, /secureMessagingGated \? renderSecureMessagingChatGate\(channel\) : View/, "sidebar chats replace their direct Chat mount with the secure gate");
+    assert.match(sidebarChatSource, /secureMessagingGated[\s\S]{0,150}renderSecureMessagingChatGate\(channel\)[\s\S]{0,150}<FullChannelView/, "popout chats replace their direct FullChannelView mount with the secure gate");
+
     const groupedMessages = [
         groupedMessage("group-1", ALICE_ID, 0),
         groupedMessage("group-2", ALICE_ID, 1_000),

@@ -20,6 +20,7 @@ import {
 } from "@api/MessageEvents";
 import { BaseText } from "@components/BaseText";
 import { Button } from "@components/Button";
+import ErrorBoundary from "@components/ErrorBoundary";
 import { Heading } from "@components/Heading";
 import { Span } from "@components/Span";
 import { copyToClipboard } from "@utils/clipboard";
@@ -34,6 +35,7 @@ import {
     ChannelStore,
     Checkbox,
     closeAllModals,
+    closeModal,
     CloudUploader,
     Constants,
     MessageActions,
@@ -110,6 +112,7 @@ import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
 import type {
     AnnouncementReviewResult,
     ChannelProtectionResult,
+    ChatAccessState,
     ConversationResult,
     ConversationSnapshot,
     DecryptIncomingResult,
@@ -460,6 +463,23 @@ let messageLengthBypassGeneration = 0;
 let selectedChannelListenerInstalled = false;
 const messageLengthBypassKeys = new Set<string>();
 
+type ChatAccessCache =
+    | { status: "pending" | "failed"; localUserId: string | null; }
+    | ({ status: "ready"; localUserId: string; protectedChannelIds: Set<string> | null; } & Pick<ChatAccessState, "hardwareVaultLocked">);
+type ChatGateReason = "checking" | "locked" | "unavailable";
+type FetchMessages = (this: unknown, options: unknown, ...args: unknown[]) => unknown;
+
+let chatAccessCache: ChatAccessCache = { status: "pending", localUserId: null };
+let chatAccessGeneration = 0;
+// Patches can run before start() at WebpackReady; enabled builds must fail closed during that gap.
+let chatAccessGateEnabled = true;
+let originalFetchMessages: FetchMessages | null = null;
+let guardedFetchMessages: FetchMessages | null = null;
+let unlockPromptKey: string | null = null;
+let unlockPromptChannelId: string | null = null;
+const chatGateRenderOwners = new Set<{ forceUpdate(): void; }>();
+const suppressedChatLoadChannelIds = new Set<string>();
+
 function secureOperationIsCurrent(generation: number, localUserId?: string): boolean {
     return generation === secureOperationGeneration &&
         (localUserId === undefined || UserStore.getCurrentUser()?.id === localUserId);
@@ -512,6 +532,7 @@ function shouldBypassMessageLengthLimit(): boolean {
 
 function handleSelectedChannelChange(): void {
     void refreshMessageLengthBypassState();
+    updateSelectedChatUnlockPrompt();
 }
 
 function installMessageLengthBypass(): void {
@@ -682,6 +703,170 @@ function currentSnapshot(channel: Channel | undefined): { localUserId: string; s
     if (!localUserId) return null;
     const snapshot = snapshotForChannel(channel, localUserId);
     return snapshot ? { localUserId, snapshot } : null;
+}
+
+function chatGateChannel(target: Channel | { channelId: string; } | null | undefined): Channel | undefined {
+    if (!target) return undefined;
+    return "channelId" in target ? ChannelStore.getChannel(target.channelId) : target;
+}
+
+function isDirectMessageChannel(channel: Channel | undefined): boolean {
+    return Boolean(channel?.isDM?.() || channel?.isGroupDM?.() || channel?.isMultiUserDM?.());
+}
+
+function chatGateReason(target: Channel | { channelId: string; } | null | undefined): ChatGateReason | null {
+    if (!chatAccessGateEnabled || !target) return null;
+    const channel = chatGateChannel(target);
+    if (channel && !isDirectMessageChannel(channel)) return null;
+    const channelId = channel?.id ?? ("channelId" in target ? target.channelId : undefined);
+    if (!channelId) return null;
+    const localUserId = UserStore.getCurrentUser()?.id;
+    const access = chatAccessCache;
+    if (!localUserId || access.localUserId !== localUserId) return "checking";
+    if (access.status !== "ready") return access.status === "pending" ? "checking" : "unavailable";
+    if (access.protectedChannelIds === null)
+        return access.hardwareVaultLocked ? "locked" : "unavailable";
+    if (!access.protectedChannelIds.has(channelId)) return null;
+    return access.hardwareVaultLocked ? "locked" : null;
+}
+
+function closeChatUnlockPrompt(): void {
+    const modalKey = unlockPromptKey;
+    unlockPromptKey = null;
+    unlockPromptChannelId = null;
+    if (modalKey) closeModal(modalKey);
+}
+
+function openChatUnlockPrompt(channel: Channel): void {
+    if (!chatAccessGateEnabled || unlockPromptKey) return;
+    unlockPromptChannelId = channel.id;
+    const modalKey = openModal(
+        modalProps => (
+            <ConversationManager
+                channel={channel}
+                modalProps={modalProps}
+                onUnlocked={closeChatUnlockPrompt}
+                unlockOnly
+            />
+        ),
+        {
+            onCloseCallback: () => {
+                if (unlockPromptKey !== modalKey) return;
+                unlockPromptKey = null;
+                unlockPromptChannelId = null;
+            },
+        },
+    );
+    unlockPromptKey = modalKey;
+}
+
+function updateSelectedChatUnlockPrompt(): void {
+    const channelId = SelectedChannelStore.getChannelId();
+    if (unlockPromptKey && unlockPromptChannelId !== channelId) closeChatUnlockPrompt();
+    const channel = channelId ? ChannelStore.getChannel(channelId) : undefined;
+    const reason = chatGateReason(channel);
+    if (channel && reason === "locked") openChatUnlockPrompt(channel);
+    else if (reason === null && unlockPromptKey) closeChatUnlockPrompt();
+}
+
+function refreshChatGateRenderers(): void {
+    const owners = [...chatGateRenderOwners];
+    chatGateRenderOwners.clear();
+    for (const owner of owners) {
+        try {
+            owner.forceUpdate();
+        } catch {
+            // Discord may have already disposed the gated chat renderer.
+        }
+    }
+    ChannelStore.emitChange();
+}
+
+function resumeSuppressedChatLoads(): void {
+    for (const channelId of suppressedChatLoadChannelIds) {
+        const target = ChannelStore.getChannel(channelId) ?? { channelId };
+        if (chatGateReason(target)) continue;
+        suppressedChatLoadChannelIds.delete(channelId);
+        if (originalFetchMessages)
+            void Reflect.apply(originalFetchMessages, MessageActions, [{ channelId }]);
+    }
+}
+
+function suppressChatLoad(target: Channel | { channelId: string; }): boolean {
+    const channel = chatGateChannel(target);
+    const channelId = channel?.id ?? ("channelId" in target ? target.channelId : undefined);
+    if (!channelId || chatGateReason(target) === null) return false;
+    suppressedChatLoadChannelIds.add(channelId);
+    return true;
+}
+
+function installChatLoadGuard(): void {
+    const actions = MessageActions as unknown as Record<string, unknown>;
+    const original = actions.fetchMessages;
+    if (typeof original !== "function") throw new Error("Secure Messaging could not guard message loading");
+    originalFetchMessages = original as FetchMessages;
+    guardedFetchMessages = function (options, ...args) {
+        const channelId = options && typeof options === "object" && "channelId" in options
+            ? options.channelId
+            : null;
+        if (typeof channelId === "string" && suppressChatLoad({ channelId })) return Promise.resolve();
+        return Reflect.apply(original, this, [options, ...args]);
+    };
+    actions.fetchMessages = guardedFetchMessages;
+}
+
+function uninstallChatLoadGuard(): void {
+    const actions = MessageActions as unknown as Record<string, unknown>;
+    if (guardedFetchMessages && actions.fetchMessages === guardedFetchMessages && originalFetchMessages)
+        actions.fetchMessages = originalFetchMessages;
+    originalFetchMessages = null;
+    guardedFetchMessages = null;
+}
+
+function commitChatAccessCache(cache: ChatAccessCache): void {
+    chatAccessCache = cache;
+    refreshChatGateRenderers();
+    if (cache.status !== "pending") {
+        resumeSuppressedChatLoads();
+        updateSelectedChatUnlockPrompt();
+    }
+}
+
+async function refreshChatAccessState(localUserId = UserStore.getCurrentUser()?.id ?? null): Promise<boolean> {
+    if (!chatAccessGateEnabled || (UserStore.getCurrentUser()?.id ?? null) !== localUserId) return false;
+    const generation = ++chatAccessGeneration;
+    commitChatAccessCache({ status: "pending", localUserId });
+    if (!localUserId) {
+        if (generation === chatAccessGeneration) commitChatAccessCache({ status: "failed", localUserId });
+        return false;
+    }
+    try {
+        const result = await Native.getChatAccessState(localUserId);
+        const currentUserId = UserStore.getCurrentUser()?.id ?? null;
+        if (!chatAccessGateEnabled || generation !== chatAccessGeneration) return false;
+        if (currentUserId !== localUserId) {
+            void refreshChatAccessState(currentUserId);
+            return false;
+        }
+        if (isNativeFailure(result)) {
+            commitChatAccessCache({ status: "failed", localUserId });
+            return false;
+        }
+        commitChatAccessCache({
+            hardwareVaultLocked: result.hardwareVaultLocked,
+            localUserId,
+            protectedChannelIds: result.protectedChannelIds === null ? null : new Set(result.protectedChannelIds),
+            status: "ready",
+        });
+        return true;
+    } catch {
+        const currentUserId = UserStore.getCurrentUser()?.id ?? null;
+        if (chatAccessGateEnabled && generation === chatAccessGeneration) {
+            if (currentUserId === localUserId) commitChatAccessCache({ status: "failed", localUserId });
+            else void refreshChatAccessState(currentUserId);
+        }
+        return false;
+    }
 }
 
 function conversationHasDetails(result: ConversationResult): result is Exclude<ConversationResult, NativeFailure> {
@@ -1611,6 +1796,40 @@ function LockIcon({ color }: Record<string, any>) {
     );
 }
 
+function SecureChatGate({ channel }: { channel: Channel; }) {
+    const reason = chatGateReason(channel) ?? "checking";
+    useEffect(() => {
+        if (reason === "locked") openChatUnlockPrompt(channel);
+    }, [channel.id, reason]);
+    const title = reason === "locked" ? "Unlock this encrypted chat" :
+        reason === "checking" ? "Checking chat protection" : "Encrypted chat unavailable";
+    const message = reason === "locked"
+        ? "Your security-key vault is locked. Messages and the composer will stay hidden until you unlock it."
+        : reason === "checking"
+            ? "Secure Messaging is checking whether this DM is protected. Discord will not load it until the check finishes."
+            : "Secure Messaging could not confirm that this DM is safe to open, so its messages remain hidden.";
+
+    return (
+        <div className="pc-secure-chat-gate">
+            <div className="pc-secure-chat-gate-card">
+                <LockIcon color={reason === "unavailable" ? "var(--status-danger)" : "var(--status-warning)"} />
+                <Heading tag="h2">{title}</Heading>
+                <BaseText size="sm" color="text-muted">{message}</BaseText>
+                <Button
+                    size="small"
+                    variant="primary"
+                    disabled={reason === "checking"}
+                    onClick={() => reason === "locked" ? openChatUnlockPrompt(channel) : void refreshChatAccessState()}
+                >
+                    {reason === "locked" ? "Unlock chat" : reason === "checking" ? "Checking…" : "Retry"}
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+const SecureChatGateScreen = ErrorBoundary.wrap(SecureChatGate);
+
 async function sendKeyAnnouncement(channelId: string, localUserId: string): Promise<void> {
     const announcement = await Native.createAnnouncement(localUserId);
     if (UserStore.getCurrentUser()?.id !== localUserId) {
@@ -1639,10 +1858,14 @@ async function handleSecureConnectionOpen(): Promise<void> {
     const localUserId = UserStore.getCurrentUser()?.id ?? null;
     const accountChanged = secureRuntimeUserId !== null && secureRuntimeUserId !== localUserId;
     secureRuntimeUserId = localUserId;
+    if (accountChanged) closeChatUnlockPrompt();
+    chatAccessGeneration++;
+    commitChatAccessCache({ status: "pending", localUserId });
     if (accountChanged) {
         secureOperationGeneration++;
         revokePreparedSecureOperations();
         messageLengthBypassKeys.clear();
+        suppressedChatLoadChannelIds.clear();
         invalidateSecureRenderCaches();
         try {
             await Native.lockSecurityKeyVault();
@@ -1651,6 +1874,7 @@ async function handleSecureConnectionOpen(): Promise<void> {
         }
     }
     invalidateSecureRenderCaches();
+    await refreshChatAccessState(localUserId);
 }
 
 function IdentityBlock({ identity }: { identity: IdentitySummary; }) {
@@ -1676,9 +1900,11 @@ function IdentityBlock({ identity }: { identity: IdentitySummary; }) {
 interface ConversationManagerProps {
     channel: Channel;
     modalProps: RenderModalProps;
+    onUnlocked?: () => void;
+    unlockOnly?: boolean;
 }
 
-function ConversationManager({ channel, modalProps }: ConversationManagerProps) {
+function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = false }: ConversationManagerProps) {
     const context = currentSnapshot(channel);
     const [identity, setIdentity] = useState<IdentityResult | null>(null);
     const [conversation, setConversation] = useState<ConversationResult | null>(null);
@@ -1711,6 +1937,11 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                 setConversation(null);
                 return;
             }
+            if (unlockOnly) {
+                if (await refreshChatAccessState(context.localUserId) && chatGateReason(channel) === null)
+                    onUnlocked?.();
+                return;
+            }
 
             const [nextIdentity, nextConversation] = await Promise.all([
                 Native.getIdentity(context.localUserId),
@@ -1728,7 +1959,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
         } finally {
             setBusy(false);
         }
-    }, [channel.id, channel.recipients?.join(","), context?.localUserId]);
+    }, [channel.id, channel.recipients?.join(","), context?.localUserId, onUnlocked, unlockOnly]);
 
     useEffect(() => { void load(); }, [load]);
 
@@ -1744,10 +1975,18 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
     const oneKeyProtected = keyState?.status === "unlocked" && keyState.profile.provider === "onekey";
 
     const runKeyAction = async (operation: () => Promise<SecurityKeyVaultResult>) => {
+        if (UserStore.getCurrentUser()?.id !== context.localUserId) {
+            modalProps.onClose();
+            return;
+        }
         setBusy(true);
         setError(null);
         try {
             const result = await operation();
+            if (UserStore.getCurrentUser()?.id !== context.localUserId) {
+                modalProps.onClose();
+                return;
+            }
             if (isNativeFailure(result)) {
                 setError(failureMessage(result));
             } else {
@@ -1759,6 +1998,13 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                         `OneKey-derived identities installed; ${result.disabledConversationCount ?? 0} protected conversation(s) disabled for identity review.`,
                         Toasts.Type.SUCCESS,
                     );
+                }
+                if (!unlockOnly && result.status === "locked") modalProps.onClose();
+                const accessReady = await refreshChatAccessState(context.localUserId);
+                if (unlockOnly && result.status === "unlocked") {
+                    if (accessReady && chatGateReason(channel) === null) onUnlocked?.();
+                    else setError("The key was unlocked, but Secure Messaging could not safely reopen this chat.");
+                    return;
                 }
                 await load();
             }
@@ -1791,6 +2037,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
             revokePreparedSecureOperations();
             setConversation(result);
             updateMessageLengthBypass(context, result);
+            await refreshChatAccessState(context.localUserId);
             if (result.status === "enabled" || result.status === "disabled") {
                 showToast(result.status === "enabled" ? "Encrypted sending enabled." : "Encrypted sending disabled.", Toasts.Type.SUCCESS);
                 modalProps.onClose();
@@ -1812,6 +2059,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
             if (result.status === "rotated") {
                 revokePreparedSecureOperations();
                 invalidateSecureRenderCaches();
+                await refreshChatAccessState(context.localUserId);
                 setConfirmRotation(false);
                 showToast(`Identity rotated; ${result.disabledConversationCount} protected conversation(s) disabled.`, Toasts.Type.SUCCESS);
                 await load();
@@ -1830,15 +2078,18 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
         <Modal
             {...modalProps}
             size="medium"
-            title="Secure Messaging"
-            actions={[
-                { text: "Save", variant: "primary", onClick: () => void save(), disabled: busy || !details || vaultLocked },
-                { text: "Cancel", variant: "secondary", onClick: modalProps.onClose, disabled: busy },
-            ]}
+            title={unlockOnly ? "Unlock encrypted chat" : "Secure Messaging"}
+            actions={unlockOnly
+                ? [{ text: "Cancel", variant: "secondary", onClick: modalProps.onClose, disabled: busy }]
+                : [
+                    { text: "Save", variant: "primary", onClick: () => void save(), disabled: busy || !details || vaultLocked },
+                    { text: "Cancel", variant: "secondary", onClick: modalProps.onClose, disabled: busy },
+                ]}
         >
             <div className="pc-secure-modal">
                 <section className="pc-secure-modal-section">
                     <Heading tag="h5">Security key</Heading>
+                    {unlockOnly && <BaseText size="sm">This chat will not load until its security-key vault is unlocked.</BaseText>}
                     {securityKey == null && <BaseText size="sm">Loading…</BaseText>}
                     {keyFailure && <BaseText size="sm" className="pc-secure-status-danger">{failureMessage(keyFailure)}</BaseText>}
                     {keyState?.status === "not_configured" && (
@@ -1932,7 +2183,7 @@ function ConversationManager({ channel, modalProps }: ConversationManagerProps) 
                     )}
                 </section>
 
-                {!vaultLocked && (
+                {!unlockOnly && !vaultLocked && (
                     <>
                         <section className="pc-secure-modal-section">
                             <Heading tag="h5">Identity</Heading>
@@ -2501,6 +2752,20 @@ export default definePlugin({
 
     patches: [
         {
+            find: "Missing channel in Channel.renderHeaderToolbar",
+            replacement: {
+                match: /(?<=renderChat\(\){)/,
+                replace: "if($self.shouldGateChat(this?.props?.channel,this))return $self.renderChatGate(this?.props?.channel,this);",
+            },
+        },
+        {
+            find: '"MessageManager"',
+            replacement: {
+                match: /(?<="MessageManager"\);)function \i\(\i\)\{/,
+                replace: "$&if($self.shouldSuppressChatLoad({channelId:arguments[0]?.channelId}))return;",
+            },
+        },
+        {
             find: "renderAttachments",
             replacement: [
                 {
@@ -2577,23 +2842,32 @@ export default definePlugin({
     start() {
         secureOperationGeneration++;
         secureRuntimeUserId = UserStore.getCurrentUser()?.id ?? null;
+        chatAccessGateEnabled = true;
+        chatAccessGeneration++;
+        chatAccessCache = { status: "pending", localUserId: secureRuntimeUserId };
         const generation = ++screenCaptureProtectionGeneration;
         setScreenCaptureProtectionStatus("pending");
         try {
             installAttachmentUploadGuard();
             installNetworkGuard();
             installEncryptedEditStarter();
+            installChatLoadGuard();
             installMessageLengthBypass();
             document.addEventListener("click", handleEncryptedAttachmentDownload, true);
         } catch (error) {
+            chatAccessGateEnabled = false;
+            chatAccessGeneration++;
+            refreshChatGateRenderers();
             document.removeEventListener("click", handleEncryptedAttachmentDownload, true);
             uninstallMessageLengthBypass();
+            uninstallChatLoadGuard();
             uninstallEncryptedEditStarter();
             uninstallNetworkGuard();
             uninstallAttachmentUploadGuard();
             throw error;
         }
         addMessageAccessory("SecureMessaging", renderSecureMessageAccessory, 0);
+        void refreshChatAccessState(secureRuntimeUserId);
         void applyScreenCaptureProtection(true).then(applied => {
             if (generation !== screenCaptureProtectionGeneration) return;
             if (!applied) {
@@ -2618,10 +2892,17 @@ export default definePlugin({
         removeMessageAccessory("SecureMessaging");
         secureOperationGeneration++;
         secureRuntimeUserId = null;
+        chatAccessGateEnabled = false;
+        chatAccessGeneration++;
+        chatAccessCache = { status: "pending", localUserId: null };
+        suppressedChatLoadChannelIds.clear();
+        closeChatUnlockPrompt();
+        refreshChatGateRenderers();
         screenCaptureProtectionGeneration++;
         setScreenCaptureProtectionStatus("disabled");
         document.removeEventListener("click", handleEncryptedAttachmentDownload, true);
         uninstallMessageLengthBypass();
+        uninstallChatLoadGuard();
         uninstallEncryptedEditStarter();
         uninstallAttachmentUploadGuard();
         uninstallNetworkGuard();
@@ -2642,6 +2923,21 @@ export default definePlugin({
         clearEncryptedEmbedCache();
         clearEncryptedMessageDecryptCache();
         keyReviewGate.clear();
+    },
+
+    shouldGateChat(target: Channel | { channelId: string; }, owner?: { forceUpdate(): void; }) {
+        const gated = chatGateReason(target) !== null;
+        if (gated && owner) chatGateRenderOwners.add(owner);
+        return gated;
+    },
+
+    shouldSuppressChatLoad(target: Channel | { channelId: string; }) {
+        return suppressChatLoad(target);
+    },
+
+    renderChatGate(channel: Channel, owner?: { forceUpdate(): void; }) {
+        if (owner) chatGateRenderOwners.add(owner);
+        return <SecureChatGateScreen channel={channel} />;
     },
 
     patchEncryptedAttachments(message: Message, owner: { forceUpdate(): void; }) {
