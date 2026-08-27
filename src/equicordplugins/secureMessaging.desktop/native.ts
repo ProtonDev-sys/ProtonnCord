@@ -7,6 +7,7 @@
 import { DATA_DIR } from "@main/utils/constants";
 import { createHash, randomUUID } from "crypto";
 import { app, BrowserWindow, type IpcMainInvokeEvent, safeStorage } from "electron";
+import { renameSync } from "fs";
 import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "fs/promises";
 import { createServer, type Server } from "net";
 import { dirname, extname, join, resolve } from "path";
@@ -66,6 +67,7 @@ import {
     prepareSecurityKeyVaultUnlock,
     SecurityKeyVaultError,
     securityKeyVaultProfileSummary,
+    type SecurityKeyVaultProtectedChannelIndex,
     type SecurityKeyVaultState,
     securityKeyVaultStateForValue,
     unwrapSecurityKeyVaultValue,
@@ -177,6 +179,14 @@ export type ConversationResult =
 export type ChannelProtectionResult =
     | { status: "unconfigured" | "disabled" | "protected"; }
     | NativeFailure;
+
+export interface ChatAccessState {
+    hardwareVaultLocked: boolean;
+    protectedChannelIds: string[] | null;
+    status: "ready";
+}
+
+export type ChatAccessStateResult = ChatAccessState | NativeFailure;
 
 export type ScreenCaptureProtectionResult =
     | { status: "applied"; enabled: boolean; windowCount: number; }
@@ -368,7 +378,9 @@ let persistedQuarantines = new Map<string, number>();
 let cachedQuarantineSignature: string | null = null;
 let cachedVault: VaultFile | null = null;
 let cachedVaultSignature: string | null = null;
+let knownVaultHardwareProtected: boolean | null = null;
 let operationQueue: Promise<void> = Promise.resolve();
+let securityKeySessionEpoch = 0;
 
 class VaultOperationError extends Error {
     constructor(readonly code: "capacity_exceeded" | "cryptographic_operation_failed" | "storage_error" | VaultUnavailableReason) {
@@ -897,6 +909,7 @@ async function synchronizeCachedVault(): Promise<void> {
     if (cachedVaultSignature === signature) return;
     cachedVault = null;
     cachedVaultSignature = signature;
+    knownVaultHardwareProtected = null;
 }
 
 function listenForVaultMutex(): Promise<Server | null> {
@@ -939,7 +952,10 @@ async function readVaultStoredValue(): Promise<unknown | null> {
         if (!vaultStat.isFile() || vaultStat.size === 0 || vaultStat.size > MAX_VAULT_BYTES)
             throw new VaultOperationError("vault_unreadable");
     } catch (error) {
-        if (hasErrorCode(error, "ENOENT")) return null;
+        if (hasErrorCode(error, "ENOENT")) {
+            knownVaultHardwareProtected = false;
+            return null;
+        }
         throw error;
     }
     await confirmEncryptedFileDurability(VAULT_PATH);
@@ -950,7 +966,9 @@ async function readVaultStoredValue(): Promise<unknown | null> {
         const plaintext = safeStorage.decryptString(ciphertext);
         if (Buffer.byteLength(plaintext, "utf8") > MAX_VAULT_BYTES)
             throw new VaultOperationError("vault_unreadable");
-        return JSON.parse(plaintext);
+        const stored: unknown = JSON.parse(plaintext);
+        knownVaultHardwareProtected = parseSecurityKeyVaultEnvelope(stored) !== null;
+        return stored;
     } catch (error) {
         if (error instanceof VaultOperationError) throw error;
         throw new VaultOperationError("vault_unreadable");
@@ -1005,10 +1023,31 @@ async function loadVault(): Promise<VaultFile> {
     }
 }
 
-async function saveVault(vault: VaultFile, forcePlain = false): Promise<void> {
+function createProtectedChannelIndex(vault: VaultFile): SecurityKeyVaultProtectedChannelIndex {
+    const index: SecurityKeyVaultProtectedChannelIndex = {};
+    for (const localUserId of Object.keys(vault.accounts).sort()) {
+        const { conversations } = vault.accounts[localUserId];
+        index[localUserId] = Object.keys(conversations)
+            .filter(channelId => conversations[channelId].enabled || conversations[channelId].reviewRequired !== null)
+            .sort();
+    }
+    return index;
+}
+
+async function saveVault(
+    vault: VaultFile,
+    forcePlain = false,
+    expectedSessionEpoch?: number,
+): Promise<void> {
     let ciphertext: Buffer;
+    let nextHardwareProtected = false;
     try {
-        const stored = forcePlain ? vault : wrapSecurityKeyVaultValue(vault);
+        if (expectedSessionEpoch !== undefined && expectedSessionEpoch !== securityKeySessionEpoch)
+            throw new SecurityKeyVaultError("locked");
+        const stored = forcePlain ? vault : wrapSecurityKeyVaultValue(vault, createProtectedChannelIndex(vault));
+        nextHardwareProtected = parseSecurityKeyVaultEnvelope(stored) !== null;
+        if (!forcePlain && !nextHardwareProtected && knownVaultHardwareProtected !== false)
+            throw new SecurityKeyVaultError("locked");
         ciphertext = safeStorage.encryptString(JSON.stringify(stored));
     } catch (error) {
         if (error instanceof SecurityKeyVaultError) throw error;
@@ -1021,18 +1060,21 @@ async function saveVault(vault: VaultFile, forcePlain = false): Promise<void> {
     const temporaryPath = join(VAULT_DIR, `vault.${randomUUID()}.tmp`);
     try {
         await writeFile(temporaryPath, ciphertext, { flag: "wx", flush: true, mode: 0o600 });
-        await rename(temporaryPath, VAULT_PATH);
+        if (expectedSessionEpoch !== undefined && expectedSessionEpoch !== securityKeySessionEpoch)
+            throw new SecurityKeyVaultError("locked");
+        renameSync(temporaryPath, VAULT_PATH);
         if (process.platform === "win32") await syncEncryptedFile(VAULT_PATH);
         await syncVaultDirectoryEntry();
         await chmod(VAULT_PATH, 0o600).catch(() => undefined);
         cachedVaultSignature = await getVaultSignature();
     } catch (error) {
-        if (error instanceof VaultOperationError) throw error;
+        if (error instanceof SecurityKeyVaultError || error instanceof VaultOperationError) throw error;
         throw new VaultOperationError("storage_error");
     } finally {
         await rm(temporaryPath, { force: true }).catch(() => undefined);
     }
     cachedVault = structuredClone(vault);
+    knownVaultHardwareProtected = nextHardwareProtected;
 }
 
 async function runSerialized<T>(operation: () => Promise<T>): Promise<T | NativeFailure> {
@@ -1844,6 +1886,7 @@ async function installOneKeyIdentities(
 async function configureSecurityKeyVault(
     prepared: PreparedSecurityKeyVault,
     localUserId: string,
+    sessionEpoch: number,
 ): Promise<SecurityKeyVaultResult> {
     try {
         return await runSerialized(async (): Promise<SecurityKeyVaultResult> => {
@@ -1858,12 +1901,14 @@ async function configureSecurityKeyVault(
                     userId => deriveOneKeyPrivateIdentity(prepared.key, userId),
                 )
                 : { changedUserIds: [], disabledConversationCount: 0, vaultChanged: false };
+            if (sessionEpoch !== securityKeySessionEpoch) throw new SecurityKeyVaultError("locked");
             activatePreparedSecurityKeyVault(prepared);
             cachedVault = null;
             try {
-                await saveVault(vault);
+                await saveVault(vault, false, sessionEpoch);
                 clearAuthenticatedAttachmentCache();
                 for (const changedUserId of identityResult.changedUserIds) clearPendingReviews(changedUserId);
+                if (sessionEpoch !== securityKeySessionEpoch) throw new SecurityKeyVaultError("locked");
                 return {
                     status: "unlocked",
                     profile: securityKeyVaultProfileSummary(prepared.profile),
@@ -1900,8 +1945,13 @@ export async function setupSecurityKeyVault(
     if (callerFailure) return callerFailure;
     const user = validateLocalUserId(localUserId);
     if (!user.ok) return invalidInput(user.error);
+    const sessionEpoch = securityKeySessionEpoch;
     try {
-        return configureSecurityKeyVault(await prepareSecurityKeyVaultSetup(event, user.value), user.value);
+        return configureSecurityKeyVault(
+            await prepareSecurityKeyVaultSetup(event, user.value),
+            user.value,
+            sessionEpoch,
+        );
     } catch (error) {
         return mapOperationFailure(error);
     }
@@ -1915,8 +1965,13 @@ export async function setupOneKeyVault(
     if (callerFailure) return callerFailure;
     const user = validateLocalUserId(localUserId);
     if (!user.ok) return invalidInput(user.error);
+    const sessionEpoch = securityKeySessionEpoch;
     try {
-        return configureSecurityKeyVault(await prepareOneKeySecurityKeyVaultSetup(event, user.value), user.value);
+        return configureSecurityKeyVault(
+            await prepareOneKeySecurityKeyVaultSetup(event, user.value),
+            user.value,
+            sessionEpoch,
+        );
     } catch (error) {
         return mapOperationFailure(error);
     }
@@ -1932,8 +1987,13 @@ export async function importSecurityKeyVault(
     const user = validateLocalUserId(localUserId);
     if (!user.ok) return invalidInput(user.error);
     if (typeof exportedProfile !== "string") return invalidInput("exportedProfile must be a security-key profile");
+    const sessionEpoch = securityKeySessionEpoch;
     try {
-        return configureSecurityKeyVault(await prepareSecurityKeyVaultImport(event, exportedProfile), user.value);
+        return configureSecurityKeyVault(
+            await prepareSecurityKeyVaultImport(event, exportedProfile),
+            user.value,
+            sessionEpoch,
+        );
     } catch (error) {
         return mapOperationFailure(error);
     }
@@ -1947,6 +2007,7 @@ export async function unlockSecurityKeyVault(
     if (callerFailure) return callerFailure;
     const user = validateLocalUserId(localUserId);
     if (!user.ok) return invalidInput(user.error);
+    const sessionEpoch = securityKeySessionEpoch;
     let initialEnvelope;
     try {
         validateStorageAvailability();
@@ -1967,6 +2028,7 @@ export async function unlockSecurityKeyVault(
             const currentEnvelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
             if (!currentEnvelope || currentEnvelope.rootFingerprint !== prepared.profile.rootFingerprint)
                 return { status: "failed", error: "security_key_mismatch" };
+            if (sessionEpoch !== securityKeySessionEpoch) throw new SecurityKeyVaultError("locked");
             activatePreparedSecurityKeyVault(prepared);
             cachedVault = null;
             try {
@@ -1978,9 +2040,11 @@ export async function unlockSecurityKeyVault(
                         return identity;
                     })
                     : { changedUserIds: [], disabledConversationCount: 0, vaultChanged: false };
-                if (identityResult.vaultChanged) await saveVault(vault);
+                if (identityResult.vaultChanged || currentEnvelope.protectedChannelIdsByUser === null)
+                    await saveVault(vault, false, sessionEpoch);
                 for (const changedUserId of identityResult.changedUserIds) clearPendingReviews(changedUserId);
                 clearAuthenticatedAttachmentCache();
+                if (sessionEpoch !== securityKeySessionEpoch) throw new SecurityKeyVaultError("locked");
                 return {
                     status: "unlocked",
                     profile: securityKeyVaultProfileSummary(prepared.profile),
@@ -2006,6 +2070,7 @@ export async function lockSecurityKeyVault(
     const callerFailure = validateIpcCaller(event);
     if (callerFailure) return callerFailure;
 
+    securityKeySessionEpoch++;
     // Locking is a memory-safety boundary. Clear private material before any filesystem,
     // mutex, or safeStorage operation that could fail or wait.
     clearSecurityKeyVaultSession();
@@ -2013,6 +2078,9 @@ export async function lockSecurityKeyVault(
     clearAuthenticatedAttachmentCache();
 
     return runSerialized(async (): Promise<SecurityKeyVaultResult> => {
+        clearSecurityKeyVaultSession();
+        cachedVault = null;
+        clearAuthenticatedAttachmentCache();
         const envelope = parseSecurityKeyVaultEnvelope(await readVaultStoredValue());
         return envelope
             ? { status: "locked", profile: securityKeyVaultProfileSummary(envelope.profile) }
@@ -2025,9 +2093,14 @@ export async function removeSecurityKeyVault(
 ): Promise<SecurityKeyVaultResult> {
     const callerFailure = validateIpcCaller(event);
     if (callerFailure) return callerFailure;
+    securityKeySessionEpoch++;
     return runSerialized(async (): Promise<SecurityKeyVaultResult> => {
         const stored = await readVaultStoredValue();
-        if (!parseSecurityKeyVaultEnvelope(stored)) return { status: "not_configured" };
+        if (!parseSecurityKeyVaultEnvelope(stored)) {
+            clearSecurityKeyVaultSession();
+            cachedVault = null;
+            return { status: "not_configured" };
+        }
         const vault = await loadVault();
         await saveVault(vault, true);
         clearSecurityKeyVaultSession();
@@ -2358,10 +2431,59 @@ export async function getChannelProtection(
     if (!user.ok) return invalidInput(user.error);
     if (!isSnowflake(channelId)) return invalidInput("channelId must be a Discord snowflake");
     return runSerialized(async (): Promise<ChannelProtectionResult> => {
+        const stored = await readVaultStoredValue();
+        const envelope = parseSecurityKeyVaultEnvelope(stored);
+        if (envelope && securityKeyVaultStateForValue(stored).status === "locked") {
+            if (envelope.protectedChannelIdsByUser === null) throw new SecurityKeyVaultError("locked");
+            return {
+                status: envelope.protectedChannelIdsByUser[user.value]?.includes(channelId)
+                    ? "protected"
+                    : "unconfigured",
+            };
+        }
         const vault = await loadVault();
         const conversation = vault.accounts[user.value]?.conversations[channelId];
         if (!conversation) return { status: "unconfigured" };
         return { status: conversation.enabled || conversation.reviewRequired !== null ? "protected" : "disabled" };
+    });
+}
+
+export async function getChatAccessState(
+    event: IpcMainInvokeEvent,
+    localUserId: string,
+): Promise<ChatAccessStateResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    const user = validateLocalUserId(localUserId);
+    if (!user.ok) return invalidInput(user.error);
+    return runSerialized(async (): Promise<ChatAccessStateResult> => {
+        const stored = await readVaultStoredValue();
+        const envelope = parseSecurityKeyVaultEnvelope(stored);
+        if (envelope) {
+            const hardwareVaultLocked = securityKeyVaultStateForValue(stored).status === "locked";
+            if (envelope.protectedChannelIdsByUser === null && !hardwareVaultLocked) {
+                const vault = await loadVault();
+                const protectedChannelIndex = createProtectedChannelIndex(vault);
+                await saveVault(vault);
+                return {
+                    hardwareVaultLocked,
+                    protectedChannelIds: protectedChannelIndex[user.value] ?? [],
+                    status: "ready",
+                };
+            }
+            return {
+                hardwareVaultLocked,
+                protectedChannelIds: envelope.protectedChannelIdsByUser === null
+                    ? null
+                    : [...(envelope.protectedChannelIdsByUser[user.value] ?? [])],
+                status: "ready",
+            };
+        }
+        return {
+            hardwareVaultLocked: false,
+            protectedChannelIds: createProtectedChannelIndex(await loadVault())[user.value] ?? [],
+            status: "ready",
+        };
     });
 }
 

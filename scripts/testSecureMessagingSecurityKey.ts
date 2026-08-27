@@ -416,14 +416,20 @@ async function main(): Promise<void> {
             },
             version: 1,
         };
+        const protectedChannelIdsByUser = {
+            "100000000000000001": ["200000000000000001", "200000000000000002"],
+            "100000000000000002": [],
+        };
         const key = randomBytes(32);
         const firstPreparedKey = Buffer.from(key);
         module.activatePreparedSecurityKeyVault({ key: firstPreparedKey, profile: prfProfile });
         assert.equal(firstPreparedKey.every(byte => byte === 0), true,
             "the transferred prepared key must be wiped after activation");
-        const wrapped = module.wrapSecurityKeyVaultValue(plaintextVault);
+        const wrapped = module.wrapSecurityKeyVaultValue(plaintextVault, protectedChannelIdsByUser);
         const envelope = module.parseSecurityKeyVaultEnvelope(wrapped);
         assert.ok(envelope, "an active security key must wrap the Secure Messaging vault");
+        assert.deepEqual(envelope.protectedChannelIdsByUser, protectedChannelIdsByUser,
+            "the OS-readable outer envelope carries a canonical protected-channel index");
         assert.equal(JSON.stringify(wrapped).includes("private material must be wrapped"), false,
             "private identity material must not remain visible in the OS-protected outer payload");
         assert.equal(module.securityKeyVaultStateForValue(wrapped).status, "unlocked");
@@ -435,11 +441,47 @@ async function main(): Promise<void> {
             "a vault profile changed during unlock must not reuse an active key from the same public root");
         assert.throws(() => module.unwrapSecurityKeyVaultValue(changedProfileEnvelope), /locked/u);
 
-        const legacyEnvelope = structuredClone(wrapped) as any;
-        delete legacyEnvelope.profile.provider;
-        assert.equal(module.parseSecurityKeyVaultEnvelope(legacyEnvelope)?.profile.provider, "prf",
+        const noncanonicalChannels = structuredClone(wrapped) as any;
+        noncanonicalChannels.protectedChannelIdsByUser["100000000000000001"].reverse();
+        assert.equal(module.parseSecurityKeyVaultEnvelope(noncanonicalChannels), null,
+            "protected channel IDs must remain sorted");
+        const duplicateChannels = structuredClone(wrapped) as any;
+        duplicateChannels.protectedChannelIdsByUser["100000000000000001"] =
+            ["200000000000000001", "200000000000000001"];
+        assert.equal(module.parseSecurityKeyVaultEnvelope(duplicateChannels), null,
+            "protected channel IDs must remain unique");
+        const noncanonicalUsers = structuredClone(wrapped) as any;
+        noncanonicalUsers.protectedChannelIdsByUser = {
+            "100000000000000002": [],
+            "100000000000000001": ["200000000000000001"],
+        };
+        assert.equal(module.parseSecurityKeyVaultEnvelope(noncanonicalUsers), null,
+            "local user IDs must remain canonical");
+        const oversizedIndex = structuredClone(wrapped) as any;
+        oversizedIndex.protectedChannelIdsByUser["100000000000000001"] = Array.from(
+            { length: 2_001 },
+            (_, index) => (200_000_000_000_001_000n + BigInt(index)).toString(),
+        );
+        assert.equal(module.parseSecurityKeyVaultEnvelope(oversizedIndex), null,
+            "the protected channel index must remain bounded per account");
+        const oversizedAccounts = structuredClone(wrapped) as any;
+        oversizedAccounts.protectedChannelIdsByUser = Object.fromEntries(Array.from(
+            { length: 17 },
+            (_, index) => [(100_000_000_000_001_000n + BigInt(index)).toString(), []],
+        ));
+        assert.equal(module.parseSecurityKeyVaultEnvelope(oversizedAccounts), null,
+            "the protected channel index must remain bounded by the vault account limit");
+
+        const legacyProfileEnvelope = structuredClone(wrapped) as any;
+        delete legacyProfileEnvelope.profile.provider;
+        assert.equal(module.parseSecurityKeyVaultEnvelope(legacyProfileEnvelope)?.profile.provider, "prf",
             "existing encrypted envelopes must normalize to the PRF provider");
-        assert.deepEqual(module.unwrapSecurityKeyVaultValue(legacyEnvelope), plaintextVault);
+        assert.deepEqual(module.unwrapSecurityKeyVaultValue(legacyProfileEnvelope), plaintextVault);
+        const legacyIndexEnvelope = structuredClone(wrapped) as any;
+        delete legacyIndexEnvelope.protectedChannelIdsByUser;
+        assert.equal(module.parseSecurityKeyVaultEnvelope(legacyIndexEnvelope)?.protectedChannelIdsByUser, null,
+            "legacy envelopes without an index must remain readable but explicitly unknown");
+        assert.deepEqual(module.unwrapSecurityKeyVaultValue(legacyIndexEnvelope), plaintextVault);
 
         module.clearSecurityKeyVaultSession();
         assert.equal(module.securityKeyVaultStateForValue(wrapped).status, "locked");
@@ -456,7 +498,7 @@ async function main(): Promise<void> {
             "authenticated vault encryption must reject modified ciphertext");
 
         module.clearSecurityKeyVaultSession();
-        assert.deepEqual(module.wrapSecurityKeyVaultValue(plaintextVault), plaintextVault,
+        assert.deepEqual(module.wrapSecurityKeyVaultValue(plaintextVault, {}), plaintextVault,
             "unconfigured vaults remain backwards compatible with OS-only storage");
         key.fill(0);
     } finally {
