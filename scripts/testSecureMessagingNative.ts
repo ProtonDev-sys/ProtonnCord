@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -46,6 +46,12 @@ class AuthenticatedProtector {
     failVaultDirectorySync = false;
     finalFileSyncCalls = 0;
     parentDirectorySyncCalls = 0;
+    pauseVaultStatAt: number | null = null;
+    resumeVaultStat: Promise<void> | null = null;
+    resumeVaultWrite: Promise<void> | null = null;
+    vaultStatCalls = 0;
+    vaultStatPaused: (() => void) | null = null;
+    vaultWritePaused: (() => void) | null = null;
     vaultDirectorySyncCalls = 0;
     readonly key = createHash("sha256").update("secure-messaging-native-test-protector").digest();
 
@@ -77,6 +83,8 @@ interface HarnessRuntime {
     appListeners?: Array<[string, (event: unknown, window: HarnessWindow) => void]>;
     browserWindows?: HarnessWindow[];
     dataDir: string;
+    oneKeyCipherPause?: Promise<void>;
+    oneKeyCipherStarted?: () => void;
     oneKeySecret?: Buffer;
     protector: AuthenticatedProtector;
 }
@@ -208,7 +216,10 @@ const runtimeStubs: Plugin = {
             contents: `
                 import { Buffer } from "node:buffer";
                 export async function runOneKeyWindowsVaultCipher() {
-                    const configured = globalThis.__secureMessagingNativeHarness.oneKeySecret;
+                    const runtime = globalThis.__secureMessagingNativeHarness;
+                    runtime.oneKeyCipherStarted?.();
+                    if (runtime.oneKeyCipherPause) await runtime.oneKeyCipherPause;
+                    const configured = runtime.oneKeySecret;
                     return { ok: true, value: configured ? Buffer.from(configured) : Buffer.alloc(32, 0x51) };
                 }
             `,
@@ -218,6 +229,29 @@ const runtimeStubs: Plugin = {
             contents: `
                 import * as fs from "node:fs/promises";
                 export * from "node:fs/promises";
+                export async function stat(path, options) {
+                    const value = await fs.stat(path, options);
+                    const protector = globalThis.__secureMessagingNativeHarness.protector;
+                    if (String(path).replaceAll("\\\\", "/").endsWith("/secure-messaging/vault.bin")) {
+                        protector.vaultStatCalls++;
+                        if (protector.vaultStatCalls === protector.pauseVaultStatAt) {
+                            protector.vaultStatPaused?.();
+                            await protector.resumeVaultStat;
+                        }
+                    }
+                    return value;
+                }
+                export async function writeFile(path, data, options) {
+                    const value = await fs.writeFile(path, data, options);
+                    const protector = globalThis.__secureMessagingNativeHarness.protector;
+                    const normalizedPath = String(path).replaceAll("\\\\", "/");
+                    if (protector.resumeVaultWrite && normalizedPath.includes("/secure-messaging/vault.") &&
+                        normalizedPath.endsWith(".tmp")) {
+                        protector.vaultWritePaused?.();
+                        await protector.resumeVaultWrite;
+                    }
+                    return value;
+                }
                 export async function open(path, flags, mode) {
                     const handle = await fs.open(path, flags, mode);
                     const runtime = globalThis.__secureMessagingNativeHarness;
@@ -283,6 +317,35 @@ async function loadNative(bundlePath: string, dataDir: string, oneKeySecret?: Bu
     const url = pathToFileURL(bundlePath);
     url.searchParams.set("instance", String(++loadSequence));
     return import(url.href) as Promise<NativeModule>;
+}
+
+function pauseNextOneKeyCipher(): { release(): void; started: Promise<void>; } {
+    const runtime = harnessGlobal.__secureMessagingNativeHarness;
+    let releasePause!: () => void;
+    const started = new Promise<void>(resolve => { runtime.oneKeyCipherStarted = resolve; });
+    runtime.oneKeyCipherPause = new Promise<void>(resolve => { releasePause = resolve; });
+    return {
+        release() {
+            runtime.oneKeyCipherPause = undefined;
+            runtime.oneKeyCipherStarted = undefined;
+            releasePause();
+        },
+        started,
+    };
+}
+
+function pauseNextVaultWrite(): { release(): void; started: Promise<void>; } {
+    let releasePause!: () => void;
+    const started = new Promise<void>(resolve => { protector.vaultWritePaused = resolve; });
+    protector.resumeVaultWrite = new Promise<void>(resolve => { releasePause = resolve; });
+    return {
+        release() {
+            protector.resumeVaultWrite = null;
+            protector.vaultWritePaused = null;
+            releasePause();
+        },
+        started,
+    };
 }
 
 async function createAnnouncement(native: NativeModule, userId: string): Promise<string> {
@@ -361,6 +424,8 @@ async function testInvalidInputs(native: NativeModule): Promise<void> {
     );
     expectStatus(await native.getIdentity(hostileEvent, ALICE_ID), "invalid_input", "non-Discord IPC origin");
     expectStatus(await native.getIdentity(DISCORD_EVENT, "not-a-snowflake"), "invalid_input", "invalid local user");
+    expectStatus(await native.getChatAccessState(hostileEvent, ALICE_ID), "invalid_input", "non-Discord chat-access origin");
+    expectStatus(await native.getChatAccessState(DISCORD_EVENT, "not-a-snowflake"), "invalid_input", "invalid chat-access user");
     expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, "not-a-snowflake"), "invalid_input", "invalid protection channel");
     expectStatus(await native.rotateIdentity(DISCORD_EVENT, ALICE_ID, "bad"), "invalid_input", "invalid rotation fingerprint");
     expectStatus(
@@ -1773,6 +1838,7 @@ async function testOneKeyIdentityLifecycle(bundlePath: string, root: string): Pr
     const otherOneKeySecret = Buffer.alloc(32, 0x9d);
     try {
         const firstDataDir = join(root, "secure-messaging-live-onekey-identity-first");
+        const vaultPath = join(firstDataDir, "secure-messaging", "vault.bin");
         const native = await loadNative(bundlePath, firstDataDir, oneKeySecret);
         const aliceBefore = await native.getIdentity(DISCORD_EVENT, ALICE_ID);
         const bobBefore = await native.getIdentity(DISCORD_EVENT, BOB_ID);
@@ -1786,13 +1852,50 @@ async function testOneKeyIdentityLifecycle(bundlePath: string, root: string): Pr
             snapshot: dmSnapshot(DM_CHANNEL_ID, BOB_ID),
         });
         expectStatus(configured, "enabled", "conversation enabled before OneKey identity migration");
+        expectStatus(await native.configureConversation(DISCORD_EVENT, ALICE_ID, {
+            enabled: false,
+            selectedRecipientIds: [BOB_ID],
+            snapshot: dmSnapshot(OUTSIDER_CHANNEL_ID, BOB_ID),
+        }), "disabled", "disabled conversations stay outside the protected-channel index");
 
         const setupStartedAt = Date.now();
+        const setupBarrier = pauseNextOneKeyCipher();
+        const pendingSetup = native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID);
+        await setupBarrier.started;
+        const lockDuringSetup = native.lockSecurityKeyVault(DISCORD_EVENT);
+        setupBarrier.release();
+        const staleSetup = await pendingSetup;
+        expectStatus(staleSetup, "unavailable", "lock invalidates a pending OneKey setup ceremony");
+        assert.equal(staleSetup.reason, "security_key_locked");
+        expectStatus(await lockDuringSetup, "not_configured", "lock completes before stale setup activation");
+        expectStatus(await native.getSecurityKeyVaultState(DISCORD_EVENT), "not_configured",
+            "a stale setup ceremony cannot reactivate or protect the vault");
+
+        const setupWriteBarrier = pauseNextVaultWrite();
+        const setupDuringSave = native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID);
+        await setupWriteBarrier.started;
+        const lockDuringSetupSave = native.lockSecurityKeyVault(DISCORD_EVENT);
+        setupWriteBarrier.release();
+        const canceledSetupSave = await setupDuringSave;
+        expectStatus(canceledSetupSave, "unavailable", "lock cancels setup after activation but before commit");
+        assert.equal(canceledSetupSave.reason, "security_key_locked");
+        expectStatus(await lockDuringSetupSave, "not_configured", "lock completes after canceled setup commit");
+        const canceledSetupStored = JSON.parse(protector.decryptString(await readFile(vaultPath))) as Record<string, unknown>;
+        assert.equal("mode" in canceledSetupStored, false,
+            "a canceled setup must not atomically replace the plaintext vault with a hardware envelope");
+        assert.equal((await readdir(join(firstDataDir, "secure-messaging"))).some(name => /^vault\..+\.tmp$/u.test(name)), false,
+            "the canceled setup temporary envelope must be removed");
+
         const setup = await native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID);
         expectStatus(setup, "unlocked", "OneKey setup");
         assert.equal(setup.profile.provider, "onekey");
         assert.equal(setup.identityChanged, true, "setup reports deterministic identity installation");
         assert.equal(setup.disabledConversationCount, 1, "setup disables conversations under replaced identities");
+        const setupAccess = await native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        expectStatus(setupAccess, "ready", "unlocked hardware-vault chat access");
+        assert.equal(setupAccess.hardwareVaultLocked, false);
+        assert.deepEqual(setupAccess.protectedChannelIds, [DM_CHANNEL_ID],
+            "identity-review conversations remain protected in the outer index");
 
         const aliceOneKey = await native.getIdentity(DISCORD_EVENT, ALICE_ID);
         const bobOneKey = await native.getIdentity(DISCORD_EVENT, BOB_ID);
@@ -1812,13 +1915,115 @@ async function testOneKeyIdentityLifecycle(bundlePath: string, root: string): Pr
         expectStatus(blockedRotation, "invalid_input", "OneKey-derived identity rotation remains blocked while protected");
 
         expectStatus(await native.lockSecurityKeyVault(DISCORD_EVENT), "locked", "OneKey vault lock");
+        const lockedAccess = await native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        expectStatus(lockedAccess, "ready", "locked hardware-vault chat access");
+        assert.equal(lockedAccess.hardwareVaultLocked, true);
+        assert.deepEqual(lockedAccess.protectedChannelIds, [DM_CHANNEL_ID]);
+        expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, DM_CHANNEL_ID), "protected",
+            "locked lookup identifies a protected conversation without decrypting the vault");
+        expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, OUTSIDER_CHANNEL_ID), "unconfigured",
+            "locked lookup does not expose a configured but disabled conversation");
+        expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, "200000000000000099"), "unconfigured",
+            "locked lookup treats an unknown conversation as unconfigured");
+
+        const unlockBarrier = pauseNextOneKeyCipher();
+        const pendingUnlock = native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID);
+        await unlockBarrier.started;
+        const lockDuringUnlock = native.lockSecurityKeyVault(DISCORD_EVENT);
+        unlockBarrier.release();
+        const staleUnlock = await pendingUnlock;
+        expectStatus(staleUnlock, "unavailable", "lock invalidates a pending OneKey unlock ceremony");
+        assert.equal(staleUnlock.reason, "security_key_locked");
+        expectStatus(await lockDuringUnlock, "locked", "lock completes before stale unlock activation");
+        expectStatus(await native.getSecurityKeyVaultState(DISCORD_EVENT), "locked",
+            "a stale unlock ceremony cannot restore the cleared hardware session");
+
         const unlocked = await native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID);
         expectStatus(unlocked, "unlocked", "OneKey vault unlock");
         assert.equal(unlocked.identityChanged, undefined, "unlocking with the same OneKey does not rotate identities");
+        expectStatus(await native.configureConversation(DISCORD_EVENT, ALICE_ID, {
+            enabled: false,
+            selectedRecipientIds: [BOB_ID],
+            snapshot: dmSnapshot(DM_CHANNEL_ID, BOB_ID),
+        }), "disabled", "disabling a conversation updates the outer index");
+        expectStatus(await native.lockSecurityKeyVault(DISCORD_EVENT), "locked", "lock after protected-index update");
+        const disabledAccess = await native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        expectStatus(disabledAccess, "ready", "updated locked hardware-vault chat access");
+        assert.deepEqual(disabledAccess.protectedChannelIds, []);
+        expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, DM_CHANNEL_ID), "unconfigured",
+            "a disabled conversation is removed from the locked-readable index");
+
+        expectStatus(await native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID), "unlocked", "unlock before legacy-index check");
+        expectStatus(await native.configureConversation(DISCORD_EVENT, ALICE_ID, {
+            enabled: true,
+            selectedRecipientIds: [BOB_ID],
+            snapshot: dmSnapshot(DM_CHANNEL_ID, BOB_ID),
+        }), "enabled", "re-enabling a conversation restores the outer index");
+        expectStatus(await native.lockSecurityKeyVault(DISCORD_EVENT), "locked", "lock before legacy-index check");
+
+        const legacyEnvelope = JSON.parse(protector.decryptString(await readFile(vaultPath))) as Record<string, unknown>;
+        delete legacyEnvelope.protectedChannelIdsByUser;
+        await writeFile(vaultPath, protector.encryptString(JSON.stringify(legacyEnvelope)));
+        const legacyAccess = await native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        expectStatus(legacyAccess, "ready", "legacy hardware-vault chat access");
+        assert.equal(legacyAccess.hardwareVaultLocked, true);
+        assert.equal(legacyAccess.protectedChannelIds, null,
+            "an absent legacy index remains explicitly unknown");
+        const legacyLookup = await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, DM_CHANNEL_ID);
+        expectStatus(legacyLookup, "unavailable", "legacy locked protection lookup fails closed");
+        assert.equal(legacyLookup.reason, "security_key_locked");
+
+        expectStatus(await native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID), "unlocked",
+            "legacy envelopes remain decryptable");
+        const migratedEnvelope = JSON.parse(protector.decryptString(await readFile(vaultPath))) as {
+            protectedChannelIdsByUser?: Record<string, string[]>;
+        };
+        assert.deepEqual(migratedEnvelope.protectedChannelIdsByUser?.[ALICE_ID], [DM_CHANNEL_ID],
+            "unlocking alone persists the derived legacy protected-channel index");
+        const unlockedLegacyAccess = await native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        expectStatus(unlockedLegacyAccess, "ready", "unlocked legacy chat access");
+        assert.equal(unlockedLegacyAccess.hardwareVaultLocked, false);
+        assert.deepEqual(unlockedLegacyAccess.protectedChannelIds, [DM_CHANNEL_ID]);
+        expectStatus(await native.lockSecurityKeyVault(DISCORD_EVENT), "locked", "lock after automatic legacy-index upgrade");
+        const upgradedAccess = await native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        expectStatus(upgradedAccess, "ready", "upgraded hardware-vault chat access");
+        assert.equal(upgradedAccess.hardwareVaultLocked, true);
+        assert.deepEqual(upgradedAccess.protectedChannelIds, [DM_CHANNEL_ID]);
+        expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, DM_CHANNEL_ID), "protected",
+            "the automatically migrated index survives relocking");
+        expectStatus(await native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID), "unlocked", "unlock after index lifecycle checks");
+
+        const concurrentLegacyEnvelope = JSON.parse(
+            protector.decryptString(await readFile(vaultPath)),
+        ) as Record<string, unknown>;
+        delete concurrentLegacyEnvelope.protectedChannelIdsByUser;
+        await writeFile(vaultPath, protector.encryptString(JSON.stringify(concurrentLegacyEnvelope)));
+        let resumeVaultStat!: () => void;
+        const vaultStatPaused = new Promise<void>(resolve => { protector.vaultStatPaused = resolve; });
+        protector.resumeVaultStat = new Promise<void>(resolve => { resumeVaultStat = resolve; });
+        protector.pauseVaultStatAt = protector.vaultStatCalls + 4;
+        const concurrentMigration = native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        await vaultStatPaused;
+        const concurrentLock = native.lockSecurityKeyVault(DISCORD_EVENT);
+        resumeVaultStat();
+        const interruptedMigration = await concurrentMigration;
+        expectStatus(interruptedMigration, "unavailable", "concurrent lock interrupts legacy-index migration");
+        assert.equal(interruptedMigration.reason, "security_key_locked");
+        expectStatus(await concurrentLock, "locked", "concurrent lock completes after guarded migration");
+        protector.pauseVaultStatAt = null;
+        protector.resumeVaultStat = null;
+        protector.vaultStatPaused = null;
+        const preservedEnvelope = JSON.parse(protector.decryptString(await readFile(vaultPath))) as Record<string, unknown>;
+        assert.equal(preservedEnvelope.mode, "security_key",
+            "a concurrent memory lock must not downgrade the hardware envelope to plaintext");
+        assert.equal("accounts" in preservedEnvelope, false,
+            "private vault contents must remain inside the hardware ciphertext after the race");
+        expectStatus(await native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID), "unlocked",
+            "the preserved legacy envelope remains unlockable after the interrupted migration");
         expectStatus(await native.removeSecurityKeyVault(DISCORD_EVENT), "not_configured", "remove OneKey protection");
 
         const stored = JSON.parse(protector.decryptString(await readFile(
-            join(firstDataDir, "secure-messaging", "vault.bin"),
+            vaultPath,
         ))) as {
             accounts: Record<string, {
                 identityHistory: Record<string, unknown>;

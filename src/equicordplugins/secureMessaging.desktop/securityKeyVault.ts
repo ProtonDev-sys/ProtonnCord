@@ -45,6 +45,8 @@ const RP_ID = "localhost";
 const CEREMONY_TIMEOUT_MS = 2 * 60 * 1_000;
 const MAX_PROFILE_LENGTH = 8_192;
 const MAX_ENCRYPTED_VAULT_BYTES = 24 * 1024 * 1024;
+const MAX_PROTECTED_CHANNEL_ACCOUNTS = 16;
+const MAX_PROTECTED_CHANNELS_PER_ACCOUNT = 2_000;
 const USER_PRESENT_FLAG = 0x01;
 const USER_VERIFIED_FLAG = 0x04;
 const ROOT_PREFIX = Buffer.from("ProtonnCord/SecureMessaging/security-key-vault-root/v1\0", "utf8");
@@ -102,11 +104,14 @@ export interface SecurityKeyVaultProfileSummary {
     rootFingerprint: string;
 }
 
+export type SecurityKeyVaultProtectedChannelIndex = Record<string, string[]>;
+
 export interface SecurityKeyVaultEnvelope {
     ciphertext: string;
     mode: "security_key";
     nonce: string;
     profile: SecurityKeyVaultProfile;
+    protectedChannelIdsByUser: SecurityKeyVaultProtectedChannelIndex | null;
     rootFingerprint: string;
     tag: string;
     version: typeof ENVELOPE_VERSION;
@@ -282,6 +287,30 @@ function parseStoredProfile(value: unknown): SecurityKeyVaultProfile {
     return profile;
 }
 
+function parseProtectedChannelIndex(value: unknown): SecurityKeyVaultProtectedChannelIndex {
+    if (!isRecord(value)) throw new SecurityKeyVaultError("invalid_profile");
+    const userIds = Object.keys(value);
+    if (userIds.length > MAX_PROTECTED_CHANNEL_ACCOUNTS)
+        throw new SecurityKeyVaultError("invalid_profile");
+    const index: SecurityKeyVaultProtectedChannelIndex = {};
+    let previousUserId = "";
+    for (const userId of userIds) {
+        const channelIds = value[userId];
+        if (!SNOWFLAKE.test(userId) || userId <= previousUserId || !Array.isArray(channelIds) ||
+            channelIds.length > MAX_PROTECTED_CHANNELS_PER_ACCOUNT)
+            throw new SecurityKeyVaultError("invalid_profile");
+        let previousChannelId = "";
+        for (const channelId of channelIds) {
+            if (typeof channelId !== "string" || !SNOWFLAKE.test(channelId) || channelId <= previousChannelId)
+                throw new SecurityKeyVaultError("invalid_profile");
+            previousChannelId = channelId;
+        }
+        index[userId] = [...channelIds] as string[];
+        previousUserId = userId;
+    }
+    return index;
+}
+
 function serializeLegacyProfile(profile: SecurityKeyVaultProfile): string {
     if (profile.provider !== "prf" || profile.prfSalt === null)
         throw new SecurityKeyVaultError("invalid_profile");
@@ -392,11 +421,17 @@ export function securityKeyVaultProfilesMatch(
 }
 
 export function parseSecurityKeyVaultEnvelope(value: unknown): SecurityKeyVaultEnvelope | null {
-    if (!isRecord(value) || !hasExactKeys(value, [
+    if (!isRecord(value)) return null;
+    const legacy = hasExactKeys(value, [
         "ciphertext", "mode", "nonce", "profile", "rootFingerprint", "tag", "version",
-    ]) || value.version !== ENVELOPE_VERSION || value.mode !== "security_key") return null;
+    ]);
+    const current = hasExactKeys(value, [
+        "ciphertext", "mode", "nonce", "profile", "protectedChannelIdsByUser", "rootFingerprint", "tag", "version",
+    ]);
+    if ((!legacy && !current) || value.version !== ENVELOPE_VERSION || value.mode !== "security_key") return null;
     try {
         const profile = parseStoredProfile(value.profile);
+        const protectedChannelIdsByUser = legacy ? null : parseProtectedChannelIndex(value.protectedChannelIdsByUser);
         decodeBase64Url(value.nonce, 12, 12);
         decodeBase64Url(value.tag, 16, 16);
         decodeBase64Url(value.ciphertext, 1, MAX_ENCRYPTED_VAULT_BYTES);
@@ -406,6 +441,7 @@ export function parseSecurityKeyVaultEnvelope(value: unknown): SecurityKeyVaultE
             mode: "security_key",
             nonce: value.nonce as string,
             profile,
+            protectedChannelIdsByUser,
             rootFingerprint: value.rootFingerprint as string,
             tag: value.tag as string,
             version: ENVELOPE_VERSION,
@@ -522,8 +558,12 @@ export function isOneKeySecurityKeyVaultActive(): boolean {
     return activeKey !== null && activeProfile?.provider === "onekey";
 }
 
-export function wrapSecurityKeyVaultValue(value: unknown): unknown {
+export function wrapSecurityKeyVaultValue(
+    value: unknown,
+    protectedChannelIdsByUser: SecurityKeyVaultProtectedChannelIndex,
+): unknown {
     if (!activeKey || !activeProfile) return value;
+    const protectedChannelIndex = parseProtectedChannelIndex(protectedChannelIdsByUser);
     const plaintext = Buffer.from(JSON.stringify(value), "utf8");
     try {
         const nonce = randomBytes(12);
@@ -538,6 +578,7 @@ export function wrapSecurityKeyVaultValue(value: unknown): unknown {
             mode: "security_key",
             nonce: nonce.toString("base64url"),
             profile: structuredClone(activeProfile),
+            protectedChannelIdsByUser: protectedChannelIndex,
             rootFingerprint: activeProfile.rootFingerprint,
             tag: tag.toString("base64url"),
             version: ENVELOPE_VERSION,
