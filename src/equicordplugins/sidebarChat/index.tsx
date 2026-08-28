@@ -79,6 +79,29 @@ const ChatInputTypes = findByPropsLazy("FORM", "NORMAL");
 const Sidebars = findByPropsLazy("ThreadSidebar", "MessageRequestSidebar");
 const ChatClasses = findCssClassesLazy("threadSidebarOpen", "loader");
 
+interface SecureMessagingChatGate {
+    renderChatGate(channel: Channel): React.ReactNode;
+    shouldGateChat(channel: Channel): boolean;
+    started: boolean;
+}
+
+function getSecureMessagingChatGate(): Partial<SecureMessagingChatGate> | undefined {
+    return Vencord.Plugins.plugins.SecureMessaging as Partial<SecureMessagingChatGate> | undefined;
+}
+
+function useSecureMessagingChatGate(channel: Channel | null | undefined): boolean {
+    return useStateFromStores([ChannelStore], () => {
+        const gate = getSecureMessagingChatGate();
+        const enabled = gate?.started === true || Vencord.Settings.plugins.SecureMessaging?.enabled === true;
+        return Boolean(enabled && channel && typeof gate?.shouldGateChat === "function" && gate.shouldGateChat(channel));
+    }, [channel?.id]);
+}
+
+function renderSecureMessagingChatGate(channel: Channel): React.ReactNode {
+    const gate = getSecureMessagingChatGate();
+    return typeof gate?.renderChatGate === "function" ? gate.renderChatGate(channel) : null;
+}
+
 const requireForumView = extractAndLoadChunksLazy(
     ["Missing channel in Channel.renderHeaderToolbar"],
     /Promise\.all\(\[((?:\i\.e\("\d+"\),?)+)\]\)\.then\(\i\.bind\(\i,(\d+)\)\)[^}]{0,100}?name:"ForumChannel"/
@@ -382,14 +405,15 @@ export default definePlugin({
                 ];
             }, []
         );
+        const secureMessagingGated = useSecureMessagingChatGate(channel);
 
         useEffect(() => {
-            if (!channel?.id || MessageStore.getLastMessage(channel.id)) return;
+            if (secureMessagingGated || !channel?.id || MessageStore.getLastMessage(channel.id)) return;
             MessageActions.fetchMessages({
                 channelId: channel.id,
                 limit: 50,
             });
-        }, [channel?.id]);
+        }, [channel?.id, secureMessagingGated]);
 
         const [width, setWidth] = useState(window.innerWidth);
 
@@ -441,7 +465,7 @@ export default definePlugin({
                     maxWidth={~~(width * 0.31)/* width - 690*/}
                 >
                     <Header channel={channel} guild={guild} />
-                    {View}
+                    {secureMessagingGated ? renderSecureMessagingChatGate(channel) : View}
                 </Resize>
             </ErrorBoundary>
         );
@@ -505,16 +529,17 @@ const Header = ({ guild, channel }: { guild: Guild; channel: Channel; }) => {
 };
 
 const RenderPopout = ErrorBoundary.wrap(({ channel, name, windowKey }: { channel: Channel; name: string; windowKey: string; }) => {
+    const secureMessagingGated = useSecureMessagingChatGate(channel);
     // Copy from an unexported function of the one they use in the experiment
     // right click a channel and search withTitleBar:!0,windowKey
     useEffect(() => {
-        if (!channel?.id || MessageStore.getLastMessage(channel.id)) return;
+        if (secureMessagingGated || !channel?.id || MessageStore.getLastMessage(channel.id)) return;
 
         MessageActions.fetchMessages({
             channelId: channel.id,
             limit: 50,
         });
-    }, [channel?.id]);
+    }, [channel?.id, secureMessagingGated]);
 
     return (
         <PopoutWindow
@@ -524,7 +549,9 @@ const RenderPopout = ErrorBoundary.wrap(({ channel, name, windowKey }: { channel
             channelId={channel.id}
         >
             <div className={cl("window")}>
-                <FullChannelView providedChannel={channel} />
+                {secureMessagingGated
+                    ? renderSecureMessagingChatGate(channel)
+                    : <FullChannelView providedChannel={channel} />}
             </div>
         </PopoutWindow>
     );
