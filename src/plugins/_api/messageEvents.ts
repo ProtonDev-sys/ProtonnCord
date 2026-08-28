@@ -44,9 +44,7 @@ export default definePlugin({
         {
             find: ".handleSendMessage,onResize:",
             replacement: {
-                // Adapted from upstream Vencord's current Discord matcher while preserving the raw
-                // content-options object Protonn Cord needs to encrypt pending uploads.
-                match: /let (\i)=\i\.\i\.parse\((\i),.+?\.getSendMessageOptions\((\{.+?\})\),location:\i\.\i\.\i\};(?=.+?(\i)\.flags=)(?<=\)\((\{.+?\})\)\.then.+?)/,
+                match: /let (\i)=\i\.\i\.parse\((\i),.{0,400}?\.getSendMessageOptions\((\{.{0,400}?\})\)\)?;(?=.{0,300}?(\i)\.flags=)(?<=\)\((\{.{0,400}?\})\)\.then.{0,500}?)/,
                 replace: (match, parsedMessage, channel, contentOptions, options, props) => match +
                     `if(await Vencord.Api.MessageEvents._handlePreSend(${channel}.id,${parsedMessage},${options},${props},${contentOptions}))` +
                     "return{shouldClear:false,shouldRefocus:true};"
