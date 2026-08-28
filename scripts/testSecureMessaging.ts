@@ -275,6 +275,25 @@ async function main(): Promise<void> {
     assert.match(rendererSource, /<ConversationManager[\s\S]{0,200}unlockOnly/, "locked protected chats reuse the unlock-only conversation manager");
     assert.match(rendererSource, /let chatAccessGateEnabled = true;/, "enabled builds fail closed before the plugin start hook runs");
     assert.match(rendererSource, /function chatGateReason[\s\S]{0,200}!chatAccessGateEnabled/, "disabled lifecycle state cannot leave an injected chat gate active");
+    const protectionResolver = rendererSource.slice(
+        rendererSource.indexOf("async function resolveConversationProtection"),
+        rendererSource.indexOf("function installAttachmentUploadGuard"),
+    );
+    const channelProtectionLookup = protectionResolver.indexOf("Native.getChannelProtection");
+    const conversationLookup = protectionResolver.indexOf("Native.getConversation");
+    assert.ok(
+        channelProtectionLookup !== -1 && conversationLookup !== -1 && channelProtectionLookup < conversationLookup,
+        "locked unprotected DMs are identified before the encrypted vault is opened",
+    );
+    const outgoingListenerSource = rendererSource.slice(
+        rendererSource.indexOf("const outgoingListener"),
+        rendererSource.indexOf("const editListener"),
+    );
+    assert.match(
+        outgoingListenerSource,
+        /resolveConversationProtection\(channelId\)[\s\S]{0,200}protection\.kind === "unprotected"\) return/,
+        "ordinary DMs bypass encrypted send handling while the hardware vault is locked",
+    );
     assert.equal(
         sidebarChatSource.match(/if \(secureMessagingGated \|\| !channel\?\.id[\s\S]{0,200}?MessageActions\.fetchMessages/g)?.length,
         2,

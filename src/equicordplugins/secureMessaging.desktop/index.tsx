@@ -1165,14 +1165,6 @@ async function resolveConversationProtection(channelId: string): Promise<Convers
 
     const channel = ChannelStore.getChannel(channelId);
     const snapshot = snapshotForChannel(channel, localUserId);
-    if (snapshot) {
-        const context = { localUserId, snapshot };
-        const conversation = await Native.getConversation(localUserId, snapshot);
-        if (UserStore.getCurrentUser()?.id !== localUserId)
-            throw new Error("Secure Messaging cancelled an operation after the authenticated account changed");
-        return { kind: "snapshot", context, conversation };
-    }
-
     const loadedNonPrivateChannel = typeof channel?.guild_id === "string" && /^\d{17,20}$/u.test(channel.guild_id);
     if (loadedNonPrivateChannel) return { kind: "unprotected" };
 
@@ -1180,7 +1172,14 @@ async function resolveConversationProtection(channelId: string): Promise<Convers
     if (UserStore.getCurrentUser()?.id !== localUserId)
         throw new Error("Secure Messaging cancelled an operation after the authenticated account changed");
     if (isNativeFailure(persisted)) throw new Error(`Secure Messaging could not establish channel protection: ${failureMessage(persisted)}`);
-    return persisted.status === "protected" ? { kind: "persisted_protected" } : { kind: "unprotected" };
+    if (persisted.status !== "protected") return { kind: "unprotected" };
+    if (!snapshot) return { kind: "persisted_protected" };
+
+    const context = { localUserId, snapshot };
+    const conversation = await Native.getConversation(localUserId, snapshot);
+    if (UserStore.getCurrentUser()?.id !== localUserId)
+        throw new Error("Secure Messaging cancelled an operation after the authenticated account changed");
+    return { kind: "snapshot", context, conversation };
 }
 
 function installAttachmentUploadGuard(): void {
@@ -1625,8 +1624,14 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
 
         if (takePermittedAnnouncement(channelId, message.content)) return { stop: true };
 
-        const conversation = await Native.getConversation(context.localUserId, context.snapshot);
+        const protection = await resolveConversationProtection(channelId);
         if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
+        if (protection.kind === "unprotected") return;
+        if (protection.kind === "persisted_protected") {
+            showToast("Unlock the security key in Secure Messaging to send encrypted messages.", Toasts.Type.FAILURE);
+            return { cancel: true };
+        }
+        const { conversation } = protection;
         updateMessageLengthBypass(context, conversation);
         if (!requiresFailClosedSend(conversation)) return;
 
