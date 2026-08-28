@@ -44,9 +44,15 @@ export default definePlugin({
         {
             find: ".handleSendMessage,onResize:",
             replacement: {
-                match: /let (\i)=\i\.\i\.parse\((\i),.{0,400}?\.getSendMessageOptions\((\{.{0,400}?\})\)\)?;(?=.{0,300}?(\i)\.flags=)(?<=\)\((\{.{0,400}?\})\)\.then.{0,500}?)/,
-                replace: (match, parsedMessage, channel, contentOptions, options, props) => match +
-                    `if(await Vencord.Api.MessageEvents._handlePreSend(${channel}.id,${parsedMessage},${options},${props},${contentOptions}))` +
+                match: /let (\i)=\i\.\i\.parse\((\i),.{0,200}?\);.{0,200}?let (\i)=\{\.\.\.\i\.\i\.getSendMessageOptions\((\{.{0,400}?\})\),location:\i\.\i\.\i\};/,
+                replace: (match, parsedMessage, channel, options, contentOptions) => match +
+                    `const vcContentOptions=${contentOptions},vcSendProps={` +
+                    "openWarningPopout:e=>this.setState({contentWarningProps:e})," +
+                    "type:this.props.chatInputType,content:vcContentOptions.content," +
+                    "hasStickers:(vcContentOptions.stickers?.length??0)>0," +
+                    "hasAttachments:(vcContentOptions.uploads?.length??0)>0," +
+                    `channel:${channel}};` +
+                    `if(await Vencord.Api.MessageEvents._handlePreSend(${channel}.id,${parsedMessage},${options},vcSendProps,vcContentOptions))` +
                     "return{shouldClear:false,shouldRefocus:true};"
             }
         },
