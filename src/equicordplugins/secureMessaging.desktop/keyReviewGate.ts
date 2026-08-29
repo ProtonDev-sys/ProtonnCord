@@ -28,8 +28,9 @@ export class KeyReviewGate {
         this.failures.set(scopeKey(localUserId, peerUserId), attemptId);
     }
 
-    succeed(localUserId: string, peerUserId: string, _attemptId: string): void {
-        this.failures.delete(scopeKey(localUserId, peerUserId));
+    succeed(localUserId: string, peerUserId: string, attemptId: string): void {
+        const scope = scopeKey(localUserId, peerUserId);
+        if (this.failures.get(scope) === attemptId) this.failures.delete(scope);
     }
 
     isBlocked(localUserId: string, peerUserId: string): boolean {
