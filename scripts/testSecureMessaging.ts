@@ -294,6 +294,28 @@ async function main(): Promise<void> {
         /resolveConversationProtection\(channelId\)[\s\S]{0,200}protection\.kind === "unprotected"\) return/,
         "ordinary DMs bypass encrypted send handling while the hardware vault is locked",
     );
+    const attachmentUploadGuardSource = rendererSource.slice(
+        rendererSource.indexOf("function installAttachmentUploadGuard"),
+        rendererSource.indexOf("function uninstallAttachmentUploadGuard"),
+    );
+    assert.match(
+        attachmentUploadGuardSource,
+        /catch \(error\) \{\s*if \(approval\) throw error;/,
+        "approved encrypted uploads surface protection failures instead of pretending to finish",
+    );
+    const attachmentReservationIndex = outgoingListenerSource.indexOf("authorizeScopedAttachmentUploadReservations");
+    const attachmentApprovalIndex = outgoingListenerSource.indexOf("approvedAttachmentUploads.set");
+    const attachmentStartIndex = outgoingListenerSource.indexOf("await Promise.all(uploads.map(upload => upload.upload()))");
+    assert.ok(
+        attachmentReservationIndex !== -1 && attachmentApprovalIndex > attachmentReservationIndex &&
+        attachmentStartIndex > attachmentApprovalIndex,
+        "encrypted attachments are authorized, approved, and explicitly started in order",
+    );
+    assert.match(
+        outgoingListenerSource,
+        /if \(preparedAttachments\) \{\s*options\.uploads = uploads;\s*options\.attachmentsToUpload = uploads;/,
+        "every encrypted attachment set is handed back to Discord's upload pipeline",
+    );
     assert.equal(
         sidebarChatSource.match(/if \(secureMessagingGated \|\| !channel\?\.id[\s\S]{0,200}?MessageActions\.fetchMessages/g)?.length,
         2,
