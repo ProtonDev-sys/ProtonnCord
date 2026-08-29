@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,22 +29,10 @@ replace_once(
 )
 
 decrypt_path = ROOT / "src/equicordplugins/secureMessaging.desktop/decryptCache.ts"
-decrypt_text = decrypt_path.read_text()
-cast_count = 0
-for pattern, replacement in (
-    (r"(?m)^(\s*result\s*=\s*)expanded(\s*;)", r"\1expanded as DecryptIncomingResult\2"),
-    (r"(?m)^(\s*:\s*)expanded(?=\s*[,;)])", r"\1(expanded as DecryptIncomingResult)"),
-    (r"(?m)^(\s*return\s+)expanded(\s*;)", r"\1expanded as DecryptIncomingResult\2"),
-):
-    decrypt_text, count = re.subn(pattern, replacement, decrypt_text)
-    cast_count += count
+replace_once(
+    decrypt_path,
+    "            result = await decryptIncomingAttachmentsCached(localUserId, message);",
+    """            const expanded = await decryptIncomingAttachmentsCached(localUserId, message);\n            result = expanded.status === \"decrypted\"\n                ? { ...result, plaintext: expanded.plaintext }\n                : expanded;""",
+)
 
-if cast_count == 0:
-    print("No expansion cast was applied; generated decryptCache.ts lines 60-100 follow:")
-    for line_number, line in enumerate(decrypt_text.splitlines()[59:100], start=60):
-        print(f"{line_number:4}: {line}")
-else:
-    print(f"Applied {cast_count} DecryptIncomingResult expansion cast(s).")
-
-decrypt_path.write_text(decrypt_text)
 Path(__file__).unlink()
