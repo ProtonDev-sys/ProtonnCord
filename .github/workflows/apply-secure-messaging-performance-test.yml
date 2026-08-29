@@ -35,7 +35,9 @@ jobs:
               run: pnpm install --frozen-lockfile
 
             - name: Apply final audit fixes
-              run: python scripts/applySecureMessagingPerformanceTest.py
+              run: |
+                  python scripts/applySecureMessagingPerformanceTest.py
+                  python scripts/fixSecureMessagingAuditTypecheck.py
 
             - name: Run performance boundaries
               run: pnpm testSecureMessagingPerformance
