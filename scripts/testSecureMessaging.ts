@@ -432,9 +432,9 @@ async function main(): Promise<void> {
     assert.equal(isSecureInlineMediaEmbedType("video"), true);
     assert.equal(isSecureInlineMediaEmbedType("article"), false, "rich link cards keep their source URL visible");
     const reviewGate = new KeyReviewGate();
-    reviewGate.begin(ALICE_ID, BOB_ID);
+    reviewGate.begin(ALICE_ID, BOB_ID, "new-key-message", 20);
     reviewGate.fail(ALICE_ID, BOB_ID, "new-key-message");
-    reviewGate.finish(ALICE_ID, BOB_ID);
+    reviewGate.finish(ALICE_ID, BOB_ID, "new-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), true, "failed key review stays fail-closed");
     reviewGate.succeed(ALICE_ID, BOB_ID, "old-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), true, "another successful history review cannot clear a different failure");
@@ -442,11 +442,11 @@ async function main(): Promise<void> {
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), true, "another local account cannot clear this account's failure");
     reviewGate.succeed(ALICE_ID, BOB_ID, "new-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), false, "only the exact failed review retry clears its gate");
-    reviewGate.begin(ALICE_ID, BOB_ID);
-    reviewGate.begin(ALICE_ID, BOB_ID);
-    reviewGate.finish(ALICE_ID, BOB_ID);
+    reviewGate.begin(ALICE_ID, BOB_ID, "retry-key-message", 30);
+    reviewGate.begin(ALICE_ID, BOB_ID, "retry-key-message", 30);
+    reviewGate.finish(ALICE_ID, BOB_ID, "retry-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), true, "concurrent review count remains pending until all work finishes");
-    reviewGate.finish(ALICE_ID, BOB_ID);
+    reviewGate.finish(ALICE_ID, BOB_ID, "retry-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), false);
 
     assert.equal(discordEditedTimestamp({ edited_timestamp: "2026-01-01T00:00:00+00:00" }), "2026-01-01T00:00:00.000Z");
