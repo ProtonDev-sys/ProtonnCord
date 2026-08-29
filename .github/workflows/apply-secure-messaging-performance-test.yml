@@ -1,0 +1,51 @@
+name: Apply Secure Messaging performance test
+
+on:
+    push:
+        branches:
+            - agent/audit-secure-messaging-performance
+
+permissions:
+    contents: write
+
+jobs:
+    patch:
+        name: Apply Secure Messaging performance test
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - uses: pnpm/action-setup@v6
+
+            - name: Use Node.js 24
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: "pnpm"
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Wire performance regression test
+              run: python scripts/applySecureMessagingPerformanceTest.py
+
+            - name: Run performance boundaries
+              run: pnpm testSecureMessagingPerformance
+
+            - name: Type-check
+              run: pnpm testTsc
+
+            - name: Test Secure Messaging
+              run: pnpm testSecureMessaging
+
+            - name: Commit test wiring
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git add package.json .github/workflows/test.yml scripts/testSecureMessagingPerformance.ts scripts/applySecureMessagingPerformanceTest.py .github/workflows/apply-secure-messaging-performance-test.yml
+                  git commit -m "test(secure-messaging): enforce performance boundaries"
+                  git push origin "HEAD:${GITHUB_REF_NAME}"
