@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { exactArrayBuffer } from "../src/equicordplugins/secureMessaging.desktop/exactArrayBuffer";
 import { KeyReviewGate } from "../src/equicordplugins/secureMessaging.desktop/keyReviewGate";
@@ -100,23 +100,38 @@ function testExactArrayBuffers(): void {
 
 function testKeyReviewGate(): void {
     const gate = new KeyReviewGate();
-    gate.begin("local", "peer");
-    gate.fail("local", "peer", "attempt-new");
-    gate.finish("local", "peer");
+    gate.begin("local", "peer", "attempt-old", 1);
+    gate.fail("local", "peer", "attempt-old");
+    gate.finish("local", "peer", "attempt-old");
     assert.equal(gate.isBlocked("local", "peer"), true);
-    gate.succeed("local", "peer", "attempt-old");
-    assert.equal(gate.isBlocked("local", "peer"), true, "a different history review cannot clear a failed attempt");
-    gate.succeed("other-local", "peer", "attempt-new");
-    assert.equal(gate.isBlocked("local", "peer"), true, "another account cannot clear this account's gate");
-    gate.succeed("local", "peer", "attempt-new");
-    assert.equal(gate.isBlocked("local", "peer"), false, "the exact successful retry clears its failed attempt");
 
-    gate.fail("local", "peer", "first");
-    gate.fail("local", "peer", "latest");
-    gate.succeed("local", "peer", "first");
-    assert.equal(gate.isBlocked("local", "peer"), true, "only the latest bounded failure can clear the scope");
-    gate.succeed("local", "peer", "latest");
+    gate.begin("local", "peer", "attempt-new", 2);
+    assert.equal(gate.isBlocked("local", "peer"), true, "a newer review supersedes an older failure and remains pending");
+    gate.fail("local", "peer", "attempt-old");
+    gate.succeed("local", "peer", "attempt-old");
+    assert.equal(gate.isBlocked("local", "peer"), true, "stale outcomes cannot change the latest attempt");
+    gate.succeed("local", "peer", "attempt-new");
+    assert.equal(gate.isBlocked("local", "peer"), true, "a successful review remains blocked until every matching caller finishes");
+    gate.finish("local", "peer", "attempt-new");
     assert.equal(gate.isBlocked("local", "peer"), false);
+
+    gate.begin("local", "peer", "attempt-new", 2);
+    gate.begin("local", "peer", "attempt-new", 2);
+    gate.finish("local", "peer", "attempt-new");
+    assert.equal(gate.isBlocked("local", "peer"), true, "duplicate consumers share a counted pending review");
+    gate.finish("local", "peer", "attempt-new");
+    assert.equal(gate.isBlocked("local", "peer"), false);
+
+    gate.begin("local", "peer", "attempt-older", 1);
+    gate.fail("local", "peer", "attempt-older");
+    gate.finish("local", "peer", "attempt-older");
+    assert.equal(gate.isBlocked("local", "peer"), false, "late historical announcements cannot re-block a newer verified key");
+
+    gate.begin("other-local", "peer", "attempt", 1);
+    assert.equal(gate.isBlocked("local", "peer"), false, "review state is isolated by signed-in account");
+    assert.equal(gate.isBlocked("other-local", "peer"), true);
+    gate.clear();
+    assert.equal(gate.isBlocked("other-local", "peer"), false);
 }
 
 function groupedMessage(id: string, timestamp: number): SecureMessageGroupCandidate {
@@ -135,8 +150,8 @@ function groupedMessage(id: string, timestamp: number): SecureMessageGroupCandid
 
 function testMessageGroupingIndexCache(): void {
     const first = groupedMessage("first", 0);
-    const middle = groupedMessage("middle", 1_000);
-    const last = groupedMessage("last", 2_000);
+    const middle = groupedMessage("middle", 0);
+    const last = groupedMessage("last", 0);
     const messages = [first, middle, last];
     assert.equal(
         secureMessageGroupFlags(middle, messages),
@@ -149,7 +164,7 @@ function testMessageGroupingIndexCache(): void {
         SecureMessageGroup.Next,
         "same-array message reordering rebuilds the cached ID index",
     );
-    messages.push(groupedMessage("fourth", 3_000));
+    messages.push(groupedMessage("fourth", 0));
     assert.equal(
         secureMessageGroupFlags(last, messages),
         SecureMessageGroup.Previous | SecureMessageGroup.Next,
@@ -167,21 +182,43 @@ function testSourceBoundaries(): void {
     const attachments = source("src/equicordplugins/secureMessaging.desktop/attachments.ts");
     const reviewCache = source("src/equicordplugins/secureMessaging.desktop/announcementReviewCache.ts");
     const grouping = source("src/equicordplugins/secureMessaging.desktop/messageGrouping.ts");
+    const gate = source("src/equicordplugins/secureMessaging.desktop/keyReviewGate.ts");
+    const packageJson = source("package.json");
+    const workflow = source(".github/workflows/test.yml");
 
     assert.match(decryptCache, /const runDecryptTask = createTaskQueue\(4\)/);
-    assert.doesNotMatch(decryptCache, /inFlightDecrypts|MAX_IN_FLIGHT/,
-        "visible encrypted messages queue instead of receiving synthetic capacity failures");
+    assert.match(decryptCache, /result = await runDecryptTask\(async \(\): Promise<DecryptIncomingResult> =>/,
+        "only an active native decrypt attempt occupies a queue permit");
+    assert.doesNotMatch(decryptCache, /runDecryptTask\(\(\) =>\s*decryptWithRetry/,
+        "retry backoff does not hold a decrypt permit");
+    assert.match(decryptCache, /TRANSIENT_FAILURE_TTL_MS = 30_000/,
+        "temporary native failures do not poison the immutable-message cache forever");
+
     assert.match(attachmentCache, /const runAttachmentLoad = createTaskQueue\(4\)/);
+    assert.match(attachmentCache, /const runAttachmentDecrypt = createTaskQueue\(4\)/);
+    assert.match(attachmentCache, /const runAttachmentDownload = createTaskQueue\(2\)/);
+    assert.match(attachmentCache, /decryptIncomingAttachmentsCached/,
+        "detached text and attachment rendering deduplicate the same native bundle operation");
     assert.doesNotMatch(attachmentCache, /MAX_IN_FLIGHT_LOADS/,
         "attachment load pressure is queued rather than surfaced as a user-facing failure");
     assert.match(attachmentCache, /new Blob\(\[exactArrayBuffer\(attachment\.data\)\]/,
         "large decrypted attachments avoid an unconditional second byte copy");
+
     assert.match(embedCache, /const runUnfurlTask = createTaskQueue\(4\)/);
-    assert.match(embedCache, /settled: boolean/);
+    assert.match(embedCache, /const embeds = await runUnfurlTask\(async \(\) =>/,
+        "only an active REST attempt occupies an unfurl queue permit");
+    assert.doesNotMatch(embedCache, /entry\.promise = runUnfurlTask/,
+        "unfurl retry backoff does not starve unrelated previews");
+    assert.match(embedCache, /TRANSIENT_ENTRY_TTL = 30_000/);
     assert.match(embedCache, /retries: 0/,
         "the secure unfurl layer owns retries instead of multiplying REST retries");
+
     assert.match(reviewCache, /const runReviewTask = createTaskQueue\(4\)/);
-    assert.match(reviewCache, /MAX_CACHE_ENTRIES = 256/);
+    assert.match(reviewCache, /let cacheGeneration = 0/);
+    assert.doesNotMatch(reviewCache, /oldestSettled \?\? oldest/,
+        "pending review promises are not evicted and duplicated under pressure");
+    assert.match(gate, /isNewerAttempt/,
+        "out-of-order historical key reviews cannot override the latest announcement state");
 
     assert.match(index, /const RENDER_DECRYPT_BATCH_SIZE = 24/);
     assert.doesNotMatch(index, /Promise\.all\(batch\.map\(request => request\.promise\)\)/,
@@ -190,6 +227,8 @@ function testSourceBoundaries(): void {
         "grouping updates are scoped to the affected channel");
     assert.doesNotMatch(index, /messageLengthBypassKeys/,
         "message-length bypass state remains bounded to the selected conversation");
+    assert.match(index, /announcementReviewOrder/,
+        "key-review gate ordering is derived from Discord message chronology");
     assert.match(index, /reviewAnnouncementCached/,
         "Flux and accessory key reviews share a bounded native request cache");
     assert.match(index, /Native\.setScreenCaptureProtection\(true\)\.catch\(\(\) => undefined\)/,
@@ -212,6 +251,18 @@ function testSourceBoundaries(): void {
     assert.match(attachments, /return exactArrayBuffer\(value\)/);
     assert.doesNotMatch(grouping, /findIndex\(/,
         "each encrypted accessory no longer scans the full message array for its own ID");
+    assert.match(packageJson, /"testSecureMessagingPerformance": "tsx scripts\/testSecureMessagingPerformance\.ts"/);
+    assert.match(workflow, /Test Secure Messaging performance boundaries/);
+    assert.equal(
+        existsSync(new URL("../scripts/applySecureMessagingPerformanceTest.py", import.meta.url)),
+        false,
+        "one-time audit patch scripts are not shipped",
+    );
+    assert.equal(
+        existsSync(new URL("../.github/workflows/apply-secure-messaging-performance-test.yml", import.meta.url)),
+        false,
+        "one-time self-modifying workflows are not shipped",
+    );
 }
 
 async function main(): Promise<void> {

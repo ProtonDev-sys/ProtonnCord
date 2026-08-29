@@ -683,6 +683,18 @@ function hasSelectedKeyReviewBlock(localUserId: string, conversation: Conversati
     return conversation.selectedRecipientIds.some(userId => keyReviewGate.isBlocked(localUserId, userId));
 }
 
+function announcementReviewOrder(message: Message): number {
+    const editedTimestamp = discordEditedTimestamp(message);
+    const editedMilliseconds = editedTimestamp === null ? Number.NaN : Date.parse(editedTimestamp);
+    if (Number.isFinite(editedMilliseconds)) return editedMilliseconds;
+    try {
+        const createdMilliseconds = SnowflakeUtils.extractTimestamp(message.id);
+        return Number.isFinite(createdMilliseconds) ? createdMilliseconds : 0;
+    } catch {
+        return 0;
+    }
+}
+
 function reviewKeyAnnouncementInBackground(message: Message | undefined): void {
     const localUserId = UserStore.getCurrentUser()?.id;
     const peerUserId = message?.author?.id;
@@ -694,7 +706,7 @@ function reviewKeyAnnouncementInBackground(message: Message | undefined): void {
 
     const generation = announcementReviewGeneration;
     backgroundAnnouncementReviews.add(attemptId);
-    keyReviewGate.begin(localUserId, peerUserId);
+    keyReviewGate.begin(localUserId, peerUserId, attemptId, announcementReviewOrder(message));
     void reviewAnnouncementCached(localUserId, message)
         .then(result => {
             if (generation !== announcementReviewGeneration || UserStore.getCurrentUser()?.id !== localUserId) return;
@@ -713,7 +725,7 @@ function reviewKeyAnnouncementInBackground(message: Message | undefined): void {
         })
         .finally(() => {
             backgroundAnnouncementReviews.delete(attemptId);
-            if (generation === announcementReviewGeneration) keyReviewGate.finish(localUserId, peerUserId);
+            if (generation === announcementReviewGeneration) keyReviewGate.finish(localUserId, peerUserId, attemptId);
         });
 }
 
@@ -2787,7 +2799,7 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
         setState(null);
         if (!reviewKey || !localUserId || !peerUserId || peerUserId === localUserId) return () => { active = false; };
         const generation = announcementReviewGeneration;
-        keyReviewGate.begin(localUserId, peerUserId);
+        keyReviewGate.begin(localUserId, peerUserId, reviewKey, announcementReviewOrder(message));
         void reviewAnnouncementCached(localUserId, message)
             .then(result => {
                 if (generation !== announcementReviewGeneration || UserStore.getCurrentUser()?.id !== localUserId) return;
@@ -2804,7 +2816,7 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
                 });
             })
             .finally(() => {
-                if (generation === announcementReviewGeneration) keyReviewGate.finish(localUserId, peerUserId);
+                if (generation === announcementReviewGeneration) keyReviewGate.finish(localUserId, peerUserId, reviewKey);
             });
         return () => { active = false; };
     }, [localUserId, peerUserId, reviewKey]);
