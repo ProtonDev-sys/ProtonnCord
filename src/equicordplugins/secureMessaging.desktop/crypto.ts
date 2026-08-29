@@ -11,6 +11,7 @@ import {
     HkdfSha256,
 } from "@hpke/core";
 
+import { exactArrayBuffer } from "./exactArrayBuffer";
 import {
     canonicalEncryptedEnvelope,
     canonicalKeyAnnouncement,
@@ -124,7 +125,7 @@ function concatBytes(...values: Uint8Array[]): Uint8Array {
 }
 
 function cryptoBytes(value: Uint8Array): ArrayBuffer {
-    return Uint8Array.from(value).buffer;
+    return exactArrayBuffer(value);
 }
 
 function unsignedEnvelope(envelope: EncryptedEnvelope): UnsignedEncryptedEnvelope {
