@@ -38,6 +38,9 @@ jobs:
             - name: Test Secure Messaging layout stability
               run: pnpm exec tsx scripts/testSecureMessagingLayoutStability.ts
 
+            - name: Test Secure Messaging performance boundaries
+              run: pnpm testSecureMessagingPerformance
+
             - name: Benchmark Secure Messaging
               run: pnpm exec tsx scripts/benchmarkSecureMessaging.ts
 

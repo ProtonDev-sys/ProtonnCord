@@ -61,6 +61,11 @@ import {
 } from "@webpack/common";
 
 import {
+    announcementReviewCacheKey,
+    clearAnnouncementReviewCache,
+    reviewAnnouncementCached,
+} from "./announcementReviewCache";
+import {
     clearEncryptedAttachmentCache,
     downloadEncryptedAttachmentUrl,
     encryptedAttachmentCacheKey,
@@ -171,46 +176,84 @@ interface ReplyPreviewState {
     result: DecryptIncomingResult | null;
 }
 
-interface PendingRenderDecryption {
+interface SettledRenderDecryption {
     apply(result: DecryptIncomingResult): void;
-    promise: Promise<DecryptIncomingResult>;
+    channelId: string;
+    generation: number;
+    result: DecryptIncomingResult;
 }
+
+const RENDER_DECRYPT_BATCH_SIZE = 24;
 
 let screenCaptureProtectionStatus: ScreenCaptureProtectionStatus = "disabled";
 let screenCaptureProtectionGeneration = 0;
 let secureOperationGeneration = 0;
 let secureMessageListenersInstalled = false;
 const screenCaptureProtectionListeners = new Set<(status: ScreenCaptureProtectionStatus) => void>();
-const secureMessageGroupingListeners = new Set<() => void>();
+const secureMessageGroupingListeners = new Map<string, Set<() => void>>();
+const secureMessageGroupingRevisions = new Map<string, number>();
+const pendingSecureMessageGroupingChannels = new Set<string>();
 const nativeMessageGroupStartObservations = new Map<string, Map<object, boolean>>();
 const pendingEncryptedRenderOwners = new Set<{ forceUpdate(): void; }>();
-let pendingRenderDecryptions: PendingRenderDecryption[] = [];
-let renderDecryptBatchScheduled = false;
-let secureMessageGroupingRevision = 0;
+let secureMessageGroupingNotificationScheduled = false;
+let settledRenderDecryptions: SettledRenderDecryption[] = [];
+let renderDecryptBatchTimer: ReturnType<typeof setTimeout> | null = null;
 
-function notifySecureMessageGroupingChanged(): void {
-    secureMessageGroupingRevision++;
-    for (const listener of secureMessageGroupingListeners) {
-        try {
-            listener();
-        } catch {
-            // A stale accessory must not prevent the rest of the visible group from settling.
+function groupObservationKey(channelId: string, messageId: string): string {
+    return `${channelId}\0${messageId}`;
+}
+
+function flushSecureMessageGroupingChanges(): void {
+    secureMessageGroupingNotificationScheduled = false;
+    const channelIds = [...pendingSecureMessageGroupingChannels];
+    pendingSecureMessageGroupingChannels.clear();
+    for (const channelId of channelIds) {
+        const listeners = secureMessageGroupingListeners.get(channelId);
+        if (!listeners?.size) continue;
+        const revision = (secureMessageGroupingRevisions.get(channelId) ?? 0) + 1;
+        secureMessageGroupingRevisions.set(channelId, revision);
+        for (const listener of [...listeners]) {
+            try {
+                listener();
+            } catch {
+                // A stale accessory must not prevent the rest of this channel from settling.
+            }
         }
     }
 }
 
-function useSecureMessageGroupingRevision(): number {
-    const [revision, setRevision] = useState(secureMessageGroupingRevision);
+function notifySecureMessageGroupingChanged(channelId: string): void {
+    pendingSecureMessageGroupingChannels.add(channelId);
+    if (secureMessageGroupingNotificationScheduled) return;
+    secureMessageGroupingNotificationScheduled = true;
+    queueMicrotask(flushSecureMessageGroupingChanges);
+}
+
+function useSecureMessageGroupingRevision(channelId: string): number {
+    const [revision, setRevision] = useState(() => secureMessageGroupingRevisions.get(channelId) ?? 0);
     useLayoutEffect(() => {
-        const listener = () => setRevision(secureMessageGroupingRevision);
-        secureMessageGroupingListeners.add(listener);
-        return () => { secureMessageGroupingListeners.delete(listener); };
-    }, []);
+        const listener = () => setRevision(secureMessageGroupingRevisions.get(channelId) ?? 0);
+        let listeners = secureMessageGroupingListeners.get(channelId);
+        if (!listeners) {
+            listeners = new Set();
+            secureMessageGroupingListeners.set(channelId, listeners);
+        }
+        listeners.add(listener);
+        listener();
+        return () => {
+            listeners?.delete(listener);
+            if (!listeners?.size) {
+                secureMessageGroupingListeners.delete(channelId);
+                secureMessageGroupingRevisions.delete(channelId);
+                pendingSecureMessageGroupingChannels.delete(channelId);
+            }
+        };
+    }, [channelId]);
     return revision;
 }
 
-function observedNativeMessageGroupStart(messageId: string): boolean | null {
-    const observations = nativeMessageGroupStartObservations.get(messageId);
+function observedNativeMessageGroupStart(channelId: string, messageId: string): boolean | null {
+    const observations = nativeMessageGroupStartObservations.get(groupObservationKey(channelId, messageId));
     if (!observations?.size) return null;
     for (const groupStart of observations.values()) {
         if (groupStart) return true;
@@ -218,24 +261,65 @@ function observedNativeMessageGroupStart(messageId: string): boolean | null {
     return false;
 }
 
-function setNativeMessageGroupStartObservation(messageId: string, owner: object, groupStart: boolean): void {
-    const previous = observedNativeMessageGroupStart(messageId);
-    let observations = nativeMessageGroupStartObservations.get(messageId);
+function setNativeMessageGroupStartObservation(
+    channelId: string,
+    messageId: string,
+    owner: object,
+    groupStart: boolean,
+): void {
+    const key = groupObservationKey(channelId, messageId);
+    const previous = observedNativeMessageGroupStart(channelId, messageId);
+    let observations = nativeMessageGroupStartObservations.get(key);
     if (!observations) {
         observations = new Map();
-        nativeMessageGroupStartObservations.set(messageId, observations);
+        nativeMessageGroupStartObservations.set(key, observations);
     }
     observations.set(owner, groupStart);
-    if (previous !== observedNativeMessageGroupStart(messageId)) notifySecureMessageGroupingChanged();
+    if (previous !== observedNativeMessageGroupStart(channelId, messageId))
+        notifySecureMessageGroupingChanged(channelId);
 }
 
-function removeNativeMessageGroupStartObservation(messageId: string, owner: object): void {
-    const observations = nativeMessageGroupStartObservations.get(messageId);
+function removeNativeMessageGroupStartObservation(channelId: string, messageId: string, owner: object): void {
+    const key = groupObservationKey(channelId, messageId);
+    const observations = nativeMessageGroupStartObservations.get(key);
     if (!observations?.has(owner)) return;
-    const previous = observedNativeMessageGroupStart(messageId);
+    const previous = observedNativeMessageGroupStart(channelId, messageId);
     observations.delete(owner);
-    if (!observations.size) nativeMessageGroupStartObservations.delete(messageId);
-    if (previous !== observedNativeMessageGroupStart(messageId)) notifySecureMessageGroupingChanged();
+    if (!observations.size) nativeMessageGroupStartObservations.delete(key);
+    if (previous !== observedNativeMessageGroupStart(channelId, messageId))
+        notifySecureMessageGroupingChanged(channelId);
+}
+
+function scheduleRenderDecryptBatch(): void {
+    if (renderDecryptBatchTimer !== null) return;
+    renderDecryptBatchTimer = setTimeout(flushRenderDecryptions, 0);
+}
+
+function flushRenderDecryptions(): void {
+    renderDecryptBatchTimer = null;
+    const batch = settledRenderDecryptions.splice(0, RENDER_DECRYPT_BATCH_SIZE);
+    if (batch.length === 0) return;
+    const generation = secureOperationGeneration;
+    const changedChannels = new Set<string>();
+    ReactDOM.flushSync(() => {
+        for (const request of batch) {
+            if (request.generation !== generation) continue;
+            try {
+                request.apply(request.result);
+                changedChannels.add(request.channelId);
+            } catch {
+                // Discord may dispose a row between decryption and the bounded render batch.
+            }
+        }
+    });
+    for (const channelId of changedChannels) notifySecureMessageGroupingChanged(channelId);
+    if (settledRenderDecryptions.length > 0) scheduleRenderDecryptBatch();
+}
+
+function enqueueSettledRenderDecryption(request: SettledRenderDecryption): void {
+    if (request.generation !== secureOperationGeneration) return;
+    settledRenderDecryptions.push(request);
+    scheduleRenderDecryptBatch();
 }
 
 function decryptCachedMessageForRender(
@@ -243,23 +327,21 @@ function decryptCachedMessageForRender(
     message: Message,
     apply: (result: DecryptIncomingResult) => void,
 ): void {
-    const promise = decryptCachedMessage(localUserId, message);
-    pendingRenderDecryptions.push({ apply, promise });
-    if (renderDecryptBatchScheduled) return;
-    renderDecryptBatchScheduled = true;
-    queueMicrotask(() => {
-        const batch = pendingRenderDecryptions;
-        const generation = secureOperationGeneration;
-        pendingRenderDecryptions = [];
-        renderDecryptBatchScheduled = false;
-        void Promise.all(batch.map(request => request.promise)).then(results => {
-            if (generation !== secureOperationGeneration) return;
-            ReactDOM.flushSync(() => {
-                for (let index = 0; index < batch.length; index++) batch[index].apply(results[index]);
-                notifySecureMessageGroupingChanged();
-            });
-        });
-    });
+    const generation = secureOperationGeneration;
+    void decryptCachedMessage(localUserId, message).then(
+        result => enqueueSettledRenderDecryption({
+            apply,
+            channelId: message.channel_id,
+            generation,
+            result,
+        }),
+        () => enqueueSettledRenderDecryption({
+            apply,
+            channelId: message.channel_id,
+            generation,
+            result: { status: "failed", error: "cryptographic_operation_failed" },
+        }),
+    );
 }
 
 async function saveEncryptedAttachment(url: string): Promise<void> {
@@ -421,9 +503,9 @@ function useSecureReplyPreview<T extends ReplyPreviewProps>(props: T): T {
         content = captureProtection === "screenshot"
             ? "Encrypted reply hidden while screenshots are allowed"
             : "Encrypted reply protected";
-    } else if (!key) content = "Encrypted message blocked";
+    } else if (!key || !localUserId) content = "Encrypted message blocked";
     else content = replyPreviewText(
-        state?.key === key ? state.result : getCachedDecryption(localUserId!, message),
+        state?.key === key ? state.result : getCachedDecryption(localUserId, message),
     );
 
     return {
@@ -437,6 +519,8 @@ function useSecureReplyPreview<T extends ReplyPreviewProps>(props: T): T {
 
 const permittedAnnouncements = new Map<string, number>();
 const keyReviewGate = new KeyReviewGate();
+const backgroundAnnouncementReviews = new Set<string>();
+let announcementReviewGeneration = 0;
 type RestMethod = (request: Record<string, any>, ...args: any[]) => Promise<any>;
 let networkGuardEnabled = false;
 let networkGuardGeneration = 0;
@@ -461,7 +545,7 @@ let guardedStartEditMessageRecord: StartEditMessageRecord | null = null;
 let editStarterGeneration = 0;
 let messageLengthBypassGeneration = 0;
 let selectedChannelListenerInstalled = false;
-const messageLengthBypassKeys = new Set<string>();
+let activeMessageLengthBypassKey: string | null = null;
 
 type ChatAccessCache =
     | { status: "pending" | "failed"; localUserId: string | null; }
@@ -493,31 +577,29 @@ function updateMessageLengthBypass(
     context: { localUserId: string; snapshot: ConversationSnapshot; },
     conversation: ConversationResult,
 ): boolean {
-    const key = messageLengthBypassKey(context.localUserId, context.snapshot.channelId);
+    if (UserStore.getCurrentUser()?.id !== context.localUserId ||
+        SelectedChannelStore.getChannelId() !== context.snapshot.channelId) return false;
     const enabled = !isNativeFailure(conversation) && conversation.status === "enabled";
-    if (enabled) messageLengthBypassKeys.add(key);
-    else messageLengthBypassKeys.delete(key);
+    activeMessageLengthBypassKey = enabled
+        ? messageLengthBypassKey(context.localUserId, context.snapshot.channelId)
+        : null;
     return enabled;
 }
 
 async function refreshMessageLengthBypassState(channelId = SelectedChannelStore.getChannelId()): Promise<boolean> {
     const generation = ++messageLengthBypassGeneration;
+    activeMessageLengthBypassKey = null;
     const localUserId = UserStore.getCurrentUser()?.id;
     if (!localUserId || !channelId) return false;
     const snapshot = snapshotForChannel(ChannelStore.getChannel(channelId), localUserId);
-    if (!snapshot) {
-        messageLengthBypassKeys.delete(messageLengthBypassKey(localUserId, channelId));
-        return false;
-    }
+    if (!snapshot) return false;
     const context = { localUserId, snapshot };
     try {
         const conversation = await Native.getConversation(localUserId, snapshot);
-        if (generation !== messageLengthBypassGeneration || UserStore.getCurrentUser()?.id !== localUserId)
-            return false;
+        if (generation !== messageLengthBypassGeneration || UserStore.getCurrentUser()?.id !== localUserId ||
+            SelectedChannelStore.getChannelId() !== channelId) return false;
         return updateMessageLengthBypass(context, conversation);
     } catch {
-        if (generation === messageLengthBypassGeneration)
-            messageLengthBypassKeys.delete(messageLengthBypassKey(localUserId, channelId));
         return false;
     }
 }
@@ -526,11 +608,12 @@ function shouldBypassMessageLengthLimit(): boolean {
     const localUserId = UserStore.getCurrentUser()?.id;
     const channelId = SelectedChannelStore.getChannelId();
     return screenCaptureProtectionStatus === "ready" && Boolean(
-        localUserId && channelId && messageLengthBypassKeys.has(messageLengthBypassKey(localUserId, channelId)),
+        localUserId && channelId && activeMessageLengthBypassKey === messageLengthBypassKey(localUserId, channelId),
     );
 }
 
 function handleSelectedChannelChange(): void {
+    activeMessageLengthBypassKey = null;
     void refreshMessageLengthBypassState();
     updateSelectedChatUnlockPrompt();
 }
@@ -546,12 +629,19 @@ function installMessageLengthBypass(): void {
 
 function uninstallMessageLengthBypass(): void {
     messageLengthBypassGeneration++;
+    activeMessageLengthBypassKey = null;
     if (selectedChannelListenerInstalled) {
         SelectedChannelStore.removeChangeListener(handleSelectedChannelChange);
         selectedChannelListenerInstalled = false;
     }
     removeMessageLengthBypassListener(shouldBypassMessageLengthLimit);
-    messageLengthBypassKeys.clear();
+}
+
+function resetAnnouncementReviewState(): void {
+    announcementReviewGeneration++;
+    backgroundAnnouncementReviews.clear();
+    clearAnnouncementReviewCache();
+    keyReviewGate.clear();
 }
 
 function revokePreparedSecureOperations(): void {
@@ -562,6 +652,7 @@ function revokePreparedSecureOperations(): void {
     preparedOutgoingMessages = new WeakMap();
     clearOptimisticOutgoingPlaintexts();
     requestAuthorizationScopes = new WeakMap();
+    resetAnnouncementReviewState();
 }
 
 function announcementKey(channelId: string, content: string): string {
@@ -592,24 +683,33 @@ function hasSelectedKeyReviewBlock(localUserId: string, conversation: Conversati
     return conversation.selectedRecipientIds.some(userId => keyReviewGate.isBlocked(localUserId, userId));
 }
 
+function announcementReviewOrder(message: Message): number {
+    const editedTimestamp = discordEditedTimestamp(message);
+    const editedMilliseconds = editedTimestamp === null ? Number.NaN : Date.parse(editedTimestamp);
+    if (Number.isFinite(editedMilliseconds)) return editedMilliseconds;
+    try {
+        const createdMilliseconds = SnowflakeUtils.extractTimestamp(message.id);
+        return Number.isFinite(createdMilliseconds) ? createdMilliseconds : 0;
+    } catch {
+        return 0;
+    }
+}
+
 function reviewKeyAnnouncementInBackground(message: Message | undefined): void {
     const localUserId = UserStore.getCurrentUser()?.id;
     const peerUserId = message?.author?.id;
-    if (!localUserId || !peerUserId || peerUserId === localUserId || !isKeyAnnouncement(message.content)) return;
+    if (!message || !localUserId || !peerUserId || peerUserId === localUserId || !isKeyAnnouncement(message.content)) return;
     const messageGuildId = (message as Message & { guild_id?: string; }).guild_id;
     if (messageGuildId || ChannelStore.getChannel(message.channel_id)?.guild_id) return;
-    const editedTimestamp = discordEditedTimestamp(message);
-    const attemptId = `${message.channel_id}\0${message.id}\0${editedTimestamp ?? ""}\0${message.content}`;
+    const attemptId = announcementReviewCacheKey(localUserId, message);
+    if (backgroundAnnouncementReviews.has(attemptId)) return;
 
-    keyReviewGate.begin(localUserId, peerUserId);
-    void Native.reviewAnnouncement(
-        localUserId,
-        peerUserId,
-        message.content,
-        message.id,
-        editedTimestamp,
-    )
+    const generation = announcementReviewGeneration;
+    backgroundAnnouncementReviews.add(attemptId);
+    keyReviewGate.begin(localUserId, peerUserId, attemptId, announcementReviewOrder(message));
+    void reviewAnnouncementCached(localUserId, message)
         .then(result => {
+            if (generation !== announcementReviewGeneration || UserStore.getCurrentUser()?.id !== localUserId) return;
             if (isNativeFailure(result)) keyReviewGate.fail(localUserId, peerUserId, attemptId);
             else {
                 keyReviewGate.succeed(localUserId, peerUserId, attemptId);
@@ -619,8 +719,14 @@ function reviewKeyAnnouncementInBackground(message: Message | undefined): void {
                 }
             }
         })
-        .catch(() => keyReviewGate.fail(localUserId, peerUserId, attemptId))
-        .finally(() => keyReviewGate.finish(localUserId, peerUserId));
+        .catch(() => {
+            if (generation === announcementReviewGeneration && UserStore.getCurrentUser()?.id === localUserId)
+                keyReviewGate.fail(localUserId, peerUserId, attemptId);
+        })
+        .finally(() => {
+            backgroundAnnouncementReviews.delete(attemptId);
+            if (generation === announcementReviewGeneration) keyReviewGate.finish(localUserId, peerUserId, attemptId);
+        });
 }
 
 function messageFromDispatch(event: Record<string, any>): Message | undefined {
@@ -1882,9 +1988,8 @@ async function handleSecureConnectionOpen(): Promise<void> {
     if (accountChanged) {
         secureOperationGeneration++;
         revokePreparedSecureOperations();
-        messageLengthBypassKeys.clear();
+        activeMessageLengthBypassKey = null;
         suppressedChatLoadChannelIds.clear();
-        invalidateSecureRenderCaches();
         try {
             await Native.lockSecurityKeyVault();
         } catch {
@@ -2428,7 +2533,7 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
     ));
     const cardRef = useRef<HTMLDivElement>(null);
     const groupStartObservationOwner = useRef<object>({}).current;
-    const groupingRevision = useSecureMessageGroupingRevision();
+    const groupingRevision = useSecureMessageGroupingRevision(message.channel_id);
     const groupFlags = useStateFromStores([MessageStore], () => {
         if (!localUserId) return 0;
         const messages = (MessageStore.getMessages(message.channel_id)?._array ?? []) as Message[];
@@ -2444,7 +2549,7 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
                 extractSecureEmbedUrls(nextResult.plaintext).length === 0;
         }, candidate => candidate.id === message.id && nativeGroupStart === true
             ? true
-            : observedNativeMessageGroupStart(candidate.id));
+            : observedNativeMessageGroupStart(message.channel_id, candidate.id));
     }, [groupingRevision, key, nativeGroupStart, result]);
     const cardClassName = classes(
         "pc-secure-card",
@@ -2466,9 +2571,9 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         if (!messageElement) return;
         const detectedGroupStart = nativeGroupStart === true ||
             Boolean(messageElement.querySelector('[id^="message-username-"]'));
-        setNativeMessageGroupStartObservation(message.id, groupStartObservationOwner, detectedGroupStart);
-        return () => removeNativeMessageGroupStartObservation(message.id, groupStartObservationOwner);
-    }, [groupStartObservationOwner, message.id, nativeGroupStart]);
+        setNativeMessageGroupStartObservation(message.channel_id, message.id, groupStartObservationOwner, detectedGroupStart);
+        return () => removeNativeMessageGroupStartObservation(message.channel_id, message.id, groupStartObservationOwner);
+    }, [groupStartObservationOwner, message.channel_id, message.id, nativeGroupStart]);
 
     useEffect(() => {
         let active = true;
@@ -2575,7 +2680,10 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
                     setError(failureMessage(forgotten));
                     return;
                 }
-                if (forgotten.status === "forgotten") invalidateSecureRenderCaches();
+                if (forgotten.status === "forgotten") {
+                    resetAnnouncementReviewState();
+                    invalidateSecureRenderCaches();
+                }
                 reviewed = await Native.reviewAnnouncement(
                     localUserId,
                     peerUserId,
@@ -2597,7 +2705,9 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
                 identity.fingerprint,
             );
             if (trusted.status === "trusted" || trusted.status === "already_trusted") {
+                resetAnnouncementReviewState();
                 invalidateSecureRenderCaches();
+                void refreshMessageLengthBypassState();
                 showToast(`Verified Secure Messaging key for ${userLabel(peerUserId)}.`, Toasts.Type.SUCCESS);
                 modalProps.onClose();
             } else if (isNativeFailure(trusted)) {
@@ -2677,29 +2787,53 @@ function openKeyReviewModal(message: Message, review: AnnouncementReviewResult, 
 
 function KeyAnnouncementAccessory({ message }: { message: Message; }) {
     const localUserId = UserStore.getCurrentUser()?.id;
-    const [review, setReview] = useState<AnnouncementReviewResult | null>(null);
+    const peerUserId = message.author?.id;
+    const reviewKey = localUserId && peerUserId && peerUserId !== localUserId
+        ? announcementReviewCacheKey(localUserId, message)
+        : null;
+    const [state, setState] = useState<{ key: string; result: AnnouncementReviewResult; } | null>(null);
+    const review = state?.key === reviewKey ? state.result : null;
 
     useEffect(() => {
         let active = true;
-        setReview(null);
-        if (!localUserId || !message.author?.id || message.author.id === localUserId) return () => { active = false; };
-        void Native.reviewAnnouncement(
-            localUserId,
-            message.author.id,
-            message.content,
-            message.id,
-            discordEditedTimestamp(message),
-        )
-            .then(result => { if (active) setReview(result); })
-            .catch(() => { if (active) setReview({ status: "failed", error: "cryptographic_operation_failed" }); });
+        setState(null);
+        if (!reviewKey || !localUserId || !peerUserId || peerUserId === localUserId) return () => { active = false; };
+        const generation = announcementReviewGeneration;
+        keyReviewGate.begin(localUserId, peerUserId, reviewKey, announcementReviewOrder(message));
+        void reviewAnnouncementCached(localUserId, message)
+            .then(result => {
+                if (generation !== announcementReviewGeneration || UserStore.getCurrentUser()?.id !== localUserId) return;
+                if (isNativeFailure(result)) keyReviewGate.fail(localUserId, peerUserId, reviewKey);
+                else keyReviewGate.succeed(localUserId, peerUserId, reviewKey);
+                if (active) setState({ key: reviewKey, result });
+            })
+            .catch(() => {
+                if (generation !== announcementReviewGeneration || UserStore.getCurrentUser()?.id !== localUserId) return;
+                keyReviewGate.fail(localUserId, peerUserId, reviewKey);
+                if (active) setState({
+                    key: reviewKey,
+                    result: { status: "failed", error: "cryptographic_operation_failed" },
+                });
+            })
+            .finally(() => {
+                if (generation === announcementReviewGeneration) keyReviewGate.finish(localUserId, peerUserId, reviewKey);
+            });
         return () => { active = false; };
-    }, [localUserId, message.author?.id, message.content]);
+    }, [localUserId, peerUserId, reviewKey]);
 
-    if (message.author?.id === localUserId) {
+    if (peerUserId === localUserId && localUserId) {
         return (
             <div className="pc-secure-card pc-secure-replaces-content">
                 <div className="pc-secure-card-header">🔑 Your Secure Messaging public-key announcement</div>
                 <BaseText size="xs" color="text-muted">Recipients must compare its fingerprint with you outside Discord.</BaseText>
+            </div>
+        );
+    }
+    if (!localUserId || !peerUserId) {
+        return (
+            <div className="pc-secure-card pc-secure-card-danger pc-secure-replaces-content">
+                <div className="pc-secure-card-header">🔑 Secure Messaging key unavailable</div>
+                <BaseText size="xs">Discord's authenticated account or announcement author is unavailable.</BaseText>
             </div>
         );
     }
@@ -2739,7 +2873,7 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
             <code className="pc-secure-fingerprint">{review.identity.formattedFingerprint}</code>
             {!trusted && (
                 <div className="pc-secure-card-actions">
-                    <Button size="xs" variant={review.status === "key_changed" ? "dangerPrimary" : "primary"} onClick={() => openKeyReviewModal(message, review, localUserId!)}>
+                    <Button size="xs" variant={review.status === "key_changed" ? "dangerPrimary" : "primary"} onClick={() => openKeyReviewModal(message, review, localUserId)}>
                         {review.status === "key_changed" ? "Review changed key" : "Review & verify"}
                     </Button>
                 </div>
@@ -2859,6 +2993,11 @@ export default definePlugin({
 
     start() {
         secureOperationGeneration++;
+        if (secureMessageListenersInstalled) {
+            removeMessagePreSendListener(outgoingListener);
+            removeMessagePreEditListener(editListener);
+            secureMessageListenersInstalled = false;
+        }
         secureRuntimeUserId = UserStore.getCurrentUser()?.id ?? null;
         chatAccessGateEnabled = true;
         chatAccessGeneration++;
@@ -2872,19 +3011,26 @@ export default definePlugin({
             installChatLoadGuard();
             installMessageLengthBypass();
             document.addEventListener("click", handleEncryptedAttachmentDownload, true);
-        } catch (error) {
+            addMessageAccessory("SecureMessaging", renderSecureMessageAccessory, 0);
+        } catch {
             chatAccessGateEnabled = false;
             chatAccessGeneration++;
             refreshChatGateRenderers();
             document.removeEventListener("click", handleEncryptedAttachmentDownload, true);
+            try {
+                removeMessageAccessory("SecureMessaging");
+            } catch {
+                // The accessory API may not have completed registration.
+            }
             uninstallMessageLengthBypass();
             uninstallChatLoadGuard();
             uninstallEncryptedEditStarter();
             uninstallNetworkGuard();
             uninstallAttachmentUploadGuard();
-            throw error;
+            setScreenCaptureProtectionStatus("failed");
+            showToast("Secure Messaging could not install its application guards.", Toasts.Type.FAILURE);
+            return;
         }
-        addMessageAccessory("SecureMessaging", renderSecureMessageAccessory, 0);
         void refreshChatAccessState(secureRuntimeUserId);
         void applyScreenCaptureProtection(true).then(applied => {
             if (generation !== screenCaptureProtectionGeneration) return;
@@ -2903,11 +3049,19 @@ export default definePlugin({
                 setScreenCaptureProtectionStatus("failed");
                 showToast("Secure Messaging could not install its protected message listeners.", Toasts.Type.FAILURE);
             }
+        }).catch(() => {
+            if (generation !== screenCaptureProtectionGeneration) return;
+            setScreenCaptureProtectionStatus("failed");
+            showToast("Secure Messaging could not initialize encrypted-content protection.", Toasts.Type.FAILURE);
         });
     },
 
     stop() {
-        removeMessageAccessory("SecureMessaging");
+        try {
+            removeMessageAccessory("SecureMessaging");
+        } catch {
+            // Stopping must continue even if Discord already removed the accessory registry entry.
+        }
         secureOperationGeneration++;
         secureRuntimeUserId = null;
         chatAccessGateEnabled = false;
@@ -2924,23 +3078,26 @@ export default definePlugin({
         uninstallEncryptedEditStarter();
         uninstallAttachmentUploadGuard();
         uninstallNetworkGuard();
-        void applyScreenCaptureProtection(true);
+        void Native.setScreenCaptureProtection(true).catch(() => undefined);
         if (secureMessageListenersInstalled) {
             removeMessagePreSendListener(outgoingListener);
             removeMessagePreEditListener(editListener);
             secureMessageListenersInstalled = false;
         }
         permittedAnnouncements.clear();
-        pendingRenderDecryptions = [];
-        renderDecryptBatchScheduled = false;
+        if (renderDecryptBatchTimer !== null) clearTimeout(renderDecryptBatchTimer);
+        renderDecryptBatchTimer = null;
+        settledRenderDecryptions = [];
+        secureMessageGroupingNotificationScheduled = false;
+        pendingSecureMessageGroupingChannels.clear();
+        secureMessageGroupingListeners.clear();
+        secureMessageGroupingRevisions.clear();
         nativeMessageGroupStartObservations.clear();
-        notifySecureMessageGroupingChanged();
         revokePreparedSecureOperations();
-        void Native.lockSecurityKeyVault();
+        void Native.lockSecurityKeyVault().catch(() => undefined);
         clearEncryptedAttachmentCache();
         clearEncryptedEmbedCache();
         clearEncryptedMessageDecryptCache();
-        keyReviewGate.clear();
     },
 
     shouldGateChat(target: Channel | { channelId: string; }, owner?: { forceUpdate(): void; }) {
