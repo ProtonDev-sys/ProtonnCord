@@ -16,6 +16,7 @@ import {
     type SecureInlineEmbedStatus,
 } from "./embedUrls";
 import { preserveEncryptedMessageScroll } from "./layoutStability";
+import { createTaskQueue } from "./taskQueue";
 import { discordEditedTimestamp } from "./messageMetadata";
 import type { DecryptIncomingResult } from "./native";
 import { isEncryptedMessage } from "./protocol";
@@ -46,10 +47,12 @@ interface UnfurlCacheEntry {
     expiresAt: number;
     lastAccess: number;
     promise: Promise<Record<string, unknown>[]>;
+    settled: boolean;
 }
 
 const cache = new Map<string, EmbedCacheEntry>();
 const unfurlCache = new Map<string, UnfurlCacheEntry>();
+const runUnfurlTask = createTaskQueue(4);
 
 function cacheKey(message: Message): string {
     return `${UserStore.getCurrentUser()?.id ?? ""}\0${message.channel_id}\0${message.id}\0${message.author?.id ?? ""}\0${discordEditedTimestamp(message) ?? ""}\0${message.content}`;
@@ -84,26 +87,30 @@ function notify(message: Message, entry: EmbedCacheEntry): void {
     entry.listeners.clear();
 }
 
-function pruneCache(protectedKey: string): void {
-    while (cache.size > MAX_CACHE_ENTRIES) {
+function pruneCache(protectedKey: string, maximumEntries = MAX_CACHE_ENTRIES): void {
+    while (cache.size > maximumEntries) {
         let oldest: [string, EmbedCacheEntry] | null = null;
+        let oldestReady: [string, EmbedCacheEntry] | null = null;
         for (const value of cache) {
-            if (value[0] === protectedKey || value[1].status === "loading") continue;
+            if (value[0] === protectedKey) continue;
             if (!oldest || value[1].lastAccess < oldest[1].lastAccess) oldest = value;
+            if (value[1].status === "ready" && (!oldestReady || value[1].lastAccess < oldestReady[1].lastAccess))
+                oldestReady = value;
         }
-        if (!oldest) break;
-        cache.delete(oldest[0]);
+        const candidate = oldestReady ?? oldest;
+        if (!candidate) break;
+        cache.delete(candidate[0]);
     }
 }
 
-function pruneUnfurlCache(protectedKey: string, now: number): void {
+function pruneUnfurlCache(protectedKey: string, now: number, maximumEntries = MAX_UNFURL_CACHE_ENTRIES): void {
     for (const [key, entry] of unfurlCache) {
-        if (key !== protectedKey && entry.expiresAt <= now) unfurlCache.delete(key);
+        if (key !== protectedKey && entry.settled && entry.expiresAt <= now) unfurlCache.delete(key);
     }
-    while (unfurlCache.size > MAX_UNFURL_CACHE_ENTRIES) {
+    while (unfurlCache.size > maximumEntries) {
         let oldest: [string, UnfurlCacheEntry] | null = null;
         for (const value of unfurlCache) {
-            if (value[0] === protectedKey) continue;
+            if (value[0] === protectedKey || !value[1].settled) continue;
             if (!oldest || value[1].lastAccess < oldest[1].lastAccess) oldest = value;
         }
         if (!oldest) break;
@@ -118,7 +125,7 @@ async function requestUnfurl(url: string): Promise<Record<string, unknown>[]> {
             const response = await RestAPI.post({
                 url: Constants.Endpoints.UNFURL_EMBED_URLS,
                 body: { urls: [url] },
-                retries: 1,
+                retries: 0,
             });
             const embeds = Array.isArray(response?.body?.embeds) ? response.body.embeds : [];
             if (embeds.length > 0) return embeds;
@@ -132,27 +139,33 @@ async function requestUnfurl(url: string): Promise<Record<string, unknown>[]> {
 function unfurlUrl(url: string): Promise<Record<string, unknown>[]> {
     const now = Date.now();
     const existing = unfurlCache.get(url);
-    if (existing && existing.expiresAt > now) {
+    if (existing && (!existing.settled || existing.expiresAt > now)) {
         existing.lastAccess = now;
         return existing.promise;
     }
     if (existing) unfurlCache.delete(url);
+    pruneUnfurlCache("", now, MAX_UNFURL_CACHE_ENTRIES - 1);
+    if (unfurlCache.size >= MAX_UNFURL_CACHE_ENTRIES) return Promise.resolve([]);
+
     const entry: UnfurlCacheEntry = {
         expiresAt: Number.POSITIVE_INFINITY,
         lastAccess: now,
         promise: Promise.resolve([]),
+        settled: false,
     };
-    entry.promise = requestUnfurl(url).then(embeds => {
+    unfurlCache.set(url, entry);
+    entry.promise = runUnfurlTask(() =>
+        unfurlCache.get(url) === entry ? requestUnfurl(url) : Promise.resolve([])
+    ).then(embeds => {
         if (unfurlCache.get(url) === entry) {
             const settledAt = Date.now();
             entry.expiresAt = settledAt + (embeds.length > 0 ? SUCCESSFUL_UNFURL_TTL : EMPTY_UNFURL_TTL);
             entry.lastAccess = settledAt;
+            entry.settled = true;
             pruneUnfurlCache(url, settledAt);
         }
         return embeds;
     });
-    unfurlCache.set(url, entry);
-    pruneUnfurlCache(url, now);
     return entry.promise;
 }
 
@@ -186,6 +199,7 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
         finishEntry(message, key, entry);
         return;
     }
+    if (cache.get(key) !== entry) return;
     entry.stickers = decrypted.stickers ?? [];
     const urls = extractSecureEmbedUrls(decrypted.plaintext);
     if (urls.length === 0) {
@@ -194,6 +208,7 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
     }
     // Matching Discord's native previews requires disclosing only the extracted URLs to its unfurl service.
     const rawEmbeds = await unfurlEmbeds(urls);
+    if (cache.get(key) !== entry) return;
     const converted: Embed[] = [];
     for (const rawEmbed of rawEmbeds) {
         try {
@@ -226,6 +241,7 @@ function ensureEntry(message: Message): EmbedCacheEntry | null {
         return existing;
     }
     if (existing) cache.delete(key);
+    pruneCache("", MAX_CACHE_ENTRIES - 1);
     const entry: EmbedCacheEntry = {
         embeds: [],
         expiresAt: Number.POSITIVE_INFINITY,

@@ -8,6 +8,7 @@ import type { PluginNative } from "@utils/types";
 import type { Message, MessageAttachment } from "@vencord/discord-types";
 import { Constants, RestAPI, UserStore } from "@webpack/common";
 
+import { exactArrayBuffer } from "./exactArrayBuffer";
 import { preserveEncryptedMessageScroll } from "./layoutStability";
 import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
 import type {
@@ -16,11 +17,11 @@ import type {
     DownloadIncomingAttachmentResult,
 } from "./native";
 import { isEncryptedMessage } from "./protocol";
+import { createTaskQueue } from "./taskQueue";
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const MAX_CACHE_BYTES = 256 * 1024 * 1024;
 const MAX_CACHE_ENTRIES = 128;
-const MAX_IN_FLIGHT_LOADS = 12;
 const FAILED_CACHE_RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000] as const;
 const SPOILER_FLAG = 8;
 const ANIMATED_FLAG = 32;
@@ -38,6 +39,7 @@ const SAFE_INLINE_MIME_TYPES = new Set([
 const LOCAL_CONTENT_SCAN_VERSION = -1;
 const VIDEO_POSTER_MAX_EDGE = 512;
 const VIDEO_POSTER_TIMEOUT_MS = 5_000;
+const runAttachmentLoad = createTaskQueue(4);
 
 export interface ExtendedAttachment extends MessageAttachment {
     content_scan_version?: number;
@@ -113,7 +115,6 @@ const cache = new Map<string, AttachmentCacheEntry>();
 const downloadReferences = new Map<string, DownloadReference>();
 let cachedBytes = 0;
 let inFlightBytes = 0;
-let inFlightLoads = 0;
 let cacheUserId: string | null = null;
 
 export function encryptedAttachmentCacheKey(message: Message): string {
@@ -344,7 +345,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
         for (const attachment of result.attachments) {
             const { metadata } = attachment;
             const contentType = safeInlineMimeType(metadata.mimeType);
-            const blob = new Blob([Uint8Array.from(attachment.data).buffer], {
+            const blob = new Blob([exactArrayBuffer(attachment.data)], {
                 type: contentType,
             });
             const objectUrl = URL.createObjectURL(blob);
@@ -431,36 +432,35 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
 function startEntryLoad(message: Message, key: string, entry: AttachmentCacheEntry, localUserId: string): void {
     if (entry.retryTimer !== null) clearTimeout(entry.retryTimer);
     entry.retryTimer = null;
-    if (inFlightLoads >= MAX_IN_FLIGHT_LOADS) {
-        entry.status = { status: "failed", reason: "The encrypted attachment cache is busy. Retry in a moment." };
-        prepareTransientRetry(entry);
-        notifyStatus(entry);
-        scheduleRetry(message, key, entry, localUserId);
-        pruneCache(key);
-        return;
-    }
-    const requiredBytes = message.attachments.reduce((total, attachment) => total + attachment.size, 0);
-    pruneCache(key, requiredBytes);
-    if (!Number.isSafeInteger(requiredBytes) || requiredBytes < 1 || requiredBytes > MAX_CACHE_BYTES ||
-        cachedBytes + inFlightBytes + requiredBytes > MAX_CACHE_BYTES) {
-        entry.status = { status: "failed", reason: "The encrypted attachment cache is busy. Retry in a moment." };
-        prepareTransientRetry(entry);
-        notifyStatus(entry);
-        scheduleRetry(message, key, entry, localUserId);
-        return;
-    }
-    entry.reservedBytes = requiredBytes;
-    inFlightBytes += requiredBytes;
-    inFlightLoads++;
-    void loadEntry(message, key, entry, localUserId).catch(() => {
-        if (entry.disposed) return;
+    void runAttachmentLoad(async () => {
+        if (entry.disposed || cache.get(key) !== entry) return;
+        if (UserStore.getCurrentUser()?.id !== localUserId) {
+            removeEntry(key, entry);
+            return;
+        }
+        const requiredBytes = message.attachments.reduce((total, attachment) => total + attachment.size, 0);
+        pruneCache(key, requiredBytes);
+        if (!Number.isSafeInteger(requiredBytes) || requiredBytes < 1 || requiredBytes > MAX_CACHE_BYTES ||
+            cachedBytes + inFlightBytes + requiredBytes > MAX_CACHE_BYTES) {
+            entry.status = { status: "failed", reason: "The encrypted attachment cache is busy. Retry in a moment." };
+            prepareTransientRetry(entry);
+            notifyStatus(entry);
+            scheduleRetry(message, key, entry, localUserId);
+            return;
+        }
+        entry.reservedBytes = requiredBytes;
+        inFlightBytes += requiredBytes;
+        try {
+            await loadEntry(message, key, entry, localUserId);
+        } finally {
+            releaseReservation(entry);
+        }
+    }).catch(() => {
+        if (entry.disposed || cache.get(key) !== entry) return;
         entry.status = { status: "failed", reason: "The encrypted attachments could not be loaded." };
         prepareTransientRetry(entry);
         notifyStatus(entry);
         scheduleRetry(message, key, entry, localUserId);
-    }).finally(() => {
-        inFlightLoads--;
-        releaseReservation(entry);
     });
 }
 
