@@ -11,6 +11,7 @@ import type { Message } from "@vencord/discord-types";
 import { encryptedAttachmentInput } from "./attachmentCache";
 import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
 import type { DecryptIncomingAttachmentsResult, DecryptIncomingResult } from "./native";
+import { createTaskQueue } from "./taskQueue";
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const MAX_CACHE_ENTRIES = 512;
@@ -23,8 +24,8 @@ interface DecryptCacheEntry {
 }
 
 const cache = new Map<string, DecryptCacheEntry>();
+const runDecryptTask = createTaskQueue(4);
 let cacheGeneration = 0;
-let inFlightDecrypts = 0;
 
 export function decryptCacheKey(localUserId: string, message: Message): string {
     return [
@@ -108,22 +109,18 @@ function ensureEntry(localUserId: string, message: Message): [string, DecryptCac
         promise: Promise.resolve({ status: "failed", error: "cryptographic_operation_failed" }),
         result: null,
     };
-    if (inFlightDecrypts >= MAX_CACHE_ENTRIES) {
-        entry.result = { status: "failed", error: "cryptographic_operation_failed" };
-        entry.promise = Promise.resolve(entry.result);
-        return [key, entry];
-    }
     cache.set(key, entry);
     const generation = cacheGeneration;
-    inFlightDecrypts++;
-    entry.promise = decryptWithRetry(localUserId, message, generation, () => cache.get(key) === entry).then(result => {
-            if (cache.get(key) === entry) {
-                entry.lastAccess = Date.now();
-                entry.result = result;
-                pruneCache(key);
-            }
-            return result;
-        }).finally(() => { inFlightDecrypts--; });
+    entry.promise = runDecryptTask(() =>
+        decryptWithRetry(localUserId, message, generation, () => cache.get(key) === entry)
+    ).then(result => {
+        if (cache.get(key) === entry) {
+            entry.lastAccess = Date.now();
+            entry.result = result;
+            pruneCache(key);
+        }
+        return result;
+    });
     pruneCache(key);
     return [key, entry];
 }
