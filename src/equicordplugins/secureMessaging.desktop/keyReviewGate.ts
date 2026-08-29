@@ -9,7 +9,7 @@ function scopeKey(localUserId: string, peerUserId: string): string {
 }
 
 export class KeyReviewGate {
-    private readonly failures = new Map<string, Set<string>>();
+    private readonly failures = new Map<string, string>();
     private readonly pending = new Map<string, number>();
 
     begin(localUserId: string, peerUserId: string): void {
@@ -25,18 +25,11 @@ export class KeyReviewGate {
     }
 
     fail(localUserId: string, peerUserId: string, attemptId: string): void {
-        const scope = scopeKey(localUserId, peerUserId);
-        const attempts = this.failures.get(scope) ?? new Set<string>();
-        attempts.add(attemptId);
-        this.failures.set(scope, attempts);
+        this.failures.set(scopeKey(localUserId, peerUserId), attemptId);
     }
 
-    succeed(localUserId: string, peerUserId: string, attemptId: string): void {
-        const scope = scopeKey(localUserId, peerUserId);
-        const attempts = this.failures.get(scope);
-        if (!attempts) return;
-        attempts.delete(attemptId);
-        if (attempts.size === 0) this.failures.delete(scope);
+    succeed(localUserId: string, peerUserId: string, _attemptId: string): void {
+        this.failures.delete(scopeKey(localUserId, peerUserId));
     }
 
     isBlocked(localUserId: string, peerUserId: string): boolean {
