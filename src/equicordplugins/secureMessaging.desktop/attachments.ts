@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { exactArrayBuffer } from "./exactArrayBuffer";
 import { decodeBase64Url, encodeBase64Url, isSnowflake } from "./protocol";
 
 export const LEGACY_ATTACHMENT_PAYLOAD_PREFIX = "PCEA1:";
@@ -129,7 +130,7 @@ function concatBytes(...values: Uint8Array[]): Uint8Array {
 }
 
 function cryptoBytes(value: Uint8Array): ArrayBuffer {
-    return Uint8Array.from(value).buffer;
+    return exactArrayBuffer(value);
 }
 
 function uint32(value: number): Uint8Array {

@@ -38,6 +38,8 @@ const DISPOSABLE_FLAG_ENV = "PROTONN_CORD_SECURE_MESSAGING_LIVE_TEST";
 const DISPOSABLE_DATA_DIR_ENV = "PROTONN_CORD_SECURE_MESSAGING_LIVE_DATA_DIR";
 const CLIENT_DATA_DIR_ENV = "PROTONN_CORD_USER_DATA_DIR";
 const PRESTARTED_PLUGIN_ENV = "PROTONN_CORD_SECURE_MESSAGING_PRESTARTED";
+const ATTACHMENTS_ONLY_ENV = "PROTONN_CORD_SECURE_MESSAGING_ATTACHMENTS_ONLY";
+const ATTACHMENTS_ONLY_COMPLETE = Symbol("attachments-only live proof complete");
 const PAGE_MESSAGE_REGISTRY = "__protonnCordSecureMessagingLiveMessageIds";
 const PAGE_COMPOSER_PROOF = "__protonnCordSecureMessagingComposerProof";
 const PAGE_DOWNLOAD_PROOF = "__protonnCordSecureMessagingDownloadProof";
@@ -989,6 +991,53 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
             delete global[proofName];
         }, PAGE_COMPOSER_PROOF);
     }
+}
+
+async function queueProofImageInActualComposer(page: Page): Promise<{
+    draftUploadCount: number;
+    plaintextUploadDeferred: boolean;
+    queuedFilename: string;
+    uploadStatus: string;
+}> {
+    return page.evaluate(async ({ channelId, fileBase64, filename }) => {
+        const global = globalThis as any;
+        const common = global.Vencord.Webpack.Common;
+        const channel = common.ChannelStore.getChannel(channelId);
+        if (!channel?.isDM?.()) throw new Error("The attachment proof channel is not a loaded DM");
+        if (common.SelectedChannelStore.getChannelId() !== channelId)
+            throw new Error("The attachment proof DM is not selected");
+
+        const draftType = common.DraftType.ChannelMessage;
+        const existingUploads = [...common.UploadAttachmentStore.getUploads(channelId, draftType)];
+        if (existingUploads.length !== 0)
+            throw new Error("Refusing to replace an existing attachment draft in the authorized DM");
+
+        const binary = atob(fileBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+        const file = new File([bytes], filename, { type: "image/png" });
+        await common.UploadHandler.promptToUpload([file], channel, draftType);
+
+        const deadline = Date.now() + 10_000;
+        let uploads = [...common.UploadAttachmentStore.getUploads(channelId, draftType)];
+        while (!uploads.some((upload: any) => upload.item?.file === file) && Date.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, 25));
+            uploads = [...common.UploadAttachmentStore.getUploads(channelId, draftType)];
+        }
+        const queued = uploads.find((upload: any) => upload.item?.file === file);
+        if (!queued) throw new Error("Discord did not queue the proof PNG in the real composer");
+
+        return {
+            draftUploadCount: uploads.length,
+            plaintextUploadDeferred: queued.status === "NOT_STARTED" && !queued.uploadedFilename && !queued.responseUrl,
+            queuedFilename: String(queued.item.file.name),
+            uploadStatus: String(queued.status),
+        };
+    }, {
+        channelId: TEST_CHANNEL_ID,
+        fileBase64: PROOF_PNG_BASE64,
+        filename: PROOF_PNG_FILENAME,
+    });
 }
 
 async function verifyMentionHighlight(page: Page, message: RawDiscordMessage): Promise<{
@@ -2128,6 +2177,7 @@ async function stopSecureMessagingPlugin(page: Page) {
 async function main(): Promise<void> {
     const expectedDataDir = requireDisposableDataDirectory();
     const pluginPrestarted = process.env[PRESTARTED_PLUGIN_ENV] === "1";
+    const attachmentsOnly = process.env[ATTACHMENTS_ONLY_ENV] === "1";
     if (!pluginPrestarted) await assertNoExistingSecureMessagingVault(expectedDataDir);
     const temporaryRecipient = await generateIdentity();
     const recipientAnnouncement = await createKeyAnnouncement(temporaryRecipient, EXPECTED_RECIPIENT_ID);
@@ -2173,12 +2223,15 @@ async function main(): Promise<void> {
         const screenCaptureProtection = await waitForScreenCaptureProtection(page);
         assert.equal(screenCaptureProtection, "ready", "screen-capture protection must be active before any decryption or protected send");
 
-        const unconfiguredLifecycle = await verifyUnprotectedMessageLifecycle(page, "unconfigured DM", true);
-        for (const messageId of unconfiguredLifecycle.messageIds) sentMessageIds.add(messageId);
-        assert.equal(unconfiguredLifecycle.plaintextPreserved, true, "an unconfigured DM must send ordinary plaintext unchanged");
-        assert.equal(unconfiguredLifecycle.editedPlaintextPreserved, true, "an unconfigured DM must edit ordinary plaintext unchanged");
-        assert.equal(unconfiguredLifecycle.forwardSourceEvicted, true, "the normal-forward proof must evict its source message and channel");
-        assert.equal(unconfiguredLifecycle.forwarded, true, "an unconfigured DM must allow ordinary Discord forwarding");
+        let unconfiguredLifecycle: Awaited<ReturnType<typeof verifyUnprotectedMessageLifecycle>> | undefined;
+        if (!attachmentsOnly) {
+            unconfiguredLifecycle = await verifyUnprotectedMessageLifecycle(page, "unconfigured DM", true);
+            for (const messageId of unconfiguredLifecycle.messageIds) sentMessageIds.add(messageId);
+            assert.equal(unconfiguredLifecycle.plaintextPreserved, true, "an unconfigured DM must send ordinary plaintext unchanged");
+            assert.equal(unconfiguredLifecycle.editedPlaintextPreserved, true, "an unconfigured DM must edit ordinary plaintext unchanged");
+            assert.equal(unconfiguredLifecycle.forwardSourceEvicted, true, "the normal-forward proof must evict its source message and channel");
+            assert.equal(unconfiguredLifecycle.forwarded, true, "an unconfigured DM must allow ordinary Discord forwarding");
+        }
 
         const trust = await trustSyntheticRecipient(
             page,
@@ -2201,6 +2254,93 @@ async function main(): Promise<void> {
             true,
             "the local Discord length popup must yield to the protected pre-send pipeline",
         );
+
+        if (attachmentsOnly) {
+            const queued = await queueProofImageInActualComposer(page);
+            assert.equal(queued.draftUploadCount, 1, "the real composer must contain exactly the proof PNG");
+            assert.equal(queued.plaintextUploadDeferred, true, "the composer must defer the eager plaintext upload before send");
+            assert.equal(queued.queuedFilename, PROOF_PNG_FILENAME, "the real composer must retain the proof PNG filename before encryption");
+
+            const attachmentPlaintext = `Secure Messaging actual attachment proof ${crypto.randomUUID()}`;
+            const attachmentProof = await sendThroughActualComposer(page, attachmentPlaintext);
+            sentMessageIds.add(attachmentProof.message.id);
+            assert.equal(attachmentProof.messagePostCount, 1, "the real attachment composer must create exactly one Discord message POST");
+            assert.equal(attachmentProof.messageStoreCiphertextMatched, true, "MessageStore must retain the attachment message ciphertext");
+            assert.equal(attachmentProof.localSenderDecrypted, true, "the sender must decrypt the confirmed attachment message");
+            assert.equal(attachmentProof.localPlaintextVisible, true, "the sender must see the attachment message plaintext");
+            assert.ok(attachmentProof.message.content.startsWith(ENCRYPTED_PREFIX), "the attachment message must store ciphertext on Discord");
+            assert.equal(attachmentProof.message.content.includes(attachmentPlaintext), false, "the attachment plaintext must be absent from the wire");
+            assert.equal(attachmentProof.message.content.includes(PROOF_PNG_FILENAME), false, "the PNG filename must be absent from the wire message");
+            assert.equal(attachmentProof.message.attachments.length, 1, "Discord must receive exactly one encrypted attachment");
+
+            const wireAttachment = attachmentProof.message.attachments[0];
+            assert.match(wireAttachment.filename, /^pc-[A-Za-z0-9_-]{22}-0\.pcaf$/u);
+            assert.ok(
+                wireAttachment.contentType === null || wireAttachment.contentType === "application/octet-stream",
+                "Discord must not classify the ciphertext as an image",
+            );
+
+            const recipientEnvelope = await decryptMessage({
+                channelId: TEST_CHANNEL_ID,
+                content: attachmentProof.message.content,
+                discordAuthorId: preflight.localUserId,
+                identity: temporaryRecipient,
+                localUserId: EXPECTED_RECIPIENT_ID,
+                senderIdentity: localPublicIdentity,
+            });
+            const recipientPlaintext = parseSecurePlaintext(recipientEnvelope.plaintext);
+            assert.equal(recipientPlaintext.text, attachmentPlaintext, "the selected recipient must decrypt the attachment caption exactly");
+            assert.ok(recipientPlaintext.attachments, "the selected recipient must receive the attachment descriptor");
+            assert.equal(recipientPlaintext.attachments.count, 1, "the encrypted attachment descriptor must contain one file");
+
+            const rawResponse = await fetch(wireAttachment.url);
+            assert.equal(rawResponse.ok, true, "Discord must return the stored encrypted attachment bytes");
+            const rawBytes = new Uint8Array(await rawResponse.arrayBuffer());
+            assert.equal(rawBytes.byteLength, wireAttachment.size, "the downloaded ciphertext size must match Discord metadata");
+            assert.notEqual(Buffer.from(rawBytes).toString("base64"), PROOF_PNG_BASE64, "Discord must not store the plaintext PNG bytes");
+            assert.equal(
+                await attachmentBundleRoot(recipientPlaintext.attachments.id, [rawBytes]),
+                recipientPlaintext.attachments.root,
+                "the selected recipient must authenticate the exact Discord attachment set",
+            );
+
+            const masterKey = decodeBase64Url(recipientPlaintext.attachments.key, 32);
+            const decryptedAttachment = await decryptAttachmentBytes({
+                bundleId: recipientPlaintext.attachments.id,
+                channelId: TEST_CHANNEL_ID,
+                ciphertext: rawBytes,
+                count: recipientPlaintext.attachments.count,
+                index: 0,
+                masterKey,
+                senderUserId: preflight.localUserId,
+            });
+            masterKey.fill(0);
+            assert.equal(decryptedAttachment.metadata.name, PROOF_PNG_FILENAME, "the recipient must recover the original PNG filename");
+            assert.equal(decryptedAttachment.metadata.mimeType, "image/png", "the recipient must authenticate the PNG MIME type");
+            assert.equal(decryptedAttachment.metadata.width, 2, "the recipient must authenticate the PNG width");
+            assert.equal(decryptedAttachment.metadata.height, 3, "the recipient must authenticate the PNG height");
+            assert.equal(Buffer.from(decryptedAttachment.data).toString("base64"), PROOF_PNG_BASE64, "the recipient must recover the exact PNG bytes");
+
+            report = {
+                attachmentOnly: true,
+                actualComposer: {
+                    decryptedBySelectedRecipient: true,
+                    exactPngBytesRecovered: true,
+                    localPlaintextVisible: attachmentProof.localPlaintextVisible,
+                    localSenderDecrypted: attachmentProof.localSenderDecrypted,
+                    messagePostCount: attachmentProof.messagePostCount,
+                    opaqueWireFilename: wireAttachment.filename,
+                    plaintextAbsentFromWire: !attachmentProof.message.content.includes(attachmentPlaintext),
+                    plaintextUploadDeferred: queued.plaintextUploadDeferred,
+                    queuedUploadStatus: queued.uploadStatus,
+                },
+                pluginStarted: pluginStart.pluginStarted,
+                screenCaptureProtection,
+                temporaryRecipientFingerprintMatched: true,
+                vaultReady: preflight.vaultReady,
+            };
+            throw ATTACHMENTS_ONLY_COMPLETE;
+        }
 
         const composerPlaintext = `Secure Messaging actual composer proof ${crypto.randomUUID()}`;
         const composerProof = await sendThroughActualComposer(page, composerPlaintext);
@@ -2959,7 +3099,7 @@ async function main(): Promise<void> {
             vaultReady: preflight.vaultReady,
         };
     } catch (error) {
-        primaryError = error;
+        if (error !== ATTACHMENTS_ONLY_COMPLETE) primaryError = error;
     }
 
     const captureCleanup = async (name: string, action: () => Promise<void>): Promise<void> => {

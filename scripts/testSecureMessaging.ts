@@ -294,6 +294,28 @@ async function main(): Promise<void> {
         /resolveConversationProtection\(channelId\)[\s\S]{0,200}protection\.kind === "unprotected"\) return/,
         "ordinary DMs bypass encrypted send handling while the hardware vault is locked",
     );
+    const attachmentUploadGuardSource = rendererSource.slice(
+        rendererSource.indexOf("function installAttachmentUploadGuard"),
+        rendererSource.indexOf("function uninstallAttachmentUploadGuard"),
+    );
+    assert.match(
+        attachmentUploadGuardSource,
+        /catch \(error\) \{\s*if \(approval\) throw error;/,
+        "approved encrypted uploads surface protection failures instead of pretending to finish",
+    );
+    const attachmentReservationIndex = outgoingListenerSource.indexOf("authorizeScopedAttachmentUploadReservations");
+    const attachmentApprovalIndex = outgoingListenerSource.indexOf("approvedAttachmentUploads.set");
+    const attachmentStartIndex = outgoingListenerSource.indexOf("await Promise.all(uploads.map(upload => upload.upload()))");
+    assert.ok(
+        attachmentReservationIndex !== -1 && attachmentApprovalIndex > attachmentReservationIndex &&
+        attachmentStartIndex > attachmentApprovalIndex,
+        "encrypted attachments are authorized, approved, and explicitly started in order",
+    );
+    assert.match(
+        outgoingListenerSource,
+        /if \(preparedAttachments\) \{\s*options\.uploads = uploads;\s*options\.attachmentsToUpload = uploads;/,
+        "every encrypted attachment set is handed back to Discord's upload pipeline",
+    );
     assert.equal(
         sidebarChatSource.match(/if \(secureMessagingGated \|\| !channel\?\.id[\s\S]{0,200}?MessageActions\.fetchMessages/g)?.length,
         2,
@@ -410,9 +432,9 @@ async function main(): Promise<void> {
     assert.equal(isSecureInlineMediaEmbedType("video"), true);
     assert.equal(isSecureInlineMediaEmbedType("article"), false, "rich link cards keep their source URL visible");
     const reviewGate = new KeyReviewGate();
-    reviewGate.begin(ALICE_ID, BOB_ID);
+    reviewGate.begin(ALICE_ID, BOB_ID, "new-key-message", 20);
     reviewGate.fail(ALICE_ID, BOB_ID, "new-key-message");
-    reviewGate.finish(ALICE_ID, BOB_ID);
+    reviewGate.finish(ALICE_ID, BOB_ID, "new-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), true, "failed key review stays fail-closed");
     reviewGate.succeed(ALICE_ID, BOB_ID, "old-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), true, "another successful history review cannot clear a different failure");
@@ -420,11 +442,11 @@ async function main(): Promise<void> {
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), true, "another local account cannot clear this account's failure");
     reviewGate.succeed(ALICE_ID, BOB_ID, "new-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), false, "only the exact failed review retry clears its gate");
-    reviewGate.begin(ALICE_ID, BOB_ID);
-    reviewGate.begin(ALICE_ID, BOB_ID);
-    reviewGate.finish(ALICE_ID, BOB_ID);
+    reviewGate.begin(ALICE_ID, BOB_ID, "retry-key-message", 30);
+    reviewGate.begin(ALICE_ID, BOB_ID, "retry-key-message", 30);
+    reviewGate.finish(ALICE_ID, BOB_ID, "retry-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), true, "concurrent review count remains pending until all work finishes");
-    reviewGate.finish(ALICE_ID, BOB_ID);
+    reviewGate.finish(ALICE_ID, BOB_ID, "retry-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), false);
 
     assert.equal(discordEditedTimestamp({ edited_timestamp: "2026-01-01T00:00:00+00:00" }), "2026-01-01T00:00:00.000Z");
