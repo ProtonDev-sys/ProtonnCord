@@ -1,0 +1,66 @@
+name: Export Secure Messaging audit
+
+on:
+    push:
+        branches:
+            - agent/audit-secure-messaging-performance
+
+permissions:
+    contents: read
+
+concurrency:
+    group: export-secure-messaging-audit-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    export:
+        name: Validate and export audited files
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+
+        steps:
+            - uses: actions/checkout@v7
+
+            - uses: pnpm/action-setup@v6
+
+            - name: Use Node.js 24
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: "pnpm"
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Apply audited changes
+              run: |
+                  python scripts/applySecureMessagingPerformanceTest.py
+                  python scripts/fixSecureMessagingAuditTypecheck.py
+
+            - name: Validate audited changes
+              run: |
+                  pnpm testSecureMessagingPerformance
+                  pnpm testTsc
+                  pnpm testSecureMessaging
+
+            - name: Package audited files
+              run: |
+                  tar -czf secure-messaging-audit-files.tgz \
+                      package.json \
+                      .github/workflows/test.yml \
+                      scripts/testSecureMessaging.ts \
+                      scripts/testSecureMessagingPerformance.ts \
+                      src/equicordplugins/secureMessaging.desktop/announcementReviewCache.ts \
+                      src/equicordplugins/secureMessaging.desktop/attachmentCache.ts \
+                      src/equicordplugins/secureMessaging.desktop/decryptCache.ts \
+                      src/equicordplugins/secureMessaging.desktop/embedCache.ts \
+                      src/equicordplugins/secureMessaging.desktop/index.tsx \
+                      src/equicordplugins/secureMessaging.desktop/keyReviewGate.ts
+
+            - name: Upload audited files
+              uses: actions/upload-artifact@v4
+              with:
+                  name: secure-messaging-audit-files
+                  path: secure-messaging-audit-files.tgz
+                  if-no-files-found: error
+                  retention-days: 1
