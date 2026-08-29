@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
     patch:
+        if: github.event.head_commit.message != 'perf(secure-messaging): finalize isolation audit'
         name: Finalize Secure Messaging audit
         runs-on: ubuntu-latest
         timeout-minutes: 30
@@ -52,6 +53,11 @@ jobs:
               run: |
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git checkout HEAD -- \
+                      .github/workflows/apply-secure-messaging-performance-test.yml \
+                      .github/workflows/test.yml \
+                      scripts/applySecureMessagingPerformanceTest.py \
+                      scripts/fixSecureMessagingAuditTypecheck.py
                   git add -A
                   if git diff --cached --quiet; then
                       exit 0
