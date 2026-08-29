@@ -5,9 +5,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def replace_once(path: Path, old: str, new: str) -> None:
     text = path.read_text()
-    if text.count(old) != 1:
-        raise RuntimeError(f"expected exactly one match in {path}: {old!r}")
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f"expected exactly one match in {path}, found {count}: {old!r}")
     path.write_text(text.replace(old, new, 1))
+
+
+def replace_all(path: Path, old: str, new: str) -> None:
+    text = path.read_text()
+    count = text.count(old)
+    if count < 1:
+        raise RuntimeError(f"expected at least one match in {path}: {old!r}")
+    path.write_text(text.replace(old, new))
 
 
 test_path = ROOT / "scripts/testSecureMessaging.ts"
@@ -28,7 +37,7 @@ replace_once(
 )
 
 decrypt_path = ROOT / "src/equicordplugins/secureMessaging.desktop/decryptCache.ts"
-replace_once(
+replace_all(
     decrypt_path,
     """            result = expanded.status === \"decrypted\"\n                ? { ...result, plaintext: expanded.plaintext }\n                : expanded;""",
     """            result = expanded.status === \"decrypted\"\n                ? { ...result, plaintext: expanded.plaintext }\n                : expanded as DecryptIncomingResult;""",
