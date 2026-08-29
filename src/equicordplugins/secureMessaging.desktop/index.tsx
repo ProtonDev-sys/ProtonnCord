@@ -1193,10 +1193,14 @@ function installAttachmentUploadGuard(): void {
         let protection: ConversationProtection;
         try {
             protection = await resolveConversationProtection(this.channelId);
-        } catch {
+        } catch (error) {
+            if (approval) throw error;
             return;
         }
-        if (generation !== attachmentGuardGeneration) return;
+        if (generation !== attachmentGuardGeneration) {
+            if (approval) throw new Error("Secure Messaging cancelled an encrypted attachment upload after its guard changed");
+            return;
+        }
         if (approval) {
             const scope = protection.kind === "snapshot"
                 ? conversationAuthorizationScope(protection.context.localUserId, protection.conversation)
@@ -1206,7 +1210,7 @@ function installAttachmentUploadGuard(): void {
                 protection.conversation.status !== "enabled" ||
                 hasSelectedKeyReviewBlock(protection.context.localUserId, protection.conversation)) {
                 approvedAttachmentUploads.delete(this);
-                return;
+                throw new Error("Secure Messaging blocked an encrypted attachment upload after its conversation changed");
             }
             return original.call(this);
         }
@@ -1730,7 +1734,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
         preparedAttachments?.apply();
         if ((Number(options.flags) & VOICE_MESSAGE_FLAG) !== 0)
             options.flags = Number(options.flags) & ~VOICE_MESSAGE_FLAG;
-        if (detachedTextIndex !== null) {
+        if (preparedAttachments) {
             options.uploads = uploads;
             options.attachmentsToUpload = uploads;
         }
@@ -1740,17 +1744,26 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
         if (!scope) return { cancel: true };
         if (preparedAttachments)
             authorizeScopedAttachmentUploadReservations(channelId, preparedAttachments.files, scope);
+        for (const upload of uploads) approvedAttachmentUploads.set(upload, { file: upload.item.file, scope });
+        if (preparedAttachments) {
+            try {
+                await Promise.all(uploads.map(upload => upload.upload()));
+            } catch (error) {
+                for (const upload of uploads) approvedAttachmentUploads.delete(upload);
+                throw error;
+            }
+            if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
+        }
         authorizeScopedWirePayload(channelId, encrypted.content, attachmentFilenames, scope);
         rememberOptimisticOutgoingPlaintext(encrypted.content, plaintext);
         message.content = encrypted.content;
         preparedOutgoingMessages.set(message, { ciphertext: encrypted.content, plaintext });
-        for (const upload of uploads) approvedAttachmentUploads.set(upload, { file: upload.item.file, scope });
         generatedDetachedUploadCommitted = true;
         return { stop: true };
     } catch (error) {
         showToast(error instanceof EncryptedAttachmentUploadLimitError
             ? `Encrypted ${error.filename} would use ${formatUploadBytes(error.encryptedBytes)}; Discord allows ${formatUploadBytes(error.limitBytes)} per file.`
-            : "Secure Messaging stopped the send because encryption failed unexpectedly.", Toasts.Type.FAILURE);
+            : "Secure Messaging stopped the send because encryption or upload failed unexpectedly.", Toasts.Type.FAILURE);
         return { cancel: true };
     } finally {
         if (generatedDetachedUpload && !generatedDetachedUploadCommitted) {
