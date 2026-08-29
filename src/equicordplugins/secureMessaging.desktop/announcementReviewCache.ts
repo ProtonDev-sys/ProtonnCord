@@ -24,9 +24,14 @@ interface ReviewCacheEntry {
 }
 
 const cache = new Map<string, ReviewCacheEntry>();
+let cacheGeneration = 0;
 
 function isNativeFailure(result: AnnouncementReviewResult): result is NativeFailure {
     return result.status === "invalid_input" || result.status === "unavailable" || result.status === "failed";
+}
+
+function cancelledReview(): AnnouncementReviewResult {
+    return { status: "failed", error: "cryptographic_operation_failed" };
 }
 
 export function announcementReviewCacheKey(localUserId: string, message: Message): string {
@@ -46,17 +51,13 @@ function pruneCache(protectedKey: string, maximumEntries = MAX_CACHE_ENTRIES): v
         if (key !== protectedKey && entry.settled && entry.expiresAt <= now) cache.delete(key);
     }
     while (cache.size > maximumEntries) {
-        let oldest: [string, ReviewCacheEntry] | null = null;
         let oldestSettled: [string, ReviewCacheEntry] | null = null;
         for (const value of cache) {
-            if (value[0] === protectedKey) continue;
-            if (!oldest || value[1].lastAccess < oldest[1].lastAccess) oldest = value;
-            if (value[1].settled && (!oldestSettled || value[1].lastAccess < oldestSettled[1].lastAccess))
-                oldestSettled = value;
+            if (value[0] === protectedKey || !value[1].settled) continue;
+            if (!oldestSettled || value[1].lastAccess < oldestSettled[1].lastAccess) oldestSettled = value;
         }
-        const candidate = oldestSettled ?? oldest;
-        if (!candidate) break;
-        cache.delete(candidate[0]);
+        if (!oldestSettled) break;
+        cache.delete(oldestSettled[0]);
     }
 }
 
@@ -74,35 +75,42 @@ export function reviewAnnouncementCached(localUserId: string, message: Message):
     const entry: ReviewCacheEntry = {
         expiresAt: Number.POSITIVE_INFINITY,
         lastAccess: now,
-        promise: Promise.resolve({ status: "failed", error: "cryptographic_operation_failed" }),
+        promise: Promise.resolve(cancelledReview()),
         settled: false,
     };
+    const generation = cacheGeneration;
     cache.set(key, entry);
-    entry.promise = runReviewTask(() => Native.reviewAnnouncement(
-        localUserId,
-        message.author.id,
-        message.content,
-        message.id,
-        discordEditedTimestamp(message),
-    )).then(result => {
-        if (cache.get(key) === entry) {
+    entry.promise = runReviewTask(() => {
+        if (generation !== cacheGeneration || cache.get(key) !== entry || !message.author?.id)
+            return Promise.resolve(cancelledReview());
+        return Native.reviewAnnouncement(
+            localUserId,
+            message.author.id,
+            message.content,
+            message.id,
+            discordEditedTimestamp(message),
+        );
+    }).then(result => {
+        if (generation === cacheGeneration && cache.get(key) === entry) {
             if (isNativeFailure(result)) {
                 cache.delete(key);
             } else {
-                entry.expiresAt = Date.now() + RESULT_TTL_MS;
-                entry.lastAccess = Date.now();
+                const settledAt = Date.now();
+                entry.expiresAt = settledAt + RESULT_TTL_MS;
+                entry.lastAccess = settledAt;
                 entry.settled = true;
                 pruneCache(key);
             }
         }
         return result;
     }, error => {
-        if (cache.get(key) === entry) cache.delete(key);
+        if (generation === cacheGeneration && cache.get(key) === entry) cache.delete(key);
         throw error;
     });
     return entry.promise;
 }
 
 export function clearAnnouncementReviewCache(): void {
+    cacheGeneration++;
     cache.clear();
 }

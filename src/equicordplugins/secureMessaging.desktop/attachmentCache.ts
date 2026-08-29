@@ -40,6 +40,8 @@ const LOCAL_CONTENT_SCAN_VERSION = -1;
 const VIDEO_POSTER_MAX_EDGE = 512;
 const VIDEO_POSTER_TIMEOUT_MS = 5_000;
 const runAttachmentLoad = createTaskQueue(4);
+const runAttachmentDecrypt = createTaskQueue(4);
+const runAttachmentDownload = createTaskQueue(2);
 
 export interface ExtendedAttachment extends MessageAttachment {
     content_scan_version?: number;
@@ -111,8 +113,14 @@ interface DownloadReference {
     message: Message;
 }
 
+interface AttachmentDecryptEntry {
+    promise: Promise<DecryptIncomingAttachmentsResult>;
+}
+
 const cache = new Map<string, AttachmentCacheEntry>();
+const attachmentDecryptions = new Map<string, AttachmentDecryptEntry>();
 const downloadReferences = new Map<string, DownloadReference>();
+let attachmentDecryptGeneration = 0;
 let cachedBytes = 0;
 let inFlightBytes = 0;
 let cacheUserId: string | null = null;
@@ -238,6 +246,50 @@ export async function encryptedAttachmentInput(message: Message): Promise<Decryp
     };
 }
 
+function attachmentDecryptKey(localUserId: string, message: Message): string {
+    return [
+        localUserId,
+        message.channel_id,
+        message.id,
+        message.author?.id ?? "",
+        discordEditedTimestamp(message) ?? "",
+        discordMessageNonce(message) ?? "",
+        message.content,
+        message.attachments.map(attachment =>
+            `${attachment.id}:${attachment.size}:${attachment.url}:${attachment.proxy_url}`).join("\0"),
+    ].join("\0");
+}
+
+export function decryptIncomingAttachmentsCached(
+    localUserId: string,
+    message: Message,
+): Promise<DecryptIncomingAttachmentsResult> {
+    const key = attachmentDecryptKey(localUserId, message);
+    const existing = attachmentDecryptions.get(key);
+    if (existing) return existing.promise;
+
+    const generation = attachmentDecryptGeneration;
+    const entry: AttachmentDecryptEntry = {
+        promise: Promise.resolve({ status: "failed", error: "cryptographic_operation_failed" }),
+    };
+    attachmentDecryptions.set(key, entry);
+    entry.promise = runAttachmentDecrypt(async (): Promise<DecryptIncomingAttachmentsResult> => {
+        if (generation !== attachmentDecryptGeneration || UserStore.getCurrentUser()?.id !== localUserId ||
+            !message.author?.id) return { status: "failed", error: "cryptographic_operation_failed" };
+        try {
+            const input = await encryptedAttachmentInput(message);
+            if (generation !== attachmentDecryptGeneration || UserStore.getCurrentUser()?.id !== localUserId)
+                return { status: "failed", error: "cryptographic_operation_failed" };
+            return await Native.decryptIncomingAttachments(localUserId, input);
+        } catch {
+            return { status: "failed", error: "attachment_download_failed" };
+        }
+    }).finally(() => {
+        if (attachmentDecryptions.get(key) === entry) attachmentDecryptions.delete(key);
+    });
+    return entry.promise;
+}
+
 function safeInlineMimeType(value: string | null): string {
     const normalized = value?.split(";", 1)[0].trim().toLowerCase() ?? "";
     return SAFE_INLINE_MIME_TYPES.has(normalized) ? normalized : "application/octet-stream";
@@ -264,17 +316,13 @@ function removeEntry(key: string, entry: AttachmentCacheEntry): void {
 
 function pruneCache(protectedKey: string, requiredBytes = 0, maximumEntries = MAX_CACHE_ENTRIES): void {
     while (cache.size > maximumEntries || cachedBytes + inFlightBytes + requiredBytes > MAX_CACHE_BYTES) {
-        let oldest: [string, AttachmentCacheEntry] | null = null;
         let oldestSettled: [string, AttachmentCacheEntry] | null = null;
         for (const value of cache) {
-            if (value[0] === protectedKey) continue;
-            if (!oldest || value[1].lastAccess < oldest[1].lastAccess) oldest = value;
-            if (value[1].status.status !== "loading" &&
-                (!oldestSettled || value[1].lastAccess < oldestSettled[1].lastAccess)) oldestSettled = value;
+            if (value[0] === protectedKey || value[1].status.status === "loading") continue;
+            if (!oldestSettled || value[1].lastAccess < oldestSettled[1].lastAccess) oldestSettled = value;
         }
-        oldest = oldestSettled ?? oldest;
-        if (!oldest) break;
-        removeEntry(...oldest);
+        if (!oldestSettled) break;
+        removeEntry(...oldestSettled);
     }
 }
 
@@ -318,13 +366,7 @@ function failureReason(result: DecryptIncomingAttachmentsResult): string {
 }
 
 async function loadEntry(message: Message, key: string, entry: AttachmentCacheEntry, localUserId: string): Promise<void> {
-    const input = await encryptedAttachmentInput(message);
-    if (entry.disposed) return;
-    if (UserStore.getCurrentUser()?.id !== localUserId) {
-        removeEntry(key, entry);
-        return;
-    }
-    const result = await Native.decryptIncomingAttachments(localUserId, input);
+    const result = await decryptIncomingAttachmentsCached(localUserId, message);
     if (entry.disposed) return;
     if (UserStore.getCurrentUser()?.id !== localUserId) {
         removeEntry(key, entry);
@@ -335,6 +377,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
         if (result.status === "failed" || result.status === "unavailable") prepareTransientRetry(entry);
         else entry.retryAt = null;
         notifyStatus(entry);
+        if (entry.retryAt === null) entry.renderOwners.clear();
         scheduleRetry(message, key, entry, localUserId);
         return;
     }
@@ -482,9 +525,12 @@ export async function downloadEncryptedAttachmentUrl(value: string): Promise<Dow
     const localUserId = syncCacheAccount();
     if (!reference || !localUserId || reference.localUserId !== localUserId) return null;
     const { message, attachmentId } = reference;
-    const input = await encryptedAttachmentInput(message);
-    if (UserStore.getCurrentUser()?.id !== localUserId) return null;
-    return Native.downloadIncomingAttachment(localUserId, input, attachmentId);
+    return runAttachmentDownload(async () => {
+        if (UserStore.getCurrentUser()?.id !== localUserId) return null;
+        const input = await encryptedAttachmentInput(message);
+        if (UserStore.getCurrentUser()?.id !== localUserId) return null;
+        return Native.downloadIncomingAttachment(localUserId, input, attachmentId);
+    });
 }
 
 function ensureEntry(message: Message): AttachmentCacheEntry | null {
@@ -577,6 +623,8 @@ export function retryEncryptedAttachmentLoad(message: Message): void {
 }
 
 export function clearEncryptedAttachmentCache(): void {
+    attachmentDecryptGeneration++;
+    attachmentDecryptions.clear();
     for (const [key, entry] of cache) removeEntry(key, entry);
     cachedBytes = 0;
 }
