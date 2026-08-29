@@ -16,10 +16,10 @@ import {
     type SecureInlineEmbedStatus,
 } from "./embedUrls";
 import { preserveEncryptedMessageScroll } from "./layoutStability";
-import { createTaskQueue } from "./taskQueue";
 import { discordEditedTimestamp } from "./messageMetadata";
 import type { DecryptIncomingResult } from "./native";
 import { isEncryptedMessage } from "./protocol";
+import { createTaskQueue } from "./taskQueue";
 
 const convertEmbed = findByCodeLazy(".uniqueId(\"embed_\")") as (
     channelId: string,
