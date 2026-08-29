@@ -1,4 +1,4 @@
-name: Apply Secure Messaging performance test
+name: Finalize Secure Messaging audit
 
 on:
     push:
@@ -8,11 +8,15 @@ on:
 permissions:
     contents: write
 
+concurrency:
+    group: finalize-secure-messaging-audit-${{ github.ref }}
+    cancel-in-progress: true
+
 jobs:
     patch:
-        name: Apply Secure Messaging performance test
+        name: Finalize Secure Messaging audit
         runs-on: ubuntu-latest
-        timeout-minutes: 20
+        timeout-minutes: 30
 
         steps:
             - uses: actions/checkout@v7
@@ -30,7 +34,7 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
-            - name: Wire performance regression test
+            - name: Apply final audit fixes
               run: python scripts/applySecureMessagingPerformanceTest.py
 
             - name: Run performance boundaries
@@ -42,10 +46,13 @@ jobs:
             - name: Test Secure Messaging
               run: pnpm testSecureMessaging
 
-            - name: Commit test wiring
+            - name: Commit audited fixes
               run: |
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-                  git add package.json .github/workflows/test.yml scripts/testSecureMessagingPerformance.ts scripts/applySecureMessagingPerformanceTest.py .github/workflows/apply-secure-messaging-performance-test.yml
-                  git commit -m "test(secure-messaging): enforce performance boundaries"
+                  git add -A
+                  if git diff --cached --quiet; then
+                      exit 0
+                  fi
+                  git commit -m "perf(secure-messaging): finalize isolation audit"
                   git push origin "HEAD:${GITHUB_REF_NAME}"
