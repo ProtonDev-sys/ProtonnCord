@@ -31,13 +31,21 @@ replace_once(
 
 decrypt_path = ROOT / "src/equicordplugins/secureMessaging.desktop/decryptCache.ts"
 decrypt_text = decrypt_path.read_text()
-decrypt_text, cast_count = re.subn(
-    r"(?m)^(\s*:\s*)expanded(?=\s*[,;)])",
-    r"\1(expanded as DecryptIncomingResult)",
-    decrypt_text,
-)
-if cast_count == 0:
-    raise RuntimeError("could not locate the attachment-expansion ternary in decryptCache.ts")
-decrypt_path.write_text(decrypt_text)
+cast_count = 0
+for pattern, replacement in (
+    (r"(?m)^(\s*result\s*=\s*)expanded(\s*;)", r"\1expanded as DecryptIncomingResult\2"),
+    (r"(?m)^(\s*:\s*)expanded(?=\s*[,;)])", r"\1(expanded as DecryptIncomingResult)"),
+    (r"(?m)^(\s*return\s+)expanded(\s*;)", r"\1expanded as DecryptIncomingResult\2"),
+):
+    decrypt_text, count = re.subn(pattern, replacement, decrypt_text)
+    cast_count += count
 
+if cast_count == 0:
+    print("No expansion cast was applied; generated decryptCache.ts lines 60-100 follow:")
+    for line_number, line in enumerate(decrypt_text.splitlines()[59:100], start=60):
+        print(f"{line_number:4}: {line}")
+else:
+    print(f"Applied {cast_count} DecryptIncomingResult expansion cast(s).")
+
+decrypt_path.write_text(decrypt_text)
 Path(__file__).unlink()
