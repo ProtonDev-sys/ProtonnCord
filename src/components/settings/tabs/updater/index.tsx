@@ -19,26 +19,14 @@
 import { useSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
-import { Divider } from "@components/Divider";
 import { Flex } from "@components/Flex";
 import { FormSwitch } from "@components/FormSwitch";
 import { Heading, HeadingSecondary } from "@components/Heading";
 import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
-import { SettingsTab, wrapTab } from "@components/settings/tabs/BaseTab";
 import { Margins } from "@utils/margins";
 import { useAwaiter } from "@utils/react";
-import { getRepo, UpdateLogger } from "@utils/updater";
 import { React } from "@webpack/common";
-
-import gitHash from "~git-hash";
-
-import { HashLink, Updatable } from "./Components";
-
-interface CommonProps {
-    repo: string;
-    repoPending: boolean;
-}
 
 function EquibopSection() {
     if (!IS_EQUIBOP) return null;
@@ -68,23 +56,11 @@ function EquibopSection() {
     );
 }
 
-function Updater() {
-    const settings = useSettings(["autoUpdate", "autoUpdateNotification", "updateBranch"]);
-
-    const [repo, err, repoPending] = useAwaiter(getRepo, { fallbackValue: "Loading..." });
-
-    React.useEffect(() => {
-        if (err)
-            UpdateLogger.error("Failed to retrieve repo", err);
-    }, [err]);
-
-    const commonProps: CommonProps = {
-        repo,
-        repoPending
-    };
+export function UpdatePreferences() {
+    const settings = useSettings(["autoUpdate", "autoUpdateNotification"]);
 
     return (
-        <SettingsTab>
+        <>
             <EquibopSection />
             <Heading className={Margins.top16}>Update Preferences</Heading>
             <Paragraph className={Margins.bottom20}>
@@ -107,34 +83,6 @@ function Updater() {
                 hideBorder
             />
 
-            <Divider className={Margins.top20} />
-
-            <Heading className={Margins.top20}>Repository</Heading>
-            <Paragraph className={Margins.bottom8}>
-                This is the GitHub repository where Protonn Cord fetches updates from.
-            </Paragraph>
-            <Paragraph color="text-subtle">
-                {repoPending
-                    ? repo
-                    : err
-                        ? "Failed to retrieve - check console"
-                        : (
-                            <Link href={repo}>
-                                {repo.split("/").slice(-2).join("/")}
-                            </Link>
-                        )
-                }
-                {" "}(<HashLink hash={gitHash} repo={repo} disabled={repoPending} />)
-            </Paragraph>
-
-            <Divider className={Margins.top20} />
-
-            <Heading className={Margins.top20}>Updates</Heading>
-            <Updatable key={settings.updateBranch} {...commonProps} disabled={repoPending || Boolean(err)} />
-        </SettingsTab>
+        </>
     );
 }
-
-export default IS_UPDATER_DISABLED
-    ? null
-    : wrapTab(Updater, "Updater");

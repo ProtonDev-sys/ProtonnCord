@@ -5,10 +5,9 @@
  */
 
 import { definePluginSettings } from "@api/Settings";
-import { BackupRestoreIcon, CloudIcon, LogIcon, MainSettingsIcon, PaintbrushIcon, PatchHelperIcon, PluginsIcon, UpdaterIcon } from "@components/Icons";
+import { BackupRestoreIcon, CloudIcon, MainSettingsIcon, PaintbrushIcon, PatchHelperIcon, PluginsIcon, UpdaterIcon } from "@components/Icons";
 import {
     BackupAndRestoreTab,
-    ChangelogTab,
     CloudTab,
     PatchHelperTab,
     PluginsTab,
@@ -210,18 +209,12 @@ export default definePlugin({
                 Component: ThemesTab,
                 Icon: PaintbrushIcon
             }),
-            !IS_UPDATER_DISABLED && UpdaterTab && buildEntry({
+            buildEntry({
                 key: "equicord_updater",
-                title: "Updater",
-                panelTitle: "Protonn Cord Updater",
+                title: "Updates",
+                panelTitle: "Protonn Cord Updates",
                 Component: UpdaterTab,
                 Icon: UpdaterIcon
-            }),
-            buildEntry({
-                key: "equicord_changelog",
-                title: "Changelog",
-                Component: ChangelogTab,
-                Icon: LogIcon,
             }),
             buildEntry({
                 key: "equicord_cloud",

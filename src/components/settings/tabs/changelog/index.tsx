@@ -16,6 +16,7 @@ import { DeleteIcon } from "@components/Icons";
 import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
 import { SettingsTab, wrapTab } from "@components/settings/tabs/BaseTab";
+import { UpdatePreferences } from "@components/settings/tabs/updater";
 import { HashLink, Updatable } from "@components/settings/tabs/updater/Components";
 import type { UpdaterBranch } from "@shared/Updater";
 import { Margins } from "@utils/margins";
@@ -463,10 +464,11 @@ function ChangelogContent({ branch }: { branch: UpdaterBranch; }) {
                         disabled={isLoading || repoPending || Boolean(repoErr)}
                         onBusyChange={setUpdaterBusy}
                     />
+                    <UpdatePreferences />
                     <Divider className={Margins.top20} />
                 </>
             )}
-            <Heading className={Margins.top16}>Fetch Changes</Heading>
+            <Heading className={Margins.top16}>Changelog</Heading>
             <Paragraph className={Margins.bottom16}>
                 Check the repository for new commits, plugin updates, and code changes. This will compare your current version with the latest available and show you what's new.
             </Paragraph>
@@ -677,4 +679,4 @@ function ChangelogTab() {
     );
 }
 
-export default wrapTab(ChangelogTab, "Changelog");
+export default wrapTab(ChangelogTab, "Updates");

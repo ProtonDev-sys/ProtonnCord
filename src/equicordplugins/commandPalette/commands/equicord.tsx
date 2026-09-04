@@ -37,27 +37,14 @@ export const equicordCommands: PaletteCommand[] = [
     },
     {
         id: "equicord.updater",
-        title: "Open Updater",
+        title: "Open Updates",
         section: SECTION,
-        keywords: ["update", "updater", "version"],
+        keywords: ["update", "updater", "version", "changelog", "news", "whats new"],
         icon: BoltIcon,
-        predicate: () => !IS_UPDATER_DISABLED,
         actions: [{
             id: "run",
-            label: "Open Updater",
+            label: "Open Updates",
             run: () => void openSettingsPage("equicord_updater")
-        }]
-    },
-    {
-        id: "equicord.changelog",
-        title: "Open Changelog",
-        section: SECTION,
-        keywords: ["changelog", "news", "whats new"],
-        icon: BoltIcon,
-        actions: [{
-            id: "run",
-            label: "Open Changelog",
-            run: () => void openSettingsPage("equicord_changelog")
         }]
     },
     {
