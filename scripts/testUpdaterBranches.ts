@@ -10,6 +10,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { runInNewContext } from "node:vm";
+import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import {
     type GitRunner,
@@ -23,10 +25,134 @@ import {
 import { serializeErrors } from "../src/main/updater/ipc";
 import {
     parseUpdaterBranch,
+    UPDATER_BRANCHES,
     updaterReleaseEndpoint,
 } from "../src/shared/Updater";
 
 const execFile = promisify(execFileCallback);
+
+async function testUpdaterControls(): Promise<void> {
+    interface Element {
+        type: unknown;
+        props: Record<string, unknown>;
+        children: unknown[];
+    }
+    const settings = { updateBranch: "main" };
+    const calls: string[] = [];
+    let states: unknown[] = [];
+    let cursor = 0;
+    let remoteChanges = [{ hash: "b".repeat(40), author: "Fixture", message: "Update" }];
+    let finishCheck: (() => void) | undefined;
+    const createElement = (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]): Element => ({ type, props: props ?? {}, children });
+    const common = {
+        React: { createElement, useEffect: () => undefined, Fragment: "Fragment" },
+        useState(initial: unknown) {
+            const index = cursor++;
+            if (!(index in states)) states[index] = initial;
+            return [states[index], (value: unknown) => { states[index] = value; }];
+        },
+        Select: "Select", ConfirmModal: "ConfirmModal",
+        Toasts: { show: () => undefined, genId: () => "fixture", Type: {}, Position: {} },
+        openModal(factory: (props: object) => Element) {
+            const modal = factory({});
+            assert.equal(typeof modal.props.onCancel, "function");
+            (modal.props.onCancel as () => void)();
+        },
+    };
+    const mocks: Record<string, object> = {
+        "@api/Settings": { Settings: settings, useSettings: () => settings },
+        "@shared/Updater": { UPDATER_BRANCHES },
+        "@utils/margins": { Margins: {} },
+        "@utils/misc": { classes: () => "" },
+        "@utils/native": { relaunch: () => assert.fail("The test must not restart Discord") },
+        "@webpack/common": common,
+        "~git-hash": { default: "a".repeat(40) },
+        "./Logger": { Logger: class { error() {} } },
+        "./native": { relaunch: () => assert.fail("The test must not restart Discord") },
+        "./updateClassification": { classifyUpdateChanges: () => ({ isNewer: false, isOutdated: true }) },
+        "./runWithDispatch": {
+            runWithDispatch: (dispatch: (value: boolean) => void, action: () => Promise<void>) => async () => {
+                dispatch(true);
+                try { await action(); } finally { dispatch(false); }
+            },
+        },
+    };
+    async function load(relative: string): Promise<Record<string, unknown>> {
+        const filename = new URL(`../${relative}`, import.meta.url);
+        const { outputText } = transpileModule(await readFile(filename, "utf8"), {
+            compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: 2 }, fileName: relative,
+        });
+        const module = { exports: {} };
+        runInNewContext(outputText, {
+            exports: module.exports, module, IS_STANDALONE: true, IS_WEB: false, IS_UPDATER_DISABLED: false,
+            require(name: string) {
+                if (mocks[name]) {
+                    if (!("__esModule" in mocks[name])) Object.defineProperty(mocks[name], "__esModule", { value: true });
+                    return mocks[name];
+                }
+                if (name.startsWith("@components/")) {
+                    const component = name.split("/").at(-1);
+                    assert.ok(component);
+                    return { [component]: component };
+                }
+                throw new Error(`Unexpected test import: ${name}`);
+            },
+            VencordNative: { updater: {
+                async getUpdates(branch: string) {
+                    calls.push(`check:${branch}`);
+                    await new Promise<void>(resolve => { finishCheck = resolve; });
+                    return { ok: true, value: remoteChanges };
+                },
+                async update(branch: string) { calls.push(`update:${branch}`); return { ok: true, value: true }; },
+                async rebuild() { calls.push("build"); return { ok: true, value: true }; },
+            } },
+        }, { filename: relative });
+        return module.exports;
+    }
+    const updater = await load("src/utils/updater.ts");
+    mocks["@utils/updater"] = updater;
+    const components = await load("src/components/settings/tabs/updater/Components.tsx");
+    const render = (disabled = false) => {
+        cursor = 0;
+        return (components.Updatable as (props: object) => Element)({ repo: "https://example.invalid", repoPending: false, disabled });
+    };
+    const elements = (node: unknown): Element[] => {
+        if (!node || typeof node !== "object" || !("children" in node)) return [];
+        const element = node as Element;
+        return [element, ...element.children.flatMap(elements)];
+    };
+    const find = (tree: Element, type: string, label?: string) => elements(tree).find(node => node.type === type && (!label || node.children.includes(label)));
+    const invoke = (element: Element | undefined, action: string, ...args: unknown[]) => {
+        assert.ok(element);
+        const callback = element.props[action];
+        assert.equal(typeof callback, "function");
+        return (callback as (...args: unknown[]) => Promise<void>)(...args);
+    };
+    for (const branch of ["nightly", "staging"]) {
+        invoke(find(render(), "Select"), "select", branch);
+        assert.equal(settings.updateBranch, branch);
+        states = [];
+        assert.equal(find(render(), "Button", "Update Now"), undefined, "branch changes discard stale update results");
+        const checking = invoke(find(render(), "Button", "Check for Updates"), "onClick");
+        assert.equal(find(render(), "Select")?.props.isDisabled, true);
+        invoke(find(render(), "Select"), "select", "main");
+        assert.equal(settings.updateBranch, branch, "a pending update check locks the branch selection");
+        assert.ok(finishCheck);
+        finishCheck();
+        await checking;
+        await invoke(find(render(), "Button", "Update Now"), "onClick");
+        assert.equal(find(render(), "Button", "Update Now"), undefined);
+    }
+    assert.deepEqual(calls, ["check:nightly", "update:nightly", "build", "check:staging", "update:staging", "build"]);
+    invoke(find(render(true), "Select"), "select", "main");
+    assert.equal(settings.updateBranch, "staging", "changelog loading also locks the controls");
+    remoteChanges = [];
+    const checking = invoke(find(render(), "Button", "Check for Updates"), "onClick");
+    assert.ok(finishCheck);
+    finishCheck();
+    await checking;
+    assert.equal(find(render(), "Button", "Update Now"), undefined, "a current branch has no install action");
+}
 
 async function run(cwd: string, ...args: string[]): Promise<{ stderr: string; stdout: string; }> {
     const result = await execFile("git", args, {
@@ -183,14 +309,22 @@ async function main(): Promise<void> {
     await testIpcBranchArguments();
     await testGitBranches();
     await testHttpBranches();
+    await testUpdaterControls();
 
     const workflow = await readFile(new URL("../.github/workflows/build.yml", import.meta.url), "utf8");
     assert.match(workflow, /- main[\s\S]*- staging[\s\S]*- nightly/u);
     assert.match(workflow, /tag="latest"/u);
     assert.match(workflow, /--prerelease/u);
 
+    const changelogSettings = await readFile(new URL(
+        "../src/components/settings/tabs/changelog/index.tsx",
+        import.meta.url,
+    ), "utf8");
+    assert.match(changelogSettings, /<Updatable/u, "Changelog must expose install controls, not only fetch commits");
+    assert.doesNotMatch(changelogSettings, /updater\.getUpdates\(\)/u,
+        "Changelog checks must not silently default to main");
     const updaterSettings = await readFile(new URL(
-        "../src/components/settings/tabs/updater/index.tsx",
+        "../src/components/settings/tabs/updater/Components.tsx",
         import.meta.url,
     ), "utf8");
     assert.match(updaterSettings, /<Select[\s\S]*options=\{UPDATE_BRANCH_OPTIONS\}/u,
