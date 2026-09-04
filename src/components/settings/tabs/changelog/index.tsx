@@ -6,6 +6,7 @@
 
 import "./styles.css";
 
+import { useSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
 import { Divider } from "@components/Divider";
@@ -15,7 +16,8 @@ import { DeleteIcon } from "@components/Icons";
 import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
 import { SettingsTab, wrapTab } from "@components/settings/tabs/BaseTab";
-import { HashLink } from "@components/settings/tabs/updater/Components";
+import { HashLink, Updatable } from "@components/settings/tabs/updater/Components";
+import type { UpdaterBranch } from "@shared/Updater";
 import { Margins } from "@utils/margins";
 import { useAwaiter } from "@utils/react";
 import { getRepo, UpdateLogger } from "@utils/updater";
@@ -223,7 +225,7 @@ function UpdateLogCard({
     );
 }
 
-function ChangelogContent() {
+function ChangelogContent({ branch }: { branch: UpdaterBranch; }) {
     const [repo, repoErr, repoPending] = useAwaiter(getRepo, {
         fallbackValue: "Loading...",
     });
@@ -239,6 +241,7 @@ function ChangelogContent() {
     );
     const [showHistory, setShowHistory] = React.useState(false);
     const [recentlyChecked, setRecentlyChecked] = React.useState(false);
+    const [updaterBusy, setUpdaterBusy] = React.useState(false);
 
     React.useEffect(() => {
         const init = async () => {
@@ -305,31 +308,6 @@ function ChangelogContent() {
         }
     }, [repo, repoErr, repoPending, loadChangelogHistory]);
 
-    // check if the repository was recently refreshed
-    React.useEffect(() => {
-        const checkRecentStatus = async () => {
-            try {
-                const lastRepoCheck = await getLastRepositoryCheckHash();
-                const updates = await VencordNative.updater.getUpdates();
-
-                if (updates.ok) {
-                    const currentRepoHash =
-                        updates.value.length > 0
-                            ? updates.value[0].hash
-                            : gitHash;
-                    setRecentlyChecked(lastRepoCheck === currentRepoHash);
-                }
-            } catch (err) {
-                // ignore errors (hopefully there are none lol)
-                setRecentlyChecked(false);
-            }
-        };
-
-        if (!repoPending && !repoErr) {
-            checkRecentStatus();
-        }
-    }, [repoPending, repoErr]);
-
     const fetchChangelog = React.useCallback(async () => {
         if (repoPending || repoErr) return;
 
@@ -338,10 +316,11 @@ function ChangelogContent() {
 
         try {
             // check if the repository was recently refreshed and that nothing has changed
-            const updates = await VencordNative.updater.getUpdates();
+            const updates = await VencordNative.updater.getUpdates(branch);
+            if (!updates.ok) throw new Error(updates.error?.message || "Failed to fetch from repository");
             const lastRepoCheck = await getLastRepositoryCheckHash();
             const currentRepoHash =
-                updates.ok && updates.value.length > 0
+                updates.value.length > 0
                     ? updates.value[0].hash
                     : gitHash;
 
@@ -351,9 +330,9 @@ function ChangelogContent() {
                 setRecentlyChecked(true);
                 const logged = await ensureLocalUpdateLogged();
                 if (!logged) {
-                    setChangelog([]);
+                    setChangelog(updates.value);
                     Toasts.show({
-                        message: "Already up to date with repository",
+                        message: "No new changes since the last check",
                         id: Toasts.genId(),
                         type: Toasts.Type.MESSAGE,
                         options: {
@@ -398,7 +377,7 @@ function ChangelogContent() {
                     Toasts.show({
                         message: logged
                             ? "Logged commits from your latest update"
-                            : "Repository is up to date with your local copy",
+                            : `No new commits found on ${branch}`,
                         id: Toasts.genId(),
                         type: logged ? Toasts.Type.SUCCESS : Toasts.Type.MESSAGE,
                         options: {
@@ -409,10 +388,6 @@ function ChangelogContent() {
                         setChangelog([]);
                     }
                 }
-            } else if (!updates.ok) {
-                throw new Error(
-                    updates.error?.message || "Failed to fetch from repository",
-                );
             }
         } catch (err: any) {
             UpdateLogger.error("Failed to fetch commits from repository", err);
@@ -433,7 +408,7 @@ function ChangelogContent() {
         } finally {
             setIsLoading(false);
         }
-    }, [repoPending, repoErr, loadNewPlugins, loadChangelogHistory]);
+    }, [branch, repoPending, repoErr, ensureLocalUpdateLogged, loadChangelogHistory]);
 
     React.useEffect(() => {
         const loadInitialData = async () => {
@@ -477,6 +452,20 @@ function ChangelogContent() {
 
     return (
         <>
+            {IS_UPDATER_DISABLED ? (
+                <Paragraph>Updates are disabled in this build. Use a release build to select an update branch and install updates here.</Paragraph>
+            ) : (
+                <>
+                    <Heading className={Margins.top16}>Updates</Heading>
+                    <Updatable
+                        repo={repo}
+                        repoPending={repoPending}
+                        disabled={isLoading || repoPending || Boolean(repoErr)}
+                        onBusyChange={setUpdaterBusy}
+                    />
+                    <Divider className={Margins.top20} />
+                </>
+            )}
             <Heading className={Margins.top16}>Fetch Changes</Heading>
             <Paragraph className={Margins.bottom16}>
                 Check the repository for new commits, plugin updates, and code changes. This will compare your current version with the latest available and show you what's new.
@@ -485,14 +474,14 @@ function ChangelogContent() {
             <div className="vc-changelog-controls">
                 <Button
                     size="small"
-                    disabled={isLoading || repoPending || !!repoErr}
+                    disabled={isLoading || updaterBusy || repoPending || !!repoErr}
                     onClick={fetchChangelog}
                     variant={recentlyChecked ? "positive" : "primary"}
                 >
                     {isLoading
                         ? "Loading..."
                         : recentlyChecked
-                            ? "Repository Up to Date"
+                            ? "Changes Fetched"
                             : "Fetch from Repository"}
                 </Button>
 
@@ -680,9 +669,10 @@ function ChangelogContent() {
 }
 
 function ChangelogTab() {
+    const { updateBranch } = useSettings(["updateBranch"]);
     return (
         <SettingsTab>
-            <ChangelogContent />
+            <ChangelogContent key={updateBranch} branch={updateBranch} />
         </SettingsTab>
     );
 }
