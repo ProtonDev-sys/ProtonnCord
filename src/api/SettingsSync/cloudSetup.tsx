@@ -119,7 +119,6 @@ async function getAuthorizationForOrigin(origin: string, userId: string) {
     const secrets = isPlainRecord(stored) ? stored : {};
     const scopedKey = `${origin}:${userId}`;
     const scopedSecret = isValidCloudSecret(secrets[scopedKey]) ? secrets[scopedKey] : undefined;
-    const legacySecret = isValidCloudSecret(secrets[origin]) ? secrets[origin] : undefined;
 
     // we need to migrate from the old format here
     if (secrets[origin] !== undefined || secrets[scopedKey] !== undefined && !scopedSecret) {

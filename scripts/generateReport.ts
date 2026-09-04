@@ -21,7 +21,6 @@
 
 import { createHmac } from "crypto";
 import { readFileSync, writeFileSync } from "fs";
-import { join } from "path";
 import pup, { JSHandle } from "puppeteer-core";
 
 const logStderr = (...data: any[]) => console.error(`${CANARY ? "CANARY" : "STABLE"} ---`, ...data);
