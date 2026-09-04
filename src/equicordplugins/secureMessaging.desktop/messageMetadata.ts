@@ -12,11 +12,17 @@ interface DiscordMessageMetadata {
 
 function normalizeTimestamp(value: unknown): string | null {
     if (value == null) return null;
-    const raw = typeof value === "string"
-        ? value
-        : typeof (value as { toISOString?: unknown; })?.toISOString === "function"
-            ? (value as { toISOString(): string; }).toISOString()
-            : "invalid-edited-timestamp";
+    let raw: unknown = value;
+    if (typeof value !== "string") {
+        try {
+            if (typeof value !== "object" || !("toISOString" in value) || typeof value.toISOString !== "function")
+                return "invalid-edited-timestamp";
+            raw = value.toISOString();
+        } catch {
+            return "invalid-edited-timestamp";
+        }
+    }
+    if (typeof raw !== "string") return "invalid-edited-timestamp";
     const milliseconds = Date.parse(raw);
     return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : raw;
 }

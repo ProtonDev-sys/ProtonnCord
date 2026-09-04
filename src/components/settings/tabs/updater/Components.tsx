@@ -4,17 +4,21 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { useSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
 import { ErrorCard } from "@components/ErrorCard";
 import { Flex } from "@components/Flex";
+import { HeadingSecondary } from "@components/Heading";
 import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
 import { Span } from "@components/Span";
+import { UPDATER_BRANCHES, type UpdaterBranch } from "@shared/Updater";
 import { Margins } from "@utils/margins";
+import { classes } from "@utils/misc";
 import { relaunch } from "@utils/native";
-import { changes, checkForUpdates, update, updateError } from "@utils/updater";
-import { ConfirmModal, openModal, React, Toasts, useState } from "@webpack/common";
+import { changes, checkForUpdates, isNewer, resetUpdateState, update, updateError } from "@utils/updater";
+import { ConfirmModal, openModal, React, Select, Toasts, useState } from "@webpack/common";
 
 import { runWithDispatch } from "./runWithDispatch";
 
@@ -22,6 +26,16 @@ export interface CommonProps {
     repo: string;
     repoPending: boolean;
 }
+
+const UPDATE_BRANCH_LABELS: Record<UpdaterBranch, string> = {
+    main: "Main (stable)",
+    nightly: "Nightly (latest previews)",
+    staging: "Staging (tested previews)",
+};
+const UPDATE_BRANCH_OPTIONS = UPDATER_BRANCHES.map(branch => ({
+    label: UPDATE_BRANCH_LABELS[branch],
+    value: branch,
+}));
 
 export function HashLink({ repo, hash, disabled = false }: { repo: string, hash: string, disabled?: boolean; }) {
     return (
@@ -70,22 +84,44 @@ export function Newer(props: CommonProps) {
     );
 }
 
-export function Updatable(props: CommonProps) {
+export function Updatable(props: CommonProps & { disabled?: boolean; }) {
+    const settings = useSettings(["updateBranch"]);
     const [updates, setUpdates] = useState(changes);
     const [isChecking, setIsChecking] = useState(false);
     const [isUpdating, setIsUpdating] = useState(false);
+    const [hasChecked, setHasChecked] = useState(false);
+    const busy = isUpdating || isChecking;
+    const disabled = props.disabled || busy;
 
     const isOutdated = (updates?.length ?? 0) > 0;
 
     return (
         <>
-            <Flex className={Margins.bottom8} gap="8px">
+            <HeadingSecondary>Update branch</HeadingSecondary>
+            <Paragraph className={Margins.bottom8}>
+                Main is stable. Staging contains tested previews, while Nightly follows the latest preview work. Select a branch, check for updates, then install the available update.
+            </Paragraph>
+            <Select
+                placeholder="Main (stable)"
+                options={UPDATE_BRANCH_OPTIONS}
+                isDisabled={disabled}
+                closeOnSelect={true}
+                select={(branch: UpdaterBranch) => {
+                    if (disabled || settings.updateBranch === branch) return;
+                    resetUpdateState();
+                    settings.updateBranch = branch;
+                }}
+                isSelected={branch => branch === settings.updateBranch}
+                serialize={branch => branch}
+            />
+            <Flex className={classes(Margins.top16, Margins.bottom8)} gap="8px">
                 <Button
-                    disabled={isUpdating || isChecking}
+                    disabled={disabled}
                     onClick={runWithDispatch(setIsChecking, async () => {
                         const outdated = await checkForUpdates();
+                        setHasChecked(true);
 
-                        if (outdated) {
+                        if (outdated || isNewer) {
                             setUpdates(changes);
                         } else {
                             setUpdates([]);
@@ -103,11 +139,11 @@ export function Updatable(props: CommonProps) {
                 >
                     Check for Updates
                 </Button>
-                {isOutdated && (
+                {isOutdated && !isNewer && (
                     <Button
                         size="small"
                         variant="primary"
-                        disabled={isUpdating || isChecking}
+                        disabled={disabled}
                         onClick={runWithDispatch(setIsUpdating, async () => {
                             if (await update()) {
                                 setUpdates([]);
@@ -136,7 +172,7 @@ export function Updatable(props: CommonProps) {
                     </Button>
                 )}
             </Flex>
-            {!updates && updateError ? (
+            {isNewer ? <Newer {...props} /> : !updates && updateError ? (
                 <>
                     <Span size="md" weight="medium" color="text-strong">Error checking for updates</Span>
                     <ErrorCard className={Margins.top8} style={{ padding: "1em" }}>
@@ -152,7 +188,9 @@ export function Updatable(props: CommonProps) {
                 </>
             ) : (
                 <Paragraph>
-                    You're running the latest version of Protonn Cord.
+                    {hasChecked
+                        ? `You're running the latest available version on ${settings.updateBranch}.`
+                        : `Check for updates to see what's available on ${settings.updateBranch}.`}
                 </Paragraph>
             )}
         </>

@@ -17,6 +17,10 @@ import type { IpcMainInvokeEvent } from "electron";
 
 import {
     attachmentBundleRoot,
+    attachmentBundleRootFromDigests,
+    type AttachmentBundleDescriptor,
+    type AttachmentMetadata,
+    createAttachmentManifest,
     DETACHED_TEXT_FILENAME,
     DETACHED_TEXT_MIME_TYPE,
     encryptAttachmentBytes,
@@ -665,6 +669,202 @@ async function testStorageFailures(bundlePath: string, linuxBundlePath: string, 
     assert.ok(protector.finalFileSyncCalls > failedFinalFileSyncCalls, "Windows reload retries the failed final-file flush");
 }
 
+async function testSelectiveAttachmentTransfers(native: NativeModule, dataDir: string): Promise<void> {
+    const pngBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j6xkAAAAASUVORK5CYII=", "base64");
+    const zipBytes = new Uint8Array(256 * 1024).fill(0x5a);
+    const executableBytes = new Uint8Array(1024 * 1024).fill(0x45);
+    const files = [
+        { data: pngBytes, name: "selective-preview.png", mimeType: "image/png", spoiler: false },
+        { data: zipBytes, name: "selective-archive.zip", mimeType: "application/zip", spoiler: true },
+        { data: executableBytes, name: "selective-inert.exe", mimeType: "application/octet-stream", spoiler: false },
+    ];
+    const served = new Map<string, Uint8Array>();
+    const requests: Array<{ id: string; bytes: number; }> = [];
+    let nextId = 8_000;
+    const createFixture = async (sourceFiles: typeof files) => {
+        const { descriptor, keyBytes } = generateAttachmentBundleMaterial(sourceFiles.length);
+        const metadata: AttachmentMetadata[] = sourceFiles.map(file => ({
+            name: file.name, mimeType: file.mimeType, size: file.data.byteLength,
+            description: null, duration: null, height: file.mimeType === "image/png" ? 1 : null,
+            width: file.mimeType === "image/png" ? 1 : null, spoiler: file.spoiler, waveform: null,
+        }));
+        let ciphertexts: Uint8Array[];
+        try {
+            ciphertexts = await Promise.all(sourceFiles.map((file, index) => encryptAttachmentBytes({
+                bundleId: descriptor.id, channelId: DM_CHANNEL_ID, count: sourceFiles.length,
+                data: file.data, index, masterKey: keyBytes, metadata: metadata[index], senderUserId: ALICE_ID,
+            })));
+        } finally {
+            keyBytes.fill(0);
+        }
+        const manifest = await createAttachmentManifest(ciphertexts, metadata);
+        const bundle: AttachmentBundleDescriptor = {
+            ...descriptor, manifest,
+            root: await attachmentBundleRootFromDigests(descriptor.id, manifest.map(entry => entry.digest)),
+        };
+        const attachments = ciphertexts.map(ciphertext => {
+            const id = messageId(nextId++);
+            served.set(id, ciphertext);
+            return {
+                id, size: ciphertext.byteLength,
+                url: `https://cdn.discordapp.com/attachments/${DM_CHANNEL_ID}/${id}/encrypted.pcaf`,
+                proxyUrl: `https://media.discordapp.net/attachments/${DM_CHANNEL_ID}/${id}/encrypted.pcaf`,
+            };
+        });
+        const sign = async (signedBundle = bundle, detachedTextIndex: number | null = null) => {
+            const encrypted = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+                plaintext: serializeSecurePlaintext("", signedBundle, [], detachedTextIndex),
+                snapshot: dmSnapshot(DM_CHANNEL_ID, BOB_ID),
+            });
+            expectStatus(encrypted, "encrypted", "the selective-download fixture has an authenticated envelope");
+            return {
+                channelId: DM_CHANNEL_ID, content: encrypted.content, discordAuthorId: ALICE_ID,
+                discordEditedTimestamp: null, discordMessageId: messageId(nextId++), attachments,
+            };
+        };
+        return { attachments, bundle, ciphertexts, sign };
+    };
+    const originalFetch = globalThis.fetch;
+    try {
+        globalThis.fetch = async input => {
+            const id = new URL(String(input)).pathname.split("/")[3];
+            const data = served.get(id);
+            assert.ok(data, "the fixture serves only its synthetic Discord attachment references");
+            requests.push({ id, bytes: data.byteLength });
+            return new Response(Buffer.from(data), { headers: { "content-length": String(data.byteLength) } });
+        };
+        const mixed = await createFixture(files);
+        const { manifest: _manifest, ...legacyBundle } = mixed.bundle;
+        const legacyInput = await mixed.sign(legacyBundle);
+        const legacyPreview = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, legacyInput, "previews");
+        expectStatus(legacyPreview, "decrypted", "legacy history can render before fetching attachment bytes");
+        assert.deepEqual(legacyPreview.attachments, []);
+        assert.equal(legacyPreview.deferredAttachments?.length, 3);
+        assert.equal(requests.length, 0, "legacy previews do not fetch an unverifiable subset");
+        const legacyAll = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, legacyInput, "all");
+        expectStatus(legacyAll, "decrypted", "an explicit legacy load still authenticates the complete bundle root");
+        assert.deepEqual(legacyAll.attachments.map(attachment => Buffer.from(attachment.data)), files.map(file => Buffer.from(file.data)));
+        assert.equal(requests.length, 3);
+        const eagerBytes = requests.reduce((total, request) => total + request.bytes, 0);
+        assert.equal(eagerBytes, mixed.ciphertexts.reduce((total, ciphertext) => total + ciphertext.byteLength, 0));
+
+        requests.length = 0;
+        const manifestInput = await mixed.sign();
+        const preview = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, manifestInput, "previews");
+        expectStatus(preview, "decrypted", "only the manifest's previewable image is fetched while reading history");
+        assert.deepEqual(preview.attachments.map(attachment => attachment.id), [mixed.attachments[0].id]);
+        assert.deepEqual(Buffer.from(preview.attachments[0].data), pngBytes);
+        assert.deepEqual(preview.deferredAttachments, files.slice(1).map((file, index) => ({
+            id: mixed.attachments[index + 1].id, name: file.name, size: file.data.byteLength, spoiler: file.spoiler,
+        })));
+        assert.deepEqual(requests, [{ id: mixed.attachments[0].id, bytes: mixed.ciphertexts[0].byteLength }]);
+        const previewBytes = requests[0].bytes;
+        const repeatPreview = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, manifestInput, "previews");
+        expectStatus(repeatPreview, "decrypted", "preview rerenders reuse authenticated bytes");
+        assert.equal(requests.length, 1);
+
+        for (const index of [1, 2]) {
+            requests.length = 0;
+            const download = await native.downloadIncomingAttachment(DISCORD_EVENT, BOB_ID, manifestInput, mixed.attachments[index].id);
+            expectStatus(download, "saved", "clicking a generic file authenticates and saves that file alone");
+            assert.deepEqual(requests, [{ id: mixed.attachments[index].id, bytes: mixed.ciphertexts[index].byteLength }]);
+            assert.equal(download.filename, files[index].name);
+            assert.deepEqual(await readFile(join(dataDir, "Downloads", download.filename)), Buffer.from(files[index].data));
+        }
+        requests.length = 0;
+        const cachedDownload = await native.downloadIncomingAttachment(DISCORD_EVENT, BOB_ID, manifestInput, mixed.attachments[1].id);
+        expectStatus(cachedDownload, "saved", "a second click saves authenticated cached bytes");
+        assert.equal(requests.length, 0);
+        assert.deepEqual(await readFile(join(dataDir, "Downloads", cachedDownload.filename)), Buffer.from(zipBytes));
+
+        const downloadsBeforeRejections = (await readdir(join(dataDir, "Downloads"))).sort();
+        const malformed: Array<[string, AttachmentBundleDescriptor]> = [];
+        const badRoot = structuredClone(mixed.bundle);
+        badRoot.root = badRoot.key;
+        malformed.push(["root", badRoot]);
+        for (const field of ["digest", "name", "size", "preview", "spoiler"] as const) {
+            const descriptor = structuredClone(mixed.bundle);
+            assert.ok(descriptor.manifest);
+            if (field === "digest") {
+                descriptor.manifest[1].digest = descriptor.key;
+                descriptor.root = await attachmentBundleRootFromDigests(descriptor.id, descriptor.manifest.map(entry => entry.digest));
+            } else if (field === "name") descriptor.manifest[1].name = "wrong-authenticated-name.zip";
+            else if (field === "size") descriptor.manifest[1].size++;
+            else if (field === "preview") descriptor.manifest[1].preview = true;
+            else descriptor.manifest[1].spoiler = false;
+            malformed.push([field, descriptor]);
+        }
+        for (const [field, descriptor] of malformed) {
+            requests.length = 0;
+            const input = await mixed.sign(descriptor);
+            const result = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, input, { attachmentId: mixed.attachments[1].id });
+            expectStatus(result, "invalid_message", `selected decryption rejects a signed manifest with a wrong ${field}`);
+            assert.ok(requests.every(request => request.id === mixed.attachments[1].id));
+            assert.equal(requests.length, field === "root" ? 0 : 2, "authentication failure tries only the selected CDN and proxy");
+        }
+        const badAead = structuredClone(mixed.bundle);
+        assert.ok(badAead.manifest);
+        const tamperedZip = Uint8Array.from(mixed.ciphertexts[1]);
+        tamperedZip[tamperedZip.length - 1] ^= 1;
+        badAead.manifest[1].digest = createHash("sha256").update(tamperedZip).digest("base64url");
+        badAead.root = await attachmentBundleRootFromDigests(badAead.id, badAead.manifest.map(entry => entry.digest));
+        const badAeadInput = await mixed.sign(badAead);
+        requests.length = 0;
+        served.set(mixed.attachments[1].id, tamperedZip);
+        try {
+            expectStatus(await native.downloadIncomingAttachment(DISCORD_EVENT, BOB_ID, badAeadInput, mixed.attachments[1].id), "invalid_message",
+                "a matching signed digest and bundle root cannot replace the selected file's AEAD authentication");
+            assert.equal(requests.length, 2);
+            assert.ok(requests.every(request => request.id === mixed.attachments[1].id));
+        } finally {
+            served.set(mixed.attachments[1].id, mixed.ciphertexts[1]);
+            tamperedZip.fill(0);
+        }
+        assert.deepEqual((await readdir(join(dataDir, "Downloads"))).sort(), downloadsBeforeRejections,
+            "failed authentication cannot create any downloaded file");
+        const badLegacyRoot = await mixed.sign({ ...legacyBundle, root: legacyBundle.key });
+        requests.length = 0;
+        expectStatus(await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, badLegacyRoot, "all"), "invalid_message",
+            "legacy explicit loads retain complete bundle-root authentication");
+        assert.equal(requests.length, 3);
+
+        const longText = "Selective detached text with generic siblings. ".repeat(160);
+        const textBytes = new TextEncoder().encode(longText);
+        const detached = await createFixture([
+            files[1], { data: textBytes, name: DETACHED_TEXT_FILENAME, mimeType: DETACHED_TEXT_MIME_TYPE, spoiler: false }, files[2],
+        ]);
+        const detachedInput = await detached.sign(detached.bundle, 1);
+        requests.length = 0;
+        const selectedText = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, detachedInput, "text");
+        expectStatus(selectedText, "decrypted", "detached text loads independently of adjacent generic files");
+        assert.equal(selectedText.plaintext, longText);
+        assert.deepEqual(selectedText.attachments, [], "the detached transport never becomes a visible file");
+        assert.deepEqual(selectedText.deferredAttachments?.map(attachment => attachment.id), [detached.attachments[0].id, detached.attachments[2].id]);
+        assert.deepEqual(requests, [{ id: detached.attachments[1].id, bytes: detached.ciphertexts[1].byteLength }]);
+        requests.length = 0;
+        const repeatText = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, detachedInput, "text");
+        expectStatus(repeatText, "decrypted", "detached text reuses its authenticated native cache");
+        assert.equal(repeatText.plaintext, longText);
+        assert.equal(requests.length, 0);
+        expectStatus(await native.downloadIncomingAttachment(DISCORD_EVENT, BOB_ID, detachedInput, detached.attachments[1].id), "invalid_message",
+            "the selected detached-text transport is not downloadable");
+        const siblingDownload = await native.downloadIncomingAttachment(DISCORD_EVENT, BOB_ID, detachedInput, detached.attachments[0].id);
+        expectStatus(siblingDownload, "saved", "downloading a detached text sibling leaves other siblings deferred");
+        assert.deepEqual(requests, [{ id: detached.attachments[0].id, bytes: detached.ciphertexts[0].byteLength }]);
+        assert.deepEqual(await readFile(join(dataDir, "Downloads", siblingDownload.filename)), Buffer.from(zipBytes));
+        console.log("selective attachment transfer proof:", JSON.stringify({
+            files: ["PNG", "ZIP", "inert EXE fixture"],
+            eager: { requests: 3, bytes: eagerBytes },
+            previews: { requests: 1, bytes: previewBytes },
+            deferredBytes: eagerBytes - previewBytes,
+            detachedText: { requests: 1, bytes: detached.ciphertexts[1].byteLength },
+        }));
+    } finally {
+        globalThis.fetch = originalFetch;
+        for (const bytes of served.values()) bytes.fill(0);
+    }
+}
+
 async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise<void> {
     const vaultDirectory = join(dataDir, "secure-messaging");
     const staleVaultTemporary = join(vaultDirectory, "vault.00000000-0000-4000-8000-000000000001.tmp");
@@ -1304,6 +1504,8 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     } finally {
         globalThis.fetch = originalFetch;
     }
+
+    await testSelectiveAttachmentTransfers(native, dataDir);
 
     decrypted = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, bobDmInput);
     expectStatus(decrypted, "decrypted", "exact message rerender is idempotent");

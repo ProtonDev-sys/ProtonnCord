@@ -16,7 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { Promisable } from "type-fest";
+import type { Promisable } from "type-fest";
+
+import { Logger } from "./Logger";
+
+const logger = new Logger("Queue");
 
 /**
  * A queue that can be used to run tasks consecutively.
@@ -29,15 +33,16 @@ export class Queue {
      */
     constructor(public readonly maxSize = Infinity) { }
 
-    private queue = [] as Array<() => Promisable<unknown>>;
+    private queue: Array<() => Promisable<unknown>> = [];
 
-    private promise?: Promise<any>;
+    private promise?: Promise<unknown>;
 
     private next() {
         const func = this.queue.shift();
         if (func)
             this.promise = Promise.resolve()
                 .then(func)
+                .catch(error => logger.error("Failed to run queued task", error))
                 .finally(() => this.next());
         else
             this.promise = undefined;
