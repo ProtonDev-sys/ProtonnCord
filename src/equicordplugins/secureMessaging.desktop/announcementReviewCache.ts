@@ -91,20 +91,20 @@ export function reviewAnnouncementCached(localUserId: string, message: Message):
             discordEditedTimestamp(message),
         );
     }).then(result => {
-        if (generation === cacheGeneration && cache.get(key) === entry) {
-            if (isNativeFailure(result)) {
-                cache.delete(key);
-            } else {
-                const settledAt = Date.now();
-                entry.expiresAt = settledAt + RESULT_TTL_MS;
-                entry.lastAccess = settledAt;
-                entry.settled = true;
-                pruneCache(key);
-            }
+        if (generation !== cacheGeneration || cache.get(key) !== entry) return cancelledReview();
+        if (isNativeFailure(result)) {
+            cache.delete(key);
+        } else {
+            const settledAt = Date.now();
+            entry.expiresAt = settledAt + RESULT_TTL_MS;
+            entry.lastAccess = settledAt;
+            entry.settled = true;
+            pruneCache(key);
         }
         return result;
     }, error => {
-        if (generation === cacheGeneration && cache.get(key) === entry) cache.delete(key);
+        if (generation !== cacheGeneration || cache.get(key) !== entry) return cancelledReview();
+        cache.delete(key);
         throw error;
     });
     return entry.promise;

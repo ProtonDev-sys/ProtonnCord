@@ -54,8 +54,7 @@ export function extractSecureEmbedUrls(plaintext: string): string[] {
             if (codeDelimiterLength === 0) {
                 let start = match.index;
                 while (start > 0 && plaintext[start - 1] === "\\") start--;
-                if ((match.index - start) % 2 !== 0) continue;
-                codeDelimiterLength = token.length;
+                codeDelimiterLength = token.length - (match.index - start) % 2;
             } else if (token.length === codeDelimiterLength) {
                 codeDelimiterLength = 0;
             }
