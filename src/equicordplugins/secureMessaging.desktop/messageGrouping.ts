@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { extractSecureEmbedUrls } from "./embedUrls";
+import type { DecryptIncomingResult } from "./native";
 import { isEncryptedMessage } from "./protocol";
 
 const MESSAGE_GROUP_WINDOW_MS = 5 * 60 * 1_000;
@@ -34,6 +36,12 @@ interface MessageIndexCache {
 }
 
 const messageIndexCache = new WeakMap<object, MessageIndexCache>();
+
+export function canGroupSecureMessageContent(result: DecryptIncomingResult | null, optimisticPlaintext?: string): boolean {
+    if (result && (result.status !== "decrypted" || result.attachmentBundle !== null || result.stickers.length > 0)) return false;
+    const plaintext = result?.status === "decrypted" ? result.plaintext : optimisticPlaintext;
+    return plaintext !== undefined && extractSecureEmbedUrls(plaintext).length === 0;
+}
 
 function buildMessageIndexes<T extends SecureMessageGroupCandidate>(messages: readonly T[]): MessageIndexCache {
     return {
@@ -69,7 +77,7 @@ function canJoinMessages<T extends SecureMessageGroupCandidate>(
 ): boolean {
     if (!isEncryptedMessage(previous.content) || !isEncryptedMessage(next.content) ||
         !previous.author?.id || previous.author.id !== next.author?.id ||
-        previous.messageReference || next.messageReference || isGroupStart(next) !== false ||
+        next.messageReference || isGroupStart(next) !== false ||
         hasTrailingAccessories(previous) || hasTrailingAccessories(next)) return false;
     const elapsed = next.timestamp.getTime() - previous.timestamp.getTime();
     return elapsed >= 0 && elapsed < MESSAGE_GROUP_WINDOW_MS && canJoin(previous, next);
