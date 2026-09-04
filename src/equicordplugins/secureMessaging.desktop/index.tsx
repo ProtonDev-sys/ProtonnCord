@@ -30,7 +30,7 @@ import { classes } from "@utils/misc";
 import definePlugin, { PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
-import { findByPropsLazy } from "@webpack";
+import { findByPropsLazy, findComponentByCodeLazy } from "@webpack";
 import {
     ChannelStore,
     Checkbox,
@@ -54,11 +54,13 @@ import {
     useCallback,
     useEffect,
     useLayoutEffect,
+    useMemo,
     useRef,
     UserStore,
     useState,
     useStateFromStores,
 } from "@webpack/common";
+import type { ReactNode } from "react";
 
 import {
     announcementReviewCacheKey,
@@ -69,7 +71,6 @@ import {
     clearEncryptedAttachmentCache,
     downloadEncryptedAttachmentUrl,
     encryptedAttachmentCacheKey,
-    encryptedAttachmentDownloads,
     encryptedAttachmentStatus,
     encryptedMediaAttachments,
     isEncryptedAttachmentDownloadUrl,
@@ -87,6 +88,7 @@ import {
     MAX_ATTACHMENT_COUNT,
     MAX_DETACHED_TEXT_BYTES,
     MAX_STICKER_COUNT,
+    parseSecurePlaintext,
     type SecureStickerItem,
     serializeSecurePlaintext,
 } from "./attachments";
@@ -109,10 +111,10 @@ import {
     patchEncryptedMessageStickers,
     prefetchEncryptedMessageEmbeds,
 } from "./embedCache";
-import { extractSecureEmbedUrls, shouldHideSecureEmbedOnlyPlaintext } from "./embedUrls";
+import { shouldHideSecureEmbedOnlyPlaintext } from "./embedUrls";
 import { KeyReviewGate } from "./keyReviewGate";
 import { encryptedAllowedMentions, encryptedMessageMentionsUser } from "./mentionNotifications";
-import { SecureMessageGroup, secureMessageGroupFlags } from "./messageGrouping";
+import { canGroupSecureMessageContent, SecureMessageGroup, secureMessageGroupFlags } from "./messageGrouping";
 import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
 import type {
     AnnouncementReviewResult,
@@ -130,6 +132,7 @@ import type {
 import {
     clearOptimisticOutgoingPlaintexts,
     getOptimisticOutgoingPlaintext,
+    getOptimisticOutgoingPlaintextForGrouping,
     rememberOptimisticOutgoingPlaintext,
     settleOptimisticOutgoingPlaintext,
 } from "./optimisticRendering";
@@ -160,6 +163,7 @@ const VOICE_MESSAGE_FLAG = 1 << 13;
 const UploadLimits = findByPropsLazy("getUserMaxFileSize") as {
     getUserMaxFileSize(user: unknown): unknown;
 };
+const NativeAttachmentDownload = findComponentByCodeLazy<{ href: string; mimeType: string[]; }>("getDefaultLinkInterceptor", "MEDIA_DOWNLOAD_BUTTON_TAPPED");
 
 type ScreenCaptureProtectionStatus = "disabled" | "failed" | "pending" | "ready" | "screenshot";
 
@@ -562,7 +566,12 @@ let guardedFetchMessages: FetchMessages | null = null;
 let unlockPromptKey: string | null = null;
 let unlockPromptChannelId: string | null = null;
 const chatGateRenderOwners = new Set<{ forceUpdate(): void; }>();
-const suppressedChatLoadChannelIds = new Set<string>();
+const suppressedChatLoads = new Set<{
+    channelId: string;
+    localUserId: string | null;
+    resume(): void;
+    cancel(): void;
+}>();
 
 function secureOperationIsCurrent(generation: number, localUserId?: string): boolean {
     return generation === secureOperationGeneration &&
@@ -888,22 +897,42 @@ function refreshChatGateRenderers(): void {
     ChannelStore.emitChange();
 }
 
+function cancelSuppressedChatLoads(): void {
+    for (const load of suppressedChatLoads) load.cancel();
+    suppressedChatLoads.clear();
+}
+
 function resumeSuppressedChatLoads(): void {
-    for (const channelId of suppressedChatLoadChannelIds) {
-        const target = ChannelStore.getChannel(channelId) ?? { channelId };
-        if (chatGateReason(target)) continue;
-        suppressedChatLoadChannelIds.delete(channelId);
-        if (originalFetchMessages)
-            void Reflect.apply(originalFetchMessages, MessageActions, [{ channelId }]);
+    for (const load of suppressedChatLoads) {
+        if (load.localUserId !== (UserStore.getCurrentUser()?.id ?? null)) {
+            suppressedChatLoads.delete(load);
+            load.cancel();
+            continue;
+        }
+        if (chatGateReason({ channelId: load.channelId })) continue;
+        suppressedChatLoads.delete(load);
+        load.resume();
     }
 }
 
-function suppressChatLoad(target: Channel | { channelId: string; }): boolean {
-    const channel = chatGateChannel(target);
-    const channelId = channel?.id ?? ("channelId" in target ? target.channelId : undefined);
-    if (!channelId || chatGateReason(target) === null) return false;
-    suppressedChatLoadChannelIds.add(channelId);
-    return true;
+function deferChatLoad(options: unknown, fetch: () => unknown): Promise<unknown> | null {
+    const channelId = options && typeof options === "object" && "channelId" in options ? options.channelId : null;
+    if (typeof channelId !== "string" || chatGateReason({ channelId }) === null) return null;
+    const pending = Promise.withResolvers<unknown>();
+    suppressedChatLoads.add({
+        channelId,
+        localUserId: UserStore.getCurrentUser()?.id ?? null,
+        resume() {
+            try {
+                pending.resolve(fetch());
+            } catch (error) {
+                pending.reject(error);
+            }
+        },
+        cancel: () => pending.reject(new DOMException("The pending chat load was cancelled.", "AbortError")),
+    });
+    void pending.promise.catch(() => undefined);
+    return pending.promise;
 }
 
 function installChatLoadGuard(): void {
@@ -912,16 +941,14 @@ function installChatLoadGuard(): void {
     if (typeof original !== "function") throw new Error("Secure Messaging could not guard message loading");
     originalFetchMessages = original as FetchMessages;
     guardedFetchMessages = function (options, ...args) {
-        const channelId = options && typeof options === "object" && "channelId" in options
-            ? options.channelId
-            : null;
-        if (typeof channelId === "string" && suppressChatLoad({ channelId })) return Promise.resolve();
-        return Reflect.apply(original, this, [options, ...args]);
+        return deferChatLoad(options, () => Reflect.apply(original, this, [options, ...args]))
+            ?? Reflect.apply(original, this, [options, ...args]);
     };
     actions.fetchMessages = guardedFetchMessages;
 }
 
 function uninstallChatLoadGuard(): void {
+    cancelSuppressedChatLoads();
     const actions = MessageActions as unknown as Record<string, unknown>;
     if (guardedFetchMessages && actions.fetchMessages === guardedFetchMessages && originalFetchMessages)
         actions.fetchMessages = originalFetchMessages;
@@ -1440,7 +1467,7 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
     }
     const scope = conversationAuthorizationScope(context.localUserId, conversation);
     if (!scope) throw new Error("Secure Messaging blocked a programmatic send after its recipient state changed");
-    rememberOptimisticOutgoingPlaintext(encrypted.content, content);
+    rememberOptimisticOutgoingPlaintext(encrypted.content, content, true);
     body.content = encrypted.content;
     applyEncryptedAllowedMentions(body, encrypted.content, endpoint.channelId, context.localUserId);
     requestAuthorizationScopes.set(request, scope);
@@ -1793,12 +1820,28 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             )
             : null;
         if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
-        let encrypted: EncryptOutgoingResult = await Native.encryptOutgoing(context.localUserId, {
-            mentionedUserIds: encryptedMentionedUserIds(plaintext, context.localUserId, conversation),
-            plaintext: preparedAttachments?.plaintext ?? serializeSecurePlaintext(plaintext, null, stickers),
-            snapshot: context.snapshot,
-        });
-        if (encrypted.status === "failed" && encrypted.error === "message_too_long" && detachedTextIndex === null) {
+        const encryptPlaintext = async (value: string): Promise<EncryptOutgoingResult> => {
+            if (!secureOperationIsCurrent(generation, context.localUserId)) return { status: "failed", error: "cryptographic_operation_failed" };
+            const result: EncryptOutgoingResult = value.length > MAX_DISCORD_MESSAGE_LENGTH
+                ? { status: "failed", error: "message_too_long" }
+                : await Native.encryptOutgoing(context.localUserId, {
+                mentionedUserIds: encryptedMentionedUserIds(plaintext, context.localUserId, conversation),
+                plaintext: value,
+                snapshot: context.snapshot,
+            });
+            if (result.status === "failed" && result.error === "message_too_long") {
+                const parsed = parseSecurePlaintext(value);
+                const bundle = parsed.attachments;
+                if (bundle?.manifest?.some(file => file.name !== null))
+                    return encryptPlaintext(serializeSecurePlaintext(parsed.text, {
+                        ...bundle, manifest: bundle.manifest.map(file => ({ ...file, name: null })),
+                    }, parsed.stickers, parsed.detachedTextIndex));
+            }
+            return result;
+        };
+        let encrypted = await encryptPlaintext(preparedAttachments?.plaintext ?? serializeSecurePlaintext(plaintext, null, stickers));
+        if (encrypted.status === "failed" && encrypted.error === "message_too_long" && detachedTextIndex === null &&
+            plaintext.length > 0 && uploads.length < MAX_ATTACHMENT_COUNT) {
             const appended = appendDetachedTextUpload(uploads, plaintext, channelId);
             if (typeof appended === "string") {
                 showToast(appended, Toasts.Type.FAILURE);
@@ -1816,11 +1859,16 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
                 uploadLimitBytes,
             );
             if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
-            encrypted = await Native.encryptOutgoing(context.localUserId, {
-                mentionedUserIds: encryptedMentionedUserIds(plaintext, context.localUserId, conversation),
-                plaintext: preparedAttachments.plaintext,
-                snapshot: context.snapshot,
-            });
+            encrypted = await encryptPlaintext(preparedAttachments.plaintext);
+        }
+        if (encrypted.status === "failed" && encrypted.error === "message_too_long" && preparedAttachments) {
+            const parsed = parseSecurePlaintext(preparedAttachments.plaintext);
+            const bundle = parsed.attachments;
+            if (bundle?.manifest) {
+                encrypted = await encryptPlaintext(serializeSecurePlaintext(
+                    parsed.text, { ...bundle, manifest: undefined }, parsed.stickers, parsed.detachedTextIndex,
+                ));
+            }
         }
         if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         if (encrypted.status !== "encrypted") {
@@ -1861,7 +1909,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         }
         authorizeScopedWirePayload(channelId, encrypted.content, attachmentFilenames, scope);
-        rememberOptimisticOutgoingPlaintext(encrypted.content, plaintext);
+        rememberOptimisticOutgoingPlaintext(encrypted.content, plaintext, preparedAttachments === null && stickers.length === 0);
         message.content = encrypted.content;
         preparedOutgoingMessages.set(message, { ciphertext: encrypted.content, plaintext });
         generatedDetachedUploadCommitted = true;
@@ -1989,7 +2037,7 @@ async function handleSecureConnectionOpen(): Promise<void> {
         secureOperationGeneration++;
         revokePreparedSecureOperations();
         activeMessageLengthBypassKey = null;
-        suppressedChatLoadChannelIds.clear();
+        cancelSuppressedChatLoads();
         try {
             await Native.lockSecurityKeyVault();
         } catch {
@@ -2473,23 +2521,7 @@ function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: 
     }
     if (expectedCount === 0) return null;
     const status = encryptedAttachmentStatus(message);
-    if (status.status === "ready") {
-        const downloads = encryptedAttachmentDownloads(message);
-        if (downloads.length === 0) return null;
-        return <div className="pc-secure-card-actions">
-            {downloads.map(attachment => (
-                <Button
-                    key={attachment.id}
-                    className="pc-secure-download"
-                    size="xs"
-                    onClick={() => void saveEncryptedAttachment(attachment.url)}
-                >
-                    Download {attachment.filename}
-                </Button>
-            ))}
-        </div>;
-    }
-    if (status.status === "idle") return null;
+    if (status.status === "ready" || status.status === "idle") return null;
     if (status.status === "failed") {
         return (
             <div className="pc-secure-card-actions">
@@ -2504,7 +2536,7 @@ function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: 
     }
     return (
         <BaseText size="xs">
-            Authenticating and decrypting attachments locally…
+            Loading encrypted previews…
         </BaseText>
     );
 }
@@ -2525,6 +2557,13 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         : undefined;
     const visiblePlaintext = result?.status === "decrypted" ? result.plaintext : optimisticPlaintext;
     const inlineEmbedStatus = encryptedMessageInlineEmbedStatus(message);
+    const embedOnly = visiblePlaintext !== undefined && (result?.status === "decrypted"
+        ? result.attachmentBundle === null && result.stickers.length === 0
+        : !result && message.attachments.length === 0 && message.stickerItems.length === 0) &&
+        shouldHideSecureEmbedOnlyPlaintext(visiblePlaintext, inlineEmbedStatus);
+    const renderedPlaintext = captureProtection === "ready" && !embedOnly && (!result || result.status === "decrypted")
+        ? visiblePlaintext : undefined;
+    const parsedPlaintext = useMemo(() => renderedPlaintext ? Parser.parse(renderedPlaintext) : null, [renderedPlaintext]);
     const mentionsLocalUser = Boolean(localUserId && message.author?.id && encryptedMessageMentionsUser(
         message.content,
         { channelId: message.channel_id, discordAuthorId: message.author.id },
@@ -2537,18 +2576,13 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
     const groupFlags = useStateFromStores([MessageStore], () => {
         if (!localUserId) return 0;
         const messages = (MessageStore.getMessages(message.channel_id)?._array ?? []) as Message[];
-        return secureMessageGroupFlags(message, messages, (previous, next) => {
-            const previousResult = getCachedDecryption(localUserId, previous);
-            const nextResult = getCachedDecryption(localUserId, next);
-            if (!previousResult || previousResult.status !== "decrypted" ||
-                !nextResult || nextResult.status !== "decrypted")
-                return false;
-            return previousResult.attachmentBundle === null && previousResult.stickers.length === 0 &&
-                extractSecureEmbedUrls(previousResult.plaintext).length === 0 &&
-                nextResult.attachmentBundle === null && nextResult.stickers.length === 0 &&
-                extractSecureEmbedUrls(nextResult.plaintext).length === 0;
-        }, candidate => candidate.id === message.id && nativeGroupStart === true
-            ? true
+        return secureMessageGroupFlags(message, messages, (previous, next) => [previous, next].every(candidate => {
+            const cached = getCachedDecryption(localUserId, candidate);
+            return canGroupSecureMessageContent(cached, !cached && candidate.author?.id === localUserId
+                ? getOptimisticOutgoingPlaintextForGrouping(candidate.content)
+                : undefined);
+        }), candidate => candidate.id === message.id && nativeGroupStart !== undefined
+            ? nativeGroupStart
             : observedNativeMessageGroupStart(message.channel_id, candidate.id));
     }, [groupingRevision, key, nativeGroupStart, result]);
     const cardClassName = classes(
@@ -2569,7 +2603,7 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
     useLayoutEffect(() => {
         const messageElement = cardRef.current?.closest<HTMLElement>('[id^="chat-messages-"]');
         if (!messageElement) return;
-        const detectedGroupStart = nativeGroupStart === true ||
+        const detectedGroupStart = nativeGroupStart ??
             Boolean(messageElement.querySelector('[id^="message-username-"]'));
         setNativeMessageGroupStartObservation(message.channel_id, message.id, groupStartObservationOwner, detectedGroupStart);
         return () => removeNativeMessageGroupStartObservation(message.channel_id, message.id, groupStartObservationOwner);
@@ -2615,11 +2649,9 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
     }
 
     if (!result && optimisticPlaintext !== undefined) {
-        const embedOnly = message.attachments.length === 0 && message.stickerItems.length === 0 &&
-            shouldHideSecureEmbedOnlyPlaintext(optimisticPlaintext, inlineEmbedStatus);
         return (
             <div ref={cardRef} className={embedOnly ? embedOnlyClassName : cardClassName} hidden={embedOnly}>
-                {!embedOnly && optimisticPlaintext && <div className="pc-secure-card-plaintext">{Parser.parse(optimisticPlaintext)}</div>}
+                {!embedOnly && optimisticPlaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
             </div>
         );
     }
@@ -2631,11 +2663,9 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         );
     }
     if (result.status === "decrypted") {
-        const embedOnly = result.attachmentBundle === null && result.stickers.length === 0 &&
-            shouldHideSecureEmbedOnlyPlaintext(result.plaintext, inlineEmbedStatus);
         return (
             <div ref={cardRef} className={embedOnly ? embedOnlyClassName : cardClassName} hidden={embedOnly}>
-                {!embedOnly && result.plaintext && <div className="pc-secure-card-plaintext">{Parser.parse(result.plaintext)}</div>}
+                {!embedOnly && result.plaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
                 {!embedOnly && <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />}
             </div>
         );
@@ -2913,8 +2943,8 @@ export default definePlugin({
         {
             find: '"MessageManager"',
             replacement: {
-                match: /(?<="MessageManager"\);)function \i\(\i\)\{/,
-                replace: "$&if($self.shouldSuppressChatLoad({channelId:arguments[0]?.channelId}))return;",
+                match: /(?<="MessageManager"\);)function (\i)\(\i\)\{/,
+                replace: "$&if($self.shouldSuppressChatLoad(arguments[0]))return $self.deferChatLoad(arguments[0],()=>$1.apply(this,arguments));",
             },
         },
         {
@@ -2939,6 +2969,27 @@ export default definePlugin({
             replacement: {
                 match: /(\i)=(\i)\.A\.toURLSafe\((\i)\.proxy_url\)/,
                 replace: "$1=$self.encryptedMediaProxyUrl($3.proxy_url)??$2.A.toURLSafe($3.proxy_url)",
+            },
+        },
+        {
+            find: "#{intl::IMG_ALT_ATTACHMENT_FILE_TYPE}",
+            replacement: {
+                match: /null!=(\i)&&\1\(\)(?=\]\}\)\})/,
+                replace: "$self.encryptedFileActions(arguments[0].url,$1)",
+            },
+        },
+        {
+            find: /getDefaultLinkInterceptor.{0,150}MEDIA_DOWNLOAD_BUTTON_TAPPED/,
+            replacement: {
+                match: /(getDefaultLinkInterceptor\((\i)\),\[\2\]\),\i=\i\.useCallback\((\i)=>\{)/,
+                replace: "$1if($self.downloadEncryptedAttachment($3.currentTarget?.href,$3))return;",
+            },
+        },
+        {
+            find: "discord-web-video-player-download-btn",
+            replacement: {
+                match: /(MEDIA_DOWNLOAD_BUTTON_TAPPED,\{[^}]{0,150}\}\),)window\.open\((\i),"_blank"\)/,
+                replace: "$1($self.downloadEncryptedAttachment($2)||window.open($2,\"_blank\"))",
             },
         },
         {
@@ -3067,7 +3118,7 @@ export default definePlugin({
         chatAccessGateEnabled = false;
         chatAccessGeneration++;
         chatAccessCache = { status: "pending", localUserId: null };
-        suppressedChatLoadChannelIds.clear();
+        cancelSuppressedChatLoads();
         closeChatUnlockPrompt();
         refreshChatGateRenderers();
         screenCaptureProtectionGeneration++;
@@ -3107,8 +3158,10 @@ export default definePlugin({
     },
 
     shouldSuppressChatLoad(target: Channel | { channelId: string; }) {
-        return suppressChatLoad(target);
+        return chatGateReason(target) !== null;
     },
+
+    deferChatLoad,
 
     renderChatGate(channel: Channel, owner?: { forceUpdate(): void; }) {
         if (owner) chatGateRenderOwners.add(owner);
@@ -3123,6 +3176,21 @@ export default definePlugin({
 
     getEncryptedMediaAttachments(message: Message) {
         return encryptedMediaAttachments(message);
+    },
+
+    encryptedFileActions(url: unknown, original?: () => ReactNode) {
+        const content = original?.();
+        if ((content == null || content === false) && typeof url === "string" && isEncryptedAttachmentDownloadUrl(url))
+            return <NativeAttachmentDownload href={url} mimeType={["application", "octet-stream"]} />;
+        return content;
+    },
+
+    downloadEncryptedAttachment(value: unknown, event?: Pick<MouseEvent, "preventDefault" | "stopPropagation">) {
+        if (typeof value !== "string" || !isEncryptedAttachmentDownloadUrl(value)) return false;
+        event?.preventDefault();
+        event?.stopPropagation();
+        void saveEncryptedAttachment(value);
+        return true;
     },
 
     encryptedMediaProxyUrl(value: string) {
