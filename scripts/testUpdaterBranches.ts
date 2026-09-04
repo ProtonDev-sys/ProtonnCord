@@ -39,6 +39,7 @@ async function testUpdaterControls(): Promise<void> {
     }
     const settings = { updateBranch: "main" };
     const calls: string[] = [];
+    const openedRoutes: string[] = [];
     let states: unknown[] = [];
     let cursor = 0;
     let remoteChanges = [{ hash: "b".repeat(40), author: "Fixture", message: "Update" }];
@@ -52,6 +53,7 @@ async function testUpdaterControls(): Promise<void> {
             return [states[index], (value: unknown) => { states[index] = value; }];
         },
         Select: "Select", ConfirmModal: "ConfirmModal",
+        SettingsRouter: { openUserSettings: (route: string) => { openedRoutes.push(route); } },
         Toasts: { show: () => undefined, genId: () => "fixture", Type: {}, Position: {} },
         openModal(factory: (props: object) => Element) {
             const modal = factory({});
@@ -64,6 +66,7 @@ async function testUpdaterControls(): Promise<void> {
         "@shared/Updater": { UPDATER_BRANCHES },
         "@utils/margins": { Margins: {} },
         "@utils/misc": { classes: () => "" },
+        "@utils/Logger": { Logger: class { debug() {} } },
         "@utils/native": { relaunch: () => assert.fail("The test must not restart Discord") },
         "@webpack/common": common,
         "~git-hash": { default: "a".repeat(40) },
@@ -112,6 +115,11 @@ async function testUpdaterControls(): Promise<void> {
     const updater = await load("src/utils/updater.ts");
     mocks["@utils/updater"] = updater;
     const components = await load("src/components/settings/tabs/updater/Components.tsx");
+    const routes = await load("src/equicordplugins/commandPalette/commands/openSettings.ts");
+    for (const route of ["equicord_updater", "equicord_changelog", "equicord_changelog_panel"])
+        await (routes.openSettingsPage as (route: string) => Promise<boolean>)(route);
+    assert.deepEqual(openedRoutes, Array(3).fill("equicord_updater_panel"),
+        "old changelog and updater commands open the same Updates page");
     const render = (disabled = false) => {
         cursor = 0;
         return (components.Updatable as (props: object) => Element)({ repo: "https://example.invalid", repoPending: false, disabled });
@@ -334,6 +342,13 @@ async function main(): Promise<void> {
     assert.match(updaterSettings, /Main \(stable\)/u);
     assert.match(updaterSettings, /Staging \(tested previews\)/u);
     assert.match(updaterSettings, /Nightly \(latest previews\)/u);
+
+    const settingsNavigation = await readFile(new URL("../src/plugins/_core/settings.tsx", import.meta.url), "utf8");
+    assert.doesNotMatch(settingsNavigation, /key: "equicord_changelog"/u,
+        "updates and changelog must share one sidebar entry");
+    assert.match(settingsNavigation, /key: "equicord_updater",\s*title: "Updates"/u);
+    assert.match(changelogSettings, /<UpdatePreferences\s*\/>/u,
+        "the combined page retains automatic-update preferences");
 
     console.log("updater branch-channel checks passed");
 }
