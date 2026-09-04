@@ -44,7 +44,8 @@ export function chooseFile(mimeTypes: string) {
         input.type = "file";
         input.style.display = "none";
         input.accept = mimeTypes;
-        input.onchange = async () => {
+        input.oncancel = () => resolve(null);
+        input.onchange = () => {
             resolve(input.files?.[0] ?? null);
         };
 
