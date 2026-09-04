@@ -2648,10 +2648,12 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         );
     }
 
-    if (!result && optimisticPlaintext !== undefined) {
+    if (result?.status === "decrypted" || !result && optimisticPlaintext !== undefined) {
         return (
             <div ref={cardRef} className={embedOnly ? embedOnlyClassName : cardClassName} hidden={embedOnly}>
-                {!embedOnly && optimisticPlaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
+                {!embedOnly && visiblePlaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
+                {!embedOnly && result?.status === "decrypted" &&
+                    <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />}
             </div>
         );
     }
@@ -2662,15 +2664,6 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
             </div>
         );
     }
-    if (result.status === "decrypted") {
-        return (
-            <div ref={cardRef} className={embedOnly ? embedOnlyClassName : cardClassName} hidden={embedOnly}>
-                {!embedOnly && result.plaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
-                {!embedOnly && <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />}
-            </div>
-        );
-    }
-
     return (
         <div ref={cardRef} className="pc-secure-card pc-secure-card-danger pc-secure-replaces-content">
             <div className="pc-secure-card-header"><LockIcon color="var(--status-danger)" /> Encrypted message blocked</div>
