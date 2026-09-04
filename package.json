@@ -41,7 +41,7 @@
         "testPrimaryStreamAudio": "tsx scripts/testPrimaryStreamAudio.ts",
         "testNewPluginsManager": "tsx scripts/testNewPluginsManager.ts",
         "testClientsideGuildIcons": "tsx scripts/testClientsideGuildIcons.ts",
-        "testCoreUtilities": "tsx --test scripts/testCoreUtilities.ts",
+        "testCoreUtilities": "tsx --test scripts/testCoreUtilities.ts scripts/testChooseFile.ts scripts/testUseIntersection.ts",
         "testRenderPerformance": "tsx scripts/testNotificationPerformance.ts --check && tsx scripts/benchmarkSecureMessagingMentions.ts --check && tsx scripts/benchmarkTimezones.ts --check",
         "testPromiseTimeout": "tsx scripts/testPromiseTimeout.ts",
         "testUpdaterClassification": "tsx scripts/testUpdaterClassification.ts",
