@@ -32,11 +32,13 @@ interface MutableCloudUpload extends CloudUpload {
 }
 
 interface UploadSource {
+    description: string | null;
     durationSecs: number | undefined;
     encryptedFile?: File;
     file: File;
     filename: string;
     mimeType: string;
+    spoiler: boolean;
     waveform: string | undefined;
 }
 
@@ -179,17 +181,19 @@ function sourceForUpload(upload: CloudUpload): UploadSource {
     if (existing?.encryptedFile === currentFile) return existing;
 
     const source = {
+        description: upload.description,
         durationSecs: upload.durationSecs,
         file: currentFile,
         filename: upload.filename || currentFile.name,
         mimeType: currentFile.type || upload.mimeType || "application/octet-stream",
+        spoiler: upload.spoiler,
         waveform: upload.waveform,
     };
     uploadSources.set(upload, source);
     return source;
 }
 
-async function metadataForUpload(upload: CloudUpload, source: UploadSource): Promise<AttachmentMetadata> {
+async function metadataForUpload(source: UploadSource): Promise<AttachmentMetadata> {
     const providedDuration = validMediaDuration(source.durationSecs);
     const metadata = providedDuration !== null && source.file.type.startsWith("audio/")
         ? { duration: providedDuration, height: null, width: null }
@@ -198,8 +202,8 @@ async function metadataForUpload(upload: CloudUpload, source: UploadSource): Pro
         name: source.filename,
         mimeType: source.mimeType,
         size: source.file.size,
-        spoiler: upload.spoiler,
-        description: upload.description,
+        spoiler: source.spoiler,
+        description: source.description,
         width: metadata.width,
         height: metadata.height,
         duration: providedDuration ?? metadata.duration,
@@ -227,7 +231,7 @@ export async function prepareEncryptedAttachments(
     if (detachedTextIndex !== null && (!Number.isInteger(detachedTextIndex) ||
         detachedTextIndex < 0 || detachedTextIndex >= uploads.length || sources[detachedTextIndex].file.size > MAX_DETACHED_TEXT_BYTES))
         throw new Error("The encrypted message text attachment is invalid or too large");
-    const metadata = await Promise.all(uploads.map((upload, index) => metadataForUpload(upload, sources[index])));
+    const metadata = await Promise.all(sources.map(metadataForUpload));
     if (detachedTextIndex !== null) {
         metadata[detachedTextIndex] = {
             name: DETACHED_TEXT_FILENAME,
@@ -256,7 +260,6 @@ export async function prepareEncryptedAttachments(
     const ciphertexts: Uint8Array[] = [];
     try {
         for (let index = 0; index < uploads.length; index++) {
-            const upload = uploads[index];
             const source = sources[index];
             const plaintext = new Uint8Array(await source.file.arrayBuffer());
             try {
@@ -290,6 +293,8 @@ export async function prepareEncryptedAttachments(
                     const { encryptedFile, filename, upload } = replacements[index];
                     sources[index].encryptedFile = encryptedFile;
                     upload.item.file = encryptedFile;
+                    upload.spoiler = false;
+                    upload.description = null;
                     upload.setFilename(filename);
                     upload.mimeType = encryptedFile.type;
                     upload.classification = "unknown";
