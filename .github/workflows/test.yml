@@ -35,6 +35,9 @@ jobs:
             - name: Test Secure Messaging crypto caches
               run: pnpm exec tsx scripts/testSecureMessagingCryptoCache.ts
 
+            - name: Test Secure Messaging cache lifecycle
+              run: pnpm exec tsx --test scripts/testSecureMessagingCaches.ts
+
             - name: Test Secure Messaging layout stability
               run: pnpm exec tsx scripts/testSecureMessagingLayoutStability.ts
 

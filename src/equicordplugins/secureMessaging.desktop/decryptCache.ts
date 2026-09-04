@@ -120,7 +120,7 @@ function ensureEntry(localUserId: string, message: Message): [string, DecryptCac
     };
     cache.set(key, entry);
     const generation = cacheGeneration;
-    entry.promise = decryptWithRetry(localUserId, message, generation, () => cache.get(key) === entry).then(result => {
+    entry.promise = decryptWithRetry(localUserId, message, generation, () => cache.get(key) === entry).catch(failedDecryption).then(result => {
         if (generation === cacheGeneration && cache.get(key) === entry) {
             const settledAt = Date.now();
             entry.expiresAt = isTransientFailure(result)
