@@ -9,8 +9,25 @@ import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 
 import { Logger } from "../src/utils/Logger";
+import { mergeDefaults } from "../src/utils/mergeDefaults";
 import { Queue } from "../src/utils/Queue";
 import { TTLMap } from "../src/utils/TTLMap";
+
+test("mergeDefaults preserves null defaults and existing scalar values", () => {
+    interface Values {
+        reference?: null | { id: string; };
+        nested?: { optional?: string | null; enabled?: boolean; count?: number; label?: string; };
+        items?: number[];
+    }
+    const defaults: Values = { reference: null, nested: { optional: null, enabled: true, count: 5, label: "default" }, items: [1] };
+    const empty: Values = {};
+    assert.equal(mergeDefaults(empty, defaults), empty);
+    assert.deepEqual(empty, defaults, "missing nullable fields must not become empty objects");
+    const existing: Values = { reference: { id: "message" }, nested: { optional: null, enabled: false, count: 0, label: "" }, items: [] };
+    assert.deepEqual(mergeDefaults(existing, defaults), {
+        reference: { id: "message" }, nested: { optional: null, enabled: false, count: 0, label: "" }, items: [],
+    });
+});
 
 test("TTLMap expires once and removes the entry before notifying", t => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
