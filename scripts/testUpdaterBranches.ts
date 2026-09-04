@@ -324,13 +324,12 @@ async function main(): Promise<void> {
     assert.match(workflow, /tag="latest"/u);
     assert.match(workflow, /--prerelease/u);
 
-    const changelogSettings = await readFile(new URL(
-        "../src/components/settings/tabs/changelog/index.tsx",
+    const updatesPage = await readFile(new URL(
+        "../src/components/settings/tabs/updater/index.tsx",
         import.meta.url,
     ), "utf8");
-    assert.match(changelogSettings, /<Updatable/u, "Changelog must expose install controls, not only fetch commits");
-    assert.doesNotMatch(changelogSettings, /updater\.getUpdates\(\)/u,
-        "Changelog checks must not silently default to main");
+    assert.match(updatesPage, /<Updatable key=\{settings\.updateBranch\}/u,
+        "switching branches must remount the update controls and clear stale results");
     const updaterSettings = await readFile(new URL(
         "../src/components/settings/tabs/updater/Components.tsx",
         import.meta.url,
@@ -345,10 +344,10 @@ async function main(): Promise<void> {
 
     const settingsNavigation = await readFile(new URL("../src/plugins/_core/settings.tsx", import.meta.url), "utf8");
     assert.doesNotMatch(settingsNavigation, /key: "equicord_changelog"/u,
-        "updates and changelog must share one sidebar entry");
+        "the removed changelog must not have a sidebar entry");
     assert.match(settingsNavigation, /key: "equicord_updater",\s*title: "Updates"/u);
-    assert.match(changelogSettings, /<UpdatePreferences\s*\/>/u,
-        "the combined page retains automatic-update preferences");
+    assert.match(updatesPage, /<UpdatePreferences\s*\/>/u,
+        "the updates page retains automatic-update preferences");
 
     console.log("updater branch-channel checks passed");
 }

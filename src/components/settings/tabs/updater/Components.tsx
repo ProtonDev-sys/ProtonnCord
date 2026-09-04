@@ -84,7 +84,7 @@ export function Newer(props: CommonProps) {
     );
 }
 
-export function Updatable(props: CommonProps & { disabled?: boolean; onBusyChange?(busy: boolean): void; }) {
+export function Updatable(props: CommonProps & { disabled?: boolean; }) {
     const settings = useSettings(["updateBranch"]);
     const [updates, setUpdates] = useState(changes);
     const [isChecking, setIsChecking] = useState(false);
@@ -92,10 +92,6 @@ export function Updatable(props: CommonProps & { disabled?: boolean; onBusyChang
     const [hasChecked, setHasChecked] = useState(false);
     const busy = isUpdating || isChecking;
     const disabled = props.disabled || busy;
-
-    React.useEffect(() => {
-        props.onBusyChange?.(busy);
-    }, [busy, props.onBusyChange]);
 
     const isOutdated = (updates?.length ?? 0) > 0;
 
