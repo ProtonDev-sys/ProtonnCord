@@ -39,7 +39,7 @@ export const equicordCommands: PaletteCommand[] = [
         id: "equicord.updater",
         title: "Open Updates",
         section: SECTION,
-        keywords: ["update", "updater", "version", "changelog", "news", "whats new"],
+        keywords: ["update", "updater", "version"],
         icon: BoltIcon,
         actions: [{
             id: "run",

@@ -32,7 +32,7 @@ export const DISCORD_SETTINGS_ROUTES: SettingsRoute[] = [
     { route: "equicord_main", label: "Equicord", keywords: ["vencord"] },
     { route: "equicord_plugins", label: "Equicord Plugins", keywords: ["plugins"] },
     { route: "equicord_themes", label: "Equicord Themes", keywords: ["themes", "css"] },
-    { route: "equicord_updater", label: "Protonn Cord Updates", keywords: ["update", "changelog", "news"] }
+    { route: "equicord_updater", label: "Protonn Cord Updates", keywords: ["update"] }
 ];
 
 const ROUTE_ALIASES = new Map<string, string[]>([
