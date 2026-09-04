@@ -4,19 +4,19 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { sleep } from "@utils/misc";
 import type { Embed, Message } from "@vencord/discord-types";
 import { findByCodeLazy } from "@webpack";
 import { Constants, RestAPI, UserStore } from "@webpack/common";
 
 import type { SecureStickerItem } from "./attachments";
-import { decryptCachedMessage } from "./decryptCache";
+import { decryptCachedMessage, decryptCacheKey } from "./decryptCache";
 import {
     extractSecureEmbedUrls,
     isSecureInlineMediaEmbedType,
     type SecureInlineEmbedStatus,
 } from "./embedUrls";
 import { preserveEncryptedMessageScroll } from "./layoutStability";
-import { discordEditedTimestamp } from "./messageMetadata";
 import type { DecryptIncomingResult } from "./native";
 import { isEncryptedMessage } from "./protocol";
 import { createTaskQueue } from "./taskQueue";
@@ -57,7 +57,7 @@ const runUnfurlTask = createTaskQueue(4);
 let cacheGeneration = 0;
 
 function cacheKey(message: Message): string {
-    return `${UserStore.getCurrentUser()?.id ?? ""}\0${message.channel_id}\0${message.id}\0${message.author?.id ?? ""}\0${discordEditedTimestamp(message) ?? ""}\0${message.content}`;
+    return `${decryptCacheKey(UserStore.getCurrentUser()?.id ?? "", message)}\0${message.flags & EMBED_SUPPRESSED}`;
 }
 
 function cloneWithEmbeds(message: Message, embeds: Embed[]): Message {
@@ -77,8 +77,10 @@ function cloneWithStickers(message: Message, stickers: SecureStickerItem[]): Mes
 }
 
 function notify(message: Message, entry: EmbedCacheEntry): void {
+    const listeners = [...entry.listeners];
+    entry.listeners.clear();
     preserveEncryptedMessageScroll(message, () => {
-        for (const listener of entry.listeners) {
+        for (const listener of listeners) {
             try {
                 listener();
             } catch {
@@ -86,7 +88,6 @@ function notify(message: Message, entry: EmbedCacheEntry): void {
             }
         }
     });
-    entry.listeners.clear();
 }
 
 function pruneCache(protectedKey: string, maximumEntries = MAX_CACHE_ENTRIES): void {
@@ -123,7 +124,7 @@ async function requestUnfurl(
 ): Promise<Record<string, unknown>[]> {
     for (const retryDelay of UNFURL_RETRY_DELAYS) {
         if (generation !== cacheGeneration || !isCurrent()) break;
-        if (retryDelay > 0) await new Promise(resolve => setTimeout(resolve, retryDelay));
+        if (retryDelay > 0) await sleep(retryDelay);
         if (generation !== cacheGeneration || !isCurrent()) break;
         const embeds = await runUnfurlTask(async () => {
             if (generation !== cacheGeneration || !isCurrent()) return [];
@@ -180,8 +181,15 @@ async function unfurlEmbeds(urls: string[]): Promise<Record<string, unknown>[]> 
     return (await Promise.all(urls.map(unfurlUrl))).flat();
 }
 
+function entryIsCurrent(message: Message, key: string, entry: EmbedCacheEntry): boolean {
+    if (cache.get(key) !== entry) return false;
+    if (cacheKey(message) === key) return true;
+    cache.delete(key);
+    return false;
+}
+
 function finishEntry(message: Message, key: string, entry: EmbedCacheEntry, expiresAt = Number.POSITIVE_INFINITY): void {
-    if (cache.get(key) !== entry) return;
+    if (!entryIsCurrent(message, key, entry)) return;
     entry.expiresAt = expiresAt;
     entry.lastAccess = Date.now();
     entry.status = "ready";
@@ -199,9 +207,10 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
     try {
         decrypted = await decryptCachedMessage(localUserId, message);
     } catch {
-        finishEntry(message, key, entry);
+        finishEntry(message, key, entry, Date.now() + TRANSIENT_ENTRY_TTL);
         return;
     }
+    if (!entryIsCurrent(message, key, entry)) return;
     if (decrypted.status !== "decrypted") {
         finishEntry(
             message,
@@ -213,16 +222,17 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
         );
         return;
     }
-    if (cache.get(key) !== entry) return;
     entry.stickers = decrypted.stickers ?? [];
-    const urls = extractSecureEmbedUrls(decrypted.plaintext);
+    const urls = (message.flags & EMBED_SUPPRESSED) !== 0 ? [] : extractSecureEmbedUrls(decrypted.plaintext);
     if (urls.length === 0) {
         finishEntry(message, key, entry);
         return;
     }
+    if (entry.stickers.length > 0) notify(message, entry);
+    if (!entryIsCurrent(message, key, entry)) return;
     // Matching Discord's native previews requires disclosing only the extracted URLs to its unfurl service.
     const rawEmbeds = await unfurlEmbeds(urls);
-    if (cache.get(key) !== entry) return;
+    if (!entryIsCurrent(message, key, entry)) return;
     const converted: Embed[] = [];
     for (const rawEmbed of rawEmbeds) {
         try {
@@ -236,13 +246,13 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
             // One malformed response must not hide other Discord-provided embeds.
         }
     }
-    if (cache.get(key) !== entry) return;
+    if (!entryIsCurrent(message, key, entry)) return;
     entry.embeds = converted;
     finishEntry(
         message,
         key,
         entry,
-        rawEmbeds.length > 0 ? Date.now() + SUCCESSFUL_UNFURL_TTL : Date.now() + EMPTY_UNFURL_TTL,
+        converted.length > 0 ? Date.now() + SUCCESSFUL_UNFURL_TTL : Date.now() + EMPTY_UNFURL_TTL,
     );
 }
 
@@ -291,7 +301,7 @@ export function patchEncryptedMessageStickers(message: Message, onReady: () => v
     const entry = ensureEntry(message);
     if (!entry) return message;
     if (entry.status === "loading") entry.listeners.add(onReady);
-    return cloneWithStickers(message, entry.status === "ready" ? entry.stickers : []);
+    return cloneWithStickers(message, entry.stickers);
 }
 
 export function clearEncryptedEmbedCache(): void {
