@@ -12,6 +12,8 @@ import type { CloudUpload } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 
 import {
+    attachmentBundleRootFromDigests,
+    attachmentCiphertextDigest,
     decryptAttachmentBytes,
     DETACHED_TEXT_FILENAME,
     DETACHED_TEXT_MIME_TYPE,
@@ -101,6 +103,16 @@ test("applying encrypted uploads removes public metadata while preserving authen
     prepared.apply();
     assertOpaque(value);
     const opened = await openAttachment(prepared, value.item.file);
+    const descriptor = parseSecurePlaintext(prepared.plaintext).attachments;
+    assert.ok(descriptor?.manifest);
+    assert.deepEqual(descriptor.manifest, [{
+        digest: await attachmentCiphertextDigest(new Uint8Array(await value.item.file.arrayBuffer())),
+        name: originalFile.name,
+        preview: false,
+        spoiler: true,
+        size: originalFile.size,
+    }]);
+    assert.equal(await attachmentBundleRootFromDigests(descriptor.id, descriptor.manifest.map(entry => entry.digest)), descriptor.root);
     assert.equal(opened.metadata.description, privateDescription);
     assert.equal(opened.metadata.spoiler, true);
     assert.equal(opened.metadata.name, originalFile.name);
