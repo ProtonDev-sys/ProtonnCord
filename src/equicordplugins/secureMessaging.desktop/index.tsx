@@ -563,7 +563,12 @@ let guardedFetchMessages: FetchMessages | null = null;
 let unlockPromptKey: string | null = null;
 let unlockPromptChannelId: string | null = null;
 const chatGateRenderOwners = new Set<{ forceUpdate(): void; }>();
-const suppressedChatLoadChannelIds = new Set<string>();
+const suppressedChatLoads = new Set<{
+    channelId: string;
+    localUserId: string | null;
+    resume(): void;
+    cancel(): void;
+}>();
 
 function secureOperationIsCurrent(generation: number, localUserId?: string): boolean {
     return generation === secureOperationGeneration &&
@@ -889,22 +894,42 @@ function refreshChatGateRenderers(): void {
     ChannelStore.emitChange();
 }
 
+function cancelSuppressedChatLoads(): void {
+    for (const load of suppressedChatLoads) load.cancel();
+    suppressedChatLoads.clear();
+}
+
 function resumeSuppressedChatLoads(): void {
-    for (const channelId of suppressedChatLoadChannelIds) {
-        const target = ChannelStore.getChannel(channelId) ?? { channelId };
-        if (chatGateReason(target)) continue;
-        suppressedChatLoadChannelIds.delete(channelId);
-        if (originalFetchMessages)
-            void Reflect.apply(originalFetchMessages, MessageActions, [{ channelId }]);
+    for (const load of suppressedChatLoads) {
+        if (load.localUserId !== (UserStore.getCurrentUser()?.id ?? null)) {
+            suppressedChatLoads.delete(load);
+            load.cancel();
+            continue;
+        }
+        if (chatGateReason({ channelId: load.channelId })) continue;
+        suppressedChatLoads.delete(load);
+        load.resume();
     }
 }
 
-function suppressChatLoad(target: Channel | { channelId: string; }): boolean {
-    const channel = chatGateChannel(target);
-    const channelId = channel?.id ?? ("channelId" in target ? target.channelId : undefined);
-    if (!channelId || chatGateReason(target) === null) return false;
-    suppressedChatLoadChannelIds.add(channelId);
-    return true;
+function deferChatLoad(options: unknown, fetch: () => unknown): Promise<unknown> | null {
+    const channelId = options && typeof options === "object" && "channelId" in options ? options.channelId : null;
+    if (typeof channelId !== "string" || chatGateReason({ channelId }) === null) return null;
+    const pending = Promise.withResolvers<unknown>();
+    suppressedChatLoads.add({
+        channelId,
+        localUserId: UserStore.getCurrentUser()?.id ?? null,
+        resume() {
+            try {
+                pending.resolve(fetch());
+            } catch (error) {
+                pending.reject(error);
+            }
+        },
+        cancel: () => pending.reject(new DOMException("The pending chat load was cancelled.", "AbortError")),
+    });
+    void pending.promise.catch(() => undefined);
+    return pending.promise;
 }
 
 function installChatLoadGuard(): void {
@@ -913,16 +938,14 @@ function installChatLoadGuard(): void {
     if (typeof original !== "function") throw new Error("Secure Messaging could not guard message loading");
     originalFetchMessages = original as FetchMessages;
     guardedFetchMessages = function (options, ...args) {
-        const channelId = options && typeof options === "object" && "channelId" in options
-            ? options.channelId
-            : null;
-        if (typeof channelId === "string" && suppressChatLoad({ channelId })) return Promise.resolve();
-        return Reflect.apply(original, this, [options, ...args]);
+        return deferChatLoad(options, () => Reflect.apply(original, this, [options, ...args]))
+            ?? Reflect.apply(original, this, [options, ...args]);
     };
     actions.fetchMessages = guardedFetchMessages;
 }
 
 function uninstallChatLoadGuard(): void {
+    cancelSuppressedChatLoads();
     const actions = MessageActions as unknown as Record<string, unknown>;
     if (guardedFetchMessages && actions.fetchMessages === guardedFetchMessages && originalFetchMessages)
         actions.fetchMessages = originalFetchMessages;
@@ -1990,7 +2013,7 @@ async function handleSecureConnectionOpen(): Promise<void> {
         secureOperationGeneration++;
         revokePreparedSecureOperations();
         activeMessageLengthBypassKey = null;
-        suppressedChatLoadChannelIds.clear();
+        cancelSuppressedChatLoads();
         try {
             await Native.lockSecurityKeyVault();
         } catch {
@@ -2909,8 +2932,8 @@ export default definePlugin({
         {
             find: '"MessageManager"',
             replacement: {
-                match: /(?<="MessageManager"\);)function \i\(\i\)\{/,
-                replace: "$&if($self.shouldSuppressChatLoad({channelId:arguments[0]?.channelId}))return;",
+                match: /(?<="MessageManager"\);)function (\i)\(\i\)\{/,
+                replace: "$&if($self.shouldSuppressChatLoad(arguments[0]))return $self.deferChatLoad(arguments[0],()=>$1.apply(this,arguments));",
             },
         },
         {
@@ -3063,7 +3086,7 @@ export default definePlugin({
         chatAccessGateEnabled = false;
         chatAccessGeneration++;
         chatAccessCache = { status: "pending", localUserId: null };
-        suppressedChatLoadChannelIds.clear();
+        cancelSuppressedChatLoads();
         closeChatUnlockPrompt();
         refreshChatGateRenderers();
         screenCaptureProtectionGeneration++;
@@ -3103,8 +3126,10 @@ export default definePlugin({
     },
 
     shouldSuppressChatLoad(target: Channel | { channelId: string; }) {
-        return suppressChatLoad(target);
+        return chatGateReason(target) !== null;
     },
+
+    deferChatLoad,
 
     renderChatGate(channel: Channel, owner?: { forceUpdate(): void; }) {
         if (owner) chatGateRenderOwners.add(owner);
