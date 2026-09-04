@@ -11,9 +11,6 @@ importers:
       '@ffmpeg/ffmpeg':
         specifier: ^0.12.10
         version: 0.12.10
-      '@ffmpeg/util':
-        specifier: ^0.12.1
-        version: 0.12.1
       '@hpke/core':
         specifier: 1.9.0
         version: 1.9.0
@@ -487,10 +484,6 @@ packages:
   '@ffmpeg/types@0.12.2':
     resolution: {integrity: sha512-NJtxwPoLb60/z1Klv0ueshguWQ/7mNm106qdHkB4HL49LXszjhjCCiL+ldHJGQ9ai2Igx0s4F24ghigy//ERdA==}
     engines: {node: '>=16.x'}
-
-  '@ffmpeg/util@0.12.1':
-    resolution: {integrity: sha512-10jjfAKWaDyb8+nAkijcsi9wgz/y26LOc1NKJradNMyCIl6usQcBbhkjX5qhALrSBcOy6TOeksunTYa+a03qNQ==}
-    engines: {node: '>=18.x'}
 
   '@hpke/common@1.10.1':
     resolution: {integrity: sha512-moJwhmtLtuxiUzzNp1jpfBfx8yefKoO9D/RCR9dmwrnc7qjJqId1rEtQz+lSlU5cabX8daToMSx/7HayXOiaFw==}
@@ -2768,8 +2761,6 @@ snapshots:
       '@ffmpeg/types': 0.12.2
 
   '@ffmpeg/types@0.12.2': {}
-
-  '@ffmpeg/util@0.12.1': {}
 
   '@hpke/common@1.10.1': {}
 
