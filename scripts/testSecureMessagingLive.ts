@@ -1928,9 +1928,10 @@ async function verifyAuthenticatedDownloadButton(page: Page, message: RawDiscord
 
     const buttonLabel = await page.evaluate(({ channelId, messageId }) => {
         const item = document.getElementById(`chat-messages-${channelId}-${messageId}`);
-        const button = item?.querySelector<HTMLButtonElement>(".pc-secure-download");
-        if (!button) throw new Error("The authenticated encrypted-attachment download button is missing");
-        const label = button.textContent ?? "";
+        const button = [...(item?.querySelectorAll<HTMLAnchorElement>("a[href^='blob:']") ?? [])]
+            .find(link => /download/iu.test(link.getAttribute("aria-label") ?? ""));
+        if (!button) throw new Error("Discord's native encrypted-attachment download control is missing");
+        const label = button.getAttribute("aria-label") ?? "";
         button.click();
         return label;
     }, { channelId: message.channelId, messageId: message.id });
@@ -2865,11 +2866,7 @@ async function main(): Promise<void> {
 
         const authenticatedDownload = await verifyAuthenticatedDownloadButton(page, attachmentSend.message);
         downloadedProofPaths.add(authenticatedDownload.downloadPath);
-        assert.equal(
-            authenticatedDownload.buttonLabel.includes(PROOF_PNG_FILENAME),
-            true,
-            "the authenticated download control must show the restored filename",
-        );
+        assert.match(authenticatedDownload.buttonLabel, /download/iu, "the native control retains Discord's download label");
         const cacheIsolation = await verifyCrossAccountRenderCacheIsolation(page, attachmentSend.message);
         assert.equal(cacheIsolation.accountSwitched, true, "the account-isolation proof must replace the active account identity");
         assert.equal(cacheIsolation.alternateAttachmentsHidden, true, "another signed-in account must not inherit decrypted attachment blobs");

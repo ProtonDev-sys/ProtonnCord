@@ -8,8 +8,9 @@ import type { CloudUpload } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 
 import {
-    attachmentBundleRoot,
+    attachmentBundleRootFromDigests,
     type AttachmentMetadata,
+    createAttachmentManifest,
     DETACHED_TEXT_FILENAME,
     DETACHED_TEXT_MIME_TYPE,
     encodedImageDimensions,
@@ -278,7 +279,8 @@ export async function prepareEncryptedAttachments(
             }
         }
 
-        const root = await attachmentBundleRoot(descriptor.id, ciphertexts);
+        const manifest = await createAttachmentManifest(ciphertexts, metadata);
+        const root = await attachmentBundleRootFromDigests(descriptor.id, manifest.map(entry => entry.digest));
         const replacements = ciphertexts.map((ciphertext, index) => {
             const filename = encryptedAttachmentFilename(descriptor.id, index);
             const encryptedFile = new File([Uint8Array.from(ciphertext).buffer], filename, {
@@ -309,7 +311,7 @@ export async function prepareEncryptedAttachments(
                 }
             },
             files: replacements.map(({ encryptedFile, filename }) => ({ filename, size: encryptedFile.size })),
-            plaintext: serializeSecurePlaintext(text, { ...descriptor, root }, stickers, detachedTextIndex),
+            plaintext: serializeSecurePlaintext(text, { ...descriptor, root, manifest }, stickers, detachedTextIndex),
             totalUploadBytes,
         };
     } finally {

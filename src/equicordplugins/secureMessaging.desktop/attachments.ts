@@ -12,6 +12,9 @@ export const LEGACY_RICH_CONTENT_PAYLOAD_PREFIX = "PCER1:";
 export const ATTACHMENT_PAYLOAD_PREFIX = "PCEA2:";
 export const RICH_CONTENT_PAYLOAD_PREFIX = "PCER2:";
 export const DETACHED_TEXT_PAYLOAD_PREFIX = "PCET1:";
+export const MANIFEST_ATTACHMENT_PAYLOAD_PREFIX = "PCEA3:";
+export const MANIFEST_RICH_CONTENT_PAYLOAD_PREFIX = "PCER3:";
+export const MANIFEST_DETACHED_TEXT_PAYLOAD_PREFIX = "PCET2:";
 export const ENCRYPTED_ATTACHMENT_EXTENSION = ".pcaf";
 export const DETACHED_TEXT_FILENAME = "message.txt";
 export const DETACHED_TEXT_MIME_TYPE = "application/vnd.protonn-cord.secure-message";
@@ -21,18 +24,33 @@ export const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_CIPHERTEXT_BYTES - 20;
 export const MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES = MAX_ATTACHMENT_CIPHERTEXT_BYTES;
 export const MAX_DETACHED_TEXT_BYTES = MAX_ATTACHMENT_BYTES;
 export const MAX_STICKER_COUNT = 3;
+export const MAX_ATTACHMENT_MANIFEST_BYTES = 768;
 
 const ATTACHMENT_VERSION = 1 as const;
 const BASE64URL_16 = /^[A-Za-z0-9_-]{22}$/u;
 const BASE64URL_32 = /^[A-Za-z0-9_-]{43}$/u;
 const MAX_ATTACHMENT_METADATA_BYTES = 8 * 1024;
 const ATTACHMENT_KDF_PREFIX = new TextEncoder().encode("ProtonnCord/SecureMessaging/v1/attachment-kdf\0");
+const PREVIEWABLE_ATTACHMENT_MIME_TYPES = new Set([
+    "audio/aac", "audio/flac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/opus", "audio/wav", "audio/webm",
+    "image/avif", "image/gif", "image/jpeg", "image/png", "image/webp",
+    "video/mp4", "video/ogg", "video/quicktime", "video/webm",
+]);
+
+export interface AttachmentManifestEntry {
+    digest: string;
+    preview: boolean;
+    spoiler: boolean;
+    size: number;
+    name: string | null;
+}
 
 export interface AttachmentBundleDescriptor {
     count: number;
     id: string;
     key: string;
     root: string;
+    manifest?: AttachmentManifestEntry[];
 }
 
 export interface AttachmentMetadata {
@@ -212,6 +230,63 @@ function validateBundleDescriptor(bundle: AttachmentBundleDescriptor): void {
         throw new Error("Attachment bundle key or root is invalid");
     decodeBase64Url(bundle.key, 32);
     decodeBase64Url(bundle.root, 32);
+    if (bundle.manifest !== undefined) {
+        if (!Array.isArray(bundle.manifest) || bundle.manifest.length !== bundle.count)
+            throw new Error("Attachment manifest count is invalid");
+        let totalSize = 0;
+        for (const entry of bundle.manifest) {
+            if (!entry || typeof entry.digest !== "string" || !BASE64URL_32.test(entry.digest) ||
+                typeof entry.preview !== "boolean" || typeof entry.spoiler !== "boolean" || !Number.isSafeInteger(entry.size) ||
+                entry.size < 1 || entry.size > MAX_ATTACHMENT_BYTES ||
+                (entry.name !== null && !validAttachmentName(entry.name)))
+                throw new Error("Attachment manifest entry is invalid");
+            decodeBase64Url(entry.digest, 32);
+            totalSize += entry.size;
+        }
+        if (totalSize > MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES ||
+            new TextEncoder().encode(JSON.stringify(compactManifest(bundle.manifest))).byteLength > MAX_ATTACHMENT_MANIFEST_BYTES)
+            throw new Error("Attachment manifest is too large");
+    }
+}
+
+export function isPreviewableAttachmentMimeType(value: string | null): boolean {
+    return PREVIEWABLE_ATTACHMENT_MIME_TYPES.has(value?.split(";", 1)[0].trim().toLowerCase() ?? "");
+}
+
+function validAttachmentName(value: unknown): value is string {
+    return typeof value === "string" && value.length >= 1 && value.length <= 255 && !/[\0-\x1f\\/]/u.test(value);
+}
+
+function compactManifest(manifest: AttachmentManifestEntry[]): Array<[string, number, number, ...string[]]> {
+    return manifest.map(entry => [entry.digest, (entry.preview ? 1 : 0) | (entry.spoiler ? 2 : 0), entry.size, ...(entry.name === null ? [] : [entry.name])]);
+}
+
+function compactBundle(bundle: AttachmentBundleDescriptor): unknown[] {
+    return [bundle.id, bundle.key, bundle.count, bundle.root, ...(bundle.manifest ? [compactManifest(bundle.manifest)] : [])];
+}
+
+function parseCompactBundle(value: unknown, manifest: boolean): AttachmentBundleDescriptor {
+    if (!Array.isArray(value) || value.length !== (manifest ? 5 : 4) ||
+        typeof value[0] !== "string" || typeof value[1] !== "string" ||
+        typeof value[2] !== "number" || typeof value[3] !== "string")
+        throw new Error("Secure attachment bundle is invalid");
+    const bundle: AttachmentBundleDescriptor = { id: value[0], key: value[1], count: value[2], root: value[3] };
+    if (manifest) {
+        if (!Array.isArray(value[4]) || value[4].length !== bundle.count || value[4].length > MAX_ATTACHMENT_COUNT)
+            throw new Error("Attachment manifest count is invalid");
+        bundle.manifest = value[4].map((entry: unknown): AttachmentManifestEntry => {
+            if (!Array.isArray(entry) || (entry.length !== 3 && entry.length !== 4) ||
+                typeof entry[0] !== "string" || !Number.isInteger(entry[1]) || entry[1] < 0 || entry[1] > 3 || typeof entry[2] !== "number" ||
+                (entry.length === 4 && typeof entry[3] !== "string"))
+                throw new Error("Attachment manifest entry is invalid");
+            return {
+                digest: entry[0], preview: (entry[1] & 1) !== 0, spoiler: (entry[1] & 2) !== 0,
+                size: entry[2], name: entry.length === 4 ? entry[3] : null,
+            };
+        });
+    }
+    validateBundleDescriptor(bundle);
+    return bundle;
 }
 
 function optionalDimension(value: unknown): value is number | null {
@@ -288,7 +363,7 @@ export function encodedImageDimensions(bytes: Uint8Array): { height: number; wid
 }
 
 export function validateAttachmentMetadata(metadata: AttachmentMetadata): void {
-    if (typeof metadata.name !== "string" || metadata.name.length < 1 || metadata.name.length > 255 || /[\0-\x1f\\/]/u.test(metadata.name))
+    if (!validAttachmentName(metadata.name))
         throw new Error("Attachment name is invalid");
     if (typeof metadata.mimeType !== "string" || metadata.mimeType.length > 255 || /[^\x20-\x7e]/u.test(metadata.mimeType))
         throw new Error("Attachment MIME type is invalid");
@@ -413,16 +488,51 @@ export async function decryptAttachmentBytes(input: {
 }
 
 export async function attachmentBundleRoot(bundleId: string, ciphertexts: Uint8Array[]): Promise<string> {
-    validateBundleId(bundleId);
     if (ciphertexts.length < 1 || ciphertexts.length > MAX_ATTACHMENT_COUNT) throw new Error("Attachment count is invalid");
-    const digests = await Promise.all(ciphertexts.map(async ciphertext => new Uint8Array(await crypto.subtle.digest("SHA-256", cryptoBytes(ciphertext)))));
+    return attachmentBundleRootFromDigests(bundleId, await Promise.all(ciphertexts.map(attachmentCiphertextDigest)));
+}
+
+export async function attachmentCiphertextDigest(ciphertext: Uint8Array): Promise<string> {
+    return encodeBase64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", cryptoBytes(ciphertext))));
+}
+
+export async function attachmentBundleRootFromDigests(bundleId: string, digests: readonly string[]): Promise<string> {
+    validateBundleId(bundleId);
+    if (digests.length < 1 || digests.length > MAX_ATTACHMENT_COUNT) throw new Error("Attachment count is invalid");
+    const decoded = digests.map(digest => {
+        if (typeof digest !== "string" || !BASE64URL_32.test(digest)) throw new Error("Attachment digest is invalid");
+        return decodeBase64Url(digest, 32);
+    });
     const root = await crypto.subtle.digest("SHA-256", cryptoBytes(concatBytes(
         new TextEncoder().encode("ProtonnCord/SecureMessaging/v1/attachment-root\0"),
         decodeBase64Url(bundleId, 16),
-        uint32(ciphertexts.length),
-        ...digests,
+        uint32(digests.length),
+        ...decoded,
     )));
     return encodeBase64Url(root);
+}
+
+export async function createAttachmentManifest(ciphertexts: Uint8Array[], metadata: AttachmentMetadata[]): Promise<AttachmentManifestEntry[]> {
+    if (ciphertexts.length < 1 || ciphertexts.length > MAX_ATTACHMENT_COUNT || ciphertexts.length !== metadata.length)
+        throw new Error("Attachment manifest count is invalid");
+    const manifest = await Promise.all(ciphertexts.map(async (ciphertext, index): Promise<AttachmentManifestEntry> => {
+        const entry = metadata[index];
+        validateAttachmentMetadata(entry);
+        return {
+            digest: await attachmentCiphertextDigest(ciphertext),
+            name: entry.name,
+            preview: isPreviewableAttachmentMimeType(entry.mimeType),
+            spoiler: entry.spoiler,
+            size: entry.size,
+        };
+    }));
+    for (let index = manifest.length - 1;
+        new TextEncoder().encode(JSON.stringify(compactManifest(manifest))).byteLength > MAX_ATTACHMENT_MANIFEST_BYTES;
+        index--) {
+        if (index < 0) throw new Error("Attachment manifest is too large");
+        manifest[index].name = null;
+    }
+    return manifest;
 }
 
 export function serializeSecurePlaintext(
@@ -438,8 +548,8 @@ export function serializeSecurePlaintext(
             detachedTextIndex < 0 || detachedTextIndex >= attachments.count)
             throw new Error("Detached secure message text is invalid");
         validateBundleDescriptor(attachments);
-        return `${DETACHED_TEXT_PAYLOAD_PREFIX}${JSON.stringify([
-            [attachments.id, attachments.key, attachments.count, attachments.root],
+        return `${attachments.manifest ? MANIFEST_DETACHED_TEXT_PAYLOAD_PREFIX : DETACHED_TEXT_PAYLOAD_PREFIX}${JSON.stringify([
+            compactBundle(attachments),
             detachedTextIndex,
             ...(stickers.length > 0 ? [stickers.map(sticker => [sticker.id, sticker.name, sticker.formatType])] : []),
         ])}`;
@@ -447,38 +557,37 @@ export function serializeSecurePlaintext(
     if (attachments === null && stickers.length === 0 &&
         !text.startsWith(ATTACHMENT_PAYLOAD_PREFIX) && !text.startsWith(RICH_CONTENT_PAYLOAD_PREFIX) &&
         !text.startsWith(DETACHED_TEXT_PAYLOAD_PREFIX) &&
+        !text.startsWith(MANIFEST_ATTACHMENT_PAYLOAD_PREFIX) && !text.startsWith(MANIFEST_RICH_CONTENT_PAYLOAD_PREFIX) &&
+        !text.startsWith(MANIFEST_DETACHED_TEXT_PAYLOAD_PREFIX) &&
         !text.startsWith(LEGACY_ATTACHMENT_PAYLOAD_PREFIX) && !text.startsWith(LEGACY_RICH_CONTENT_PAYLOAD_PREFIX)) return text;
     if (attachments) validateBundleDescriptor(attachments);
     const compactAttachment = attachments
-        ? [attachments.id, attachments.key, attachments.count, attachments.root]
+        ? compactBundle(attachments)
         : null;
     if (stickers.length > 0) {
-        return `${RICH_CONTENT_PAYLOAD_PREFIX}${JSON.stringify([
+        return `${attachments?.manifest ? MANIFEST_RICH_CONTENT_PAYLOAD_PREFIX : RICH_CONTENT_PAYLOAD_PREFIX}${JSON.stringify([
             text,
             compactAttachment,
             stickers.map(sticker => [sticker.id, sticker.name, sticker.formatType]),
         ])}`;
     }
-    return `${ATTACHMENT_PAYLOAD_PREFIX}${JSON.stringify([text, compactAttachment])}`;
+    return `${attachments?.manifest ? MANIFEST_ATTACHMENT_PAYLOAD_PREFIX : ATTACHMENT_PAYLOAD_PREFIX}${JSON.stringify([text, compactAttachment])}`;
 }
 
 export function parseSecurePlaintext(value: string): SecurePlaintext {
     if (typeof value !== "string") throw new Error("Secure plaintext is invalid");
-    if (value.startsWith(DETACHED_TEXT_PAYLOAD_PREFIX)) {
+    const manifestDetached = value.startsWith(MANIFEST_DETACHED_TEXT_PAYLOAD_PREFIX);
+    if (manifestDetached || value.startsWith(DETACHED_TEXT_PAYLOAD_PREFIX)) {
+        const prefix = manifestDetached ? MANIFEST_DETACHED_TEXT_PAYLOAD_PREFIX : DETACHED_TEXT_PAYLOAD_PREFIX;
         let parsed: unknown;
         try {
-            parsed = JSON.parse(value.slice(DETACHED_TEXT_PAYLOAD_PREFIX.length));
+            parsed = JSON.parse(value.slice(prefix.length));
         } catch {
             throw new Error("Detached secure content payload is malformed");
         }
-        if (!Array.isArray(parsed) || (parsed.length !== 2 && parsed.length !== 3) ||
-            !Array.isArray(parsed[0]) || parsed[0].length !== 4 ||
-            typeof parsed[0][0] !== "string" || typeof parsed[0][1] !== "string" ||
-            typeof parsed[0][2] !== "number" || typeof parsed[0][3] !== "string" ||
-            !Number.isInteger(parsed[1]))
+        if (!Array.isArray(parsed) || (parsed.length !== 2 && parsed.length !== 3) || !Number.isInteger(parsed[1]))
             throw new Error("Detached secure content payload is invalid");
-        const attachments = { id: parsed[0][0], key: parsed[0][1], count: parsed[0][2], root: parsed[0][3] };
-        validateBundleDescriptor(attachments);
+        const attachments = parseCompactBundle(parsed[0], manifestDetached);
         const detachedTextIndex = parsed[1] as number;
         if (detachedTextIndex < 0 || detachedTextIndex >= attachments.count)
             throw new Error("Detached secure message index is invalid");
@@ -494,18 +603,21 @@ export function parseSecurePlaintext(value: string): SecurePlaintext {
             validateStickers(stickers);
         }
         const canonical = [
-            [attachments.id, attachments.key, attachments.count, attachments.root],
+            compactBundle(attachments),
             detachedTextIndex,
             ...(stickers.length > 0 ? [stickers.map(sticker => [sticker.id, sticker.name, sticker.formatType])] : []),
         ];
-        if (JSON.stringify(canonical) !== value.slice(DETACHED_TEXT_PAYLOAD_PREFIX.length))
+        if (JSON.stringify(canonical) !== value.slice(prefix.length))
             throw new Error("Detached secure content payload is not canonical");
         return { text: "", attachments, detachedTextIndex, stickers };
     }
-    const compactRich = value.startsWith(RICH_CONTENT_PAYLOAD_PREFIX);
-    const compactAttachment = value.startsWith(ATTACHMENT_PAYLOAD_PREFIX);
+    const manifestRich = value.startsWith(MANIFEST_RICH_CONTENT_PAYLOAD_PREFIX);
+    const manifestAttachment = value.startsWith(MANIFEST_ATTACHMENT_PAYLOAD_PREFIX);
+    const compactRich = manifestRich || value.startsWith(RICH_CONTENT_PAYLOAD_PREFIX);
+    const compactAttachment = manifestAttachment || value.startsWith(ATTACHMENT_PAYLOAD_PREFIX);
     if (compactRich || compactAttachment) {
-        const prefix = compactRich ? RICH_CONTENT_PAYLOAD_PREFIX : ATTACHMENT_PAYLOAD_PREFIX;
+        const prefix = manifestRich ? MANIFEST_RICH_CONTENT_PAYLOAD_PREFIX : manifestAttachment ? MANIFEST_ATTACHMENT_PAYLOAD_PREFIX :
+            compactRich ? RICH_CONTENT_PAYLOAD_PREFIX : ATTACHMENT_PAYLOAD_PREFIX;
         let parsed: unknown;
         try {
             parsed = JSON.parse(value.slice(prefix.length));
@@ -515,14 +627,8 @@ export function parseSecurePlaintext(value: string): SecurePlaintext {
         if (!Array.isArray(parsed) || parsed.length !== (compactRich ? 3 : 2) || typeof parsed[0] !== "string")
             throw new Error("Secure content payload is invalid");
         let attachments: AttachmentBundleDescriptor | null = null;
-        if (parsed[1] !== null) {
-            if (!Array.isArray(parsed[1]) || parsed[1].length !== 4 ||
-                typeof parsed[1][0] !== "string" || typeof parsed[1][1] !== "string" ||
-                typeof parsed[1][2] !== "number" || typeof parsed[1][3] !== "string")
-                throw new Error("Secure attachment bundle is invalid");
-            attachments = { id: parsed[1][0], key: parsed[1][1], count: parsed[1][2], root: parsed[1][3] };
-            validateBundleDescriptor(attachments);
-        }
+        if (parsed[1] !== null) attachments = parseCompactBundle(parsed[1], manifestRich || manifestAttachment);
+        else if (manifestRich || manifestAttachment) throw new Error("Secure attachment manifest is missing");
         const stickers: SecureStickerItem[] = [];
         if (compactRich) {
             if (!Array.isArray(parsed[2])) throw new Error("Secure sticker list is invalid");
@@ -537,7 +643,7 @@ export function parseSecurePlaintext(value: string): SecurePlaintext {
         }
         const canonical = [
             parsed[0],
-            attachments ? [attachments.id, attachments.key, attachments.count, attachments.root] : null,
+            attachments ? compactBundle(attachments) : null,
             ...(compactRich ? [stickers.map(sticker => [sticker.id, sticker.name, sticker.formatType])] : []),
         ];
         if (JSON.stringify(canonical) !== value.slice(prefix.length)) throw new Error("Secure content payload is not canonical");

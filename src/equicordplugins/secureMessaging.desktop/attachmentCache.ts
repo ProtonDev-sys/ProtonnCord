@@ -8,6 +8,7 @@ import type { PluginNative } from "@utils/types";
 import type { Message, MessageAttachment } from "@vencord/discord-types";
 import { Constants, RestAPI, UserStore } from "@webpack/common";
 
+import { isPreviewableAttachmentMimeType } from "./attachments";
 import { exactArrayBuffer } from "./exactArrayBuffer";
 import { preserveEncryptedMessageScroll } from "./layoutStability";
 import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
@@ -28,11 +29,6 @@ const ANIMATED_FLAG = 32;
 const VOICE_MESSAGE_FLAG = 1 << 13;
 const ATTACHMENT_URL_REFRESH_THRESHOLD_MS = 60 * 60 * 1_000;
 const ALLOWED_ATTACHMENT_HOSTS = new Set(["cdn.discordapp.com", "media.discordapp.net"]);
-const SAFE_INLINE_MIME_TYPES = new Set([
-    "audio/aac", "audio/flac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/opus", "audio/wav", "audio/webm",
-    "image/avif", "image/gif", "image/jpeg", "image/png", "image/webp",
-    "video/mp4", "video/ogg", "video/quicktime", "video/webm",
-]);
 // Discord treats a missing scan version as pending and can obscure media from non-friends.
 // E2EE plaintext cannot be scanned by Discord, so use its explicit local/unscanned sentinel
 // instead of misrepresenting the ciphertext attachment's scan as applying to decrypted bytes.
@@ -108,6 +104,7 @@ interface AttachmentCacheEntry {
 
 interface DownloadReference {
     attachmentId: string;
+    downloadPromise?: Promise<DownloadIncomingAttachmentResult | null>;
     isMedia: boolean;
     localUserId: string;
     message: Message;
@@ -263,8 +260,9 @@ function attachmentDecryptKey(localUserId: string, message: Message): string {
 export function decryptIncomingAttachmentsCached(
     localUserId: string,
     message: Message,
+    selection: "all" | "previews" | "text" = "previews",
 ): Promise<DecryptIncomingAttachmentsResult> {
-    const key = attachmentDecryptKey(localUserId, message);
+    const key = `${selection}\0${attachmentDecryptKey(localUserId, message)}`;
     const existing = attachmentDecryptions.get(key);
     if (existing) return existing.promise;
 
@@ -280,7 +278,7 @@ export function decryptIncomingAttachmentsCached(
             const input = await encryptedAttachmentInput(message);
             if (generation !== attachmentDecryptGeneration || UserStore.getCurrentUser()?.id !== localUserId)
                 return { status: "failed", error: "cryptographic_operation_failed" };
-            return await Native.decryptIncomingAttachments(localUserId, input);
+            return await Native.decryptIncomingAttachments(localUserId, input, selection);
         } catch {
             return { status: "failed", error: "attachment_download_failed" };
         }
@@ -292,7 +290,7 @@ export function decryptIncomingAttachmentsCached(
 
 function safeInlineMimeType(value: string | null): string {
     const normalized = value?.split(";", 1)[0].trim().toLowerCase() ?? "";
-    return SAFE_INLINE_MIME_TYPES.has(normalized) ? normalized : "application/octet-stream";
+    return isPreviewableAttachmentMimeType(normalized) ? normalized : "application/octet-stream";
 }
 
 function requiresSecureMediaPlayer(attachment: ExtendedAttachment): boolean {
@@ -353,8 +351,7 @@ function prepareTransientRetry(entry: AttachmentCacheEntry): void {
     entry.retryAt = delay === undefined ? null : Date.now() + delay;
 }
 
-function failureReason(result: DecryptIncomingAttachmentsResult): string {
-    if (result.status === "decrypted") return "";
+function failureReason(result: Exclude<DecryptIncomingAttachmentsResult, { status: "decrypted"; }>): string {
     if (result.status === "untrusted_author") return "Verify the sender's encryption key before opening attachments.";
     if (result.status === "replay_detected") return "The encrypted attachment bundle conflicts with a previously authenticated message.";
     if (result.status === "invalid_message") return "The encrypted attachment bundle failed authentication.";
@@ -365,6 +362,15 @@ function failureReason(result: DecryptIncomingAttachmentsResult): string {
     return "The encrypted attachments could not be decrypted.";
 }
 
+function failEntry(message: Message, key: string, entry: AttachmentCacheEntry, localUserId: string, result: Exclude<DecryptIncomingAttachmentsResult, { status: "decrypted"; }>): void {
+    entry.status = { status: "failed", reason: failureReason(result) };
+    if (result.status === "failed" || result.status === "unavailable") prepareTransientRetry(entry);
+    else entry.retryAt = null;
+    notifyStatus(entry);
+    if (entry.retryAt === null) entry.renderOwners.clear();
+    scheduleRetry(message, key, entry, localUserId);
+}
+
 async function loadEntry(message: Message, key: string, entry: AttachmentCacheEntry, localUserId: string): Promise<void> {
     const result = await decryptIncomingAttachmentsCached(localUserId, message);
     if (entry.disposed) return;
@@ -373,12 +379,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
         return;
     }
     if (result.status !== "decrypted") {
-        entry.status = { status: "failed", reason: failureReason(result) };
-        if (result.status === "failed" || result.status === "unavailable") prepareTransientRetry(entry);
-        else entry.retryAt = null;
-        notifyStatus(entry);
-        if (entry.retryAt === null) entry.renderOwners.clear();
-        scheduleRetry(message, key, entry, localUserId);
+        failEntry(message, key, entry, localUserId, result);
         return;
     }
     const attachments: ExtendedAttachment[] = [];
@@ -452,6 +453,25 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
             downloadReferences.set(objectUrl, downloadReference);
             if (proxyObjectUrl !== objectUrl) downloadReferences.set(proxyObjectUrl, downloadReference);
         }
+        for (const attachment of result.deferredAttachments ?? []) {
+            const filename = attachment.name ?? `Encrypted file ${message.attachments.findIndex(value => value.id === attachment.id) + 1}`;
+            const url = URL.createObjectURL(new Blob([], { type: "application/octet-stream" }));
+            objectUrls.push(url);
+            attachments.push({
+                id: attachment.id,
+                filename,
+                content_scan_version: LOCAL_CONTENT_SCAN_VERSION,
+                content_type: "application/octet-stream",
+                size: attachment.size,
+                spoiler: attachment.spoiler ?? false,
+                flags: attachment.spoiler ? SPOILER_FLAG : 0,
+                url: `${url}#${encodeURIComponent(filename)}`,
+                proxy_url: `${url}#${encodeURIComponent(filename)}`,
+            });
+            downloadReferences.set(url, { attachmentId: attachment.id, isMedia: false, localUserId, message });
+        }
+        attachments.sort((left, right) =>
+            message.attachments.findIndex(value => value.id === left.id) - message.attachments.findIndex(value => value.id === right.id));
     } catch (error) {
         for (const objectUrl of objectUrls) {
             downloadReferences.delete(objectUrl);
@@ -481,9 +501,28 @@ function startEntryLoad(message: Message, key: string, entry: AttachmentCacheEnt
             removeEntry(key, entry);
             return;
         }
-        const requiredBytes = message.attachments.reduce((total, attachment) => total + attachment.size, 0);
+        const inspected = await Native.decryptIncoming(localUserId, {
+            channelId: message.channel_id,
+            content: message.content,
+            discordAuthorId: message.author.id,
+            discordEditedTimestamp: discordEditedTimestamp(message),
+            discordMessageId: message.id,
+            discordNonce: discordMessageNonce(message),
+        });
+        if (entry.disposed || cache.get(key) !== entry) return;
+        if (UserStore.getCurrentUser()?.id !== localUserId) {
+            removeEntry(key, entry);
+            return;
+        }
+        if (inspected.status !== "decrypted") {
+            failEntry(message, key, entry, localUserId, inspected);
+            return;
+        }
+        const manifest = inspected.attachmentBundle?.manifest;
+        const requiredBytes = manifest ? message.attachments.reduce((total, attachment, index) =>
+            total + (manifest[index]?.preview || inspected.detachedTextIndex === index ? attachment.size : 0), 0) : 0;
         pruneCache(key, requiredBytes);
-        if (!Number.isSafeInteger(requiredBytes) || requiredBytes < 1 || requiredBytes > MAX_CACHE_BYTES ||
+        if (!Number.isSafeInteger(requiredBytes) || requiredBytes < 0 || requiredBytes > MAX_CACHE_BYTES ||
             cachedBytes + inFlightBytes + requiredBytes > MAX_CACHE_BYTES) {
             entry.status = { status: "failed", reason: "The encrypted attachment cache is busy. Retry in a moment." };
             prepareTransientRetry(entry);
@@ -524,12 +563,17 @@ export async function downloadEncryptedAttachmentUrl(value: string): Promise<Dow
     const reference = downloadReferences.get(objectUrl(value));
     const localUserId = syncCacheAccount();
     if (!reference || !localUserId || reference.localUserId !== localUserId) return null;
+    if (reference.downloadPromise) return reference.downloadPromise;
     const { message, attachmentId } = reference;
-    return runAttachmentDownload(async () => {
-        if (UserStore.getCurrentUser()?.id !== localUserId) return null;
+    const generation = attachmentDecryptGeneration;
+    return reference.downloadPromise = runAttachmentDownload(async () => {
+        if (generation !== attachmentDecryptGeneration || UserStore.getCurrentUser()?.id !== localUserId ||
+            downloadReferences.get(objectUrl(value)) !== reference) return null;
         const input = await encryptedAttachmentInput(message);
-        if (UserStore.getCurrentUser()?.id !== localUserId) return null;
+        if (generation !== attachmentDecryptGeneration || UserStore.getCurrentUser()?.id !== localUserId) return null;
         return Native.downloadIncomingAttachment(localUserId, input, attachmentId);
+    }).finally(() => {
+        reference.downloadPromise = undefined;
     });
 }
 
@@ -585,13 +629,6 @@ export function patchEncryptedMessageAttachments(
 
 export function encryptedAttachmentStatus(message: Message): AttachmentCacheStatus {
     return ensureEntry(message)?.status ?? { status: "idle" };
-}
-
-export function encryptedAttachmentDownloads(message: Message): Array<{ filename: string; id: string; url: string; }> {
-    const entry = ensureEntry(message);
-    return entry?.status.status === "ready"
-        ? entry.attachments.map(attachment => ({ filename: attachment.filename, id: attachment.id, url: attachment.url }))
-        : [];
 }
 
 export function encryptedMediaAttachments(message: Message): ExtendedAttachment[] {
