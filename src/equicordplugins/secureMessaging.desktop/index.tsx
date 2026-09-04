@@ -54,6 +54,7 @@ import {
     useCallback,
     useEffect,
     useLayoutEffect,
+    useMemo,
     useRef,
     UserStore,
     useState,
@@ -69,7 +70,6 @@ import {
     clearEncryptedAttachmentCache,
     downloadEncryptedAttachmentUrl,
     encryptedAttachmentCacheKey,
-    encryptedAttachmentDownloads,
     encryptedAttachmentStatus,
     encryptedMediaAttachments,
     isEncryptedAttachmentDownloadUrl,
@@ -87,6 +87,7 @@ import {
     MAX_ATTACHMENT_COUNT,
     MAX_DETACHED_TEXT_BYTES,
     MAX_STICKER_COUNT,
+    parseSecurePlaintext,
     type SecureStickerItem,
     serializeSecurePlaintext,
 } from "./attachments";
@@ -1817,12 +1818,28 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             )
             : null;
         if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
-        let encrypted: EncryptOutgoingResult = await Native.encryptOutgoing(context.localUserId, {
-            mentionedUserIds: encryptedMentionedUserIds(plaintext, context.localUserId, conversation),
-            plaintext: preparedAttachments?.plaintext ?? serializeSecurePlaintext(plaintext, null, stickers),
-            snapshot: context.snapshot,
-        });
-        if (encrypted.status === "failed" && encrypted.error === "message_too_long" && detachedTextIndex === null) {
+        const encryptPlaintext = async (value: string): Promise<EncryptOutgoingResult> => {
+            if (!secureOperationIsCurrent(generation, context.localUserId)) return { status: "failed", error: "cryptographic_operation_failed" };
+            const result: EncryptOutgoingResult = value.length > MAX_DISCORD_MESSAGE_LENGTH
+                ? { status: "failed", error: "message_too_long" }
+                : await Native.encryptOutgoing(context.localUserId, {
+                mentionedUserIds: encryptedMentionedUserIds(plaintext, context.localUserId, conversation),
+                plaintext: value,
+                snapshot: context.snapshot,
+            });
+            if (result.status === "failed" && result.error === "message_too_long") {
+                const parsed = parseSecurePlaintext(value);
+                const bundle = parsed.attachments;
+                if (bundle?.manifest?.some(file => file.name !== null))
+                    return encryptPlaintext(serializeSecurePlaintext(parsed.text, {
+                        ...bundle, manifest: bundle.manifest.map(file => ({ ...file, name: null })),
+                    }, parsed.stickers, parsed.detachedTextIndex));
+            }
+            return result;
+        };
+        let encrypted = await encryptPlaintext(preparedAttachments?.plaintext ?? serializeSecurePlaintext(plaintext, null, stickers));
+        if (encrypted.status === "failed" && encrypted.error === "message_too_long" && detachedTextIndex === null &&
+            plaintext.length > 0 && uploads.length < MAX_ATTACHMENT_COUNT) {
             const appended = appendDetachedTextUpload(uploads, plaintext, channelId);
             if (typeof appended === "string") {
                 showToast(appended, Toasts.Type.FAILURE);
@@ -1840,11 +1857,16 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
                 uploadLimitBytes,
             );
             if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
-            encrypted = await Native.encryptOutgoing(context.localUserId, {
-                mentionedUserIds: encryptedMentionedUserIds(plaintext, context.localUserId, conversation),
-                plaintext: preparedAttachments.plaintext,
-                snapshot: context.snapshot,
-            });
+            encrypted = await encryptPlaintext(preparedAttachments.plaintext);
+        }
+        if (encrypted.status === "failed" && encrypted.error === "message_too_long" && preparedAttachments) {
+            const parsed = parseSecurePlaintext(preparedAttachments.plaintext);
+            const bundle = parsed.attachments;
+            if (bundle?.manifest) {
+                encrypted = await encryptPlaintext(serializeSecurePlaintext(
+                    parsed.text, { ...bundle, manifest: undefined }, parsed.stickers, parsed.detachedTextIndex,
+                ));
+            }
         }
         if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         if (encrypted.status !== "encrypted") {
@@ -2497,23 +2519,7 @@ function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: 
     }
     if (expectedCount === 0) return null;
     const status = encryptedAttachmentStatus(message);
-    if (status.status === "ready") {
-        const downloads = encryptedAttachmentDownloads(message);
-        if (downloads.length === 0) return null;
-        return <div className="pc-secure-card-actions">
-            {downloads.map(attachment => (
-                <Button
-                    key={attachment.id}
-                    className="pc-secure-download"
-                    size="xs"
-                    onClick={() => void saveEncryptedAttachment(attachment.url)}
-                >
-                    Download {attachment.filename}
-                </Button>
-            ))}
-        </div>;
-    }
-    if (status.status === "idle") return null;
+    if (status.status === "ready" || status.status === "idle") return null;
     if (status.status === "failed") {
         return (
             <div className="pc-secure-card-actions">
@@ -2528,7 +2534,7 @@ function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: 
     }
     return (
         <BaseText size="xs">
-            Authenticating and decrypting attachments locally…
+            Loading encrypted previews…
         </BaseText>
     );
 }
@@ -2549,6 +2555,13 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         : undefined;
     const visiblePlaintext = result?.status === "decrypted" ? result.plaintext : optimisticPlaintext;
     const inlineEmbedStatus = encryptedMessageInlineEmbedStatus(message);
+    const embedOnly = visiblePlaintext !== undefined && (result?.status === "decrypted"
+        ? result.attachmentBundle === null && result.stickers.length === 0
+        : !result && message.attachments.length === 0 && message.stickerItems.length === 0) &&
+        shouldHideSecureEmbedOnlyPlaintext(visiblePlaintext, inlineEmbedStatus);
+    const renderedPlaintext = captureProtection === "ready" && !embedOnly && (!result || result.status === "decrypted")
+        ? visiblePlaintext : undefined;
+    const parsedPlaintext = useMemo(() => renderedPlaintext ? Parser.parse(renderedPlaintext) : null, [renderedPlaintext]);
     const mentionsLocalUser = Boolean(localUserId && message.author?.id && encryptedMessageMentionsUser(
         message.content,
         { channelId: message.channel_id, discordAuthorId: message.author.id },
@@ -2634,11 +2647,9 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
     }
 
     if (!result && optimisticPlaintext !== undefined) {
-        const embedOnly = message.attachments.length === 0 && message.stickerItems.length === 0 &&
-            shouldHideSecureEmbedOnlyPlaintext(optimisticPlaintext, inlineEmbedStatus);
         return (
             <div ref={cardRef} className={embedOnly ? embedOnlyClassName : cardClassName} hidden={embedOnly}>
-                {!embedOnly && optimisticPlaintext && <div className="pc-secure-card-plaintext">{Parser.parse(optimisticPlaintext)}</div>}
+                {!embedOnly && optimisticPlaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
             </div>
         );
     }
@@ -2650,11 +2661,9 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         );
     }
     if (result.status === "decrypted") {
-        const embedOnly = result.attachmentBundle === null && result.stickers.length === 0 &&
-            shouldHideSecureEmbedOnlyPlaintext(result.plaintext, inlineEmbedStatus);
         return (
             <div ref={cardRef} className={embedOnly ? embedOnlyClassName : cardClassName} hidden={embedOnly}>
-                {!embedOnly && result.plaintext && <div className="pc-secure-card-plaintext">{Parser.parse(result.plaintext)}</div>}
+                {!embedOnly && result.plaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
                 {!embedOnly && <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />}
             </div>
         );
@@ -2961,6 +2970,20 @@ export default definePlugin({
             },
         },
         {
+            find: /getDefaultLinkInterceptor.{0,150}MEDIA_DOWNLOAD_BUTTON_TAPPED/,
+            replacement: {
+                match: /(getDefaultLinkInterceptor\((\i)\),\[\2\]\),\i=\i\.useCallback\((\i)=>\{)/,
+                replace: "$1if($self.downloadEncryptedAttachment($3.currentTarget?.href,$3))return;",
+            },
+        },
+        {
+            find: "discord-web-video-player-download-btn",
+            replacement: {
+                match: /(MEDIA_DOWNLOAD_BUTTON_TAPPED,\{[^}]{0,150}\}\),)window\.open\((\i),"_blank"\)/,
+                replace: "$1($self.downloadEncryptedAttachment($2)||window.open($2,\"_blank\"))",
+            },
+        },
+        {
             find: "contentScanMetadata:null==e.content_scan_version",
             replacement: [
                 {
@@ -3144,6 +3167,14 @@ export default definePlugin({
 
     getEncryptedMediaAttachments(message: Message) {
         return encryptedMediaAttachments(message);
+    },
+
+    downloadEncryptedAttachment(value: unknown, event?: Pick<MouseEvent, "preventDefault" | "stopPropagation">) {
+        if (typeof value !== "string" || !isEncryptedAttachmentDownloadUrl(value)) return false;
+        event?.preventDefault();
+        event?.stopPropagation();
+        void saveEncryptedAttachment(value);
+        return true;
     },
 
     encryptedMediaProxyUrl(value: string) {

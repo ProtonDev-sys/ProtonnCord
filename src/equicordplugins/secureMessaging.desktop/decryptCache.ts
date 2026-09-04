@@ -78,7 +78,7 @@ async function decryptWithRetry(
             }
         });
         if (result.status === "decrypted" && result.detachedTextIndex !== null) {
-            const expanded = await decryptIncomingAttachmentsCached(localUserId, message);
+            const expanded = await decryptIncomingAttachmentsCached(localUserId, message, "text");
             result = expanded.status === "decrypted"
                 ? { ...result, plaintext: expanded.plaintext }
                 : expanded;
