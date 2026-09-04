@@ -112,3 +112,14 @@ test("retains the inline media type allowlist", () => {
     for (const type of ["gifv", "image", "video"]) assert.equal(isSecureInlineMediaEmbedType(type), true);
     for (const type of ["link", "article", "rich", ""]) assert.equal(isSecureInlineMediaEmbedType(type), false);
 });
+
+for (const backslashes of [1, 2, 3, 4]) {
+    for (const delimiterLength of [1, 2, 3]) {
+        test(`${backslashes} preceding backslashes preserve the remaining ${delimiterLength}-backtick code delimiter`, () => {
+            const delimiter = "`".repeat(delimiterLength);
+            const opening = "\\".repeat(backslashes) + "`".repeat(delimiterLength + backslashes % 2);
+            const plaintext = `${opening}${hiddenUrl}${delimiter} ${visibleUrl}`;
+            assert.deepEqual(extractSecureEmbedUrls(plaintext), [visibleUrl]);
+        });
+    }
+}
