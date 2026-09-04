@@ -9,6 +9,7 @@ const OPTIMISTIC_PLAINTEXT_TTL_MS = 60_000;
 
 interface OptimisticPlaintextEntry {
     expiresAt: number;
+    groupable: boolean;
     plaintext: string;
 }
 
@@ -28,12 +29,14 @@ function pruneOptimisticPlaintexts(now: number): void {
 export function rememberOptimisticOutgoingPlaintext(
     ciphertext: string,
     plaintext: string,
+    groupable = false,
     now = Date.now(),
 ): void {
     pruneOptimisticPlaintexts(now);
     optimisticPlaintexts.delete(ciphertext);
     optimisticPlaintexts.set(ciphertext, {
         expiresAt: now + OPTIMISTIC_PLAINTEXT_TTL_MS,
+        groupable,
         plaintext,
     });
     pruneOptimisticPlaintexts(now);
@@ -50,6 +53,11 @@ export function getOptimisticOutgoingPlaintext(ciphertext: string, now = Date.no
 
 export function isProvisionalOutgoingMessage(messageId: string, nonce: string | null): boolean {
     return nonce === messageId;
+}
+
+export function getOptimisticOutgoingPlaintextForGrouping(ciphertext: string, now = Date.now()): string | undefined {
+    const plaintext = getOptimisticOutgoingPlaintext(ciphertext, now);
+    return optimisticPlaintexts.get(ciphertext)?.groupable ? plaintext : undefined;
 }
 
 export function settleOptimisticOutgoingPlaintext(

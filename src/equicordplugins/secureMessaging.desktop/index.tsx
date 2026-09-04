@@ -109,10 +109,10 @@ import {
     patchEncryptedMessageStickers,
     prefetchEncryptedMessageEmbeds,
 } from "./embedCache";
-import { extractSecureEmbedUrls, shouldHideSecureEmbedOnlyPlaintext } from "./embedUrls";
+import { shouldHideSecureEmbedOnlyPlaintext } from "./embedUrls";
 import { KeyReviewGate } from "./keyReviewGate";
 import { encryptedAllowedMentions, encryptedMessageMentionsUser } from "./mentionNotifications";
-import { SecureMessageGroup, secureMessageGroupFlags } from "./messageGrouping";
+import { canGroupSecureMessageContent, SecureMessageGroup, secureMessageGroupFlags } from "./messageGrouping";
 import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
 import type {
     AnnouncementReviewResult,
@@ -130,6 +130,7 @@ import type {
 import {
     clearOptimisticOutgoingPlaintexts,
     getOptimisticOutgoingPlaintext,
+    getOptimisticOutgoingPlaintextForGrouping,
     rememberOptimisticOutgoingPlaintext,
     settleOptimisticOutgoingPlaintext,
 } from "./optimisticRendering";
@@ -1440,7 +1441,7 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
     }
     const scope = conversationAuthorizationScope(context.localUserId, conversation);
     if (!scope) throw new Error("Secure Messaging blocked a programmatic send after its recipient state changed");
-    rememberOptimisticOutgoingPlaintext(encrypted.content, content);
+    rememberOptimisticOutgoingPlaintext(encrypted.content, content, true);
     body.content = encrypted.content;
     applyEncryptedAllowedMentions(body, encrypted.content, endpoint.channelId, context.localUserId);
     requestAuthorizationScopes.set(request, scope);
@@ -1861,7 +1862,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
         }
         authorizeScopedWirePayload(channelId, encrypted.content, attachmentFilenames, scope);
-        rememberOptimisticOutgoingPlaintext(encrypted.content, plaintext);
+        rememberOptimisticOutgoingPlaintext(encrypted.content, plaintext, preparedAttachments === null && stickers.length === 0);
         message.content = encrypted.content;
         preparedOutgoingMessages.set(message, { ciphertext: encrypted.content, plaintext });
         generatedDetachedUploadCommitted = true;
@@ -2537,18 +2538,13 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
     const groupFlags = useStateFromStores([MessageStore], () => {
         if (!localUserId) return 0;
         const messages = (MessageStore.getMessages(message.channel_id)?._array ?? []) as Message[];
-        return secureMessageGroupFlags(message, messages, (previous, next) => {
-            const previousResult = getCachedDecryption(localUserId, previous);
-            const nextResult = getCachedDecryption(localUserId, next);
-            if (!previousResult || previousResult.status !== "decrypted" ||
-                !nextResult || nextResult.status !== "decrypted")
-                return false;
-            return previousResult.attachmentBundle === null && previousResult.stickers.length === 0 &&
-                extractSecureEmbedUrls(previousResult.plaintext).length === 0 &&
-                nextResult.attachmentBundle === null && nextResult.stickers.length === 0 &&
-                extractSecureEmbedUrls(nextResult.plaintext).length === 0;
-        }, candidate => candidate.id === message.id && nativeGroupStart === true
-            ? true
+        return secureMessageGroupFlags(message, messages, (previous, next) => [previous, next].every(candidate => {
+            const cached = getCachedDecryption(localUserId, candidate);
+            return canGroupSecureMessageContent(cached, !cached && candidate.author?.id === localUserId
+                ? getOptimisticOutgoingPlaintextForGrouping(candidate.content)
+                : undefined);
+        }), candidate => candidate.id === message.id && nativeGroupStart !== undefined
+            ? nativeGroupStart
             : observedNativeMessageGroupStart(message.channel_id, candidate.id));
     }, [groupingRevision, key, nativeGroupStart, result]);
     const cardClassName = classes(
@@ -2569,7 +2565,7 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
     useLayoutEffect(() => {
         const messageElement = cardRef.current?.closest<HTMLElement>('[id^="chat-messages-"]');
         if (!messageElement) return;
-        const detectedGroupStart = nativeGroupStart === true ||
+        const detectedGroupStart = nativeGroupStart ??
             Boolean(messageElement.querySelector('[id^="message-username-"]'));
         setNativeMessageGroupStartObservation(message.channel_id, message.id, groupStartObservationOwner, detectedGroupStart);
         return () => removeNativeMessageGroupStartObservation(message.channel_id, message.id, groupStartObservationOwner);
