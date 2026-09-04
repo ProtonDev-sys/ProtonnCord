@@ -30,7 +30,7 @@ import { classes } from "@utils/misc";
 import definePlugin, { PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
-import { findByPropsLazy } from "@webpack";
+import { findByPropsLazy, findComponentByCodeLazy } from "@webpack";
 import {
     ChannelStore,
     Checkbox,
@@ -60,6 +60,7 @@ import {
     useState,
     useStateFromStores,
 } from "@webpack/common";
+import type { ReactNode } from "react";
 
 import {
     announcementReviewCacheKey,
@@ -162,6 +163,7 @@ const VOICE_MESSAGE_FLAG = 1 << 13;
 const UploadLimits = findByPropsLazy("getUserMaxFileSize") as {
     getUserMaxFileSize(user: unknown): unknown;
 };
+const NativeAttachmentDownload = findComponentByCodeLazy<{ href: string; mimeType: string[]; }>("getDefaultLinkInterceptor", "MEDIA_DOWNLOAD_BUTTON_TAPPED");
 
 type ScreenCaptureProtectionStatus = "disabled" | "failed" | "pending" | "ready" | "screenshot";
 
@@ -2970,6 +2972,13 @@ export default definePlugin({
             },
         },
         {
+            find: "#{intl::IMG_ALT_ATTACHMENT_FILE_TYPE}",
+            replacement: {
+                match: /null!=(\i)&&\1\(\)(?=\]\}\)\})/,
+                replace: "$self.encryptedFileActions(arguments[0].url,$1)",
+            },
+        },
+        {
             find: /getDefaultLinkInterceptor.{0,150}MEDIA_DOWNLOAD_BUTTON_TAPPED/,
             replacement: {
                 match: /(getDefaultLinkInterceptor\((\i)\),\[\2\]\),\i=\i\.useCallback\((\i)=>\{)/,
@@ -3167,6 +3176,13 @@ export default definePlugin({
 
     getEncryptedMediaAttachments(message: Message) {
         return encryptedMediaAttachments(message);
+    },
+
+    encryptedFileActions(url: unknown, original?: () => ReactNode) {
+        const content = original?.();
+        if ((content == null || content === false) && typeof url === "string" && isEncryptedAttachmentDownloadUrl(url))
+            return <NativeAttachmentDownload href={url} mimeType={["application", "octet-stream"]} />;
+        return content;
     },
 
     downloadEncryptedAttachment(value: unknown, event?: Pick<MouseEvent, "preventDefault" | "stopPropagation">) {

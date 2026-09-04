@@ -105,6 +105,7 @@ interface AttachmentCacheEntry {
 interface DownloadReference {
     attachmentId: string;
     downloadPromise?: Promise<DownloadIncomingAttachmentResult | null>;
+    hasManifest: boolean;
     isMedia: boolean;
     localUserId: string;
     message: Message;
@@ -195,9 +196,10 @@ function needsUrlRefresh(url: URL): boolean {
     return Number.isFinite(expiresAt) && expiresAt - ATTACHMENT_URL_REFRESH_THRESHOLD_MS <= Date.now();
 }
 
-async function refreshedAttachmentUrls(message: Message): Promise<Map<string, string>> {
+async function refreshedAttachmentUrls(message: Message, refreshIds?: readonly string[]): Promise<Map<string, string>> {
     const candidates = new Map<string, string>();
     for (const attachment of message.attachments) {
+        if (refreshIds && !refreshIds.includes(attachment.id)) continue;
         for (const value of [attachment.url, attachment.proxy_url]) {
             const url = validatedAttachmentUrl(value, message.channel_id, attachment.id);
             if (url && needsUrlRefresh(url)) candidates.set(value, attachment.id);
@@ -225,8 +227,8 @@ async function refreshedAttachmentUrls(message: Message): Promise<Map<string, st
     }
 }
 
-export async function encryptedAttachmentInput(message: Message): Promise<DecryptIncomingAttachmentsInput> {
-    const refreshedUrls = await refreshedAttachmentUrls(message);
+export async function encryptedAttachmentInput(message: Message, refreshIds?: readonly string[]): Promise<DecryptIncomingAttachmentsInput> {
+    const refreshedUrls = await refreshedAttachmentUrls(message, refreshIds);
     return {
         channelId: message.channel_id,
         content: message.content,
@@ -261,6 +263,7 @@ export function decryptIncomingAttachmentsCached(
     localUserId: string,
     message: Message,
     selection: "all" | "previews" | "text" = "previews",
+    refreshIds?: readonly string[],
 ): Promise<DecryptIncomingAttachmentsResult> {
     const key = `${selection}\0${attachmentDecryptKey(localUserId, message)}`;
     const existing = attachmentDecryptions.get(key);
@@ -275,7 +278,7 @@ export function decryptIncomingAttachmentsCached(
         if (generation !== attachmentDecryptGeneration || UserStore.getCurrentUser()?.id !== localUserId ||
             !message.author?.id) return { status: "failed", error: "cryptographic_operation_failed" };
         try {
-            const input = await encryptedAttachmentInput(message);
+            const input = await encryptedAttachmentInput(message, refreshIds);
             if (generation !== attachmentDecryptGeneration || UserStore.getCurrentUser()?.id !== localUserId)
                 return { status: "failed", error: "cryptographic_operation_failed" };
             return await Native.decryptIncomingAttachments(localUserId, input, selection);
@@ -371,8 +374,8 @@ function failEntry(message: Message, key: string, entry: AttachmentCacheEntry, l
     scheduleRetry(message, key, entry, localUserId);
 }
 
-async function loadEntry(message: Message, key: string, entry: AttachmentCacheEntry, localUserId: string): Promise<void> {
-    const result = await decryptIncomingAttachmentsCached(localUserId, message);
+async function loadEntry(message: Message, key: string, entry: AttachmentCacheEntry, localUserId: string, refreshIds: readonly string[], hasManifest: boolean): Promise<void> {
+    const result = await decryptIncomingAttachmentsCached(localUserId, message, "previews", refreshIds);
     if (entry.disposed) return;
     if (UserStore.getCurrentUser()?.id !== localUserId) {
         removeEntry(key, entry);
@@ -446,6 +449,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
             });
             const downloadReference = {
                 attachmentId: attachment.id,
+                hasManifest,
                 isMedia: contentType.startsWith("audio/") || contentType.startsWith("image/") || contentType.startsWith("video/"),
                 localUserId,
                 message,
@@ -465,10 +469,10 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
                 size: attachment.size,
                 spoiler: attachment.spoiler ?? false,
                 flags: attachment.spoiler ? SPOILER_FLAG : 0,
-                url: `${url}#${encodeURIComponent(filename)}`,
-                proxy_url: `${url}#${encodeURIComponent(filename)}`,
+                url: `${url}#pc-secure-deferred=${encodeURIComponent(filename)}`,
+                proxy_url: `${url}#pc-secure-deferred=${encodeURIComponent(filename)}`,
             });
-            downloadReferences.set(url, { attachmentId: attachment.id, isMedia: false, localUserId, message });
+            downloadReferences.set(url, { attachmentId: attachment.id, hasManifest, isMedia: false, localUserId, message });
         }
         attachments.sort((left, right) =>
             message.attachments.findIndex(value => value.id === left.id) - message.attachments.findIndex(value => value.id === right.id));
@@ -519,8 +523,8 @@ function startEntryLoad(message: Message, key: string, entry: AttachmentCacheEnt
             return;
         }
         const manifest = inspected.attachmentBundle?.manifest;
-        const requiredBytes = manifest ? message.attachments.reduce((total, attachment, index) =>
-            total + (manifest[index]?.preview || inspected.detachedTextIndex === index ? attachment.size : 0), 0) : 0;
+        const previewAttachments = message.attachments.filter((_, index) => manifest && (manifest[index]?.preview || inspected.detachedTextIndex === index));
+        const requiredBytes = previewAttachments.reduce((total, attachment) => total + attachment.size, 0);
         pruneCache(key, requiredBytes);
         if (!Number.isSafeInteger(requiredBytes) || requiredBytes < 0 || requiredBytes > MAX_CACHE_BYTES ||
             cachedBytes + inFlightBytes + requiredBytes > MAX_CACHE_BYTES) {
@@ -533,7 +537,7 @@ function startEntryLoad(message: Message, key: string, entry: AttachmentCacheEnt
         entry.reservedBytes = requiredBytes;
         inFlightBytes += requiredBytes;
         try {
-            await loadEntry(message, key, entry, localUserId);
+            await loadEntry(message, key, entry, localUserId, previewAttachments.map(attachment => attachment.id), Boolean(manifest));
         } finally {
             releaseReservation(entry);
         }
@@ -569,7 +573,7 @@ export async function downloadEncryptedAttachmentUrl(value: string): Promise<Dow
     return reference.downloadPromise = runAttachmentDownload(async () => {
         if (generation !== attachmentDecryptGeneration || UserStore.getCurrentUser()?.id !== localUserId ||
             downloadReferences.get(objectUrl(value)) !== reference) return null;
-        const input = await encryptedAttachmentInput(message);
+        const input = await encryptedAttachmentInput(message, reference.hasManifest ? [attachmentId] : undefined);
         if (generation !== attachmentDecryptGeneration || UserStore.getCurrentUser()?.id !== localUserId) return null;
         return Native.downloadIncomingAttachment(localUserId, input, attachmentId);
     }).finally(() => {

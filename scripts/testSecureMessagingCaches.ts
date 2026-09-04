@@ -63,7 +63,7 @@ function message(overrides: Partial<Message> = {}): Message {
 function harness(options: {
     cachedDecrypt?: () => Promise<DecryptIncomingResult>;
     decrypt?: () => Promise<DecryptIncomingResult>;
-    expand?: () => Promise<DecryptIncomingAttachmentsResult>;
+    expand?: (selection: string, refreshIds?: readonly string[]) => Promise<DecryptIncomingAttachmentsResult>;
     review?: () => Promise<AnnouncementReviewResult>;
     unfurl?: () => Promise<object>;
     convert?: (embed: Exports) => Exports | null;
@@ -100,7 +100,8 @@ function harness(options: {
             UserStore: { getCurrentUser: () => ({ id: userId }) },
         },
         "./attachmentCache": {
-            decryptIncomingAttachmentsCached: () => options.expand ? options.expand() : Promise.resolve(expanded()),
+            decryptIncomingAttachmentsCached: (_userId: string, _message: Message, selection: string, refreshIds?: readonly string[]) =>
+                options.expand ? options.expand(selection, refreshIds) : Promise.resolve(expanded()),
         },
         "./layoutStability": { preserveEncryptedMessageScroll: (_message: unknown, update: () => void) => update() },
         "./protocol": { isEncryptedMessage: (content: string) => content.startsWith("PCEM3:") },
@@ -138,6 +139,34 @@ function harness(options: {
 }
 
 const noop = () => undefined;
+
+for (const hasManifest of [false, true]) {
+    test(`${hasManifest ? "manifest" : "legacy"} detached text limits refresh to ${hasManifest ? "the text file" : "the authenticated bundle"}`, async () => {
+        const value = message({ attachments: [1, 2].map(index => ({
+            id: `40000000000000000${index}`, filename: "encrypted.pcaf", size: 100, spoiler: false,
+            url: `https://cdn.discordapp.com/attachments/300000000000000001/40000000000000000${index}/encrypted.pcaf?ex=1`,
+            proxy_url: `https://media.discordapp.net/attachments/300000000000000001/40000000000000000${index}/encrypted.pcaf?ex=1`
+        })) });
+        let expansions = 0;
+        const h = harness({
+            decrypt: async () => ({
+                ...decrypted(), detachedTextIndex: 1,
+                attachmentBundle: {
+                    id: "A".repeat(22), key: "A".repeat(43), root: "A".repeat(43), count: 2,
+                    ...(hasManifest && { manifest: value.attachments.map(() => ({ digest: "A".repeat(43), preview: false, spoiler: false, size: 10, name: null })) })
+                }
+            }),
+            expand: async (selection, refreshIds) => {
+                expansions++;
+                assert.equal(selection, "text");
+                assert.deepEqual(refreshIds && Array.from(refreshIds), hasManifest ? [value.attachments[1].id] : undefined);
+                return expanded();
+            }
+        });
+        assert.equal((await h.decrypt.decryptCachedMessage(localUserId, value)).status, "decrypted");
+        assert.equal(expansions, 1);
+    });
+}
 
 async function render(h: ReturnType<typeof harness>, value: Message): Promise<Message> {
     h.embeds.patchEncryptedMessageEmbeds(value, noop);

@@ -6,8 +6,10 @@
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { runInNewContext } from "node:vm";
 
 import { strToU8, zipSync } from "fflate";
+import { createSourceFile, isFunctionDeclaration, isMethodDeclaration, JsxEmit, ModuleKind, type Node, ScriptTarget, transpileModule } from "typescript";
 
 import {
     extractZipArchiveEntry,
@@ -325,6 +327,45 @@ async function testNoWholeArchiveInflationRegression(): Promise<void> {
     assert.match(source, /extractZipArchiveEntry/u);
 }
 
+async function testDeferredSecureAttachmentRows(): Promise<void> {
+    const utilsSource = await readFile("src/equicordplugins/zipPreview/utils.ts", "utf8");
+    const utilsTree = createSourceFile("utils.ts", utilsSource, ScriptTarget.Latest, true);
+    const helpers = new Set(["isZipFile", "getAttachmentFileName", "getAttachmentUrl"]);
+    const helperSource = utilsTree.statements.filter(statement =>
+        isFunctionDeclaration(statement) && statement.name && helpers.has(statement.name.text)
+    ).map(statement => statement.getText(utilsTree)).join("\n");
+    const pluginSource = await readFile("src/equicordplugins/zipPreview/index.tsx", "utf8");
+    const pluginTree = createSourceFile("index.tsx", pluginSource, ScriptTarget.Latest, true);
+    let renderSource = "";
+    const visit = (node: Node) => {
+        if (isMethodDeclaration(node) && node.name.getText(pluginTree) === "renderZipPreview") renderSource = node.getText(pluginTree);
+        node.forEachChild(visit);
+    };
+    visit(pluginTree);
+    assert.ok(renderSource);
+    let previewMounts = 0;
+    const controls = runInNewContext(transpileModule(`${helperSource}\nconst plugin = { ${renderSource} }; plugin;`, {
+        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ESNext, jsx: JsxEmit.React },
+    }).outputText, {
+        exports: {},
+        SafeZipPreviewInline: "preview-component",
+        React: { createElement: () => { previewMounts++; return "preview"; } },
+    }) as { renderZipPreview(props: object): unknown; };
+    const deferredUrl = "blob:https://discord.com/deferred#pc-secure-deferred=archive.zip";
+    for (const props of [
+        { fileName: "archive.zip", url: deferredUrl },
+        { item: { downloadUrl: deferredUrl, originalItem: { filename: "archive.zip" } } },
+        { item: { originalItem: { title: "archive.zip", proxy_url: deferredUrl } } },
+    ]) assert.equal(controls.renderZipPreview(props), null);
+    assert.equal(previewMounts, 0, "deferred ZIP placeholders cannot mount the expander or start its fetch path");
+    for (const url of [
+        "https://cdn.discordapp.com/attachments/1/2/archive.zip",
+        "blob:https://discord.com/decrypted#archive.zip",
+        "https://cdn.discordapp.com/attachments/1/2/archive.zip#pc-secure-deferred=archive.zip",
+    ]) assert.equal(controls.renderZipPreview({ fileName: "archive.zip", url }), "preview");
+    assert.equal(previewMounts, 3, "ordinary ZIPs and populated ZIP blobs retain their preview controls");
+}
+
 async function main(): Promise<void> {
     await testNormalArchiveAndLazyExtraction();
     await testOnlySelectedEntryIsInflated();
@@ -335,6 +376,7 @@ async function main(): Promise<void> {
     await testIntegrityAndPreviewLimit();
     await testForgedExpandedSizeCannotBeTruncated();
     await testNoWholeArchiveInflationRegression();
+    await testDeferredSecureAttachmentRows();
     console.log("ZIP Preview archive security checks passed");
 }
 

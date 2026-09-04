@@ -26,7 +26,7 @@ The client processes key announcements from Discord message events and loaded hi
 
 New attachments use `PCEA3:`/`PCER3:` payloads, or `PCET2:` for detached message text. Recipients need an updated Secure Messaging plugin to read these payloads. This version continues reading `PCEA1:`/`PCEA2:`, `PCER1:`/`PCER2:`, and `PCET1:`.
 
-Opening a message fetches only supported image, video, and audio previews, plus detached message text when needed. Ordinary files such as ZIPs and executables use Discord's file row and download control; their bytes are fetched, authenticated, decrypted, and saved only after a download click. The manifest remains inside the encrypted envelope, so Discord does not receive plaintext filenames or file types.
+Opening a message fetches only supported image, video, and audio previews, plus detached message text when needed. Ordinary files such as ZIPs and executables use Discord's file row and download control; their bytes are fetched, authenticated, decrypted, and saved only after a download click. ZipPreview's archive expander is hidden for these deferred files. The manifest remains inside the encrypted envelope, so Discord does not receive plaintext filenames or file types.
 
 Older bundles have no authenticated file list outside their ciphertext. They appear as generic file rows until downloaded, and that first download authenticates the complete older bundle. Older detached text also requires the complete bundle to reconstruct its message body. These compatibility paths retain the original integrity checks.
 
