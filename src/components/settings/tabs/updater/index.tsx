@@ -19,14 +19,21 @@
 import { useSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
+import { Divider } from "@components/Divider";
 import { Flex } from "@components/Flex";
 import { FormSwitch } from "@components/FormSwitch";
 import { Heading, HeadingSecondary } from "@components/Heading";
 import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
+import { SettingsTab, wrapTab } from "@components/settings/tabs/BaseTab";
 import { Margins } from "@utils/margins";
 import { useAwaiter } from "@utils/react";
+import { getRepo, UpdateLogger } from "@utils/updater";
 import { React } from "@webpack/common";
+
+import gitHash from "~git-hash";
+
+import { HashLink, Updatable } from "./Components";
 
 function EquibopSection() {
     if (!IS_EQUIBOP) return null;
@@ -56,7 +63,7 @@ function EquibopSection() {
     );
 }
 
-export function UpdatePreferences() {
+function UpdatePreferences() {
     const settings = useSettings(["autoUpdate", "autoUpdateNotification"]);
 
     return (
@@ -82,7 +89,41 @@ export function UpdatePreferences() {
                 disabled={!settings.autoUpdate}
                 hideBorder
             />
-
         </>
     );
 }
+
+function Updater() {
+    const settings = useSettings(["updateBranch"]);
+    const [repo, error, repoPending] = useAwaiter(getRepo, { fallbackValue: "Loading..." });
+
+    React.useEffect(() => {
+        if (error) UpdateLogger.error("Failed to retrieve repo", error);
+    }, [error]);
+
+    return (
+        <SettingsTab>
+            <Heading className={Margins.top16}>Updates</Heading>
+            {IS_UPDATER_DISABLED ? (
+                <Paragraph>Updates are disabled in this build. Use a release build to select an update branch and install updates here.</Paragraph>
+            ) : (
+                <>
+                    <Updatable key={settings.updateBranch} repo={repo} repoPending={repoPending} disabled={repoPending || Boolean(error)} />
+                    <UpdatePreferences />
+                </>
+            )}
+            <Divider className={Margins.top20} />
+            <Heading className={Margins.top20}>Repository</Heading>
+            <Paragraph color="text-subtle">
+                {repoPending ? repo : error ? "Failed to retrieve repository." : (
+                    <>
+                        <Link href={repo}>{repo.split("/").slice(-2).join("/")}</Link>
+                        {" "}(<HashLink hash={gitHash} repo={repo} />)
+                    </>
+                )}
+            </Paragraph>
+        </SettingsTab>
+    );
+}
+
+export default wrapTab(Updater, "Updates");
