@@ -43,7 +43,7 @@ export function encryptedMessageMentionsUser(
 ): boolean {
     if (!/^\d{17,20}$/u.test(userId)) return false;
     try {
-        if (parseEncryptedEnvelope(content, context).m?.includes(userId)) return true;
+        if (content.includes(`<@${userId}>`) && parseEncryptedEnvelope(content, context).m?.includes(userId)) return true;
     } catch {
         // A verified decrypted plaintext may still supply mention state for an older envelope.
     }
