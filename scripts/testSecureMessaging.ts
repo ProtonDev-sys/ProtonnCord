@@ -345,7 +345,12 @@ async function main(): Promise<void> {
     const replyBoundary = [groupedMessages[0], groupedMessage("reply", ALICE_ID, 1_000, { messageReference: {} })];
     assert.equal(secureMessageGroupFlags(replyBoundary[0], replyBoundary), 0, "reply previews split secure cards");
     const previousReplyBoundary = [groupedMessage("previous-reply", ALICE_ID, 0, { messageReference: {} }), groupedMessages[1]];
-    assert.equal(secureMessageGroupFlags(previousReplyBoundary[1], previousReplyBoundary), 0, "messages after replies start a new secure card");
+    assert.equal(secureMessageGroupFlags(previousReplyBoundary[0], previousReplyBoundary), SecureMessageGroup.Next,
+        "a reply can join the following message in the same native group");
+    assert.equal(secureMessageGroupFlags(previousReplyBoundary[1], previousReplyBoundary), SecureMessageGroup.Previous,
+        "messages after replies continue the native group");
+    assert.equal(secureMessageGroupFlags(previousReplyBoundary[1], previousReplyBoundary, () => true, () => true), 0,
+        "a native group boundary after a reply still splits secure cards");
     const reactionBoundary = [groupedMessage("reacted", ALICE_ID, 0, { reactions: [{}] }), groupedMessages[1]];
     assert.equal(secureMessageGroupFlags(reactionBoundary[0], reactionBoundary), 0, "reactions stay below a closed secure card");
     const nextAttachmentBoundary = [groupedMessages[0], groupedMessage("attached", ALICE_ID, 1_000, { attachments: [{}] })];
