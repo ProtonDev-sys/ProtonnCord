@@ -8,13 +8,15 @@
  * A Map whose entries expire after a given amount of time. When an entry expires, it is automatically removed from the map and an optional callback is called.
  */
 export class TTLMap<K, V> extends Map<K, V> {
-    private readonly _timers = new Map<K, NodeJS.Timeout>();
+    private readonly _timers = new Map<K, ReturnType<typeof setTimeout>>();
 
     public constructor(public readonly expiryMs: number, private readonly onExpire?: (key: K, value: V) => void) {
         super();
     }
 
     public set(key: K, value: V) {
+        clearTimeout(this._timers.get(key));
+
         const timeoutId = setTimeout(() => {
             this.delete(key);
             this.onExpire?.(key, value);
@@ -25,10 +27,8 @@ export class TTLMap<K, V> extends Map<K, V> {
     }
 
     public delete(key: K) {
-        if (this._timers.has(key)) {
-            clearTimeout(this._timers.get(key));
-            this._timers.delete(key);
-        }
+        clearTimeout(this._timers.get(key));
+        this._timers.delete(key);
 
         return super.delete(key);
     }

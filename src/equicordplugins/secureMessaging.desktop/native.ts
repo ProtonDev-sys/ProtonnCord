@@ -16,10 +16,12 @@ import { setTimeout as delay } from "timers/promises";
 import {
     type AttachmentBundleDescriptor,
     attachmentBundleRoot,
+    attachmentBundleRootFromDigests,
     type AttachmentMetadata,
     decryptAttachmentBytes,
     DETACHED_TEXT_FILENAME,
     DETACHED_TEXT_MIME_TYPE,
+    isPreviewableAttachmentMimeType,
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENT_CIPHERTEXT_BYTES,
     MAX_ATTACHMENT_COUNT,
@@ -219,6 +221,7 @@ export type DecryptIncomingAttachmentsResult =
         status: "decrypted";
         attachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }>;
         plaintext: string;
+        deferredAttachments?: Array<{ id: string; name: string | null; size: number; spoiler?: boolean; }>;
     }
     | { status: "invalid_message" | "replay_detected" | "untrusted_author"; }
     | NativeFailure;
@@ -2857,9 +2860,11 @@ function resolveDetachedMessageText(
     decrypted: Extract<DecryptIncomingResult, { status: "decrypted"; }>,
     attachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }>,
     clearDetachedData = true,
+    detachedAttachmentId?: string,
 ): { attachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }>; plaintext: string; } | null {
     if (decrypted.detachedTextIndex === null) return { attachments, plaintext: decrypted.plaintext };
-    const detached = attachments[decrypted.detachedTextIndex];
+    const detached = detachedAttachmentId ? attachments.find(attachment => attachment.id === detachedAttachmentId)
+        : attachments[decrypted.detachedTextIndex];
     if (!detached || decrypted.plaintext.length > 0 || detached.data.byteLength < 1 ||
         detached.data.byteLength > MAX_DETACHED_TEXT_BYTES ||
         detached.metadata.name !== DETACHED_TEXT_FILENAME || detached.metadata.mimeType !== DETACHED_TEXT_MIME_TYPE ||
@@ -2872,7 +2877,7 @@ function resolveDetachedMessageText(
         if (plaintext.length === 0) return null;
         if (clearDetachedData) detached.data.fill(0);
         return {
-            attachments: attachments.filter((_, index) => index !== decrypted.detachedTextIndex),
+            attachments: attachments.filter(attachment => attachment !== detached),
             plaintext,
         };
     } catch {
@@ -2884,6 +2889,7 @@ export async function decryptIncomingAttachments(
     event: IpcMainInvokeEvent,
     localUserId: string,
     input: DecryptIncomingAttachmentsInput,
+    selection: "all" | "previews" | "text" | { attachmentId: string; } = "all",
 ): Promise<DecryptIncomingAttachmentsResult> {
     const callerFailure = validateIpcCaller(event);
     if (callerFailure) return callerFailure;
@@ -2891,14 +2897,33 @@ export async function decryptIncomingAttachments(
     if (!user.ok) return invalidInput(user.error);
     const checkedInput = validateDecryptAttachmentsInput(input);
     if (!checkedInput.ok) return invalidInput(checkedInput.error);
+    if (selection !== "all" && selection !== "previews" && selection !== "text" &&
+        (!isRecord(selection) || !hasExactKeys(selection, ["attachmentId"]) || !isSnowflake(selection.attachmentId)))
+        return invalidInput("Invalid encrypted attachment selection");
     const { attachments, ...message } = checkedInput.value;
+    if (typeof selection === "object" && !attachments.some(attachment => attachment.id === selection.attachmentId))
+        return invalidInput("The selected attachment must belong to this message");
     const decrypted = await decryptIncoming(event, user.value, message);
     if (decrypted.status !== "decrypted") return decrypted;
     if (!decrypted.attachmentBundle || decrypted.attachmentBundle.count !== attachments.length)
         return { status: "invalid_message" };
 
     const bundle = decrypted.attachmentBundle;
-    if (decrypted.detachedTextIndex !== null) {
+    const detachedAttachmentId = decrypted.detachedTextIndex === null ? undefined : attachments[decrypted.detachedTextIndex]?.id;
+    if (typeof selection === "object" && selection.attachmentId === detachedAttachmentId) return { status: "invalid_message" };
+    const selectedIndexes = attachments.flatMap((attachment, index) => {
+        const selected = bundle.manifest
+            ? selection === "all" || (typeof selection === "object" ? attachment.id === selection.attachmentId
+                : index === decrypted.detachedTextIndex || selection === "previews" && bundle.manifest[index].preview)
+            : selection !== "previews";
+        return selected ? [index] : [];
+    });
+    const deferredAttachments = attachments.flatMap((attachment, index) =>
+        !selectedIndexes.includes(index) && index !== decrypted.detachedTextIndex
+            ? [{ id: attachment.id, name: bundle.manifest?.[index].name ?? null,
+                size: bundle.manifest?.[index].size ?? attachment.size, spoiler: bundle.manifest?.[index].spoiler ?? false }]
+            : []);
+    if (!bundle.manifest && decrypted.detachedTextIndex !== null && selectedIndexes.length === attachments.length) {
         const cachedAttachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }> = [];
         for (const attachment of attachments) {
             const cached = cachedAuthenticatedAttachment(user.value, checkedInput.value, attachment.id);
@@ -2915,9 +2940,17 @@ export async function decryptIncomingAttachments(
     }
     const ciphertexts: Uint8Array[] = [];
     try {
+        if (bundle.manifest && await attachmentBundleRootFromDigests(bundle.id, bundle.manifest.map(file => file.digest)) !== bundle.root)
+            return { status: "invalid_message" };
+        if (selectedIndexes.length === 0)
+            return { status: "decrypted", plaintext: decrypted.plaintext, attachments: [], deferredAttachments };
         const masterKey = decodeBase64Url(bundle.key, 32);
         try {
-            const outcomes = await Promise.all(attachments.map(async (attachment, index) => {
+            const outcomes = await Promise.all(selectedIndexes.map(async index => {
+                const attachment = attachments[index];
+                const manifest = bundle.manifest?.[index];
+                const cached = manifest && cachedAuthenticatedAttachment(user.value, checkedInput.value, attachment.id);
+                if (cached) return { status: "decrypted" as const, ciphertext: null, value: cached, index };
                 let candidateIndex = 0;
                 let hadAuthenticationFailure = false;
                 let hadDownloadFailure = false;
@@ -2936,18 +2969,29 @@ export async function decryptIncomingAttachments(
                         };
                     }
                     try {
+                        if (manifest && createHash("sha256").update(downloaded.ciphertext).digest("base64url") !== manifest.digest)
+                            throw new Error("The encrypted attachment does not match its authenticated digest");
+                        const value = await decryptAttachmentBytes({
+                            bundleId: bundle.id,
+                            channelId: message.channelId,
+                            ciphertext: downloaded.ciphertext,
+                            count: bundle.count,
+                            index,
+                            masterKey,
+                            senderUserId: message.discordAuthorId,
+                        });
+                        if (manifest && (value.metadata.size !== manifest.size ||
+                            value.metadata.spoiler !== manifest.spoiler ||
+                            manifest.name !== null && value.metadata.name !== manifest.name ||
+                            isPreviewableAttachmentMimeType(value.metadata.mimeType) !== manifest.preview)) {
+                            value.data.fill(0);
+                            throw new Error("The encrypted attachment does not match its authenticated file details");
+                        }
                         return {
                             status: "decrypted" as const,
                             ciphertext: downloaded.ciphertext,
-                            value: await decryptAttachmentBytes({
-                                bundleId: bundle.id,
-                                channelId: message.channelId,
-                                ciphertext: downloaded.ciphertext,
-                                count: bundle.count,
-                                index,
-                                masterKey,
-                                senderUserId: message.discordAuthorId,
-                            }),
+                            value,
+                            index,
                         };
                     } catch {
                         hadAuthenticationFailure = true;
@@ -2959,7 +3003,7 @@ export async function decryptIncomingAttachments(
             const authenticated = outcomes.filter(outcome => outcome.status === "decrypted");
             const clearAuthenticatedOutcomes = () => {
                 for (const outcome of authenticated) {
-                    outcome.ciphertext.fill(0);
+                    outcome.ciphertext?.fill(0);
                     outcome.value.data.fill(0);
                 }
             };
@@ -2972,24 +3016,27 @@ export async function decryptIncomingAttachments(
                 return { status: "invalid_message" };
             }
 
-            ciphertexts.push(...authenticated.map(outcome => outcome.ciphertext));
-            if (await attachmentBundleRoot(bundle.id, ciphertexts) !== bundle.root) {
+            ciphertexts.push(...authenticated.flatMap(outcome => outcome.ciphertext ? [outcome.ciphertext] : []));
+            if (!bundle.manifest && await attachmentBundleRoot(bundle.id, ciphertexts) !== bundle.root) {
                 for (const outcome of authenticated) outcome.value.data.fill(0);
                 return { status: "invalid_message" };
             }
-            const resolved = authenticated.map((outcome, index) => ({
-                id: attachments[index].id,
+            const resolved = authenticated.map(outcome => ({
+                id: attachments[outcome.index].id,
                 ...outcome.value,
             }));
-            const visible = resolveDetachedMessageText(decrypted, resolved, false);
+            const visible = typeof selection === "object"
+                ? { attachments: resolved, plaintext: decrypted.plaintext }
+                : resolveDetachedMessageText(decrypted, resolved, false, detachedAttachmentId);
             if (!visible) {
                 for (const attachment of resolved) attachment.data.fill(0);
                 return { status: "invalid_message" };
             }
-            for (const [index, attachment] of resolved.entries())
-                cacheAuthenticatedAttachment(user.value, checkedInput.value, attachment, index !== decrypted.detachedTextIndex);
-            if (decrypted.detachedTextIndex !== null) resolved[decrypted.detachedTextIndex].data.fill(0);
-            return { status: "decrypted", plaintext: visible.plaintext, attachments: visible.attachments };
+            for (const attachment of resolved)
+                cacheAuthenticatedAttachment(user.value, checkedInput.value, attachment, attachment.id !== detachedAttachmentId);
+            resolved.find(attachment => attachment.id === detachedAttachmentId)?.data.fill(0);
+            return { status: "decrypted", plaintext: visible.plaintext, attachments: visible.attachments,
+                ...(deferredAttachments.length > 0 ? { deferredAttachments } : {}) };
         } finally {
             masterKey.fill(0);
         }
@@ -3030,7 +3077,7 @@ export async function downloadIncomingAttachment(
         }
     }
 
-    const decrypted = await decryptIncomingAttachments(event, user.value, checkedInput.value);
+    const decrypted = await decryptIncomingAttachments(event, user.value, checkedInput.value, { attachmentId });
     if (decrypted.status !== "decrypted") return decrypted;
     try {
         const attachment = decrypted.attachments.find(candidate => candidate.id === attachmentId);

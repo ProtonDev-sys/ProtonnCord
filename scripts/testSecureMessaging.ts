@@ -254,19 +254,22 @@ async function main(): Promise<void> {
     const managerFixture = 'let logger=new Logger("MessageManager");function M(e){let{isPreload,channelId,forceFetch}=e;return fetch(channelId)}return M({channelId:"42"});';
     const patchedManager = managerFixture.replace(
         patchMatcher,
-        messageManagerPatch[2].replace("$self.shouldSuppressChatLoad", "guard"),
+        messageManagerPatch[2],
     );
     assert.notEqual(patchedManager, managerFixture, "the no-fetch patch applies without relying on destructuring order");
-    const runPatchedManager = new Function("Logger", "guard", "fetch", patchedManager) as (
+    const runPatchedManager = new Function("Logger", "$self", "fetch", patchedManager) as (
         logger: new (name: string) => object,
-        guard: (channelId: string) => boolean,
+        plugin: { shouldSuppressChatLoad(): boolean; deferChatLoad(): Promise<unknown>; },
         fetch: (channelId: string) => string,
     ) => unknown;
     let fetchCount = 0;
     const Logger = class { constructor(_name: string) { } };
-    assert.equal(runPatchedManager(Logger, () => true, () => { fetchCount++; return "loaded"; }), undefined);
+    const deferred = Promise.withResolvers<unknown>();
+    const plugin = { shouldSuppressChatLoad: () => true, deferChatLoad: () => deferred.promise };
+    assert.equal(runPatchedManager(Logger, plugin, () => { fetchCount++; return "loaded"; }), deferred.promise);
     assert.equal(fetchCount, 0, "a locked protected channel never reaches MessageManager fetch");
-    assert.equal(runPatchedManager(Logger, () => false, () => { fetchCount++; return "loaded"; }), "loaded");
+    plugin.shouldSuppressChatLoad = () => false;
+    assert.equal(runPatchedManager(Logger, plugin, () => { fetchCount++; return "loaded"; }), "loaded");
     assert.equal(fetchCount, 1, "an unlocked channel resumes normal MessageManager fetch");
 
     assert.match(rendererSource, /function installChatLoadGuard\(\)[\s\S]{0,900}actions\.fetchMessages = guardedFetchMessages/, "direct chat fetch actions share the same fail-closed guard");
@@ -345,7 +348,12 @@ async function main(): Promise<void> {
     const replyBoundary = [groupedMessages[0], groupedMessage("reply", ALICE_ID, 1_000, { messageReference: {} })];
     assert.equal(secureMessageGroupFlags(replyBoundary[0], replyBoundary), 0, "reply previews split secure cards");
     const previousReplyBoundary = [groupedMessage("previous-reply", ALICE_ID, 0, { messageReference: {} }), groupedMessages[1]];
-    assert.equal(secureMessageGroupFlags(previousReplyBoundary[1], previousReplyBoundary), 0, "messages after replies start a new secure card");
+    assert.equal(secureMessageGroupFlags(previousReplyBoundary[0], previousReplyBoundary), SecureMessageGroup.Next,
+        "a reply can join the following message in the same native group");
+    assert.equal(secureMessageGroupFlags(previousReplyBoundary[1], previousReplyBoundary), SecureMessageGroup.Previous,
+        "messages after replies continue the native group");
+    assert.equal(secureMessageGroupFlags(previousReplyBoundary[1], previousReplyBoundary, () => true, () => true), 0,
+        "a native group boundary after a reply still splits secure cards");
     const reactionBoundary = [groupedMessage("reacted", ALICE_ID, 0, { reactions: [{}] }), groupedMessages[1]];
     assert.equal(secureMessageGroupFlags(reactionBoundary[0], reactionBoundary), 0, "reactions stay below a closed secure card");
     const nextAttachmentBoundary = [groupedMessages[0], groupedMessage("attached", ALICE_ID, 1_000, { attachments: [{}] })];

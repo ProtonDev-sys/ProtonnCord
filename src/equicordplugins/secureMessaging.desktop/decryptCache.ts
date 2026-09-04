@@ -78,7 +78,10 @@ async function decryptWithRetry(
             }
         });
         if (result.status === "decrypted" && result.detachedTextIndex !== null) {
-            const expanded = await decryptIncomingAttachmentsCached(localUserId, message);
+            const refreshIds = result.attachmentBundle?.manifest
+                ? message.attachments.slice(result.detachedTextIndex, result.detachedTextIndex + 1).map(attachment => attachment.id)
+                : undefined;
+            const expanded = await decryptIncomingAttachmentsCached(localUserId, message, "text", refreshIds);
             result = expanded.status === "decrypted"
                 ? { ...result, plaintext: expanded.plaintext }
                 : expanded;
@@ -120,7 +123,7 @@ function ensureEntry(localUserId: string, message: Message): [string, DecryptCac
     };
     cache.set(key, entry);
     const generation = cacheGeneration;
-    entry.promise = decryptWithRetry(localUserId, message, generation, () => cache.get(key) === entry).then(result => {
+    entry.promise = decryptWithRetry(localUserId, message, generation, () => cache.get(key) === entry).catch(failedDecryption).then(result => {
         if (generation === cacheGeneration && cache.get(key) === entry) {
             const settledAt = Date.now();
             entry.expiresAt = isTransientFailure(result)
