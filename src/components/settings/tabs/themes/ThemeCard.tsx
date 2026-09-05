@@ -8,7 +8,8 @@ import type { ThemeActivationMode } from "@api/Settings";
 import { Flex } from "@components/Flex";
 import { CogWheel, DeleteIcon, FolderIcon } from "@components/Icons";
 import { Link } from "@components/Link";
-import { OnlineThemeCard } from "@components/settings/OnlineThemeCard";
+import { AddonCard } from "@components/settings/AddonCard";
+import { EditableText } from "@components/settings/EditableText";
 import { UserThemeHeader } from "@main/themes";
 import { parseExternalHttpsUrl } from "@shared/externalUrls";
 import { classNameFactory } from "@utils/css";
@@ -107,6 +108,7 @@ export interface ThemeCardProps {
 }
 
 export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton, onEditName, disabled, onPin, isPinned, onRefresh, onOpenFolder, onCopyUrl, onDownload, themeLink, isLocal, activationMode = "always", onActivationModeChange }: ThemeCardProps) {
+    const name = theme.customName || theme.name || theme.fileName || "Unknown Theme";
     const website = parseExternalHttpsUrl(theme.website);
     const openThemeMenu = (e: React.MouseEvent) => {
         ContextMenuApi.openContextMenu(e, () => (
@@ -192,9 +194,8 @@ export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton
     };
 
     return (
-        <OnlineThemeCard
-            customName={theme.customName}
-            name={theme.name || theme.fileName || "Unknown Theme"}
+        <AddonCard
+            name={onEditName ? <EditableText value={name} onChange={onEditName} className="vc-addon-editable" /> : name}
             description={theme.description || "No description provided."}
             author={theme.author || "Unknown"}
             enabled={enabled}
@@ -262,8 +263,6 @@ export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton
                     )}
                 </Flex>
             }
-
-            onEditName={onEditName}
         />
     );
 }
