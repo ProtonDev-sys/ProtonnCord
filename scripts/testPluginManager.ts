@@ -16,6 +16,10 @@ interface TestPlugin {
     started?: boolean;
     isDependency?: boolean;
     requiresRestart?: boolean;
+    commands?: object[];
+    chatBarButton?: object;
+    chatBarButtonWrapper?: object;
+    userProfileBadges?: object[];
     start?(): void;
     onMessageClick?(this: TestPlugin): void;
     flux?: Record<string, (this: TestPlugin, data: unknown) => void | Promise<void>>;
@@ -53,7 +57,7 @@ function loadManager() {
         compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
     }).outputText;
     const manager = runInNewContext(code + "\nexports;", {
-        exports: {}, Promise, IS_REPORTER: false,
+        exports: {}, Promise, IS_REPORTER: false, IS_DEV: false,
         require(name: string) {
             if (name in mocks) return mocks[name];
             if (name.startsWith("@api/") || name.startsWith("./")) return {};
@@ -164,4 +168,62 @@ test("initially disabled plugins receive bound declarative callbacks", () => {
     manager.initPluginManager();
     plugin.onMessageClick?.call({ name: "Different receiver" });
     assert.equal(receiver, plugin);
+});
+
+test("initial dependency closure includes inferred APIs regardless of plugin order", () => {
+    for (const reverse of [false, true]) {
+        const { manager, add, plugins, settings } = loadManager();
+        const definitions: TestPlugin[] = [
+            { name: "Transport" },
+            { name: "CommandsAPI", dependencies: ["Transport"] },
+            { name: "Leaf", commands: [{}] },
+            { name: "Middle", dependencies: ["Leaf"] },
+            { name: "Root", dependencies: ["Middle", "Middle"] },
+            { name: "Unrelated", dependencies: ["Missing"] }
+        ];
+        for (const definition of reverse ? definitions.reverse() : definitions) add(definition);
+        settings.Root.enabled = true;
+        manager.initPluginManager();
+        for (const name of ["Middle", "Leaf", "CommandsAPI", "Transport"]) {
+            assert.equal(settings[name].enabled, true, name);
+            assert.equal(plugins[name].isDependency, true, name);
+        }
+        assert.deepEqual(Array.from(plugins.Root.dependencies ?? []), ["Middle"]);
+        assert.equal(settings.Unrelated.enabled, false);
+    }
+});
+
+test("initially disabled plugins retain API dependencies for later enabling", () => {
+    const { manager, add, settings } = loadManager();
+    const api = add({ name: "ChatInputButtonAPI", requiresRestart: true });
+    const plugin = add({ name: "Disabled", chatBarButton: {}, chatBarButtonWrapper: {} });
+    manager.initPluginManager();
+    assert.equal(settings.ChatInputButtonAPI.enabled, false);
+    assert.deepEqual(Array.from(plugin.dependencies ?? []), ["ChatInputButtonAPI"]);
+    const result = manager.startDependenciesRecursive(plugin);
+    assert.equal(result.restartNeeded, true);
+    assert.equal(result.failures.length, 0);
+    assert.equal(api.isDependency, true);
+    assert.equal(settings.ChatInputButtonAPI.enabled, true);
+});
+
+test("initial dependency traversal terminates cycles and continues past missing dependencies", () => {
+    const { manager, add, settings } = loadManager();
+    add({ name: "First", dependencies: ["Missing", "Second"] });
+    add({ name: "Second", dependencies: ["First", "Third"] });
+    add({ name: "Third" });
+    settings.First.enabled = true;
+    manager.initPluginManager();
+    assert.equal(settings.Second.enabled, true);
+    assert.equal(settings.Third.enabled, true);
+});
+
+test("API plugins may use their own declarations without gaining an inferred self dependency", () => {
+    const { manager, add, settings } = loadManager();
+    const badgeApi = add({ name: "BadgeAPI", userProfileBadges: [{}] });
+    add({ name: "Consumer", dependencies: ["BadgeAPI"] });
+    settings.Consumer.enabled = true;
+    manager.initPluginManager();
+    assert.equal(badgeApi.dependencies?.includes("BadgeAPI") ?? false, false);
+    assert.equal(settings.BadgeAPI.enabled, true);
 });
