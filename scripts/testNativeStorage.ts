@@ -12,6 +12,8 @@ import { setImmediate } from "node:timers/promises";
 import { runInNewContext } from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
+import { SettingsStore } from "../src/shared/SettingsStore";
+import { mergeDefaults } from "../src/utils/mergeDefaults";
 import { crxToZip } from "../src/main/utils/crxToZip";
 import { ensureSafePath } from "../src/main/utils/ensureSafePath";
 
@@ -98,5 +100,60 @@ test("extension installation awaits loading and removes failed extraction before
         gate.resolve();
         await pending;
         assert.equal(rejection, outcome === "installed" ? undefined : error);
+    }
+});
+
+
+test("native settings publish only after atomic replacement and preserve prior data on filesystem failures", () => {
+    for (const failAt of ["", "open", "write", "sync", "close", "rename"] as const) {
+        const files = new Map([["settings.json", '{"plugins":{"Existing":{"enabled":true}}}'], ["native.json", '{"plugins":{},"customCspRules":{}}']]);
+        const descriptors = new Map<number, string>();
+        const handlers = new Map<string, (event: unknown, data: object) => void>();
+        const events: string[] = [];
+        const failure = new Error("Synthetic filesystem failure");
+        function step(name: string) { events.push(name); if (name === failAt) throw failure; }
+        const dependencies = {
+            crypto: { randomUUID: () => "fixture" },
+            electron: { ipcMain: { handle(name: string, callback: (event: unknown, data: object) => void) { handlers.set(name, callback); }, on() { } } },
+            "@shared/IpcEvents": { IpcEvents: { GET_SETTINGS_DIR: "directory", GET_SETTINGS: "get", SET_SETTINGS: "set" } },
+            "@shared/SettingsStore": { SettingsStore }, "@utils/mergeDefaults": { mergeDefaults },
+            "./utils/constants": { SETTINGS_FILE: "settings.json", NATIVE_SETTINGS_FILE: "native.json", SETTINGS_DIR: "fixture" },
+            fs: {
+                mkdirSync() { },
+                readFileSync(name: string) { return files.get(name); },
+                openSync(name: string, flags: string, mode: number) {
+                    assert.equal(flags, "wx"); assert.equal(mode, 0o600); step("open");
+                    assert.equal(files.has(name), false); files.set(name, ""); descriptors.set(1, name); return 1;
+                },
+                writeFileSync(descriptor: number, value: string) {
+                    const name = descriptors.get(descriptor); assert.ok(name);
+                    files.set(name, "partial"); step("write"); files.set(name, value);
+                },
+                fsyncSync() { step("sync"); },
+                closeSync(descriptor: number) { descriptors.delete(descriptor); step("close"); },
+                renameSync(from: string, to: string) { step("rename"); const contents = files.get(from); assert.ok(contents); files.set(to, contents); files.delete(from); },
+                rmSync(name: string) { files.delete(name); events.push("cleanup"); }
+            }
+        };
+        const module = runInNewContext(`${compile(readFileSync("src/main/settings.ts", "utf8"))}\nexports;`, {
+            exports: {}, process: { pid: 1 }, console: { error() { } },
+            require(name: string) { assert.ok(Object.hasOwn(dependencies, name), name); return dependencies[name]; }
+        });
+        const previous = module.RendererSettings.plain;
+        const set = handlers.get("set"); assert.ok(set);
+        const next = { plugins: { Changed: { enabled: false } } };
+        if (failAt) {
+            assert.throws(() => set(undefined, next), error => error === failure);
+            assert.equal(module.RendererSettings.plain, previous);
+            assert.deepEqual(JSON.parse(files.get("settings.json") ?? "null"), { plugins: { Existing: { enabled: true } } });
+        } else {
+            set(undefined, next);
+            assert.equal(module.RendererSettings.plain, next);
+            assert.deepEqual(JSON.parse(files.get("settings.json") ?? "null"), next);
+            assert.deepEqual(events, ["open", "write", "sync", "close", "rename", "cleanup"]);
+        }
+        assert.equal(descriptors.size, 0);
+        assert.deepEqual([...files.keys()].sort(), ["native.json", "settings.json"]);
+        assert.throws(() => set(undefined, []), /Settings must contain an object/);
     }
 });
