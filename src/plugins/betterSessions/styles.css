@@ -11,11 +11,14 @@
     translate: 0 -2px;
 }
 
-.vc-betterSessions-new-btn {
+.vc-betterSessions-new-badge {
     margin-left: 4px;
     translate: 0 -2px;
-    pointer-events: none;
     padding: 1px 4px;
+    border-radius: var(--radius-xs);
+    background: var(--control-critical-primary-background-default);
+    color: var(--control-critical-primary-text-default);
+    font-size: 12px;
 }
 
 .vc-betterSessions-lowerBadge {

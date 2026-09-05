@@ -23,16 +23,22 @@ import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Paragraph } from "@components/Paragraph";
 import { Devs } from "@utils/constants";
+import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { findComponentByCodeLazy, findCssClassesLazy } from "@webpack";
-import { AuthSessionsStore, Constants, React, RestAPI, SettingsRouter, Tooltip } from "@webpack/common";
+import { Constants, React, RestAPI, SettingsRouter, Tooltip, UserStore } from "@webpack/common";
 
-import { NewButton, RenameButton } from "./components/RenameButton";
+import { RenameButton } from "./components/RenameButton";
 import { Session, SessionInfo } from "./types";
-import { cl, fetchNamesFromDataStore, getDefaultName, GetOsColor, GetPlatformIcon, savedSessionsCache, saveSessionsToDataStore } from "./utils";
+import { cl, fetchNamesFromDataStore, getDefaultName, GetOsColor, GetPlatformIcon, isSessionCacheCurrent, resetSessionCache, savedSessionsCache, saveSessionsToDataStore, useSessionNames } from "./utils";
 
 const TimestampClasses = findCssClassesLazy("timestamp", "blockquoteContainer");
 const BlobMask = findComponentByCodeLazy("!1,lowerBadgeSize:");
+const logger = new Logger("BetterSessions");
+let generation = 0;
+let checkInterval: ReturnType<typeof setInterval> | undefined;
+let pendingCheck: Promise<void> | undefined;
+const viewedSessions = new Set<string>();
 
 const settings = definePluginSettings({
     backgroundCheck: {
@@ -45,9 +51,79 @@ const settings = definePluginSettings({
         description: "How often to check for new sessions in the background (if enabled), in minutes",
         type: OptionType.NUMBER,
         default: 20,
+        isValid: value => typeof value === "number" && value >= 1 && value <= 0x7FFFFFFF / 60000,
         restartNeeded: true
     }
 });
+
+function checkNewSessions() {
+    if (pendingCheck) return pendingCheck;
+    const currentGeneration = generation;
+    const userId = UserStore.getCurrentUser()?.id;
+    const isCurrent = () => currentGeneration === generation && userId === UserStore.getCurrentUser()?.id;
+
+    pendingCheck = (async () => {
+        if (!userId) return;
+        if (!isSessionCacheCurrent() && !await fetchNamesFromDataStore(isCurrent)) return;
+        if (!isCurrent()) return;
+
+        const data = await RestAPI.get({
+            url: Constants.Endpoints.AUTH_SESSIONS
+        });
+        if (!isCurrent()) return;
+
+        const activeHashes = new Set<string>(data.body.user_sessions.map((session: Session) => session.id_hash));
+        for (const id of savedSessionsCache.keys()) {
+            if (!activeHashes.has(id)) {
+                savedSessionsCache.delete(id);
+            }
+        }
+        for (const id of viewedSessions) {
+            if (!activeHashes.has(id)) viewedSessions.delete(id);
+        }
+
+        for (const session of data.body.user_sessions) {
+            if (savedSessionsCache.has(session.id_hash)) continue;
+
+            const isNew = !viewedSessions.has(session.id_hash);
+            savedSessionsCache.set(session.id_hash, { name: "", isNew });
+            if (!isNew) continue;
+            showNotification({
+                title: "BetterSessions",
+                body: `New session:\n${session.client_info.os} · ${session.client_info.platform} · ${session.client_info.location}`,
+                permanent: true,
+                onClick: () => SettingsRouter.openUserSettings("sessions_panel")
+            });
+        }
+
+        await saveSessionsToDataStore();
+    })().catch(error => logger.error("Failed to check sessions", error)).finally(() => {
+        if (currentGeneration === generation) pendingCheck = undefined;
+    });
+    return pendingCheck;
+}
+
+function start() {
+    generation++;
+    pendingCheck = undefined;
+    viewedSessions.clear();
+    resetSessionCache();
+    clearInterval(checkInterval);
+    if (settings.store.backgroundCheck) {
+        const minutes = settings.store.checkInterval;
+        checkInterval = setInterval(checkNewSessions, (minutes >= 1 && minutes <= 0x7FFFFFFF / 60000 ? minutes : 20) * 60 * 1000);
+    }
+    void checkNewSessions();
+}
+
+function stop() {
+    generation++;
+    pendingCheck = undefined;
+    viewedSessions.clear();
+    clearInterval(checkInterval);
+    checkInterval = undefined;
+    resetSessionCache();
+}
 
 export default definePlugin({
     name: "BetterSessions",
@@ -81,19 +157,22 @@ export default definePlugin({
     ],
 
     renderName: ErrorBoundary.wrap(({ session }: SessionInfo) => {
-        const savedSession = savedSessionsCache.get(session.id_hash);
-
-        const state = React.useState(savedSession?.name ? `${savedSession.name}*` : getDefaultName(session.client_info));
-        const [title, setTitle] = state;
+        const sessions = useSessionNames();
+        const savedSession = sessions?.get(session.id_hash);
+        const title = savedSession?.name ? `${savedSession.name}*` : getDefaultName(session.client_info);
+        const accountId = UserStore.getCurrentUser()?.id;
+        React.useEffect(() => {
+            if (sessions && accountId === UserStore.getCurrentUser()?.id) viewedSessions.add(session.id_hash);
+        });
         // Show a "NEW" badge if the session is seen for the first time
         return (
             <>
                 <Paragraph size="md" weight="semibold" color="text-strong">{title}</Paragraph>
                 <div className={cl("footer-buttons")}>
-                    {(savedSession == null || savedSession.isNew) && (
-                        <NewButton />
+                    {sessions && (savedSession == null || savedSession.isNew) && (
+                        <span className={cl("new-badge")}>NEW</span>
                     )}
-                    <RenameButton session={session} state={state} />
+                    <RenameButton session={session} disabled={!sessions} />
                 </div>
             </>
         );
@@ -149,62 +228,26 @@ export default definePlugin({
         );
     }, { noop: true }),
 
-    async checkNewSessions() {
-        const data = await RestAPI.get({
-            url: Constants.Endpoints.AUTH_SESSIONS
-        });
-
-        for (const session of data.body.user_sessions) {
-            if (savedSessionsCache.has(session.id_hash)) continue;
-
-            savedSessionsCache.set(session.id_hash, { name: "", isNew: true });
-            showNotification({
-                title: "BetterSessions",
-                body: `New session:\n${session.client_info.os} · ${session.client_info.platform} · ${session.client_info.location}`,
-                permanent: true,
-                onClick: () => SettingsRouter.openUserSettings("sessions_panel")
-            });
-        }
-
-        saveSessionsToDataStore();
-    },
+    checkNewSessions,
 
     flux: {
-        USER_SETTINGS_ACCOUNT_RESET_AND_CLOSE_FORM() {
-            const lastFetchedHashes: string[] = AuthSessionsStore.getSessions().map(session => session.id_hash);
-
-            // Add new sessions to cache
-            lastFetchedHashes.forEach(idHash => {
-                if (!savedSessionsCache.has(idHash)) savedSessionsCache.set(idHash, { name: "", isNew: false });
-            });
-
-            // Delete removed sessions from cache
-            if (lastFetchedHashes.length > 0) {
-                savedSessionsCache.forEach((_, idHash) => {
-                    if (!lastFetchedHashes.includes(idHash)) savedSessionsCache.delete(idHash);
-                });
+        CONNECTION_OPEN: start,
+        LOGOUT: stop,
+        async USER_SETTINGS_ACCOUNT_RESET_AND_CLOSE_FORM() {
+            if (!isSessionCacheCurrent()) return;
+            let changed = false;
+            for (const idHash of viewedSessions) {
+                const previous = savedSessionsCache.get(idHash);
+                if (!previous) continue;
+                viewedSessions.delete(idHash);
+                if (!previous.isNew) continue;
+                savedSessionsCache.set(idHash, { ...previous, isNew: false });
+                changed = true;
             }
-
-            // Dismiss the "NEW" badge of all sessions.
-            // Since the only way for a session to be marked as "NEW" is going to the Devices tab,
-            // closing the settings means they've been viewed and are no longer considered new.
-            savedSessionsCache.forEach(data => {
-                data.isNew = false;
-            });
-            saveSessionsToDataStore();
+            if (changed) await saveSessionsToDataStore();
         }
     },
 
-    async start() {
-        await fetchNamesFromDataStore();
-
-        this.checkNewSessions();
-        if (settings.store.backgroundCheck) {
-            this.checkInterval = setInterval(this.checkNewSessions, settings.store.checkInterval * 60 * 1000);
-        }
-    },
-
-    stop() {
-        clearInterval(this.checkInterval);
-    }
+    start,
+    stop
 });
