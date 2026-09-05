@@ -269,6 +269,25 @@ test("file content copying handles failures and prevents copying incomplete prev
     assert.deepEqual(copied, ["Fixture", "Fixture"]);
 });
 
+test("console logger levels follow settings changed outside their checkbox component", () => {
+    const store = { whitelistedLoggers: "Allowed; Other", allowLevel: { error: true, warn: false } };
+    const plugin = loadComponent("src/plugins/consoleJanitor/index.tsx", {}, {
+        "@api/Settings": { definePluginSettings: () => ({ store }) },
+        "@components/ErrorBoundary": { __esModule: true, default: { wrap: (component: unknown) => component } },
+        "@components/settings/tabs/plugins/components/Common": {},
+        "@utils/constants": { Devs: {} },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin, defineDefault: (value: unknown) => value, OptionType: {}, StartAt: {} }
+    }).default;
+    plugin.start();
+    assert.equal(plugin.shouldLog("Unlisted", "warn"), false);
+    assert.equal(plugin.shouldLog("Allowed", "warn"), true);
+    store.allowLevel.warn = true;
+    assert.equal(plugin.shouldLog("Unlisted", "warn"), true);
+    store.allowLevel = { error: false, warn: false };
+    assert.equal(plugin.shouldLog("Unlisted", "error"), false);
+    assert.equal(plugin.shouldLog("Other", "error"), true);
+});
+
 test("disabled links have no destination and suppress click callbacks", () => {
     const { Link } = loadComponent("src/components/Link.tsx");
     let clicked = 0;

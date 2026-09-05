@@ -26,18 +26,10 @@ const NoopLogger = {
     fileOnly: Noop
 };
 
-interface AllowLevels {
-    error: boolean;
-    warn: boolean;
-    trace: boolean;
-    log: boolean;
-    info: boolean;
-    debug: boolean;
-}
-
-const ALLOW_LEVEL_KEYS: Array<keyof AllowLevels> = ["error", "warn", "trace", "log", "info", "debug"];
+const ALLOW_LEVEL_KEYS = ["error", "warn", "trace", "log", "info", "debug"] as const;
+type AllowLevels = Record<typeof ALLOW_LEVEL_KEYS[number], boolean>;
+const ALLOW_LEVEL_SETTINGS: ["allowLevel"] = ["allowLevel"];
 const logAllow = new Set<string>();
-let allowedLevels = new Set<keyof AllowLevels>();
 
 function rebuildLogAllow(value = settings.store.whitelistedLoggers ?? "") {
     logAllow.clear();
@@ -48,31 +40,18 @@ function rebuildLogAllow(value = settings.store.whitelistedLoggers ?? "") {
     }
 }
 
-function rebuildAllowedLevels() {
-    const nextAllowedLevels = new Set<keyof AllowLevels>();
-
-    for (const level of ALLOW_LEVEL_KEYS) {
-        if (settings.store.allowLevel[level]) nextAllowedLevels.add(level);
-    }
-
-    allowedLevels = nextAllowedLevels;
-}
-
 interface AllowLevelSettingProps {
     settingKey: keyof AllowLevels;
 }
 
 function AllowLevelSetting({ settingKey }: AllowLevelSettingProps) {
-    const { allowLevel } = settings.use(["allowLevel"]);
+    const { allowLevel } = settings.use(ALLOW_LEVEL_SETTINGS);
     const value = allowLevel[settingKey];
 
     return (
         <Checkbox
             value={value}
-            onChange={(_, newValue) => {
-                settings.store.allowLevel[settingKey] = newValue;
-                rebuildAllowedLevels();
-            }}
+            onChange={(_, newValue) => settings.store.allowLevel[settingKey] = newValue}
             size={20}
         >
             <BaseText size="sm">{settingKey[0].toUpperCase() + settingKey.slice(1)}</BaseText>
@@ -136,14 +115,13 @@ export default definePlugin({
     startAt: StartAt.Init,
     start() {
         rebuildLogAllow(this.settings.store.whitelistedLoggers);
-        rebuildAllowedLevels();
     },
 
     Noop,
     NoopLogger: () => NoopLogger,
 
     shouldLog(logger: string, level: keyof AllowLevels) {
-        return logAllow.has(logger) || allowedLevels.has(level);
+        return logAllow.has(logger) || settings.store.allowLevel[level] === true;
     },
 
     patches: [
