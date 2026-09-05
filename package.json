@@ -28,7 +28,7 @@
         "generateProtonnCordPluginJson": "tsx scripts/generatePluginList.ts --equicord",
         "generateEquicordPluginJson": "pnpm generateProtonnCordPluginJson",
         "generateVencordPluginJson": "tsx scripts/generatePluginList.ts --vencord",
-        "generateTypes": "tspc --emitDeclarationOnly --declaration --outDir packages/vencord-types --allowJs false",
+        "generateTypes": "tspc --project tsconfig.types.json && tsx packages/vencord-types/prepare.ts",
         "inject": "node scripts/runInstaller.mjs -- --install",
         "uninject": "node scripts/runInstaller.mjs -- --uninstall",
         "repair": "node scripts/runInstaller.mjs -- --repair",
