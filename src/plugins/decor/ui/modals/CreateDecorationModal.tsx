@@ -10,6 +10,7 @@ import { Heading } from "@components/Heading";
 import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
 import { GUILD_ID, INVITE_KEY, RAW_SKU_ID } from "@plugins/decor/lib/constants";
+import { Authorization, useAuthorizationStore } from "@plugins/decor/lib/stores/AuthorizationStore";
 import { useCurrentUserDecorationsStore } from "@plugins/decor/lib/stores/CurrentUserDecorationsStore";
 import { cl, DecorationModalClasses, requireAvatarDecorationModal, requireCreateStickerModal } from "@plugins/decor/ui";
 import { AvatarDecorationModalPreview } from "@plugins/decor/ui/components";
@@ -26,35 +27,40 @@ const { HelpMessage, HelpMessageTypes } = mapMangledModuleLazy('POSITIVE="positi
     HelpMessage: filters.byCode("messageType:")
 });
 
-function useObjectURL(object: Blob | MediaSource | null) {
-    const [url, setUrl] = useState<string | null>(null);
+function useObjectURL(file: File | null) {
+    const [preview, setPreview] = useState<{ file: File; url: string; } | null>(null);
 
     useEffect(() => {
-        if (!object) return;
+        if (!file) {
+            setPreview(null);
+            return;
+        }
 
-        const objectUrl = URL.createObjectURL(object);
-        setUrl(objectUrl);
+        const url = URL.createObjectURL(file);
+        setPreview({ file, url });
 
-        return () => {
-            URL.revokeObjectURL(objectUrl);
-            setUrl(null);
-        };
-    }, [object]);
-
-    return url;
-}
-
-function CreateDecorationModal(props: RenderModalProps) {
-    const [name, setName] = useState("");
-    const [file, setFile] = useState<File | null>(null);
-    const [submitting, setSubmitting] = useState(false);
-    const [error, setError] = useState<Error | null>(null);
-
-    useEffect(() => {
-        if (error) setError(null);
+        return () => URL.revokeObjectURL(url);
     }, [file]);
 
-    const { create: createDecoration } = useCurrentUserDecorationsStore();
+    return preview && preview.file === file ? preview.url : null;
+}
+
+function CreateDecorationModal({ owner, ...props }: RenderModalProps & { owner: Authorization; }) {
+    const [name, setName] = useState("");
+    const [file, setFile] = useState<File | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const authorization = useAuthorizationStore();
+    const isCurrent = authorization.authorization === owner && authorization.isAuthorized();
+
+    useEffect(() => {
+        setError(null);
+    }, [file, name]);
+
+    useEffect(() => {
+        if (!isCurrent) props.onClose();
+    }, [isCurrent]);
+
+    const { create: createDecoration, busy } = useCurrentUserDecorationsStore();
 
     const fileUrl = useObjectURL(file);
 
@@ -73,12 +79,14 @@ function CreateDecorationModal(props: RenderModalProps) {
             {
                 text: "Submit for Review",
                 variant: "primary",
+                loading: busy,
                 onClick: () => {
-                    setSubmitting(true);
-                    createDecoration({ alt: name, file: file! })
-                        .then(props.onClose).catch(e => { setSubmitting(false); setError(e); });
+                    if (!file || !name.trim() || busy || !isCurrent) return;
+                    setError(null);
+                    createDecoration({ alt: name.trim(), file }, owner)
+                        .then(props.onClose).catch(error => setError(error instanceof Error ? error.message : "Could not submit the decoration."));
                 },
-                disabled: !file || !name || submitting
+                disabled: !file || !name.trim() || busy || !isCurrent || authorization.busy
             }
         ]}
     >
@@ -93,7 +101,7 @@ function CreateDecorationModal(props: RenderModalProps) {
                 </HelpMessage>
                 <div className={cl("create-decoration-modal-form-preview-container")}>
                     <div className={cl("create-decoration-modal-form")}>
-                        {error !== null && <BaseText size="xs" color="text-danger">{error.message}</BaseText>}
+                        {error !== null && <BaseText size="xs" color="text-danger" role="alert">{error}</BaseText>}
                         <section>
                             <Heading>File</Heading>
                             <FileUpload
@@ -152,6 +160,9 @@ function CreateDecorationModal(props: RenderModalProps) {
     </Modal>;
 }
 
-export const openCreateDecorationModal = () =>
-    Promise.all([requireAvatarDecorationModal(), requireCreateStickerModal()])
-        .then(() => openModal(props => <CreateDecorationModal {...props} />));
+export const openCreateDecorationModal = async (owner: Authorization) => {
+    useAuthorizationStore.getState().requireAuthorization(owner);
+    await Promise.all([requireAvatarDecorationModal(), requireCreateStickerModal()]);
+    useAuthorizationStore.getState().requireAuthorization(owner);
+    return openModal(props => <CreateDecorationModal {...props} owner={owner} />);
+};

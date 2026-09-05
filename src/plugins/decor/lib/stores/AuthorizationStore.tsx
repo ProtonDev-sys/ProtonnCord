@@ -31,13 +31,14 @@ interface AuthorizationState {
     clear(error?: string): void;
     authorize(): Promise<void>;
     remove(expected: Authorization): Promise<void>;
-    requireAuthorization(): Authorization;
+    requireAuthorization(expected?: Authorization): Authorization;
     isAuthorized(): boolean;
 }
 
 interface AuthorizationStore {
     (): AuthorizationState;
     getState(): AuthorizationState;
+    subscribe(listener: (state: AuthorizationState, previous: AuthorizationState) => void): () => void;
 }
 
 const TOKEN_KEY = "decor-auth-v2";
@@ -221,9 +222,11 @@ export const useAuthorizationStore: AuthorizationStore = proxyLazy(() => zustand
                 throw failure;
             }
         },
-        requireAuthorization() {
-            const { authorization, ready } = get();
+        requireAuthorization(expected) {
+            const { authorization, ready, busy } = get();
             if (!ready || !authorization || !scopeMatches(authorization)) throw new Error("Sign in to Decor before changing decorations.");
+            if (busy) throw new Error("Wait for the current Decor authorization to finish.");
+            if (expected && authorization !== expected) throw new Error("The Decor account or service changed. Please try again.");
             return authorization;
         },
         isAuthorized() {

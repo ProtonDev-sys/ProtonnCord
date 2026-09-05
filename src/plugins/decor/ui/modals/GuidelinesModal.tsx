@@ -6,25 +6,49 @@
 
 import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
+import { Authorization, useAuthorizationStore } from "@plugins/decor/lib/stores/AuthorizationStore";
 import { settings } from "@plugins/decor/settings";
 import { DecorationModalClasses, requireAvatarDecorationModal } from "@plugins/decor/ui";
 import { RenderModalProps } from "@vencord/discord-types";
-import { ConfirmModal, openModal } from "@webpack/common";
+import { Modal, openModal, useEffect, useState } from "@webpack/common";
 
 import { openCreateDecorationModal } from "./CreateDecorationModal";
 
-function GuidelinesModal(props: RenderModalProps) {
+function GuidelinesModal({ owner, ...props }: RenderModalProps & { owner: Authorization; }) {
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const authorization = useAuthorizationStore();
+    const isCurrent = authorization.authorization === owner && authorization.isAuthorized();
+    useEffect(() => {
+        if (!isCurrent) props.onClose();
+    }, [isCurrent]);
     return (
-        <ConfirmModal
+        <Modal
             {...props}
             title="Hold on"
-            confirmText="Continue"
-            variant="primary"
-            onConfirm={() => {
-                settings.store.agreedToGuidelines = true;
-                props.onClose();
-                openCreateDecorationModal();
-            }}
+            notice={error ? { type: "critical", message: error } : undefined}
+            actions={[
+                { text: "Cancel", variant: "secondary", onClick: props.onClose, disabled: busy },
+                {
+                    text: "Continue",
+                    variant: "primary",
+                    disabled: busy || !isCurrent,
+                    onClick: async () => {
+                        if (busy || !isCurrent) return;
+                        setBusy(true);
+                        setError(null);
+                        try {
+                            await openCreateDecorationModal(owner);
+                            settings.store.agreedToGuidelines = true;
+                            props.onClose();
+                        } catch (error) {
+                            setError(error instanceof Error ? error.message : "Could not open the decoration editor.");
+                        } finally {
+                            setBusy(false);
+                        }
+                    }
+                }
+            ]}
         >
             <div className={DecorationModalClasses.modal}>
                 <Paragraph>
@@ -35,9 +59,13 @@ function GuidelinesModal(props: RenderModalProps) {
                     </Link>. Not reading these guidelines may get your account suspended from creating more decorations in the future.
                 </Paragraph>
             </div>
-        </ConfirmModal>
+        </Modal>
     );
 }
 
-export const openGuidelinesModal = () =>
-    requireAvatarDecorationModal().then(() => openModal(props => <GuidelinesModal {...props} />));
+export const openGuidelinesModal = async (owner: Authorization) => {
+    useAuthorizationStore.getState().requireAuthorization(owner);
+    await requireAvatarDecorationModal();
+    useAuthorizationStore.getState().requireAuthorization(owner);
+    return openModal(props => <GuidelinesModal {...props} owner={owner} />);
+};

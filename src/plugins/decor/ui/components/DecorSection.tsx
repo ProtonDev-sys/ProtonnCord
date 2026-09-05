@@ -12,7 +12,7 @@ import { useCurrentUserDecorationsStore } from "@plugins/decor/lib/stores/Curren
 import { cl } from "@plugins/decor/ui";
 import { openChangeDecorationModal } from "@plugins/decor/ui/modals/ChangeDecorationModal";
 import { findComponentByCodeLazy } from "@webpack";
-import { NewCustomizationSection, useEffect } from "@webpack/common";
+import { NewCustomizationSection, useEffect, useState } from "@webpack/common";
 
 const CustomizationSection = findComponentByCodeLazy(".DESCRIPTION", "hasBackground:");
 
@@ -25,11 +25,29 @@ export interface DecorSectionProps {
 
 export default function DecorSection({ hideTitle = false, hideDivider = false, noMargin = false, useNewSection = false }: DecorSectionProps) {
     const authorization = useAuthorizationStore();
-    const { selectedDecoration, select: selectDecoration, fetch: fetchDecorations } = useCurrentUserDecorationsStore();
+    const { selectedDecoration, select: selectDecoration, fetch: fetchDecorations, loading, busy, error: decorationError } = useCurrentUserDecorationsStore();
+    const [error, setError] = useState<string | null>(null);
+    const owner = authorization.authorization;
+    const notice = error ?? authorization.error ?? decorationError;
+    const showError = (error: unknown, expected = owner) => {
+        if (useAuthorizationStore.getState().authorization === expected)
+            setError(error instanceof Error ? error.message : "Could not change the decoration.");
+    };
 
     useEffect(() => {
-        if (authorization.isAuthorized()) fetchDecorations();
-    }, [authorization.authorization]);
+        setError(null);
+        if (owner && authorization.isAuthorized()) fetchDecorations(owner).catch(showError);
+    }, [owner]);
+
+    const open = async () => {
+        let expected = useAuthorizationStore.getState().authorization;
+        try {
+            expected = useAuthorizationStore.getState().requireAuthorization();
+            await openChangeDecorationModal(expected);
+        } catch (error) {
+            showError(error, expected);
+        }
+    };
 
     const NewSection = useNewSection ? NewCustomizationSection : undefined;
 
@@ -52,12 +70,13 @@ export default function DecorSection({ hideTitle = false, hideDivider = false, n
         <Section {...sectionProps}>
             <Flex gap="4px">
                 <Button
-                    disabled={!authorization.ready || authorization.busy}
+                    disabled={!authorization.ready || authorization.busy || busy}
                     onClick={() => {
+                        setError(null);
                         if (!authorization.isAuthorized()) {
-                            authorization.authorize().then(openChangeDecorationModal).catch(() => { });
+                            authorization.authorize().then(open, () => undefined);
                         } else {
-                            openChangeDecorationModal();
+                            open();
                         }
                     }}
                     variant="primary"
@@ -65,9 +84,13 @@ export default function DecorSection({ hideTitle = false, hideDivider = false, n
                 >
                     {changeLabel}
                 </Button>
-                {selectedDecoration && authorization.isAuthorized() && (
+                {owner && selectedDecoration && authorization.isAuthorized() && (
                     <Button
-                        onClick={() => selectDecoration(null)}
+                        disabled={loading || busy || authorization.busy}
+                        onClick={() => {
+                            setError(null);
+                            selectDecoration(null, owner).catch(showError);
+                        }}
                         variant="secondary"
                         size="small"
                     >
@@ -75,7 +98,7 @@ export default function DecorSection({ hideTitle = false, hideDivider = false, n
                     </Button>
                 )}
             </Flex>
-            {authorization.error && <Paragraph role="alert">{authorization.error}</Paragraph>}
+            {notice && <Paragraph role="alert">{notice}</Paragraph>}
         </Section>
     );
 }

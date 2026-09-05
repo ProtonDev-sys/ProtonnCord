@@ -27,6 +27,7 @@ export interface AvatarDecoration {
 let generation = 0;
 let active = false;
 let configuration: Promise<boolean> | undefined;
+let unsubscribeAuthorization: (() => void) | undefined;
 
 function clearDecorations() {
     useAuthorizationStore.getState().clear();
@@ -192,7 +193,11 @@ export default definePlugin({
     async start() {
         const currentGeneration = ++generation;
         active = true;
+        unsubscribeAuthorization?.();
         clearDecorations();
+        unsubscribeAuthorization = useAuthorizationStore.subscribe((state, previous) => {
+            if (state.authorization !== previous.authorization) useCurrentUserDecorationsStore.getState().clear();
+        });
         configuration = setBaseUrl(settings.store.baseUrl);
         await initializeDecorations(currentGeneration);
     },
@@ -200,6 +205,8 @@ export default definePlugin({
     stop() {
         generation++;
         active = false;
+        unsubscribeAuthorization?.();
+        unsubscribeAuthorization = undefined;
         cancelConfiguration();
         clearDecorations();
     },
