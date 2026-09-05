@@ -37,16 +37,21 @@ enum FolderIconDisplay {
 
 const FolderUtils = findByPropsLazy("move", "toggleGuildFolderExpand");
 
-let lastGuildId = null as string | null;
-let dispatchingFoldersClose = false;
+let lastGuildId: string | null | undefined;
+let closeOthersTask: (() => void) | undefined;
+
+function resetFolderState() {
+    lastGuildId = undefined;
+    closeOthersTask = undefined;
+}
 
 function getGuildFolder(id: string) {
     return SortedGuildStore.getGuildFolders().find(folder => folder.guildIds.includes(id));
 }
 
 function closeFolders() {
-    for (const id of ExpandedGuildFolderStore.getExpandedFolders())
-        FolderUtils.toggleGuildFolderExpand(id);
+    for (const id of [...ExpandedGuildFolderStore.getExpandedFolders()])
+        if (ExpandedGuildFolderStore.isFolderExpanded(id)) FolderUtils.toggleGuildFolderExpand(id);
 }
 
 function filterGuildListTree(node: ReactNode): ReactNode {
@@ -97,7 +102,7 @@ export const settings = definePluginSettings({
     },
     forceOpen: {
         type: OptionType.BOOLEAN,
-        description: "Force a folder to open when switching to a server of that folder",
+        description: "Open a server's folder when switching servers. Closing the selected folder takes priority.",
         default: false
     },
     keepIcons: {
@@ -129,6 +134,7 @@ export default definePlugin({
     isModified: true,
     tags: ["Organisation", "Servers", "Appearance"],
     settings,
+    stop: resetFolderState,
 
     patches: [
         {
@@ -272,11 +278,10 @@ export default definePlugin({
                 lastGuildId = data.guildId;
                 const guildFolder = getGuildFolder(data.guildId);
 
-                if (guildFolder?.folderId) {
-                    if (settings.store.forceOpen && !ExpandedGuildFolderStore.isFolderExpanded(guildFolder.folderId)) {
-                        FolderUtils.toggleGuildFolderExpand(guildFolder.folderId);
-                    }
-                    if (settings.store.closeServerFolder && ExpandedGuildFolderStore.isFolderExpanded(guildFolder.folderId)) {
+                if (guildFolder?.folderId != null) {
+                    const shouldExpand = settings.store.forceOpen && !settings.store.closeServerFolder;
+                    if ((settings.store.forceOpen || settings.store.closeServerFolder)
+                        && ExpandedGuildFolderStore.isFolderExpanded(guildFolder.folderId) !== shouldExpand) {
                         FolderUtils.toggleGuildFolderExpand(guildFolder.folderId);
                     }
                 } else if (settings.store.closeAllFolders) {
@@ -286,25 +291,27 @@ export default definePlugin({
         },
 
         TOGGLE_GUILD_FOLDER_EXPAND(data) {
-            if (settings.store.closeOthers && !dispatchingFoldersClose) {
-                dispatchingFoldersClose = true;
+            if (!settings.store.closeOthers || closeOthersTask) return;
 
-                FluxDispatcher.wait(() => {
-                    const expandedFolders = ExpandedGuildFolderStore.getExpandedFolders();
-
-                    if (expandedFolders.size > 1) {
-                        for (const id of expandedFolders) if (id !== data.folderId)
+            const task = () => {
+                if (closeOthersTask !== task) return;
+                try {
+                    if (!settings.store.closeOthers || !ExpandedGuildFolderStore.isFolderExpanded(data.folderId)) return;
+                    for (const id of [...ExpandedGuildFolderStore.getExpandedFolders()])
+                        if (id !== data.folderId && ExpandedGuildFolderStore.isFolderExpanded(id))
                             FolderUtils.toggleGuildFolderExpand(id);
-                    }
-
-                    dispatchingFoldersClose = false;
-                });
-            }
+                } catch (e) {
+                    new Logger("BetterFolders").error("Failed to close other folders", e);
+                } finally {
+                    if (closeOthersTask === task) closeOthersTask = undefined;
+                }
+            };
+            closeOthersTask = task;
+            FluxDispatcher.wait(task);
         },
 
-        LOGOUT() {
-            closeFolders();
-        }
+        LOGOUT: resetFolderState,
+        CONNECTION_OPEN: resetFolderState
     },
 
     FolderSideBar,

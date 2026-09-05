@@ -36,20 +36,40 @@ function loadComponent(path: string, hooks: Record<string, unknown> = {}, additi
     });
 }
 
-test("folder sidebar filtering preserves frozen source trees, keys and guild-list identity", () => {
+function loadFolders() {
     type Element = { key: string; props: { children?: unknown; renderTreeNode?: unknown; }; };
+    const settings = { closeOthers: true, forceOpen: false, closeServerFolder: false, closeAllFolders: false };
+    const expanded = new Set<number>();
+    const pending: (() => void)[] = [];
+    const toggles: number[] = [];
+    const errors: unknown[] = [];
+    const controls = { failNext: false };
     const plugin = loadComponent("src/plugins/betterFolders/index.tsx", {
         React: {
             isValidElement: (node: Element | null) => !!node && typeof node === "object" && "props" in node,
             cloneElement: (node: Element, _props: undefined, children: unknown) => ({ ...node, props: { ...node.props, children } })
-        }
+        },
+        ExpandedGuildFolderStore: { getExpandedFolders: () => expanded, isFolderExpanded: (id: number) => expanded.has(id) },
+        SortedGuildStore: { getGuildFolders: () => [{ folderId: 0, guildIds: ["guild-zero"] }, { folderId: 1, guildIds: ["guild-one"] }] },
+        FluxDispatcher: { wait: (callback: () => void) => pending.push(callback) }
     }, {
-        "@api/Settings": { definePluginSettings: () => ({ store: {} }) },
+        "@api/Settings": { definePluginSettings: () => ({ store: settings }) },
         "@utils/constants": { Devs: {} }, "@utils/discord": {},
-        "@utils/Logger": { Logger: class { error(error: unknown) { assert.fail(String(error)); } } },
+        "@utils/Logger": { Logger: class { error(error: unknown) { errors.push(error); } } },
         "@utils/types": { __esModule: true, default: (plugin: object) => plugin, OptionType: {} },
-        "@webpack": { findByPropsLazy: () => ({}) }, "./FolderSideBar": {}
+        "@webpack": { findByPropsLazy: () => ({ toggleGuildFolderExpand(id: number) {
+            if (controls.failNext) { controls.failNext = false; throw new Error("toggle failed"); }
+            toggles.push(id);
+            if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
+            plugin.flux.TOGGLE_GUILD_FOLDER_EXPAND({ folderId: id });
+        } }) }, "./FolderSideBar": {}
     }).default;
+    function flush() { while (pending.length) pending.shift()?.(); }
+    return { plugin, settings, expanded, pending, toggles, errors, controls, flush };
+}
+
+test("folder sidebar filtering preserves frozen source trees, keys and guild-list identity", () => {
+    const { plugin } = loadFolders();
     const guildList = Object.freeze({ key: "guild-list", props: Object.freeze({ renderTreeNode() {} }) });
     const unrelated = Object.freeze({ key: "other", props: Object.freeze({ children: "Button" }) });
     const nested = Object.freeze([unrelated, guildList]);
@@ -66,6 +86,59 @@ test("folder sidebar filtering preserves frozen source trees, keys and guild-lis
     assert.equal(nested.length, 2);
     assert.equal(filter(unrelated), null);
     assert.equal(plugin.makeGuildsBarSidebarFilter(false)(wrapper), wrapper);
+});
+
+test("deferred folder closing is cancelled by stop, logout and reconnect", () => {
+    for (const reset of ["stop", "LOGOUT", "CONNECTION_OPEN"]) {
+        const { plugin, expanded, toggles, flush } = loadFolders();
+        expanded.add(1).add(2);
+        plugin.flux.TOGGLE_GUILD_FOLDER_EXPAND({ folderId: 1 });
+        if (reset === "stop") plugin.stop(); else plugin.flux[reset]();
+        flush();
+        assert.deepEqual(toggles, [], reset);
+        assert.equal(expanded.size, 2);
+        plugin.flux.TOGGLE_GUILD_FOLDER_EXPAND({ folderId: 2 });
+        flush();
+        assert.deepEqual(toggles, [1]);
+    }
+});
+
+test("folder closing recovers from a failed toggle and ignores closed targets or disabled preferences", () => {
+    const { plugin, settings, expanded, toggles, controls, errors, flush } = loadFolders();
+    expanded.add(1).add(2).add(3);
+    controls.failNext = true;
+    plugin.flux.TOGGLE_GUILD_FOLDER_EXPAND({ folderId: 1 });
+    flush();
+    assert.equal(errors.length, 1);
+    plugin.flux.TOGGLE_GUILD_FOLDER_EXPAND({ folderId: 1 });
+    flush();
+    assert.deepEqual(toggles, [2, 3]);
+    expanded.add(2).add(3);
+    plugin.flux.TOGGLE_GUILD_FOLDER_EXPAND({ folderId: 4 });
+    flush();
+    assert.deepEqual(toggles, [2, 3]);
+    plugin.flux.TOGGLE_GUILD_FOLDER_EXPAND({ folderId: 1 });
+    settings.closeOthers = false;
+    flush();
+    assert.deepEqual(toggles, [2, 3]);
+});
+
+test("folder selection toggles once with conflicting preferences and resets across accounts", () => {
+    const { plugin, settings, expanded, toggles } = loadFolders();
+    settings.forceOpen = true;
+    settings.closeServerFolder = true;
+    plugin.flux.CHANNEL_SELECT({ guildId: "guild-one" });
+    assert.deepEqual(toggles, []);
+    expanded.add(1);
+    plugin.flux.CONNECTION_OPEN();
+    plugin.flux.CHANNEL_SELECT({ guildId: "guild-one" });
+    assert.deepEqual(toggles, [1]);
+    settings.closeServerFolder = false;
+    plugin.flux.LOGOUT();
+    plugin.flux.CHANNEL_SELECT({ guildId: "guild-one" });
+    assert.deepEqual(toggles, [1, 1]);
+    plugin.flux.CHANNEL_SELECT({ guildId: "guild-zero" });
+    assert.deepEqual(toggles, [1, 1, 0]);
 });
 
 test("numeric settings validate parsed values and retain invalid drafts without committing them", () => {
