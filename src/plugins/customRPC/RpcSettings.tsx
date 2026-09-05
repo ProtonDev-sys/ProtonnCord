@@ -123,6 +123,7 @@ function SelectSetting<K extends "type" | "timestampMode">({ settingsKey, label,
         <div className={cl("single", { disabled })}>
             <Heading tag="h5">{label}</Heading>
             <Select
+                aria-label={label}
                 placeholder={"Select an option"}
                 options={options}
                 maxVisibleItems={5}
@@ -189,6 +190,7 @@ function PresetSettings({ onLoad }: { onLoad(): void; }) {
             {presets.length ? (
                 <div className={cl("preset-actions")}>
                     <Select
+                        aria-label="Saved preset"
                         isDisabled={unavailable}
                         placeholder="Select a preset"
                         options={presets.map(preset => ({ label: preset.name, value: preset.name }))}
