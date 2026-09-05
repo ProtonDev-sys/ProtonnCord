@@ -24,7 +24,7 @@ import { getIntlMessage } from "@utils/discord";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { findByPropsLazy } from "@webpack";
-import { ExpandedGuildFolderStore, FluxDispatcher, SortedGuildStore } from "@webpack/common";
+import { ExpandedGuildFolderStore, FluxDispatcher, React, SortedGuildStore } from "@webpack/common";
 import { ReactNode } from "react";
 
 import FolderSideBar from "./FolderSideBar";
@@ -49,32 +49,17 @@ function closeFolders() {
         FolderUtils.toggleGuildFolderExpand(id);
 }
 
-// Nuckyz: Unsure if this should be a general utility or not
-function filterTreeWithTargetNode(children: any, predicate: (node: any) => boolean) {
-    if (children == null) {
-        return false;
+function filterGuildListTree(node: ReactNode): ReactNode {
+    if (Array.isArray(node)) {
+        const children = node.map(filterGuildListTree).filter(child => child != null);
+        return children.length ? children : null;
     }
+    if (!React.isValidElement<{ children?: ReactNode; renderTreeNode?: unknown; }>(node)) return null;
+    if (node.props.renderTreeNode != null) return node;
 
-    if (!Array.isArray(children)) {
-        if (predicate(children)) {
-            return true;
-        }
-
-        return filterTreeWithTargetNode(children.props?.children, predicate);
-    }
-
-    let childIsTargetChild = false;
-    for (let i = 0; i < children.length; i++) {
-        const shouldKeep = filterTreeWithTargetNode(children[i], predicate);
-        if (shouldKeep) {
-            childIsTargetChild = true;
-            continue;
-        }
-
-        children.splice(i--, 1);
-    }
-
-    return childIsTargetChild;
+    const children = filterGuildListTree(node.props.children);
+    if (children == null) return null;
+    return React.cloneElement(node, undefined, children);
 }
 
 export const settings = definePluginSettings({
@@ -184,7 +169,7 @@ export default definePlugin({
                 // If we are rendering the Better Folders sidebar, we filter out everything but the Guild List from the Sidebar children
                 {
                     match: /reverse:!0,.{0,150}?barClassName:.+?\}\)\]/,
-                    replace: "$&.filter($self.makeGuildsBarSidebarFilter(!!arguments[0]?.isBetterFolders))"
+                    replace: "$&.map($self.makeGuildsBarSidebarFilter(!!arguments[0]?.isBetterFolders))"
                 }
             ]
         },
@@ -363,16 +348,16 @@ export default definePlugin({
     },
 
     makeGuildsBarSidebarFilter(isBetterFolders: boolean) {
-        return (child: any) => {
+        return (child: ReactNode) => {
             if (!isBetterFolders) {
-                return true;
+                return child;
             }
 
             try {
-                return filterTreeWithTargetNode(child, child => child?.props?.renderTreeNode != null);
+                return filterGuildListTree(child);
             } catch (e) {
-                console.error(e);
-                return true;
+                new Logger("BetterFolders").error("Failed to filter the folder sidebar", e);
+                return child;
             }
         };
     },

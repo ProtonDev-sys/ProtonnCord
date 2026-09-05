@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
-function loadComponent(path: string, hooks: Record<string, unknown> = {}) {
+function loadComponent(path: string, hooks: Record<string, unknown> = {}, additionalMocks: Record<string, object> = {}) {
     const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
     const mocks: Record<string, object> = {
         "@webpack/common": { React, TextInput: "input", ...hooks },
@@ -19,7 +19,8 @@ function loadComponent(path: string, hooks: Record<string, unknown> = {}) {
         "@utils/types": { OptionType: { NUMBER: 1, BIGINT: 2 } },
         "./Common": { SettingsSection: "section", resolveError: (result: boolean | string) => result === true ? null : result || "Invalid input provided" },
         "@utils/css": { classNameFactory: (prefix: string) => (...names: string[]) => names.map(name => prefix + name).join(" ") },
-        "@utils/misc": { classes: (...names: unknown[]) => names.filter(Boolean).join(" ") }
+        "@utils/misc": { classes: (...names: unknown[]) => names.filter(Boolean).join(" ") },
+        ...additionalMocks
     };
     const code = transpileModule(readFileSync(path, "utf8"), {
         fileName: path,
@@ -34,6 +35,38 @@ function loadComponent(path: string, hooks: Record<string, unknown> = {}) {
         }
     });
 }
+
+test("folder sidebar filtering preserves frozen source trees, keys and guild-list identity", () => {
+    type Element = { key: string; props: { children?: unknown; renderTreeNode?: unknown; }; };
+    const plugin = loadComponent("src/plugins/betterFolders/index.tsx", {
+        React: {
+            isValidElement: (node: Element | null) => !!node && typeof node === "object" && "props" in node,
+            cloneElement: (node: Element, _props: undefined, children: unknown) => ({ ...node, props: { ...node.props, children } })
+        }
+    }, {
+        "@api/Settings": { definePluginSettings: () => ({ store: {} }) },
+        "@utils/constants": { Devs: {} }, "@utils/discord": {},
+        "@utils/Logger": { Logger: class { error(error: unknown) { assert.fail(String(error)); } } },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin, OptionType: {} },
+        "@webpack": { findByPropsLazy: () => ({}) }, "./FolderSideBar": {}
+    }).default;
+    const guildList = Object.freeze({ key: "guild-list", props: Object.freeze({ renderTreeNode() {} }) });
+    const unrelated = Object.freeze({ key: "other", props: Object.freeze({ children: "Button" }) });
+    const nested = Object.freeze([unrelated, guildList]);
+    const children = Object.freeze([unrelated, nested, [null, false, []]]);
+    const wrapper = Object.freeze({ key: "wrapper", props: Object.freeze({ children }) });
+    const filter = plugin.makeGuildsBarSidebarFilter(true);
+    const filtered = filter(wrapper);
+    assert.equal(filtered.key, "wrapper");
+    assert.equal(filtered.props.children.length, 1);
+    assert.equal(filtered.props.children[0].length, 1);
+    assert.equal(filtered.props.children[0][0], guildList);
+    assert.equal(wrapper.props.children, children);
+    assert.equal(children.length, 3);
+    assert.equal(nested.length, 2);
+    assert.equal(filter(unrelated), null);
+    assert.equal(plugin.makeGuildsBarSidebarFilter(false)(wrapper), wrapper);
+});
 
 test("numeric settings validate parsed values and retain invalid drafts without committing them", () => {
     const states: unknown[] = [];
