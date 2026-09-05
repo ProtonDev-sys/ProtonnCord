@@ -1,0 +1,52 @@
+name: Prepare Secure Messaging receive prefetch
+on:
+    push:
+        branches:
+            - perf/secure-receive-prefetch-stage-20260905
+permissions:
+    contents: write
+jobs:
+    prepare:
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+            - name: Apply reviewed patch
+              run: |
+                  echo '7d6087dd4da356dddad4aba2c03a93e91d841f72f29afa7a22cfc28bbc180b2d  .github/secure-receive-prefetch.patch' | sha256sum --check
+                  git apply --check .github/secure-receive-prefetch.patch
+                  git apply .github/secure-receive-prefetch.patch
+                  git diff --check
+            - uses: pnpm/action-setup@v6
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: pnpm
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+            - name: Type check and lint changed sources
+              run: |
+                  pnpm testTsc
+                  pnpm exec eslint src/equicordplugins/secureMessaging.desktop/index.tsx src/equicordplugins/secureMessaging.desktop/decryptCache.ts scripts/testSecureMessagingReceive.ts
+            - name: Secure Messaging regression tests
+              run: |
+                  pnpm testSecureMessagingPerformance
+                  pnpm testSecureMessagingHistory
+                  pnpm testSecureMessagingPlaintextRendering
+                  pnpm testSecureMessagingAttachments
+                  pnpm testSecureMessaging
+                  pnpm testSecureMessagingNative
+                  pnpm exec tsx --test scripts/testSecureMessagingCaches.ts
+            - name: Desktop build
+              run: pnpm buildStandalone
+            - name: Commit validated source without preparation files
+              run: |
+                  git rm .github/secure-receive-prefetch.patch .github/workflows/secure-receive-prefetch-prepare.yml
+                  git add package.json src/equicordplugins/secureMessaging.desktop/decryptCache.ts src/equicordplugins/secureMessaging.desktop/index.tsx scripts/testSecureMessagingReceive.ts docs/performance-secure-receive-prefetch.md
+                  git diff --cached --check
+                  git config user.name 'github-actions[bot]'
+                  git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+                  git commit -m 'perf: start Secure Messaging decryption on receipt'
+                  git push origin HEAD:refs/heads/perf/secure-receive-prefetch-stage-20260905
