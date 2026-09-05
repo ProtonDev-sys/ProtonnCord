@@ -8,6 +8,7 @@ import { isObject } from "@utils/misc";
 
 import { API_URL } from "./constants";
 import { Authorization, useAuthorizationStore } from "./stores/AuthorizationStore";
+import { validateDecorationFile } from "./utils/decoration";
 
 export interface Preset {
     id: string;
@@ -28,10 +29,11 @@ export interface Decoration {
 
 export interface NewDecoration {
     file: File;
-    alt: string | null;
+    alt: string;
 }
 
 async function fetchApi(path: string, authorization: Authorization, options?: RequestInit) {
+    if (options?.signal?.aborted) throw new Error("The decoration request was cancelled.");
     useAuthorizationStore.getState().requireAuthorization(authorization);
     const headers = new Headers(options?.headers);
     headers.set("Authorization", `Bearer ${authorization.token}`);
@@ -98,9 +100,12 @@ export const setUserDecoration = async (hash: string | null, authorization: Auth
 };
 
 export const createDecoration = async (decoration: NewDecoration, authorization: Authorization, signal?: AbortSignal): Promise<Decoration> => {
+    const name = decoration.alt.trim();
+    if (!name) throw new Error("Enter a decoration name.");
+    await validateDecorationFile(decoration.file);
     const formData = new FormData();
     formData.append("image", decoration.file);
-    formData.append("alt", decoration.alt ?? "null");
+    formData.append("alt", name);
     return fetchApi("/users/@me/decoration", authorization, { method: "PUT", body: formData, signal }).then(c => c.json()).then(readDecoration);
 };
 

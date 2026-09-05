@@ -9,16 +9,16 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { Heading } from "@components/Heading";
 import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
-import { GUILD_ID, INVITE_KEY, RAW_SKU_ID } from "@plugins/decor/lib/constants";
+import { INVITE_KEY, RAW_SKU_ID } from "@plugins/decor/lib/constants";
 import { Authorization, useAuthorizationStore } from "@plugins/decor/lib/stores/AuthorizationStore";
 import { useCurrentUserDecorationsStore } from "@plugins/decor/lib/stores/CurrentUserDecorationsStore";
-import { cl, DecorationModalClasses, requireAvatarDecorationModal, requireCreateStickerModal } from "@plugins/decor/ui";
+import { validateDecorationFile } from "@plugins/decor/lib/utils/decoration";
+import { cl, DecorationModalClasses, requireAvatarDecorationModal, requireCreateStickerModal, requireDialogOwner, useDialogActions } from "@plugins/decor/ui";
 import { AvatarDecorationModalPreview } from "@plugins/decor/ui/components";
-import { openInviteModal } from "@utils/discord";
 import { Margins } from "@utils/margins";
 import { RenderModalProps } from "@vencord/discord-types";
 import { filters, findComponentByCodeLazy, mapMangledModuleLazy } from "@webpack";
-import { closeAllModals, FluxDispatcher, GuildStore, Modal, NavigationRouter, openModal, TextInput, useEffect, useMemo, UserStore, useState } from "@webpack/common";
+import { Modal, openModal, TextInput, useEffect, useMemo, UserStore, useState } from "@webpack/common";
 
 const FileUpload = findComponentByCodeLazy(".currentTarget.files", "lineClamp:1");
 
@@ -46,6 +46,7 @@ function useObjectURL(file: File | null) {
 }
 
 function CreateDecorationModal({ owner, ...props }: RenderModalProps & { owner: Authorization; }) {
+    const actions = useDialogActions(props.onClose);
     const [name, setName] = useState("");
     const [file, setFile] = useState<File | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -53,11 +54,7 @@ function CreateDecorationModal({ owner, ...props }: RenderModalProps & { owner: 
     const isCurrent = authorization.authorization === owner && authorization.isAuthorized();
 
     useEffect(() => {
-        setError(null);
-    }, [file, name]);
-
-    useEffect(() => {
-        if (!isCurrent) props.onClose();
+        if (!isCurrent) actions.close();
     }, [isCurrent]);
 
     const { create: createDecoration, busy } = useCurrentUserDecorationsStore();
@@ -68,13 +65,14 @@ function CreateDecorationModal({ owner, ...props }: RenderModalProps & { owner: 
 
     return <Modal
         {...props}
+        onClose={actions.close}
         size="lg"
         title="Create Decoration"
         actions={[
             {
-                text: "Cancel",
+                text: busy ? "Close" : "Cancel",
                 variant: "secondary",
-                onClick: props.onClose
+                onClick: actions.close
             },
             {
                 text: "Submit for Review",
@@ -83,8 +81,8 @@ function CreateDecorationModal({ owner, ...props }: RenderModalProps & { owner: 
                 onClick: () => {
                     if (!file || !name.trim() || busy || !isCurrent) return;
                     setError(null);
-                    createDecoration({ alt: name.trim(), file }, owner)
-                        .then(props.onClose).catch(error => setError(error instanceof Error ? error.message : "Could not submit the decoration."));
+                    createDecoration({ alt: name, file }, owner)
+                        .then(actions.close).catch(error => setError(error instanceof Error ? error.message : "Could not submit the decoration."));
                 },
                 disabled: !file || !name.trim() || busy || !isCurrent || authorization.busy
             }
@@ -104,15 +102,27 @@ function CreateDecorationModal({ owner, ...props }: RenderModalProps & { owner: 
                         {error !== null && <BaseText size="xs" color="text-danger" role="alert">{error}</BaseText>}
                         <section>
                             <Heading>File</Heading>
-                            <FileUpload
+                            {busy ? <Paragraph>{file?.name}</Paragraph> : <FileUpload
                                 filename={file?.name}
                                 placeholder="Choose a file"
                                 buttonText="Browse"
                                 filters={[{ name: "Decoration file", extensions: ["png", "apng"] }]}
-                                onFileSelect={setFile}
-                            />
+                                onFileSelect={async (selected: File | null) => {
+                                    if (useCurrentUserDecorationsStore.getState().busy) return;
+                                    const signal = actions.begin();
+                                    setFile(null);
+                                    setError(null);
+                                    if (!selected) return;
+                                    try {
+                                        await validateDecorationFile(selected);
+                                        if (!signal.aborted) setFile(selected);
+                                    } catch (error) {
+                                        if (!signal.aborted) setError(error instanceof Error ? error.message : "Could not read the decoration file.");
+                                    }
+                                }}
+                            />}
                             <Paragraph className={Margins.top8}>
-                                File should be APNG or PNG.
+                                Choose a square PNG or APNG image.
                             </Paragraph>
                         </section>
                         <section>
@@ -120,7 +130,11 @@ function CreateDecorationModal({ owner, ...props }: RenderModalProps & { owner: 
                             <TextInput
                                 placeholder="Companion Cube"
                                 value={name}
-                                onChange={setName}
+                                disabled={busy}
+                                onChange={value => {
+                                    if (useCurrentUserDecorationsStore.getState().busy) return;
+                                    setName(value);
+                                }}
                             />
                             <Paragraph className={Margins.top8}>
                                 This name will be used when referring to this decoration.
@@ -137,20 +151,6 @@ function CreateDecorationModal({ owner, ...props }: RenderModalProps & { owner: 
                 <HelpMessage messageType={HelpMessageTypes.INFO} className={Margins.bottom8}>
                     To receive updates on your decoration's review, join <Link
                         href={`https://discord.gg/${INVITE_KEY}`}
-                        onClick={async e => {
-                            e.preventDefault();
-                            if (!GuildStore.getGuild(GUILD_ID)) {
-                                const inviteAccepted = await openInviteModal(INVITE_KEY);
-                                if (inviteAccepted) {
-                                    closeAllModals();
-                                    FluxDispatcher.dispatch({ type: "LAYER_POP_ALL" });
-                                }
-                            } else {
-                                closeAllModals();
-                                FluxDispatcher.dispatch({ type: "LAYER_POP_ALL" });
-                                NavigationRouter.transitionToGuild(GUILD_ID);
-                            }
-                        }}
                     >
                         Decor's Discord server
                     </Link> and allow direct messages.
@@ -160,9 +160,9 @@ function CreateDecorationModal({ owner, ...props }: RenderModalProps & { owner: 
     </Modal>;
 }
 
-export const openCreateDecorationModal = async (owner: Authorization) => {
-    useAuthorizationStore.getState().requireAuthorization(owner);
+export const openCreateDecorationModal = async (owner: Authorization, signal: AbortSignal) => {
+    requireDialogOwner(owner, signal);
     await Promise.all([requireAvatarDecorationModal(), requireCreateStickerModal()]);
-    useAuthorizationStore.getState().requireAuthorization(owner);
+    requireDialogOwner(owner, signal);
     return openModal(props => <CreateDecorationModal {...props} owner={owner} />);
 };
