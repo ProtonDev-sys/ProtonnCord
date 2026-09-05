@@ -45,7 +45,7 @@
         "testBrowser": "tsx --test scripts/testBrowserBuild.ts scripts/testBrowserRuntime.ts",
         "testMoreStickersStorage": "tsx --test scripts/testMoreStickersStorage.ts",
         "testClientsideGuildIcons": "tsx scripts/testClientsideGuildIcons.ts",
-        "testCoreUtilities": "tsx --test scripts/testCoreUtilities.ts scripts/testChooseFile.ts scripts/testUseIntersection.ts scripts/testAudioPlayer.ts scripts/testCrashHandler.ts scripts/testThemes.ts scripts/testUiComponents.ts scripts/testPluginManager.ts scripts/testBadges.ts scripts/testBetterSessions.ts",
+        "testCoreUtilities": "tsx --test scripts/testCoreUtilities.ts scripts/testChooseFile.ts scripts/testUseIntersection.ts scripts/testAudioPlayer.ts scripts/testCrashHandler.ts scripts/testThemes.ts scripts/testUiComponents.ts scripts/testPluginManager.ts scripts/testBadges.ts scripts/testBetterSessions.ts scripts/testUploadFileNames.ts",
         "testRenderPerformance": "tsx scripts/testNotificationPerformance.ts --check && tsx scripts/benchmarkSecureMessagingMentions.ts --check && tsx scripts/benchmarkTimezones.ts --check",
         "testPromiseTimeout": "tsx scripts/testPromiseTimeout.ts",
         "testUpdaterClassification": "tsx scripts/testUpdaterClassification.ts",
