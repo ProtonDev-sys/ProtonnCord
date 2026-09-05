@@ -350,3 +350,62 @@ test("chat badge classes stay lazy until rendering and sibling badge keys are un
         assert.equal(new Set(keys).size, 2);
     }
 });
+
+test("account profile actions preserve server/global context without a prefetch or cancelled launch", () => {
+    const store = { prioritizeServerProfile: true };
+    const opened: object[] = [];
+    const effects: (() => void)[] = [];
+    let closed = 0;
+    const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
+    const { plugin, menu } = loadSource("src/plugins/accountPanelServerProfile/index.tsx", {
+        "@api/PluginManager": { isPluginEnabled: () => true },
+        "@api/Settings": { definePluginSettings: () => ({ store, use: () => store }) },
+        "@components/ErrorBoundary": boundary,
+        "@equicordplugins/alwaysExpandProfiles": { __esModule: true, default: { name: "AlwaysExpandProfiles" } },
+        "@utils/constants": { Devs: {} },
+        "@utils/discord": { getCurrentChannel: () => ({ id: "channel", getGuildId: () => "guild" }) },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin, OptionType: { BOOLEAN: 0 } },
+        "@webpack": { findComponentByCodeLazy: () => ({ $$vencordGetWrappedComponent() { throw new Error("The full modal does not require loading the popout component"); } }) },
+        "@webpack/common": {
+            ContextMenuApi: {}, Menu: { Menu: "menu", MenuItem: "item", MenuCheckboxItem: "checkbox" },
+            useEffect: (effect: () => void) => effects.push(effect),
+            UserStore: { getCurrentUser: () => ({ id: "user" }) },
+            UserProfileActions: { openUserProfileModal: (options: object) => opened.push(options) }
+        }
+    }, { React }, "({ plugin: exports.default, menu: AccountPanelContextMenu })");
+    menu().props.children[0].props.action();
+    assert.equal(opened.length, 1);
+    assert.equal(Reflect.get(opened[0], "guildId"), undefined);
+    store.prioritizeServerProfile = false;
+    menu().props.children[0].props.action();
+    assert.equal(Reflect.get(opened[1], "guildId"), "guild");
+    store.prioritizeServerProfile = true;
+    const launcher = plugin.UserProfile({
+        popoutProps: { closePopout: () => closed++, onRequestClose() { throw new Error("Only one close callback should be invoked"); } },
+        currentUser: { id: "user" }, originalRenderPopout: () => "original"
+    });
+    launcher.type(launcher.props);
+    assert.equal(opened.length, 2);
+    effects[0]();
+    assert.equal(closed, 1);
+    assert.equal(opened.length, 3);
+    assert.equal(Reflect.get(opened[2], "guildId"), "guild");
+    assert.equal(Reflect.get(opened[2], "channelId"), "channel");
+});
+
+test("animation preferences gate every patch and expose their restart requirement", () => {
+    const store: Record<string, boolean> = {};
+    const { default: plugin } = loadSource("src/plugins/alwaysAnimate/index.ts", {
+        "@api/Settings": { definePluginSettings: (def: object) => ({ def, store }) },
+        "@utils/constants": { Devs: {} },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin, OptionType: { BOOLEAN: 0 } }
+    });
+    for (const [key, option] of Object.entries(plugin.settings.def) as [string, { restartNeeded?: boolean; }][]) {
+        store[key] = false;
+        assert.equal(option.restartNeeded, true, key);
+    }
+    const active = () => plugin.patches.filter((patch: { predicate?(): boolean; }) => !patch.predicate || patch.predicate());
+    assert.equal(active().length, 0);
+    store.roleGradients = true;
+    assert.equal(active().length, 3);
+});

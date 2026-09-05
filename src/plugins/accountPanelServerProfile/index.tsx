@@ -9,14 +9,19 @@ import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import alwaysExpandProfiles from "@equicordplugins/alwaysExpandProfiles";
 import { Devs } from "@utils/constants";
-import { fetchUserProfile, getCurrentChannel, openUserProfile } from "@utils/discord";
+import { getCurrentChannel } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
 import { User } from "@vencord/discord-types";
 import { findComponentByCodeLazy } from "@webpack";
-import { ContextMenuApi, Menu, useEffect, UserStore } from "@webpack/common";
+import { ContextMenuApi, Menu, useEffect, UserProfileActions, UserStore } from "@webpack/common";
+
+interface PopoutProps extends Record<string, unknown> {
+    closePopout?(): void;
+    onRequestClose?(): void;
+}
 
 interface UserProfileProps {
-    popoutProps: Record<string, any>;
+    popoutProps: PopoutProps;
     currentUser: User;
     originalRenderPopout: () => React.ReactNode;
 }
@@ -37,16 +42,18 @@ const AccountPanelContextMenu = ErrorBoundary.wrap(() => {
                 id="vc-ap-view-alternate-popout"
                 label={prioritizeServerProfile ? "View Account Profile" : "View Server Profile"}
                 disabled={getCurrentChannel()?.getGuildId() == null}
-                action={async e => {
+                action={() => {
                     if (isPluginEnabled(alwaysExpandProfiles.name)) {
                         const currentUserId = UserStore.getCurrentUser()?.id;
                         if (!currentUserId) return;
 
                         const currentChannel = getCurrentChannel();
-                        const user = await fetchUserProfile(currentUserId, {
-                            guild_id: prioritizeServerProfile ? undefined : currentChannel?.getGuildId()
-                        }, false).catch(() => null);
-                        if (user) return openUserProfile(user.userId);
+                        UserProfileActions.openUserProfileModal({
+                            userId: currentUserId,
+                            guildId: prioritizeServerProfile ? undefined : currentChannel?.getGuildId(),
+                            channelId: currentChannel?.id
+                        });
+                        return;
                     }
                     openAlternatePopout = true;
                     accountPanelRef.current?.click();
@@ -124,38 +131,33 @@ export default definePlugin({
         }
 
         const currentChannel = getCurrentChannel();
-        if (currentChannel?.getGuildId() == null || !UserProfile.$$vencordGetWrappedComponent()) {
+        const guildId = currentChannel?.getGuildId();
+        if (!currentChannel || guildId == null) {
             return originalRenderPopout();
         }
 
         if (isPluginEnabled(alwaysExpandProfiles.name)) {
-            return <ServerProfileLauncher popoutProps={popoutProps} userId={currentUser.id} guildId={currentChannel.getGuildId()!} />;
+            return <ServerProfileLauncher popoutProps={popoutProps} userId={currentUser.id} guildId={guildId} channelId={currentChannel.id} />;
         }
+
+        if (!UserProfile.$$vencordGetWrappedComponent()) return originalRenderPopout();
 
         return (
             <UserProfile
                 {...popoutProps}
                 user={currentUser}
                 currentUser={currentUser}
-                guildId={currentChannel.getGuildId()}
+                guildId={guildId}
                 channelId={currentChannel.id}
             />
         );
     }, { noop: true })
 });
 
-function ServerProfileLauncher({ popoutProps, userId, guildId }: { popoutProps: Record<string, any>; userId: string; guildId: string; }) {
+function ServerProfileLauncher({ popoutProps, userId, guildId, channelId }: { popoutProps: PopoutProps; userId: string; guildId: string; channelId: string; }) {
     useEffect(() => {
-        let isActive = true;
-        popoutProps.closePopout?.();
-        popoutProps.onRequestClose?.();
-        void fetchUserProfile(userId, { guild_id: guildId }, false).then(user => {
-            if (isActive && user) openUserProfile(user.userId);
-        }).catch(() => null);
-
-        return () => {
-            isActive = false;
-        };
-    }, [guildId, popoutProps, userId]);
+        (popoutProps.closePopout ?? popoutProps.onRequestClose)?.();
+        UserProfileActions.openUserProfileModal({ userId, guildId, channelId });
+    }, [channelId, guildId, popoutProps, userId]);
     return null;
 }
