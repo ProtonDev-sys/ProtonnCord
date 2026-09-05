@@ -168,7 +168,7 @@ function testMessageGroupingIndexCache(): void {
     assert.equal(
         secureMessageGroupFlags(last, messages),
         SecureMessageGroup.Previous | SecureMessageGroup.Next,
-        "same-array length changes rebuild the cached ID index",
+        "same-array length changes rebuilds the cached ID index",
     );
 }
 
@@ -251,7 +251,7 @@ function testSourceBoundaries(): void {
     assert.match(attachments, /return exactArrayBuffer\(value\)/);
     assert.doesNotMatch(grouping, /findIndex\(/,
         "each encrypted accessory no longer scans the full message array for its own ID");
-    assert.match(packageJson, /"testSecureMessagingPerformance": "tsx scripts\/testSecureMessagingPerformance\.ts"/);
+    assert.match(packageJson, /"testSecureMessagingPerformance": "tsx scripts\/testSecureMessagingPerformance\.ts && tsx scripts\/testSecureMessagingReceive\.ts"/);
     assert.match(workflow, /Test Secure Messaging performance boundaries/);
     assert.equal(
         existsSync(new URL("../scripts/applySecureMessagingPerformanceTest.py", import.meta.url)),
