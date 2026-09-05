@@ -547,3 +547,61 @@ test("timestamp rounding restores the previous function only while its override 
         moment.relativeTimeRounding(original);
     }
 });
+
+test("image quality overrides stay on Discord attachments and preserve freeze and resize behavior", () => {
+    const settings = { originalImagesInChat: false };
+    const errors: unknown[] = [];
+    const plugin = loadComponent("src/plugins/fixImagesQuality/index.tsx", {}, {
+        "@api/Settings": { definePluginSettings: () => ({ store: settings }) },
+        "@components/Card": {}, "@components/Flex": {}, "@components/margins": {}, "@components/Paragraph": {},
+        "@utils/constants": { Devs: {} },
+        "@utils/Logger": { Logger: class { error(...args: unknown[]) { errors.push(args); } } },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin, OptionType: {} }
+    }, { URL }).default;
+    const props = Object.freeze({ src: "https://media.discordapp.net/attachments/1/2/image.gif?ex=expiry&hm=signature", width: 4000, height: 2400, contentType: "image/gif" });
+    for (const origin of ["https://example.org", "http://media.discordapp.net", "https://media.discordapp.net:444", "https://user:pass@media.discordapp.net", "https://media.discordapp.net.example.org"]) {
+        assert.equal(plugin.getSrc({ ...props, src: `${origin}/attachments/1/2/image.gif`, trigger: "modal" }), undefined);
+    }
+    assert.equal(plugin.getSrc({ ...props, src: "https://media.discordapp.net/external/image.gif" }), undefined);
+    assert.equal(plugin.getSrc({ ...props, contentType: "video/mp4" }), undefined);
+    const resized = new URL(plugin.getSrc(props, true));
+    assert.equal(resized.origin, "https://media.discordapp.net");
+    assert.equal(resized.searchParams.get("width"), "2000");
+    assert.equal(resized.searchParams.get("height"), "1200");
+    assert.equal(resized.searchParams.get("animated"), "false");
+    assert.equal(resized.searchParams.get("format"), "webp");
+    assert.equal(resized.searchParams.get("hm"), "signature");
+    assert.equal(props.src.includes("width="), false, "the source props remain unchanged");
+    const original = new URL(plugin.getSrc({ ...props, trigger: "modal" }));
+    assert.equal(original.origin, "https://cdn.discordapp.com");
+    assert.equal(original.searchParams.get("animated"), "true");
+    assert.equal(original.searchParams.get("ex"), "expiry");
+    for (const [width, height] of [[NaN, 20], [Infinity, 20], [0, 20], [-1, -1], [1e308, 1e308], [1e12, 1]])
+        assert.equal(plugin.getSrc({ ...props, width, height }), undefined);
+    const embed = new URL(plugin.getSrc({ ...props, contentType: undefined, mosaicStyleAlt: false, width: 100, height: 100 }));
+    assert.equal(embed.origin, "https://media.discordapp.net");
+    assert.equal(embed.searchParams.has("width"), false);
+    settings.originalImagesInChat = true;
+    assert.equal(new URL(plugin.getSrc(props)).origin, "https://cdn.discordapp.com");
+    assert.deepEqual(errors, []);
+});
+
+test("owner crowns retain the host result when guild context is unavailable", () => {
+    const guilds = new Map<string, { ownerId: string; }>();
+    const plugin = loadComponent("src/plugins/forceOwnerCrown/index.ts", { GuildStore: { getGuild: (id: string) => guilds.get(id) } }, {
+        "@utils/constants": { Devs: {} },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin }
+    }).default;
+    assert.equal(plugin.isGuildOwner({ isOwner: true }), true);
+    const props = { user: { id: "owner" }, guildId: "guild", isOwner: true };
+    assert.equal(plugin.isGuildOwner(props), true);
+    assert.equal(plugin.isGuildOwner({ ...props, isOwner: false }), false);
+    assert.equal(plugin.isGuildOwner({ ...props, guildId: undefined }), true);
+    guilds.set("guild", { ownerId: "other" });
+    assert.equal(plugin.isGuildOwner(props), false);
+    assert.equal(plugin.isGuildOwner({ ...props, channel: { type: 3 } }), true);
+    guilds.set("guild", { ownerId: "owner" });
+    assert.equal(plugin.isGuildOwner({ ...props, isOwner: false }), true);
+    assert.equal(plugin.isGuildOwner({ ...props, guildId: undefined, channel: { guild_id: "guild" } }), true);
+    assert.equal(plugin.isGuildOwner(), undefined);
+});
