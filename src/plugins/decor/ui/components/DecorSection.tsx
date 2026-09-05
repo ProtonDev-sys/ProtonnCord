@@ -6,6 +6,7 @@
 
 import { Button } from "@components/Button";
 import { Flex } from "@components/Flex";
+import { Paragraph } from "@components/Paragraph";
 import { useAuthorizationStore } from "@plugins/decor/lib/stores/AuthorizationStore";
 import { useCurrentUserDecorationsStore } from "@plugins/decor/lib/stores/CurrentUserDecorationsStore";
 import { cl } from "@plugins/decor/ui";
@@ -28,7 +29,7 @@ export default function DecorSection({ hideTitle = false, hideDivider = false, n
 
     useEffect(() => {
         if (authorization.isAuthorized()) fetchDecorations();
-    }, [authorization.token]);
+    }, [authorization.authorization]);
 
     const NewSection = useNewSection ? NewCustomizationSection : undefined;
 
@@ -51,6 +52,7 @@ export default function DecorSection({ hideTitle = false, hideDivider = false, n
         <Section {...sectionProps}>
             <Flex gap="4px">
                 <Button
+                    disabled={!authorization.ready || authorization.busy}
                     onClick={() => {
                         if (!authorization.isAuthorized()) {
                             authorization.authorize().then(openChangeDecorationModal).catch(() => { });
@@ -73,6 +75,7 @@ export default function DecorSection({ hideTitle = false, hideDivider = false, n
                     </Button>
                 )}
             </Flex>
+            {authorization.error && <Paragraph role="alert">{authorization.error}</Paragraph>}
         </Section>
     );
 }

@@ -11,7 +11,7 @@ import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { UserStore } from "@webpack/common";
 
-import { CDN_URL, RAW_SKU_ID, setBaseUrl, SKU_ID } from "./lib/constants";
+import { cancelConfiguration, CDN_URL, RAW_SKU_ID, setBaseUrl, SKU_ID } from "./lib/constants";
 import { useAuthorizationStore } from "./lib/stores/AuthorizationStore";
 import { useCurrentUserDecorationsStore } from "./lib/stores/CurrentUserDecorationsStore";
 import { useUserDecorAvatarDecoration, useUsersDecorationsStore } from "./lib/stores/UsersDecorationsStore";
@@ -26,7 +26,29 @@ export interface AvatarDecoration {
 
 let generation = 0;
 let active = false;
-let configuration: Promise<void> | undefined;
+let configuration: Promise<boolean> | undefined;
+
+function clearDecorations() {
+    useAuthorizationStore.getState().clear();
+    useUsersDecorationsStore.getState().stop();
+    useCurrentUserDecorationsStore.getState().clear();
+}
+
+async function initializeDecorations(version: number) {
+    const configured = await configuration;
+    if (!active || version !== generation) return;
+    if (!configured) {
+        useAuthorizationStore.getState().clear("Could not load Decor configuration. Check the service URL and restart the plugin.");
+        return;
+    }
+    await useAuthorizationStore.getState().init();
+    if (!active || version !== generation) return;
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    if (currentUserId) {
+        useUsersDecorationsStore.getState().start();
+        useUsersDecorationsStore.getState().fetch(currentUserId, true);
+    }
+}
 
 export default definePlugin({
     name: "Decor",
@@ -137,25 +159,16 @@ export default definePlugin({
     flux: {
         CONNECTION_OPEN: async () => {
             if (!active) return;
-            const currentGeneration = generation;
-            useAuthorizationStore.getState().init();
-            useCurrentUserDecorationsStore.getState().clear();
-            useUsersDecorationsStore.getState().stop();
-            await configuration;
-            if (!active || currentGeneration !== generation) return;
-            const currentUserId = UserStore.getCurrentUser()?.id;
-            if (currentUserId) {
-                useUsersDecorationsStore.getState().start();
-                useUsersDecorationsStore.getState().fetch(currentUserId, true);
-            }
+            const currentGeneration = ++generation;
+            clearDecorations();
+            await initializeDecorations(currentGeneration);
         },
         USER_PROFILE_MODAL_OPEN: data => {
             useUsersDecorationsStore.getState().fetch(data.userId, true);
         },
         LOGOUT: () => {
             generation++;
-            useUsersDecorationsStore.getState().stop();
-            useCurrentUserDecorationsStore.getState().clear();
+            clearDecorations();
         },
     },
 
@@ -179,21 +192,16 @@ export default definePlugin({
     async start() {
         const currentGeneration = ++generation;
         active = true;
+        clearDecorations();
         configuration = setBaseUrl(settings.store.baseUrl);
-        await configuration;
-        if (currentGeneration !== generation) return;
-        const currentUserId = UserStore.getCurrentUser()?.id;
-        if (currentUserId) {
-            useUsersDecorationsStore.getState().start();
-            useUsersDecorationsStore.getState().fetch(currentUserId, true);
-        }
+        await initializeDecorations(currentGeneration);
     },
 
     stop() {
         generation++;
         active = false;
-        useUsersDecorationsStore.getState().stop();
-        useCurrentUserDecorationsStore.getState().clear();
+        cancelConfiguration();
+        clearDecorations();
     },
 
     getDecorAvatarDecorationURL({ avatarDecoration, canAnimate }: { avatarDecoration: AvatarDecoration | null; canAnimate?: boolean; }) {
