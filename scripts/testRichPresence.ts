@@ -11,6 +11,8 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
+import { SettingsStore } from "../src/shared/SettingsStore";
+
 function deferred<T>() {
     let resolve: ((value: T) => void) | undefined;
     let reject: ((reason: Error) => void) | undefined;
@@ -319,4 +321,178 @@ test("Apple Music native metadata preserves an empty album field without shiftin
     assert.equal(track.artist, "Artist");
     assert.equal(track.duration, 60);
     assert.deepEqual(commands, ["pgrep", "osascript", "osascript", "osascript"]);
+});
+
+
+function customRpcFixture() {
+    const initialTime = 1_735_689_610_000;
+    const state = { now: initialTime, userId: "account" as string | undefined };
+    const store = new SettingsStore({ plugins: { CustomRPC: { appName: "Fixture" } as Record<string, unknown> } }, { readOnly: true });
+    const settings = { get store() { return store.store.plugins.CustomRPC; }, withPrivateSettings() { return this; } };
+    const timers = new Map<number, { callback: () => void; delay: number; at: number; }>();
+    let timerId = 0;
+    const actions: { activity: { name: string; application_id: string; timestamps?: { start?: number; end?: number; }; buttons?: string[]; metadata?: { button_urls: string[]; }; assets?: { large_image?: string; small_image?: string; }; } | null; }[] = [];
+    const assets: { appId: string; keys: string[]; result: ReturnType<typeof deferred<string[]>>; }[] = [];
+    const errors: unknown[][] = [];
+    const mocks: Record<string, object> = {
+        "@api/Settings": { SettingsStore: store, definePluginSettings: () => settings },
+        "@api/UserSettings": { getUserSettingLazy: () => ({}) },
+        "@components/Divider": {}, "@components/ErrorCard": {}, "@components/Flex": {},
+        "@components/Heading": {}, "@components/Link": {}, "@components/Paragraph": {},
+        "@utils/constants": { Devs: {} }, "@utils/margins": {}, "@utils/misc": {}, "@utils/react": {},
+        "@utils/Logger": { Logger: class { error(...args: unknown[]) { errors.push(args); } } },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin, OptionType: {} },
+        "@vencord/discord-types/enums": { ActivityType: { PLAYING: 0, STREAMING: 1 } },
+        "@webpack": { findByCodeLazy: () => {}, findComponentByCodeLazy: () => {} },
+        "@webpack/common": {
+            ApplicationAssetUtils: { fetchAssetIds(appId: string, keys: string[]) {
+                const result = deferred<string[]>(); assets.push({ appId, keys, result }); return result.promise;
+            } },
+            UserStore: { getCurrentUser: () => state.userId ? { id: state.userId } : undefined },
+            FluxDispatcher: { dispatch: (action: typeof actions[number]) => actions.push(action) }
+        },
+        "./RpcSettings": {}
+    };
+    const code = transpileModule(readFileSync("src/plugins/customRPC/index.tsx", "utf8"), {
+        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
+    }).outputText;
+    const module = runInNewContext(code + "\nexports;", {
+        exports: {}, performance: { timeOrigin: initialTime - 10_000 + 0.75 },
+        Date: class extends Date { constructor(value = state.now) { super(value); } static now() { return state.now; } },
+        setTimeout(callback: () => void, delay: number) { timers.set(++timerId, { callback, delay, at: state.now + delay }); return timerId; },
+        clearTimeout(id?: number) { if (id !== undefined) timers.delete(id); },
+        require(name: string) { assert.ok(name in mocks, name); return mocks[name]; }
+    });
+    function runNext() {
+        const next = [...timers].sort((a, b) => a[1].at - b[1].at)[0];
+        assert.ok(next, "Expected a pending timer");
+        timers.delete(next[0]); state.now = next[1].at; next[1].callback();
+    }
+    return { module, plugin: module.default, config: settings.store, store, state, timers, runNext, actions, assets, errors, initialTime };
+}
+
+test("custom RPC invalidates old requests immediately on edits and only publishes the latest update", async () => {
+    const { module, plugin, config, store, actions, assets, runNext } = customRpcFixture();
+    config.appID = "old-app"; config.imageBig = "old-image";
+    plugin.start(); await setImmediate();
+    assert.equal(assets[0].appId, "old-app");
+    config.appName = "New"; config.appID = "new-app"; config.imageBig = "new-image";
+    assets[0].result.resolve(["old-id"]); await setImmediate();
+    assert.equal(actions.length, 0);
+    runNext(); await setImmediate();
+    assert.equal(assets[1].appId, "new-app");
+    assets[1].result.resolve(["new-id"]); await setImmediate();
+    assert.equal(actions.at(-1)?.activity?.name, "New");
+    assert.equal(actions.at(-1)?.activity?.application_id, "new-app");
+    store.store.plugins = { CustomRPC: { appName: "Imported", appID: "new-app", imageBig: "new-image" } };
+    runNext(); await setImmediate();
+    assert.equal(actions.at(-1)?.activity?.name, "Imported");
+    assert.equal(assets.length, 2);
+    const count = actions.length;
+    plugin.stop(); await module.setRpc();
+    assert.equal(actions.length, count + 1);
+    assert.equal(actions.at(-1)?.activity, null);
+});
+
+test("custom RPC keeps replacement cache entries after old failures and retries missing assets", async () => {
+    const { plugin, module, config, assets, actions } = customRpcFixture();
+    config.imageBig = "image";
+    plugin.start(); await setImmediate();
+    plugin.stop(); plugin.start(); await setImmediate();
+    assets[0].result.reject(new Error("Old request failed")); await setImmediate();
+    const latest = module.setRpc(); await setImmediate();
+    assert.equal(assets.length, 2);
+    assets[1].result.resolve([]); await latest;
+    assert.equal(actions.at(-1)?.activity?.assets, undefined);
+    const retry = module.setRpc(); await setImmediate();
+    assert.equal(assets.length, 3);
+    assets[2].result.resolve(["valid-id"]); await retry;
+    assert.equal(actions.at(-1)?.activity?.assets?.large_image, "valid-id");
+    plugin.stop();
+});
+
+test("custom RPC isolates image failures and keeps button labels paired with destinations", async () => {
+    const { plugin, config, assets, actions, errors } = customRpcFixture();
+    Object.assign(config, { imageBig: "large", imageSmall: "small", buttonOneText: "Incomplete", buttonTwoText: "Complete", buttonTwoURL: "https://example.com" });
+    plugin.start(); await setImmediate();
+    assets[0].result.reject(new Error("Image unavailable")); assets[1].result.resolve(["small-id"]); await setImmediate();
+    assert.equal(actions.at(-1)?.activity?.assets?.small_image, "small-id");
+    assert.equal(actions.at(-1)?.activity?.assets?.large_image, undefined);
+    assert.equal(JSON.stringify(actions.at(-1)?.activity?.buttons), JSON.stringify(["Complete"]));
+    assert.equal(JSON.stringify(actions.at(-1)?.activity?.metadata?.button_urls), JSON.stringify(["https://example.com"]));
+    assert.equal(errors.length, 1);
+    plugin.stop();
+});
+
+test("custom RPC discards account-obsolete results and cancels pending updates on logout and stop", async () => {
+    const { plugin, config, state, assets, actions, timers } = customRpcFixture();
+    config.imageBig = "image";
+    plugin.start(); await setImmediate();
+    state.userId = "other-account";
+    assets[0].result.resolve(["id"]); await setImmediate();
+    assert.equal(actions.length, 0);
+    plugin.flux.CONNECTION_OPEN(); await setImmediate();
+    assert.equal(actions.length, 1);
+    config.appName = "Edited";
+    assert.equal(timers.size, 1);
+    state.userId = undefined; plugin.flux.LOGOUT();
+    assert.equal(timers.size, 0);
+    assert.equal(actions.at(-1)?.activity, null);
+    state.userId = "third-account"; plugin.flux.CONNECTION_OPEN(); await setImmediate();
+    assets[1].result.resolve(["new-id"]); await setImmediate();
+    config.appName = "Pending"; plugin.stop();
+    assert.equal(timers.size, 0);
+});
+
+test("custom RPC timestamps retain document anchors and preserve the zero epoch", async () => {
+    const { plugin, module, config, state, actions, initialTime } = customRpcFixture();
+    config.timestampMode = 1;
+    plugin.start(); await setImmediate();
+    assert.equal(actions.at(-1)?.activity?.timestamps?.start, initialTime - 10_000);
+    state.now += 100_000; await module.setRpc();
+    assert.equal(actions.at(-1)?.activity?.timestamps?.start, initialTime - 10_000);
+    config.timestampMode = 2; await module.setRpc();
+    const midnight = actions.at(-1)?.activity?.timestamps?.start;
+    assert.equal(midnight, new Date(initialTime - 10_000).setHours(0, 0, 0, 0));
+    state.now += 86_400_000; await module.setRpc();
+    assert.equal(actions.at(-1)?.activity?.timestamps?.start, midnight);
+    config.timestampMode = 3; config.startTime = 0; await module.setRpc();
+    assert.equal(actions.at(-1)?.activity?.timestamps?.start, 0);
+    plugin.stop();
+});
+
+test("custom RPC loops restart for changed durations and stop for disabled or invalid timing", async () => {
+    const { plugin, config, state, actions, timers, runNext } = customRpcFixture();
+    Object.assign(config, { timestampMode: 3, startTime: 0, endTime: 10_000 });
+    plugin.start(); await setImmediate();
+    assert.equal([...timers.values()][0].delay, 10_000);
+    const firstAnchor = actions.at(-1)?.activity?.timestamps?.start;
+    state.now += 2000; config.endTime = 20_000;
+    assert.equal(timers.size, 2);
+    runNext(); await setImmediate();
+    assert.notEqual(actions.at(-1)?.activity?.timestamps?.start, firstAnchor);
+    assert.equal([...timers.values()][0].delay, 20_000);
+    runNext(); await setImmediate();
+    assert.equal(actions.at(-1)?.activity?.timestamps?.start, state.now);
+    assert.equal([...timers.values()][0].delay, 20_000);
+    config.timestampMode = 0;
+    assert.equal(timers.size, 1);
+    runNext(); await setImmediate();
+    assert.equal(timers.size, 0);
+    assert.equal(actions.at(-1)?.activity?.timestamps, undefined);
+    config.timestampMode = 3; config.endTime = Number.POSITIVE_INFINITY;
+    runNext(); await setImmediate();
+    assert.equal(timers.size, 0);
+    config.endTime = 1;
+    assert.equal([...timers.values()].some(timer => timer.delay === 1000), true);
+    config.endTime = 3_000_000_000;
+    runNext(); await setImmediate();
+    assert.equal([...timers.values()][0].delay, 2_147_483_647);
+    runNext(); await setImmediate();
+    assert.ok([...timers.values()][0].delay > 0 && [...timers.values()][0].delay <= 2_147_483_647);
+    config.endTime = 8_640_000_000_000_000;
+    runNext(); await setImmediate();
+    assert.equal(timers.size, 0);
+    assert.equal(actions.at(-1)?.activity?.timestamps?.end, 8_640_000_000_000_000);
+    plugin.stop(); assert.equal(timers.size, 0);
 });
