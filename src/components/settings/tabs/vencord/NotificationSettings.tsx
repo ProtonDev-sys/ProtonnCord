@@ -54,7 +54,7 @@ function NotificationSettings() {
     return (
         <>
             <Heading tag="h5">Notification Style</Heading>
-            {settings.useNative !== "never" && Notification?.permission === "denied" && (
+            {settings.useNative !== "never" && globalThis.Notification?.permission === "denied" && (
                 <ErrorCard style={{ padding: "1em" }} className={Margins.bottom8}>
                     <Heading>Desktop Notification Permission denied</Heading>
                     <Paragraph>You have denied Notification Permissions. Thus, Desktop notifications will not work!</Paragraph>

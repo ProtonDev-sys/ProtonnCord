@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import "./VencordTab.css";
-
 import { openNotificationLogModal } from "@api/Notifications/notificationLog";
 import { plugins } from "@api/PluginManager";
 import { useSettings } from "@api/Settings";
-import { Button } from "@components/Button";
+import { Button, TextButton } from "@components/Button";
 import { Divider } from "@components/Divider";
 import { FormSwitch } from "@components/FormSwitch";
 import { Heading } from "@components/Heading";
@@ -60,7 +58,7 @@ function Switches() {
             description: "Enable the React Developer Tools extension for debugging Discord's React components. Useful for plugin development.",
             restartRequired: true,
         },
-        (!IS_WEB && !IS_DISCORD_DESKTOP || !IS_WINDOWS) && {
+        !IS_WEB && (!IS_DISCORD_DESKTOP || !IS_WINDOWS) && {
             key: "mainWindowFrameless",
             title: "Disable the Main Window Frame",
             description: "Remove the native window frame for a cleaner look. You can still move the window by dragging the title bar area.",
@@ -261,13 +259,12 @@ function EquicordSettings() {
             </Paragraph>
             <Notice.Info className={Margins.bottom20} style={{ width: "100%" }}>
                 You can customize where this settings section appears in Discord's settings menu by configuring the{" "}
-                <a
-                    role="button"
+                <TextButton
+                    variant="link"
                     onClick={() => openPluginModal(plugins.Settings)}
-                    style={{ cursor: "pointer", color: "var(--text-link)" }}
                 >
                     Settings Plugin
-                </a>.
+                </TextButton>.
             </Notice.Info>
 
             <Switches />
