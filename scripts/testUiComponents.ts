@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import moment from "moment";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -520,4 +521,29 @@ test("console previews can retry after root creation fails", () => {
     assert.equal(state.renders.length, 1);
     plugin.stop();
     assert.equal(state.unmounts, 1);
+});
+
+
+test("timestamp rounding restores the previous function only while its override is owned", () => {
+    const original = moment.relativeTimeRounding();
+    const previous = (value: number) => Math.ceil(value);
+    const plugin = loadComponent("src/plugins/dontRoundMyTimestamps/index.ts", { moment }, {
+        "@utils/constants": { Devs: {} },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin }
+    }).default;
+    try {
+        moment.relativeTimeRounding(previous);
+        plugin.start();
+        plugin.start();
+        assert.equal(moment.relativeTimeRounding()(7.6), 7);
+        plugin.stop();
+        plugin.stop();
+        assert.equal(moment.relativeTimeRounding(), previous);
+        plugin.start();
+        moment.relativeTimeRounding(Math.ceil);
+        plugin.stop();
+        assert.equal(moment.relativeTimeRounding(), Math.ceil);
+    } finally {
+        moment.relativeTimeRounding(original);
+    }
 });
