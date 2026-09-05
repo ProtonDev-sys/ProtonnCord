@@ -215,6 +215,60 @@ test("call timers discard join times on logout and stop, then accept a fresh ini
     assert.equal(plugin.ConnectionTimer(), null);
 });
 
+test("emoji copy menus defer lazy lookups until the Unicode action is used", () => {
+    let lookups = 0;
+    const copied: string[] = [];
+    const plugin = loadComponent("src/plugins/copyEmojiMarkdown/index.tsx", {
+        Menu: { MenuGroup: "group", MenuItem: "item" }
+    }, {
+        "@api/Settings": { definePluginSettings: () => ({ store: { copyUnicode: true } }) },
+        "@utils/constants": { Devs: {} },
+        "@utils/discord": { copyWithToast: (text: string) => copied.push(text) },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin, OptionType: {} },
+        "@webpack": { findByPropsLazy: () => new Proxy({}, { get: () => { lookups++; return () => "🛒"; } }) }
+    }).default;
+    assert.equal(lookups, 0);
+    const children: { props: { children: { props: { action: () => void; }; }[]; }; }[] = [];
+    plugin.contextMenus["expression-picker"](children, { target: { dataset: { type: "emoji", name: "cart" } } });
+    assert.equal(lookups, 0);
+    children[0].props.children[0].props.action();
+    assert.equal(lookups, 1);
+    assert.deepEqual(copied, ["🛒"]);
+});
+
+test("file content copying handles failures and prevents copying incomplete previews", async () => {
+    const copied: string[] = [];
+    const errors: { message: string; }[] = [];
+    let fail = false;
+    const plugin = loadComponent("src/plugins/copyFileContents/index.tsx", {
+        Tooltip: "tooltip", Toasts: { show: (value: typeof errors[number]) => errors.push(value), genId: () => "toast", Type: { FAILURE: "failure" } }
+    }, {
+        "@components/Button": { Button: "button" },
+        "@components/ErrorBoundary": { __esModule: true, default: { wrap: (component: unknown) => component } },
+        "@components/Icons": { CopyIcon: "copy", NoEntrySignIcon: "unavailable" },
+        "@utils/constants": { Devs: {} },
+        "@utils/discord": { copyWithToast: async (text: string) => { if (fail) throw new Error("Clipboard unavailable"); copied.push(text); } },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin }
+    }).default;
+    const button = (bytesLeft: number) => plugin.addCopyButton({ fileContents: "Fixture", bytesLeft }).props.children[0]({});
+    const incomplete = button(1);
+    assert.equal(incomplete.props["aria-disabled"], true);
+    await incomplete.props.onClick();
+    assert.equal(copied.length, 0);
+    const complete = button(0);
+    assert.equal(complete.type, "button");
+    assert.equal(complete.props.type, "button");
+    assert.equal(complete.props["aria-label"], "Copy File Contents");
+    await complete.props.onClick();
+    assert.deepEqual(copied, ["Fixture"]);
+    fail = true;
+    await complete.props.onClick();
+    assert.equal(errors.length, 1);
+    fail = false;
+    await complete.props.onClick();
+    assert.deepEqual(copied, ["Fixture", "Fixture"]);
+});
+
 test("disabled links have no destination and suppress click callbacks", () => {
     const { Link } = loadComponent("src/components/Link.tsx");
     let clicked = 0;
