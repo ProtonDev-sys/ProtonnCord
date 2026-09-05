@@ -17,7 +17,10 @@ mkdirSync(SETTINGS_DIR, { recursive: true });
 
 function readSettings<T = object>(name: string, file: string): Partial<T> {
     try {
-        return JSON.parse(readFileSync(file, "utf-8"));
+        const data: unknown = JSON.parse(readFileSync(file, "utf-8"));
+        if (data === null || typeof data !== "object" || Array.isArray(data))
+            throw new Error("Settings must contain a JSON object");
+        return data as Partial<T>;
     } catch (err: any) {
         if (err?.code !== "ENOENT")
             console.error(`Failed to read ${name} settings`, err);
