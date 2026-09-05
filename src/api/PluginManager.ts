@@ -419,55 +419,43 @@ export const initPluginManager = onlyOnce(function init() {
     const pluginsValues = Object.values(Plugins);
     const settings = Settings.plugins;
 
-    const neededApiPlugins = new Set<string>();
-
-    // First round-trip to mark and force enable dependencies
-    //
-    // FIXME: might need to revisit this if there's ever nested (dependencies of dependencies) dependencies since this only
-    // goes for the top level and their children, but for now this works okay with the current API plugins
-    for (const p of pluginsValues) if (isPluginEnabled(p.name)) {
-        p.dependencies?.forEach(d => {
-            const dep = Plugins[d];
-
-            if (!dep) {
-                const error = new Error(`Plugin ${p.name} has unresolved dependency ${d}`);
-
-                if (IS_DEV) {
-                    throw error;
-                }
-
-                logger.warn(error);
-                return;
-            }
-
-            settings[d].enabled = true;
-            dep.isDependency = true;
-        });
-
-        if (p.commands?.length) neededApiPlugins.add("CommandsAPI");
-        if (p.onBeforeMessageEdit || p.onBeforeMessageSend || p.onMessageClick) neededApiPlugins.add("MessageEventsAPI");
-        if (p.chatBarButton) neededApiPlugins.add("ChatInputButtonAPI");
-        if (p.renderMemberListDecorator) neededApiPlugins.add("MemberListDecoratorsAPI");
-        if (p.renderMessageAccessory) neededApiPlugins.add("MessageAccessoriesAPI");
-        if (p.renderMessageDecoration) neededApiPlugins.add("MessageDecorationsAPI");
-        if (p.messagePopoverButton) neededApiPlugins.add("MessagePopoverAPI");
-        if (p.userProfileBadges?.length) neededApiPlugins.add("BadgeAPI");
+    for (const p of pluginsValues) {
+        const dependencies = new Set(p.dependencies);
+        if (p.commands?.length) dependencies.add("CommandsAPI");
+        if (p.onBeforeMessageEdit || p.onBeforeMessageSend || p.onMessageClick) dependencies.add("MessageEventsAPI");
+        if (p.chatBarButton || p.chatBarButtonWrapper) dependencies.add("ChatInputButtonAPI");
+        if (p.renderMemberListDecorator) dependencies.add("MemberListDecoratorsAPI");
+        if (p.renderMessageAccessory) dependencies.add("MessageAccessoriesAPI");
+        if (p.renderMessageDecoration) dependencies.add("MessageDecorationsAPI");
+        if (p.messagePopoverButton) dependencies.add("MessagePopoverAPI");
+        if (p.userProfileBadges?.length) dependencies.add("BadgeAPI");
 
         // Custom
-        if (p.renderNicknameIcon) neededApiPlugins.add("NicknameIconsAPI");
-        if (p.headerBarButton) neededApiPlugins.add("HeaderBarAPI");
-        if (p.audioProcessor) neededApiPlugins.add("AudioPlayerAPI");
-        if (p.userAreaButton) neededApiPlugins.add("UserAreaAPI");
-        if (p.renderProfileCollection) neededApiPlugins.add("ProfileCollectionsAPI");
-        if (p.chatBarButtonWrapper) neededApiPlugins.add("ChatInputButtonAPI");
-        if (p.renderProfileSection) neededApiPlugins.add("ProfileSectionsAPI");
-        if (p.gifPickerContextMenu) neededApiPlugins.add("ExtraContextMenusAPI");
-
+        if (p.renderNicknameIcon) dependencies.add("NicknameIconsAPI");
+        if (p.headerBarButton) dependencies.add("HeaderBarAPI");
+        if (p.audioProcessor) dependencies.add("AudioPlayerAPI");
+        if (p.userAreaButton) dependencies.add("UserAreaAPI");
+        if (p.renderProfileCollection) dependencies.add("ProfileCollectionsAPI");
+        if (p.renderProfileSection) dependencies.add("ProfileSectionsAPI");
+        if (p.gifPickerContextMenu) dependencies.add("ExtraContextMenusAPI");
+        if (!p.dependencies?.includes(p.name)) dependencies.delete(p.name);
+        if (dependencies.size) p.dependencies = [...dependencies];
     }
 
-    for (const p of neededApiPlugins) {
-        Plugins[p].isDependency = true;
-        settings[p].enabled = true;
+    const enabledPlugins = new Set(pluginsValues.filter(p => isPluginEnabled(p.name)));
+    for (const p of enabledPlugins) {
+        for (const name of p.dependencies ?? []) {
+            const dependency = Plugins[name];
+            if (!dependency) {
+                const error = new Error(`Plugin ${p.name} has unresolved dependency ${name}`);
+                if (IS_DEV) throw error;
+                logger.warn(error);
+                continue;
+            }
+            settings[name].enabled = true;
+            dependency.isDependency = true;
+            enabledPlugins.add(dependency);
+        }
     }
 
     for (const p of pluginsValues) {
