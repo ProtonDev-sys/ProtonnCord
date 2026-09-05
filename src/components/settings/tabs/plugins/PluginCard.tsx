@@ -32,8 +32,8 @@ interface PluginCardProps extends React.HTMLProps<HTMLDivElement> {
 export function PluginCard({ plugin, disabled, onRestartNeeded, onMouseEnter, onMouseLeave, isNew }: PluginCardProps) {
     const settings = Settings.plugins[plugin.name];
     const pluginMeta = PluginMeta[plugin.name];
-    const isEquicordPlugin = pluginMeta.folderName.startsWith("src/equicordplugins/") ?? false;
-    const isVencordPlugin = pluginMeta.folderName.startsWith("src/plugins/") ?? false;
+    const isEquicordPlugin = pluginMeta.folderName.startsWith("src/equicordplugins/");
+    const isVencordPlugin = pluginMeta.folderName.startsWith("src/plugins/");
     const isUserPlugin = pluginMeta?.userPlugin ?? false;
     const isModifiedPlugin = plugin.isModified ?? false;
 
@@ -142,7 +142,8 @@ export function PluginCard({ plugin, disabled, onRestartNeeded, onMouseEnter, on
             onMouseLeave={onMouseLeave}
             infoButton={
                 <button
-                    role="switch"
+                    type="button"
+                    aria-label={`Open ${plugin.name} settings and information`}
                     onClick={() => openPluginModal(plugin, onRestartNeeded)}
                     className={cl("info-button")}
                 >

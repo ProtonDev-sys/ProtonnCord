@@ -13,8 +13,11 @@ import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 function loadComponent(path: string, hooks: Record<string, unknown> = {}) {
     const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
     const mocks: Record<string, object> = {
-        "@webpack/common": { React, ...hooks },
+        "@webpack/common": { React, TextInput: "input", ...hooks },
         "@components/BaseText": { BaseText: "div" },
+        "@api/PluginManager": { isSettingDisabled: () => false },
+        "@utils/types": { OptionType: { NUMBER: 1, BIGINT: 2 } },
+        "./Common": { SettingsSection: "section", resolveError: (result: boolean | string) => result === true ? null : result || "Invalid input provided" },
         "@utils/css": { classNameFactory: (prefix: string) => (...names: string[]) => names.map(name => prefix + name).join(" ") },
         "@utils/misc": { classes: (...names: unknown[]) => names.filter(Boolean).join(" ") }
     };
@@ -31,6 +34,52 @@ function loadComponent(path: string, hooks: Record<string, unknown> = {}) {
         }
     });
 }
+
+test("numeric settings validate parsed values and retain invalid drafts without committing them", () => {
+    const states: unknown[] = [];
+    let cursor = 0;
+    const { NumberSetting } = loadComponent("src/components/settings/tabs/plugins/components/NumberSetting.tsx", {
+        useState(initial: unknown) {
+            const index = cursor++;
+            if (!(index in states)) states[index] = initial;
+            return [states[index], (value: unknown) => { states[index] = value; }];
+        }
+    });
+    const committed: (number | bigint)[] = [];
+    const receiver = {};
+    let type = 1;
+    let validate = (value: number | bigint) => true;
+    function render() {
+        cursor = 0;
+        return NumberSetting({
+            setting: { type, isValid(this: object, value: number | bigint) { assert.equal(this, receiver); return validate(value); } },
+            pluginSettings: {}, definedSettings: receiver, id: "value", onChange: (value: number | bigint) => committed.push(value)
+        });
+    }
+    function enter(value: string) { render().props.children[0].props.onChange(value); }
+    enter("1.5");
+    enter("1e3");
+    validate = value => typeof value === "number" && Number.isInteger(value);
+    enter("42");
+    const count = committed.length;
+    for (const draft of ["", "-", "1e", "Infinity", "1e999", "1.5"]) {
+        enter(draft);
+        assert.equal(render().props.children[0].props.value, draft);
+        assert.ok(render().props.error);
+        assert.equal(committed.length, count);
+    }
+    type = 2;
+    validate = value => typeof value === "bigint";
+    enter("900719925474099312345");
+    enter("-2");
+    const bigIntCount = committed.length;
+    for (const draft of ["", "-", "1.5", "1e3"]) {
+        enter(draft);
+        assert.ok(render().props.error);
+        assert.equal(committed.length, bigIntCount);
+    }
+    assert.deepEqual(committed, [1.5, 1000, 42, 900719925474099312345n, -2n]);
+});
 
 test("disabled links have no destination and suppress click callbacks", () => {
     const { Link } = loadComponent("src/components/Link.tsx");
