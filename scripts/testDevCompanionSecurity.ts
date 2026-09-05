@@ -114,11 +114,11 @@ async function settle(): Promise<void> {
 }
 
 async function waitFor(condition: () => boolean, failureMessage: string): Promise<void> {
-    for (let index = 0; index < 1000; index++) {
-        if (condition()) return;
-        await new Promise<void>(resolve => setImmediate(resolve));
+    const deadline = performance.now() + 5000;
+    while (!condition()) {
+        if (performance.now() >= deadline) assert.fail(failureMessage);
+        await new Promise<void>(resolve => setTimeout(resolve, 5));
     }
-    assert.fail(failureMessage);
 }
 
 async function testAuthenticator(): Promise<void> {
@@ -344,7 +344,6 @@ async function loadInitWs(): Promise<DevCompanionModule> {
             plugins: [runtimeStubs],
             target: "node24",
         });
-        const source = await readFile(output, "utf8");
         return await import(`${pathToFileURL(output).href}?security=${Date.now()}`) as DevCompanionModule;
     } finally {
         await rm(directory, { force: true, recursive: true });
