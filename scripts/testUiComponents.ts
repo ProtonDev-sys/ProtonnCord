@@ -40,17 +40,11 @@ function loadComponent(path: string, hooks: Record<string, unknown> = {}, additi
 }
 
 function decorFixture() {
-    const scheduled = new Set<() => Promise<void>>();
+    const scheduled = new Map<() => Promise<void>, number>();
     const requests: { ids: string[]; signal?: AbortSignal; resolve: (result: Record<string, string | null>) => void; reject: (error: Error) => void; }[] = [];
     const errors: unknown[] = [];
     const clock = { now: 1_000 };
-    function debounce(callback: () => Promise<void>) {
-        const trigger = () => { scheduled.add(callback); };
-        trigger.cancel = () => scheduled.delete(callback);
-        return trigger;
-    }
     const module = loadComponent("src/plugins/decor/lib/stores/UsersDecorationsStore.ts", {
-        lodash: { debounce },
         zustandCreate<T>(initializer: (set: (next: Partial<T>) => void, get: () => T) => T) {
             let state: T;
             state = initializer(next => { state = { ...state, ...next }; }, () => state);
@@ -59,19 +53,64 @@ function decorFixture() {
     }, {
         "@plugins/decor/lib/api": { getUsersDecorations: (ids: string[], signal?: AbortSignal) => new Promise<Record<string, string | null>>((resolve, reject) => requests.push({ ids, signal, resolve, reject })) },
         "@plugins/decor/lib/constants": { DECORATION_FETCH_COOLDOWN: 10_000, SKU_ID: "decor" },
-        "@shared/debounce": { debounce },
         "@utils/lazy": { proxyLazy },
         "@utils/Logger": { Logger: class { error(...args: unknown[]) { errors.push(args); } } }
-    }, { AbortController, Date: class extends Date { static now() { return clock.now; } } });
+    }, {
+        AbortController, Date: class extends Date { static now() { return clock.now; } },
+        setTimeout(callback: () => Promise<void>, delay: number) {
+            scheduled.set(callback, clock.now + delay);
+            return callback;
+        },
+        clearTimeout(callback: () => Promise<void>) { scheduled.delete(callback); }
+    });
     const store = module.useUsersDecorationsStore;
     function flush() {
-        const callback = scheduled.values().next().value;
+        const callback = scheduled.keys().next().value;
         assert.ok(callback);
         scheduled.delete(callback);
         return callback();
     }
-    return { store, requests, scheduled, flush, errors, clock };
+    function advance(milliseconds: number) {
+        clock.now += milliseconds;
+        const work: Promise<void>[] = [];
+        for (const [callback, due] of scheduled) {
+            if (due <= clock.now) {
+                scheduled.delete(callback);
+                work.push(callback());
+            }
+        }
+        return work;
+    }
+    return { store, requests, scheduled, flush, advance, errors, clock };
 }
+
+test("Decor continuous arrivals cannot postpone the first batch and stopped timers cannot fetch", async () => {
+    const f = decorFixture();
+    f.store.getState().start();
+    f.store.getState().fetch("a");
+    f.advance(100); f.store.getState().fetch("b");
+    f.advance(100); f.store.getState().fetch("c");
+    assert.equal(f.requests.length, 0);
+    const first = f.advance(100);
+    assert.equal(f.requests.length, 1);
+    assert.deepEqual([...f.requests[0].ids], ["a", "b", "c"]);
+    f.store.getState().fetch("d");
+    f.advance(299);
+    assert.equal(f.requests.length, 1);
+    const second = f.advance(1);
+    assert.equal(f.requests.length, 2);
+    f.requests[1].resolve({ d: "new" }); await Promise.all(second);
+    f.requests[0].resolve({ a: null, b: "b", c: null }); await Promise.all(first);
+    assert.equal(f.store.getState().usersDecorations.get("d").asset, "new");
+    f.store.getState().fetch("cancelled");
+    f.store.getState().stop();
+    await Promise.all(f.advance(300));
+    assert.equal(f.requests.length, 2);
+    f.store.getState().start(); f.store.getState().fetch("restarted");
+    const restarted = f.advance(300);
+    assert.equal(f.requests.length, 3);
+    f.requests[2].resolve({ restarted: null }); await Promise.all(restarted);
+});
 
 test("Decor lookups preserve newer local and unrelated decoration updates", async () => {
     const { store, requests, flush } = decorFixture();

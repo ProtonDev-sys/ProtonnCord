@@ -168,6 +168,9 @@ importers:
 
   packages/discord-types:
     dependencies:
+      '@types/node':
+        specifier: ^26.0.1
+        version: 26.0.1
       '@types/react':
         specifier: 19.1.0
         version: 19.1.0
