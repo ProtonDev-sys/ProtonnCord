@@ -34,13 +34,13 @@ export type EnsureChunkHandlers = {
      * @param chunkId The chunk id
      * @param promises The promises array to add the loading promise to
      */
-    j: (this: EnsureChunkHandlers, chunkId: PropertyKey, promises: Promise<void[]>) => void;
+    j: (this: EnsureChunkHandlers, chunkId: PropertyKey, promises: Promise<void>[]) => void;
     /**
      * Ensures the css file for this chunk is loaded, or starts to load if it's not.
      * @param chunkId The chunk id
      * @param promises The promises array to add the loading promise to. This array will likely contain the promise of the js file too
      */
-    css: (this: EnsureChunkHandlers, chunkId: PropertyKey, promises: Promise<void[]>) => void;
+    css: (this: EnsureChunkHandlers, chunkId: PropertyKey, promises: Promise<void>[]) => void;
     /**
      * Trigger for prefetching next chunks. This is called after ensuring a chunk is loaded and internally looks up
      * a map to see if the chunk that just loaded has next chunks to prefetch.
@@ -50,7 +50,7 @@ export type EnsureChunkHandlers = {
      * @param chunkId The chunk id
      * @param promises The promises array of ensuring the chunk is loaded
      */
-    prefetch: (this: EnsureChunkHandlers, chunkId: PropertyKey, promises: Promise<void[]>) => void;
+    prefetch: (this: EnsureChunkHandlers, chunkId: PropertyKey, promises: Promise<void>[]) => void;
 };
 
 export type PrefetchChunkHandlers = {

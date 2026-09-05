@@ -10,7 +10,7 @@ import { DECORATION_FETCH_COOLDOWN, SKU_ID } from "@plugins/decor/lib/constants"
 import { proxyLazy } from "@utils/lazy";
 import { Logger } from "@utils/Logger";
 import { User } from "@vencord/discord-types";
-import { lodash, React, useCallback, useEffect, zustandCreate } from "@webpack/common";
+import { React, useCallback, useEffect, zustandCreate } from "@webpack/common";
 
 interface UserDecorationData {
     asset: string | null;
@@ -37,7 +37,9 @@ export const useUsersDecorationsStore: UsersDecorationsStore = proxyLazy(() => z
     const queue = new Set<string>();
     const inFlight = new Map<string, symbol>();
     const requests = new Set<AbortController>();
-    const bulkFetch = lodash.debounce(async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bulkFetch = async () => {
+        timer = undefined;
         if (!get().session || queue.size === 0) return;
         const ids = [...queue];
         queue.clear();
@@ -63,7 +65,7 @@ export const useUsersDecorationsStore: UsersDecorationsStore = proxyLazy(() => z
                 if (inFlight.get(id) === token) inFlight.delete(id);
             }
         }
-    }, 300);
+    };
 
     return {
         session: null,
@@ -74,7 +76,7 @@ export const useUsersDecorationsStore: UsersDecorationsStore = proxyLazy(() => z
             if (!force && ((cached && Date.now() - cached.fetchedAt < DECORATION_FETCH_COOLDOWN) || inFlight.has(userId))) return;
             if (queue.has(userId)) return;
             queue.add(userId);
-            bulkFetch();
+            timer ??= setTimeout(bulkFetch, 300);
         },
         set(userId, asset) {
             if (!get().session) return;
@@ -88,7 +90,8 @@ export const useUsersDecorationsStore: UsersDecorationsStore = proxyLazy(() => z
             if (!get().session) set({ session: Symbol() });
         },
         stop() {
-            bulkFetch.cancel();
+            clearTimeout(timer);
+            timer = undefined;
             queue.clear();
             inFlight.clear();
             for (const request of requests) request.abort();
