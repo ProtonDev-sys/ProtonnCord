@@ -12,182 +12,173 @@ import { moment, Toasts } from "@webpack/common";
 import { DataStore } from "..";
 
 type BackupType = "all" | "plugins" | "css" | "datastore";
-
-const toast = (type: string, message: string) =>
-    Toasts.show({
-        type,
-        message,
-        id: Toasts.genId()
-    });
-
-const toastSuccess = () =>
-    toast(Toasts.Type.SUCCESS, "Settings successfully imported. Restart to apply changes!");
-
-const toastFailure = (err: any) =>
-    toast(Toasts.Type.FAILURE, `Failed to import settings: ${String(err)}`);
+type BackupKey = string | number | BackupKey[];
+interface Backup {
+    settings?: typeof PlainSettings;
+    quickCss?: string;
+    dataStore?: [IDBValidKey, unknown][];
+}
 
 const logger = new Logger("SettingsSync:Offline", "#39b7e0");
+const forbiddenKeys = new Set(["__proto__", "constructor", "prototype"]);
+let importing = false;
 
-function deepMerge<T extends object>(target: T, source: T): T {
-    for (const key in source) {
-        const sourceVal = source[key];
+const toast = (type: string, message: string) =>
+    Toasts.show({ type, message, id: Toasts.genId() });
 
-        if (sourceVal !== null && typeof sourceVal === "object" && !Array.isArray(sourceVal)) {
-            if (target[key] === null || target[key] === undefined || typeof target[key] !== "object" || Array.isArray(target[key])) {
-                target[key] = {} as any;
-            }
-            deepMerge(target[key] as object, sourceVal as object);
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+        && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+}
+
+function isSafeJson(value: unknown): boolean {
+    if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+    if (typeof value === "number") return Number.isFinite(value);
+    if (Array.isArray(value)) return Object.keys(value).length === value.length && Array.from(value).every(isSafeJson);
+    return isRecord(value) && Reflect.ownKeys(value).every(key =>
+        typeof key === "string" && !forbiddenKeys.has(key) && isSafeJson(value[key])
+    );
+}
+
+function isBackupKey(value: unknown): value is BackupKey {
+    return typeof value === "string" || (typeof value === "number" && Number.isFinite(value))
+        || (Array.isArray(value) && value.every(isBackupKey));
+}
+
+function isDataStoreBackup(value: unknown): value is [BackupKey, unknown][] {
+    if (!Array.isArray(value)) return false;
+    const keys = new Set<string>();
+    return value.every(entry => {
+        if (!Array.isArray(entry) || entry.length !== 2 || !isBackupKey(entry[0]) || !isSafeJson(entry[1])) return false;
+        const key = JSON.stringify(entry[0]);
+        if (keys.has(key)) return false;
+        keys.add(key);
+        return true;
+    });
+}
+
+function deepMerge(target: object, source: Record<string, unknown>) {
+    for (const [key, value] of Object.entries(source)) {
+        if (isRecord(value)) {
+            const current: unknown = Reflect.get(target, key);
+            const nested = isRecord(current) ? current : {};
+            Reflect.set(target, key, nested);
+            deepMerge(nested, value);
         } else {
-            target[key] = sourceVal;
+            Reflect.set(target, key, value);
         }
     }
-    return target;
 }
 
-function isSafeObject(obj: any) {
-    if (obj == null || typeof obj !== "object") return true;
-
-    for (const key in obj) {
-        if (["__proto__", "constructor", "prototype"].includes(key)) {
-            return false;
-        }
-        if (!isSafeObject(obj[key])) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-export async function importSettings(data: string, type: BackupType = "all", cloud = false) {
+export async function importSettings(data: string, type: BackupType = "all") {
+    if (importing) throw new Error("Wait for the current import to finish.");
+    let parsed: unknown;
     try {
-        var parsed = JSON.parse(data);
-    } catch (err) {
-        throw new Error("Failed to parse JSON: " + String(err));
+        parsed = JSON.parse(data);
+    } catch {
+        throw new Error("The backup is not valid JSON.");
     }
-
-    if (!isSafeObject(parsed))
-        throw new Error("Unsafe Settings");
-
-    switch (type) {
-        case "all": {
-            if (!cloud && (!("settings" in parsed)))
-                throw new Error("Invalid Settings. Plugin settings is required for this import try a different one.");
-
-            if (parsed.settings) {
-                deepMerge(PlainSettings, parsed.settings);
-                await VencordNative.settings.set(PlainSettings);
+    if (!isRecord(parsed)) throw new Error("The backup must contain a JSON object.");
+    if (!isSafeJson(parsed)) throw new Error("The backup contains unsupported values or reserved object keys.");
+    if (!["all", "plugins", "css", "datastore"].includes(type)) throw new Error("Unknown backup type.");
+    const settings = type === "all" || type === "plugins" ? parsed.settings : undefined;
+    const quickCss = type === "all" || type === "css" ? parsed.quickCss : undefined;
+    const dataStore = type === "all" || type === "datastore" ? parsed.dataStore : undefined;
+    if ((type === "all" || type === "plugins") && !isRecord(settings)) throw new Error("Settings are missing or invalid.");
+    if (isRecord(settings)) {
+        for (const key of ["plugins", "cloud", "notifications", "uiElements", "themeNames", "themeActivationModes"]) {
+            if (Object.hasOwn(settings, key) && !isRecord(settings[key])) throw new Error("Invalid settings section: " + key + ".");
+        }
+        if (isRecord(settings.plugins)) {
+            for (const plugin of Object.values(settings.plugins)) {
+                if (!isRecord(plugin)) throw new Error("Invalid plugin settings.");
+                for (const key of ["enabled", "isFavorite"]) {
+                    if (Object.hasOwn(plugin, key) && typeof plugin[key] !== "boolean") throw new Error("Invalid plugin setting: " + key + ".");
+                }
             }
-            if (parsed.quickCss) await VencordNative.quickCss.set(parsed.quickCss);
-            if (parsed.dataStore) await DataStore.setMany(parsed.dataStore);
-            break;
         }
-        case "plugins": {
-            if (!parsed.settings) throw new Error("Plugin settings missing");
+    }
+    if ((type === "css" || quickCss !== undefined) && typeof quickCss !== "string") throw new Error("QuickCSS is missing or invalid.");
+    const entries = isDataStoreBackup(dataStore) ? dataStore : undefined;
+    if ((type === "datastore" || dataStore !== undefined) && !entries) throw new Error("DataStore entries are missing or invalid.");
 
-            deepMerge(PlainSettings, parsed.settings);
-            await VencordNative.settings.set(PlainSettings);
-            break;
+    importing = true;
+    const completed: string[] = [];
+    try {
+        if (isRecord(settings)) {
+            const next = structuredClone(PlainSettings);
+            deepMerge(next, settings);
+            await VencordNative.settings.set(next);
+            deepMerge(PlainSettings, settings);
+            completed.push("settings");
         }
-        case "css": {
-            if (!parsed.quickCss) throw new Error("CSS missing");
-
-            await VencordNative.quickCss.set(parsed.quickCss);
-            break;
+        if (typeof quickCss === "string") {
+            await VencordNative.quickCss.set(quickCss);
+            completed.push("QuickCSS");
         }
-        case "datastore": {
-            if (!parsed.dataStore) throw new Error("DataStore data missing");
-
-            await DataStore.setMany(parsed.dataStore);
-            break;
+        if (entries) {
+            await DataStore.setMany(typeof quickCss === "string" ? entries.filter(([key]) => key !== "VencordQuickCss") : entries);
+            completed.push("DataStore");
         }
+    } catch (cause) {
+        throw new Error(completed.length
+            ? `Import stopped after saving ${completed.join(" and ")}. Those changes remain applied.`
+            : "The import could not be saved.", { cause });
+    } finally {
+        importing = false;
     }
 }
 
-export async function exportSettings({ syncDataStore = true, type = "all", minify }: { syncDataStore?: boolean; type?: BackupType; minify?: boolean; }) {
-    const settings = VencordNative.settings.get();
-    const quickCss = await VencordNative.quickCss.get();
-    let dataStore: any;
-
-    if (syncDataStore) {
-        try {
-            dataStore = await DataStore.entries();
-        } catch (err) {
-            logger.error("Failed to read DataStore entries:", err);
-
-            if (type === "all") {
-                logger.warn("Skipping DataStore in backup due to size. Export DataStore separately if needed.");
-                toast(Toasts.Type.MESSAGE, "DataStore too large - exported without it. Use 'Export DataStore' separately if needed.");
-                dataStore = undefined;
-            } else if (type === "datastore") {
-                throw new Error("DataStore is too large to export. Please clear some plugin data and try again.");
-            }
-        }
+export async function exportSettings({ type = "all", minify }: { type?: BackupType; minify?: boolean; } = {}) {
+    const backup: Backup = {};
+    if (!["all", "plugins", "css", "datastore"].includes(type)) throw new Error("Unknown backup type.");
+    if (type === "all" || type === "plugins") backup.settings = VencordNative.settings.get();
+    if (type === "all" || type === "css") backup.quickCss = await VencordNative.quickCss.get();
+    if (type === "all" || type === "datastore") {
+        const entries = (await DataStore.entries()).filter(([key]) => key !== "VencordQuickCss");
+        if (!isDataStoreBackup(entries)) throw new Error("DataStore contains values that cannot be restored from a JSON backup. Export settings or QuickCSS separately.");
+        backup.dataStore = entries;
     }
-
-    switch (type) {
-        case "all": {
-            return JSON.stringify({ settings, quickCss, ...(dataStore && { dataStore }) }, null, minify ? undefined : 4);
-        }
-        case "plugins": {
-            return JSON.stringify({ settings }, null, minify ? undefined : 4);
-        }
-        case "css": {
-            return JSON.stringify({ quickCss }, null, minify ? undefined : 4);
-        }
-        case "datastore": {
-            return JSON.stringify({ dataStore }, null, minify ? undefined : 4);
-        }
-    }
+    return JSON.stringify(backup, null, minify ? undefined : 4);
 }
 
 export async function downloadSettingsBackup(type: BackupType = "all", { minify }: { minify?: boolean; } = {}) {
     try {
-        const syncDataStore = type === "all" || type === "datastore";
-        const backup = await exportSettings({ minify, type, syncDataStore });
+        const backup = await exportSettings({ minify, type });
         const filename = `protonncord-${type}-backup-${moment().format("YYYY-MM-DD")}.json`;
         const data = new TextEncoder().encode(backup);
-
         if (IS_DISCORD_DESKTOP) {
-            DiscordNative.fileManager.saveWithDialog(data, filename);
+            await DiscordNative.fileManager.saveWithDialog(data, filename);
         } else {
             saveFile(new File([data], filename, { type: "application/json" }));
         }
     } catch (err) {
         logger.error("Failed to export settings:", err);
-        toast(Toasts.Type.FAILURE, "Failed to export settings, check console");
-        throw err;
+        toast(Toasts.Type.FAILURE, `Failed to export settings: ${String(err)}`);
     }
 }
 
-export async function uploadSettingsBackup(type: BackupType = "all", showToast = true): Promise<void> {
-    if (IS_DISCORD_DESKTOP) {
-        const [file] = await DiscordNative.fileManager.openFiles({
-            filters: [
-                { name: "Protonn Cord Settings Backup", extensions: ["json"] },
-                { name: "all", extensions: ["*"] }
-            ]
-        });
-
-        if (file) {
-            try {
-                await importSettings(new TextDecoder().decode(file.data), type);
-                if (showToast) toastSuccess();
-            } catch (err) {
-                logger.error(err);
-                if (showToast) toastFailure(err);
-            }
+export async function uploadSettingsBackup(type: BackupType = "all"): Promise<void> {
+    try {
+        let data: Uint8Array | ArrayBuffer;
+        if (IS_DISCORD_DESKTOP) {
+            const [file] = await DiscordNative.fileManager.openFiles({
+                filters: [
+                    { name: "Protonn Cord Settings Backup", extensions: ["json"] },
+                    { name: "all", extensions: ["*"] }
+                ]
+            });
+            if (!file) return;
+            data = file.data;
+        } else {
+            const file = await chooseFile("application/json");
+            if (!file) return;
+            data = await file.arrayBuffer();
         }
-    } else {
-        const file = await chooseFile("application/json");
-        if (!file) return;
-
-        try {
-            await importSettings(await file.text(), type);
-            if (showToast) toastSuccess();
-        } catch (err) {
-            logger.error(err);
-            if (showToast) toastFailure(err);
-        }
+        await importSettings(new TextDecoder("utf-8", { fatal: true }).decode(data), type);
+        toast(Toasts.Type.SUCCESS, "Settings successfully imported. Restart to apply changes!");
+    } catch (err) {
+        logger.error("Failed to import settings:", err);
+        toast(Toasts.Type.FAILURE, `Failed to import settings: ${String(err)}`);
     }
 }

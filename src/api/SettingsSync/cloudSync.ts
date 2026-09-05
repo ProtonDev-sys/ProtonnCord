@@ -361,7 +361,7 @@ async function applyDownloads(downloads: SyncResponse["downloads"], context: Clo
                 const safe = sanitizeCloudSettings(parsed, cloudPluginRegistry);
                 if (patchMatches(VencordNative.settings.get(), safe)) continue;
                 if (!isCurrentContext(context)) return { accepted: false, changed };
-                await importSettings(JSON.stringify({ settings: safe }), "all", true);
+                await importSettings(JSON.stringify({ settings: safe }), "plugins");
                 changed = true;
             } catch {
                 return { accepted: false, changed };
@@ -690,7 +690,7 @@ async function getV1(context: CloudRequestContext, signal: AbortSignal, shouldNo
     let changed = false;
     if (!patchMatches(VencordNative.settings.get(), document.settings)) {
         if (!isCurrentContext(context)) return false;
-        await importSettings(JSON.stringify({ settings: document.settings }), "all", true);
+        await importSettings(JSON.stringify({ settings: document.settings }), "plugins");
         changed = true;
     }
     if (document.quickCss !== undefined && currentQuickCss !== document.quickCss) {
