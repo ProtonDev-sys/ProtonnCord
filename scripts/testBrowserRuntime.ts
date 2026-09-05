@@ -101,3 +101,53 @@ test("content script ignores unrelated window messages", () => {
     listener({ source: window, data: { type: "OPEN_SHORTCUTS" } });
     assert.equal(sent, 1);
 });
+
+test("APNG conversions coalesce loads, retry failures and reuse the loaded worker", async () => {
+    const instances: FFmpeg[] = [];
+    const loads: { resolve(): void; reject(error: Error): void; }[] = [];
+    class FFmpeg {
+        loaded = false;
+        terminated = false;
+        writes: string[] = [];
+        deleted: string[] = [];
+        constructor() { instances.push(this); }
+        terminate() { this.terminated = true; }
+        async writeFile(path: string) { this.writes.push(path); }
+        async exec() { return 0; }
+        async readFile() { return new Uint8Array([1, 2, 3]); }
+        async deleteFile(path: string) { this.deleted.push(path); }
+    }
+    const mocks: Record<string, object> = {
+        "@ffmpeg/ffmpeg": { FFmpeg },
+        "@utils/ffmpeg": { async loadFFmpeg(instance: FFmpeg) {
+            await new Promise<void>((resolve, reject) => loads.push({ resolve, reject }));
+            instance.loaded = true;
+        } }
+    };
+    const { convertApngToGif } = load("src/equicordplugins/fileUpload/utils/apngToGif.ts", {
+        Blob, Uint8Array, console: { error() { } },
+        require(name: string) { assert.ok(name in mocks, name); return mocks[name]; }
+    });
+    const input = new Blob(["synthetic input"]);
+    const first = convertApngToGif(input);
+    const duplicate = convertApngToGif(input);
+    assert.equal(loads.length, 1);
+    loads[0].reject(new Error("load failed"));
+    assert.deepEqual(await Promise.all([first, duplicate]), [null, null]);
+    const retry = convertApngToGif(input);
+    const concurrent = convertApngToGif(input);
+    assert.equal(loads.length, 2, "a rejected load must not be cached");
+    assert.equal(instances[0].terminated, true);
+    loads[1].resolve();
+    for (const result of await Promise.all([retry, concurrent])) {
+        assert.ok(result instanceof Blob);
+        assert.equal(result.type, "image/gif");
+        assert.deepEqual(new Uint8Array(await result.arrayBuffer()), new Uint8Array([1, 2, 3]));
+    }
+    assert.ok(await convertApngToGif(input) instanceof Blob);
+    assert.equal(loads.length, 2);
+    assert.equal(instances.length, 2);
+    assert.equal(instances[1].terminated, false);
+    assert.equal(new Set(instances[1].writes).size, 3);
+    assert.deepEqual(instances[1].deleted.sort(), ["input_2.png", "input_3.png", "input_4.png", "output_2.gif", "output_3.gif", "output_4.gif"]);
+});
