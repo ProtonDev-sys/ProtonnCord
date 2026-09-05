@@ -18,32 +18,6 @@
     grid-template-columns: 1fr 150px;
 }
 
-.vc-settings-theme-error-card {
-    padding: 16px;
-}
-
-.vc-settings-csp-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.vc-settings-csp-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 0;
-}
-
-.vc-settings-csp-row a {
-    text-overflow: ellipsis;
-    overflow: hidden;
-    white-space: nowrap;
-    flex: 1;
-    min-width: 0;
-}
-
 .vc-settings-theme-menu-button {
     cursor: pointer;
     color: var(--interactive-icon-default, var(--interactive-normal));

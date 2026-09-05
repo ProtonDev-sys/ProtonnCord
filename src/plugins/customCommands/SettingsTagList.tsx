@@ -13,24 +13,26 @@ import { Margins } from "@components/margins";
 import { Paragraph } from "@components/Paragraph";
 
 import { openCreateTagModal } from "./CreateTagModal";
-import { removeTag, settings } from "./settings";
+import { getTags, removeTag, settings } from "./settings";
+
+const SETTINGS_KEYS: ["tagsList"] = ["tagsList"];
 
 export function SettingsTagList() {
-    const { tagsList } = settings.use(["tagsList"]);
+    const { tagsList } = settings.use(SETTINGS_KEYS);
 
     return (
         <section className={Margins.top8}>
             <BaseText size="md" weight="semibold">Registered Tags</BaseText>
             <Flex flexDirection="column" gap="0.5em" className={Margins.top8}>
-                {Object.values(tagsList).map(tag => (
+                {getTags(tagsList).map(tag => (
                     <Card key={tag.name} className="vc-customCommands-card">
                         <Paragraph size="md" weight="medium">{tag.name}</Paragraph>
 
-                        <Button variant="secondary" size="iconOnly" onClick={() => openCreateTagModal(tag)}>
-                            <PencilIcon aria-label="Edit Tag" width={20} height={20} />
+                        <Button aria-label={`Edit ${tag.name}`} variant="secondary" size="iconOnly" onClick={() => openCreateTagModal(tag)}>
+                            <PencilIcon width={20} height={20} />
                         </Button>
-                        <Button variant="dangerSecondary" size="iconOnly" onClick={() => removeTag(tag.name)}>
-                            <DeleteIcon aria-label="Delete Tag" width={20} height={20} />
+                        <Button aria-label={`Delete ${tag.name}`} variant="dangerSecondary" size="iconOnly" onClick={() => removeTag(tag.name)}>
+                            <DeleteIcon width={20} height={20} />
                         </Button>
                     </Card>
                 ))}

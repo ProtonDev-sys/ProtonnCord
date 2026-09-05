@@ -9,7 +9,6 @@ import { QrCodeIcon } from "@components/Icons";
 import { wrapTab } from "@components/settings";
 import loginWithQR from "@equicordplugins/loginWithQR";
 import { images } from "@equicordplugins/loginWithQR/images";
-import { findByPropsLazy } from "@webpack";
 import {
     RestAPI,
     useEffect,
@@ -54,8 +53,6 @@ const limitSize = (width: number, height: number) => {
         return { h, w: (width / height) * h };
     }
 };
-
-const { getVideoDeviceId } = findByPropsLazy("getVideoDeviceId");
 
 const tokenRegex = /^https:\/\/discord\.com\/ra\/([\w-]+)$/;
 const verifyUrl = async (

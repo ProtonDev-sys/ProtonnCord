@@ -71,33 +71,43 @@ export interface Embed {
     fields: EmbedField[];
 }
 
+export interface EmbedImageJSON {
+    url: string;
+    proxy_url?: string;
+    height?: number;
+    width?: number;
+    content_type?: string;
+    placeholder?: string;
+    placeholder_version?: number;
+    description?: string;
+    flags?: number;
+}
+
 export interface EmbedJSON {
     author?: {
         name: string;
-        url: string;
-        icon_url: string;
-        proxy_icon_url: string;
+        url?: string;
+        icon_url?: string;
+        proxy_icon_url?: string;
     };
-    title: string;
-    color: string;
-    description: string;
-    type: EmbedType;
-    url: string | undefined;
+    title?: string;
+    color?: number;
+    description?: string;
+    type?: EmbedType;
+    url?: string;
     provider?: {
-        name: string;
-        url: string;
+        name?: string;
+        url?: string;
     };
-    timestamp: string;
-    thumbnail?: {
-        height: number;
-        width: number;
-        url: string;
-        proxy_url: string | undefined;
+    timestamp?: string;
+    image?: EmbedImageJSON;
+    thumbnail?: EmbedImageJSON;
+    video?: Partial<EmbedImageJSON>;
+    footer?: {
+        text: string;
+        icon_url?: string;
+        proxy_icon_url?: string;
     };
-    video?: {
-        height: number;
-        width: number;
-        url: string;
-        proxy_url: string | undefined;
-    };
+    fields?: { name: string; value: string; inline?: boolean; }[];
+    flags?: number;
 }

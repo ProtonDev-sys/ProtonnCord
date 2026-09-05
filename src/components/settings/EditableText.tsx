@@ -5,7 +5,7 @@
  */
 
 import { BaseText } from "@components/BaseText";
-import { React, useEffect, useRef, useState } from "@webpack/common";
+import { React, useState } from "@webpack/common";
 
 interface EditableTextProps {
     value: string;
@@ -15,32 +15,20 @@ interface EditableTextProps {
 
 export function EditableText({ value, onChange, className }: EditableTextProps) {
     const [editing, setEditing] = useState(false);
-    const [tempValue, setTempValue] = useState(value);
-    const inputRef = useRef<HTMLInputElement>(null);
-
-    useEffect(() => {
-        if (editing && inputRef.current) {
-            inputRef.current.focus();
-        }
-    }, [editing]);
-
     return editing ? (
         <input
-            ref={inputRef}
+            autoFocus
             className={className}
-            value={tempValue}
-            onChange={e => setTempValue(e.target.value)}
-            onBlur={() => {
+            defaultValue={value}
+            onBlur={e => {
                 setEditing(false);
-                onChange(tempValue);
+                if (e.currentTarget.value !== value) onChange(e.currentTarget.value);
             }}
             onKeyDown={e => {
-                if (e.key === "Enter") {
-                    setEditing(false);
-                    onChange(tempValue);
-                } else if (e.key === "Escape") {
-                    setEditing(false);
-                    setTempValue(value);
+                if (e.key === "Enter" || e.key === "Escape") {
+                    e.preventDefault();
+                    if (e.key === "Escape") e.currentTarget.value = value;
+                    e.currentTarget.blur();
                 }
             }}
         />

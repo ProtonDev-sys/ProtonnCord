@@ -16,7 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import ErrorBoundary from "@components/ErrorBoundary";
 import globalBadges from "@equicordplugins/globalBadges";
 import BadgeAPIPlugin from "@plugins/_api/badges";
 import { ComponentType, HTMLProps } from "react";
@@ -67,7 +66,6 @@ const Badges = new Set<ProfileBadge>();
  * @param badge The badge to register
  */
 export function addProfileBadge(badge: ProfileBadge) {
-    badge.component &&= ErrorBoundary.wrap(badge.component, { noop: true });
     Badges.add(badge);
 }
 
@@ -91,11 +89,7 @@ export function _getBadges(args: BadgeUserArgs) {
         }
 
         const b = badge.getBadges
-            ? badge.getBadges(args).map(badge => ({
-                ...args,
-                ...badge,
-                component: badge.component && ErrorBoundary.wrap(badge.component, { noop: true })
-            }))
+            ? badge.getBadges(args).map(badge => ({ ...args, ...badge }))
             : [{ ...args, ...badge }];
 
         if (badge.position === BadgePosition.START) {

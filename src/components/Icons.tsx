@@ -46,9 +46,10 @@ function Icon({ height = 24, width = 24, className, children, viewBox, ...svgPro
 /**
  * Discord's link icon, as seen in the Message context menu "Copy Message Link" option
  */
-export function LinkIcon({ height = 24, width = 24, className }: IconProps) {
+export function LinkIcon({ height = 24, width = 24, className, ...props }: IconProps) {
     return (
         <Icon
+            {...props}
             height={height}
             width={width}
             className={classes(className, "vc-link-icon")}
@@ -149,9 +150,10 @@ export function InfoIcon(props: IconProps) {
     );
 }
 
-export function WarningIcon({ height = 32, width = 32, className }: IconProps) {
+export function WarningIcon({ height = 32, width = 32, className, ...props }: IconProps) {
     return (
         <Icon
+            {...props}
             height={height}
             width={width}
             className={classes(className, "vc-warning-icon")}
@@ -366,8 +368,6 @@ export function ResetIcon(props: IconProps) {
     return (
         <Icon
             {...props}
-            width="24"
-            height="24"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -782,19 +782,7 @@ export function ChevronSmallUpIcon(props: IconProps) {
     );
 }
 
-export function DownArrow(props: IconProps) {
-    return (
-        <Icon
-            {...props}
-            viewBox="0 0 24 24"
-        >
-            <path
-                fill={props.fill || "currentColor"}
-                d="M5.3 9.3a1 1 0 0 1 1.4 0l5.3 5.29 5.3-5.3a1 1 0 1 1 1.4 1.42l-6 6a1 1 0 0 1-1.4 0l-6-6a1 1 0 0 1 0-1.42Z"
-            />
-        </Icon>
-    );
-}
+export const DownArrow = ChevronSmallDownIcon;
 
 export function RightArrow(props: IconProps) {
     return (
@@ -810,7 +798,7 @@ export function RightArrow(props: IconProps) {
     );
 }
 
-export const QrCodeIcon = (props?: any) => {
+export const QrCodeIcon = (props: IconProps = {}) => {
     return (
         <Icon
             {...props}
@@ -830,7 +818,7 @@ export const QrCodeIcon = (props?: any) => {
     );
 };
 
-export const ComponentsIcon = (props?: any) => {
+export const ComponentsIcon = (props: IconProps = {}) => {
     return (
         <Icon
             {...props}
@@ -850,7 +838,7 @@ export const ComponentsIcon = (props?: any) => {
     );
 };
 
-export const LogsIcon = (props?: any) => {
+export const LogsIcon = (props: IconProps = {}) => {
     return (
         <Icon
             {...props}
@@ -866,7 +854,7 @@ export const LogsIcon = (props?: any) => {
     );
 };
 
-export const BookmarkIcon = (props?: any) => {
+export const BookmarkIcon = (props: IconProps = {}) => {
     return (
         <Icon
             {...props}

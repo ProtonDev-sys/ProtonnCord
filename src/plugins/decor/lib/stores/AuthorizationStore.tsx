@@ -5,102 +5,233 @@
  */
 
 import * as DataStore from "@api/DataStore";
-import { AUTHORIZE_URL, CLIENT_ID } from "@plugins/decor/lib/constants";
+import { API_URL, AUTHORIZE_URL, CLIENT_ID } from "@plugins/decor/lib/constants";
 import { proxyLazy } from "@utils/lazy";
 import { Logger } from "@utils/Logger";
-import { OAuth2AuthorizeModal, openModal, showToast, Toasts, UserStore, zustandCreate, zustandPersist } from "@webpack/common";
+import { isObject, parseUrl } from "@utils/misc";
+import { closeModal, OAuth2AuthorizeModal, openModal, UserStore, zustandCreate } from "@webpack/common";
 
-interface AuthorizationState {
-    token: string | null;
-    tokens: Record<string, string>;
-    init: () => void;
-    authorize: () => Promise<void>;
-    setToken: (token: string) => void;
-    remove: (id: string) => void;
-    isAuthorized: () => boolean;
+interface AuthorizationScope {
+    userId: string;
+    apiUrl: string;
+    authorizeUrl: string;
+    clientId: string;
 }
 
-const indexedDBStorage = {
-    async getItem(name: string): Promise<string | null> {
-        return DataStore.get(name).then(v => v ?? null);
-    },
-    async setItem(name: string, value: string): Promise<void> {
-        await DataStore.set(name, value);
-    },
-    async removeItem(name: string): Promise<void> {
-        await DataStore.del(name);
-    },
-};
+export interface Authorization extends AuthorizationScope {
+    token: string;
+}
 
-// TODO: Move switching accounts subscription inside the store?
-export const useAuthorizationStore = proxyLazy(() => zustandCreate(
-    zustandPersist(
-        (set: any, get: any) => ({
-            token: null,
-            tokens: {},
-            init: () => {
-                const currentUserId = UserStore.getCurrentUser()?.id;
-                set({ token: currentUserId ? get().tokens[currentUserId] ?? null : null });
-            },
-            setToken: (token: string) => {
-                const currentUserId = UserStore.getCurrentUser()?.id;
-                if (!currentUserId) return;
-                set({ token, tokens: { ...get().tokens, [currentUserId]: token } });
-            },
-            remove: (id: string) => {
-                const { tokens, init } = get();
-                const newTokens = { ...tokens };
-                delete newTokens[id];
-                set({ tokens: newTokens });
+interface AuthorizationState {
+    authorization: Authorization | null;
+    ready: boolean;
+    busy: boolean;
+    error: string | null;
+    init(): Promise<void>;
+    clear(error?: string): void;
+    authorize(): Promise<void>;
+    remove(expected: Authorization): Promise<void>;
+    requireAuthorization(expected?: Authorization): Authorization;
+    isAuthorized(): boolean;
+}
 
-                init();
-            },
-            async authorize() {
-                return new Promise((resolve, reject) => openModal(props =>
-                    <OAuth2AuthorizeModal
-                        {...props}
-                        scopes={["identify"]}
-                        responseType="code"
-                        redirectUri={AUTHORIZE_URL}
-                        permissions={0n}
-                        clientId={CLIENT_ID}
-                        cancelCompletesFlow={false}
-                        callback={async (response: any) => {
-                            try {
-                                const url = new URL(response.location);
-                                url.searchParams.append("client", "vencord");
+interface AuthorizationStore {
+    (): AuthorizationState;
+    getState(): AuthorizationState;
+    subscribe(listener: (state: AuthorizationState, previous: AuthorizationState) => void): () => void;
+}
 
-                                const req = await fetch(url);
+const TOKEN_KEY = "decor-auth-v2";
+const logger = new Logger("Decor");
 
-                                if (req?.ok) {
-                                    const token = await req.text();
-                                    get().setToken(token);
-                                } else {
-                                    throw new Error("Request not OK");
+function scopeMatches(scope: AuthorizationScope) {
+    return scope.userId === UserStore.getCurrentUser()?.id && scope.apiUrl === API_URL
+        && scope.authorizeUrl === AUTHORIZE_URL && scope.clientId === CLIENT_ID;
+}
+
+function captureScope(): AuthorizationScope {
+    const userId = UserStore.getCurrentUser()?.id;
+    if (!userId) throw new Error("Sign in to Discord before using Decor.");
+    return { userId, apiUrl: API_URL, authorizeUrl: AUTHORIZE_URL, clientId: CLIENT_ID };
+}
+
+function tokenKey(scope: AuthorizationScope) {
+    return JSON.stringify([scope.apiUrl, scope.authorizeUrl, scope.clientId, scope.userId]);
+}
+
+function isToken(value: unknown): value is string {
+    return typeof value === "string" && /^[\x21-\x7e]+$/.test(value);
+}
+
+function readTokens(value: unknown): Record<string, string> {
+    if (value === undefined) return {};
+    if (!isObject(value)) throw new Error("Could not read saved Decor authorization.");
+    const entries = Object.entries(value);
+    if (entries.some(([, token]) => !isToken(token))) throw new Error("Could not read saved Decor authorization.");
+    return Object.fromEntries(entries);
+}
+
+export const useAuthorizationStore: AuthorizationStore = proxyLazy(() => zustandCreate((set: (state: Partial<AuthorizationState>) => void, get: () => AuthorizationState) => {
+    let generation = 0;
+    let attempt: { scope: AuthorizationScope; promise: Promise<void>; cancel(): void; } | undefined;
+    const isCurrent = (scope: AuthorizationScope, version: number) => version === generation && scopeMatches(scope);
+
+    return {
+        authorization: null,
+        ready: false,
+        busy: false,
+        error: null,
+        clear(error) {
+            generation++;
+            attempt?.cancel();
+            set({ authorization: null, ready: false, busy: false, error: error ?? null });
+        },
+        async init() {
+            get().clear();
+            if (!UserStore.getCurrentUser()) return;
+            const version = generation;
+            const scope = captureScope();
+            set({ busy: true });
+            try {
+                const tokens = readTokens(await DataStore.get<unknown>(TOKEN_KEY));
+                if (!isCurrent(scope, version)) return;
+                const token = tokens[tokenKey(scope)];
+                set({ authorization: token ? { ...scope, token } : null, ready: true, busy: false });
+            } catch (error) {
+                if (!isCurrent(scope, version)) return;
+                logger.error("Could not load Decor authorization", error);
+                set({ ready: true, busy: false, error: "Could not read saved Decor authorization. Your saved data has been kept." });
+            }
+        },
+        authorize() {
+            let scope: AuthorizationScope;
+            try {
+                if (!get().ready) throw new Error("Decor is not ready to authorize. Check its configuration and restart the plugin.");
+                scope = captureScope();
+            } catch (error) {
+                const failure = error instanceof Error ? error : new Error("Could not start Decor authorization.");
+                set({ error: failure.message });
+                return Promise.reject(failure);
+            }
+            if (attempt && scopeMatches(attempt.scope)) return attempt.promise;
+            attempt?.cancel();
+            const version = ++generation;
+            set({ busy: true, error: null });
+            let cancel: () => void = () => undefined;
+            const promise = new Promise<void>((resolve, reject) => {
+                const controller = new AbortController();
+                let modalKey: string | undefined;
+                let exchanging = false;
+                let settled = false;
+                const closeOwnedModal = () => {
+                    if (modalKey === undefined) return;
+                    const key = modalKey;
+                    modalKey = undefined;
+                    try { closeModal(key); } catch (error) { logger.error("Could not close Decor authorization", error); }
+                };
+                const finish = (error?: Error, cancelled = false) => {
+                    if (settled) return;
+                    settled = true;
+                    controller.abort();
+                    if (isCurrent(scope, version)) set({ busy: false, error: cancelled ? null : error?.message ?? null });
+                    closeOwnedModal();
+                    if (error) reject(error);
+                    else resolve();
+                };
+                cancel = () => finish(new Error("Authorization cancelled."), true);
+                const assertCurrent = () => {
+                    if (controller.signal.aborted || !isCurrent(scope, version)) throw new Error("The Decor account or service changed. Please try again.");
+                };
+                try {
+                    modalKey = openModal(props =>
+                        <OAuth2AuthorizeModal
+                            {...props}
+                            scopes={["identify"]}
+                            responseType="code"
+                            redirectUri={scope.authorizeUrl}
+                            permissions={0n}
+                            clientId={scope.clientId}
+                            cancelCompletesFlow={false}
+                            callback={async (response: unknown) => {
+                                if (settled || exchanging) return;
+                                exchanging = true;
+                                try {
+                                    assertCurrent();
+                                    const url = isObject(response) && "location" in response && typeof response.location === "string"
+                                        ? parseUrl(response.location) : null;
+                                    const expected = new URL(scope.authorizeUrl);
+                                    if (!url || url.origin !== expected.origin || url.pathname !== expected.pathname
+                                        || url.username || url.password || url.hash || !url.searchParams.get("code") || url.searchParams.has("error"))
+                                        throw new Error("Invalid Decor authorization response.");
+                                    url.searchParams.set("client", "vencord");
+                                    const responseToken = await fetch(url, { signal: controller.signal, redirect: "error" });
+                                    if (!responseToken.ok) throw new Error("Decor authorization failed.");
+                                    const token = (await responseToken.text()).trim();
+                                    if (!isToken(token)) throw new Error("Decor returned an invalid authorization token.");
+                                    assertCurrent();
+                                    await DataStore.update<unknown>(TOKEN_KEY, previous => {
+                                        assertCurrent();
+                                        return { ...readTokens(previous), [tokenKey(scope)]: token };
+                                    });
+                                    assertCurrent();
+                                    set({ authorization: { ...scope, token } });
+                                    finish();
+                                } catch (error) {
+                                    if (settled) return;
+                                    const failure = error instanceof Error ? error : new Error("Decor authorization failed.");
+                                    logger.error("Failed to authorize Decor", failure);
+                                    finish(failure);
                                 }
-                                resolve(void 0);
-                            } catch (e) {
-                                if (e instanceof Error) {
-                                    showToast(`Failed to authorize: ${e.message}`, Toasts.Type.FAILURE);
-                                    new Logger("Decor").error("Failed to authorize", e);
-                                    reject(e);
-                                }
-                            }
-                        }}
-                    />, {
-                    onCloseCallback() {
-                        reject(new Error("Authorization cancelled"));
-                    },
+                            }}
+                        />, {
+                        onCloseCallback() {
+                            modalKey = undefined;
+                            if (!exchanging) cancel();
+                        }
+                    });
+                    if (settled) closeOwnedModal();
+                    else if (!isCurrent(scope, version)) cancel();
+                } catch (error) {
+                    finish(error instanceof Error ? error : new Error("Could not open Decor authorization."));
                 }
-                ));
-            },
-            isAuthorized: () => !!get().token,
-        } as AuthorizationState),
-        {
-            name: "decor-auth",
-            storage: indexedDBStorage,
-            partialize: state => ({ tokens: state.tokens }),
-            onRehydrateStorage: () => state => state?.init()
+            });
+            const current = { scope, promise, cancel };
+            attempt = current;
+            const cleanup = () => { if (attempt === current) attempt = undefined; };
+            void promise.then(cleanup, cleanup);
+            return promise;
+        },
+        async remove(expected) {
+            if (get().authorization !== expected || !scopeMatches(expected)) throw new Error("The Decor account changed. Please try again.");
+            if (get().busy) throw new Error("Wait for the current Decor authorization to finish.");
+            const version = ++generation;
+            set({ busy: true, error: null });
+            try {
+                await DataStore.update<unknown>(TOKEN_KEY, previous => {
+                    if (!isCurrent(expected, version)) throw new Error("The Decor account changed. Please try again.");
+                    const tokens = readTokens(previous);
+                    const key = tokenKey(expected);
+                    if (tokens[key] !== undefined && tokens[key] !== expected.token) throw new Error("Saved Decor authorization changed. Please sign in again.");
+                    delete tokens[key];
+                    return tokens;
+                });
+                if (isCurrent(expected, version)) set({ authorization: null, busy: false });
+            } catch (error) {
+                const failure = error instanceof Error ? error : new Error("Could not remove Decor authorization.");
+                if (isCurrent(expected, version)) set({ busy: false, error: failure.message });
+                throw failure;
+            }
+        },
+        requireAuthorization(expected) {
+            const { authorization, ready, busy } = get();
+            if (!ready || !authorization || !scopeMatches(authorization)) throw new Error("Sign in to Decor before changing decorations.");
+            if (busy) throw new Error("Wait for the current Decor authorization to finish.");
+            if (expected && authorization !== expected) throw new Error("The Decor account or service changed. Please try again.");
+            return authorization;
+        },
+        isAuthorized() {
+            const { authorization, ready } = get();
+            return ready && authorization !== null && scopeMatches(authorization);
         }
-    )
-));
+    } satisfies AuthorizationState;
+}));

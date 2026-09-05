@@ -116,7 +116,7 @@ function registerSubCommands(cmd: VencordCommand, plugin: string) {
         const subCmd = {
             ...cmd,
             ...o,
-            options: o.options !== undefined ? o.options : undefined,
+            options: o.options,
             type: ApplicationCommandType.CHAT_INPUT,
             id: `${o.name}-${cmd.id}`,
             name: getSubCommandName(cmd, o),
@@ -173,7 +173,7 @@ export function registerCommand<C extends VencordCommand>(command: C, plugin: st
     BUILT_IN.push(command);
 }
 
-export function unregisterCommand(name: string, isSubCommands = false) {
+export function unregisterCommand(name: string) {
     const cmd = commands[name];
     if (cmd && isSubCommandParent(cmd)) {
         delete commands[name];

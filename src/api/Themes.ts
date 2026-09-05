@@ -18,7 +18,7 @@
 
 import { Settings, SettingsStore, type ThemeActivationMode } from "@api/Settings";
 import { createAndAppendStyle } from "@utils/css";
-import { isNonNullish } from "@utils/guards";
+import { Logger } from "@utils/Logger";
 import { ThemeStore } from "@vencord/discord-types";
 import { PopoutWindowStore } from "@webpack/common";
 
@@ -28,9 +28,11 @@ let style: HTMLStyleElement;
 let themesStyle: HTMLStyleElement;
 
 const themeChangeListeners = new Set<() => void>();
+const logger = new Logger("Themes");
 
-function getThemeActivationMode(themeId: string) {
-    return Settings.themeActivationModes?.[themeId] ?? "always";
+function getThemeActivationMode(themeId: string, legacyMode?: string) {
+    return Settings.themeActivationModes?.[themeId]
+        ?? (legacyMode === "light" || legacyMode === "dark" ? legacyMode : "always");
 }
 
 function shouldApplyTheme(mode: ThemeActivationMode, activeTheme?: "light" | "dark") {
@@ -43,22 +45,36 @@ async function toggle(isEnabled: boolean) {
     if (!style) {
         if (isEnabled) {
             style = createAndAppendStyle("vencord-custom-css", userStyleRootNode);
-            VencordNative.quickCss.addChangeListener(css => {
+            let receivedChange = false;
+            const applyCss = (css: string) => {
                 style.textContent = css;
                 // At the time of writing this, changing textContent resets the disabled state
                 style.disabled = !Settings.useQuickCss;
                 updatePopoutWindows();
+            };
+            VencordNative.quickCss.addChangeListener(css => {
+                receivedChange = true;
+                applyCss(css);
             });
-            style.textContent = await VencordNative.quickCss.get();
+            try {
+                const css = await VencordNative.quickCss.get();
+                if (!receivedChange) applyCss(css);
+            } catch (err) {
+                logger.error("Failed to read QuickCSS", err);
+            }
         }
-    } else
+    } else {
         style.disabled = !isEnabled;
+        updatePopoutWindows();
+    }
 }
 
 // for cleanup
 let previousThemeBlobObjectURLs = [] as string[];
+let themeLoadId = 0;
 
 async function initThemes() {
+    const loadId = ++themeLoadId;
     themesStyle ??= createAndAppendStyle("vencord-themes", userStyleRootNode);
 
     const { enabledThemeLinks, enabledThemes } = Settings;
@@ -76,7 +92,7 @@ async function initThemes() {
     for (const rawLink of enabledThemeLinks) {
         const match = /^@(light|dark) (.*)/.exec(rawLink);
         const link = match?.[2] ?? rawLink;
-        const mode = getThemeActivationMode(rawLink);
+        const mode = getThemeActivationMode(rawLink, match?.[1]);
 
         if (shouldApplyTheme(mode, activeTheme)) {
             links.add(link);
@@ -84,21 +100,21 @@ async function initThemes() {
     }
 
     if (IS_WEB) {
-        previousThemeBlobObjectURLs.forEach(url => URL.revokeObjectURL(url));
-
         const themesToApply = enabledThemes.filter(theme =>
             shouldApplyTheme(getThemeActivationMode(theme), activeTheme)
         );
 
-        const objectUrls = await Promise.all(themesToApply.map(async theme => {
-            const themeData = await VencordNative.themes.getThemeData(theme);
-            if (!themeData) return null;
+        const themeData = await Promise.all(themesToApply.map(theme => VencordNative.themes.getThemeData(theme)))
+            .catch(err => {
+                logger.error("Failed to read themes", err);
+                return null;
+            });
+        if (!themeData || loadId !== themeLoadId) return;
 
-            const blob = new Blob([themeData], { type: "text/css" });
-            return URL.createObjectURL(blob);
-        }));
-
-        previousThemeBlobObjectURLs = objectUrls.filter(isNonNullish);
+        const objectUrls = themeData.filter((data): data is string => !!data)
+            .map(data => URL.createObjectURL(new Blob([data], { type: "text/css" })));
+        previousThemeBlobObjectURLs.forEach(url => URL.revokeObjectURL(url));
+        previousThemeBlobObjectURLs = objectUrls;
         previousThemeBlobObjectURLs.forEach(url => links.add(url));
     } else {
         const version = Date.now();
@@ -133,6 +149,8 @@ function applyToPopout(popoutWindow: Window | undefined, key: string) {
     }
 
     doc.documentElement.appendChild(clonedRoot);
+    const quickCss = clonedRoot.querySelector<HTMLStyleElement>("#vencord-custom-css");
+    if (quickCss) quickCss.disabled = !Settings.useQuickCss;
 }
 
 function updatePopoutWindows() {

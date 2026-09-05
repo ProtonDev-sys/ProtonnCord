@@ -42,8 +42,7 @@
     "web_accessible_resources": [
         {
             "resources": [
-                "dist/*",
-                "vendor/*"
+                "dist/*"
             ],
             "matches": [
                 "*://*.discord.com/*"

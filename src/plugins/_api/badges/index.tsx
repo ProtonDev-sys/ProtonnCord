@@ -24,7 +24,7 @@ import { openContributorModal } from "@components/settings/tabs";
 import { Devs } from "@utils/constants";
 import { copyWithToast } from "@utils/discord";
 import { Logger } from "@utils/Logger";
-import { shouldShowContributorBadge, shouldShowEquicordContributorBadge } from "@utils/misc";
+import { isObject, shouldShowContributorBadge, shouldShowEquicordContributorBadge } from "@utils/misc";
 import definePlugin from "@utils/types";
 import { ContextMenuApi, Menu, Toasts, UserStore } from "@webpack/common";
 
@@ -82,39 +82,52 @@ const UserPluginContributorBadge: ProfileBadge = {
     },
 };
 
-let DonorBadges = {} as Record<string, Array<Record<"tooltip" | "badge", string>>>;
-let EquicordDonorBadges = {} as Record<string, Array<Record<"tooltip" | "badge", string>>>;
+type DonorBadgeMap = Record<string, Array<Record<"tooltip" | "badge", string>>>;
+
+let DonorBadges: DonorBadgeMap = {};
+let EquicordDonorBadges: DonorBadgeMap = {};
 let loadAllBadgesPromise: Promise<void> | undefined;
-
-async function loadBadges(url: string, noCache = false) {
-    const init = {} as RequestInit;
-    if (noCache) init.cache = "no-cache";
-
-    return await fetch(url, init).then(r => r.json());
-}
-
-async function loadAllBadges(noCache = false) {
-    if (loadAllBadgesPromise) return loadAllBadgesPromise;
-
-    loadAllBadgesPromise = (async () => {
-        const [vencordBadges, equicordBadges] = await Promise.all([
-            loadBadges("https://badges.vencord.dev/badges.json", noCache),
-            loadBadges("https://badge.equicord.org/badges.json", noCache)
-        ]);
-
-        DonorBadges = vencordBadges;
-        EquicordDonorBadges = equicordBadges;
-    })();
-
-    try {
-        await loadAllBadgesPromise;
-    } finally {
-        loadAllBadgesPromise = undefined;
-    }
-}
-
 let intervalId: ReturnType<typeof setInterval> | undefined;
 let badgeLoadGeneration = 0;
+const logger = new Logger("BadgeAPI");
+
+async function loadBadges(url: string, noCache = false) {
+    const response = await fetch(url, { cache: noCache ? "no-cache" : "default" });
+    if (!response.ok) throw new Error(`Badge request failed: ${response.status}`);
+    const data: unknown = await response.json();
+    if (!isObject(data) || !Object.values(data).every(badges =>
+        Array.isArray(badges) && badges.every(badge => isObject(badge)
+            && "tooltip" in badge && typeof badge.tooltip === "string"
+            && "badge" in badge && typeof badge.badge === "string")
+    )) throw new Error("Invalid badge response");
+
+    return data as DonorBadgeMap;
+}
+
+function loadAllBadges(noCache = false) {
+    if (loadAllBadgesPromise) return loadAllBadgesPromise;
+
+    const generation = badgeLoadGeneration;
+    loadAllBadgesPromise = (async () => {
+        const results = await Promise.allSettled([
+            loadBadges("https://badges.vencord.dev/badges.json", noCache).then(badges => {
+                if (generation === badgeLoadGeneration) DonorBadges = badges;
+            }),
+            loadBadges("https://badge.equicord.org/badges.json", noCache).then(badges => {
+                if (generation === badgeLoadGeneration) EquicordDonorBadges = badges;
+            })
+        ]);
+        const errors = results.filter(r => r.status === "rejected").map(r => r.reason);
+        if (errors.length) throw new AggregateError(errors, "Could not refresh all badge services");
+    })().finally(() => {
+        if (generation === badgeLoadGeneration) loadAllBadgesPromise = undefined;
+    });
+    return loadAllBadgesPromise;
+}
+
+function refreshBadges() {
+    return loadAllBadges().catch(error => logger.error("Failed to refresh badges", error));
+}
 
 export function BadgeContextMenu({ badge }: { badge: Omit<ProfileBadge, "id"> & BadgeUserArgs; }) {
     return (
@@ -191,28 +204,29 @@ export default definePlugin({
 
     toolboxActions: {
         async "Refetch Badges"() {
-            await loadAllBadges(true);
-            Toasts.show({
-                id: Toasts.genId(),
-                message: "Successfully refetched badges!",
-                type: Toasts.Type.SUCCESS
-            });
+            try {
+                await loadAllBadges(true);
+                Toasts.show({ id: Toasts.genId(), message: "Successfully refetched badges!", type: Toasts.Type.SUCCESS });
+            } catch (error) {
+                logger.error("Failed to refresh badges", error);
+                Toasts.show({ id: Toasts.genId(), message: "Could not refresh all badge services. Try again later.", type: Toasts.Type.FAILURE });
+            }
         }
     },
 
     userProfileBadges: [ContributorBadge, EquicordContributorBadge, UserPluginContributorBadge],
 
-    async start() {
-        const generation = ++badgeLoadGeneration;
+    start() {
+        badgeLoadGeneration++;
+        loadAllBadgesPromise = undefined;
         clearInterval(intervalId);
-        await loadAllBadges();
-        if (generation !== badgeLoadGeneration) return;
-
-        intervalId = setInterval(() => void loadAllBadges(), 1000 * 60 * 30); // 30 minutes
+        intervalId = setInterval(refreshBadges, 1000 * 60 * 30); // 30 minutes
+        void refreshBadges();
     },
 
-    async stop() {
+    stop() {
         badgeLoadGeneration++;
+        loadAllBadgesPromise = undefined;
         clearInterval(intervalId);
         intervalId = undefined;
     },

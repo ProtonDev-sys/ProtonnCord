@@ -183,4 +183,8 @@
     }
 
     walk(document.body);
+    for (const link of document.querySelectorAll("a[href]")) {
+        link.setAttribute("href", link.getAttribute("href").replace(/{{(\w+)}}/g,
+            (match, key) => data.has(key) ? encodeURIComponent(data.get(key)) : match));
+    }
 </script>

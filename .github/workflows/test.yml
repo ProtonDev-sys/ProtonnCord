@@ -58,3 +58,8 @@ jobs:
 
             - name: Test if plugin structure is valid
               run: pnpm generatePluginJson
+
+            - name: Test the generated API type package
+              run: |
+                  pnpm generateTypes
+                  pnpm --dir packages/vencord-types test

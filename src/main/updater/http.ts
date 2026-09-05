@@ -64,7 +64,6 @@ async function calculateGitChanges(branch: unknown) {
         ASAR_FILE,
         parseUpdaterBranch(branch),
     );
-    PendingUpdate = inspection.pending;
     return inspection.changes;
 }
 
