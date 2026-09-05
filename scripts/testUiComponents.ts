@@ -10,7 +10,9 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
-function loadComponent(path: string, hooks: Record<string, unknown> = {}, additionalMocks: Record<string, object> = {}) {
+import { proxyLazy, SYM_LAZY_GET } from "../src/utils/lazy";
+
+function loadComponent(path: string, hooks: Record<string, unknown> = {}, additionalMocks: Record<string, object> = {}, globals: Record<string, unknown> = {}) {
     const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
     const mocks: Record<string, object> = {
         "@webpack/common": { React, TextInput: "input", ...hooks },
@@ -27,7 +29,7 @@ function loadComponent(path: string, hooks: Record<string, unknown> = {}, additi
         compilerOptions: { jsx: JsxEmit.React, module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
     }).outputText;
     return runInNewContext(code + "\nexports;", {
-        exports: {}, React,
+        exports: {}, React, ...globals,
         require(name: string) {
             if (name.endsWith(".css")) return {};
             assert.ok(name in mocks, name);
@@ -215,7 +217,7 @@ test("call timers discard join times on logout and stop, then accept a fresh ini
     assert.equal(plugin.ConnectionTimer(), null);
 });
 
-test("emoji copy menus defer lazy lookups until the Unicode action is used", () => {
+test("emoji copy menus keep the real webpack proxy lazy until the Unicode action is used", () => {
     let lookups = 0;
     const copied: string[] = [];
     const plugin = loadComponent("src/plugins/copyEmojiMarkdown/index.tsx", {
@@ -225,7 +227,7 @@ test("emoji copy menus defer lazy lookups until the Unicode action is used", () 
         "@utils/constants": { Devs: {} },
         "@utils/discord": { copyWithToast: (text: string) => copied.push(text) },
         "@utils/types": { __esModule: true, default: (plugin: object) => plugin, OptionType: {} },
-        "@webpack": { findByPropsLazy: () => new Proxy({}, { get: () => { lookups++; return () => "🛒"; } }) }
+        "@webpack": { findByPropsLazy: () => proxyLazy(() => { lookups++; return { convertNameToSurrogate: () => "🛒" }; }) }
     }).default;
     assert.equal(lookups, 0);
     const children: { props: { children: { props: { action: () => void; }; }[]; }; }[] = [];
@@ -348,3 +350,174 @@ for (const action of ["Enter", "Escape", "blur"]) {
         assert.equal(editing, false);
     });
 }
+
+
+function loadShortcuts() {
+    const state = { resolutions: 0, opens: 0, roots: 0, unmounts: 0, renders: [] as unknown[], blocked: false, failRoot: false };
+    const module = Object.freeze({ value: "lazy module", nested: Object.freeze({ value: 1 }) });
+    const lazy = proxyLazy(() => { state.resolutions++; return module; });
+    const modules: Record<string, unknown>[] = [];
+    const fluxStores = new Map<string, object>();
+    const popups: ReturnType<typeof makePopup>[] = [];
+    function makePopup() {
+        let pagehide: (() => void) | undefined;
+        return {
+            closed: false, closes: 0, focus() {},
+            document: {
+                head: { append() {} },
+                body: { style: {}, appendChild: (element: object) => element },
+                createElement: () => ({})
+            },
+            addEventListener(event: string, callback: () => void) { assert.equal(event, "pagehide"); pagehide = callback; },
+            close() { this.closes++; this.closed = true; pagehide?.(); },
+            leave() { this.closed = true; pagehide?.(); }
+        };
+    }
+    const window = {
+        open() {
+            state.opens++;
+            if (state.blocked) return null;
+            const popup = makePopup();
+            popups.push(popup);
+            return popup;
+        }
+    };
+    const byProps = (...keys: string[]) => (value: Record<string, unknown>) => keys.every(key => Object.hasOwn(value, key));
+    const webpack = {
+        fluxStores,
+        filters: { byProps, byCode: byProps, componentByCode: byProps, byClassNames: byProps },
+        findAll: (filter: (value: object) => boolean) => modules.filter(filter),
+        findStore: (name: string) => { const store = fluxStores.get(name); if (!store) throw new Error("Missing store"); return store; },
+        findModuleId: (code: string) => code === "present" ? 0 : null,
+        extract: (id: number) => { assert.equal(id, 0); return "source"; },
+        search() {}
+    };
+    const plugin = loadComponent("src/plugins/consoleShortcuts/index.ts", {
+        LazyModule: lazy,
+        createRoot: () => {
+            if (state.failRoot) throw new Error("Root unavailable");
+            state.roots++;
+            return { render: (element: unknown) => state.renders.push(element), unmount: () => state.unmounts++ };
+        }
+    }, {
+        "@debug/loadLazyChunks": { loadLazyChunks() { assert.fail("Automatic chunk loading"); } },
+        "@utils/constants": { Devs: {} },
+        "@utils/discord": { getCurrentChannel: () => null, getCurrentGuild: () => null },
+        "@utils/intlHash": { runtimeHashMessageKey() {} },
+        "@utils/lazy": { SYM_LAZY_GET },
+        "@utils/native": { relaunch() { assert.fail("Unexpected relaunch"); } },
+        "@utils/patches": { canonicalizeMatch() {}, canonicalizeReplace() {}, canonicalizeReplacement() {} },
+        "@utils/types": { __esModule: true, default: (value: object) => value, StartAt: {} },
+        "@webpack": webpack
+    }, {
+        window, document: { querySelectorAll: () => [] },
+        IS_WEB: false, IS_VESKTOP: false, IS_EQUIBOP: false
+    }).default;
+    return { plugin, window, state, module, modules, fluxStores, popups };
+}
+
+test("console aliases resolve lazies only on access without mutating module exports", async () => {
+    const { plugin, window, state, module } = loadShortcuts();
+    plugin.start();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(state.resolutions, 0);
+    const shortcuts = Reflect.get(window, "shortcutList");
+    assert.equal(Reflect.get(window, "LazyModule"), module);
+    assert.equal(shortcuts.LazyModule, module);
+    assert.equal(state.resolutions, 1);
+    assert.deepEqual(module.nested, { value: 1 });
+    plugin.stop();
+    assert.equal(Object.hasOwn(window, "LazyModule"), false);
+});
+
+test("console aliases restore owned descriptors and preserve collisions and external replacements", () => {
+    const { plugin, window } = loadShortcuts();
+    const previous = { value: "previous", writable: false, configurable: true, enumerable: false };
+    Object.defineProperty(window, "wp", previous);
+    Object.defineProperty(window, "find", { value: "reserved", configurable: false });
+    const previousList = { value: "previous list", writable: true, configurable: true, enumerable: false };
+    Object.defineProperty(window, "shortcutList", previousList);
+    plugin.start();
+    const shortcuts = Reflect.get(window, "shortcutList");
+    plugin.start();
+    assert.equal(Reflect.get(window, "shortcutList"), shortcuts);
+    assert.equal(Reflect.get(window, "find"), "reserved");
+    assert.equal(shortcuts.find(() => true), null);
+    Object.defineProperty(window, "reload", { value: "external", configurable: true });
+    plugin.stop();
+    plugin.stop();
+    assert.deepEqual(Object.getOwnPropertyDescriptor(window, "wp"), previous);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(window, "shortcutList"), previousList);
+    assert.equal(Reflect.get(window, "find"), "reserved");
+    assert.equal(Reflect.get(window, "reload"), "external");
+    plugin.start();
+    plugin.stop();
+    assert.equal(Reflect.get(window, "reload"), "external");
+});
+
+test("console searches distinguish identical-looking closures and reflect replaced modules and stores", () => {
+    const { plugin, window, modules, fluxStores } = loadShortcuts();
+    plugin.start();
+    const shortcuts = Reflect.get(window, "shortcutList");
+    const first = { id: 1 }, second = { id: 2 };
+    modules.push(first, second);
+    const byId = (id: number) => (module: { id: number }) => module.id === id;
+    assert.equal(String(byId(1)), String(byId(2)));
+    assert.equal(shortcuts.find(byId(1)), first);
+    assert.equal(shortcuts.find(byId(2)), second);
+    const replacement = { id: 1 };
+    modules.splice(0, 1, replacement);
+    assert.equal(shortcuts.find(byId(1)), replacement);
+    assert.equal(shortcuts.findExportedComponent("absent"), undefined);
+    assert.equal(shortcuts.wpexs("absent"), null);
+    assert.equal(shortcuts.wpexs("present"), "source");
+    assert.equal(shortcuts.findStore("Sample"), null);
+    assert.equal(shortcuts.Stores.Sample, undefined);
+    fluxStores.set("Sample", first);
+    assert.equal(shortcuts.Stores.Sample, first);
+    assert.equal(shortcuts.findStore("Sample"), first);
+    fluxStores.set("Sample", second);
+    assert.equal(shortcuts.findStore("Sample"), second);
+    assert.equal(shortcuts.Stores.Sample, second);
+    plugin.stop();
+});
+
+test("console previews report blocked popups and reuse one root until close or stop", () => {
+    const { plugin, window, state, popups } = loadShortcuts();
+    plugin.start();
+    const { fakeRender } = Reflect.get(window, "shortcutList");
+    const component = () => null;
+    state.blocked = true;
+    assert.throws(() => fakeRender(component), /Could not open/);
+    assert.equal(state.roots, 0);
+    state.blocked = false;
+    fakeRender(component, { value: 1 });
+    fakeRender(component, { value: 2 });
+    assert.equal(state.roots, 1);
+    assert.equal(state.renders.length, 2);
+    popups[0].leave();
+    assert.equal(state.unmounts, 1);
+    fakeRender(component);
+    assert.equal(state.roots, 2);
+    plugin.stop();
+    plugin.stop();
+    assert.equal(state.unmounts, 2);
+    assert.equal(popups[1].closed, true);
+    assert.equal(popups[1].closes, 1);
+});
+
+
+test("console previews can retry after root creation fails", () => {
+    const { plugin, window, state, popups } = loadShortcuts();
+    plugin.start();
+    const { fakeRender } = Reflect.get(window, "shortcutList");
+    state.failRoot = true;
+    assert.throws(() => fakeRender(() => null), /Root unavailable/);
+    assert.equal(popups[0].closed, true);
+    state.failRoot = false;
+    fakeRender(() => null);
+    assert.equal(state.roots, 1);
+    assert.equal(state.renders.length, 1);
+    plugin.stop();
+    assert.equal(state.unmounts, 1);
+});
