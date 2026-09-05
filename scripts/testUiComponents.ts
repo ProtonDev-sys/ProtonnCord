@@ -167,12 +167,19 @@ test("Decor lifecycle keeps initialization and connection work obsolete after lo
     const { store, scheduled } = decorFixture();
     const pending: ((configured: boolean) => void)[] = [];
     const account = { id: "first", clears: 0, authInits: 0 };
+    const authorizationListeners = new Set<(state: object, previous: object) => void>();
     const plugin = loadComponent("src/plugins/decor/index.tsx", { UserStore: { getCurrentUser: () => account.id ? { id: account.id } : undefined } }, {
         "@components/ErrorBoundary": { __esModule: true, default: { wrap: (component: unknown) => component } },
         "@utils/constants": { Devs: {} },
         "@utils/types": { __esModule: true, default: (plugin: object) => plugin },
         "./lib/constants": { setBaseUrl: () => new Promise<boolean>(resolve => pending.push(resolve)), cancelConfiguration: () => undefined },
-        "./lib/stores/AuthorizationStore": { useAuthorizationStore: { getState: () => ({ init: () => account.authInits++, clear: () => undefined }) } },
+        "./lib/stores/AuthorizationStore": { useAuthorizationStore: {
+            getState: () => ({ init: () => account.authInits++, clear: () => undefined }),
+            subscribe(listener: (state: object, previous: object) => void) {
+                authorizationListeners.add(listener);
+                return () => authorizationListeners.delete(listener);
+            }
+        } },
         "./lib/stores/CurrentUserDecorationsStore": { useCurrentUserDecorationsStore: { getState: () => ({ clear: () => account.clears++ }) } },
         "./lib/stores/UsersDecorationsStore": { useUsersDecorationsStore: store },
         "./settings": { settings: { store: { baseUrl: "https://decor.invalid" } } },
@@ -182,6 +189,7 @@ test("Decor lifecycle keeps initialization and connection work obsolete after lo
     plugin.stop(); pending.shift()?.(true); await first;
     assert.equal(store.getState().session, null);
     assert.equal(scheduled.size, 0);
+    assert.equal(authorizationListeners.size, 0);
     const second = plugin.start();
     const connection = plugin.flux.CONNECTION_OPEN();
     account.id = ""; plugin.flux.LOGOUT(); pending.shift()?.(true); await Promise.all([second, connection]);
@@ -189,9 +197,13 @@ test("Decor lifecycle keeps initialization and connection work obsolete after lo
     account.id = "second"; await plugin.flux.CONNECTION_OPEN();
     assert.equal(typeof store.getState().session, "symbol");
     assert.equal(scheduled.size, 1);
+    const clears = account.clears;
+    for (const listener of authorizationListeners) listener({ authorization: null }, { authorization: {} });
+    assert.equal(account.clears, clears + 1);
     plugin.stop(); await plugin.flux.CONNECTION_OPEN();
     assert.equal(store.getState().session, null);
     assert.equal(scheduled.size, 0);
+    assert.equal(authorizationListeners.size, 0);
     assert.ok(account.clears >= 4);
     assert.equal(account.authInits, 1);
     const failed = plugin.start(); pending.shift()?.(false); await failed;
@@ -390,15 +402,29 @@ test("Decor private requests reject stale credentials before sending and disable
     assert.equal(requests.length, 0);
     f.storage.value = { [f.key()]: "synthetic-token" };
     await f.store.getState().init();
-    await api.getUserDecorations();
+    const owner = f.store.getState().requireAuthorization();
+    await api.getUserDecorations(owner);
     assert.equal(new Headers(requests[0].options.headers).get("Authorization"), "Bearer synthetic-token");
     assert.equal(requests[0].options.redirect, "error");
     f.account.id = "second";
-    await assert.rejects(api.getUserDecorations(), /Sign in/);
+    await assert.rejects(api.getUserDecorations(owner), /Sign in/);
     f.account.id = "first";
     f.service.API_URL = "https://other.invalid/api";
-    await assert.rejects(api.getUserDecorations(), /Sign in/);
+    await assert.rejects(api.getUserDecorations(owner), /Sign in/);
     assert.equal(requests.length, 1);
+});
+
+test("Decor private actions wait for a pending credential removal to finish", async () => {
+    const f = decorAuthorizationFixture();
+    f.storage.value = { [f.key()]: "synthetic-token" };
+    await f.store.getState().init();
+    const owner = f.store.getState().requireAuthorization();
+    let resume: () => void = () => undefined;
+    f.storage.beforeUpdate = () => new Promise<void>(resolve => { resume = resolve; });
+    const removed = f.store.getState().remove(owner);
+    assert.throws(() => f.store.getState().requireAuthorization(owner), /Wait for/);
+    resume(); await removed;
+    assert.throws(() => f.store.getState().requireAuthorization(owner), /Sign in/);
 });
 
 test("Decor checks authorization ownership again inside an awaited storage transaction", async () => {
@@ -454,6 +480,200 @@ test("Decor configuration applies validated responses atomically and ignores can
     requests[4].resolve({ ok: true, json: async () => ({ CDN_URL: "https://ignored.invalid", CLIENT_ID: "1096966363416899624" }) });
     assert.equal(await stopped, false);
     assert.equal(config.BASE_URL, "https://new.invalid/base");
+});
+
+const syntheticDecoration = (hash: string, authorId = "first") => ({ hash, animated: false, alt: hash, authorId, reviewed: true, presetId: null });
+
+async function decorPrivateFixture() {
+    const f = decorAuthorizationFixture();
+    f.storage.value = { [f.key()]: "synthetic-token" };
+    await f.store.getState().init();
+    const requests: { url: string; options: RequestInit; resolve(response: Response): void; reject(error: Error): void; }[] = [];
+    const api = loadComponent("src/plugins/decor/lib/api.ts", {}, {
+        "./constants": f.service,
+        "./stores/AuthorizationStore": { useAuthorizationStore: f.store },
+        "@utils/misc": { isObject: (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) }
+    }, { Headers, FormData, URL, Error, fetch: (url: string, options: RequestInit) => new Promise<Response>((resolve, reject) => requests.push({ url, options, resolve, reject })) });
+    const publicStore = decorFixture().store;
+    publicStore.getState().start();
+    const utils = loadComponent("src/plugins/decor/lib/utils/decoration.ts", {}, { "@plugins/decor/lib/constants": { SKU_ID: "decor" } });
+    const store = loadComponent("src/plugins/decor/lib/stores/CurrentUserDecorationsStore.ts", {
+        zustandCreate<T>(initializer: (set: (next: Partial<T>) => void, get: () => T) => T) {
+            let state: T;
+            state = initializer(next => { state = { ...state, ...next }; }, () => state);
+            return { getState: () => state };
+        }
+    }, {
+        "@plugins/decor/lib/api": api,
+        "@plugins/decor/lib/utils/decoration": utils,
+        "@utils/lazy": { proxyLazy },
+        "./AuthorizationStore": { useAuthorizationStore: f.store },
+        "./UsersDecorationsStore": { useUsersDecorationsStore: publicStore }
+    }, { AbortController, Error }).useCurrentUserDecorationsStore;
+    const respond = (index: number, body: unknown, status = 200) => requests[index].resolve(new Response(JSON.stringify(body), { status }));
+    return { ...f, auth: f.store, store, api, requests, publicStore, respond, owner: f.store.getState().requireAuthorization() };
+}
+
+test("Decor selection commits only after success and preserves failed edits", async () => {
+    const f = await decorPrivateFixture();
+    const decoration = syntheticDecoration("chosen");
+    const first = f.store.getState().select(decoration, f.owner);
+    const failure = assert.rejects(first, /Rejected/);
+    assert.equal(f.store.getState().selectedDecoration, null);
+    assert.equal(f.store.getState().busy, true);
+    assert.equal(f.publicStore.getState().usersDecorations.has("first"), false);
+    f.respond(0, "Rejected", 400); await failure;
+    assert.equal(f.store.getState().selectedDecoration, null);
+    assert.match(f.store.getState().error, /Rejected/);
+    assert.equal(f.store.getState().busy, false);
+    const retry = f.store.getState().select(decoration, f.owner);
+    f.respond(1, "ok"); await retry;
+    assert.equal(f.store.getState().selectedDecoration, decoration);
+    assert.equal(f.publicStore.getState().usersDecorations.get("first").asset, "chosen");
+    assert.equal(f.store.getState().error, null);
+    const emptyFailure = assert.rejects(f.store.getState().select(null, f.owner), /HTTP 500/);
+    f.requests[2].resolve(new Response("", { status: 500 })); await emptyFailure;
+    assert.equal(f.store.getState().selectedDecoration, decoration);
+});
+
+test("Decor explicitly removing an unloaded decoration still reaches the service", async () => {
+    const f = await decorPrivateFixture();
+    const removal = f.store.getState().select(null, f.owner);
+    assert.equal(f.requests.length, 1);
+    assert.equal((f.requests[0].options.body as FormData).get("hash"), "null");
+    f.respond(0, "ok"); await removal;
+    assert.equal(f.publicStore.getState().usersDecorations.get("first").asset, null);
+});
+
+test("Decor private loads coalesce and a confirmed write wins over earlier reads", async () => {
+    const f = await decorPrivateFixture();
+    const first = f.store.getState().fetch(f.owner);
+    const duplicate = f.store.getState().fetch(f.owner);
+    assert.equal(f.requests.length, 2);
+    const selected = f.store.getState().select(syntheticDecoration("new"), f.owner);
+    assert.equal(f.requests[0].options.signal?.aborted, true);
+    assert.equal(f.requests[1].options.signal?.aborted, true);
+    await assert.rejects(f.store.getState().select(syntheticDecoration("competing"), f.owner), /Wait for/);
+    await assert.rejects(f.store.getState().fetch(f.owner), /Wait for/);
+    assert.equal(f.requests.length, 3);
+    f.respond(2, "ok"); await selected;
+    f.respond(0, [syntheticDecoration("old")]); f.respond(1, syntheticDecoration("old"));
+    await first; await duplicate;
+    assert.equal(f.store.getState().selectedDecoration.hash, "new");
+    assert.equal(f.publicStore.getState().usersDecorations.get("first").asset, "new");
+});
+
+test("Decor clearing or switching accounts cannot publish late private writes or clear a new busy state", async () => {
+    const f = await decorPrivateFixture();
+    const old = f.store.getState().select(syntheticDecoration("old"), f.owner);
+    const obsolete = assert.rejects(old, /account or service changed/);
+    f.account.id = "second";
+    f.storage.value = { [f.key()]: "second-token" };
+    f.store.getState().clear(); await f.auth.getState().init();
+    const owner = f.auth.getState().requireAuthorization();
+    const current = f.store.getState().select(syntheticDecoration("new", "second"), owner);
+    assert.equal(f.requests[0].options.signal?.aborted, true);
+    f.respond(0, "ok"); await obsolete;
+    assert.equal(f.store.getState().busy, true);
+    assert.equal(f.store.getState().selectedDecoration, null);
+    assert.equal(f.publicStore.getState().usersDecorations.has("first"), false);
+    await assert.rejects(f.store.getState().select(syntheticDecoration("wrong"), f.owner), /account or service changed/);
+    assert.equal(f.requests.length, 2);
+    f.respond(1, "ok"); await current;
+    assert.equal(f.publicStore.getState().usersDecorations.get("second").asset, "new");
+    assert.equal(f.store.getState().busy, false);
+});
+
+test("Decor discards cleared private reads and keeps replacement loading and failure state", async () => {
+    const f = await decorPrivateFixture();
+    const old = f.store.getState().fetch(f.owner);
+    f.store.getState().clear();
+    const current = f.store.getState().fetch(f.owner);
+    f.requests[0].reject(new Error("Obsolete read failed"));
+    f.respond(1, syntheticDecoration("old")); await old;
+    assert.equal(f.store.getState().loading, true);
+    assert.equal(f.store.getState().error, null);
+    f.respond(2, [syntheticDecoration("current")]); f.respond(3, syntheticDecoration("current")); await current;
+    assert.equal(f.publicStore.getState().usersDecorations.get("first").asset, "current");
+    const failed = f.store.getState().fetch(f.owner);
+    f.respond(4, { invalid: true }); f.respond(5, null); await failed;
+    assert.match(f.store.getState().error, /Invalid decoration response/);
+    assert.equal(f.store.getState().selectedDecoration.hash, "current");
+    assert.equal(f.store.getState().loading, false);
+});
+
+test("Decor deletion preserves failures and reconciles selected and public state after success", async () => {
+    const f = await decorPrivateFixture();
+    const first = syntheticDecoration("first/hash?value");
+    const second = syntheticDecoration("second");
+    const loaded = f.store.getState().fetch(f.owner);
+    f.respond(0, [first, second]); f.respond(1, first); await loaded;
+    f.publicStore.getState().set("first", first.hash); f.publicStore.getState().set("unrelated", "keep");
+    const rejected = f.store.getState().delete(first.hash, f.owner);
+    const failure = assert.rejects(rejected, /Denied/);
+    assert.ok(f.requests[2].url.endsWith("/decorations/first%2Fhash%3Fvalue"));
+    f.respond(2, "Denied", 403); await failure;
+    assert.equal(f.store.getState().decorations.length, 2);
+    assert.equal(f.publicStore.getState().usersDecorations.get("first").asset, first.hash);
+    const deleted = f.store.getState().delete(first.hash, f.owner);
+    f.respond(3, "ok"); await deleted;
+    assert.deepEqual([...f.store.getState().decorations].map(item => item.hash), ["second"]);
+    assert.equal(f.store.getState().selectedDecoration, null);
+    assert.equal(f.publicStore.getState().usersDecorations.get("first").asset, null);
+    assert.equal(f.publicStore.getState().usersDecorations.get("unrelated").asset, "keep");
+});
+
+test("Decor uploads validate responses and replace an existing hash without duplicating it", async () => {
+    const f = await decorPrivateFixture();
+    const file = new File(["synthetic fixture"], "test.png", { type: "image/png" });
+    const invalid = f.store.getState().create({ file, alt: "name" }, f.owner);
+    const failure = assert.rejects(invalid, /Invalid decoration response/);
+    f.respond(0, { hash: "incomplete" }); await failure;
+    assert.equal(f.store.getState().decorations.length, 0);
+    const decoration = syntheticDecoration("created");
+    const created = f.store.getState().create({ file, alt: "name" }, f.owner);
+    f.respond(1, decoration); await created;
+    const repeated = f.store.getState().create({ file, alt: "updated" }, f.owner);
+    f.respond(2, { ...decoration, alt: "updated" }); await repeated;
+    assert.equal(f.store.getState().decorations.length, 1);
+    assert.equal(f.store.getState().decorations[0].alt, "updated");
+    assert.equal(f.store.getState().selectedDecoration, null);
+    assert.equal(f.publicStore.getState().usersDecorations.size, 0, "a pending upload is not a selected decoration");
+});
+
+test("Decor private lists reject malformed fields and duplicate decoration identities", async () => {
+    const f = await decorPrivateFixture();
+    const decoration = syntheticDecoration("a");
+    const invalid = [null, {}, [{ ...decoration, animated: "yes" }], [{ ...decoration, reviewed: "pending" }], [decoration, decoration]];
+    for (const body of invalid) {
+        const index = f.requests.length;
+        const result = f.api.getUserDecorations(f.owner);
+        const failure = assert.rejects(result, /Invalid.*decoration response/);
+        f.respond(index, body); await failure;
+    }
+    const index = f.requests.length;
+    const selected = f.api.getUserDecoration(f.owner);
+    f.respond(index, null); assert.equal(await selected, null);
+});
+
+test("Decor preset requests forward cancellation and validate HTTP, nested records and unique IDs", async () => {
+    const f = await decorPrivateFixture();
+    const preset = { id: "preset", name: "Preset", description: null, decorations: [syntheticDecoration("a")], authorIds: ["first"] };
+    const controller = new AbortController();
+    const valid = f.api.getPresets(controller.signal);
+    assert.equal(f.requests[0].options.signal, controller.signal);
+    assert.equal(f.requests[0].options.headers, undefined);
+    f.respond(0, [preset]); assert.deepEqual(structuredClone(await valid), [preset]);
+    for (const body of [null, {}, [{ ...preset, authorIds: [123] }], [{ ...preset, decorations: [null] }], [preset, preset]]) {
+        const index = f.requests.length;
+        const result = f.api.getPresets();
+        const failure = assert.rejects(result, /Invalid/);
+        f.respond(index, body); await failure;
+    }
+    const index = f.requests.length;
+    const result = f.api.getPresets();
+    const failure = assert.rejects(result, /Could not load decoration presets/);
+    f.respond(index, [preset], 500); await failure;
 });
 
 function loadFolders() {
