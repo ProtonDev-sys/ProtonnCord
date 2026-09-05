@@ -6,40 +6,30 @@
 
 import "./settings.css";
 
-import { DataStore } from "@api/index";
 import { Divider } from "@components/Divider";
 import { Heading } from "@components/Heading";
 import { resolveError } from "@components/settings/tabs/plugins/components/Common";
 import { classNameFactory } from "@utils/css";
 import { useAwaiter } from "@utils/react";
 import { ActivityType } from "@vencord/discord-types/enums";
-import { Button, Select, showToast, Text, TextInput, Toasts, useState } from "@webpack/common";
+import { Button, Select, showToast, Text, TextInput, Toasts, useEffect, useRef, useState } from "@webpack/common";
 
 import { RpcConfig, settings, TimestampMode } from ".";
+import { applyRpcConfig, deletePreset, loadPresets, RPC_CONFIG_KEYS, RpcNumberKey, RpcStringKey, savePreset } from "./presets";
 
 const cl = classNameFactory("vc-customRPC-settings-");
-const PRESETS_KEY = "CustomRPC_presets";
 
-type SettingsKey = keyof typeof settings.store;
-
-interface RpcPreset {
-    name: string;
-    config: RpcConfig;
-}
-
-interface TextOption<T> {
-    settingsKey: SettingsKey;
+type TextOption = {
     label: string;
     disabled?: boolean;
-    transform?: (value: string) => T;
-    isValid?: (value: T) => true | string;
-}
+    isValid?: (value: string) => true | string;
+} & ({ settingsKey: RpcStringKey; numeric?: false; } | { settingsKey: RpcNumberKey; numeric: true; });
 
-interface SelectOption<T> {
-    settingsKey: SettingsKey;
+interface SelectOption<K extends "type" | "timestampMode"> {
+    settingsKey: K;
     label: string;
     disabled?: boolean;
-    options: { label: string; value: T; default?: boolean; }[];
+    options: { label: string; value: NonNullable<RpcConfig[K]>; default?: boolean; }[];
 }
 
 const makeValidator = (maxLength: number, isRequired = false) => (value: string) => {
@@ -65,16 +55,6 @@ function isStreamLinkValid(value: string) {
     return true;
 }
 
-function parseNumber(value: string) {
-    return value ? parseInt(value, 10) : 0;
-}
-
-function isNumberValid(value: number) {
-    if (isNaN(value)) return "Must be a number.";
-    if (value < 0) return "Must be a positive number.";
-    return true;
-}
-
 function isUrlValid(value: string) {
     if (value && !/^https?:\/\/.+/.test(value)) return "Must be a valid URL.";
     return true;
@@ -87,7 +67,7 @@ function isImageKeyValid(value: string) {
     return true;
 }
 
-function PairSetting<T>(props: { data: [TextOption<T>, TextOption<T>]; }) {
+function PairSetting(props: { data: [TextOption, TextOption]; }) {
     const [left, right] = props.data;
 
     return (
@@ -98,25 +78,34 @@ function PairSetting<T>(props: { data: [TextOption<T>, TextOption<T>]; }) {
     );
 }
 
-function SingleSetting<T>({ settingsKey, label, disabled, isValid, transform }: TextOption<T>) {
-    const [state, setState] = useState(settings.store[settingsKey] ?? "");
+function SingleSetting({ settingsKey, label, disabled, isValid, numeric }: TextOption) {
+    const value = settings.store[settingsKey];
+    const [state, setState] = useState(String(value ?? ""));
     const [error, setError] = useState<string | null>(null);
 
-    function handleChange(newValue: any) {
-        if (transform) newValue = transform(newValue);
+    useEffect(() => {
+        setState(String(value ?? ""));
+        setError(null);
+    }, [value]);
 
-        const valid = isValid?.(newValue) ?? true;
-
+    function handleChange(newValue: string) {
         setState(newValue);
+        const number = Number(newValue);
+        const valid = numeric && newValue !== "" && (!/^\d+$/.test(newValue) || !Number.isSafeInteger(number)
+            || ((settingsKey === "startTime" || settingsKey === "endTime") && number > 8.64e15))
+            ? "Must be a nonnegative whole number within the supported range."
+            : isValid?.(newValue) ?? true;
         setError(resolveError(valid));
 
-        if (valid === true) settings.store[settingsKey] = newValue;
+        if (valid === true) Object.assign(settings.store, { [settingsKey]: numeric ? (newValue === "" ? undefined : number) : newValue });
     }
 
     return (
         <div className={cl("single", { disabled })}>
             <Heading tag="h5">{label}</Heading>
             <TextInput
+                aria-label={label}
+                aria-invalid={!!error}
                 type="text"
                 placeholder={"Enter a value"}
                 value={state}
@@ -128,7 +117,8 @@ function SingleSetting<T>({ settingsKey, label, disabled, isValid, transform }: 
     );
 }
 
-function SelectSetting<T>({ settingsKey, label, options, disabled }: SelectOption<T>) {
+function SelectSetting<K extends "type" | "timestampMode">({ settingsKey, label, options, disabled }: SelectOption<K>) {
+    const value = settings.store[settingsKey] ?? options.find(option => option.default)?.value;
     return (
         <div className={cl("single", { disabled })}>
             <Heading tag="h5">{label}</Heading>
@@ -137,8 +127,8 @@ function SelectSetting<T>({ settingsKey, label, options, disabled }: SelectOptio
                 options={options}
                 maxVisibleItems={5}
                 closeOnSelect={true}
-                select={v => settings.store[settingsKey] = v}
-                isSelected={v => v === settings.store[settingsKey]}
+                select={v => Object.assign(settings.store, { [settingsKey]: v })}
+                isSelected={v => v === value}
                 serialize={v => String(v)}
                 isDisabled={disabled}
             />
@@ -146,50 +136,41 @@ function SelectSetting<T>({ settingsKey, label, options, disabled }: SelectOptio
     );
 }
 
-function getCurrentConfig(): RpcConfig {
-    const { config, ...rpcConfig } = settings.store;
-    return rpcConfig;
-}
-
 function PresetSettings({ onLoad }: { onLoad(): void; }) {
-    const [storedPresets] = useAwaiter(async () => await DataStore.get<RpcPreset[]>(PRESETS_KEY) ?? [], { fallbackValue: [] });
-    const [changedPresets, setChangedPresets] = useState<RpcPreset[] | null>(null);
+    const [revision, setRevision] = useState(0);
+    const [presets, loadError, pending] = useAwaiter(loadPresets, { fallbackValue: [], deps: [revision] });
+    const [error, setError] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
+    const saving = useRef(false);
     const [presetName, setPresetName] = useState("");
     const [selectedPreset, setSelectedPreset] = useState("");
-    const presets = changedPresets ?? storedPresets;
+    const unavailable = pending || busy || !!loadError;
 
-    async function savePreset() {
-        const name = presetName.trim();
+    async function act(action: "save" | "load" | "delete") {
+        if (unavailable || saving.current) return;
+        const name = action === "save" ? presetName.trim() : selectedPreset;
         if (!name) return;
-
-        const nextPresets = [
-            ...presets.filter(preset => preset.name !== name),
-            { name, config: getCurrentConfig() }
-        ].sort((a, b) => a.name.localeCompare(b.name));
-
-        await DataStore.set(PRESETS_KEY, nextPresets);
-        setChangedPresets(nextPresets);
-        setSelectedPreset(name);
-        showToast(`Saved preset ${name}.`, Toasts.Type.SUCCESS);
-    }
-
-    function loadPreset() {
-        const preset = presets.find(preset => preset.name === selectedPreset);
-        if (!preset) return;
-
-        Object.assign(settings.store, preset.config);
-        onLoad();
-        showToast(`Loaded preset ${preset.name}.`, Toasts.Type.SUCCESS);
-    }
-
-    async function deletePreset() {
-        const nextPresets = presets.filter(preset => preset.name !== selectedPreset);
-        if (nextPresets.length === presets.length) return;
-
-        await DataStore.set(PRESETS_KEY, nextPresets);
-        setChangedPresets(nextPresets);
-        setSelectedPreset("");
-        showToast(`Deleted preset ${selectedPreset}.`, Toasts.Type.SUCCESS);
+        saving.current = true;
+        setBusy(true);
+        setError(null);
+        try {
+            if (action === "save") await savePreset(name, settings.store);
+            else if (action === "delete") await deletePreset(name);
+            else {
+                const preset = presets.find(preset => preset.name === name);
+                if (!preset) return;
+                applyRpcConfig(settings.store, preset.config);
+                onLoad();
+            }
+            setSelectedPreset(action === "delete" ? "" : name);
+            if (action !== "load") setRevision(value => value + 1);
+            showToast(`${action === "save" ? "Saved" : action === "delete" ? "Deleted" : "Loaded"} preset ${name}.`, Toasts.Type.SUCCESS);
+        } catch (error) {
+            setError(error instanceof Error ? error.message : "Could not update presets. Please try again.");
+        } finally {
+            saving.current = false;
+            setBusy(false);
+        }
     }
 
     return (
@@ -197,16 +178,18 @@ function PresetSettings({ onLoad }: { onLoad(): void; }) {
             <Heading tag="h5">Presets</Heading>
             <div className={cl("preset-create")}>
                 <TextInput
+                    aria-label="Preset name"
                     type="text"
                     placeholder="Preset name"
                     value={presetName}
                     onChange={setPresetName}
                 />
-                <Button disabled={!presetName.trim()} onClick={savePreset}>Save</Button>
+                <Button disabled={unavailable || !presetName.trim()} onClick={() => act("save")}>Save</Button>
             </div>
             {presets.length ? (
                 <div className={cl("preset-actions")}>
                     <Select
+                        isDisabled={unavailable}
                         placeholder="Select a preset"
                         options={presets.map(preset => ({ label: preset.name, value: preset.name }))}
                         closeOnSelect={true}
@@ -214,18 +197,20 @@ function PresetSettings({ onLoad }: { onLoad(): void; }) {
                         isSelected={value => value === selectedPreset}
                         serialize={String}
                     />
-                    <Button disabled={!selectedPreset} onClick={loadPreset}>Load</Button>
-                    <Button color={Button.Colors.RED} disabled={!selectedPreset} onClick={deletePreset}>Delete</Button>
+                    <Button disabled={unavailable || !selectedPreset} onClick={() => act("load")}>Load</Button>
+                    <Button color={Button.Colors.RED} disabled={unavailable || !selectedPreset} onClick={() => act("delete")}>Delete</Button>
                 </div>
             ) : (
-                <Text variant="text-sm/normal">No saved presets yet.</Text>
+                <Text variant="text-sm/normal">{pending ? "Loading presets…" : loadError ? "Could not load saved presets." : "No saved presets yet."}</Text>
             )}
+            {(error || loadError) && <Text role="alert" className={cl("error")} variant="text-sm/normal">{error || "Could not read saved presets. Your saved data has been kept."}</Text>}
+            {loadError && <Button disabled={busy || pending} onClick={() => setRevision(value => value + 1)}>Retry</Button>}
         </div>
     );
 }
 
 function RPCFields() {
-    const { type, timestampMode } = settings.use(["type", "timestampMode"]);
+    const { type = ActivityType.PLAYING, timestampMode = TimestampMode.NONE } = settings.use(RPC_CONFIG_KEYS);
 
     return (
         <>
@@ -283,15 +268,13 @@ function RPCFields() {
                 {
                     settingsKey: "partySize",
                     label: "Party Size",
-                    transform: parseNumber,
-                    isValid: isNumberValid,
+                    numeric: true,
                     disabled: type !== ActivityType.PLAYING,
                 },
                 {
                     settingsKey: "partyMaxSize",
                     label: "Maximum Party Size",
-                    transform: parseNumber,
-                    isValid: isNumberValid,
+                    numeric: true,
                     disabled: type !== ActivityType.PLAYING,
                 },
             ]} />
@@ -351,15 +334,13 @@ function RPCFields() {
                 {
                     settingsKey: "startTime",
                     label: "Start Timestamp (in milliseconds)",
-                    transform: parseNumber,
-                    isValid: isNumberValid,
+                    numeric: true,
                     disabled: timestampMode !== TimestampMode.CUSTOM,
                 },
                 {
                     settingsKey: "endTime",
                     label: "End Timestamp (in milliseconds)",
-                    transform: parseNumber,
-                    isValid: isNumberValid,
+                    numeric: true,
                     disabled: timestampMode !== TimestampMode.CUSTOM,
                 },
             ]} />

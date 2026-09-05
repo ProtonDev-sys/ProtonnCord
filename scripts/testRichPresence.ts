@@ -13,6 +13,94 @@ import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { SettingsStore } from "../src/shared/SettingsStore";
 
+function presetFixture(initial: unknown = undefined) {
+    const state = { value: initial, fail: false, writes: 0 };
+    let queue = Promise.resolve();
+    const mocks: Record<string, object> = {
+        "@api/DataStore": {
+            get: async () => structuredClone(state.value),
+            update(_key: string, updater: (old: unknown) => unknown) {
+                const transaction = queue.then(() => {
+                    if (state.fail) throw new Error("Storage unavailable");
+                    const value = updater(structuredClone(state.value));
+                    state.value = structuredClone(value);
+                    state.writes++;
+                });
+                queue = transaction.then(() => undefined, () => undefined);
+                return transaction;
+            }
+        },
+        "@utils/misc": { isObject: (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) }
+    };
+    const code = transpileModule(readFileSync("src/plugins/customRPC/presets.ts", "utf8"), {
+        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
+    }).outputText;
+    const presets: typeof import("../src/plugins/customRPC/presets") = runInNewContext(code + "\nexports;", {
+        exports: {}, require(name: string) { assert.ok(name in mocks, name); return mocks[name]; }
+    });
+    return { presets, state };
+}
+
+test("RPC presets contain only activity fields and replace omitted fields without changing enablement", async () => {
+    const { presets, state } = presetFixture();
+    const config = { enabled: true, config: "component", appName: "Fixture", imageBig: "old", unrelated: "keep" };
+    await presets.savePreset(" first ", config);
+    assert.deepEqual(state.value, [{ name: "first", config: { appName: "Fixture", imageBig: "old" } }]);
+    presets.applyRpcConfig(config, { enabled: false, appName: "Second", unrelated: "replace" });
+    assert.equal(config.enabled, true);
+    assert.equal(config.unrelated, "keep");
+    assert.equal(config.config, "component");
+    assert.equal(config.imageBig, undefined);
+    assert.equal(config.appName, "Second");
+    const snapshot = structuredClone(config);
+    assert.throws(() => presets.applyRpcConfig(config, { appName: "Partial", startTime: Infinity }), /Invalid preset field/);
+    assert.deepEqual(config, snapshot, "validate before changing any setting");
+});
+
+test("RPC preset writes use the latest stored list and capture settings before awaiting storage", async () => {
+    const { presets, state } = presetFixture();
+    const config = { appName: "Captured" };
+    const first = presets.savePreset("first", config);
+    config.appName = "Later";
+    await Promise.all([first, presets.savePreset("second", config)]);
+    assert.deepEqual(state.value, [
+        { name: "first", config: { appName: "Captured" } }, { name: "second", config: { appName: "Later" } }
+    ]);
+    await Promise.all([presets.deletePreset("first"), presets.savePreset("third", {})]);
+    assert.deepEqual(state.value, [{ name: "second", config: { appName: "Later" } }, { name: "third", config: {} }]);
+});
+
+test("RPC presets preserve malformed storage and reject invalid fields without committing", async () => {
+    for (const stored of [null, {}, [null], [{ name: " ", config: {} }], [{ name: "bad", config: { appName: 1 } }],
+        [{ name: "same", config: {} }, { name: "same", config: {} }]]) {
+        const { presets, state } = presetFixture(stored);
+        await assert.rejects(presets.loadPresets());
+        await assert.rejects(presets.savePreset("new", {}));
+        await assert.rejects(presets.deletePreset("bad"));
+        assert.deepEqual(state.value, stored);
+        assert.equal(state.writes, 0);
+    }
+    const { presets, state } = presetFixture();
+    for (const config of [{ partySize: -1 }, { partySize: 1.5 }, { endTime: 8.64e15 + 1 }, { type: 4 }, { timestampMode: 10 }, { details: null }])
+        await assert.rejects(presets.savePreset("invalid", config));
+    assert.equal(state.writes, 0);
+    await presets.savePreset("zero", { startTime: 0, partySize: 0, type: 0, timestampMode: 0 });
+    assert.equal((await presets.loadPresets())[0].config.startTime, 0);
+});
+
+test("RPC presets retain legacy activity values and propagate storage failures for retry", async () => {
+    const { presets, state } = presetFixture([{ name: "old", config: { enabled: false, appName: "Legacy" } }]);
+    assert.deepEqual(structuredClone(await presets.loadPresets()), [{ name: "old", config: { appName: "Legacy" } }]);
+    state.fail = true;
+    await assert.rejects(presets.savePreset("new", {}), /Storage unavailable/);
+    await assert.rejects(presets.deletePreset("old"), /Storage unavailable/);
+    assert.equal(state.writes, 0);
+    state.fail = false;
+    await presets.savePreset("new", {});
+    assert.equal(state.writes, 1);
+    assert.deepEqual(state.value, [{ name: "new", config: {} }, { name: "old", config: { appName: "Legacy" } }]);
+});
+
 function deferred<T>() {
     let resolve: ((value: T) => void) | undefined;
     let reject: ((reason: Error) => void) | undefined;
