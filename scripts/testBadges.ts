@@ -196,7 +196,7 @@ test("global badge display settings use existing data and unknown service names 
     store.showAero = false;
     store.showModStyle = "prefix";
     assert.equal(plugin.getGlobalBadges("fixture")[0].description, "newmod - Developer");
-    assert.equal(plugin.GlobalBadges.fixture.length, 1);
+    assert.equal(plugin.getGlobalBadges("fixture").length, 1);
     store.showAero = true;
     store.showModStyle = "suffix";
     assert.equal(plugin.getGlobalBadges("fixture")[0].description, "Contributor - Aero");
@@ -213,15 +213,15 @@ test("global badge loads discard stale responses and stop invalidates pending da
     await second;
     requests[0].resolve(response({ users: { stale: [] } }));
     await first;
-    assert.equal("current" in plugin.GlobalBadges, true);
-    assert.equal("stale" in plugin.GlobalBadges, false);
+    assert.equal(plugin.getGlobalBadges("current")?.length, 0);
+    assert.equal(plugin.getGlobalBadges("stale"), undefined);
     plugin.start();
     assert.equal(intervals.size, 1);
     plugin.stop();
     requests[2].resolve(response({ users: { stopped: [] } }));
     await setImmediate();
     assert.equal(intervals.size, 0);
-    assert.equal("stopped" in plugin.GlobalBadges, false);
+    assert.equal(plugin.getGlobalBadges("stopped"), undefined);
 });
 
 test("global badge refresh retries failures, rejects malformed data and reports manual errors", async () => {
@@ -239,7 +239,7 @@ test("global badge refresh retries failures, rejects malformed data and reports 
         const pending = utils.refreshBadges();
         requests[offset].resolve(response(invalid));
         await pending;
-        assert.equal("good" in plugin.GlobalBadges, true);
+        assert.equal(plugin.getGlobalBadges("good")?.length, 0);
     }
     const offset = requests.length;
     const manual = plugin.toolboxActions["Refetch Global Badges"]();
