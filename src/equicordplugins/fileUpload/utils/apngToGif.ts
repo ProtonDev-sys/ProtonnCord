@@ -8,27 +8,25 @@ import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { loadFFmpeg } from "@utils/ffmpeg";
 
 let ffmpeg: FFmpeg | null = null;
-let ffmpegLoaded = false;
 let ffmpegLoading: Promise<FFmpeg> | null = null;
 let conversionCounter = 0;
 
 async function getFFmpeg(): Promise<FFmpeg> {
-    if (ffmpegLoaded && ffmpeg) {
-        return ffmpeg;
-    }
-
-    if (ffmpegLoading) {
-        return ffmpegLoading;
-    }
+    if (ffmpeg?.loaded) return ffmpeg;
+    if (ffmpegLoading) return ffmpegLoading;
 
     ffmpegLoading = (async () => {
-        ffmpeg = new FFmpeg();
-
-        await loadFFmpeg(ffmpeg);
-
-        ffmpegLoaded = true;
-
-        return ffmpeg;
+        const instance = new FFmpeg();
+        try {
+            await loadFFmpeg(instance);
+            ffmpeg = instance;
+            return instance;
+        } catch (error) {
+            instance.terminate();
+            throw error;
+        } finally {
+            ffmpegLoading = null;
+        }
     })();
 
     return ffmpegLoading;
