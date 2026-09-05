@@ -9,7 +9,7 @@ import { Flex } from "@components/Flex";
 import { Paragraph } from "@components/Paragraph";
 import { useAuthorizationStore } from "@plugins/decor/lib/stores/AuthorizationStore";
 import { useCurrentUserDecorationsStore } from "@plugins/decor/lib/stores/CurrentUserDecorationsStore";
-import { cl } from "@plugins/decor/ui";
+import { cl, useDialogActions } from "@plugins/decor/ui";
 import { openChangeDecorationModal } from "@plugins/decor/ui/modals/ChangeDecorationModal";
 import { findComponentByCodeLazy } from "@webpack";
 import { NewCustomizationSection, useEffect, useState } from "@webpack/common";
@@ -27,6 +27,7 @@ export default function DecorSection({ hideTitle = false, hideDivider = false, n
     const authorization = useAuthorizationStore();
     const { selectedDecoration, select: selectDecoration, fetch: fetchDecorations, loading, busy, error: decorationError } = useCurrentUserDecorationsStore();
     const [error, setError] = useState<string | null>(null);
+    const actions = useDialogActions();
     const owner = authorization.authorization;
     const notice = error ?? authorization.error ?? decorationError;
     const showError = (error: unknown, expected = owner) => {
@@ -40,12 +41,13 @@ export default function DecorSection({ hideTitle = false, hideDivider = false, n
     }, [owner]);
 
     const open = async () => {
+        const signal = actions.begin();
         let expected = useAuthorizationStore.getState().authorization;
         try {
             expected = useAuthorizationStore.getState().requireAuthorization();
-            await openChangeDecorationModal(expected);
+            await openChangeDecorationModal(expected, signal);
         } catch (error) {
-            showError(error, expected);
+            if (!signal.aborted) showError(error, expected);
         }
     };
 

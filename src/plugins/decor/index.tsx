@@ -8,6 +8,7 @@ import "./ui/styles.css";
 
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Devs } from "@utils/constants";
+import { parseUrl } from "@utils/misc";
 import definePlugin from "@utils/types";
 import { UserStore } from "@webpack/common";
 
@@ -214,12 +215,16 @@ export default definePlugin({
     getDecorAvatarDecorationURL({ avatarDecoration, canAnimate }: { avatarDecoration: AvatarDecoration | null; canAnimate?: boolean; }) {
         // Only Decor avatar decorations have this SKU ID
         if (avatarDecoration?.skuId === SKU_ID) {
-            const parts = avatarDecoration.asset.split("_");
             // Remove a_ prefix if it's animated and animation is disabled
-            if (avatarDecoration.asset.startsWith("a_") && !canAnimate) parts.shift();
-            return `${CDN_URL}/${parts.join("_")}.png`;
+            const asset = avatarDecoration.asset.startsWith("a_") && !canAnimate ? avatarDecoration.asset.slice(2) : avatarDecoration.asset;
+            try {
+                return `${CDN_URL}/${encodeURIComponent(asset)}.png`;
+            } catch {
+                return undefined;
+            }
         } else if (avatarDecoration?.skuId === RAW_SKU_ID) {
-            return avatarDecoration.asset;
+            const url = parseUrl(avatarDecoration.asset);
+            if (url?.protocol === "blob:" && url.origin === location.origin) return url.href;
         }
     },
 

@@ -32,7 +32,7 @@ function DeleteDecorationModal({ decoration, owner, ...props }: DecorationAction
         subtitle={`Are you sure you want to delete ${decoration.alt ?? "this decoration"}?`}
         notice={error ? { type: "critical", message: error } : undefined}
         actions={[
-            { text: "Cancel", variant: "secondary", onClick: props.onClose },
+            { text: busy ? "Close" : "Cancel", variant: "secondary", onClick: props.onClose },
             {
                 text: "Delete",
                 variant: "critical-primary",

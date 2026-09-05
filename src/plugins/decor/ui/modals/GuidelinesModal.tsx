@@ -8,43 +8,46 @@ import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
 import { Authorization, useAuthorizationStore } from "@plugins/decor/lib/stores/AuthorizationStore";
 import { settings } from "@plugins/decor/settings";
-import { DecorationModalClasses, requireAvatarDecorationModal } from "@plugins/decor/ui";
+import { DecorationModalClasses, requireAvatarDecorationModal, requireDialogOwner, useDialogActions } from "@plugins/decor/ui";
 import { RenderModalProps } from "@vencord/discord-types";
 import { Modal, openModal, useEffect, useState } from "@webpack/common";
 
 import { openCreateDecorationModal } from "./CreateDecorationModal";
 
 function GuidelinesModal({ owner, ...props }: RenderModalProps & { owner: Authorization; }) {
+    const actions = useDialogActions(props.onClose);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const authorization = useAuthorizationStore();
     const isCurrent = authorization.authorization === owner && authorization.isAuthorized();
     useEffect(() => {
-        if (!isCurrent) props.onClose();
+        if (!isCurrent) actions.close();
     }, [isCurrent]);
     return (
         <Modal
             {...props}
+            onClose={actions.close}
             title="Hold on"
             notice={error ? { type: "critical", message: error } : undefined}
             actions={[
-                { text: "Cancel", variant: "secondary", onClick: props.onClose, disabled: busy },
+                { text: "Cancel", variant: "secondary", onClick: actions.close },
                 {
                     text: "Continue",
                     variant: "primary",
                     disabled: busy || !isCurrent,
                     onClick: async () => {
                         if (busy || !isCurrent) return;
+                        const signal = actions.begin();
                         setBusy(true);
                         setError(null);
                         try {
-                            await openCreateDecorationModal(owner);
+                            await openCreateDecorationModal(owner, signal);
                             settings.store.agreedToGuidelines = true;
-                            props.onClose();
+                            actions.close();
                         } catch (error) {
-                            setError(error instanceof Error ? error.message : "Could not open the decoration editor.");
+                            if (!signal.aborted) setError(error instanceof Error ? error.message : "Could not open the decoration editor.");
                         } finally {
-                            setBusy(false);
+                            if (!signal.aborted) setBusy(false);
                         }
                     }
                 }
@@ -63,9 +66,9 @@ function GuidelinesModal({ owner, ...props }: RenderModalProps & { owner: Author
     );
 }
 
-export const openGuidelinesModal = async (owner: Authorization) => {
-    useAuthorizationStore.getState().requireAuthorization(owner);
+export const openGuidelinesModal = async (owner: Authorization, signal: AbortSignal) => {
+    requireDialogOwner(owner, signal);
     await requireAvatarDecorationModal();
-    useAuthorizationStore.getState().requireAuthorization(owner);
+    requireDialogOwner(owner, signal);
     return openModal(props => <GuidelinesModal {...props} owner={owner} />);
 };

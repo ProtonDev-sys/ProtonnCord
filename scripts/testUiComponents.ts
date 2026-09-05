@@ -145,6 +145,7 @@ test("Decor public lookups check HTTP and response shapes and never request the 
     const api = loadComponent("src/plugins/decor/lib/api.ts", {}, {
         "./constants": { API_URL: "https://decor.invalid/api" },
         "./stores/AuthorizationStore": {},
+        "./utils/decoration": {},
         "@utils/misc": { isObject: (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) }
     }, { URL, fetch: async (url: URL, options: { signal?: AbortSignal; }) => {
         requests.push({ url: String(url), signal: options.signal });
@@ -393,6 +394,7 @@ test("Decor private requests reject stale credentials before sending and disable
     const api = loadComponent("src/plugins/decor/lib/api.ts", {}, {
         "./constants": f.service,
         "./stores/AuthorizationStore": { useAuthorizationStore: f.store },
+        "./utils/decoration": {},
         "@utils/misc": {}
     }, { Headers, fetch: async (url: string, options: RequestInit) => {
         requests.push({ url, options });
@@ -483,20 +485,26 @@ test("Decor configuration applies validated responses atomically and ignores can
 });
 
 const syntheticDecoration = (hash: string, authorId = "first") => ({ hash, animated: false, alt: hash, authorId, reviewed: true, presetId: null });
+const syntheticPng = () => Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a41sAAAAASUVORK5CYII=", "base64");
 
 async function decorPrivateFixture() {
     const f = decorAuthorizationFixture();
     f.storage.value = { [f.key()]: "synthetic-token" };
     await f.store.getState().init();
     const requests: { url: string; options: RequestInit; resolve(response: Response): void; reject(error: Error): void; }[] = [];
+    const waiters = new Set<() => void>();
+    const utils = loadComponent("src/plugins/decor/lib/utils/decoration.ts", {}, { "@plugins/decor/lib/constants": { SKU_ID: "decor" } }, { Error });
     const api = loadComponent("src/plugins/decor/lib/api.ts", {}, {
         "./constants": f.service,
         "./stores/AuthorizationStore": { useAuthorizationStore: f.store },
+        "./utils/decoration": utils,
         "@utils/misc": { isObject: (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) }
-    }, { Headers, FormData, URL, Error, fetch: (url: string, options: RequestInit) => new Promise<Response>((resolve, reject) => requests.push({ url, options, resolve, reject })) });
+    }, { Headers, FormData, URL, Error, fetch: (url: string, options: RequestInit) => new Promise<Response>((resolve, reject) => {
+        requests.push({ url, options, resolve, reject });
+        for (const waiter of waiters) waiter();
+    }) });
     const publicStore = decorFixture().store;
     publicStore.getState().start();
-    const utils = loadComponent("src/plugins/decor/lib/utils/decoration.ts", {}, { "@plugins/decor/lib/constants": { SKU_ID: "decor" } });
     const store = loadComponent("src/plugins/decor/lib/stores/CurrentUserDecorationsStore.ts", {
         zustandCreate<T>(initializer: (set: (next: Partial<T>) => void, get: () => T) => T) {
             let state: T;
@@ -511,7 +519,11 @@ async function decorPrivateFixture() {
         "./UsersDecorationsStore": { useUsersDecorationsStore: publicStore }
     }, { AbortController, Error }).useCurrentUserDecorationsStore;
     const respond = (index: number, body: unknown, status = 200) => requests[index].resolve(new Response(JSON.stringify(body), { status }));
-    return { ...f, auth: f.store, store, api, requests, publicStore, respond, owner: f.store.getState().requireAuthorization() };
+    const waitForRequests = (count: number) => new Promise<void>(resolve => {
+        const check = () => { if (requests.length >= count) { waiters.delete(check); resolve(); } };
+        waiters.add(check); check();
+    });
+    return { ...f, auth: f.store, store, api, requests, publicStore, respond, waitForRequests, owner: f.store.getState().requireAuthorization() };
 }
 
 test("Decor selection commits only after success and preserves failed edits", async () => {
@@ -623,17 +635,20 @@ test("Decor deletion preserves failures and reconciles selected and public state
     assert.equal(f.publicStore.getState().usersDecorations.get("unrelated").asset, "keep");
 });
 
-test("Decor uploads validate responses and replace an existing hash without duplicating it", async () => {
+test("Decor uploads validate responses and replace an existing hash without duplicating it", { timeout: 5000 }, async () => {
     const f = await decorPrivateFixture();
-    const file = new File(["synthetic fixture"], "test.png", { type: "image/png" });
+    const file = new File([syntheticPng()], "test.png", { type: "image/png" });
     const invalid = f.store.getState().create({ file, alt: "name" }, f.owner);
     const failure = assert.rejects(invalid, /Invalid decoration response/);
+    await f.waitForRequests(1);
     f.respond(0, { hash: "incomplete" }); await failure;
     assert.equal(f.store.getState().decorations.length, 0);
     const decoration = syntheticDecoration("created");
     const created = f.store.getState().create({ file, alt: "name" }, f.owner);
+    await f.waitForRequests(2);
     f.respond(1, decoration); await created;
     const repeated = f.store.getState().create({ file, alt: "updated" }, f.owner);
+    await f.waitForRequests(3);
     f.respond(2, { ...decoration, alt: "updated" }); await repeated;
     assert.equal(f.store.getState().decorations.length, 1);
     assert.equal(f.store.getState().decorations[0].alt, "updated");
@@ -674,6 +689,88 @@ test("Decor preset requests forward cancellation and validate HTTP, nested recor
     const result = f.api.getPresets();
     const failure = assert.rejects(result, /Could not load decoration presets/);
     f.respond(index, [preset], 500); await failure;
+});
+
+test("Decor dialog actions cancel replacement, close and unmount work and survive effect replay", () => {
+    let setup: () => () => void = () => () => undefined;
+    const owner = {};
+    let closes = 0;
+    const ui = loadComponent("src/plugins/decor/ui/index.ts", {
+        useEffect: (effect: () => () => void) => { setup = effect; },
+        useRef: <T>(value: T) => ({ current: value })
+    }, {
+        "@webpack": { findCssClassesLazy: () => ({}), extractAndLoadChunksLazy: () => async () => undefined },
+        "../lib/stores/AuthorizationStore": { useAuthorizationStore: { getState: () => ({ requireAuthorization: (expected: object) => { assert.equal(expected, owner); } }) } }
+    }, { AbortController });
+    const actions = ui.useDialogActions(() => closes++);
+    assert.equal(actions.begin().aborted, true);
+    let cleanup = setup();
+    const first = actions.begin(); ui.requireDialogOwner(owner, first);
+    const second = actions.begin(); assert.equal(first.aborted, true);
+    assert.throws(() => ui.requireDialogOwner(owner, first), /closed/);
+    actions.close(); assert.equal(second.aborted, true); assert.equal(closes, 1);
+    assert.equal(actions.begin().aborted, true);
+    cleanup(); cleanup = setup();
+    const replay = actions.begin(); assert.equal(replay.aborted, false);
+    cleanup(); assert.equal(replay.aborted, true);
+});
+
+test("Decor checks a bounded PNG header and rejects non-square or invalid files", async () => {
+    const utils = loadComponent("src/plugins/decor/lib/utils/decoration.ts", {}, { "@plugins/decor/lib/constants": {} });
+    const valid = syntheticPng();
+    await utils.validateDecorationFile(new File([valid], "image.bin", { type: "" }));
+    for (const offset of [0, 8, 12, 16, 20]) {
+        const invalid = Buffer.from(valid);
+        invalid.writeUInt32BE(offset === 16 || offset === 20 ? 2 : 0, offset);
+        await assert.rejects(utils.validateDecorationFile(new File([invalid], "image.png")), /Choose/);
+    }
+    await assert.rejects(utils.validateDecorationFile(new File([valid.subarray(0, 24)], "short.png")), /Choose/);
+    const slices: number[][] = [];
+    await utils.validateDecorationFile({ size: 1_000_000_000, slice(start: number, end: number) {
+        slices.push([start, end]); return new Blob([valid.subarray(start, end)]);
+    } });
+    assert.deepEqual(slices, [[0, 24]], "header validation must not read the whole upload");
+});
+
+test("Decor validates uploads at the request boundary and cancels before a deferred file read can send", async () => {
+    const f = await decorPrivateFixture();
+    await assert.rejects(f.store.getState().create({ file: new File(["text"], "image.png"), alt: "Name" }, f.owner), /Choose a PNG/);
+    const file = new File([syntheticPng()], "image.png");
+    await assert.rejects(f.store.getState().create({ file, alt: "   " }, f.owner), /Enter a decoration name/);
+    assert.equal(f.requests.length, 0);
+    let finish: (buffer: ArrayBuffer) => void = () => undefined;
+    const bytes = new Promise<ArrayBuffer>(resolve => { finish = resolve; });
+    const header = file.slice(0, 24);
+    Object.defineProperty(header, "arrayBuffer", { value: () => bytes });
+    Object.defineProperty(file, "slice", { value: () => header });
+    const pending = f.store.getState().create({ file, alt: "Name" }, f.owner);
+    const failure = assert.rejects(pending, /cancelled/);
+    f.store.getState().clear();
+    finish(await new Blob([syntheticPng().subarray(0, 24)]).arrayBuffer()); await failure;
+    assert.equal(f.requests.length, 0);
+    assert.equal(f.store.getState().decorations.length, 0);
+});
+
+test("Decor avatar URLs preserve animation prefixes, encode one asset segment and only pass local Blob previews", () => {
+    const plugin = loadComponent("src/plugins/decor/index.tsx", {}, {
+        "@components/ErrorBoundary": { __esModule: true, default: { wrap: (component: unknown) => component } },
+        "@utils/constants": { Devs: {} },
+        "@utils/misc": { parseUrl: (value: string) => { try { return new URL(value); } catch { return null; } } },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin },
+        "./lib/constants": { CDN_URL: "https://cdn.invalid", SKU_ID: "decor", RAW_SKU_ID: "raw" },
+        "./lib/stores/AuthorizationStore": {}, "./lib/stores/CurrentUserDecorationsStore": {}, "./lib/stores/UsersDecorationsStore": {},
+        "./settings": { settings: {} }, "./ui/components": {}, "./ui/components/DecorSection": {}
+    }, { location: { origin: "https://discord.invalid" } }).default;
+    const url = (asset: string, canAnimate = false, skuId = "decor") => plugin.getDecorAvatarDecorationURL({ avatarDecoration: Object.freeze({ asset, skuId }), canAnimate });
+    assert.equal(url("a_hash_name"), "https://cdn.invalid/hash_name.png");
+    assert.equal(url("a_hash_name", true), "https://cdn.invalid/a_hash_name.png");
+    assert.equal(url("hash_name", true), "https://cdn.invalid/hash_name.png");
+    assert.equal(url("../image?query#fragment"), "https://cdn.invalid/..%2Fimage%3Fquery%23fragment.png");
+    assert.equal(url("\ud800"), undefined);
+    assert.equal(url("blob:https://discord.invalid/fixture", false, "raw"), "blob:https://discord.invalid/fixture");
+    assert.equal(url("blob:https://other.invalid/fixture", false, "raw"), undefined);
+    assert.equal(url("https://other.invalid/image.png", false, "raw"), undefined);
+    assert.equal(plugin.getDecorAvatarDecorationURL({ avatarDecoration: null }), undefined);
 });
 
 function loadFolders() {
