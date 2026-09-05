@@ -103,6 +103,7 @@ import {
     decryptCachedMessage,
     decryptCacheKey,
     getCachedDecryption,
+    prefetchCachedMessage,
 } from "./decryptCache";
 import {
     clearEncryptedEmbedCache,
@@ -748,13 +749,33 @@ function messageFromDispatch(event: Record<string, any>): Message | undefined {
         : undefined;
 }
 
+function prefetchReceivedEncryptedMessage(dispatched: Message | undefined): void {
+    const localUserId = UserStore.getCurrentUser()?.id;
+    if (!dispatched || !localUserId || localUserId !== secureRuntimeUserId || screenCaptureProtectionStatus !== "ready") return;
+    const channelId = dispatched.channel_id;
+    if (channelId !== SelectedChannelStore.getChannelId() || chatGateReason({ channelId }) !== null) return;
+    const channel = ChannelStore.getChannel(channelId);
+    if (!channel || channel.guild_id) return;
+    const message = MessageStore.getMessage(channelId, dispatched.id);
+    if (!message?.author?.id || message.state === "SENDING" || !isEncryptedMessage(message.content)) return;
+    const generation = secureOperationGeneration;
+    const key = decryptCacheKey(localUserId, message);
+    void prefetchCachedMessage(localUserId, message)?.then(() => {
+        if (secureOperationIsCurrent(generation, localUserId) && screenCaptureProtectionStatus === "ready" &&
+            key === decryptCacheKey(localUserId, message) && chatGateReason({ channelId }) === null)
+            notifySecureMessageGroupingChanged(channelId);
+    });
+}
+
 function handleKeyAnnouncementDispatch(event: Record<string, any>): void {
-    reviewKeyAnnouncementInBackground(messageFromDispatch(event));
+    const message = messageFromDispatch(event);
+    reviewKeyAnnouncementInBackground(message);
+    if (!event.optimistic) prefetchReceivedEncryptedMessage(message);
 }
 
 function handleLoadedKeyAnnouncements(event: Record<string, any>): void {
     if (!Array.isArray(event.messages)) return;
-    for (const message of event.messages) reviewKeyAnnouncementInBackground(message as Message);
+    for (const message of event.messages) handleKeyAnnouncementDispatch({ channelId: event.channelId, message });
 }
 
 function isNativeFailure(result: { status: string; }): result is NativeFailure {

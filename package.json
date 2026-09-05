@@ -76,7 +76,7 @@
         "testSecureMessagingPlaintextRendering": "tsx scripts/testSecureMessagingPlaintextRendering.ts",
         "testSecureMessagingAttachments": "tsx --test scripts/testSecureMessagingAttachmentManifest.ts scripts/testSecureMessagingAttachmentMetadata.ts scripts/testSecureMessagingAttachmentCache.ts scripts/testSecureMessagingAttachmentFallback.ts scripts/testSecureMessagingDownloadControls.ts",
         "testSecureMessagingEmbedUrls": "tsx scripts/testSecureMessagingEmbedUrls.ts",
-        "testSecureMessagingPerformance": "tsx scripts/testSecureMessagingPerformance.ts",
+        "testSecureMessagingPerformance": "tsx scripts/testSecureMessagingPerformance.ts && tsx scripts/testSecureMessagingReceive.ts",
         "testSecureMessagingNative": "tsx scripts/testSecureMessagingNative.ts",
         "testSecureMessagingLive": "tsx scripts/testSecureMessagingLive.ts",
         "createDiscordMcpVideo": "tsx scripts/createDiscordMcpVideo.ts",
