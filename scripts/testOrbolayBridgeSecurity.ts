@@ -29,6 +29,8 @@ const PRIVATE_NOTIFICATION = "ORBolay-private-notification-must-not-leak-before-
 
 interface HarnessRuntime {
     currentUserReads: number;
+    streamerModeReads: number;
+    streamerModeEnabled: boolean;
     dispatches: unknown[];
     settings: {
         port: unknown;
@@ -45,7 +47,7 @@ interface OrbolayPlugin {
     flux: {
         RPC_NOTIFICATION_CREATE(dispatch: unknown): void;
         SPEAKING(dispatch: unknown): void;
-        STREAMER_MODE(dispatch: unknown): void;
+        STREAMER_MODE_UPDATE(dispatch: unknown): void;
         VOICE_STATE_UPDATES(dispatch: unknown): Promise<void>;
     };
     settings: {
@@ -173,7 +175,12 @@ const runtimeStubs: Plugin = {
                 export const GuildMemberStore = {
                     getNick: () => "private nickname"
                 };
-                export const StreamerModeStore = { enabled: true };
+                export const StreamerModeStore = {
+                    get enabled() {
+                        runtime().streamerModeReads++;
+                        return runtime().streamerModeEnabled;
+                    }
+                };
                 export const Toasts = {
                     Type: { FAILURE: 0, MESSAGE: 1, SUCCESS: 2 },
                     genId: () => "toast-id",
@@ -218,7 +225,7 @@ function isOrbolayPlugin(value: unknown): value is OrbolayPlugin {
     return isRecord(flux)
         && typeof flux.RPC_NOTIFICATION_CREATE === "function"
         && typeof flux.SPEAKING === "function"
-        && typeof flux.STREAMER_MODE === "function"
+        && typeof flux.STREAMER_MODE_UPDATE === "function"
         && typeof flux.VOICE_STATE_UPDATES === "function"
         && isRecord(settings)
         && isRecord(settings.def)
@@ -570,6 +577,8 @@ async function testCommandRateLimit(): Promise<void> {
 function resetHarness(sharedSecret: unknown, port: unknown = 6888): HarnessRuntime {
     const runtime: HarnessRuntime = {
         currentUserReads: 0,
+        streamerModeReads: 0,
+        streamerModeEnabled: true,
         dispatches: [],
         settings: { port, sharedSecret },
         toasts: [],
@@ -615,7 +624,7 @@ function emitSensitiveEvents(plugin: OrbolayPlugin): Promise<void> {
         message: { channel_id: CHANNEL_ID, guild_id: GUILD_ID, id: MESSAGE_ID },
         title: "private-title",
     });
-    plugin.flux.STREAMER_MODE({ value: true });
+    plugin.flux.STREAMER_MODE_UPDATE({ key: "enabled", value: true });
     return plugin.flux.VOICE_STATE_UPDATES({
         voiceStates: [{
             channelId: CHANNEL_ID,
@@ -669,6 +678,7 @@ async function testHermeticLoopbackBoundary(): Promise<void> {
         assert.equal(parseRecord(preAuthSocket.sent[0]).type, "AUTH_HELLO");
         await emitSensitiveEvents(plugin);
         assert.equal(preAuthRuntime.currentUserReads, 0, "pre-auth events must not even read identity state");
+        assert.equal(preAuthRuntime.streamerModeReads, 0, "pre-auth events must not read streamer mode state");
         assert.equal(preAuthRuntime.dispatches.length, 0);
         assert.equal(preAuthSocket.sent.length, 1, "identity, notification, voice, and stream state must stay silent");
         assert.doesNotMatch(preAuthSocket.sent[0], new RegExp(`${USER_ID}|${PRIVATE_NOTIFICATION}`, "u"));
@@ -722,6 +732,18 @@ async function testHermeticLoopbackBoundary(): Promise<void> {
             assert.equal(parseRecord(raw).type, "ENVELOPE", "post-auth data must remain authenticated");
             assert.doesNotMatch(raw, new RegExp(secret, "u"), "the shared secret must never be transmitted");
         }
+
+        const beforeStreamerUpdate = authenticatedSocket.sent.length;
+        authenticatedRuntime.streamerModeEnabled = false;
+        plugin.flux.STREAMER_MODE_UPDATE({ key: "hidePersonalInformation", value: true });
+        await waitUntil(() => authenticatedSocket.sent.length === beforeStreamerUpdate + 1, "streamer setting update");
+        assert.deepEqual(parseRecord(authenticatedSocket.sent[beforeStreamerUpdate]).payload,
+            { cmd: "STREAMER_MODE", enabled: false }, "other boolean settings must not enable streamer mode");
+        authenticatedRuntime.streamerModeEnabled = true;
+        plugin.flux.STREAMER_MODE_UPDATE({ key: "enabled", value: false });
+        await waitUntil(() => authenticatedSocket.sent.length === beforeStreamerUpdate + 2, "current streamer mode state");
+        assert.deepEqual(parseRecord(authenticatedSocket.sent[beforeStreamerUpdate + 1]).payload,
+            { cmd: "STREAMER_MODE", enabled: true }, "the current store state must take precedence over the event value");
 
         const disconnect = await createOrbolayCompanionCommand(
             secret,
