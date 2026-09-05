@@ -33,7 +33,6 @@ import { Logger } from "@utils/Logger";
 import { onlyOnce } from "@utils/onlyOnce";
 import { canonicalizeFind, canonicalizeReplacement } from "@utils/patches";
 import { DefinedSettings, Patch, Plugin, PluginDef, PluginSettingDef, ReporterTestable, StartAt } from "@utils/types";
-import { FluxEvents } from "@vencord/discord-types";
 import { FluxDispatcher } from "@webpack/common";
 import { patches } from "@webpack/patcher";
 
@@ -53,7 +52,8 @@ export const PMLogger = logger;
 
 /** Whether we have subscribed to flux events of all the enabled plugins when FluxDispatcher was ready */
 let enabledPluginsSubscribedFlux = false;
-const subscribedFluxEventsPlugins = new Set<string>();
+type FluxHandler = (event: unknown) => void | Promise<void>;
+const subscribedFluxEventsPlugins = new Map<string, Map<string, FluxHandler>>();
 
 const pluginKeysToBind = [
     "onBeforeMessageEdit", "onBeforeMessageSend", "onMessageClick",
@@ -152,44 +152,55 @@ export const startAllPlugins = traceFunction("startAllPlugins", function startAl
     }
 });
 
-export function startDependenciesRecursive(p: Plugin) {
+export function startDependenciesRecursive(p: Plugin, visiting = new Set<string>()): { restartNeeded: boolean; failures: string[]; } {
     const settings = Settings.plugins;
     let restartNeeded = false;
     const failures: string[] = [];
 
+    if (visiting.has(p.name)) return { restartNeeded, failures: [p.name] };
+    visiting.add(p.name);
+
     p.dependencies?.forEach(d => {
-        if (!settings[d].enabled) {
-            const dep = Plugins[d];
-            startDependenciesRecursive(dep);
+        const dep = Plugins[d];
+        if (!dep) {
+            failures.push(d);
+            return;
+        }
+        if (!dep.started) {
+            const nested = startDependenciesRecursive(dep, visiting);
+            restartNeeded ||= nested.restartNeeded;
+            failures.push(...nested.failures);
+            if (nested.failures.length) return;
 
             // If the plugin has patches, don't start the plugin, just enable it.
-            settings[d].enabled = true;
-            dep.isDependency = true;
-
-            if (pluginRequiresRestart(dep)) {
+            if (nested.restartNeeded || pluginRequiresRestart(dep)) {
                 logger.warn(`Enabling dependency ${d} requires restart.`);
                 restartNeeded = true;
+            } else if (!startPlugin(dep)) {
+                failures.push(d);
                 return;
             }
-
-            const result = startPlugin(dep);
-            if (!result) failures.push(d);
         }
+        settings[d].enabled = true;
+        dep.isDependency = true;
     });
 
+    visiting.delete(p.name);
     return { restartNeeded, failures };
 }
 
 export function subscribePluginFluxEvents(p: Plugin, fluxDispatcher: typeof FluxDispatcher) {
     if (p.flux && !subscribedFluxEventsPlugins.has(p.name) && (!IS_REPORTER || isReporterTestable(p, ReporterTestable.FluxEvents))) {
-        subscribedFluxEventsPlugins.add(p.name);
+        const handlers = new Map<string, FluxHandler>();
+        subscribedFluxEventsPlugins.set(p.name, handlers);
 
         logger.debug("Subscribing to flux events of plugin", p.name);
         for (const [event, handler] of Object.entries(p.flux)) {
-            const wrappedHandler = p.flux[event] = function () {
+            if (!handler) continue;
+            const wrappedHandler: FluxHandler = eventData => {
                 if (p.name === "Encryptcord" && event === "MESSAGE_CREATE") return;
                 try {
-                    const res = handler!.apply(p, arguments as any);
+                    const res = handler.call(p, eventData);
                     return res instanceof Promise
                         ? res.catch(e => logger.error(`${p.name}: Error while handling ${event}\n`, e))
                         : res;
@@ -198,19 +209,20 @@ export function subscribePluginFluxEvents(p: Plugin, fluxDispatcher: typeof Flux
                 }
             };
 
-            fluxDispatcher.subscribe(event as FluxEvents, wrappedHandler);
+            fluxDispatcher.subscribe(event, wrappedHandler);
+            handlers.set(event, wrappedHandler);
         }
     }
 }
 
 export function unsubscribePluginFluxEvents(p: Plugin, fluxDispatcher: typeof FluxDispatcher) {
-    if (p.flux) {
-        subscribedFluxEventsPlugins.delete(p.name);
-
+    const handlers = subscribedFluxEventsPlugins.get(p.name);
+    if (handlers) {
         logger.debug("Unsubscribing from flux events of plugin", p.name);
-        for (const [event, handler] of Object.entries(p.flux)) {
-            fluxDispatcher.unsubscribe(event as FluxEvents, handler!);
+        for (const [event, handler] of handlers) {
+            fluxDispatcher.unsubscribe(event, handler);
         }
+        subscribedFluxEventsPlugins.delete(p.name);
     }
 }
 
@@ -233,12 +245,12 @@ export const startPlugin = traceFunction("startPlugin", function startPlugin(p: 
         renderProfileSection, gifPickerContextMenu
     } = p;
 
+    if (p.started) {
+        logger.warn(`${name} already started`);
+        return false;
+    }
     if (p.start) {
         logger.info("Starting plugin", name);
-        if (p.started) {
-            logger.warn(`${name} already started`);
-            return false;
-        }
         try {
             p.start();
         } catch (e) {
@@ -315,12 +327,12 @@ export const stopPlugin = traceFunction("stopPlugin", function stopPlugin(p: Plu
         renderProfileSection, gifPickerContextMenu
     } = p;
 
+    if (!p.started) {
+        logger.warn(`${name} already stopped`);
+        return false;
+    }
     if (p.stop) {
         logger.info("Stopping plugin", name);
-        if (!p.started) {
-            logger.warn(`${name} already stopped`);
-            return false;
-        }
         try {
             p.stop();
         } catch (e) {
@@ -451,7 +463,6 @@ export const initPluginManager = onlyOnce(function init() {
         if (p.renderProfileSection) neededApiPlugins.add("ProfileSectionsAPI");
         if (p.gifPickerContextMenu) neededApiPlugins.add("ExtraContextMenusAPI");
 
-        bindPluginMethods(p);
     }
 
     for (const p of neededApiPlugins) {
@@ -460,6 +471,7 @@ export const initPluginManager = onlyOnce(function init() {
     }
 
     for (const p of pluginsValues) {
+        bindPluginMethods(p);
         bindPluginSettings(p);
 
         if (p.patches && isPluginEnabled(p.name)) {
