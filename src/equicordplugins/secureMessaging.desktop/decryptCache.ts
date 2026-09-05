@@ -15,6 +15,7 @@ import { createTaskQueue } from "./taskQueue";
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const MAX_CACHE_ENTRIES = 512;
+const MAX_PREFETCH_ENTRIES = 4;
 const TRANSIENT_FAILURE_TTL_MS = 30_000;
 const TRANSIENT_RETRY_DELAYS = [0, 250, 1_000, 3_000] as const;
 const runDecryptTask = createTaskQueue(4);
@@ -27,6 +28,7 @@ interface DecryptCacheEntry {
 }
 
 const cache = new Map<string, DecryptCacheEntry>();
+const prefetches = new Set<Promise<DecryptIncomingResult>>();
 let cacheGeneration = 0;
 
 function failedDecryption(): DecryptIncomingResult {
@@ -155,7 +157,17 @@ export function decryptCachedMessage(localUserId: string, message: Message): Pro
     return ensureEntry(localUserId, message)[1].promise;
 }
 
+export function prefetchCachedMessage(localUserId: string, message: Message): Promise<DecryptIncomingResult> | null {
+    if (prefetches.size >= MAX_PREFETCH_ENTRIES || getCachedDecryption(localUserId, message)) return null;
+    const promise = decryptCachedMessage(localUserId, message);
+    if (prefetches.has(promise)) return null;
+    prefetches.add(promise);
+    void promise.then(() => prefetches.delete(promise), () => prefetches.delete(promise));
+    return promise;
+}
+
 export function clearEncryptedMessageDecryptCache(): void {
     cacheGeneration++;
     cache.clear();
+    prefetches.clear();
 }
