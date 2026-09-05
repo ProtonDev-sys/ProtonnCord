@@ -111,39 +111,47 @@ ipcMain.handle(IpcEvents.GET_THEME_SYSTEM_VALUES, () => {
 ipcMain.handle(IpcEvents.OPEN_THEMES_FOLDER, () => shell.openPath(THEMES_DIR));
 ipcMain.handle(IpcEvents.OPEN_SETTINGS_FOLDER, () => shell.openPath(SETTINGS_DIR));
 
-let fsWatchers = [] as FSWatcher[];
+let stopWatching: (() => void) | undefined;
 
-ipcMain.handle(IpcEvents.INIT_FILE_WATCHERS, ({ sender }) => {
-    fsWatchers.forEach(w => w.close());
+ipcMain.handle(IpcEvents.INIT_FILE_WATCHERS, async ({ sender }) => {
+    stopWatching?.();
 
-    let quickCssWatcher: FSWatcher | undefined;
-    let rendererCssWatcher: FSWatcher | undefined;
+    const watchers: FSWatcher[] = [];
+    let stopped = false;
+    const stop = () => {
+        stopped = true;
+        watchers.forEach(watcher => watcher.close());
+        sender.removeListener("destroyed", stop);
+        if (stopWatching === stop) stopWatching = undefined;
+    };
+    stopWatching = stop;
+    sender.once("destroyed", stop);
 
-    open(QUICK_CSS_PATH, "a+").then(fd => {
-        fd.close();
-        quickCssWatcher = watch(QUICK_CSS_PATH, { persistent: false }, debounce(async () => {
-            sender.postMessage(IpcEvents.QUICK_CSS_UPDATE, await readCss());
-        }, 50));
-    }).catch(() => { });
+    await open(QUICK_CSS_PATH, "a+").then(fd => fd.close()).catch(() => { });
+    if (stopped) return;
 
-    const themesWatcher = watch(THEMES_DIR, { persistent: false }, debounce(() => {
-        sender.postMessage(IpcEvents.THEME_UPDATE, void 0);
-    }));
+    try {
+        watchers.push(watch(QUICK_CSS_PATH, { persistent: false }, debounce(async () => {
+            const css = await readCss();
+            if (!stopped) sender.postMessage(IpcEvents.QUICK_CSS_UPDATE, css);
+        }, 50)));
+    } catch { }
 
-    if (IS_DEV) {
-        rendererCssWatcher = watch(RENDERER_CSS_PATH, { persistent: false }, async () => {
-            sender.postMessage(IpcEvents.RENDERER_CSS_UPDATE, await readFile(RENDERER_CSS_PATH, "utf-8"));
-        });
+    try {
+        watchers.push(watch(THEMES_DIR, { persistent: false }, debounce(() => {
+            if (!stopped) sender.postMessage(IpcEvents.THEME_UPDATE, void 0);
+        })));
+
+        if (IS_DEV) {
+            watchers.push(watch(RENDERER_CSS_PATH, { persistent: false }, async () => {
+                const css = await readFile(RENDERER_CSS_PATH, "utf-8").catch(() => null);
+                if (!stopped && css !== null) sender.postMessage(IpcEvents.RENDERER_CSS_UPDATE, css);
+            }));
+        }
+    } catch (error) {
+        stop();
+        throw error;
     }
-
-    fsWatchers = [quickCssWatcher, themesWatcher, rendererCssWatcher].filter(Boolean) as FSWatcher[];
-
-    sender.once("destroyed", () => {
-        quickCssWatcher?.close();
-        themesWatcher.close();
-        rendererCssWatcher?.close();
-        fsWatchers = [];
-    });
 });
 
 ipcMain.on(IpcEvents.GET_MONACO_THEME, e => {
@@ -181,6 +189,7 @@ ipcMain.handle(IpcEvents.OPEN_MONACO_EDITOR, async () => {
 
 app.on("before-quit", async event => {
     if (monacoWin && !monacoWin.isDestroyed() && !monacoWin.isVisible()) {
+        event.preventDefault();
         const result = await dialog.showMessageBox({
             type: "question",
             buttons: ["Cancel", "Close Anyway"],

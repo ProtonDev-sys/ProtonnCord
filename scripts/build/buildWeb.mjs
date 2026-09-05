@@ -20,7 +20,7 @@
 // @ts-check
 
 import { readFileSync } from "fs";
-import { appendFile, mkdir, readdir, readFile, rm, writeFile } from "fs/promises";
+import { appendFile, mkdir, readFile, rm, writeFile } from "fs/promises";
 import { join } from "path";
 import Zip from "zip-local";
 
@@ -58,31 +58,8 @@ const commonOptions = {
     })
 };
 
-const MonacoWorkerEntryPoints = [
-    "vs/language/css/css.worker.js",
-    "vs/editor/editor.worker.js"
-];
-
 /** @type {import("esbuild").BuildOptions[]} */
 const buildConfigs = [
-    {
-        entryPoints: MonacoWorkerEntryPoints.map(entry => `node_modules/monaco-editor/esm/${entry}`),
-        bundle: true,
-        minify: true,
-        format: "iife",
-        outbase: "node_modules/monaco-editor/esm/",
-        outdir: "dist/browser/vendor/monaco"
-    },
-    {
-        entryPoints: ["browser/monaco.ts"],
-        bundle: true,
-        minify: true,
-        format: "iife",
-        outfile: "dist/browser/vendor/monaco/index.js",
-        loader: {
-            ".ttf": "file"
-        }
-    },
     {
         ...commonOptions,
         outfile: "dist/browser/browser.js",
@@ -119,45 +96,12 @@ const buildConfigs = [
 await buildOrWatchAll(buildConfigs);
 
 /**
- * @type {(dir: string) => Promise<string[]>}
- */
-async function globDir(dir) {
-    const files = [];
-
-    for (const child of await readdir(dir, { withFileTypes: true })) {
-        const p = join(dir, child.name);
-        if (child.isDirectory())
-            files.push(...await globDir(p));
-        else
-            files.push(p);
-    }
-
-    return files;
-}
-
-/**
- * @type {(dir: string, basePath?: string) => Promise<Record<string, string>>}
- */
-async function loadDir(dir, basePath = "") {
-    const files = await globDir(dir);
-    return Object.fromEntries(
-        await Promise.all(
-            files.map(
-                async f =>
-                    [f.slice(basePath.length), await readFile(f)]
-            )
-        )
-    );
-}
-
-/**
   * @type {(target: string, files: string[]) => Promise<void>}
  */
 async function buildExtension(target, files) {
     const entries = {
         "dist/ProtonnCord.js": await readFile("dist/browser/extension.js"),
         "dist/ProtonnCord.css": await readFile("dist/browser/extension.css"),
-        ...await loadDir("dist/browser/vendor/monaco", "dist/browser/"),
         ...Object.fromEntries(await Promise.all(files.map(async f => {
             let content = await readFile(join("browser", f));
             if (f.startsWith("manifest")) {
@@ -173,9 +117,10 @@ async function buildExtension(target, files) {
         })))
     };
 
-    await rm(target, { recursive: true, force: true });
+    const targetDirectory = join("dist/browser", target);
+    await rm(targetDirectory, { recursive: true, force: true });
     await Promise.all(Object.entries(entries).map(async ([file, content]) => {
-        const dest = join("dist/browser", target, file);
+        const dest = join(targetDirectory, file);
         const parentDirectory = join(dest, "..");
         await mkdir(parentDirectory, { recursive: true });
         await writeFile(dest, content);
@@ -185,7 +130,7 @@ async function buildExtension(target, files) {
 }
 
 const appendCssRuntime = readFile("dist/ProtonnCord.user.css", "utf-8").then(content => {
-    const cssRuntime = `unsafeWindow._vcUserScriptRendererCss=\`${content.replaceAll("`", "\\`")}\``;
+    const cssRuntime = `unsafeWindow._vcUserScriptRendererCss=${JSON.stringify(content)};`;
 
     return appendFile("dist/ProtonnCord.user.js", cssRuntime);
 });
