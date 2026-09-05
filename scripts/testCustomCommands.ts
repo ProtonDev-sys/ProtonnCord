@@ -16,11 +16,12 @@ import { SettingsStore } from "../src/shared/SettingsStore";
 type Tag = { name: string; message: string; };
 
 function loadTags() {
-    const store = new SettingsStore({ plugins: { CustomCommands: { tagsList: {} as Record<string, Tag> } } });
+    const store = new SettingsStore({ plugins: { CustomCommands: { tagsList: {} as Record<string, Tag> } } }, { readOnly: true });
+    const rendererSettings = store.store;
     const errors: unknown[][] = [];
     const sent: unknown[] = [], local: unknown[] = [], dispatched: unknown[] = [];
     const state = { reply: undefined as object | undefined, send: async () => {}, failName: "" };
-    const settings = { get store() { return store.store.plugins.CustomCommands; } };
+    const settings = { get store() { return rendererSettings.plugins.CustomCommands; } };
     const mocks: Record<string, object> = {
         "@api/Settings": { SettingsStore: store, definePluginSettings: () => settings, migratePluginSettings() {} },
         "@utils/constants": { Devs: {} },
@@ -104,7 +105,7 @@ test("tag edits stay inactive until start and stop cleans the actual owned regis
     const first = api.commands.greet;
     plugin.default.start();
     assert.equal(api.commands.greet, first);
-    store.setData({ plugins: { CustomCommands: { tagsList: {} } } });
+    store.store.plugins = { CustomCommands: { tagsList: {} } };
     assert.equal(Object.hasOwn(api.commands, "greet"), false);
     tags.addTag({ name: "next", message: "Next" });
     plugin.default.stop();
@@ -164,7 +165,7 @@ test("imported and nested tag changes synchronize without deleting foreign repla
     const foreign = api.commands.greet;
     tags.removeTag("greet");
     assert.equal(api.commands.greet, foreign);
-    store.setData({ plugins: { CustomCommands: { tagsList: { valid: { name: "valid", message: "Imported" }, invalid: { name: "mismatch", message: "Ignored" } } } } });
+    store.store.plugins = { CustomCommands: { tagsList: { valid: { name: "valid", message: "Imported" }, invalid: { name: "mismatch", message: "Ignored" } } } };
     assert.ok(api.commands.valid);
     assert.equal(Object.hasOwn(api.commands, "mismatch"), false);
     assert.equal(tags.getTags(null).length, 0);
