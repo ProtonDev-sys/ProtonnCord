@@ -10,10 +10,6 @@
     transition: color 0.3s ease;
 }
 
-.vc-charCounter-count {
-    transition: color 0.3s ease;
-}
-
 .vc-charCounter-selected {
     color: var(--brand-500);
 }
