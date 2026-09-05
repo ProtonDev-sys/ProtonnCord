@@ -248,3 +248,105 @@ test("global badge refresh retries failures, rejects malformed data and reports 
     assert.equal(toasts.at(-1)?.type, "failure");
     plugin.stop();
 });
+
+test("friendship badges cover milestone days and unregister the objects that were registered", () => {
+    const registered = new Set<object>();
+    let days = 0;
+    let isFriend = true;
+    const { default: plugin } = loadSource("src/equicordplugins/friendshipRanks/index.tsx", {
+        "@api/Badges": { BadgePosition: { END: 1 } },
+        "@api/index": { Badges: { addProfileBadge: (badge: object) => registered.add(badge), removeProfileBadge: (badge: object) => registered.delete(badge) } },
+        "@api/Settings": { definePluginSettings: (settings: object) => settings },
+        "@components/ErrorBoundary": boundary,
+        "@components/Flex": {},
+        "@components/Paragraph": {},
+        "@utils/constants": { Devs: {}, EquicordDevs: {} },
+        "@utils/css": { classNameFactory: () => () => "fixture" },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin, OptionType: { BOOLEAN: 0 } },
+        "@webpack/common": { RelationshipStore: { isFriend: () => isFriend, getSince: () => new Date(Date.now() - days * 86400000).toISOString() } }
+    });
+    for (let cycle = 0; cycle < 3; cycle++) {
+        plugin.start?.();
+        plugin.userProfileBadges?.forEach((badge: object) => registered.add(badge));
+        assert.equal(registered.size, 7);
+        const badges = Array.from(registered) as { description: string; shouldShow(args: { userId: string; }): boolean; }[];
+        for (const [age, title] of [[0, "Sprout"], [29, "Sprout"], [30, "Blooming"], [90, "Burning"], [182, "Burning"], [183, "Fighter"], [365, "Star"], [730, "Royal"], [1827, "Besties"]] as const) {
+            days = age;
+            assert.deepEqual(badges.filter(badge => badge.shouldShow({ userId: "fixture" })).map(badge => badge.description), [title]);
+        }
+        isFriend = false;
+        assert.equal(badges.some(badge => badge.shouldShow({ userId: "fixture" })), false);
+        isFriend = true;
+        plugin.stop?.();
+        plugin.userProfileBadges?.forEach((badge: object) => registered.delete(badge));
+        assert.equal(registered.size, 0);
+    }
+});
+
+test("chat badge layout reads live settings and handles toggles, keyboard moves and unrelated drops", () => {
+    const writes: string[] = [];
+    const store: Record<string, unknown> = new Proxy({}, {
+        set(target: Record<string, unknown>, key: string, value: unknown) { writes.push(key); target[key] = value; return true; }
+    });
+    const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
+    const { default: settings } = loadSource("src/equicordplugins/showBadgesInChat/settings.tsx", {
+        "@api/Settings": { definePluginSettings(def: Record<string, { default?: unknown; }>) {
+            for (const [key, option] of Object.entries(def)) store[key] = option.default;
+            return { def, store, use: () => store };
+        } },
+        "@components/BaseText": { BaseText: "span" },
+        "@components/Button": { Button: "button" },
+        "@utils/types": { OptionType: { BOOLEAN: 0, NUMBER: 1, COMPONENT: 2 } },
+        "@webpack/common": { UserStore: { getCurrentUser: () => null } }
+    }, { React });
+    function render() {
+        const element = settings.def.badgeSettings.component();
+        return element.type().props.children[1].props.children[1];
+    }
+    writes.length = 0;
+    let controls = render();
+    assert.equal(writes.length, 0);
+    assert.equal(controls[0].props["aria-pressed"], true);
+    controls[0].props.onClick();
+    assert.equal(store.showEquicordDonor, false);
+    assert.deepEqual(writes, ["showEquicordDonor"]);
+    store.showEquicordDonor = true;
+    controls = render();
+    assert.equal(controls[0].props["aria-pressed"], true);
+    writes.length = 0;
+    controls[0].props.onDrop({ preventDefault() {}, dataTransfer: { getData: () => "" } });
+    assert.equal(writes.length, 0);
+    let prevented = 0;
+    controls[0].props.onKeyDown({ altKey: true, key: "ArrowRight", preventDefault: () => prevented++ });
+    assert.equal(prevented, 1);
+    controls = render();
+    assert.equal(controls[0].props.key, "EquicordContributor");
+    assert.equal(controls[1].props.key, "EquicordDonor");
+    controls[0].props.onDrop({ preventDefault() {}, dataTransfer: { getData: () => "DiscordNitro" } });
+    assert.equal(render()[0].props.key, "DiscordNitro");
+});
+
+test("chat badge classes stay lazy until rendering and sibling badge keys are unique", () => {
+    let ready = false;
+    const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
+    const { CheckBadge } = loadSource("src/equicordplugins/showBadgesInChat/index.tsx", {
+        "@plugins/_api/badges": { __esModule: true, default: {
+            getDonorBadges: () => [{ id: "one" }, { id: "two" }], getEquicordDonorBadges: () => [{ id: "one" }, { id: "two" }]
+        } },
+        "@utils/constants": { Devs: {}, EquicordDevs: {} },
+        "@utils/misc": {},
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin },
+        "@webpack": {
+            findComponentByCodeLazy: () => "role-icon",
+            findCssClassesLazy: () => new Proxy({}, { get() { assert.equal(ready, true, "Discord classes are unavailable during module initialization"); return "role-icon"; } })
+        },
+        "./settings": { __esModule: true, default: { store: {} } }
+    }, { React }, "({ CheckBadge })");
+    ready = true;
+    for (const badge of ["EquicordDonor", "VencordDonor", "DiscordProfile"]) {
+        const rendered = CheckBadge({ badge, author: { id: "fixture", flags: 3 } });
+        const keys = rendered.props.children[0].map((child: { props: { key: string; }; }) => child.props.key);
+        assert.equal(keys.length, 2);
+        assert.equal(new Set(keys).size, 2);
+    }
+});
