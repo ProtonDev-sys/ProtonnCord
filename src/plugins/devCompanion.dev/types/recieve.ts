@@ -30,9 +30,11 @@ export type FindOrSearchData =
     | (SearchData & {
         usePatched: boolean | null;
     })
-    | ({
+    | {
         extractType: "find";
-    } & _PrefixKeys<_CapitalizeKeys<FindData>, "find">);
+        findType: AnyFindType;
+        findArgs: FindNode[];
+    };
 
 export type AnyFindType =
     `find${"Component" | "ByProps" | "CssClasses" | "Store" | "ByCode" | "ModuleId" | "ComponentByCode" | ""}${"Lazy" | ""}`;
@@ -318,16 +320,3 @@ export function parseIncomingMessage(value: unknown): FullIncomingMessage | null
 
     return valid ? value as FullIncomingMessage : null;
 }
-
-type _PrefixKeys<
-    T extends Record<string, any>,
-    P extends string,
-> = string extends P
-    ? never
-    : {
-        [K in keyof T as K extends string ? `${P}${K}` : never]: T[K];
-    };
-
-type _CapitalizeKeys<T extends Record<string, any>> = {
-    [K in keyof T as K extends string ? Capitalize<K> : never]: T[K];
-};
