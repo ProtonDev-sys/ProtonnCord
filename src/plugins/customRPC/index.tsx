@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { definePluginSettings } from "@api/Settings";
+import { definePluginSettings, SettingsStore } from "@api/Settings";
 import { getUserSettingLazy } from "@api/UserSettings";
 import { Divider } from "@components/Divider";
 import { ErrorCard } from "@components/ErrorCard";
@@ -25,7 +25,6 @@ import { Heading } from "@components/Heading";
 import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
 import { Devs } from "@utils/constants";
-import { isTruthy } from "@utils/guards";
 import { Logger } from "@utils/Logger";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
@@ -45,28 +44,32 @@ const logger = new Logger("CustomRPC");
 const ShowCurrentGame = getUserSettingLazy<boolean>("status", "showCurrentGame")!;
 
 const maxAssetCacheSize = 100;
-const assetCache = new Map<string, Promise<string>>();
+const assetCache = new Map<string, Promise<string | undefined>>();
+const openedAt = Math.floor(performance.timeOrigin);
+const openedDayStart = new Date(openedAt).setHours(0, 0, 0, 0);
 
-async function getApplicationAsset(key: string): Promise<string> {
-    const appId = settings.store.appID || "0";
+function getApplicationAsset(appId: string, key: string): Promise<string | undefined> {
     const cacheKey = `${appId}:${key}`;
     const cached = assetCache.get(cacheKey);
-    if (cached) return await cached;
-
+    if (cached) return cached;
     if (assetCache.size >= maxAssetCacheSize) {
         const oldestKey = assetCache.keys().next().value;
         if (oldestKey !== undefined) assetCache.delete(oldestKey);
     }
-
-    const promise = ApplicationAssetUtils.fetchAssetIds(appId, [key])
-        .then(ids => ids[0]!)
+    const promise = Promise.resolve()
+        .then(() => ApplicationAssetUtils.fetchAssetIds(appId, [key]))
+        .then((ids: unknown) => {
+            const id = Array.isArray(ids) && typeof ids[0] === "string" && ids[0] ? ids[0] : undefined;
+            if (!id && assetCache.get(cacheKey) === promise) assetCache.delete(cacheKey);
+            return id;
+        })
         .catch(error => {
-            assetCache.delete(cacheKey);
-            throw error;
+            if (assetCache.get(cacheKey) === promise) assetCache.delete(cacheKey);
+            logger.error("Failed to load custom RPC image", error);
+            return undefined;
         });
     assetCache.set(cacheKey, promise);
-
-    return await promise;
+    return promise;
 }
 
 export const enum TimestampMode {
@@ -152,27 +155,30 @@ async function createActivity(): Promise<Activity | undefined> {
     switch (timestampMode) {
         case TimestampMode.NOW:
             activity.timestamps = {
-                start: Date.now()
+                start: openedAt
             };
             break;
         case TimestampMode.TIME:
             activity.timestamps = {
-                start: Date.now() - (new Date().getHours() * 3600 + new Date().getMinutes() * 60 + new Date().getSeconds()) * 1000
+                start: openedDayStart
             };
             break;
-        case TimestampMode.CUSTOM:
-            if (startTime || endTime) {
+        case TimestampMode.CUSTOM: {
+            const start = validTimestamp(startTime);
+            const end = validTimestamp(endTime);
+            if (start !== undefined || end !== undefined) {
                 activity.timestamps = {};
-                if (startTime && endTime && endTime > startTime) {
-                    const anchor = getLoopAnchor();
+                if (start !== undefined && end !== undefined && end > start && end - start <= MAX_TIMESTAMP - Date.now()) {
+                    const anchor = loopDuration === end - start ? loopAnchor ?? Date.now() : Date.now();
                     activity.timestamps.start = anchor;
-                    activity.timestamps.end = anchor + (endTime - startTime);
+                    activity.timestamps.end = anchor + (end - start);
                 } else {
-                    if (startTime) activity.timestamps.start = startTime;
-                    if (endTime) activity.timestamps.end = endTime;
+                    if (start !== undefined) activity.timestamps.start = start;
+                    if (end !== undefined) activity.timestamps.end = end;
                 }
             }
             break;
+        }
         case TimestampMode.NONE:
         default:
             break;
@@ -186,26 +192,19 @@ async function createActivity(): Promise<Activity | undefined> {
         activity.state_url = stateURL;
     }
 
-    if (buttonOneText) {
-        activity.buttons = [
-            buttonOneText,
-            buttonTwoText
-        ].filter(isTruthy);
-
-        activity.metadata = {
-            button_urls: [
-                buttonOneURL,
-                buttonTwoURL
-            ].filter(isTruthy)
-        };
+    const buttons = [[buttonOneText, buttonOneURL], [buttonTwoText, buttonTwoURL]]
+        .filter((pair): pair is [string, string] => typeof pair[0] === "string" && !!pair[0] && typeof pair[1] === "string" && !!pair[1]);
+    if (buttons.length) {
+        activity.buttons = buttons.map(([text]) => text);
+        activity.metadata = { button_urls: buttons.map(([, url]) => url) };
     }
 
     const [largeImageAsset, smallImageAsset] = await Promise.all([
-        imageBig ? getApplicationAsset(imageBig) : undefined,
-        imageSmall ? getApplicationAsset(imageSmall) : undefined
+        imageBig ? getApplicationAsset(appID || "0", imageBig) : undefined,
+        imageSmall ? getApplicationAsset(appID || "0", imageSmall) : undefined
     ]);
 
-    if (imageBig) {
+    if (largeImageAsset) {
         activity.assets = {
             large_image: largeImageAsset,
             large_text: imageBigTooltip || undefined,
@@ -213,7 +212,7 @@ async function createActivity(): Promise<Activity | undefined> {
         };
     }
 
-    if (imageSmall) {
+    if (smallImageAsset) {
         activity.assets = {
             ...activity.assets,
             small_image: smallImageAsset,
@@ -222,7 +221,7 @@ async function createActivity(): Promise<Activity | undefined> {
         };
     }
 
-    if (partyMaxSize && partySize) {
+    if (partySize !== undefined && partyMaxSize !== undefined && Number.isSafeInteger(partyMaxSize) && Number.isSafeInteger(partySize) && partySize > 0 && partySize <= partyMaxSize) {
         activity.party = {
             size: [partySize, partyMaxSize]
         };
@@ -238,52 +237,71 @@ async function createActivity(): Promise<Activity | undefined> {
     return activity;
 }
 
-export async function setRpc(disable?: boolean) {
-    const generation = disable ? ++rpcGeneration : rpcGeneration;
-    const activity: Activity | undefined = disable ? undefined : await createActivity();
-    if (!disable && (!pluginActive || generation !== rpcGeneration)) return;
-
-    FluxDispatcher.dispatch({
-        type: "LOCAL_ACTIVITY_UPDATE",
-        activity: !disable ? activity : null,
-        socketId: "CustomRPC",
-    });
+export async function setRpc(disable = false) {
+    const generation = ++rpcGeneration;
+    if (disable) {
+        stopTimestampLoop();
+        FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity: null, socketId: "CustomRPC" });
+        return;
+    }
+    if (!pluginActive) return;
+    const userId = UserStore.getCurrentUser()?.id;
+    if (!userId) { stopTimestampLoop(); return; }
+    updateTimestampLoop();
+    const activity = await createActivity();
+    if (!pluginActive || generation !== rpcGeneration || userId !== UserStore.getCurrentUser()?.id) return;
+    FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity: activity ?? null, socketId: "CustomRPC" });
 }
 
-export function queueSetRpc(disable?: boolean) {
+function queueSetRpc(disable = false) {
     void setRpc(disable).catch(error => logger.error("Failed to update custom RPC", error));
 }
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
-
+const MAX_TIMESTAMP = 8_640_000_000_000_000;
 let loopTimeout: ReturnType<typeof setTimeout> | undefined;
-let loopAnchor = 0;
+let updateTimeout: ReturnType<typeof setTimeout> | undefined;
+let loopAnchor: number | undefined;
+let loopDuration: number | undefined;
 let rpcGeneration = 0;
 let pluginActive = false;
 
-function getLoopAnchor() {
-    return loopAnchor;
+function validTimestamp(value: unknown) {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= MAX_TIMESTAMP ? value : undefined;
 }
 
-function startTimestampLoop() {
-    const { timestampMode, startTime, endTime } = settings.store;
-    if (timestampMode !== TimestampMode.CUSTOM || !startTime || !endTime) return;
-    const duration = endTime - startTime;
-    if (duration <= 0) return;
+function handleSettingsChange(_data?: unknown, path = "") {
+    if (!pluginActive || (path && path !== "plugins" && path !== "plugins.CustomRPC" && !path.startsWith("plugins.CustomRPC."))) return;
+    rpcGeneration++;
+    clearTimeout(updateTimeout);
+    updateTimestampLoop();
+    updateTimeout = setTimeout(() => {
+        updateTimeout = undefined;
+        queueSetRpc();
+    }, 300);
+}
 
+function updateTimestampLoop() {
+    const { timestampMode, startTime, endTime, appName } = settings.store;
+    const start = validTimestamp(startTime);
+    const end = validTimestamp(endTime);
+    const duration = pluginActive && UserStore.getCurrentUser() && appName && timestampMode === TimestampMode.CUSTOM && start !== undefined && end !== undefined && end > start && end - start <= MAX_TIMESTAMP - Date.now()
+        ? end - start : undefined;
+    if (duration === loopDuration) return;
     stopTimestampLoop();
-    loopAnchor = Date.now();
-    scheduleTimestampLoop(duration);
+    loopDuration = duration;
+    if (duration !== undefined) {
+        loopAnchor = Date.now();
+        scheduleTimestampLoop(duration);
+    }
 }
 
 function scheduleTimestampLoop(duration: number) {
-    if (!pluginActive) return;
-    const delay = Math.min(Math.max(loopAnchor + duration - Date.now(), 0), MAX_TIMEOUT_MS);
-
+    if (!pluginActive || loopAnchor === undefined || loopDuration !== duration) return;
+    const delay = Math.min(Math.max(loopAnchor + duration - Date.now(), 1000), MAX_TIMEOUT_MS);
     loopTimeout = setTimeout(() => {
         loopTimeout = undefined;
-        if (!pluginActive) return;
-
+        if (!pluginActive || loopAnchor === undefined || loopDuration !== duration) return;
         if (Date.now() >= loopAnchor + duration) {
             loopAnchor = Date.now();
             queueSetRpc();
@@ -293,11 +311,10 @@ function scheduleTimestampLoop(duration: number) {
 }
 
 function stopTimestampLoop() {
-    if (loopTimeout !== undefined) {
-        clearTimeout(loopTimeout);
-        loopTimeout = undefined;
-    }
-    loopAnchor = 0;
+    clearTimeout(loopTimeout);
+    loopTimeout = undefined;
+    loopAnchor = undefined;
+    loopDuration = undefined;
 }
 
 export default definePlugin({
@@ -311,16 +328,29 @@ export default definePlugin({
     settings,
 
     start() {
+        if (pluginActive) return;
         pluginActive = true;
-        rpcGeneration++;
-        startTimestampLoop();
+        SettingsStore.addGlobalChangeListener(handleSettingsChange);
         queueSetRpc();
     },
     stop() {
+        if (!pluginActive) return;
         pluginActive = false;
+        SettingsStore.removeGlobalChangeListener(handleSettingsChange);
+        clearTimeout(updateTimeout);
+        updateTimeout = undefined;
         queueSetRpc(true);
-        stopTimestampLoop();
         assetCache.clear();
+    },
+
+    flux: {
+        CONNECTION_OPEN() { queueSetRpc(); },
+        LOGOUT() {
+            clearTimeout(updateTimeout);
+            updateTimeout = undefined;
+            queueSetRpc(true);
+            assetCache.clear();
+        }
     },
 
     // Discord hides buttons on your own Rich Presence for some reason. This patch disables that behaviour

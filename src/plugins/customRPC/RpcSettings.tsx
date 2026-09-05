@@ -7,17 +7,15 @@
 import "./settings.css";
 
 import { DataStore } from "@api/index";
-import { isPluginEnabled } from "@api/PluginManager";
 import { Divider } from "@components/Divider";
 import { Heading } from "@components/Heading";
 import { resolveError } from "@components/settings/tabs/plugins/components/Common";
-import { debounce } from "@shared/debounce";
 import { classNameFactory } from "@utils/css";
 import { useAwaiter } from "@utils/react";
 import { ActivityType } from "@vencord/discord-types/enums";
 import { Button, Select, showToast, Text, TextInput, Toasts, useState } from "@webpack/common";
 
-import CustomRPCPlugin, { RpcConfig, setRpc, settings, TimestampMode } from ".";
+import { RpcConfig, settings, TimestampMode } from ".";
 
 const cl = classNameFactory("vc-customRPC-settings-");
 const PRESETS_KEY = "CustomRPC_presets";
@@ -56,11 +54,6 @@ function isAppIdValid(value: string) {
     if (!/^\d{16,21}$/.test(value)) return "Must be a valid Discord ID.";
     return true;
 }
-
-const updateRPC = debounce(() => {
-    setRpc(true);
-    if (isPluginEnabled(CustomRPCPlugin.name)) setRpc();
-});
 
 function isStreamLinkDisabled() {
     return settings.store.type !== ActivityType.STREAMING;
@@ -117,10 +110,7 @@ function SingleSetting<T>({ settingsKey, label, disabled, isValid, transform }: 
         setState(newValue);
         setError(resolveError(valid));
 
-        if (valid === true) {
-            settings.store[settingsKey] = newValue;
-            updateRPC();
-        }
+        if (valid === true) settings.store[settingsKey] = newValue;
     }
 
     return (
@@ -147,10 +137,7 @@ function SelectSetting<T>({ settingsKey, label, options, disabled }: SelectOptio
                 options={options}
                 maxVisibleItems={5}
                 closeOnSelect={true}
-                select={v => {
-                    settings.store[settingsKey] = v;
-                    updateRPC();
-                }}
+                select={v => settings.store[settingsKey] = v}
                 isSelected={v => v === settings.store[settingsKey]}
                 serialize={v => String(v)}
                 isDisabled={disabled}
@@ -192,7 +179,6 @@ function PresetSettings({ onLoad }: { onLoad(): void; }) {
 
         Object.assign(settings.store, preset.config);
         onLoad();
-        updateRPC();
         showToast(`Loaded preset ${preset.name}.`, Toasts.Type.SUCCESS);
     }
 
