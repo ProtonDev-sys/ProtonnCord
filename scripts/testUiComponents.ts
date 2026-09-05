@@ -39,6 +39,163 @@ function loadComponent(path: string, hooks: Record<string, unknown> = {}, additi
     });
 }
 
+function decorFixture() {
+    const scheduled = new Set<() => Promise<void>>();
+    const requests: { ids: string[]; signal?: AbortSignal; resolve: (result: Record<string, string | null>) => void; reject: (error: Error) => void; }[] = [];
+    const errors: unknown[] = [];
+    const clock = { now: 1_000 };
+    function debounce(callback: () => Promise<void>) {
+        const trigger = () => { scheduled.add(callback); };
+        trigger.cancel = () => scheduled.delete(callback);
+        return trigger;
+    }
+    const module = loadComponent("src/plugins/decor/lib/stores/UsersDecorationsStore.ts", {
+        lodash: { debounce },
+        zustandCreate<T>(initializer: (set: (next: Partial<T>) => void, get: () => T) => T) {
+            let state: T;
+            state = initializer(next => { state = { ...state, ...next }; }, () => state);
+            return { getState: () => state };
+        }
+    }, {
+        "@plugins/decor/lib/api": { getUsersDecorations: (ids: string[], signal?: AbortSignal) => new Promise<Record<string, string | null>>((resolve, reject) => requests.push({ ids, signal, resolve, reject })) },
+        "@plugins/decor/lib/constants": { DECORATION_FETCH_COOLDOWN: 10_000, SKU_ID: "decor" },
+        "@shared/debounce": { debounce },
+        "@utils/lazy": { proxyLazy },
+        "@utils/Logger": { Logger: class { error(...args: unknown[]) { errors.push(args); } } }
+    }, { AbortController, Date: class extends Date { static now() { return clock.now; } } });
+    const store = module.useUsersDecorationsStore;
+    function flush() {
+        const callback = scheduled.values().next().value;
+        assert.ok(callback);
+        scheduled.delete(callback);
+        return callback();
+    }
+    return { store, requests, scheduled, flush, errors, clock };
+}
+
+test("Decor lookups preserve newer local and unrelated decoration updates", async () => {
+    const { store, requests, flush } = decorFixture();
+    store.getState().start?.();
+    store.getState().fetch("a");
+    const first = flush();
+    store.getState().set("a", "local");
+    store.getState().fetch("b");
+    const second = flush();
+    requests[1].resolve({ b: "remote-b" }); await second;
+    requests[0].resolve({ a: "old-a" }); await first;
+    assert.equal(store.getState().usersDecorations.get("a").asset, "local");
+    assert.equal(store.getState().usersDecorations.get("b").asset, "remote-b");
+});
+
+test("Decor lookups deduplicate pending IDs and prefer the latest forced request", async () => {
+    const { store, requests, scheduled, flush } = decorFixture();
+    store.getState().start();
+    store.getState().fetch("a"); store.getState().fetch("a");
+    const first = flush();
+    assert.deepEqual([...requests[0].ids], ["a"]);
+    store.getState().fetch("a");
+    assert.equal(scheduled.size, 0);
+    store.getState().fetch("a", true);
+    const second = flush();
+    requests[1].resolve({ a: "new" }); await second;
+    requests[0].resolve({ a: "old" }); await first;
+    assert.equal(store.getState().usersDecorations.get("a").asset, "new");
+});
+
+test("Decor stop cancels queued requests and old failures cannot erase restarted work", async () => {
+    const { store, requests, scheduled, flush, errors } = decorFixture();
+    store.getState().fetch("inactive");
+    assert.equal(scheduled.size, 0);
+    store.getState().start(); store.getState().fetch("a");
+    const old = flush();
+    store.getState().fetch("queued"); store.getState().stop();
+    assert.equal(scheduled.size, 0);
+    assert.equal(requests[0].signal?.aborted, true);
+    store.getState().start(); store.getState().fetch("a");
+    const current = flush();
+    requests[0].reject(new Error("Old failure")); await old;
+    store.getState().fetch("a");
+    assert.equal(scheduled.size, 0, "the old cleanup must preserve the new in-flight marker");
+    requests[1].resolve({ a: "current" }); await current;
+    assert.equal(store.getState().usersDecorations.get("a").asset, "current");
+    store.getState().fetch("a", true); const failed = flush();
+    requests[2].reject(new Error("Retryable failure")); await failed;
+    assert.equal(store.getState().usersDecorations.get("a").asset, "current");
+    assert.equal(errors.length, 1);
+    store.getState().fetch("a", true); const retry = flush();
+    store.getState().stop(); requests[3].resolve({ a: "late" }); await retry;
+    assert.equal(store.getState().usersDecorations.size, 0);
+});
+
+test("Decor cached absence expires and expired entries are released", async () => {
+    const { store, requests, scheduled, flush, clock } = decorFixture();
+    store.getState().start(); store.getState().fetch("a");
+    const first = flush(); requests[0].resolve({ a: null }); await first;
+    store.getState().fetch("a"); assert.equal(scheduled.size, 0);
+    clock.now += 10_000;
+    store.getState().fetch("b"); const second = flush(); requests[1].resolve({ b: "b" }); await second;
+    assert.equal(store.getState().usersDecorations.has("a"), false);
+    store.getState().fetch("a"); assert.equal(scheduled.size, 1);
+    store.getState().stop();
+});
+
+test("Decor public lookups check HTTP and response shapes and never request the entire user list", async () => {
+    const requests: { url: string; signal?: AbortSignal; }[] = [];
+    const response: { ok: boolean; body: unknown; } = { ok: true, body: { a: "asset", b: null, unrelated: "ignored" } };
+    const api = loadComponent("src/plugins/decor/lib/api.ts", {}, {
+        "./constants": { API_URL: "https://decor.invalid/api" },
+        "./stores/AuthorizationStore": {},
+        "@utils/misc": { isObject: (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) }
+    }, { URL, fetch: async (url: URL, options: { signal?: AbortSignal; }) => {
+        requests.push({ url: String(url), signal: options.signal });
+        return { ok: response.ok, json: async () => response.body };
+    } });
+    assert.deepEqual(structuredClone(await api.getUsersDecorations([])), {});
+    assert.equal(requests.length, 0);
+    const controller = new AbortController();
+    assert.deepEqual(structuredClone(await api.getUsersDecorations(["a", "b", "missing"], controller.signal)), { a: "asset", b: null, missing: null });
+    assert.equal(requests[0].signal, controller.signal);
+    assert.deepEqual(JSON.parse(new URL(requests[0].url).searchParams.get("ids") ?? "null"), ["a", "b", "missing"]);
+    response.ok = false; await assert.rejects(api.getUsersDecorations(["a"]), /Could not load/);
+    response.ok = true;
+    for (const body of [null, [], { a: 123 }, { a: {} }]) {
+        response.body = body; await assert.rejects(api.getUsersDecorations(["a"]), /Invalid decoration response/);
+    }
+});
+
+test("Decor lifecycle keeps initialization and connection work obsolete after logout or stop", async () => {
+    const { store, scheduled } = decorFixture();
+    const pending: (() => void)[] = [];
+    const account = { id: "first", clears: 0, authInits: 0 };
+    const plugin = loadComponent("src/plugins/decor/index.tsx", { UserStore: { getCurrentUser: () => account.id ? { id: account.id } : undefined } }, {
+        "@components/ErrorBoundary": { __esModule: true, default: { wrap: (component: unknown) => component } },
+        "@utils/constants": { Devs: {} },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin },
+        "./lib/constants": { setBaseUrl: () => new Promise<void>(resolve => pending.push(resolve)) },
+        "./lib/stores/AuthorizationStore": { useAuthorizationStore: { getState: () => ({ init: () => account.authInits++ }) } },
+        "./lib/stores/CurrentUserDecorationsStore": { useCurrentUserDecorationsStore: { getState: () => ({ clear: () => account.clears++ }) } },
+        "./lib/stores/UsersDecorationsStore": { useUsersDecorationsStore: store },
+        "./settings": { settings: { store: { baseUrl: "https://decor.invalid" } } },
+        "./ui/components": {}, "./ui/components/DecorSection": {}
+    }).default;
+    const first = plugin.start();
+    plugin.stop(); pending.shift()?.(); await first;
+    assert.equal(store.getState().session, null);
+    assert.equal(scheduled.size, 0);
+    const second = plugin.start();
+    const connection = plugin.flux.CONNECTION_OPEN();
+    account.id = ""; plugin.flux.LOGOUT(); pending.shift()?.(); await Promise.all([second, connection]);
+    assert.equal(store.getState().session, null);
+    account.id = "second"; await plugin.flux.CONNECTION_OPEN();
+    assert.equal(typeof store.getState().session, "symbol");
+    assert.equal(scheduled.size, 1);
+    plugin.stop(); await plugin.flux.CONNECTION_OPEN();
+    assert.equal(store.getState().session, null);
+    assert.equal(scheduled.size, 0);
+    assert.ok(account.clears >= 4);
+    assert.equal(account.authInits, 2);
+});
+
 function loadFolders() {
     type Element = { key: string; props: { children?: unknown; renderTreeNode?: unknown; }; };
     const settings = { closeOthers: true, forceOpen: false, closeServerFolder: false, closeAllFolders: false };

@@ -5,7 +5,7 @@
  */
 
 import { BaseText } from "@components/BaseText";
-import { Button, Button as NewButton } from "@components/Button";
+import { Button } from "@components/Button";
 import { Flex } from "@components/Flex";
 import { Paragraph } from "@components/Paragraph";
 import { Decoration, getPresets, Preset } from "@plugins/decor/lib/api";
@@ -158,7 +158,7 @@ function ChangeDecorationModal(props: RenderModalProps) {
         preview={
             <div className={cl("modal-footer-btn-container", Margins.top8)}>
                 <Tooltip text="Join Decor's Discord Server for notifications on your decoration's review, and when new presets are released">
-                    {tooltipProps => <NewButton
+                    {tooltipProps => <Button
                         {...tooltipProps}
                         onClick={async () => {
                             if (!GuildStore.getGuild(GUILD_ID)) {
@@ -176,9 +176,9 @@ function ChangeDecorationModal(props: RenderModalProps) {
                         variant="link"
                     >
                         Discord Server
-                    </NewButton>}
+                    </Button>}
                 </Tooltip>
-                <NewButton
+                <Button
                     onClick={() => openModal(modalProps => (
                         <ConfirmModal
                             {...modalProps}
@@ -195,7 +195,7 @@ function ChangeDecorationModal(props: RenderModalProps) {
                     variant="dangerSecondary"
                 >
                     Log Out
-                </NewButton>
+                </Button>
             </div>
         }
     >
