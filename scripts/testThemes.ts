@@ -13,6 +13,133 @@ import { createSourceFile, forEachChild, isFunctionDeclaration, JsxEmit, ModuleK
 
 const source = readFileSync("src/api/Themes.ts", "utf8");
 
+function loadThemeModule(path: string, mocks: Record<string, object> = {}, globals: Record<string, unknown> = {}) {
+    const code = transpileModule(readFileSync(path, "utf8"), {
+        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
+    }).outputText;
+    return runInNewContext(code + "\nexports;", {
+        exports: {}, ...globals,
+        require(name: string) { assert.ok(name in mocks, name); return mocks[name]; }
+    });
+}
+
+function clientThemeFixture(urls = ["fixture.css"]) {
+    const styles = new Map<string, { textContent: string; remove(): void; }>();
+    const requests: { signal: AbortSignal; result: ReturnType<typeof Promise.withResolvers<Response>>; }[] = [];
+    const warnings: unknown[] = [];
+    const colors = loadThemeModule("src/plugins/clientTheme/utils/colorUtils.ts");
+    const api = loadThemeModule("src/plugins/clientTheme/utils/styleUtils.ts", {
+        "./colorUtils": colors,
+        "@api/Styles": {},
+        "@utils/css": { createAndAppendStyle(id: string) {
+            const style = { textContent: "", remove: () => { styles.delete(id); } }; styles.set(id, style); return style;
+        } },
+        "@utils/Logger": { Logger: class { warn(...args: unknown[]) { warnings.push(args); } } }
+    }, {
+        AbortController,
+        document: { querySelectorAll: () => urls.map(href => ({ href })) },
+        fetch: (_url: string, { signal }: { signal: AbortSignal; }) => {
+            const result = Promise.withResolvers<Response>(); requests.push({ signal, result }); return result.promise;
+        }
+    });
+    return { api, styles, requests, warnings, colors };
+}
+
+const CLIENT_THEME_CSS = ":root{--neutral-2-hsl:220 5% 98%;--neutral-69-hsl:220 5% 20%;--neutral-50-hsl:220 5% 50%;}";
+
+test("ClientTheme ignores disabled color changes and cancels stopped or superseded styles", async () => {
+    const { api, styles, requests } = clientThemeFixture();
+    api.createOrUpdateThemeColorVars("ff0000");
+    assert.equal(styles.size, 0);
+    const old = api.startClientTheme("ff0000");
+    api.disableClientTheme();
+    assert.equal(requests[0].signal.aborted, true);
+    assert.equal(styles.size, 0);
+    const current = api.startClientTheme("00ff00");
+    requests[1].result.resolve(new Response(CLIENT_THEME_CSS));
+    await current;
+    const active = styles.get("vc-clientTheme-overrides");
+    assert.ok(active);
+    assert.match(active.textContent, /--neutral-50-hsl:.*\+ 30\.00%/);
+    requests[0].result.resolve(new Response(CLIENT_THEME_CSS.replace("50%;", "60%;")));
+    await old;
+    assert.equal(styles.get("vc-clientTheme-overrides"), active);
+    const obsolete = api.startClientTheme("0000ff");
+    const latest = api.startClientTheme("ffffff");
+    assert.equal(requests[2].signal.aborted, true);
+    requests[3].result.resolve(new Response(CLIENT_THEME_CSS));
+    await latest;
+    const latestCss = active.textContent;
+    requests[2].result.resolve(new Response(CLIENT_THEME_CSS.replace("50%;", "60%;")));
+    await obsolete;
+    assert.equal(active.textContent, latestCss);
+    api.disableClientTheme();
+    assert.equal(styles.size, 0);
+});
+
+test("ClientTheme tolerates an unrelated stylesheet failure and rejects missing base colors", async () => {
+    const good = clientThemeFixture(["missing.css", "colors.css"]);
+    const pending = good.api.startClientTheme("invalid");
+    good.requests[0].result.resolve(new Response("Not found", { status: 404 }));
+    good.requests[1].result.resolve(new Response(CLIENT_THEME_CSS));
+    await pending;
+    assert.ok(good.styles.has("vc-clientTheme-overrides"));
+    assert.equal(good.warnings.length, 1);
+    assert.doesNotMatch(good.styles.get("vc-clientTheme-vars")?.textContent ?? "", /NaN/);
+    const missing = clientThemeFixture();
+    const incomplete = missing.api.startClientTheme("313338");
+    missing.requests[0].result.resolve(new Response("body { color: red; }"));
+    await incomplete;
+    assert.equal(missing.styles.has("vc-clientTheme-overrides"), false);
+    assert.equal(missing.warnings.length, 1);
+});
+
+test("ClientTheme color conversion handles primaries, grayscale and invalid imported values", () => {
+    const colors = loadThemeModule("src/plugins/clientTheme/utils/colorUtils.ts");
+    for (const [hex, hue, saturation, lightness] of [["ff0000", 0, 100, 50], ["00ff00", 120, 100, 50], ["0000ff", 240, 100, 50], ["ffffff", 0, 0, 100], ["000000", 0, 0, 0]] as const) {
+        const value = colors.hexToHSL(hex);
+        assert.deepEqual([value.hue, value.saturation, value.lightness], [hue, saturation, lightness]);
+    }
+    assert.equal(colors.relativeLuminance("000000"), 0);
+    assert.equal(colors.relativeLuminance("ffffff"), 1);
+    assert.equal(colors.relativeLuminance("ff0000"), 0.2126);
+    for (const value of [null, undefined, 0, "", "#123456", "ffff", "invalid"])
+        assert.equal(colors.normalizeHexColor(value), "313338");
+    assert.equal(colors.normalizeHexColor("Aa00fF"), "Aa00fF");
+});
+
+test("ClientTheme settings subscribe to color changes and send lowercase theme values", () => {
+    const colors = loadThemeModule("src/plugins/clientTheme/utils/colorUtils.ts");
+    const store = { color: "000000" };
+    const keys: string[][] = [];
+    const themes: string[] = [];
+    const themeStore = { theme: "light" };
+    const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
+    const settings = loadThemeModule("src/plugins/clientTheme/components/Settings.tsx", {
+        "..": { settings: { store, use: (names: string[]) => { keys.push(names); return store; } } },
+        "@plugins/clientTheme/utils/colorUtils": colors,
+        "@components/ErrorCard": { ErrorCard: "warning" },
+        "@components/Heading": { HeadingPrimary: "h1", HeadingSecondary: "h2" },
+        "@components/Paragraph": { Paragraph: "p" },
+        "@utils/css": { classNameFactory: (prefix: string) => (name: string) => prefix + name },
+        "@utils/margins": { Margins: {} },
+        "@webpack": { findByCodeLazy: () => ({ theme }: { theme: string; }) => themes.push(theme) },
+        "@webpack/common": { Button: Object.assign(() => null, { Colors: {} }), ColorPicker: "picker", ThemeStore: themeStore, ClientThemesBackgroundStore: {}, useStateFromStores: (_stores: unknown[], read: () => unknown) => read() }
+    }, { React });
+    const render = () => settings.ThemeSettingsComponent();
+    const first = render();
+    first.props.children[1].props.children[3].props.children[0].props.onClick();
+    assert.equal(themes[0], "dark");
+    store.color = "ffffff";
+    themeStore.theme = "dark";
+    const second = render();
+    assert.equal(second.props.children[0].props.children[1].props.color, 0xffffff);
+    second.props.children[1].props.children[3].props.children[0].props.onClick();
+    assert.equal(themes[1], "light");
+    assert.equal(keys[0], keys[1]);
+    assert.deepEqual(Array.from(keys[0]), ["color"]);
+});
+
 function fixture() {
     const settings = {
         enabledThemeLinks: [] as string[], enabledThemes: [] as string[], useQuickCss: true,
