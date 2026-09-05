@@ -12,7 +12,7 @@ import { settings } from "./settings";
 
 type GlobalBadge = Record<"mod" | "tooltip" | "badge", string>;
 
-export let GlobalBadges: Record<string, GlobalBadge[]> = {};
+let GlobalBadges: Record<string, GlobalBadge[]> = {};
 let loadGeneration = 0;
 export const INVITE_LINK = "kwHCJPxp8t";
 export const cl = classNameFactory("vc-global-badges-");
@@ -90,6 +90,6 @@ export function getBadges(userId: string) {
         const mod = Object.hasOwn(serviceMap, badge.mod) ? serviceMap[badge.mod] : badge.mod;
         const prefix = showModStyle === "prefix" ? `${mod} - ` : "";
         const suffix = showModStyle === "suffix" ? ` - ${mod}` : "";
-        return { ...badge, key: badge.tooltip, tooltip: prefix + badge.tooltip + suffix };
+        return { ...badge, tooltip: prefix + badge.tooltip + suffix };
     });
 }

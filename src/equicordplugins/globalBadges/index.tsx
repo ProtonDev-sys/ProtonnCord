@@ -16,7 +16,7 @@ import definePlugin from "@utils/types";
 import { ContextMenuApi, React, Toasts } from "@webpack/common";
 
 import { settings } from "./settings";
-import { cancelBadgeLoad, cl, getBadges, GlobalBadges, INVITE_LINK, loadBadges, refreshBadges } from "./utils";
+import { cancelBadgeLoad, cl, getBadges, INVITE_LINK, loadBadges, refreshBadges } from "./utils";
 
 let intervalId: ReturnType<typeof setInterval> | undefined;
 
@@ -55,9 +55,6 @@ export default definePlugin({
                 Toasts.show({ id: Toasts.genId(), message: "Could not refresh global badges. Try again later.", type: Toasts.Type.FAILURE });
             }
         }
-    },
-    get GlobalBadges() {
-        return Object.fromEntries(Object.keys(GlobalBadges).map(userId => [userId, getBadges(userId)]));
     },
     getGlobalBadges(userId: string) {
         return getBadges(userId)?.map((badge, idx) => ({
