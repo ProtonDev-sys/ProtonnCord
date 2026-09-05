@@ -63,7 +63,6 @@ export async function importSettings(data: string, type: BackupType = "all", clo
     try {
         var parsed = JSON.parse(data);
     } catch (err) {
-        console.log(data);
         throw new Error("Failed to parse JSON: " + String(err));
     }
 
@@ -183,16 +182,12 @@ export async function uploadSettingsBackup(type: BackupType = "all", showToast =
         const file = await chooseFile("application/json");
         if (!file) return;
 
-        const reader = new FileReader();
-        reader.onload = async () => {
-            try {
-                await importSettings(reader.result as string, type);
-                if (showToast) toastSuccess();
-            } catch (err) {
-                logger.error(err);
-                if (showToast) toastFailure(err);
-            }
-        };
-        reader.readAsText(file);
+        try {
+            await importSettings(await file.text(), type);
+            if (showToast) toastSuccess();
+        } catch (err) {
+            logger.error(err);
+            if (showToast) toastFailure(err);
+        }
     }
 }

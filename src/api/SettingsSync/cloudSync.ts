@@ -441,7 +441,6 @@ async function doSyncV2(
 
 async function verifyV2SourceSnapshot(
     context: CloudRequestContext,
-    localChecksums: Map<string, string>,
     signal: AbortSignal
 ) {
     if (!isCurrentContext(context) || signal.aborted) return null;
@@ -526,7 +525,7 @@ async function putV2(context: CloudRequestContext, signal: AbortSignal, manual =
 
     // The V2 response manifest is built from a pre-write server snapshot, so it cannot prove
     // that another client did not race a non-uploaded key. Verify in a fresh request before clean.
-    const verifiedManifest = await verifyV2SourceSnapshot(context, localChecksums, signal);
+    const verifiedManifest = await verifyV2SourceSnapshot(context, signal);
     if (!verifiedManifest) {
         markLocalSettingsDirty();
         return false;
