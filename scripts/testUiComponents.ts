@@ -187,6 +187,34 @@ test("numeric settings validate parsed values and retain invalid drafts without 
     assert.deepEqual(committed, [1.5, 1000, 42, 900719925474099312345n, -2n]);
 });
 
+test("call timers discard join times on logout and stop, then accept a fresh initial voice batch", () => {
+    let user: { id: string; } | undefined = { id: "self" };
+    const plugin = loadComponent("src/plugins/callTimer/index.tsx", {
+        UserStore: { getCurrentUser: () => user }
+    }, {
+        "@api/Settings": { definePluginSettings: () => ({ store: { watchLargeGuilds: false, trackSelf: true } }) },
+        "@components/ErrorBoundary": { __esModule: true, default: Object.assign(() => null, { wrap: (component: unknown) => component }) },
+        "@utils/constants": { Devs: {}, EquicordDevs: {} },
+        "@utils/react": { useFixedTimer: () => 0 },
+        "@utils/text": { formatDurationMs: () => "00:00" },
+        "@utils/types": { __esModule: true, default: (plugin: object) => plugin, OptionType: {} },
+        "./alignedChatInputFix.css?managed": {}, "./Timer": { Timer: "timer" }
+    }).default;
+    const update = () => plugin.flux.VOICE_STATE_UPDATES({ voiceStates: [{ userId: "self", channelId: "voice", guildId: "guild" }] });
+    for (const reset of [() => plugin.flux.LOGOUT?.(), () => plugin.stop()]) {
+        update();
+        assert.ok(plugin.renderTimer("self"));
+        assert.ok(plugin.ConnectionTimer());
+        reset();
+        assert.equal(plugin.renderTimer("self"), undefined);
+        assert.equal(plugin.ConnectionTimer(), null);
+        update();
+        assert.ok(plugin.renderTimer("self"));
+    }
+    user = undefined;
+    assert.equal(plugin.ConnectionTimer(), null);
+});
+
 test("disabled links have no destination and suppress click callbacks", () => {
     const { Link } = loadComponent("src/components/Link.tsx");
     let clicked = 0;
