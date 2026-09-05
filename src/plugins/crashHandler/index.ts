@@ -23,22 +23,13 @@ import { Devs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { maybePromptToUpdate } from "@utils/updater";
-import { filters, findBulk, proxyLazyWebpack } from "@webpack";
+import { findByPropsLazy } from "@webpack";
 import { closeAllModals, DraftType, ExpressionPickerStore, FluxDispatcher, NavigationRouter, SelectedChannelStore } from "@webpack/common";
 
 const CrashHandlerLogger = new Logger("CrashHandler");
 
-const { ModalStack, DraftManager } = proxyLazyWebpack(() => {
-    const [ModalStack, DraftManager] = findBulk(
-        filters.byProps("pushLazy", "popAll"),
-        filters.byProps("clearDraft", "saveDraft"),
-    );
-
-    return {
-        ModalStack,
-        DraftManager
-    };
-});
+const ModalStack = findByPropsLazy("pushLazy", "popAll");
+const DraftManager = findByPropsLazy("clearDraft", "saveDraft");
 
 const settings = definePluginSettings({
     attemptToPreventCrashes: {
@@ -93,6 +84,9 @@ export default definePlugin({
 
         // 1 ms timeout to avoid react breaking when re-rendering
         setTimeout(() => {
+            // Set isRecovering to false before setting the state to allow us to handle the next crash error correcty, in case it happens
+            setImmediate(() => isRecovering = false);
+
             try {
                 // Prevent a crash loop with an error that could not be handled
                 if (!shouldAttemptRecover) {
@@ -198,9 +192,6 @@ export default definePlugin({
                 CrashHandlerLogger.debug("Failed to navigate to home", err);
             }
         }
-
-        // Set isRecovering to false before setting the state to allow us to handle the next crash error correcty, in case it happens
-        setImmediate(() => isRecovering = false);
 
         try {
             _this.setState({ error: null, info: null });
