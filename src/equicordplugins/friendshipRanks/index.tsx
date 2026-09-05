@@ -7,7 +7,6 @@
 import "./styles.css";
 
 import { BadgePosition, BadgeUserArgs } from "@api/Badges";
-import { Badges } from "@api/index";
 import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Flex } from "@components/Flex";
@@ -125,28 +124,7 @@ function shouldShowBadge(userId: string, requirement: number, index: number) {
 
     const days = daysSince(RelationshipStore.getSince(userId));
 
-    if (ranks[index + 1] == null) return days > requirement;
-
-    return (days > requirement && days < ranks[index + 1].requirement);
-}
-
-function getBadgesToApply() {
-    return ranks.map((rank, index) => {
-        return ({
-            id: `friendship_ranks_badge_${index}`,
-            description: rank.title,
-            iconSrc: rank.iconSrc,
-            position: BadgePosition.END,
-            onClick: () => openRankModal(rank),
-            shouldShow: (info: BadgeUserArgs) => shouldShowBadge(info.userId, rank.requirement, index),
-            props: {
-                style: {
-                    borderRadius: "50%",
-                    transform: "scale(0.9)"
-                }
-            },
-        });
-    });
+    return days >= requirement && (ranks[index + 1] == null || days < ranks[index + 1].requirement);
 }
 
 const FriendDecoration = ErrorBoundary.wrap(({ userId }: { userId: string; }) => {
@@ -177,11 +155,18 @@ export default definePlugin({
         if (!settings.store.showFriendsInChat || !message?.author) return null;
         return <FriendDecoration userId={message.author.id} />;
     },
-    start() {
-        getBadgesToApply().forEach(b => Badges.addProfileBadge(b));
-
-    },
-    stop() {
-        getBadgesToApply().forEach(b => Badges.removeProfileBadge(b));
-    },
+    userProfileBadges: ranks.map((rank, index) => ({
+        id: `friendship_ranks_badge_${index}`,
+        description: rank.title,
+        iconSrc: rank.iconSrc,
+        position: BadgePosition.END,
+        onClick: () => openRankModal(rank),
+        shouldShow: (info: BadgeUserArgs) => shouldShowBadge(info.userId, rank.requirement, index),
+        props: {
+            style: {
+                borderRadius: "50%",
+                transform: "scale(0.9)"
+            }
+        },
+    })),
 });
