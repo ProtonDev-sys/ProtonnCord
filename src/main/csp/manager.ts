@@ -19,10 +19,12 @@ export function registerCspIpcHandlers() {
 }
 
 function validate(url: string, directives: string[]) {
+    if (typeof url !== "string" || !Array.isArray(directives)) return false;
+
     try {
         const { host } = new URL(url);
 
-        if (/[;'"\\]/.test(host)) return false;
+        if (!host || /[;'"\\]/.test(host)) return false;
     } catch {
         return false;
     }
@@ -69,7 +71,7 @@ function getMessage(url: string, directives: string[], callerName: string) {
 }
 
 async function addCspRule(_: IpcMainInvokeEvent, url: string, directives: string[], callerName: string): Promise<CspRequestResult> {
-    if (!validate(url, directives)) {
+    if (!validate(url, directives) || typeof callerName !== "string") {
         return "invalid";
     }
 

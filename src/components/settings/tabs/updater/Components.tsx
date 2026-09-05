@@ -7,7 +7,6 @@
 import { useSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
-import { ErrorCard } from "@components/ErrorCard";
 import { Flex } from "@components/Flex";
 import { HeadingSecondary } from "@components/Heading";
 import { Link } from "@components/Link";
@@ -17,7 +16,7 @@ import { UPDATER_BRANCHES, type UpdaterBranch } from "@shared/Updater";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
 import { relaunch } from "@utils/native";
-import { changes, checkForUpdates, isNewer, resetUpdateState, update, updateError } from "@utils/updater";
+import { changes, checkForUpdates, isNewer, resetUpdateState, update } from "@utils/updater";
 import { ConfirmModal, openModal, React, Select, Toasts, useState } from "@webpack/common";
 
 import { runWithDispatch } from "./runWithDispatch";
@@ -93,7 +92,7 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
     const busy = isUpdating || isChecking;
     const disabled = props.disabled || busy;
 
-    const isOutdated = (updates?.length ?? 0) > 0;
+    const isOutdated = updates.length > 0;
 
     return (
         <>
@@ -172,14 +171,7 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                     </Button>
                 )}
             </Flex>
-            {isNewer ? <Newer {...props} /> : !updates && updateError ? (
-                <>
-                    <Span size="md" weight="medium" color="text-strong">Error checking for updates</Span>
-                    <ErrorCard className={Margins.top8} style={{ padding: "1em" }}>
-                        <p>{updateError.stderr || updateError.stdout || updateError.message || "An unknown error occurred"}</p>
-                    </ErrorCard>
-                </>
-            ) : isOutdated ? (
+            {isNewer ? <Newer {...props} /> : isOutdated ? (
                 <>
                     <Paragraph>
                         There {updates.length === 1 ? "is 1 update" : `are ${updates.length} updates`} available. Click the button above to download and install.

@@ -28,7 +28,6 @@ import { classifyUpdateChanges } from "./updateClassification";
 export const UpdateLogger = /* #__PURE__*/ new Logger("Updater", "white");
 export let isOutdated = false;
 export let isNewer = false;
-export let updateError: any;
 export let changes: Record<"hash" | "author" | "message", string>[] = [];
 
 async function Unwrap<T>(p: Promise<IpcRes<T>>) {
@@ -36,14 +35,12 @@ async function Unwrap<T>(p: Promise<IpcRes<T>>) {
 
     if (res.ok) return res.value;
 
-    updateError = res.error;
     throw res.error;
 }
 
 export function resetUpdateState() {
     isOutdated = false;
     isNewer = false;
-    updateError = undefined;
     changes = [];
 }
 
