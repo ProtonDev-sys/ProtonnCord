@@ -165,26 +165,26 @@ test("Decor public lookups check HTTP and response shapes and never request the 
 
 test("Decor lifecycle keeps initialization and connection work obsolete after logout or stop", async () => {
     const { store, scheduled } = decorFixture();
-    const pending: (() => void)[] = [];
+    const pending: ((configured: boolean) => void)[] = [];
     const account = { id: "first", clears: 0, authInits: 0 };
     const plugin = loadComponent("src/plugins/decor/index.tsx", { UserStore: { getCurrentUser: () => account.id ? { id: account.id } : undefined } }, {
         "@components/ErrorBoundary": { __esModule: true, default: { wrap: (component: unknown) => component } },
         "@utils/constants": { Devs: {} },
         "@utils/types": { __esModule: true, default: (plugin: object) => plugin },
-        "./lib/constants": { setBaseUrl: () => new Promise<void>(resolve => pending.push(resolve)) },
-        "./lib/stores/AuthorizationStore": { useAuthorizationStore: { getState: () => ({ init: () => account.authInits++ }) } },
+        "./lib/constants": { setBaseUrl: () => new Promise<boolean>(resolve => pending.push(resolve)), cancelConfiguration: () => undefined },
+        "./lib/stores/AuthorizationStore": { useAuthorizationStore: { getState: () => ({ init: () => account.authInits++, clear: () => undefined }) } },
         "./lib/stores/CurrentUserDecorationsStore": { useCurrentUserDecorationsStore: { getState: () => ({ clear: () => account.clears++ }) } },
         "./lib/stores/UsersDecorationsStore": { useUsersDecorationsStore: store },
         "./settings": { settings: { store: { baseUrl: "https://decor.invalid" } } },
         "./ui/components": {}, "./ui/components/DecorSection": {}
     }).default;
     const first = plugin.start();
-    plugin.stop(); pending.shift()?.(); await first;
+    plugin.stop(); pending.shift()?.(true); await first;
     assert.equal(store.getState().session, null);
     assert.equal(scheduled.size, 0);
     const second = plugin.start();
     const connection = plugin.flux.CONNECTION_OPEN();
-    account.id = ""; plugin.flux.LOGOUT(); pending.shift()?.(); await Promise.all([second, connection]);
+    account.id = ""; plugin.flux.LOGOUT(); pending.shift()?.(true); await Promise.all([second, connection]);
     assert.equal(store.getState().session, null);
     account.id = "second"; await plugin.flux.CONNECTION_OPEN();
     assert.equal(typeof store.getState().session, "symbol");
@@ -193,7 +193,267 @@ test("Decor lifecycle keeps initialization and connection work obsolete after lo
     assert.equal(store.getState().session, null);
     assert.equal(scheduled.size, 0);
     assert.ok(account.clears >= 4);
-    assert.equal(account.authInits, 2);
+    assert.equal(account.authInits, 1);
+    const failed = plugin.start(); pending.shift()?.(false); await failed;
+    assert.equal(store.getState().session, null);
+    assert.equal(account.authInits, 1);
+    plugin.stop();
+});
+
+function decorAuthorizationFixture() {
+    const service = { API_URL: "https://decor.invalid/api", AUTHORIZE_URL: "https://decor.invalid/api/authorize", CLIENT_ID: "1096966363416899624" };
+    const account = { id: "first" };
+    const storage: { value: unknown; error?: Error; beforeUpdate?: () => Promise<void>; } = { value: undefined };
+    const reads: string[] = [];
+    const requests: { url: URL; options: RequestInit; resolve: (response: { ok: boolean; text(): Promise<string>; }) => void; }[] = [];
+    const modals: { props: { callback(response: unknown): Promise<void>; redirectUri: string; clientId: string; }; close(): void; }[] = [];
+    const closed: string[] = [];
+    const store = loadComponent("src/plugins/decor/lib/stores/AuthorizationStore.tsx", {
+        UserStore: { getCurrentUser: () => account.id ? { id: account.id } : undefined },
+        zustandCreate<T>(initializer: (set: (next: Partial<T>) => void, get: () => T) => T) {
+            let state: T;
+            state = initializer(next => { state = { ...state, ...next }; }, () => state);
+            return { getState: () => state };
+        },
+        OAuth2AuthorizeModal: "oauth",
+        openModal(render: (props: object) => { props: typeof modals[number]["props"]; }, options: { onCloseCallback(): void; }) {
+            modals.push({ props: render({}).props, close: options.onCloseCallback });
+            return String(modals.length - 1);
+        },
+        closeModal(key: string) { closed.push(key); modals[Number(key)].close(); }
+    }, {
+        "@plugins/decor/lib/constants": service,
+        "@api/DataStore": {
+            async get(key: string) { reads.push(key); if (storage.error) throw storage.error; return structuredClone(storage.value); },
+            async update(key: string, updater: (value: unknown) => unknown) {
+                assert.equal(key, "decor-auth-v2");
+                await storage.beforeUpdate?.();
+                if (storage.error) throw storage.error;
+                storage.value = structuredClone(updater(structuredClone(storage.value)));
+            }
+        },
+        "@utils/lazy": { proxyLazy },
+        "@utils/Logger": { Logger: class { error() { return undefined; } } },
+        "@utils/misc": {
+            isObject: (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value),
+            parseUrl: (value: string) => { try { return new URL(value); } catch { return null; } }
+        }
+    }, { URL, AbortController, Error, fetch: (url: URL, options: RequestInit) => new Promise(resolve => requests.push({ url, options, resolve })) }).useAuthorizationStore;
+    const key = (id = account.id) => JSON.stringify([service.API_URL, service.AUTHORIZE_URL, service.CLIENT_ID, id]);
+    return { store, service, account, storage, reads, requests, modals, closed, key };
+}
+
+test("Decor credentials are isolated by account and service and legacy credentials are not reused", async () => {
+    const f = decorAuthorizationFixture();
+    await f.store.getState().init();
+    assert.deepEqual(f.reads, ["decor-auth-v2"]);
+    assert.equal(f.store.getState().isAuthorized(), false);
+    f.storage.value = { [f.key()]: "first-token", [f.key("second")]: "second-token" };
+    await f.store.getState().init();
+    assert.equal(f.store.getState().requireAuthorization().token, "first-token");
+    f.account.id = "second";
+    assert.equal(f.store.getState().isAuthorized(), false);
+    assert.throws(() => f.store.getState().requireAuthorization(), /Sign in/);
+    await f.store.getState().init();
+    assert.equal(f.store.getState().requireAuthorization().token, "second-token");
+    f.service.CLIENT_ID = "2096966363416899624";
+    assert.throws(() => f.store.getState().requireAuthorization(), /Sign in/);
+    await f.store.getState().init();
+    assert.equal(f.store.getState().isAuthorized(), false);
+    assert.equal(Object.keys(f.storage.value as object).length, 2);
+});
+
+test("Decor authorization coalesces clicks and completes after the host closes its OAuth modal", async () => {
+    const f = decorAuthorizationFixture();
+    await f.store.getState().init();
+    const authorized = f.store.getState().authorize();
+    assert.equal(f.store.getState().authorize(), authorized);
+    assert.equal(f.modals.length, 1);
+    assert.equal(f.modals[0].props.redirectUri, f.service.AUTHORIZE_URL);
+    assert.equal(f.modals[0].props.clientId, f.service.CLIENT_ID);
+    const callback = f.modals[0].props.callback({ location: `${f.service.AUTHORIZE_URL}?code=synthetic` });
+    f.modals[0].close();
+    assert.equal(f.requests[0].options.signal?.aborted, false);
+    assert.equal(f.requests[0].options.redirect, "error");
+    assert.equal(f.requests[0].url.searchParams.get("client"), "vencord");
+    f.requests[0].resolve({ ok: true, text: async () => " synthetic-token\n" });
+    await callback; await authorized;
+    assert.equal(f.store.getState().requireAuthorization().token, "synthetic-token");
+    assert.deepEqual(f.storage.value, { [f.key()]: "synthetic-token" });
+    assert.equal(f.store.getState().busy, false);
+    assert.deepEqual(f.closed, [], "the host already closed this modal");
+});
+
+test("Decor cancellation and account changes discard late authorization responses", async () => {
+    const f = decorAuthorizationFixture();
+    await f.store.getState().init();
+    const dismissed = f.store.getState().authorize();
+    const dismissal = assert.rejects(dismissed, /cancelled/);
+    f.modals[0].close(); await dismissal;
+    assert.equal(f.store.getState().error, null);
+    const first = f.store.getState().authorize();
+    const cancellation = assert.rejects(first, /cancelled/);
+    const oldCallback = f.modals[1].props.callback({ location: `${f.service.AUTHORIZE_URL}?code=first` });
+    f.account.id = "second";
+    await f.store.getState().init(); await cancellation;
+    assert.equal(f.requests[0].options.signal?.aborted, true);
+    const second = f.store.getState().authorize();
+    const newCallback = f.modals[2].props.callback({ location: `${f.service.AUTHORIZE_URL}?code=second` });
+    f.requests[1].resolve({ ok: true, text: async () => "second-token" });
+    await newCallback; await second;
+    f.requests[0].resolve({ ok: true, text: async () => "first-token" });
+    await oldCallback;
+    assert.deepEqual(f.storage.value, { [f.key()]: "second-token" });
+    assert.equal(f.store.getState().requireAuthorization().userId, "second");
+});
+
+test("Decor validates authorization callbacks and does not publish credentials when persistence fails", async () => {
+    for (const location of ["https://other.invalid/api/authorize?code=x", "https://decor.invalid/api/other?code=x", "https://decor.invalid/api/authorize?error=denied", "https://decor.invalid/api/authorize#code=x"]) {
+        const f = decorAuthorizationFixture();
+        await f.store.getState().init();
+        const authorized = f.store.getState().authorize();
+        const failure = assert.rejects(authorized, /Invalid Decor authorization response/);
+        await f.modals[0].props.callback({ location }); await failure;
+        assert.equal(f.requests.length, 0);
+        assert.equal(f.store.getState().busy, false);
+    }
+    const f = decorAuthorizationFixture();
+    await f.store.getState().init();
+    const authorized = f.store.getState().authorize();
+    const failure = assert.rejects(authorized, /Storage unavailable/);
+    const callback = f.modals[0].props.callback({ location: `${f.service.AUTHORIZE_URL}?code=x` });
+    f.storage.error = new Error("Storage unavailable");
+    f.requests[0].resolve({ ok: true, text: async () => "synthetic-token" });
+    await callback; await failure;
+    assert.equal(f.store.getState().authorization, null);
+    assert.match(f.store.getState().error, /Storage unavailable/);
+    assert.equal(f.storage.value, undefined);
+});
+
+test("Decor preserves malformed storage and only removes the confirmed current credential", async () => {
+    const f = decorAuthorizationFixture();
+    f.storage.value = { legacy: 123 };
+    await f.store.getState().init();
+    assert.match(f.store.getState().error, /saved data has been kept/);
+    assert.deepEqual(f.storage.value, { legacy: 123 });
+    f.storage.value = { [f.key()]: "first-token", [f.key("second")]: "second-token" };
+    await f.store.getState().init();
+    const expected = f.store.getState().authorization;
+    f.account.id = "second";
+    await assert.rejects(f.store.getState().remove(expected), /account changed/);
+    f.account.id = "first";
+    f.storage.error = new Error("Commit failed");
+    await assert.rejects(f.store.getState().remove(expected), /Commit failed/);
+    assert.equal(f.store.getState().authorization, expected);
+    f.storage.error = undefined;
+    f.storage.value = { [f.key()]: "newer-token" };
+    await assert.rejects(f.store.getState().remove(expected), /Saved Decor authorization changed/);
+    assert.deepEqual(f.storage.value, { [f.key()]: "newer-token" });
+    await f.store.getState().init();
+    f.storage.value = { [f.key()]: "newer-token", [f.key("second")]: "second-token" };
+    await f.store.getState().remove(f.store.getState().authorization);
+    assert.deepEqual(f.storage.value, { [f.key("second")]: "second-token" });
+    assert.equal(f.store.getState().isAuthorized(), false);
+});
+
+test("Decor rejects failed exchanges and invalid tokens without storing them", async () => {
+    for (const response of [{ ok: false, token: "synthetic-token" }, { ok: true, token: "" }, { ok: true, token: "invalid token" }]) {
+        const f = decorAuthorizationFixture();
+        await assert.rejects(f.store.getState().authorize(), /not ready/);
+        assert.equal(f.modals.length, 0);
+        await f.store.getState().init();
+        const authorized = f.store.getState().authorize();
+        const failure = assert.rejects(authorized, /authorization failed|invalid authorization token/);
+        const callback = f.modals[0].props.callback({ location: `${f.service.AUTHORIZE_URL}?code=x` });
+        await f.modals[0].props.callback({ location: `${f.service.AUTHORIZE_URL}?code=x` });
+        assert.equal(f.requests.length, 1);
+        f.requests[0].resolve({ ok: response.ok, text: async () => response.token });
+        await callback; await failure;
+        assert.equal(f.storage.value, undefined);
+        assert.equal(f.store.getState().authorization, null);
+        assert.deepEqual(f.closed, ["0"]);
+    }
+});
+
+test("Decor private requests reject stale credentials before sending and disable redirects", async () => {
+    const f = decorAuthorizationFixture();
+    const requests: { url: string; options: RequestInit; }[] = [];
+    const api = loadComponent("src/plugins/decor/lib/api.ts", {}, {
+        "./constants": f.service,
+        "./stores/AuthorizationStore": { useAuthorizationStore: f.store },
+        "@utils/misc": {}
+    }, { Headers, fetch: async (url: string, options: RequestInit) => {
+        requests.push({ url, options });
+        return { ok: true, json: async () => [] };
+    } });
+    await assert.rejects(api.getUserDecorations(), /Sign in/);
+    assert.equal(requests.length, 0);
+    f.storage.value = { [f.key()]: "synthetic-token" };
+    await f.store.getState().init();
+    await api.getUserDecorations();
+    assert.equal(new Headers(requests[0].options.headers).get("Authorization"), "Bearer synthetic-token");
+    assert.equal(requests[0].options.redirect, "error");
+    f.account.id = "second";
+    await assert.rejects(api.getUserDecorations(), /Sign in/);
+    f.account.id = "first";
+    f.service.API_URL = "https://other.invalid/api";
+    await assert.rejects(api.getUserDecorations(), /Sign in/);
+    assert.equal(requests.length, 1);
+});
+
+test("Decor checks authorization ownership again inside an awaited storage transaction", async () => {
+    const f = decorAuthorizationFixture();
+    await f.store.getState().init();
+    let resume: () => void = () => undefined;
+    f.storage.beforeUpdate = () => new Promise<void>(resolve => { resume = resolve; });
+    const authorized = f.store.getState().authorize();
+    const failure = assert.rejects(authorized, /cancelled/);
+    const callback = f.modals[0].props.callback({ location: `${f.service.AUTHORIZE_URL}?code=x` });
+    f.requests[0].resolve({ ok: true, text: async () => "synthetic-token" });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    f.store.getState().clear(); resume();
+    await callback; await failure;
+    assert.equal(f.storage.value, undefined);
+    assert.equal(f.store.getState().authorization, null);
+});
+
+test("Decor configuration applies validated responses atomically and ignores cancelled requests", async () => {
+    const requests: { url: string; options: RequestInit; resolve: (response: { ok: boolean; json(): Promise<unknown>; }) => void; }[] = [];
+    const config = loadComponent("src/plugins/decor/lib/constants.ts", {}, {
+        "@utils/Logger": { Logger: class { error() { return undefined; } } },
+        "@utils/misc": {
+            isObject: (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value),
+            parseUrl: (value: string) => { try { return new URL(value); } catch { return null; } }
+        }
+    }, { AbortController, fetch: (url: string, options: RequestInit) => new Promise(resolve => requests.push({ url, options, resolve })) });
+    const original = config.BASE_URL;
+    for (const invalid of ["http://decor.invalid", "https://user:password@decor.invalid", "https://decor.invalid/?query=x", "https://decor.invalid/#fragment", " https://decor.invalid"]) {
+        assert.equal(await config.setBaseUrl(invalid), false);
+    }
+    assert.equal(requests.length, 0);
+    const old = config.setBaseUrl("https://old.invalid");
+    const current = config.setBaseUrl("https://new.invalid/base/");
+    assert.equal(requests[0].options.signal?.aborted, true);
+    assert.equal(requests[1].url, "https://new.invalid/base/api/config");
+    assert.equal(requests[1].options.redirect, "error");
+    requests[1].resolve({ ok: true, json: async () => ({ CDN_URL: "https://cdn.invalid/content/", CLIENT_ID: "1096966363416899624" }) });
+    assert.equal(await current, true);
+    requests[0].resolve({ ok: true, json: async () => ({ CDN_URL: "https://old-cdn.invalid", CLIENT_ID: "2096966363416899624" }) });
+    assert.equal(await old, false);
+    assert.equal(config.BASE_URL, "https://new.invalid/base");
+    assert.equal(config.CDN_URL, "https://cdn.invalid/content");
+    assert.equal(config.AUTHORIZE_URL, "https://new.invalid/base/api/authorize");
+    const invalid = config.setBaseUrl("https://bad.invalid");
+    requests[2].resolve({ ok: true, json: async () => ({ CDN_URL: "http://cdn.invalid", CLIENT_ID: "1096966363416899624" }) });
+    assert.equal(await invalid, false);
+    assert.equal(config.BASE_URL, "https://new.invalid/base");
+    const failed = config.setBaseUrl(config.BASE_URL);
+    requests[3].resolve({ ok: false, json: async () => null });
+    assert.equal(await failed, true, "a temporary same-service failure retains trusted configuration");
+    const stopped = config.setBaseUrl(original); config.cancelConfiguration();
+    requests[4].resolve({ ok: true, json: async () => ({ CDN_URL: "https://ignored.invalid", CLIENT_ID: "1096966363416899624" }) });
+    assert.equal(await stopped, false);
+    assert.equal(config.BASE_URL, "https://new.invalid/base");
 });
 
 function loadFolders() {

@@ -32,12 +32,13 @@ export interface NewDecoration {
 }
 
 async function fetchApi(url: RequestInfo, options?: RequestInit) {
+    const { token } = useAuthorizationStore.getState().requireAuthorization();
+    const headers = new Headers(options?.headers);
+    headers.set("Authorization", `Bearer ${token}`);
     const res = await fetch(url, {
         ...options,
-        headers: {
-            ...options?.headers,
-            Authorization: `Bearer ${useAuthorizationStore.getState().token}`
-        }
+        headers,
+        redirect: "error"
     });
 
     if (res.ok) return res;

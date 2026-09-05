@@ -91,6 +91,9 @@ function SectionHeader({ section }: SectionHeaderProps) {
 }
 
 function ChangeDecorationModal(props: RenderModalProps) {
+    const authorization = useAuthorizationStore();
+    const [error, setError] = useState<string | null>(null);
+    const notice = error ?? authorization.error;
     // undefined = not trying, null = none, Decoration = selected
     const [tryingDecoration, setTryingDecoration] = useState<Decoration | null | undefined>(undefined);
     const isTryingDecoration = typeof tryingDecoration !== "undefined";
@@ -139,6 +142,7 @@ function ChangeDecorationModal(props: RenderModalProps) {
     return <Modal
         {...props}
         title="Change Decoration"
+        notice={notice ? { type: "critical", message: notice } : undefined}
         size="lg"
         actions={[
             {
@@ -179,19 +183,25 @@ function ChangeDecorationModal(props: RenderModalProps) {
                     </Button>}
                 </Tooltip>
                 <Button
-                    onClick={() => openModal(modalProps => (
-                        <ConfirmModal
-                            {...modalProps}
-                            title="Log Out"
-                            subtitle="Are you sure you want to log out of Decor?"
-                            confirmText="Log Out"
-                            cancelText="Cancel"
-                            onConfirm={() => {
-                                useAuthorizationStore.getState().remove(UserStore.getCurrentUser().id);
-                                props.onClose();
-                            }}
-                        />
-                    ))}
+                    disabled={authorization.busy || !authorization.authorization}
+                    onClick={() => {
+                        const expected = authorization.authorization;
+                        if (!expected) return;
+                        openModal(modalProps => (
+                            <ConfirmModal
+                                {...modalProps}
+                                title="Log Out"
+                                subtitle="Are you sure you want to log out of Decor?"
+                                confirmText="Log Out"
+                                cancelText="Cancel"
+                                onConfirm={() => {
+                                    authorization.remove(expected).then(props.onClose).catch(error => {
+                                        setError(error instanceof Error ? error.message : "Could not log out of Decor.");
+                                    });
+                                }}
+                            />
+                        ));
+                    }}
                     variant="dangerSecondary"
                 >
                     Log Out
