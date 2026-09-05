@@ -6,7 +6,7 @@
 
 import { definePluginSettings } from "@api/Settings";
 import { getUserSettingLazy } from "@api/UserSettings";
-import { CopyIdIcon, ImageIcon } from "@components/Icons";
+import { CopyIdIcon, ImageIcon, PencilIcon as SharedPencilIcon, UserIcon } from "@components/Icons";
 import { copyToClipboard } from "@utils/clipboard";
 import { Devs } from "@utils/constants";
 import { getCurrentChannel, getCurrentGuild, getIntlMessage, openImageModal } from "@utils/discord";
@@ -23,7 +23,7 @@ const loadRoleMembers = findByCodeLazy(".GUILD_ROLE_MEMBER_IDS(", "requestMember
 
 const DeveloperMode = getUserSettingLazy("appearance", "developerMode")!;
 
-async function openRoleIconModal(roleId: string, roleIcon: string, roleName: string) {
+function openRoleIconModal(roleId: string, roleIcon: string) {
     const format = settings.store.roleIconFileFormat;
     const original = `${location.protocol}//${window.GLOBAL_ENV.CDN_HOST}/role-icons/${roleId}/${roleIcon}.${format}`;
     const url = original.replace(`//${window.GLOBAL_ENV.CDN_HOST}/`, "//media.discordapp.net/");
@@ -37,31 +37,13 @@ async function openRoleIconModal(roleId: string, roleIcon: string, roleName: str
 }
 
 function PencilIcon() {
-    return (
-        <svg
-            role="img"
-            width="18"
-            height="18"
-            fill="none"
-            viewBox="0 0 24 24"
-        >
-            <path fill="currentColor" d="m13.96 5.46 4.58 4.58a1 1 0 0 0 1.42 0l1.38-1.38a2 2 0 0 0 0-2.82l-3.18-3.18a2 2 0 0 0-2.82 0l-1.38 1.38a1 1 0 0 0 0 1.42ZM2.11 20.16l.73-4.22a3 3 0 0 1 .83-1.61l7.87-7.87a1 1 0 0 1 1.42 0l4.58 4.58a1 1 0 0 1 0 1.42l-7.87 7.87a3 3 0 0 1-1.6.83l-4.23.73a1.5 1.5 0 0 1-1.73-1.73Z" />
-        </svg>
-    );
+    return <SharedPencilIcon width={18} height={18} />;
 }
 
 function AppearanceIcon() {
     return (
         <svg width="18" height="18" viewBox="0 0 24 24">
             <path fill="currentColor" d="M 12,0 C 5.3733333,0 0,5.3733333 0,12 c 0,6.626667 5.3733333,12 12,12 1.106667,0 2,-0.893333 2,-2 0,-0.52 -0.2,-0.986667 -0.52,-1.346667 -0.306667,-0.346666 -0.506667,-0.813333 -0.506667,-1.32 0,-1.106666 0.893334,-2 2,-2 h 2.36 C 21.013333,17.333333 24,14.346667 24,10.666667 24,4.7733333 18.626667,0 12,0 Z M 4.6666667,12 c -1.1066667,0 -2,-0.893333 -2,-2 0,-1.1066667 0.8933333,-2 2,-2 1.1066666,0 2,0.8933333 2,2 0,1.106667 -0.8933334,2 -2,2 z M 8.666667,6.6666667 c -1.106667,0 -2.0000003,-0.8933334 -2.0000003,-2 0,-1.1066667 0.8933333,-2 2.0000003,-2 1.106666,0 2,0.8933333 2,2 0,1.1066666 -0.893334,2 -2,2 z m 6.666666,0 c -1.106666,0 -2,-0.8933334 -2,-2 0,-1.1066667 0.893334,-2 2,-2 1.106667,0 2,0.8933333 2,2 0,1.1066666 -0.893333,2 -2,2 z m 4,5.3333333 c -1.106666,0 -2,-0.893333 -2,-2 0,-1.1066667 0.893334,-2 2,-2 1.106667,0 2,0.8933333 2,2 0,1.106667 -0.893333,2 -2,2 z" />
-        </svg>
-    );
-}
-
-function RoleMembersIcon() {
-    return (
-        <svg width="18" height="18" viewBox="0 0 24 24">
-            <path fill="currentColor" d="M12 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM11.53 11A9.53 9.53 0 0 0 2 20.53c0 .81.66 1.47 1.47 1.47h.22c.24 0 .44-.17.5-.4.29-1.12.84-2.17 1.32-2.91.14-.21.43-.1.4.15l-.26 2.61c-.02.3.2.55.5.55h11.7a.5.5 0 0 0 .5-.55l-.27-2.6c-.02-.26.27-.37.41-.16.48.74 1.03 1.8 1.32 2.9.06.24.26.41.5.41h.22c.81 0 1.47-.66 1.47-1.47A9.53 9.53 0 0 0 12.47 11h-.94Z" />
         </svg>
     );
 }
@@ -90,6 +72,7 @@ const settings = definePluginSettings({
 
 export function buildExtraRoleContextMenuItems(role: Role, guild: Guild, popoutRef?: React.RefObject<any>) {
     if (!role) return { before: [], after: [] };
+    const { colorString, icon } = role;
 
     const before = [
         PermissionStore.getGuildPermissionProps(guild).canManageRoles && (
@@ -104,30 +87,24 @@ export function buildExtraRoleContextMenuItems(role: Role, guild: Guild, popoutR
                 icon={PencilIcon}
             />
         ),
-        role.colorString && (
+        colorString && (
             <Menu.MenuItem
                 key="vc-copy-role-color"
                 id="vc-copy-role-color"
                 label="Copy Role Color"
-                action={() => copyToClipboard(role.colorString!)}
+                action={() => copyToClipboard(colorString)}
                 icon={AppearanceIcon}
             />
         )
     ].filter(isTruthy);
 
     const after = [
-        role.icon && (
+        icon && (
             <Menu.MenuItem
                 key="vc-view-role-icon"
                 id="vc-view-role-icon"
                 label="View Role Icon"
-                action={() => {
-                    openImageModal({
-                        url: `${location.protocol}//${window.GLOBAL_ENV.CDN_HOST}/role-icons/${role.id}/${role.icon}.${settings.store.roleIconFileFormat}`,
-                        height: 128,
-                        width: 128
-                    });
-                }}
+                action={() => openRoleIconModal(role.id, icon)}
                 icon={ImageIcon}
             />
         ),
@@ -160,7 +137,7 @@ export function buildExtraRoleContextMenuItems(role: Role, guild: Guild, popoutR
                             >
                                 <div className={MenuItemClasses.label}>View Role Members</div>
                                 <div className={MenuItemClasses.iconContainer}>
-                                    <RoleMembersIcon />
+                                    <UserIcon width={18} height={18} />
                                 </div>
                             </div>
                         )}
@@ -231,51 +208,15 @@ export default definePlugin({
 
     contextMenus: {
         "dev-context"(children, { id }: { id: string; }) {
-            const popoutRef = useRef(null);
-
             const guild = getCurrentGuild();
             if (!guild) return;
 
             const role = GuildRoleStore.getRole(guild.id, id);
             if (!role) return;
 
-            if (role.colorString) {
-                children.unshift(
-                    <Menu.MenuItem
-                        id="vc-copy-role-color"
-                        label="Copy Role Color"
-                        action={() => copyToClipboard(role.colorString!)}
-                        icon={AppearanceIcon}
-                    />
-                );
-            }
-
-            if (PermissionStore.getGuildPermissionProps(guild).canManageRoles) {
-                children.unshift(
-                    <Menu.MenuItem
-                        id="vc-edit-role"
-                        label="Edit Role"
-                        action={async () => {
-                            await GuildSettingsActions.open(guild.id, "ROLES");
-                            GuildSettingsActions.selectRole(id);
-                        }}
-                        icon={PencilIcon}
-                    />
-                );
-            }
-
-            if (role.icon) {
-                const roleIcon = role.icon;
-                children.push(
-                    <Menu.MenuItem
-                        id="vc-view-role-icon"
-                        label="View Role Icon"
-                        action={() => openRoleIconModal(role.id, roleIcon, role.name)}
-                        icon={ImageIcon}
-                    />
-
-                );
-            }
+            const { before, after } = buildExtraRoleContextMenuItems(role, guild);
+            children.unshift(...before);
+            children.push(...after);
         }
     }
 });
