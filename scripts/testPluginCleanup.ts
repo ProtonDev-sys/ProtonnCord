@@ -75,7 +75,7 @@ class CanvasStub {
     readonly context = { canvas: this, clearRect() { }, drawImage() { }, fillRect() { }, strokeRect() { } };
 
     getContext() { return this.context; }
-    getBoundingClientClientRect() { return { left: 10, top: 20, width: 100, height: 50 }; }
+    getBoundingClientRect() { return { left: 10, top: 20, width: 100, height: 50 }; }
     addEventListener(name: string, listener: (event: Pointer) => void) {
         assert.equal(this.listeners.has(name), false);
         this.listeners.set(name, listener);
