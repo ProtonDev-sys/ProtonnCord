@@ -16,7 +16,7 @@ Secure Messaging adds opt-in encrypted messages, stickers, GIF-picker links, and
 - The privileged native helper resolves recipients only through its persistent verified-key store. The receiver validates the Discord author/channel binding, pinned sender fingerprint, signature, AEAD tag, recipient entry, and persistent replay state before rendering plaintext.
 - Private key material and counters are stored in an encrypted vault protected by Electron `safeStorage`. The plugin refuses to operate if secure OS storage is unavailable, including Linux's `basic_text` backend.
 
-After the vault is validated, a decrypted copy is cached in the trusted Electron main process to avoid a disk and operating-system key-store round trip on every message. Identity keys therefore remain in main-process memory while an unprotected vault is in use or a protected vault is unlocked. The renderer API cannot export them, but malicious code already running in the main process remains outside the threat model.
+After the vault is validated, a decrypted copy is cached in the trusted Electron main process to avoid a disk and operating-system key-store round trip on every message. Identity keys therefore remain in main-process memory while an unprotected vault is in use or a protected vault is unlocked. The renderer API does not return plaintext private keys, but malicious code already running in the main process remains outside the threat model.
 
 Key fingerprints bind the Discord user ID and both public keys. Users must compare the full fingerprint through a channel outside the Discord conversation before trusting it. A changed key is never accepted silently and disables affected conversation configuration until it is explicitly verified again.
 
@@ -53,6 +53,14 @@ Deterministic identity recovery restores the current fingerprint, not the rest o
 A clean OneKey restore seeds its send counter from the current system clock because no prior counter is available. Keep that clock accurate and use only one active sending installation for the same physical OneKey and Discord account at a time. A correctly restored installation-local state backup preserves the exact send counters and replay records instead.
 
 The wallet recovery phrase does not recreate the physical device's secure-element secret. Before resetting, replacing, or losing the OneKey, unlock the vault and select **Remove protection**. Otherwise the locked vault can become permanently unreadable. While OneKey protection is active, deterministic identity rotation is hidden; remove protection first if rotation is required.
+
+### Pair an Android phone
+
+Use the same OneKey Classic 1S and Discord account with [ProtonnCord Mobile](../../../mobile/README.md). After setting up or unlocking OneKey in the mobile plugin settings, compare the full identity fingerprint with desktop.
+
+On the unlocked desktop, **Copy phone pairing** creates a `PCMP1` snapshot of verified contacts, enabled and reviewed conversations, and bounded retired-key history. It encrypts that snapshot in the main process using a separate HKDF-derived pairing key and AES-GCM, binding the OneKey root fingerprint and account as authenticated context. Only ciphertext reaches the renderer/clipboard. Paste it into **Bring your PC chats → Import PC chats** on the phone, then clear the clipboard. The phone rejects a different OneKey/account, modified pairing data, or a pairing older than one already imported.
+
+Pairing does not copy desktop counters or replay records and does not continuously synchronize later contact changes. The phone retains its own replay history and uses a separate high counter range from desktop's clock-seeded range. This permits the paired PC and phone to send with the current shared identity; the general clean-desktop-restore warning above still applies to multiple desktop installations. A changed DM membership or pending peer-key review continues to block mobile sends. Retired keys carried in the pairing retain their original history cutoffs. Keep the installation-local desktop state backup as well.
 
 ## Safety properties and limits
 

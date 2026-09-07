@@ -1,0 +1,7 @@
+{
+	"name": "Protonn Cord Mobile",
+	"description": "Android Secure Messaging compatibility for Protonn Cord.",
+	"channels": {
+		"uk.co.protonn.secure-messaging": { "latest": "0.2.0-alpha3", "beta": "0.2.0-alpha3", "nightly": "0.2.0-alpha3" }
+	}
+}
