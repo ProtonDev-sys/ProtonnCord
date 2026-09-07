@@ -423,6 +423,8 @@ async function main(): Promise<void> {
         const key = randomBytes(32);
         const firstPreparedKey = Buffer.from(key);
         module.activatePreparedSecurityKeyVault({ key: firstPreparedKey, profile: prfProfile });
+        assert.throws(() => module.createActiveOneKeyMobilePairing(localUserId, plaintextVault), /locked/u,
+            "phone pairing requires the OneKey provider, not a different unlocked security-key mode");
         assert.equal(firstPreparedKey.every(byte => byte === 0), true,
             "the transferred prepared key must be wiped after activation");
         const wrapped = module.wrapSecurityKeyVaultValue(plaintextVault, protectedChannelIdsByUser);
@@ -500,6 +502,13 @@ async function main(): Promise<void> {
         module.clearSecurityKeyVaultSession();
         assert.deepEqual(module.wrapSecurityKeyVaultValue(plaintextVault, {}), plaintextVault,
             "unconfigured vaults remain backwards compatible with OS-only storage");
+        assert.throws(() => module.createActiveOneKeyMobilePairing(localUserId, plaintextVault), /locked/u);
+        module.activatePreparedSecurityKeyVault({ key: Buffer.from(key), profile: oneKeyProfile });
+        const phonePairing = module.createActiveOneKeyMobilePairing(localUserId, plaintextVault);
+        assert.ok(phonePairing.startsWith(`PCMP1:${localUserId}.${oneKeyProfile.rootFingerprint}.`));
+        assert.equal(phonePairing.includes("private material must be wrapped"), false);
+        module.clearSecurityKeyVaultSession();
+        assert.throws(() => module.createActiveOneKeyMobilePairing(localUserId, plaintextVault), /locked/u);
         key.fill(0);
     } finally {
         await rm(directory, { force: true, recursive: true });
