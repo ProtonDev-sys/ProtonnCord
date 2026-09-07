@@ -24,6 +24,8 @@ type DevCompanionModule = typeof import("../src/plugins/devCompanion.dev/initWs"
 
 interface HarnessRuntime {
     authSecret: string;
+    lazyLoad?: () => Promise<void>;
+    lookups: number;
     logs: unknown[][];
     reloads: number;
     toasts: Array<Record<string, unknown>>;
@@ -114,11 +116,11 @@ async function settle(): Promise<void> {
 }
 
 async function waitFor(condition: () => boolean, failureMessage: string): Promise<void> {
-    for (let index = 0; index < 1000; index++) {
-        if (condition()) return;
-        await new Promise<void>(resolve => setImmediate(resolve));
+    const deadline = performance.now() + 5000;
+    while (!condition()) {
+        if (performance.now() >= deadline) assert.fail(failureMessage);
+        await new Promise<void>(resolve => setTimeout(resolve, 5));
     }
-    assert.fail(failureMessage);
 }
 
 async function testAuthenticator(): Promise<void> {
@@ -270,7 +272,6 @@ const runtimeStubs: Plugin = {
         stub(/^@api\/Notices$/, "notices");
         stub(/^@api\/PluginManager$/, "plugin-manager");
         stub(/^@api\/Settings$/, "settings");
-        stub(/^@components\/ErrorBoundary$/, "error-boundary");
         stub(/^@debug\/loadLazyChunks$/, "lazy-chunks");
         stub(/^@debug\/reporterData$/, "reporter-data");
         stub(/^@utils\/discord$/, "discord");
@@ -300,10 +301,9 @@ const runtimeStubs: Plugin = {
                     export const stopPlugin = () => false;
                 `,
                 settings: "export const Settings = { plugins: {} };",
-                "error-boundary": "export default { wrap: component => component };",
-                "lazy-chunks": "export const loadLazyChunks = async () => undefined;",
+                "lazy-chunks": "export const loadLazyChunks = () => globalThis.__devCompanionHarness.lazyLoad?.() ?? Promise.resolve();",
                 "reporter-data": "export const reporterData = {};",
-                discord: "export const getIntlMessageFromHash = () => 'translated';",
+                discord: "export const getIntlMessageFromHash = () => { globalThis.__devCompanionHarness.lookups++; return 'translated'; };",
                 patches: "export const canonicalizeMatch = value => value;",
                 webpack: `
                     export const wreq = { c: {}, m: { 101: () => undefined, 202: () => undefined } };
@@ -314,14 +314,12 @@ const runtimeStubs: Plugin = {
                     export const filters = { byClassNames: noMatch, byProps: noMatch, byStoreName: noMatch, byCode: noMatch, componentByCode: noMatch };
                 `,
                 "webpack-common": `
-                    export const React = { createElement: (type, props, ...children) => ({ children, props, type }) };
                     export const Toasts = {
                         Position: { BOTTOM: 0, TOP: 1 },
                         Type: { FAILURE: 0, MESSAGE: 1, SUCCESS: 2 },
                         genId: () => "toast",
                         show: toast => globalThis.__devCompanionHarness.toasts.push(toast)
                     };
-                    export const useState = value => [value, () => undefined];
                 `,
                 vencord: "export const WebpackPatcher = { getFactoryPatchedBy: () => new Set(), getFactoryPatchedSource: () => undefined };"
             };
@@ -344,7 +342,6 @@ async function loadInitWs(): Promise<DevCompanionModule> {
             plugins: [runtimeStubs],
             target: "node24",
         });
-        const source = await readFile(output, "utf8");
         return await import(`${pathToFileURL(output).href}?security=${Date.now()}`) as DevCompanionModule;
     } finally {
         await rm(directory, { force: true, recursive: true });
@@ -393,7 +390,7 @@ async function authenticateSocket(socket: FakeWebSocket): Promise<void> {
 
 async function testHostileServers(module: DevCompanionModule): Promise<void> {
     FakeWebSocket.instances.length = 0;
-    harnessGlobal.__devCompanionHarness = { authSecret: "", logs: [], reloads: 0, toasts: [] };
+    harnessGlobal.__devCompanionHarness = { authSecret: "", logs: [], lookups: 0, reloads: 0, toasts: [] };
     module.initWs();
     assert.equal(FakeWebSocket.instances.length, 0, "an empty or invalid secret must disable all network activity");
 
@@ -521,6 +518,53 @@ async function testHostileServers(module: DevCompanionModule): Promise<void> {
         "the over-limit command must not reach dispatch or receive a response");
 }
 
+async function testConnectionLifetime(module: DevCompanionModule): Promise<void> {
+    const runtime = harnessGlobal.__devCompanionHarness;
+    const pending = Promise.withResolvers<void>();
+    runtime.lazyLoad = () => pending.promise;
+    const old = await beginConnection(module);
+    await authenticateSocket(old);
+    old.emitMessage(JSON.stringify({ nonce: 1, type: "allModules", data: null }));
+    const oldResponses = old.sent.length;
+    const replacement = await beginConnection(module);
+    assert.equal(old.readyState, FakeWebSocket.CLOSED, "replacement closes the previous connection");
+    const lookups = runtime.lookups;
+    old.emitMessage(JSON.stringify({ nonce: 2, type: "i18n", data: { hashedKey: "ignored" } }));
+    assert.equal(runtime.lookups, lookups, "obsolete connections cannot dispatch a lookup");
+    pending.resolve(); await settle();
+    assert.equal(old.sent.length, oldResponses, "obsolete chunk completion cannot reply");
+    await authenticateSocket(replacement);
+    const failure = Promise.withResolvers<void>();
+    runtime.lazyLoad = () => failure.promise;
+    replacement.emitMessage(JSON.stringify({ nonce: 3, type: "allModules", data: null }));
+    const responses = replacement.sent.length;
+    const toasts = runtime.toasts.length;
+    module.stopWs();
+    module.stopWs();
+    replacement.emitMessage(JSON.stringify({ nonce: 4, type: "i18n", data: { hashedKey: "ignored" } }));
+    failure.reject(new Error("Synthetic chunk failure")); await settle();
+    assert.equal(runtime.lookups, lookups);
+    assert.equal(replacement.sent.length, responses, "stopped chunk failures cannot reply");
+    assert.equal(runtime.toasts.length, toasts, "intentional stop does not report a connection failure");
+    delete runtime.lazyLoad;
+    module.initWs();
+    const connecting = FakeWebSocket.instances.at(-1);
+    assert.ok(connecting);
+    module.stopWs(); connecting.emitOpen(); await settle();
+    assert.equal(connecting.sent.length, 0, "late open events cannot begin authentication after stop");
+    const current = await beginConnection(module);
+    await authenticateSocket(current);
+    current.emitMessage(JSON.stringify({ nonce: 5, type: "allModules", data: null }));
+    await waitFor(() => parseSent(current).some(message => message.nonce === 5), "current chunk load did not reply");
+    assert.equal(parseSent(current).find(message => message.nonce === 5)?.ok, true);
+    runtime.lazyLoad = () => Promise.reject(new Error("Synthetic active chunk failure"));
+    current.emitMessage(JSON.stringify({ nonce: 6, type: "allModules", data: null }));
+    await waitFor(() => parseSent(current).some(message => message.nonce === 6), "current chunk failure did not reply");
+    assert.equal(parseSent(current).find(message => message.nonce === 6)?.ok, false);
+    delete runtime.lazyLoad;
+    module.stopWs();
+}
+
 async function main(): Promise<void> {
     const originalWebSocket = Object.getOwnPropertyDescriptor(globalThis, "WebSocket");
     const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
@@ -544,7 +588,7 @@ async function main(): Promise<void> {
     assert.match(indexSource, /componentProps:\s*\{\s*type: "password"/u,
         "the shared authentication secret must not be displayed as ordinary text");
 
-    harnessGlobal.__devCompanionHarness = { authSecret: SECRET, logs: [], reloads: 0, toasts: [] };
+    harnessGlobal.__devCompanionHarness = { authSecret: SECRET, logs: [], lookups: 0, reloads: 0, toasts: [] };
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket, writable: true });
     Object.defineProperty(globalThis, "window", { configurable: true, value: globalThis, writable: true });
     Object.defineProperty(globalThis, "location", {
@@ -554,7 +598,9 @@ async function main(): Promise<void> {
     });
 
     try {
-        await testHostileServers(await loadInitWs());
+        const module = await loadInitWs();
+        await testHostileServers(module);
+        await testConnectionLifetime(module);
     } finally {
         for (const socket of FakeWebSocket.instances) socket.close(1000, "test cleanup");
         if (originalWebSocket) Object.defineProperty(globalThis, "WebSocket", originalWebSocket);

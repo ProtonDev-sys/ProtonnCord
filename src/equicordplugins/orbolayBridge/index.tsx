@@ -434,9 +434,9 @@ async function handleVoiceStateUpdates(dispatch: unknown): Promise<void> {
     }
 }
 
-function handleStreamerMode(dispatch: unknown): void {
-    if (!bridge?.protocol.authenticated || !isRecord(dispatch) || typeof dispatch.value !== "boolean") return;
-    sendAuthenticated({ cmd: "STREAMER_MODE", enabled: dispatch.value });
+function handleStreamerMode(): void {
+    if (!bridge?.protocol.authenticated) return;
+    sendAuthenticated({ cmd: "STREAMER_MODE", enabled: StreamerModeStore.enabled === true });
 }
 
 export default definePlugin({
@@ -449,7 +449,7 @@ export default definePlugin({
         SPEAKING: handleSpeaking,
         VOICE_STATE_UPDATES: handleVoiceStateUpdates,
         RPC_NOTIFICATION_CREATE: handleMessageNotification,
-        STREAMER_MODE: handleStreamerMode,
+        STREAMER_MODE_UPDATE: handleStreamerMode,
     },
 
     start() {

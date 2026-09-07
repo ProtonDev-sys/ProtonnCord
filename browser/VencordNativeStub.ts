@@ -29,7 +29,7 @@ import { debounce } from "@shared/debounce";
 import type { UpdaterBranch } from "@shared/Updater";
 import { localStorage } from "@utils/localStorage";
 import { getStylusWebStoreUrl } from "@utils/web";
-import { EXTENSION_BASE_URL, metaReady, RENDERER_CSS_URL } from "@utils/web-metadata";
+import { metaReady, RENDERER_CSS_URL } from "@utils/web-metadata";
 
 import { openExternalInBrowser } from "./externalLinks";
 
@@ -111,7 +111,6 @@ window.VencordNative = {
                 return;
             }
 
-            win.baseUrl = EXTENSION_BASE_URL;
             win.setCss = setCssDebounced;
             win.getCurrentCss = () => VencordNative.quickCss.get();
             win.getTheme = this.getEditorTheme;

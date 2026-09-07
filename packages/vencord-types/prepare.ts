@@ -16,32 +16,15 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { cpSync, moveSync, readdirSync, rmSync } from "fs-extra";
+import { copyFileSync, moveSync, readdirSync, rmSync } from "fs-extra";
 import { join } from "path";
 
 readdirSync(join(__dirname, "src"))
     .forEach(child => moveSync(join(__dirname, "src", child), join(__dirname, child), { overwrite: true }));
 
-const VencordSrc = join(__dirname, "..", "..", "src");
-
-for (const file of ["preload.d.ts", "userplugins", "main", "debug", "src", "browser", "scripts"]) {
+for (const file of ["preload.d.ts", "userplugins", "src", "browser", "scripts"]) {
     rmSync(join(__dirname, file), { recursive: true, force: true });
 }
 
-function copyDtsFiles(from: string, to: string) {
-    for (const file of readdirSync(from, { withFileTypes: true })) {
-        // bad
-        if (from === VencordSrc && file.name === "globals.d.ts") continue;
-
-        const fullFrom = join(from, file.name);
-        const fullTo = join(to, file.name);
-
-        if (file.isDirectory()) {
-            copyDtsFiles(fullFrom, fullTo);
-        } else if (file.name.endsWith(".d.ts")) {
-            cpSync(fullFrom, fullTo);
-        }
-    }
-}
-
-copyDtsFiles(VencordSrc, __dirname);
+copyFileSync(join(__dirname, "..", "..", "src", "modules.d.ts"), join(__dirname, "modules.d.ts"));
+copyFileSync(join(__dirname, "..", "..", "LICENSE"), join(__dirname, "LICENSE"));

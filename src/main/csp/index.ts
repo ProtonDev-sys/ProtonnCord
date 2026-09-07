@@ -79,9 +79,10 @@ const findHeader = (headers: PolicyMap, headerName: Lowercase<string>) => {
 };
 
 const parsePolicy = (policy: string): PolicyMap => {
-    const result: PolicyMap = {};
+    const result: PolicyMap = Object.create(null);
     policy.split(";").forEach(directive => {
-        const [directiveKey, ...directiveValue] = directive.trim().split(/\s+/g);
+        const [name, ...directiveValue] = directive.trim().split(/\s+/g);
+        const directiveKey = name.toLowerCase();
         if (directiveKey && !Object.prototype.hasOwnProperty.call(result, directiveKey)) {
             result[directiveKey] = directiveValue;
         }
@@ -92,7 +93,6 @@ const parsePolicy = (policy: string): PolicyMap => {
 
 const stringifyPolicy = (policy: PolicyMap): string =>
     Object.entries(policy)
-        .filter(([, values]) => values?.length)
         .map(directive => directive.flat().join(" "))
         .join("; ");
 
@@ -104,39 +104,41 @@ const patchCsp = (headers: PolicyMap) => {
     const header = findHeader(headers, "content-security-policy");
 
     if (header) {
-        const csp = parsePolicy(headers[header][0]);
+        headers[header] = headers[header].flatMap(policy => policy.split(",")).map(policy => {
+            const csp = parsePolicy(policy);
 
-        const pushDirective = (directive: string, ...values: string[]) => {
-            csp[directive] ??= [...(csp["default-src"] ?? [])];
-            csp[directive].push(...values);
-        };
+            const pushDirective = (directive: string, ...values: string[]) => {
+                csp[directive] ??= [...(csp["default-src"] ?? [])];
+                csp[directive].push(...values);
+            };
 
-        pushDirective("style-src", "'unsafe-inline'");
-        // we could make unsafe-inline safe by using strict-dynamic with a random nonce on our Vencord loader script https://content-security-policy.com/strict-dynamic/
-        // HOWEVER, at the time of writing (24 Jan 2025), Discord is INSANE and also uses unsafe-inline
-        // Once they stop using it, we also should
-        pushDirective("script-src", "'unsafe-inline'", "'unsafe-eval'");
+            pushDirective("style-src", "'unsafe-inline'");
+            // we could make unsafe-inline safe by using strict-dynamic with a random nonce on our Vencord loader script https://content-security-policy.com/strict-dynamic/
+            // HOWEVER, at the time of writing (24 Jan 2025), Discord is INSANE and also uses unsafe-inline
+            // Once they stop using it, we also should
+            pushDirective("script-src", "'unsafe-inline'", "'unsafe-eval'");
 
-        for (const directive of ["style-src", "connect-src", "img-src", "font-src", "media-src", "worker-src"]) {
-            pushDirective(directive, "blob:", "data:", "vencord:", "vesktop:", "equicord:", "equibop:", "protonncord:");
-        }
-
-        for (const [host, directives] of Object.entries(NativeSettings.store.customCspRules)) {
-            for (const directive of directives) {
-                pushDirective(directive, host);
+            for (const directive of ["style-src", "connect-src", "img-src", "font-src", "media-src", "worker-src"]) {
+                pushDirective(directive, "blob:", "data:", "vencord:", "vesktop:", "equicord:", "equibop:", "protonncord:");
             }
-        }
 
-        for (const [host, directives] of Object.entries(CspPolicies)) {
-            // A global wildcard would nullify Discord's host containment for every
-            // directive. Features must declare the exact hosts they need instead.
-            if (host === "*") continue;
-            for (const directive of directives) {
-                pushDirective(directive, host);
+            for (const [host, directives] of Object.entries(NativeSettings.store.customCspRules)) {
+                for (const directive of directives) {
+                    pushDirective(directive, host);
+                }
             }
-        }
 
-        headers[header] = [stringifyPolicy(csp)];
+            for (const [host, directives] of Object.entries(CspPolicies)) {
+                // A global wildcard would nullify Discord's host containment for every
+                // directive. Features must declare the exact hosts they need instead.
+                if (host === "*") continue;
+                for (const directive of directives) {
+                    pushDirective(directive, host);
+                }
+            }
+
+            return stringifyPolicy(csp);
+        });
     }
 };
 

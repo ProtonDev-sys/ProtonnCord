@@ -47,7 +47,6 @@ import { FavoriteButton, GithubButton, WebsiteButton } from "./PluginModalButton
 const cl = classNameFactory("vc-plugin-modal-");
 
 const AvatarStyles = findCssClassesLazy("moreUsers", "avatar", "clickableAvatar");
-const CloseButton = findComponentByCodeLazy("CLOSE_BUTTON_LABEL");
 const ConfirmModal = findComponentByCodeLazy('parentComponent:"ConfirmModal"');
 const WarningIcon = findComponentByCodeLazy("3.15H3.29c-1.74");
 const UserRecord: Constructor<Partial<User>> = proxyLazy(() => UserStore.getCurrentUser().constructor) as any;
@@ -94,7 +93,7 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
 
     useEffect(() => {
         (async () => {
-            for (const [index, user] of plugin.authors.slice(0, 6).entries()) {
+            for (const user of plugin.authors.slice(0, 6)) {
                 try {
                     const author = user.id
                         ? await UserUtils.getUser(String(user.id))
@@ -173,7 +172,7 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
     }
 
     const pluginMeta = PluginMeta[plugin.name];
-    const isEquicordPlugin = pluginMeta.folderName.startsWith("src/equicordplugins/") ?? false;
+    const isEquicordPlugin = pluginMeta.folderName.startsWith("src/equicordplugins/");
 
     return (
         <Modal
@@ -217,7 +216,7 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
                                 renderUser={(user: User) => (
                                     <Clickable
                                         className={AvatarStyles.clickableAvatar}
-                                        onClick={() => isEquicordPlugin ? openContributorModal(user) : openContributorModal(user)}
+                                        onClick={() => openContributorModal(user)}
                                     >
                                         <img
                                             className={AvatarStyles.avatar}

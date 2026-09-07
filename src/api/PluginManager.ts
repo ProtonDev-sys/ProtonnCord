@@ -33,7 +33,6 @@ import { Logger } from "@utils/Logger";
 import { onlyOnce } from "@utils/onlyOnce";
 import { canonicalizeFind, canonicalizeReplacement } from "@utils/patches";
 import { DefinedSettings, Patch, Plugin, PluginDef, PluginSettingDef, ReporterTestable, StartAt } from "@utils/types";
-import { FluxEvents } from "@vencord/discord-types";
 import { FluxDispatcher } from "@webpack/common";
 import { patches } from "@webpack/patcher";
 
@@ -53,7 +52,8 @@ export const PMLogger = logger;
 
 /** Whether we have subscribed to flux events of all the enabled plugins when FluxDispatcher was ready */
 let enabledPluginsSubscribedFlux = false;
-const subscribedFluxEventsPlugins = new Set<string>();
+type FluxHandler = (event: unknown) => void | Promise<void>;
+const subscribedFluxEventsPlugins = new Map<string, Map<string, FluxHandler>>();
 
 const pluginKeysToBind = [
     "onBeforeMessageEdit", "onBeforeMessageSend", "onMessageClick",
@@ -152,44 +152,55 @@ export const startAllPlugins = traceFunction("startAllPlugins", function startAl
     }
 });
 
-export function startDependenciesRecursive(p: Plugin) {
+export function startDependenciesRecursive(p: Plugin, visiting = new Set<string>()): { restartNeeded: boolean; failures: string[]; } {
     const settings = Settings.plugins;
     let restartNeeded = false;
     const failures: string[] = [];
 
+    if (visiting.has(p.name)) return { restartNeeded, failures: [p.name] };
+    visiting.add(p.name);
+
     p.dependencies?.forEach(d => {
-        if (!settings[d].enabled) {
-            const dep = Plugins[d];
-            startDependenciesRecursive(dep);
+        const dep = Plugins[d];
+        if (!dep) {
+            failures.push(d);
+            return;
+        }
+        if (!dep.started) {
+            const nested = startDependenciesRecursive(dep, visiting);
+            restartNeeded ||= nested.restartNeeded;
+            failures.push(...nested.failures);
+            if (nested.failures.length) return;
 
             // If the plugin has patches, don't start the plugin, just enable it.
-            settings[d].enabled = true;
-            dep.isDependency = true;
-
-            if (pluginRequiresRestart(dep)) {
+            if (nested.restartNeeded || pluginRequiresRestart(dep)) {
                 logger.warn(`Enabling dependency ${d} requires restart.`);
                 restartNeeded = true;
+            } else if (!startPlugin(dep)) {
+                failures.push(d);
                 return;
             }
-
-            const result = startPlugin(dep);
-            if (!result) failures.push(d);
         }
+        settings[d].enabled = true;
+        dep.isDependency = true;
     });
 
+    visiting.delete(p.name);
     return { restartNeeded, failures };
 }
 
 export function subscribePluginFluxEvents(p: Plugin, fluxDispatcher: typeof FluxDispatcher) {
     if (p.flux && !subscribedFluxEventsPlugins.has(p.name) && (!IS_REPORTER || isReporterTestable(p, ReporterTestable.FluxEvents))) {
-        subscribedFluxEventsPlugins.add(p.name);
+        const handlers = new Map<string, FluxHandler>();
+        subscribedFluxEventsPlugins.set(p.name, handlers);
 
         logger.debug("Subscribing to flux events of plugin", p.name);
         for (const [event, handler] of Object.entries(p.flux)) {
-            const wrappedHandler = p.flux[event] = function () {
+            if (!handler) continue;
+            const wrappedHandler: FluxHandler = eventData => {
                 if (p.name === "Encryptcord" && event === "MESSAGE_CREATE") return;
                 try {
-                    const res = handler!.apply(p, arguments as any);
+                    const res = handler.call(p, eventData);
                     return res instanceof Promise
                         ? res.catch(e => logger.error(`${p.name}: Error while handling ${event}\n`, e))
                         : res;
@@ -198,19 +209,20 @@ export function subscribePluginFluxEvents(p: Plugin, fluxDispatcher: typeof Flux
                 }
             };
 
-            fluxDispatcher.subscribe(event as FluxEvents, wrappedHandler);
+            fluxDispatcher.subscribe(event, wrappedHandler);
+            handlers.set(event, wrappedHandler);
         }
     }
 }
 
 export function unsubscribePluginFluxEvents(p: Plugin, fluxDispatcher: typeof FluxDispatcher) {
-    if (p.flux) {
-        subscribedFluxEventsPlugins.delete(p.name);
-
+    const handlers = subscribedFluxEventsPlugins.get(p.name);
+    if (handlers) {
         logger.debug("Unsubscribing from flux events of plugin", p.name);
-        for (const [event, handler] of Object.entries(p.flux)) {
-            fluxDispatcher.unsubscribe(event as FluxEvents, handler!);
+        for (const [event, handler] of handlers) {
+            fluxDispatcher.unsubscribe(event, handler);
         }
+        subscribedFluxEventsPlugins.delete(p.name);
     }
 }
 
@@ -233,12 +245,12 @@ export const startPlugin = traceFunction("startPlugin", function startPlugin(p: 
         renderProfileSection, gifPickerContextMenu
     } = p;
 
+    if (p.started) {
+        logger.warn(`${name} already started`);
+        return false;
+    }
     if (p.start) {
         logger.info("Starting plugin", name);
-        if (p.started) {
-            logger.warn(`${name} already started`);
-            return false;
-        }
         try {
             p.start();
         } catch (e) {
@@ -315,12 +327,12 @@ export const stopPlugin = traceFunction("stopPlugin", function stopPlugin(p: Plu
         renderProfileSection, gifPickerContextMenu
     } = p;
 
+    if (!p.started) {
+        logger.warn(`${name} already stopped`);
+        return false;
+    }
     if (p.stop) {
         logger.info("Stopping plugin", name);
-        if (!p.started) {
-            logger.warn(`${name} already stopped`);
-            return false;
-        }
         try {
             p.stop();
         } catch (e) {
@@ -407,59 +419,47 @@ export const initPluginManager = onlyOnce(function init() {
     const pluginsValues = Object.values(Plugins);
     const settings = Settings.plugins;
 
-    const neededApiPlugins = new Set<string>();
-
-    // First round-trip to mark and force enable dependencies
-    //
-    // FIXME: might need to revisit this if there's ever nested (dependencies of dependencies) dependencies since this only
-    // goes for the top level and their children, but for now this works okay with the current API plugins
-    for (const p of pluginsValues) if (isPluginEnabled(p.name)) {
-        p.dependencies?.forEach(d => {
-            const dep = Plugins[d];
-
-            if (!dep) {
-                const error = new Error(`Plugin ${p.name} has unresolved dependency ${d}`);
-
-                if (IS_DEV) {
-                    throw error;
-                }
-
-                logger.warn(error);
-                return;
-            }
-
-            settings[d].enabled = true;
-            dep.isDependency = true;
-        });
-
-        if (p.commands?.length) neededApiPlugins.add("CommandsAPI");
-        if (p.onBeforeMessageEdit || p.onBeforeMessageSend || p.onMessageClick) neededApiPlugins.add("MessageEventsAPI");
-        if (p.chatBarButton) neededApiPlugins.add("ChatInputButtonAPI");
-        if (p.renderMemberListDecorator) neededApiPlugins.add("MemberListDecoratorsAPI");
-        if (p.renderMessageAccessory) neededApiPlugins.add("MessageAccessoriesAPI");
-        if (p.renderMessageDecoration) neededApiPlugins.add("MessageDecorationsAPI");
-        if (p.messagePopoverButton) neededApiPlugins.add("MessagePopoverAPI");
-        if (p.userProfileBadge) neededApiPlugins.add("BadgeAPI");
+    for (const p of pluginsValues) {
+        const dependencies = new Set(p.dependencies);
+        if (p.commands?.length) dependencies.add("CommandsAPI");
+        if (p.onBeforeMessageEdit || p.onBeforeMessageSend || p.onMessageClick) dependencies.add("MessageEventsAPI");
+        if (p.chatBarButton || p.chatBarButtonWrapper) dependencies.add("ChatInputButtonAPI");
+        if (p.renderMemberListDecorator) dependencies.add("MemberListDecoratorsAPI");
+        if (p.renderMessageAccessory) dependencies.add("MessageAccessoriesAPI");
+        if (p.renderMessageDecoration) dependencies.add("MessageDecorationsAPI");
+        if (p.messagePopoverButton) dependencies.add("MessagePopoverAPI");
+        if (p.userProfileBadges?.length) dependencies.add("BadgeAPI");
 
         // Custom
-        if (p.renderNicknameIcon) neededApiPlugins.add("NicknameIconsAPI");
-        if (p.headerBarButton) neededApiPlugins.add("HeaderBarAPI");
-        if (p.audioProcessor) neededApiPlugins.add("AudioPlayerAPI");
-        if (p.userAreaButton) neededApiPlugins.add("UserAreaAPI");
-        if (p.renderProfileCollection) neededApiPlugins.add("ProfileCollectionsAPI");
-        if (p.chatBarButtonWrapper) neededApiPlugins.add("ChatInputButtonAPI");
-        if (p.renderProfileSection) neededApiPlugins.add("ProfileSectionsAPI");
-        if (p.gifPickerContextMenu) neededApiPlugins.add("ExtraContextMenusAPI");
-
-        bindPluginMethods(p);
+        if (p.renderNicknameIcon) dependencies.add("NicknameIconsAPI");
+        if (p.headerBarButton) dependencies.add("HeaderBarAPI");
+        if (p.audioProcessor) dependencies.add("AudioPlayerAPI");
+        if (p.userAreaButton) dependencies.add("UserAreaAPI");
+        if (p.renderProfileCollection) dependencies.add("ProfileCollectionsAPI");
+        if (p.renderProfileSection) dependencies.add("ProfileSectionsAPI");
+        if (p.gifPickerContextMenu) dependencies.add("ExtraContextMenusAPI");
+        if (!p.dependencies?.includes(p.name)) dependencies.delete(p.name);
+        if (dependencies.size) p.dependencies = [...dependencies];
     }
 
-    for (const p of neededApiPlugins) {
-        Plugins[p].isDependency = true;
-        settings[p].enabled = true;
+    const enabledPlugins = new Set(pluginsValues.filter(p => isPluginEnabled(p.name)));
+    for (const p of enabledPlugins) {
+        for (const name of p.dependencies ?? []) {
+            const dependency = Plugins[name];
+            if (!dependency) {
+                const error = new Error(`Plugin ${p.name} has unresolved dependency ${name}`);
+                if (IS_DEV) throw error;
+                logger.warn(error);
+                continue;
+            }
+            settings[name].enabled = true;
+            dependency.isDependency = true;
+            enabledPlugins.add(dependency);
+        }
     }
 
     for (const p of pluginsValues) {
+        bindPluginMethods(p);
         bindPluginSettings(p);
 
         if (p.patches && isPluginEnabled(p.name)) {

@@ -361,7 +361,7 @@ async function applyDownloads(downloads: SyncResponse["downloads"], context: Clo
                 const safe = sanitizeCloudSettings(parsed, cloudPluginRegistry);
                 if (patchMatches(VencordNative.settings.get(), safe)) continue;
                 if (!isCurrentContext(context)) return { accepted: false, changed };
-                await importSettings(JSON.stringify({ settings: safe }), "all", true);
+                await importSettings(JSON.stringify({ settings: safe }), "plugins");
                 changed = true;
             } catch {
                 return { accepted: false, changed };
@@ -441,7 +441,6 @@ async function doSyncV2(
 
 async function verifyV2SourceSnapshot(
     context: CloudRequestContext,
-    localChecksums: Map<string, string>,
     signal: AbortSignal
 ) {
     if (!isCurrentContext(context) || signal.aborted) return null;
@@ -526,7 +525,7 @@ async function putV2(context: CloudRequestContext, signal: AbortSignal, manual =
 
     // The V2 response manifest is built from a pre-write server snapshot, so it cannot prove
     // that another client did not race a non-uploaded key. Verify in a fresh request before clean.
-    const verifiedManifest = await verifyV2SourceSnapshot(context, localChecksums, signal);
+    const verifiedManifest = await verifyV2SourceSnapshot(context, signal);
     if (!verifiedManifest) {
         markLocalSettingsDirty();
         return false;
@@ -691,7 +690,7 @@ async function getV1(context: CloudRequestContext, signal: AbortSignal, shouldNo
     let changed = false;
     if (!patchMatches(VencordNative.settings.get(), document.settings)) {
         if (!isCurrentContext(context)) return false;
-        await importSettings(JSON.stringify({ settings: document.settings }), "all", true);
+        await importSettings(JSON.stringify({ settings: document.settings }), "plugins");
         changed = true;
     }
     if (document.quickCss !== undefined && currentQuickCss !== document.quickCss) {

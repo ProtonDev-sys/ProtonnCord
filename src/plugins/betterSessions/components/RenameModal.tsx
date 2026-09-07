@@ -19,25 +19,29 @@
 import { TextButton } from "@components/Button";
 import { Heading } from "@components/Heading";
 import { SessionInfo } from "@plugins/betterSessions/types";
-import { getDefaultName, savedSessionsCache, saveSessionsToDataStore } from "@plugins/betterSessions/utils";
+import { getDataKey, getDefaultName, isSessionCacheCurrent, savedSessionsCache, saveSessionsToDataStore } from "@plugins/betterSessions/utils";
+import { Logger } from "@utils/Logger";
 import { RenderModalProps } from "@vencord/discord-types";
-import { Modal, React, TextInput } from "@webpack/common";
+import { Modal, React, TextInput, Toasts } from "@webpack/common";
 import { KeyboardEvent } from "react";
 
-export function RenameModal({ props, session, state }: { props: RenderModalProps, session: SessionInfo["session"], state: [string, React.Dispatch<React.SetStateAction<string>>]; }) {
-    const [title, setTitle] = state;
+export function RenameModal({ props, session }: { props: RenderModalProps; session: SessionInfo["session"]; }) {
+    const [accountKey] = React.useState(getDataKey);
     const [value, setValue] = React.useState(savedSessionsCache.get(session.id_hash)?.name ?? "");
 
-    function onSaveClick() {
-        savedSessionsCache.set(session.id_hash, { name: value, isNew: false });
-        if (value !== "") {
-            setTitle(`${value}*`);
-        } else {
-            setTitle(getDefaultName(session.client_info));
+    async function onSaveClick() {
+        if (accountKey !== getDataKey() || !isSessionCacheCurrent()) {
+            Toasts.show({ id: Toasts.genId(), type: Toasts.Type.FAILURE, message: "The account changed. Reopen the device settings to rename this session." });
+            return;
         }
-
-        saveSessionsToDataStore();
-        props.onClose();
+        try {
+            savedSessionsCache.set(session.id_hash, { name: value, isNew: false });
+            await saveSessionsToDataStore();
+            props.onClose();
+        } catch (error) {
+            new Logger("BetterSessions").error("Failed to save session name", error);
+            Toasts.show({ id: Toasts.genId(), type: Toasts.Type.FAILURE, message: "Could not save the session name. Try again." });
+        }
     }
 
     return (
@@ -60,17 +64,20 @@ export function RenameModal({ props, session, state }: { props: RenderModalProps
             <div>
                 <Heading tag="h5">New device name</Heading>
                 <TextInput
+                    aria-label="New device name"
                     style={{ marginBottom: "10px" }}
                     placeholder={getDefaultName(session.client_info)}
                     value={value}
                     onChange={setValue}
                     onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
                         if (e.key === "Enter") {
-                            onSaveClick();
+                            e.preventDefault();
+                            void onSaveClick();
                         }
                     }}
                 />
                 <TextButton
+                    type="button"
                     style={{
                         paddingLeft: "1px",
                         opacity: 0.6

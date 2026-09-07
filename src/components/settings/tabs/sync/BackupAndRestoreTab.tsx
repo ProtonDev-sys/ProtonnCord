@@ -25,8 +25,26 @@ import { Notice } from "@components/Notice";
 import { Paragraph } from "@components/Paragraph";
 import { SettingsTab, wrapTab } from "@components/settings/tabs/BaseTab";
 import { Margins } from "@utils/margins";
+import { useState } from "@webpack/common";
+
+const backupTypes = [
+    ["all", "All Settings"],
+    ["plugins", "Settings"],
+    ["css", "QuickCSS"],
+    ["datastore", "DataStore"]
+] as const;
 
 function BackupAndRestoreTab() {
+    const [busy, setBusy] = useState(false);
+    async function run(action: () => Promise<void>) {
+        if (busy) return;
+        setBusy(true);
+        try {
+            await action();
+        } finally {
+            setBusy(false);
+        }
+    }
     return (
         <SettingsTab>
             <Heading className={Margins.top16}>Backup & Restore</Heading>
@@ -35,85 +53,37 @@ function BackupAndRestoreTab() {
             </Paragraph>
 
             <Notice.Warning className={Margins.bottom20}>
-                Importing a settings file will overwrite your current settings. Make sure to export a backup first if you want to keep your current configuration.
+                Imported values replace matching settings and DataStore entries. Values absent from the backup are kept. Export a backup first if you want to preserve your current configuration.
             </Notice.Warning>
-
-            <Heading>What's included in a backup</Heading>
-            <Paragraph className={Margins.bottom20}>
-                • Custom QuickCSS<br />
-                • Theme Links<br />
-                • Plugin Settings<br />
-                • DataStore Data
-            </Paragraph>
 
             <Divider className={Margins.bottom20} />
 
             <Heading>Import Settings</Heading>
             <Paragraph className={Margins.bottom16}>
-                Select a previously exported settings file to restore your configuration. This will replace all your current settings with the ones from the backup.
+                Select a previously exported file and choose which sections to import. Restart afterward to apply all changes.
             </Paragraph>
 
             <Flex gap="8px" className={Margins.bottom20} style={{ flexWrap: "wrap" }}>
-                <Button
-                    onClick={() => uploadSettingsBackup("all")}
-                    size="small"
-                    variant="secondary"
-                >
-                    Import All Settings
-                </Button>
-                <Button
-                    onClick={() => uploadSettingsBackup("plugins")}
-                    size="small"
-                >
-                    Import Plugins
-                </Button>
-                <Button
-                    onClick={() => uploadSettingsBackup("css")}
-                    size="small"
-                >
-                    Import QuickCSS
-                </Button>
-                <Button
-                    onClick={() => uploadSettingsBackup("datastore")}
-                    size="small"
-                >
-                    Import DataStore
-                </Button>
+                {backupTypes.map(([type, label]) => (
+                    <Button key={type} onClick={() => run(() => uploadSettingsBackup(type))} disabled={busy} size="small" variant={type === "all" ? "secondary" : "primary"}>
+                        Import {label}
+                    </Button>
+                ))}
             </Flex>
 
             <Divider className={Margins.bottom20} />
 
             <Heading>Export Settings</Heading>
             <Paragraph className={Margins.bottom16}>
-                Download your current settings as a backup file. You can export everything at once, or choose to export only specific parts of your configuration.
+                Choose the sections to save as a JSON file. Backups can include saved credentials and private plugin data, so keep them private. DataStore values that JSON cannot restore are reported instead of being silently lost.
             </Paragraph>
 
             <Flex gap="8px" style={{ flexWrap: "wrap" }}>
-                <Button
-                    onClick={() => downloadSettingsBackup("all")}
-                    size="small"
-                    variant="secondary"
-                >
-                    Export All Settings
-                </Button>
-                <Button
-                    onClick={() => downloadSettingsBackup("plugins")}
-                    size="small"
-                >
-                    Export Plugins
-                </Button>
-                <Button
-                    onClick={() => downloadSettingsBackup("css")}
-                    size="small"
-                >
-                    Export QuickCSS
-                </Button>
-                <Button
-                    onClick={() => downloadSettingsBackup("datastore")}
-                    size="small"
-                >
-                    Export DataStore
-                </Button>
+                {backupTypes.map(([type, label]) => (
+                    <Button key={type} onClick={() => run(() => downloadSettingsBackup(type))} disabled={busy} size="small" variant={type === "all" ? "secondary" : "primary"}>
+                        Export {label}
+                    </Button>
+                ))}
             </Flex>
         </SettingsTab>
     );

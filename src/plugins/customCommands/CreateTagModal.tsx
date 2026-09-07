@@ -13,8 +13,8 @@ import { Paragraph } from "@components/Paragraph";
 import { RenderModalProps } from "@vencord/discord-types";
 import { Modal, openModal, TextArea, TextInput, useState } from "@webpack/common";
 
-import { parseTagArguments } from ".";
-import { addTag, getTag, removeTag, Tag } from "./settings";
+import { parseTagArguments, validateTag } from ".";
+import { addTag, getTag, Tag } from "./settings";
 
 export function openCreateTagModal(initialValue: Tag = { name: "", message: "" }) {
     openModal(modalProps => (
@@ -28,17 +28,16 @@ function CreateTagDialog({ initialValue, modalProps }: { initialValue: Tag; moda
     const [name, setName] = useState(initialValue.name);
     const [message, setMessage] = useState(initialValue.message.replaceAll("\\n", "\n"));
 
+    const [error, setError] = useState<string>();
     const isEdit = Boolean(initialValue.name);
 
     const detectedArguments = parseTagArguments(message);
-    const hasReservedEphemeral = detectedArguments.some(arg => arg.name === "ephemeral");
+    const validationError = validateTag({ name, message });
     const nameAlreadyExists = name !== initialValue.name && getTag(name);
 
-    const notice = hasReservedEphemeral
-        ? 'The argument name "ephemeral" is reserved and cannot be used.'
-        : nameAlreadyExists
-            ? `A tag with the name "${name}" already exists and will be overwritten.`
-            : undefined;
+    const notice = error ?? (name && message ? validationError : undefined) ?? (nameAlreadyExists
+        ? `A tag with the name "${name}" already exists and will be overwritten.`
+        : undefined);
 
     return (
         <Modal
@@ -55,15 +54,14 @@ function CreateTagDialog({ initialValue, modalProps }: { initialValue: Tag; moda
                     text: isEdit ? "Save" : "Create",
                     variant: "primary",
                     onClick: () => {
-                        if (isEdit && initialValue.name !== name) {
-                            removeTag(initialValue.name);
+                        try {
+                            addTag({ name, message }, initialValue.name);
+                            modalProps.onClose();
+                        } catch (error) {
+                            setError(error instanceof Error ? error.message : String(error));
                         }
-
-                        const tag = { name, message };
-                        addTag(tag);
-                        modalProps.onClose();
                     },
-                    disabled: !name || !message || hasReservedEphemeral
+                    disabled: Boolean(validationError)
                 }
             ]}
             notice={notice ? { message: notice, type: "critical" } : undefined}
@@ -71,26 +69,24 @@ function CreateTagDialog({ initialValue, modalProps }: { initialValue: Tag; moda
             <Flex flexDirection="column" gap={12}>
                 <section>
                     <HeadingSecondary>Name</HeadingSecondary>
-                    <TextInput value={name} onChange={setName} placeholder="greet" />
+                    <TextInput aria-label="Name" value={name} onChange={value => { setName(value); setError(undefined); }} placeholder="greet" />
                 </section>
 
                 <section>
                     <HeadingSecondary>Response</HeadingSecondary>
-                    <TextArea value={message} onChange={setMessage} placeholder={EXAMPLE_RESPONSE} autosize />
+                    <TextArea aria-label="Response" value={message} onChange={value => { setMessage(value); setError(undefined); }} placeholder={EXAMPLE_RESPONSE} autosize />
                 </section>
 
                 {detectedArguments.length > 0 && (
                     <section>
                         <HeadingSecondary>Detected Arguments</HeadingSecondary>
-                        <Paragraph>
-                            <ul>
-                                {detectedArguments.map(arg => (
-                                    <li key={arg.name}>
-                                        &mdash; <b>{arg.name}</b>{arg.defaultValue ? ` (default: ${arg.defaultValue})` : ""}
-                                    </li>
-                                ))}
-                            </ul>
-                        </Paragraph>
+                        <ul>
+                            {detectedArguments.map(arg => (
+                                <li key={arg.name}>
+                                    <b>{arg.name}</b>{arg.defaultValue !== null ? ` (default: ${arg.defaultValue})` : ""}
+                                </li>
+                            ))}
+                        </ul>
                     </section>
                 )}
 

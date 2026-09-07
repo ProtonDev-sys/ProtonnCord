@@ -6,18 +6,13 @@
 
 import "./style.css";
 
+import { Button } from "@components/Button";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { CopyIcon, NoEntrySignIcon } from "@components/Icons";
 import { Devs } from "@utils/constants";
 import { copyWithToast } from "@utils/discord";
 import definePlugin from "@utils/types";
-import { Tooltip, useEffect, useRef, useState } from "@webpack/common";
-
-const CheckMarkIcon = () => {
-    return <svg width="18" height="18" viewBox="0 0 24 24">
-        <path fill="currentColor" d="M21.7 5.3a1 1 0 0 1 0 1.4l-12 12a1 1 0 0 1-1.4 0l-6-6a1 1 0 1 1 1.4-1.4L9 16.58l11.3-11.3a1 1 0 0 1 1.4 0Z"></path>
-    </svg>;
-};
+import { Toasts, Tooltip } from "@webpack/common";
 
 export default definePlugin({
     name: "CopyFileContents",
@@ -42,52 +37,31 @@ export default definePlugin({
         }
     ],
 
-    addCopyButton: ErrorBoundary.wrap(({ fileContents, bytesLeft }: { fileContents: string, bytesLeft: number; }) => {
-        const [recentlyCopied, setRecentlyCopied] = useState(false);
-        const copiedResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-        useEffect(() => () => {
-            if (copiedResetTimeoutRef.current === undefined) return;
-
-            clearTimeout(copiedResetTimeoutRef.current);
-            copiedResetTimeoutRef.current = undefined;
-        }, []);
-
-        const scheduleCopiedReset = () => {
-            if (copiedResetTimeoutRef.current !== undefined) {
-                clearTimeout(copiedResetTimeoutRef.current);
-            }
-
-            copiedResetTimeoutRef.current = setTimeout(() => {
-                copiedResetTimeoutRef.current = undefined;
-                setRecentlyCopied(false);
-            }, 2000);
-        };
-
-        return (
-            <Tooltip text={recentlyCopied ? "Copied!" : bytesLeft > 0 ? "File too large to copy" : "Copy File Contents"}>
-                {tooltipProps => (
-                    <div
-                        {...tooltipProps}
-                        className="vc-cfc-button"
-                        role="button"
-                        onClick={() => {
-                            if (!recentlyCopied && bytesLeft <= 0) {
-                                copyWithToast(fileContents);
-                                setRecentlyCopied(true);
-                                scheduleCopiedReset();
-                            }
-                        }}
-                    >
-                        {recentlyCopied
-                            ? <CheckMarkIcon />
-                            : bytesLeft > 0
-                                ? <NoEntrySignIcon width={18} height={18} color="var(--channel-icon)" />
-                                : <CopyIcon width={18} height={18} />
+    addCopyButton: ErrorBoundary.wrap(({ fileContents, bytesLeft }: { fileContents: string, bytesLeft: number; }) => (
+        <Tooltip text={bytesLeft > 0 ? "File too large to copy" : "Copy File Contents"}>
+            {tooltipProps => (
+                <Button
+                    {...tooltipProps}
+                    type="button"
+                    variant="none"
+                    size="iconOnly"
+                    className="vc-cfc-button"
+                    aria-label={bytesLeft > 0 ? "File too large to copy" : "Copy File Contents"}
+                    aria-disabled={bytesLeft > 0}
+                    onClick={async () => {
+                        if (bytesLeft > 0) return;
+                        try {
+                            await copyWithToast(fileContents);
+                        } catch {
+                            Toasts.show({ id: Toasts.genId(), message: "Could not copy file contents", type: Toasts.Type.FAILURE });
                         }
-                    </div>
-                )}
-            </Tooltip>
-        );
-    }, { noop: true }),
+                    }}
+                >
+                    {bytesLeft > 0
+                        ? <NoEntrySignIcon width={18} height={18} color="var(--channel-icon)" />
+                        : <CopyIcon width={18} height={18} />}
+                </Button>
+            )}
+        </Tooltip>
+    ), { noop: true }),
 });

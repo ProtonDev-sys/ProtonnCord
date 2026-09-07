@@ -8,6 +8,10 @@ Create and use your own custom avatar decorations, or pick your favorite from th
 
 You'll be able to see the custom avatar decorations of other users of this plugin, and they'll be able to see your custom avatar decoration.
 
+Decor looks up decorations by sending user IDs to the Decor service. Signing in uses Discord's `identify` permission, and uploaded decoration files and names are sent to that service for review.
+
+Existing Decor sessions need to sign in again once: older saved tokens did not record which service issued them. New sessions are saved separately for each Discord account and Decor service.
+
 You can select and manage your custom avatar decorations under the "Profiles" page in settings, or in the plugin settings.
 
 ![Custom decorations management](https://github.com/Vendicated/Vencord/assets/30497388/74fe8a9e-a2a2-4b29-bc10-9eaa58208ad4)

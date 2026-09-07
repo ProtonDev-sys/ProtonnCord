@@ -1,4 +1,4 @@
-import { ComponentType, ReactNode, Ref, RefObject } from "react";
+import { ComponentType, ReactNode, Ref } from "react";
 import { LiteralUnion } from "type-fest";
 
 export type ModalActionVariant = LiteralUnion<"primary" | "secondary" | "critical-primary", string>;
@@ -74,9 +74,6 @@ export interface ConfirmModalProps extends ModalProps {
         checked: boolean;
         onChange(checked: boolean): void;
     };
-
-    /** Custom Modal content */
-    children?: ReactNode;
 }
 
 export type Modal = ComponentType<ModalProps>;

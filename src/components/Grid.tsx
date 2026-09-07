@@ -12,11 +12,11 @@ interface Props {
     inline?: boolean;
 }
 
-export function Grid(props: Props & JSX.IntrinsicElements["div"]) {
+export function Grid({ columns, gap, inline, ...props }: Props & JSX.IntrinsicElements["div"]) {
     const style: CSSProperties = {
-        display: props.inline ? "inline-grid" : "grid",
-        gridTemplateColumns: `repeat(${props.columns}, 1fr)`,
-        gap: props.gap,
+        display: inline ? "inline-grid" : "grid",
+        gridTemplateColumns: `repeat(${columns}, 1fr)`,
+        gap,
         ...props.style
     };
 

@@ -1,0 +1,18 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "allowJs": false,
+        "declaration": true,
+        "emitDeclarationOnly": true,
+        "noEmitOnError": true,
+        "rootDir": "src",
+        "outDir": "packages/vencord-types/src"
+    },
+    "include": [
+        "src/Vencord.ts",
+        "src/VencordNative.ts",
+        "src/globals.d.ts",
+        "src/modules.d.ts",
+        "src/nativeModules.d.ts"
+    ]
+}

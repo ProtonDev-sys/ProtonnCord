@@ -8,10 +8,11 @@ import "./ui/styles.css";
 
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Devs } from "@utils/constants";
+import { parseUrl } from "@utils/misc";
 import definePlugin from "@utils/types";
 import { UserStore } from "@webpack/common";
 
-import { CDN_URL, RAW_SKU_ID, setBaseUrl, SKU_ID } from "./lib/constants";
+import { cancelConfiguration, CDN_URL, RAW_SKU_ID, setBaseUrl, SKU_ID } from "./lib/constants";
 import { useAuthorizationStore } from "./lib/stores/AuthorizationStore";
 import { useCurrentUserDecorationsStore } from "./lib/stores/CurrentUserDecorationsStore";
 import { useUserDecorAvatarDecoration, useUsersDecorationsStore } from "./lib/stores/UsersDecorationsStore";
@@ -22,6 +23,33 @@ import DecorSection, { DecorSectionProps } from "./ui/components/DecorSection";
 export interface AvatarDecoration {
     asset: string;
     skuId: string;
+}
+
+let generation = 0;
+let active = false;
+let configuration: Promise<boolean> | undefined;
+let unsubscribeAuthorization: (() => void) | undefined;
+
+function clearDecorations() {
+    useAuthorizationStore.getState().clear();
+    useUsersDecorationsStore.getState().stop();
+    useCurrentUserDecorationsStore.getState().clear();
+}
+
+async function initializeDecorations(version: number) {
+    const configured = await configuration;
+    if (!active || version !== generation) return;
+    if (!configured) {
+        useAuthorizationStore.getState().clear("Could not load Decor configuration. Check the service URL and restart the plugin.");
+        return;
+    }
+    await useAuthorizationStore.getState().init();
+    if (!active || version !== generation) return;
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    if (currentUserId) {
+        useUsersDecorationsStore.getState().start();
+        useUsersDecorationsStore.getState().fetch(currentUserId, true);
+    }
 }
 
 export default definePlugin({
@@ -131,14 +159,18 @@ export default definePlugin({
     settings,
 
     flux: {
-        CONNECTION_OPEN: () => {
-            useAuthorizationStore.getState().init();
-            useCurrentUserDecorationsStore.getState().clear();
-            const currentUserId = UserStore.getCurrentUser()?.id;
-            if (currentUserId) useUsersDecorationsStore.getState().fetch(currentUserId, true);
+        CONNECTION_OPEN: async () => {
+            if (!active) return;
+            const currentGeneration = ++generation;
+            clearDecorations();
+            await initializeDecorations(currentGeneration);
         },
         USER_PROFILE_MODAL_OPEN: data => {
             useUsersDecorationsStore.getState().fetch(data.userId, true);
+        },
+        LOGOUT: () => {
+            generation++;
+            clearDecorations();
         },
     },
 
@@ -160,20 +192,39 @@ export default definePlugin({
     useUserDecorAvatarDecoration,
 
     async start() {
-        await setBaseUrl(settings.store.baseUrl);
-        const currentUserId = UserStore.getCurrentUser()?.id;
-        if (currentUserId) useUsersDecorationsStore.getState().fetch(currentUserId, true);
+        const currentGeneration = ++generation;
+        active = true;
+        unsubscribeAuthorization?.();
+        clearDecorations();
+        unsubscribeAuthorization = useAuthorizationStore.subscribe((state, previous) => {
+            if (state.authorization !== previous.authorization) useCurrentUserDecorationsStore.getState().clear();
+        });
+        configuration = setBaseUrl(settings.store.baseUrl);
+        await initializeDecorations(currentGeneration);
+    },
+
+    stop() {
+        generation++;
+        active = false;
+        unsubscribeAuthorization?.();
+        unsubscribeAuthorization = undefined;
+        cancelConfiguration();
+        clearDecorations();
     },
 
     getDecorAvatarDecorationURL({ avatarDecoration, canAnimate }: { avatarDecoration: AvatarDecoration | null; canAnimate?: boolean; }) {
         // Only Decor avatar decorations have this SKU ID
         if (avatarDecoration?.skuId === SKU_ID) {
-            const parts = avatarDecoration.asset.split("_");
             // Remove a_ prefix if it's animated and animation is disabled
-            if (avatarDecoration.asset.startsWith("a_") && !canAnimate) parts.shift();
-            return `${CDN_URL}/${parts.join("_")}.png`;
+            const asset = avatarDecoration.asset.startsWith("a_") && !canAnimate ? avatarDecoration.asset.slice(2) : avatarDecoration.asset;
+            try {
+                return `${CDN_URL}/${encodeURIComponent(asset)}.png`;
+            } catch {
+                return undefined;
+            }
         } else if (avatarDecoration?.skuId === RAW_SKU_ID) {
-            return avatarDecoration.asset;
+            const url = parseUrl(avatarDecoration.asset);
+            if (url?.protocol === "blob:" && url.origin === location.origin) return url.href;
         }
     },
 
