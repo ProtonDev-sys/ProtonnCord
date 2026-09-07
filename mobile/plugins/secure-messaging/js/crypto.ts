@@ -13,6 +13,7 @@ import {
 	encode64,
 	header,
 	KEY_PREFIX,
+	MAX_RECIPIENTS,
 	parseAnnouncement,
 	parseEnvelope,
 	requireSnowflake,
@@ -350,6 +351,21 @@ export function encryptMessage(input: {
 	now?: number
 	id?: Uint8Array
 }): string {
+	if (
+		typeof input.plaintext !== 'string' ||
+		input.plaintext.length < 1 ||
+		input.plaintext.length > 2000
+	)
+		throw new Error(
+			'Protected messages need text or an encrypted attachment descriptor within the mobile length limit',
+		)
+	if (!Number.isSafeInteger(input.counter) || input.counter < 1)
+		throw new Error('The secure send counter is invalid')
+	if (
+		!Array.isArray(input.recipients) ||
+		input.recipients.length > MAX_RECIPIENTS
+	)
+		throw new Error('Too many encrypted recipients')
 	const sender = publicIdentity(input.identity, input.senderUserId)
 	const recipientMap = new Map<string, PublicIdentity>([
 		[sender.userId, sender],
@@ -362,6 +378,17 @@ export function encryptMessage(input: {
 	const recipients = [...recipientMap.values()].sort((a, b) =>
 		a.userId.localeCompare(b.userId),
 	)
+	const mentions = [
+		...new Set(
+			[...input.plaintext.matchAll(/<@!?(\d{17,20})>/g)].map(
+				match => match[1]!,
+			),
+		),
+	]
+		.filter(id => recipientMap.has(id))
+		.sort()
+	if (mentions.length > MAX_RECIPIENTS)
+		throw new Error('Too many mentioned encrypted recipients')
 	const base = {
 		v: 3 as const,
 		t: 'm' as const,
@@ -372,7 +399,7 @@ export function encryptMessage(input: {
 		q: input.counter,
 		k: sender.fingerprint,
 		r: recipients.map(recipient => ({ u: recipient.userId, e: '', x: '' })),
-		m: [],
+		m: mentions,
 	}
 	const messageHeader = header(base)
 	const contentKey = randomSource(32)

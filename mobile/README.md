@@ -24,7 +24,11 @@ The Revenge runtime and native API source revisions are pinned in `toolchain.jso
 4. Compare the complete mobile fingerprint with your PC fingerprint for the same Discord account.
 5. After restarting Discord, use **Unlock with OneKey**. You can unplug the device after approval; **Lock Secure Messaging** clears the active root and decrypted caches.
 
-The same physical OneKey and Discord account derive the same current identity as desktop. The existing mobile identity is retained for historical decryption when setup replaces it, and affected conversations require review. Contacts, conversation choices, and older retired PC identities are installation-local state: deriving the current identity does not copy them from the PC. Verify peer announcements on the phone before enabling those conversations.
+The same physical OneKey and Discord account derive the same current identity as desktop. The existing mobile identity is retained for bounded historical decryption when setup replaces it, and affected conversations require review.
+
+To bring existing PC chats across, unlock Secure Messaging on the PC and choose **Copy phone pairing** in its security-key controls. In the phone plugin settings, unlock with the same OneKey, paste that encrypted pairing into **Bring your PC chats**, and choose **Import PC chats**. This transfers verified contacts, enabled conversation choices, and up to four historical identities per account/contact. Private historical keys are encrypted in the main process before the pairing reaches the desktop renderer. The pairing is bound to the OneKey and Discord account; a password is not needed. Clear the clipboard afterward. Existing mobile counters and replay records remain local, and changed membership or pending peer keys still block sends for review.
+
+Pairing is an explicit snapshot, not continuous synchronization or a complete desktop vault backup. Copy a new pairing after changing verified contacts on the PC. Without pairing, verify peer announcements on the phone before enabling conversations.
 
 OneKey protection encrypts the mobile vault beneath its Android Keystore layer. Derived identity keys exist in the app's memory while unlocked. The wallet recovery phrase does not reproduce this device-bound secret. Bluetooth is not supported by this USB implementation.
 
@@ -42,11 +46,11 @@ Commands entered in a DM are intercepted locally:
 
 Each person uses `/pc announce`, compares the complete fingerprint over another trusted channel, and trusts that exact key with `/pc trust`. Use `/pc on` to enable encryption; in group DMs, supply the intended recipient IDs explicitly. A membership change or observed peer key change blocks protected sends pending review. `/pc announce` publishes a public key announcement; other commands are handled locally.
 
-Mobile sends desktop-compatible PCEM3 text and encrypted file bundles. It reads PCEM2/3, including the latest PCEA3/PCER3 attachment manifests and PCET2 detached text. Text stays out of Discord's message store; decrypted attachments use temporary app-cache files cleared on lock. Signature, channel/author binding, trusted keys, AEAD, bundle integrity, and a persistent bounded 4,096-record replay history are checked before display. Failed encryption or vault persistence cancels a protected send.
+Mobile sends desktop-compatible PCEM3 text, participant mentions, and encrypted file bundles. It reads PCEM1/2/3, including the latest PCEA3/PCER3 attachment manifests and PCET2 detached text. Text stays out of Discord's message store; decrypted attachments use temporary app-cache files cleared on lock. Signature, channel/author binding, trusted keys, AEAD, bundle integrity, and a persistent bounded 4,096-record replay history are checked before display. Retired identities accept only history posted, signed, and last edited before their retirement cutoff. Failed encryption or vault persistence cancels a protected send.
 
 ## Current limits
 
-This is an alpha, not full desktop feature parity. Mobile does not yet read PCEM1 or older PCEM2 UUID envelopes, send detached long text, edit encrypted messages, render native encrypted stickers, transfer the PC's complete trusted-contact/history state, or enforce the desktop's retired-key cutoffs. Incoming media is fetched as a complete authenticated bundle rather than on demand per file. Uploads are bounded to 64 MiB per file and 128 MiB total; the actual Discord allowance can be lower. Duplicate optimistic own-message IDs can be blocked until the canonical message reloads.
+This is an alpha, not full desktop feature parity. Mobile does not yet send detached long text, edit encrypted messages, or render native encrypted stickers. Incoming media is fetched as a complete authenticated bundle rather than on demand per file. Uploads are bounded to 64 MiB per file and 128 MiB total; the actual Discord allowance can be lower. Duplicate optimistic own-message IDs can be blocked until the canonical message reloads.
 
 Protected mobile edits, stickers, and forwards are blocked on the hooked message-actions path. Other plugins and unhooked programmatic network paths remain part of the trusted endpoint; mobile does not claim the desktop REST backstop. Calls, reactions, notifications, Discord metadata, screenshots, and a compromised client are outside message encryption. The protocol is non-ratcheting E2EE without forward secrecy.
 
@@ -55,6 +59,8 @@ The legacy password-encrypted PCIB1/2 import remains available for existing unpr
 ## Build and verify
 
 Use Bun, Node 24, JDK 21 and 25, Android SDK 36 and 37, and the pinned Revenge API built from source. The workflow is the complete reproducible build recipe.
+
+Run `pnpm install --frozen-lockfile` in the repository root first; the interoperability tests import that checkout's desktop implementation and dependencies.
 
 ```powershell
 bun install --frozen-lockfile

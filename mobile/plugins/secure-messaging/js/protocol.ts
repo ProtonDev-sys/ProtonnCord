@@ -5,6 +5,7 @@ import { base64urlnopad } from '@scure/base'
 export const KEY_PREFIX = 'PCEK1:'
 export const MESSAGE_PREFIX = 'PCEM3:'
 export const PREVIOUS_MESSAGE_PREFIX = 'PCEM2:'
+export const LEGACY_MESSAGE_PREFIX = 'PCEM1:'
 export const MAX_MESSAGE_LENGTH = 2_000
 export const MAX_RECIPIENTS = 24
 
@@ -42,7 +43,7 @@ export interface WrappedKey {
 }
 
 export interface Envelope {
-	v: 2 | 3
+	v: 1 | 2 | 3
 	t: 'm'
 	i: string
 	c: string
@@ -225,6 +226,20 @@ export function header(
 		'v' | 'i' | 'c' | 's' | 'd' | 'q' | 'k' | 'r' | 'm'
 	>,
 ): Uint8Array {
+	if (value.v === 1)
+		return utf8Bytes(
+			JSON.stringify({
+				v: 1,
+				t: 'm',
+				i: value.i,
+				c: value.c,
+				s: value.s,
+				d: value.d,
+				q: value.q,
+				k: value.k,
+				r: value.r.map(recipient => recipient.u),
+			}),
+		)
 	const prefix = value.v === 3 ? MESSAGE_PREFIX : PREVIOUS_MESSAGE_PREFIX
 	return utf8Bytes(
 		JSON.stringify([
@@ -242,6 +257,26 @@ export function header(
 }
 
 export function canonicalEnvelope(value: UnsignedEnvelope): Uint8Array {
+	if (value.v === 1)
+		return utf8Bytes(
+			JSON.stringify({
+				v: 1,
+				t: 'm',
+				i: value.i,
+				c: value.c,
+				s: value.s,
+				d: value.d,
+				q: value.q,
+				k: value.k,
+				r: value.r.map(recipient => ({
+					u: recipient.u,
+					e: recipient.e,
+					x: recipient.x,
+				})),
+				n: value.n,
+				x: value.x,
+			}),
+		)
 	const prefix = value.v === 3 ? MESSAGE_PREFIX : PREVIOUS_MESSAGE_PREFIX
 	return utf8Bytes(
 		JSON.stringify([
@@ -281,7 +316,10 @@ function compact(value: Envelope): unknown[] {
 
 export function serializeEnvelope(value: Envelope): string {
 	const prefix = value.v === 3 ? MESSAGE_PREFIX : PREVIOUS_MESSAGE_PREFIX
-	const content = `${prefix}${JSON.stringify(compact(value))}`
+	const content =
+		value.v === 1
+			? `${LEGACY_MESSAGE_PREFIX}${JSON.stringify(value)}`
+			: `${prefix}${JSON.stringify(compact(value))}`
 	if (content.length > MAX_MESSAGE_LENGTH)
 		throw new Error('Encrypted message exceeds Discord’s 2,000 character limit')
 	return content
@@ -294,6 +332,26 @@ export function parseEnvelope(
 ): Envelope {
 	requireSnowflake(channelId, 'channelId')
 	requireSnowflake(authorId, 'authorId')
+	if (content.startsWith(LEGACY_MESSAGE_PREFIX)) {
+		if (content.length > MAX_MESSAGE_LENGTH)
+			throw new Error('Unsupported encrypted message')
+		const raw = content.slice(LEGACY_MESSAGE_PREFIX.length)
+		const value = JSON.parse(raw)
+		if (
+			!value ||
+			typeof value !== 'object' ||
+			Array.isArray(value) ||
+			value.v !== 1 ||
+			value.t !== 'm' ||
+			Object.keys(value).sort().join() !== 'c,d,i,k,n,q,r,s,t,v,x,z' ||
+			value.c !== channelId ||
+			value.s !== authorId ||
+			JSON.stringify(value) !== raw
+		)
+			throw new Error('Invalid legacy encrypted envelope or Discord binding')
+		validateFields(value)
+		return value
+	}
 	const current = content.startsWith(MESSAGE_PREFIX)
 	const isPrevious = content.startsWith(PREVIOUS_MESSAGE_PREFIX)
 	if ((!current && !isPrevious) || content.length > MAX_MESSAGE_LENGTH)
@@ -341,17 +399,44 @@ export function parseEnvelope(
 		x: wire[current ? 7 : 6],
 		z: wire[current ? 8 : 7],
 	}
-	decode64(value.i, 16)
+	validateFields(value)
+	if (JSON.stringify(compact(value)) !== content.slice(prefix.length))
+		throw new Error('Non-canonical encrypted envelope')
+	return value
+}
+
+function validateFields(value: Envelope): void {
+	const current = value.v === 3
+	const recipients = value.r
+	const mentions = value.m ?? []
+	if (value.v === 1) {
+		if (
+			typeof value.i !== 'string' ||
+			!/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(value.i)
+		)
+			throw new Error('Invalid legacy envelope ID')
+	} else decode64(value.i, 16)
 	if (!timestamp(value.d) || !Number.isSafeInteger(value.q) || value.q < 1)
 		throw new Error('Invalid encrypted envelope fields')
 	decode64(value.k, 32)
 	decode64(value.n, 12)
 	if (decode64(value.x).length < 17) throw new Error('Invalid ciphertext')
 	decode64(value.z, 64)
-	if (recipients.length < 1 || recipients.length > MAX_RECIPIENTS + 1)
+	if (
+		!Array.isArray(recipients) ||
+		recipients.length < 1 ||
+		recipients.length > MAX_RECIPIENTS + 1
+	)
 		throw new Error('Invalid recipient count')
 	let previous = ''
 	for (const recipient of recipients) {
+		if (
+			!recipient ||
+			typeof recipient !== 'object' ||
+			Array.isArray(recipient) ||
+			Object.keys(recipient).sort().join() !== 'e,u,x'
+		)
+			throw new Error('Invalid recipient entry')
 		requireSnowflake(recipient.u, 'recipient')
 		decode64(recipient.e, 32)
 		decode64(recipient.x, 48)
@@ -370,7 +455,4 @@ export function parseEnvelope(
 			previousMention = userId
 		}
 	}
-	if (JSON.stringify(compact(value)) !== content.slice(prefix.length))
-		throw new Error('Non-canonical encrypted envelope')
-	return value
 }

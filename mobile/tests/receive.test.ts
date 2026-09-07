@@ -123,3 +123,26 @@ test('storage failure prevents decrypted display', async () => {
 		/storage failed/,
 	)
 })
+
+test('a cached plaintext version cannot bypass a subsequently accepted edit', async () => {
+	const receiver = new MessageReceiver(
+		async () => {},
+		() => true,
+	)
+	const old = message(12),
+		edit = message(13),
+		account = state()
+	receiver.render(old, account, BOB, () => {})
+	await new Promise(resolve => setImmediate(resolve))
+	assert.equal(
+		receiver.render(old, account, BOB, () => {}),
+		'private text',
+	)
+	receiver.render(edit, account, BOB, () => {})
+	await new Promise(resolve => setImmediate(resolve))
+	assert.equal(
+		receiver.render(edit, account, BOB, () => {}),
+		'private text',
+	)
+	assert.throws(() => receiver.render(old, account, BOB, () => {}), /stale/)
+})
