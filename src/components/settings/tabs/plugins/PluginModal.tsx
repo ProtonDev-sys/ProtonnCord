@@ -29,12 +29,12 @@ import { Paragraph } from "@components/Paragraph";
 import { debounce } from "@shared/debounce";
 import { gitRemote } from "@shared/vencordUserAgent";
 import { classNameFactory } from "@utils/css";
-import { proxyLazy } from "@utils/lazy";
+import { makeLazy } from "@utils/lazy";
 import { Margins } from "@utils/margins";
 import { classes, isObjectEmpty } from "@utils/misc";
 import { OptionType, Plugin, PluginTag } from "@utils/types";
 import { RenderModalProps, User } from "@vencord/discord-types";
-import { findComponentByCodeLazy, findCssClassesLazy } from "@webpack";
+import { findComponentByCodeLazy, findCssClasses } from "@webpack";
 import { Clickable, FluxDispatcher, Modal, openModal, React, Text, Toasts, Tooltip, useEffect, useMemo, UserStore, UserSummaryItem, UserUtils, useState } from "@webpack/common";
 import { Constructor } from "type-fest";
 
@@ -46,10 +46,10 @@ import { FavoriteButton, GithubButton, WebsiteButton } from "./PluginModalButton
 
 const cl = classNameFactory("vc-plugin-modal-");
 
-const AvatarStyles = findCssClassesLazy("moreUsers", "avatar", "clickableAvatar");
+const getAvatarStyles = makeLazy(() => findCssClasses("moreUsers", "avatar", "clickableAvatar"));
 const ConfirmModal = findComponentByCodeLazy('parentComponent:"ConfirmModal"');
 const WarningIcon = findComponentByCodeLazy("3.15H3.29c-1.74");
-const UserRecord: Constructor<Partial<User>> = proxyLazy(() => UserStore.getCurrentUser().constructor) as any;
+const getUserRecord = makeLazy(() => UserStore.getCurrentUser().constructor as Constructor<Partial<User>>);
 
 interface PluginModalProps extends RenderModalProps {
     plugin: Plugin;
@@ -57,6 +57,7 @@ interface PluginModalProps extends RenderModalProps {
 }
 
 export function makeDummyUser(user: { username: string; id?: string; avatar?: string; }) {
+    const UserRecord = getUserRecord();
     const newUser = new UserRecord({
         username: user.username,
         id: user.id ?? generateId(),
@@ -84,6 +85,7 @@ function PluginTags({ tags }: { tags: PluginTag[]; }) {
 }
 
 export default function PluginModal({ plugin, onRestartNeeded, onClose, transitionState }: PluginModalProps) {
+    const AvatarStyles = getAvatarStyles();
     const pluginSettings = useSettings([`plugins.${plugin.name}.*`]).plugins[plugin.name];
     const hasSettings = hasAnyVisibleSettings(plugin);
 

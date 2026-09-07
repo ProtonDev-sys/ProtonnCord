@@ -1723,7 +1723,7 @@ async function assertPrivacyWarningSource(): Promise<void> {
         readFile("src/api/SettingsSync/cloudSync.ts", "utf8"),
         readFile("src/api/SettingsSync/cloudSetup.tsx", "utf8"),
         readFile("src/components/settings/tabs/sync/CloudTab.tsx", "utf8"),
-        readFile("src/Vencord.ts", "utf8"),
+        readFile("src/runtime/cloudSettings.ts", "utf8"),
     ]);
     assert.match(tabSource, /cannot verify or erase automatically/u);
     assert.match(tabSource, /rotate previously synced API keys, passwords, and tokens/u);
@@ -1735,11 +1735,12 @@ async function assertPrivacyWarningSource(): Promise<void> {
     assert.match(tabSource, /disabled=\{!isAuthenticated\}[\s\S]+?Delete Cloud Settings/u, "deletion depends on account authorization, not sync enablement");
     assert.doesNotMatch(`${syncSource}\n${setupSource}\n${tabSource}`, /migrateCloudPrivacy|purgeLegacyCloudData/u);
     assert.doesNotMatch(tabSource, /legacy (?:data|credentials) (?:were|was|is|are) (?:purged|erased|deleted|removed)/iu);
-    assert.match(startupSource, /import \{ getCloudRequestContext, getCloudSyncScope \} from "\.\/api\/SettingsSync\/cloudSetup"/u);
+    assert.match(startupSource, /import \{ getCloudRequestContext, getCloudSyncScope \} from "@api\/SettingsSync\/cloudSetup"/u);
     assert.match(startupSource, /authenticationContext = await getCloudRequestContext\(\)/u, "startup authentication is sourced from a complete current origin/account context");
     assert.match(startupSource, /const currentContext = await getCloudRequestContext\(\)[\s\S]+?currentContext\.scope !== authenticationContext\.scope/u);
-    assert.match(startupSource, /SettingsStore\.addGlobalChangeListener\(\(\) => \{\s*markLocalSettingsDirty\(\);/u);
-    assert.match(startupSource, /VencordNative\.quickCss\.addChangeListener\(\(\) => \{\s*markLocalSettingsDirty\(\);/u);
+    assert.match(startupSource, /function localChange\(\)[\s\S]+?markLocalSettingsDirty\(\);/u);
+    assert.match(startupSource, /SettingsStore\.addGlobalChangeListener\(localChange\)/u);
+    assert.match(startupSource, /VencordNative\.quickCss\.addChangeListener\(localChange\)/u);
     const settingsListener = startupSource.indexOf("SettingsStore.addGlobalChangeListener");
     const quickCssListener = startupSource.indexOf("VencordNative.quickCss.addChangeListener");
     const authLookup = startupSource.indexOf("authenticationContext = await getCloudRequestContext()");

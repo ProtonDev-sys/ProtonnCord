@@ -19,13 +19,13 @@ import {
     wrapTab,
 } from "@components/settings/tabs/BaseTab";
 import { classes, isObjectEmpty } from "@utils/misc";
-import { relaunch } from "@utils/native";
-import { Alerts, closeAllModals,NavigationRouter, Toasts, useEffect, useState } from "@webpack/common";
+import { Alerts, closeAllModals, NavigationRouter, Toasts, useEffect, useState } from "@webpack/common";
 
 import userpluginInstaller, { Native } from "..";
 import {
     cl,
     CLONE_LINK_REGEX,
+    restartAfterPluginChange,
     showInstallFinishedAlert,
 } from "../misc/constants";
 
@@ -223,11 +223,7 @@ function UserPluginsTab() {
                                                         ? "Restart"
                                                         : "Refresh",
                                                 cancelText: "Later",
-                                                onConfirm() {
-                                                    plugin.usesNative
-                                                        ? relaunch()
-                                                        : window.location.reload();
-                                                },
+                                                onConfirm: () => restartAfterPluginChange(plugin.usesNative),
                                             });
                                         }}
                                         className={cl("delete-button")}
@@ -281,11 +277,7 @@ function UserPluginsTab() {
                                                                             ? "Restart"
                                                                             : "Refresh",
                                                                     cancelText: "Later",
-                                                                    onConfirm() {
-                                                                        plugin.usesNative
-                                                                            ? relaunch()
-                                                                            : window.location.reload();
-                                                                    },
+                                                                    onConfirm: () => restartAfterPluginChange(plugin.usesNative),
                                                                 });
                                                             } catch (e: any) {
                                                                 if (

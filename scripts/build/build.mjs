@@ -20,12 +20,21 @@
 // @ts-check
 
 import { createPackage } from "@electron/asar";
-import { readdir, writeFile } from "fs/promises";
+import { writeFile } from "fs/promises";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
-import { getPluginTarget } from "../utils.mjs";
-import { BUILD_TIMESTAMP, commonOpts, exists, globPlugins, IS_DEV, IS_REPORTER, IS_COMPANION_TEST, IS_STANDALONE, IS_UPDATER_DISABLED, resolvePluginName, VERSION, commonRendererPlugins, watch, buildOrWatchAll, stringifyValues, IS_ANTI_CRASH_TEST } from "./common.mjs";
+import { BUILD_TIMESTAMP, commonOpts, globPlugins, IS_DEV, IS_REPORTER, IS_COMPANION_TEST, IS_STANDALONE, IS_UPDATER_DISABLED, resolvePluginName, VERSION, commonRendererPlugins, watch, buildOrWatchAll, stringifyValues, IS_ANTI_CRASH_TEST } from "./common.mjs";
+import { createPluginNativesPlugin } from "./pluginNatives.mjs";
+
+const outputArguments = process.argv.filter(argument => argument.startsWith("--outdir="));
+if (outputArguments.length > 1 || process.argv.includes("--outdir"))
+    throw new Error("Pass one output directory using --outdir=<directory>.");
+const outputArgument = outputArguments[0]?.slice("--outdir=".length);
+if (outputArgument !== undefined && !outputArgument.trim())
+    throw new Error("The build output directory cannot be empty.");
+const outputDirectory = resolve(outputArgument ?? "dist");
+const outputPath = (...parts) => join(outputDirectory, ...parts);
 
 const defines = stringifyValues({
     IS_STANDALONE,
@@ -63,63 +72,7 @@ const nodeCommonOpts = {
 const sourceMapFooter = s => watch ? "" : `//# sourceMappingURL=vencord://${s}.js.map`;
 const sourcemap = watch ? "inline" : "external";
 
-/**
- * @type {import("esbuild").Plugin}
- */
-const globNativesPlugin = {
-    name: "glob-natives-plugin",
-    setup: build => {
-        const filter = /^~pluginNatives$/;
-        build.onResolve({ filter }, args => {
-            return {
-                namespace: "import-natives",
-                path: args.path
-            };
-        });
-
-        build.onLoad({ filter, namespace: "import-natives" }, async () => {
-            const pluginDirs = ["plugins", "equicordplugins", "userplugins"];
-            let code = "";
-            let natives = "\n";
-            let i = 0;
-            /**
-             * @type {string[]}
-             */
-            const watchFiles = [];
-            for (const dir of pluginDirs) {
-                const dirPath = join("src", dir);
-                if (!await exists(dirPath)) continue;
-                const plugins = await readdir(dirPath, { withFileTypes: true });
-                for (const file of plugins) {
-                    const fileName = file.name;
-                    const nativePath = join(dirPath, fileName, "native.ts");
-                    const indexNativePath = join(dirPath, fileName, "native/index.ts");
-
-                    watchFiles.push(resolve(nativePath), resolve(indexNativePath));
-
-                    if (!(await exists(nativePath)) && !(await exists(indexNativePath)))
-                        continue;
-                    if (getPluginTarget(fileName) === "dev" && !IS_DEV && !IS_REPORTER)
-                        continue;
-
-                    const pluginName = await resolvePluginName(dirPath, file);
-
-                    const mod = `p${i}`;
-                    code += `import * as ${mod} from "./${dir}/${fileName}/native";\n`;
-                    natives += `${JSON.stringify(pluginName)}:${mod},\n`;
-                    i++;
-                }
-            }
-            code += `export default {${natives}};`;
-            return {
-                contents: code,
-                resolveDir: "./src",
-                watchDirs: pluginDirs.map(d => resolve("src", d)),
-                watchFiles,
-            };
-        });
-    }
-};
+const globNativesPlugin = createPluginNativesPlugin({ resolvePluginName, isDev: IS_DEV, isReporter: IS_REPORTER });
 
 /** @type {import("esbuild").BuildOptions[]} */
 const buildConfigs = ([
@@ -127,7 +80,7 @@ const buildConfigs = ([
     {
         ...nodeCommonOpts,
         entryPoints: [join(dirname(fileURLToPath(import.meta.url)), "../../src/main/index.ts")],
-        outfile: "dist/desktop/patcher.js",
+        outfile: outputPath("desktop", "patcher.js"),
         footer: { js: "//# sourceURL=file:///VencordPatcher\n" + sourceMapFooter("patcher") },
         sourcemap,
         plugins: [
@@ -145,7 +98,7 @@ const buildConfigs = ([
     {
         ...commonOpts,
         entryPoints: [join(dirname(fileURLToPath(import.meta.url)), "../../src/Vencord.ts")],
-        outfile: "dist/desktop/renderer.js",
+        outfile: outputPath("desktop", "renderer.js"),
         format: "iife",
         target: ["esnext"],
         footer: { js: "//# sourceURL=file:///VencordRenderer\n" + sourceMapFooter("renderer") },
@@ -165,7 +118,7 @@ const buildConfigs = ([
     {
         ...nodeCommonOpts,
         entryPoints: [join(dirname(fileURLToPath(import.meta.url)), "../../src/preload.ts")],
-        outfile: "dist/desktop/preload.js",
+        outfile: outputPath("desktop", "preload.js"),
         footer: { js: "//# sourceURL=file:///VencordPreload\n" + sourceMapFooter("preload") },
         sourcemap,
         define: {
@@ -180,7 +133,7 @@ const buildConfigs = ([
     {
         ...nodeCommonOpts,
         entryPoints: [join(dirname(fileURLToPath(import.meta.url)), "../../src/main/index.ts")],
-        outfile: "dist/equibop/main.js",
+        outfile: outputPath("equibop", "main.js"),
         footer: { js: "//# sourceURL=file:///VencordDesktopMain\n" + sourceMapFooter("main") },
         sourcemap,
         plugins: [
@@ -197,7 +150,7 @@ const buildConfigs = ([
     {
         ...commonOpts,
         entryPoints: [join(dirname(fileURLToPath(import.meta.url)), "../../src/Vencord.ts")],
-        outfile: "dist/equibop/renderer.js",
+        outfile: outputPath("equibop", "renderer.js"),
         format: "iife",
         target: ["esnext"],
         footer: { js: "//# sourceURL=file:///VencordDesktopRenderer\n" + sourceMapFooter("renderer") },
@@ -217,7 +170,7 @@ const buildConfigs = ([
     {
         ...nodeCommonOpts,
         entryPoints: [join(dirname(fileURLToPath(import.meta.url)), "../../src/preload.ts")],
-        outfile: "dist/equibop/preload.js",
+        outfile: outputPath("equibop", "preload.js"),
         footer: { js: "//# sourceURL=file:///VencordPreload\n" + sourceMapFooter("preload") },
         sourcemap,
         define: {
@@ -232,17 +185,17 @@ const buildConfigs = ([
 await buildOrWatchAll(buildConfigs);
 
 await Promise.all([
-    writeFile("dist/desktop/package.json", JSON.stringify({
+    writeFile(outputPath("desktop", "package.json"), JSON.stringify({
         name: "protonn-cord",
         main: "patcher.js"
     })),
-    writeFile("dist/equibop/package.json", JSON.stringify({
+    writeFile(outputPath("equibop", "package.json"), JSON.stringify({
         name: "protonn-cord",
         main: "main.js"
     }))
 ]);
 
 await Promise.all([
-    createPackage("dist/desktop", "dist/desktop.asar"),
-    createPackage("dist/equibop", "dist/equibop.asar"),
+    createPackage(outputPath("desktop"), outputPath("desktop.asar")),
+    createPackage(outputPath("equibop"), outputPath("equibop.asar")),
 ]);

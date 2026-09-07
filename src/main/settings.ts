@@ -56,8 +56,11 @@ export const RendererSettings = new SettingsStore(readSettings<Settings>("render
 ipcMain.handle(IpcEvents.GET_SETTINGS_DIR, () => SETTINGS_DIR);
 ipcMain.on(IpcEvents.GET_SETTINGS, e => e.returnValue = RendererSettings.plain);
 
-ipcMain.handle(IpcEvents.SET_SETTINGS, (_, data: Settings, pathToNotify?: string) => {
+ipcMain.handle(IpcEvents.SET_SETTINGS, (_, data: Settings, pathToNotify?: string | readonly string[]) => {
     if (data === null || typeof data !== "object" || Array.isArray(data)) throw new Error("Settings must contain an object.");
+    if (pathToNotify !== undefined && typeof pathToNotify !== "string"
+        && (!Array.isArray(pathToNotify) || pathToNotify.some(path => typeof path !== "string")))
+        throw new Error("Settings notification paths must contain strings.");
     writeSettings(SETTINGS_FILE, data);
     RendererSettings.setData(data, pathToNotify);
 });

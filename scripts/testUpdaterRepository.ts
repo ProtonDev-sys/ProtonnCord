@@ -8,7 +8,8 @@ const gitUpdater = readFileSync("src/main/updater/git.ts", "utf8");
 const gitOperations = readFileSync("src/main/updater/gitOperations.ts", "utf8");
 const workflow = readFileSync(".github/workflows/build.yml", "utf8");
 
-assert.match(patcher, /\/\/ Standalone: true/u, "the repository test must inspect a freshly built standalone updater");
+assert.match(patcher, /\/\/ Development: false/u, "the repository test must inspect a production build");
+assert.match(patcher, /\/\/ Updater Disabled: false/u, "the repository test must inspect an updater-enabled build");
 assert.match(
     buildCommon,
     /IS_UPDATER_DISABLED = IS_DEV \|\| process\.argv\.includes\("--disable-updater"\)/u,

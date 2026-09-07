@@ -9,9 +9,10 @@ import type { CspRequestResult } from "@main/csp/manager";
 import type { PluginIpcMappings } from "@main/ipcPlugins";
 import { UserThemeHeader } from "@main/themes";
 import { IpcEvents } from "@shared/IpcEvents";
+import { createSettingsPersistence } from "@shared/settingsPersistence";
 import type { UpdaterBranch, UpdaterDiagnostics } from "@shared/Updater";
 import type { IpcRes } from "@utils/types";
-import { ipcRenderer } from "electron/renderer";
+import { ipcRenderer, type IpcRendererEvent } from "electron/renderer";
 
 export function invoke<T = any>(event: IpcEvents, ...args: any[]) {
     return ipcRenderer.invoke(event, ...args) as Promise<T>;
@@ -19,6 +20,16 @@ export function invoke<T = any>(event: IpcEvents, ...args: any[]) {
 
 export function sendSync<T = any>(event: IpcEvents, ...args: any[]) {
     return ipcRenderer.sendSync(event, ...args) as T;
+}
+
+const settingsPersistence = createSettingsPersistence<Settings>((settings, paths) =>
+    invoke<void>(IpcEvents.SET_SETTINGS, settings, paths)
+);
+
+function subscribe<Args extends unknown[]>(event: IpcEvents, listener: (...args: Args) => void) {
+    const callback = (_event: IpcRendererEvent, ...args: Args) => listener(...args);
+    ipcRenderer.on(event, callback);
+    return () => { ipcRenderer.removeListener(event, callback); };
 }
 
 const PluginHelpers = {} as Record<string, Record<string, (...args: any[]) => Promise<any>>>;
@@ -58,7 +69,8 @@ export default {
 
     settings: {
         get: () => sendSync<Settings>(IpcEvents.GET_SETTINGS),
-        set: (settings: Settings, pathToNotify?: string) => invoke<void>(IpcEvents.SET_SETTINGS, settings, pathToNotify),
+        set: settingsPersistence.set,
+        flush: settingsPersistence.flush,
         getSettingsDir: () => invoke<string>(IpcEvents.GET_SETTINGS_DIR),
 
         openFolder: () => invoke<void>(IpcEvents.OPEN_SETTINGS_FOLDER),
@@ -69,11 +81,11 @@ export default {
         set: (css: string) => invoke<void>(IpcEvents.SET_QUICK_CSS, css),
 
         addChangeListener(cb: (newCss: string) => void) {
-            ipcRenderer.on(IpcEvents.QUICK_CSS_UPDATE, (_, css) => cb(css));
+            return subscribe(IpcEvents.QUICK_CSS_UPDATE, cb);
         },
 
         addThemeChangeListener(cb: () => void) {
-            ipcRenderer.on(IpcEvents.THEME_UPDATE, () => cb());
+            return subscribe(IpcEvents.THEME_UPDATE, cb);
         },
 
         openFile: () => invoke<void>(IpcEvents.OPEN_QUICKCSS),
@@ -87,9 +99,8 @@ export default {
         openExternal: (url: string) => invoke<void>(IpcEvents.OPEN_EXTERNAL, url),
         getRendererCss: () => invoke<string>(IpcEvents.GET_RENDERER_CSS),
         onRendererCssUpdate: (cb: (newCss: string) => void) => {
-            if (!IS_DEV) return;
-
-            ipcRenderer.on(IpcEvents.RENDERER_CSS_UPDATE, (_e, newCss: string) => cb(newCss));
+            if (!IS_DEV) return () => { };
+            return subscribe(IpcEvents.RENDERER_CSS_UPDATE, cb);
         }
     },
 
@@ -107,8 +118,8 @@ export default {
 
     tray: {
         setUpdateState: (available: boolean) => ipcRenderer.send(IpcEvents.SET_TRAY_UPDATE_STATE, available),
-        onCheckUpdates: (cb: () => void) => { ipcRenderer.on(IpcEvents.TRAY_CHECK_UPDATES, cb); },
-        onRepair: (cb: () => void) => { ipcRenderer.on(IpcEvents.TRAY_REPAIR, cb); },
+        onCheckUpdates: (cb: () => void) => subscribe(IpcEvents.TRAY_CHECK_UPDATES, cb),
+        onRepair: (cb: () => void) => subscribe(IpcEvents.TRAY_REPAIR, cb),
     },
 
     pluginHelpers: PluginHelpers

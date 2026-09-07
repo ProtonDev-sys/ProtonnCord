@@ -70,7 +70,7 @@ window.VencordNative = {
             return fetch(RENDERER_CSS_URL)
                 .then(res => res.text());
         },
-        onRendererCssUpdate: NOOP,
+        onRendererCssUpdate: () => NOOP,
     },
 
     updater: {
@@ -91,9 +91,11 @@ window.VencordNative = {
             cssListeners.forEach(l => l(css));
         },
         addChangeListener(cb) {
-            cssListeners.add(cb);
+            const listener = (css: string) => cb(css);
+            cssListeners.add(listener);
+            return () => { cssListeners.delete(listener); };
         },
-        addThemeChangeListener: NOOP,
+        addThemeChangeListener: () => NOOP,
         openFile: NOOP_ASYNC,
         async openEditor() {
             if (IS_USERSCRIPT) {
@@ -136,6 +138,7 @@ window.VencordNative = {
             }
         },
         set: async (s: Settings) => localStorage.setItem("ProtonnCordSettings", JSON.stringify(s)),
+        flush: async () => { },
         getSettingsDir: async () => "LocalStorage",
         openFolder: async () => Promise.reject("settings:openFolder is not supported on web"),
     },
@@ -144,7 +147,7 @@ window.VencordNative = {
     csp: {} as any,
     tray: {
         setUpdateState: NOOP,
-        onCheckUpdates: NOOP,
-        onRepair: NOOP,
+        onCheckUpdates: () => NOOP,
+        onRepair: () => NOOP,
     },
 };

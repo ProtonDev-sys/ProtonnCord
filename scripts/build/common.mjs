@@ -30,6 +30,7 @@ import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 
 import { getPluginTarget } from "../utils.mjs";
+import { createPluginManifestAnalyzer } from "./pluginManifest.mjs";
 
 const PackageJSON = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../package.json"), "utf-8"));
 
@@ -148,8 +149,10 @@ export const globPlugins = kind => ({
 
         build.onLoad({ filter, namespace: "import-plugins" }, async () => {
             const pluginDirs = ["plugins/_api", "plugins/_core", "plugins", "equicordplugins/_api", "equicordplugins/_core", "equicordplugins", "userplugins"];
-            let code = "";
+            const analyzeManifest = createPluginManifestAnalyzer();
+            let code = 'import { createPluginCatalog, describePlugin } from "./shared/pluginDefinition";\n';
             let pluginsCode = "\n";
+            let manifestCode = "\n";
             let metaCode = "\n";
             let excludedCode = "\n";
             let i = 0;
@@ -185,15 +188,24 @@ export const globPlugins = kind => ({
                     }
 
                     const folderName = `src/${dir}/${fileName}`;
-
+                    const entry = file.isFile() ? folderName : (await exists(join(folderName, "index.ts")) ? join(folderName, "index.ts") : join(folderName, "index.tsx"));
+                    const manifest = !IS_DEV && !IS_REPORTER && !IS_ANTI_CRASH_TEST && !userPlugin ? await analyzeManifest(entry) : undefined;
+                    const importPath = `./${dir}/${fileName.replace(/\.tsx?$/, "")}`;
                     const mod = `p${i}`;
-                    code += `import ${mod} from "./${dir}/${fileName.replace(/\.tsx?$/, "")}";\n`;
-                    pluginsCode += `[${mod}.name]:${mod},\n`;
-                    metaCode += `[${mod}.name]:${JSON.stringify({ folderName, userPlugin })},\n`;
+                    if (manifest) {
+                        pluginsCode += `${JSON.stringify(manifest.name)}:()=>require(${JSON.stringify(importPath)}).default,\n`;
+                        manifestCode += `${JSON.stringify(manifest.name)}:${JSON.stringify(manifest)},\n`;
+                        metaCode += `${JSON.stringify(manifest.name)}:${JSON.stringify({ folderName, userPlugin })},\n`;
+                    } else {
+                        code += `import ${mod} from ${JSON.stringify(importPath)};\n`;
+                        pluginsCode += `[${mod}.name]:()=>${mod},\n`;
+                        manifestCode += `[${mod}.name]:describePlugin(${mod}),\n`;
+                        metaCode += `[${mod}.name]:${JSON.stringify({ folderName, userPlugin })},\n`;
+                    }
                     i++;
                 }
             }
-            code += `export default {${pluginsCode}};export const PluginMeta={${metaCode}};export const ExcludedPlugins={${excludedCode}};`;
+            code += `export default createPluginCatalog({${pluginsCode}});export const PluginManifest={${manifestCode}};export const PluginMeta={${metaCode}};export const ExcludedPlugins={${excludedCode}};`;
             return {
                 contents: code,
                 resolveDir: "./src",

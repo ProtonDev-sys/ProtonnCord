@@ -45,10 +45,14 @@ export function resetUpdateState() {
 }
 
 export async function checkForUpdates() {
-    changes = await Unwrap(VencordNative.updater.getUpdates(Settings.updateBranch));
+    const branch = Settings.updateBranch;
+    const [nextChanges, diagnostics] = await Promise.all([
+        Unwrap(VencordNative.updater.getUpdates(branch)),
+        Unwrap(VencordNative.updater.getDiagnostics(branch)),
+    ]);
+    changes = nextChanges;
 
-    // we only want to check this for the git updater, not the http updater
-    if (!IS_STANDALONE) {
+    if (diagnostics.backend === "git") {
         const classification = classifyUpdateChanges(changes, gitHash);
         isNewer = classification.isNewer;
         return (isOutdated = classification.isOutdated);
@@ -85,7 +89,7 @@ export async function maybePromptToUpdate(confirmMessage: string, checkForDev = 
             if (wantsUpdate && isNewer) return alert("Your local copy has more recent commits. Please stash or reset them.");
             if (wantsUpdate) {
                 await update();
-                relaunch();
+                await relaunch();
             }
         }
     } catch (err) {

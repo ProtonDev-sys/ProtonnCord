@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { reload } from "@utils/native";
+
 import type { PaletteCommand } from "../api/types";
 import { BoltIcon, GearIcon, PaintIcon, RestartIcon } from "../ui/icons";
 import { openSettingsPage } from "./openSettings";
@@ -56,7 +58,7 @@ export const equicordCommands: PaletteCommand[] = [
         actions: [{
             id: "run",
             label: "Restart Discord",
-            run: () => window.location.reload()
+            run: reload
         }]
     }
 ];
