@@ -6,7 +6,7 @@
 
 import { isPluginEnabled, pluginRequiresRestart, plugins, startDependenciesRecursive, startPlugin, stopPlugin } from "@api/PluginManager";
 import { Settings } from "@api/Settings";
-import { openPluginModal } from "@components/settings/tabs/plugins/PluginModal";
+import { openPluginModal } from "@components/settings";
 import type { Plugin } from "@utils/types";
 import { showToast, Toasts } from "@webpack/common";
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
+import * as catalogView from "../src/components/settings/tabs/plugins/catalogView";
 import {
     getNewSettings,
     isNotifiablePlugin,
@@ -129,7 +130,7 @@ function verifyCatalogCards() {
             PluginManifest: { Example: entry },
             PluginMeta: { Example: { folderName: "src/plugins/example", userPlugin: false } },
         },
-        "./PluginModal": { openPluginModal: (plugin: unknown) => { opened = plugin; } },
+        "@components/settings/tabs": { openPluginModal: (plugin: unknown) => { opened = plugin; } },
     };
     const module = runInNewContext(code + "\nexports;", {
         exports: {},
@@ -148,6 +149,11 @@ function verifyCatalogCards() {
     card.props.setEnabled();
     assert.equal(started, definition, "toggle actions resolve the original definition object");
     assert.equal(settings.plugins.Example.enabled, true);
+    const detached = settings.plugins.Example;
+    settings.plugins.Example = { enabled: false };
+    card.props.setEnabled();
+    assert.equal(settings.plugins.Example.enabled, true, "retained card handlers update replacement settings branches");
+    assert.equal(detached.enabled, true);
     const beforeContributorCard = definitionReads;
     module.PluginCard({ plugin: definition, onRestartNeeded() {} });
     assert.equal(definitionReads, beforeContributorCard, "real plugins supplied by contributor views remain compatible");
@@ -181,7 +187,7 @@ function verifyCatalogFavorites() {
     let stateCursor = 0;
     const React = {
         createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props: { ...props as object, children } }),
-        useEffect() {}, Fragment: "fragment",
+        useEffect() {}, Fragment: "fragment", memo: () => "plugin-card",
     };
     const mocks: Record<string, unknown> = {
         "./styles.css": {},
@@ -223,6 +229,8 @@ function verifyCatalogFavorites() {
         "./PluginCard": { PluginCard: "plugin-card" },
         "./PluginModal": {},
         "./PluginStatCards": { StockPluginsCard: "stock-stats", UserPluginsCard: "user-stats" },
+        "./catalogView": catalogView,
+        "./shared": { cl: (name: string) => name, logger: {}, ExcludedReasons: {}, PluginDependencyList: "dependency-list" },
         "./UIElements": { UIElementsButton: "ui-elements" },
     };
     const source = readFileSync("src/components/settings/tabs/plugins/index.tsx", "utf8");
@@ -235,7 +243,7 @@ function verifyCatalogFavorites() {
     const find = (tree: any, type: string): any[] => Array.isArray(tree)
         ? tree.flatMap(child => find(child, type))
         : !tree || typeof tree !== "object" ? [] : [...(tree.type === type ? [tree] : []), ...find(tree.props?.children, type)];
-    const names = (tree: unknown) => find(tree, "plugin-card").map(card => card.props.plugin.name);
+    const names = (tree: unknown) => find(tree, "plugin-card").map(card => card.props.card.plugin.name);
     const first = render();
     assert.deepEqual(names(first), ["Bravo", "Alpha", "Charlie"], "favorites sort before ordinary plugins, including unsaved entries");
     assert.equal(definitionLoads, 0, "catalog sorting and rendering must not hydrate disabled definitions through missing favorite defaults");
