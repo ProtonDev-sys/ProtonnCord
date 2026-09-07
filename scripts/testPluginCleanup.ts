@@ -33,7 +33,7 @@ interface UnindentPlugin {
 
 const { default: unindent } = loadModule<{ default: UnindentPlugin; }>("src/plugins/unindent/index.ts", {
     "@utils/constants": { Devs: { Ven: {} } },
-    "@utils/types": { default: <T>(plugin: T) => plugin }
+    "@utils/types": { __esModule: true, default: <T>(plugin: T) => plugin }
 });
 
 for (const [name, content, expected] of [
@@ -75,7 +75,7 @@ class CanvasStub {
     readonly context = { canvas: this, clearRect() { }, drawImage() { }, fillRect() { }, strokeRect() { } };
 
     getContext() { return this.context; }
-    getBoundingClientRect() { return { left: 10, top: 20, width: 100, height: 50 }; }
+    getBoundingClientClientRect() { return { left: 10, top: 20, width: 100, height: 50 }; }
     addEventListener(name: string, listener: (event: Pointer) => void) {
         assert.equal(this.listeners.has(name), false);
         this.listeners.set(name, listener);
