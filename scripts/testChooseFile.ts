@@ -18,7 +18,8 @@ for (const action of ["select", "empty", "cancel"] as const) {
             files: action === "select" ? [selected] : [],
             onchange: undefined as (() => void) | undefined,
             oncancel: undefined as (() => void) | undefined,
-            click: t.mock.fn()
+            click: t.mock.fn(),
+            remove: t.mock.fn()
         };
         const body = { appendChild: t.mock.fn(), removeChild: t.mock.fn() };
         const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
@@ -38,11 +39,17 @@ for (const action of ["select", "empty", "cancel"] as const) {
         assert.equal(input.accept, "text/plain");
         assert.equal(input.click.mock.callCount(), 1);
         assert.equal(body.appendChild.mock.calls[0].arguments[0], input);
-        assert.equal(body.removeChild.mock.calls[0].arguments[0], input);
+        assert.equal(body.removeChild.mock.callCount(), 0);
+        assert.equal(input.remove.mock.callCount(), 0);
+        assert.equal(result, undefined);
 
-        input[action === "cancel" ? "oncancel" : "onchange"]?.();
-        await setImmediate();
-        assert.equal(result, action === "select" ? selected : null);
+        const onComplete = input[action === "cancel" ? "oncancel" : "onchange"];
+        assert.ok(onComplete);
+        onComplete();
         await pending;
+        assert.equal(result, action === "select" ? selected : null);
+        assert.equal(input.remove.mock.callCount(), 1);
+        await setImmediate();
+        assert.equal(body.removeChild.mock.callCount(), 0);
     });
 }
