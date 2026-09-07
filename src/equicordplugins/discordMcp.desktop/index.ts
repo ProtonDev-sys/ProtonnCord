@@ -20,6 +20,8 @@ import {
     UserStore,
 } from "@webpack/common";
 
+import gitHash from "~git-hash";
+
 import { decodeAudio } from "../voiceMessageTranscriber.desktop/utils";
 import {
     DISCORD_MCP_TOOL_NAMES,
@@ -686,6 +688,9 @@ async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Pro
             connected: Boolean(UserStore.getCurrentUser()),
             currentUser: serializeUser(UserStore.getCurrentUser()),
             channelAccess: "all_accessible_channels",
+            build: { hash: gitHash, version: VERSION, builtAt: BUILD_TIMESTAMP, updaterDisabled: IS_UPDATER_DISABLED },
+            runtime: Vencord.Runtime.getRuntimeStatus(),
+            plugins: Vencord.Plugins.getPluginRuntimeStatus(),
             capabilities: {
                 allAccessibleChannels: true,
                 changesActiveView: false,

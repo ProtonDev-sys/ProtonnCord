@@ -67,11 +67,9 @@ const UserPluginContributorBadge: ProfileBadge = {
     position: BadgePosition.START,
     shouldShow: ({ userId }) => {
         if (!IS_DEV) return false;
-        const allPlugins = Object.values(Plugins);
-        return allPlugins.some(p => {
-            const pluginMeta = PluginMeta[p.name];
-            return pluginMeta?.userPlugin && p.authors.some(a => a.id.toString() === userId);
-        });
+        return Object.entries(PluginMeta).some(([name, metadata]) =>
+            metadata.userPlugin && Plugins[name].authors.some(a => a.id.toString() === userId)
+        );
     },
     onClick: (_, { userId }) => openContributorModal(UserStore.getUser(userId)),
     props: {

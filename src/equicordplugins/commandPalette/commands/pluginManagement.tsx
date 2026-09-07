@@ -6,9 +6,11 @@
 
 import { isPluginEnabled, pluginRequiresRestart, plugins, startDependenciesRecursive, startPlugin, stopPlugin } from "@api/PluginManager";
 import { Settings } from "@api/Settings";
-import { openPluginModal } from "@components/settings/tabs/plugins/PluginModal";
+import { openPluginModal } from "@components/settings";
 import type { Plugin } from "@utils/types";
 import { showToast, Toasts } from "@webpack/common";
+
+import { PluginManifest } from "~plugins";
 
 import type { PaletteCommand, PaletteListItem } from "../api/types";
 import { GearIcon, PlugIcon } from "../ui/icons";
@@ -54,7 +56,7 @@ function togglePlugin(plugin: Plugin) {
 }
 
 function pluginItems(): PaletteListItem[] {
-    return Object.values(plugins)
+    return Object.values(PluginManifest)
         .filter(plugin => !plugin.required && !plugin.hidden)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(plugin => {
@@ -69,13 +71,13 @@ function pluginItems(): PaletteListItem[] {
                         id: "toggle",
                         label: enabled ? "Disable Plugin" : "Enable Plugin",
                         keepOpen: true,
-                        run: () => togglePlugin(plugin)
+                        run: () => togglePlugin(plugins[plugin.name])
                     },
                     {
                         id: "settings",
                         label: "Open Plugin Settings",
                         icon: GearIcon,
-                        run: () => openPluginModal(plugin)
+                        run: () => openPluginModal(plugins[plugin.name])
                     }
                 ]
             };

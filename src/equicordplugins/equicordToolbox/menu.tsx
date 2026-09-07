@@ -14,6 +14,8 @@ import { OptionType, Plugin } from "@utils/types";
 import { Menu, showToast, useMemo, useState } from "@webpack/common";
 import type { ReactNode } from "react";
 
+import { PluginManifest } from "~plugins";
+
 import { settings } from ".";
 
 function buildPluginMenu() {
@@ -43,7 +45,7 @@ export function buildPluginMenuEntries(includeEmpty = false) {
     const lowerSearch = search.toLowerCase();
 
     const sortedPlugins = useMemo(() =>
-        Object.values(plugins).sort((a, b) => a.name.localeCompare(b.name)),
+        Object.values(PluginManifest).sort((a, b) => a.name.localeCompare(b.name)),
         []
     );
 
@@ -76,7 +78,8 @@ export function buildPluginMenuEntries(includeEmpty = false) {
             <Menu.MenuSeparator />
 
             {candidates
-                .map(p => {
+                .map(entry => {
+                    const p = plugins[entry.name];
                     const options = [] as ReactNode[];
 
                     let hasAnyOption = false;
@@ -246,8 +249,10 @@ export function buildThemeMenuEntries() {
 function buildCustomPluginEntries() {
     const pluginEntries = [] as { plugin: Plugin, node: ReactNode; }[];
 
-    for (const plugin of Object.values(plugins)) {
-        if (plugin.toolboxActions && isPluginEnabled(plugin.name)) {
+    for (const name in PluginManifest) {
+        if (!isPluginEnabled(name)) continue;
+        const plugin = plugins[name];
+        if (plugin.toolboxActions) {
             const entries = typeof plugin.toolboxActions === "function"
                 ? plugin.toolboxActions()
                 : Object.entries(plugin.toolboxActions).map(([text, action]) => {

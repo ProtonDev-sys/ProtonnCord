@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+import { getLoadedPluginDefinition } from "@shared/pluginDefinition";
 import { SettingsStore as SettingsStoreClass } from "@shared/SettingsStore";
 import type { UpdaterBranch } from "@shared/Updater";
 import { Logger } from "@utils/Logger";
@@ -23,7 +24,7 @@ import { mergeDefaults } from "@utils/mergeDefaults";
 import { DefinedSettings, OptionType, SettingsChecks, SettingsDefinition } from "@utils/types";
 import { React, useEffect } from "@webpack/common";
 
-import plugins from "~plugins";
+import plugins, { PluginManifest } from "~plugins";
 
 const logger = new Logger("Settings");
 
@@ -164,17 +165,22 @@ export const SettingsStore = new SettingsStoreClass(settings, {
         path
     }) {
         const v = target[key];
-        if (!plugins) return v; // plugins not initialised yet. this means this path was reached by being called on the top level
+        if (!PluginManifest) return v; // Circular plugin imports may read settings before catalog initialization.
 
-        if (path === "plugins" && key in plugins)
+        if (path === "plugins" && key in PluginManifest)
             return target[key] = {
-                enabled: IS_REPORTER || plugins[key].required || plugins[key].enabledByDefault || false
+                enabled: IS_REPORTER || PluginManifest[key].required || PluginManifest[key].enabledByDefault || false
             };
 
         // Since the property is not set, check if this is a plugin's setting and if so, try to resolve
         // the default value.
         if (path.startsWith("plugins.")) {
             const plugin = path.slice("plugins.".length);
+            const metadata = PluginManifest[plugin];
+            // Unknown fields (including JSON's toJSON probe) have no static default.
+            // Once loaded, the real definition may have added settings dynamically.
+            if (metadata?.eager === false && !metadata.settingsKeys.includes(key) && !getLoadedPluginDefinition(plugin))
+                return v;
             if (plugin in plugins) {
                 const setting = plugins[plugin].settings?.def[key];
                 if (!setting) return v;
@@ -228,10 +234,12 @@ export const Settings = SettingsStore.store;
 // TODO: Representing paths as essentially "string[].join('.')" wont allow dots in paths, change to "paths?: string[][]" later
 export function useSettings(paths?: UseSettings<Settings>[]) {
     const [, forceUpdate] = React.useReducer(() => ({}), {});
+    const subscriptionKey = JSON.stringify(paths);
 
     useEffect(() => {
-        if (paths) {
-            paths.forEach(p => {
+        const subscriptions: string[] | undefined = subscriptionKey === undefined ? undefined : JSON.parse(subscriptionKey);
+        if (subscriptions) {
+            subscriptions.forEach(p => {
                 if (p.endsWith(".*")) {
                     SettingsStore.addPrefixChangeListener(p.slice(0, -2), forceUpdate);
                 } else {
@@ -239,7 +247,7 @@ export function useSettings(paths?: UseSettings<Settings>[]) {
                 }
             });
 
-            return () => paths.forEach(p => {
+            return () => subscriptions.forEach(p => {
                 if (p.endsWith(".*")) {
                     SettingsStore.removePrefixChangeListener(p.slice(0, -2), forceUpdate);
                 } else {
@@ -250,7 +258,7 @@ export function useSettings(paths?: UseSettings<Settings>[]) {
             SettingsStore.addGlobalChangeListener(forceUpdate);
             return () => SettingsStore.removeGlobalChangeListener(forceUpdate);
         }
-    }, [paths]);
+    }, [subscriptionKey]);
 
     return SettingsStore.store;
 }

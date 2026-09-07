@@ -50,6 +50,9 @@ jobs:
             - name: Benchmark Secure Messaging
               run: pnpm exec tsx scripts/benchmarkSecureMessaging.ts
 
+            - name: Build production desktop test inputs
+              run: pnpm build
+
             - name: Lint & Test if desktop version compiles
               run: pnpm test
 

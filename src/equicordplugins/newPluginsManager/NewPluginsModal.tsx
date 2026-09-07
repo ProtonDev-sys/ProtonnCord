@@ -11,20 +11,23 @@ import { BaseText } from "@components/BaseText";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Link } from "@components/Link";
 import { Notice } from "@components/Notice";
-import { PluginDependencyList } from "@components/settings/tabs/plugins";
 import { PluginCard } from "@components/settings/tabs/plugins/PluginCard";
+import { PluginDependencyList } from "@components/settings/tabs/plugins/shared";
 import { ChangeList } from "@utils/ChangeList";
 import { classNameFactory } from "@utils/css";
+import { Logger } from "@utils/Logger";
+import { reload } from "@utils/native";
 import { useForceUpdater } from "@utils/react";
 import { RenderModalProps } from "@vencord/discord-types";
-import { closeModal, Modal, openModal, Tooltip, useMemo } from "@webpack/common";
+import { closeModal, Modal, openModal, showToast, Toasts, Tooltip, useMemo } from "@webpack/common";
 import { ReactNode } from "react";
 
-import Plugins from "~plugins";
+import { PluginManifest as Plugins } from "~plugins";
 
 import { getNewPluginChanges, KnownPluginSettingsMap, writeKnownSettings } from "./knownSettings";
 
 const cl = classNameFactory("vc-new-plugins-");
+const logger = new Logger("NewPluginsManager");
 
 let hasSeen = false;
 
@@ -108,9 +111,14 @@ function NewPluginsModal({ modalProps, newPlugins, newSettings }: ModalComponent
 
     const totalCount = pluginCards.length + requiredPluginCards.length;
 
-    const handleContinue = () => {
+    const handleContinue = async () => {
         if (changes.hasChanges) {
-            location.reload();
+            try {
+                await reload();
+            } catch (error) {
+                logger.error("Cannot restart before saving settings", error);
+                showToast("Your settings could not be saved. Try again before restarting.", Toasts.Type.FAILURE);
+            }
         } else {
             modalProps.onClose();
         }

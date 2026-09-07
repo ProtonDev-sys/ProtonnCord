@@ -101,6 +101,7 @@ async function testUpdaterControls(): Promise<void> {
                 throw new Error(`Unexpected test import: ${name}`);
             },
             VencordNative: { updater: {
+                async getDiagnostics(branch: string) { return { ok: true, value: { backend: "http", branch } }; },
                 async getUpdates(branch: string) {
                     calls.push(`check:${branch}`);
                     await new Promise<void>(resolve => { finishCheck = resolve; });
