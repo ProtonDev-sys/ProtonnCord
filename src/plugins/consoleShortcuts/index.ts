@@ -21,7 +21,7 @@ import { Devs } from "@utils/constants";
 import { getCurrentChannel, getCurrentGuild } from "@utils/discord";
 import { runtimeHashMessageKey } from "@utils/intlHash";
 import { SYM_LAZY_GET } from "@utils/lazy";
-import { relaunch } from "@utils/native";
+import { relaunch, reload } from "@utils/native";
 import { canonicalizeMatch, canonicalizeReplace, canonicalizeReplacement } from "@utils/patches";
 import definePlugin, { StartAt } from "@utils/types";
 import * as Webpack from "@webpack";
@@ -39,7 +39,7 @@ const switchBranch = (branch: string) => () => {
     const target = IS_VESKTOP ? Vesktop : Equibop;
     if (target.Settings.store.discordBranch === branch) throw new Error(`Already on ${branch}.`);
     target.Settings.store.discordBranch = branch;
-    VesktopNative.app.relaunch();
+    return relaunch();
 };
 
 const installedShortcuts = new Map<string, { previous?: PropertyDescriptor; installed: PropertyDescriptor; }>();
@@ -115,7 +115,7 @@ function makeShortcuts() {
         Settings: { getter: () => Vencord.Settings },
         Api: { getter: () => Vencord.Api },
         Util: { getter: () => Vencord.Util },
-        reload: () => location.reload(),
+        reload,
         restart: IS_WEB ? DESKTOP_ONLY("restart") : relaunch,
         canonicalizeMatch,
         canonicalizeReplace,

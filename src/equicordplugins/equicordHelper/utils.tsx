@@ -7,6 +7,7 @@
 import { showNotice } from "@api/Notices";
 import { plugins, startDependenciesRecursive, startPlugin, stopPlugin } from "@api/PluginManager";
 import { Settings } from "@api/Settings";
+import { reload } from "@utils/native";
 import { Alerts, Toasts } from "@webpack/common";
 
 function showErrorToast(message: string) {
@@ -52,7 +53,7 @@ export async function toggleEnabled(name: string) {
             if (!confirmed) return false;
 
             settings.enabled = !wasEnabled;
-            location.reload();
+            await reload();
             return true;
         }
 

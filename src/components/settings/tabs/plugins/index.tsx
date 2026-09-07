@@ -19,7 +19,7 @@
 import "./styles.css";
 
 import { isPluginEnabled, stopPlugin } from "@api/PluginManager";
-import { useSettings } from "@api/Settings";
+import { PlainSettings, useSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
 import { Divider } from "@components/Divider";
@@ -27,18 +27,20 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { HeadingTertiary } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { SettingsTab } from "@components/settings";
+import { getLoadedPluginDefinition, type PluginManifestEntry } from "@shared/pluginDefinition";
 import { ChangeList } from "@utils/ChangeList";
 import { classNameFactory } from "@utils/css";
 import { isTruthy } from "@utils/guards";
 import { Logger } from "@utils/Logger";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
+import { reload } from "@utils/native";
 import { useCleanupEffect, useIntersection } from "@utils/react";
 import { PluginTag, PluginTags } from "@utils/types";
 import { Alerts, ConfirmModal, openModal, Parser, React, SearchableSelect, Select, TextInput, Toasts, Tooltip, useCallback, useMemo, useRef, useState } from "@webpack/common";
 import { JSX } from "react";
 
-import Plugins, { ExcludedPlugins, PluginMeta } from "~plugins";
+import Plugins, { ExcludedPlugins, PluginManifest, PluginMeta } from "~plugins";
 
 import { getReleaseNewPlugins } from "./newPluginRelease";
 import { PluginCard } from "./PluginCard";
@@ -60,6 +62,15 @@ function showErrorToast(message: string) {
     });
 }
 
+async function restartAfterSaving() {
+    try {
+        await reload();
+    } catch (error) {
+        logger.error("Cannot restart before saving settings", error);
+        showErrorToast("Your settings could not be saved. Try again before restarting.");
+    }
+}
+
 function ReloadRequiredCard({ required, enabledPlugins, openWarningModal, resetCheckAndDo }) {
     return (
         <Card className={classes(cl("info-card"), required && "vc-warning-card")}>
@@ -69,7 +80,7 @@ function ReloadRequiredCard({ required, enabledPlugins, openWarningModal, resetC
                     <Paragraph className={cl("dep-text")}>
                         Restart now to apply new plugins and their settings
                     </Paragraph>
-                    <Button variant="primary" className={cl("restart-button")} onClick={() => location.reload()}>
+                    <Button variant="primary" className={cl("restart-button")} onClick={restartAfterSaving}>
                         Restart
                     </Button>
                 </>
@@ -164,7 +175,7 @@ export default function PluginSettings() {
                     confirmText="Restart now"
                     cancelText="Later!"
                     variant="primary"
-                    onConfirm={() => location.reload()}
+                    onConfirm={restartAfterSaving}
                 >
                     <>
                         <p>The following plugins require a restart:</p>
@@ -185,8 +196,8 @@ export default function PluginSettings() {
 
     const depMap = useMemo(() => {
         const o = {} as Record<string, string[]>;
-        for (const plugin in Plugins) {
-            const deps = Plugins[plugin].dependencies;
+        for (const plugin in PluginManifest) {
+            const deps = PluginManifest[plugin].dependencies;
             if (deps) {
                 for (const dep of deps) {
                     o[dep] ??= [];
@@ -198,10 +209,10 @@ export default function PluginSettings() {
     }, []);
 
     const sortedPlugins = useMemo(() =>
-        Object.values(Plugins).sort((a, b) => a.name.localeCompare(b.name)),
+        Object.values(PluginManifest).sort((a, b) => a.name.localeCompare(b.name)),
         []
     )
-        .toSorted((a, b) => Number(settings.plugins[b.name]?.isFavorite ?? false) - Number(settings.plugins[a.name]?.isFavorite ?? false));
+        .toSorted((a, b) => Number(PlainSettings.plugins[b.name]?.isFavorite ?? false) - Number(PlainSettings.plugins[a.name]?.isFavorite ?? false));
 
     const hasUserPlugins = useMemo(() => !IS_STANDALONE && Object.values(PluginMeta).some(m => m.userPlugin), []);
 
@@ -210,12 +221,12 @@ export default function PluginSettings() {
     const search = searchValue.value.toLowerCase();
     const onSearch = (query: string) => setSearchValue(prev => ({ ...prev, value: query }));
 
-    const pluginFilter = useCallback((plugin: typeof Plugins[keyof typeof Plugins], newPluginsSet: Set<string> | null) => {
+    const pluginFilter = useCallback((plugin: PluginManifestEntry, newPluginsSet: Set<string> | null) => {
         const { status, tags } = searchValue;
 
         switch (status) {
             case SearchStatus.FAVORITES:
-                if (!settings.plugins[plugin.name]?.isFavorite) return false;
+                if (!PlainSettings.plugins[plugin.name]?.isFavorite) return false;
                 break;
             case SearchStatus.DISABLED:
                 if (isPluginEnabled(plugin.name)) return false;
@@ -262,12 +273,12 @@ export default function PluginSettings() {
 
         const showApi = searchValue.status === SearchStatus.API_PLUGINS;
         for (const p of sortedPlugins) {
-            if (p.hidden || (!p.settings?.def && p.name.endsWith("API") && !showApi))
+            if (p.hidden || (!p.hasSettings && p.name.endsWith("API") && !showApi))
                 continue;
 
             if (!pluginFilter(p, newPluginsSet)) continue;
 
-            const isRequired = p.required || p.isDependency || depMap[p.name]?.some(d => settings.plugins[d].enabled);
+            const isRequired = p.required || getLoadedPluginDefinition(p.name)?.isDependency || depMap[p.name]?.some(d => settings.plugins[d].enabled);
 
             if (isRequired) {
                 const tooltipText = p.required || !depMap[p.name]
@@ -337,18 +348,18 @@ export default function PluginSettings() {
                 ),
                 confirmText: "Restart Now",
                 cancelText: "Later",
-                onConfirm: () => location.reload()
+                onConfirm: restartAfterSaving
             });
         }
     }
 
     // Code directly taken from supportHelper.tsx
-    const isApiPlugin = (plugin: string) => plugin.endsWith("API") || Plugins[plugin].required;
+    const isApiPlugin = (plugin: string) => plugin.endsWith("API") || PluginManifest[plugin].required;
 
-    const totalPlugins = Object.keys(Plugins).filter(p => !isApiPlugin(p));
-    const enabledPlugins = Object.keys(Plugins).filter(p => isPluginEnabled(p) && !isApiPlugin(p));
+    const totalPlugins = Object.keys(PluginManifest).filter(p => !isApiPlugin(p));
+    const enabledPlugins = Object.keys(PluginManifest).filter(p => isPluginEnabled(p) && !isApiPlugin(p));
 
-    const totalStockPlugins = totalPlugins.filter(p => !PluginMeta[p].userPlugin && !Plugins[p].hidden).length;
+    const totalStockPlugins = totalPlugins.filter(p => !PluginMeta[p].userPlugin && !PluginManifest[p].hidden).length;
     const totalUserPlugins = totalPlugins.filter(p => PluginMeta[p].userPlugin).length;
     const enabledStockPlugins = enabledPlugins.filter(p => !PluginMeta[p].userPlugin).length;
     const enabledUserPlugins = enabledPlugins.filter(p => PluginMeta[p].userPlugin).length;

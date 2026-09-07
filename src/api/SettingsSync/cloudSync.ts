@@ -578,7 +578,7 @@ async function getV2(context: CloudRequestContext, signal: AbortSignal, shouldNo
             title: "Cloud Settings",
             body: applied.changed ? "Your settings were updated; restart to fully apply changes." : "Your settings are up to date.",
             color: applied.changed ? "var(--green-360)" : undefined,
-            onClick: applied.changed ? (IS_WEB ? () => location.reload() : relaunch) : undefined,
+            onClick: applied.changed ? relaunch : undefined,
             noPersist: true,
         });
     }
@@ -706,7 +706,7 @@ async function getV1(context: CloudRequestContext, signal: AbortSignal, shouldNo
             title: "Cloud Settings",
             body: changed ? "Your settings were updated; restart to fully apply changes." : "Your settings are up to date.",
             color: changed ? "var(--green-360)" : undefined,
-            onClick: changed ? (IS_WEB ? () => location.reload() : relaunch) : undefined,
+            onClick: changed ? relaunch : undefined,
             noPersist: true,
         });
     }
