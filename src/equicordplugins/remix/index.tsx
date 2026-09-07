@@ -9,7 +9,7 @@ import { PaintbrushIcon } from "@components/Icons";
 import { EquicordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { extractAndLoadChunksLazy } from "@webpack";
-import { ChannelStore, closeModal, DraftType, FluxDispatcher, Menu, openModal, PendingReplyStore, SelectedChannelStore, UploadHandler } from "@webpack/common";
+import { ChannelStore, closeModal, DraftType, Menu, openModal, SelectedChannelStore, UploadHandler } from "@webpack/common";
 
 import RemixModal from "./RemixModal";
 import css from "./styles.css?managed";
@@ -56,8 +56,6 @@ const MessageContextMenuPatch: NavContextMenuPatchCallback = (children, props) =
 export function sendRemix(blob: Blob) {
     const currentChannelId = SelectedChannelStore.getChannelId();
     const channel = ChannelStore.getChannel(currentChannelId);
-    const reply = PendingReplyStore.getPendingReply(currentChannelId);
-    if (reply) FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", currentChannelId });
 
     const file = new File([blob], "remix.png", { type: "image/png" });
     return UploadHandler.promptToUpload([file], channel, DraftType.ChannelMessage);

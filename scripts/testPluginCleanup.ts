@@ -273,3 +273,46 @@ test("Remix crop removes subscriptions even after its canvas has gone", () => {
     assert.equal(event.events.move.length, 0);
     assert.equal(event.events.up.length, 0);
 });
+
+for (const outcome of ["success", "throw", "reject"] as const) {
+    test(`Remix leaves reply drafts to the host upload flow on ${outcome}`, async () => {
+        const actions: unknown[] = [];
+        const channel = { id: "channel" };
+        const uploaded: File[] = [];
+        const failure = new Error("Upload preparation failed");
+        const module = loadModule<{ sendRemix(blob: Blob): Promise<void>; }>("src/equicordplugins/remix/index.tsx", {
+            "@api/ContextMenu": {},
+            "@components/Icons": {},
+            "@utils/constants": { EquicordDevs: { MrDiamond: {}, meowabyte: {} } },
+            "@utils/types": { __esModule: true, default: <T>(plugin: T) => plugin },
+            "@webpack": { extractAndLoadChunksLazy: () => async () => { } },
+            "@webpack/common": {
+                SelectedChannelStore: { getChannelId: () => channel.id },
+                ChannelStore: { getChannel: (id: string) => { assert.equal(id, channel.id); return channel; } },
+                PendingReplyStore: { getPendingReply: () => ({ messageId: "reply-draft" }) },
+                FluxDispatcher: { dispatch: (action: unknown) => actions.push(action) },
+                DraftType: { ChannelMessage: 0 },
+                UploadHandler: {
+                    promptToUpload(files: File[], target: object, draftType: number) {
+                        assert.equal(target, channel);
+                        assert.equal(draftType, 0);
+                        uploaded.push(...files);
+                        if (outcome === "throw") throw failure;
+                        return outcome === "reject" ? Promise.reject(failure) : Promise.resolve();
+                    }
+                }
+            },
+            "./RemixModal": { __esModule: true, default: () => null },
+            "./styles.css?managed": { __esModule: true, default: "style" }
+        }, { File });
+        const send = () => module.sendRemix(new Blob(["fixture"]));
+        if (outcome === "throw") assert.throws(send, error => error === failure);
+        else if (outcome === "reject") await assert.rejects(send(), error => error === failure);
+        else await send();
+        assert.equal(uploaded.length, 1);
+        assert.equal(uploaded[0].name, "remix.png");
+        assert.equal(uploaded[0].type, "image/png");
+        assert.equal(await uploaded[0].text(), "fixture");
+        assert.deepEqual(actions, [], "preparing an image must not delete the host reply draft");
+    });
+}
