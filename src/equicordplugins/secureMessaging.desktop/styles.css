@@ -59,6 +59,13 @@
     text-align: center;
 }
 
+.vc-secure-messaging-send-status {
+    align-self: center;
+    max-width: 10rem;
+    margin-right: 0.5rem;
+    color: var(--text-muted);
+}
+
 .pc-secure-card {
     --pc-secure-card-border: color-mix(in srgb, var(--status-positive) 45%, var(--border-subtle));
     --pc-secure-card-background: color-mix(in srgb, var(--background-secondary) 92%, var(--status-positive));
