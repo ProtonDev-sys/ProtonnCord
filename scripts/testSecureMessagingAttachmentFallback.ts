@@ -70,6 +70,9 @@ function fixture(options: {
         detachedTextIndex: null, generatedDetachedUpload: null,
         preparedAttachments: { plaintext: serializeSecurePlaintext(text, bundle) },
         parseSecurePlaintext, serializeSecurePlaintext,
+        setAttachmentStatus(stage: string) {
+            events.push(stage);
+        },
         secureOperationIsCurrent: (generation: number, userId: string) => generation === currentGeneration && userId === currentUserId,
         encryptedMentionedUserIds: (original: string) => { assert.equal(original, text); return [localUserId]; },
         Native: {
@@ -163,7 +166,7 @@ test("native failures other than message-too-long are preserved without fallback
 test("mandatory manifest fallback occurs after name removal and text detachment", async () => {
     const harness = fixture({ native: async value => parseSecurePlaintext(value).attachments?.manifest ? tooLong : success });
     assert.equal((await harness.runFlow()).status, "encrypted");
-    assert.deepEqual(harness.events, ["named", "anonymous", "detach", "prepare", "named", "anonymous", "legacy"]);
+    assert.deepEqual(harness.events, ["named", "anonymous", "detach", "Encrypting attachments…", "prepare", "named", "anonymous", "legacy"]);
     const fallback = parseSecurePlaintext(harness.calls[4]);
     assert.equal(fallback.attachments?.count, 2);
     assert.equal(fallback.attachments?.manifest, undefined);
