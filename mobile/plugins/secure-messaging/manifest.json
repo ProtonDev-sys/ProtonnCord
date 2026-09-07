@@ -1,0 +1,20 @@
+{
+	"format": 1,
+	"id": "uk.co.protonn.secure-messaging",
+	"name": "Protonn Cord Secure Messaging",
+	"description": "PCEM3 encrypted Discord text and attachments for Android, compatible with desktop Protonn Cord.",
+	"icon": "LockIcon",
+	"author": "Protonn Cord",
+	"version": "0.2.0-alpha2",
+	"dependencies": {
+		"revenge.api": { "version": ">=1 <2" },
+		"discord": { "version": ">=341.0" }
+	},
+	"dist": {
+		"script": "index.js",
+		"android": {
+			"path": "plugin.jar",
+			"class": "uk.co.protonn.securemessaging.SecureMessagingPlugin"
+		}
+	}
+}
