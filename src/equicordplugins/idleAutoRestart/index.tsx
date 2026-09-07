@@ -7,6 +7,7 @@
 import { definePluginSettings } from "@api/Settings";
 import { EquicordDevs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
+import { reload } from "@utils/native";
 import definePlugin, { OptionType } from "@utils/types";
 import { Menu, VoiceStateStore } from "@webpack/common";
 
@@ -53,7 +54,7 @@ function checkIdleTimeout() {
     }
 
     logger.info("Idle timeout reached, reloading client");
-    location.reload();
+    void reload().catch(error => logger.error("Failed to save settings before reloading", error));
 }
 
 function resetIdleTimer() {

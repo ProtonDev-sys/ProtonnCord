@@ -9,19 +9,20 @@ import { hasAnyVisibleSettings, isPluginEnabled, pluginRequiresRestart, startDep
 import { Settings } from "@api/Settings";
 import { CogWheel, InfoIcon } from "@components/Icons";
 import { AddonCard } from "@components/settings/AddonCard";
+import type { PluginManifestEntry } from "@shared/pluginDefinition";
 import { classNameFactory } from "@utils/css";
 import { Logger } from "@utils/Logger";
 import { Plugin } from "@utils/types";
 import { React, showToast, Toasts } from "@webpack/common";
 
-import { PluginMeta } from "~plugins";
+import Plugins, { PluginManifest, PluginMeta } from "~plugins";
 
 import { openPluginModal } from "./PluginModal";
 
 const logger = new Logger("PluginCard");
 const cl = classNameFactory("vc-plugins-");
 interface PluginCardProps extends React.HTMLProps<HTMLDivElement> {
-    plugin: Plugin;
+    plugin: Plugin | PluginManifestEntry;
     disabled?: boolean;
     onRestartNeeded(name: string, key: string): void;
     isNew?: boolean;
@@ -40,11 +41,12 @@ export function PluginCard({ plugin, disabled, onRestartNeeded, onMouseEnter, on
     const isEnabled = () => isPluginEnabled(plugin.name);
 
     function toggleEnabled() {
+        const definition = Plugins[plugin.name];
         const wasEnabled = isEnabled();
 
         // If we're enabling a plugin, make sure all deps are enabled recursively.
         if (!wasEnabled) {
-            const { restartNeeded, failures } = startDependenciesRecursive(plugin);
+            const { restartNeeded, failures } = startDependenciesRecursive(definition);
 
             if (failures.length) {
                 logger.error(`Failed to start dependencies for ${plugin.name}: ${failures.join(", ")}`);
@@ -61,19 +63,19 @@ export function PluginCard({ plugin, disabled, onRestartNeeded, onMouseEnter, on
         }
 
         // if the plugin requires a restart, don't use stopPlugin/startPlugin. Wait for restart to apply changes.
-        if (pluginRequiresRestart(plugin)) {
+        if (pluginRequiresRestart(definition)) {
             settings.enabled = !wasEnabled;
             onRestartNeeded(plugin.name, "enabled");
             return;
         }
 
         // If the plugin is enabled, but hasn't been started, then we can just toggle it off.
-        if (wasEnabled && !plugin.started) {
+        if (wasEnabled && !definition.started) {
             settings.enabled = !wasEnabled;
             return;
         }
 
-        const result = wasEnabled ? stopPlugin(plugin) : startPlugin(plugin);
+        const result = wasEnabled ? stopPlugin(definition) : startPlugin(definition);
 
         if (!result) {
             settings.enabled = false;
@@ -144,10 +146,10 @@ export function PluginCard({ plugin, disabled, onRestartNeeded, onMouseEnter, on
                 <button
                     type="button"
                     aria-label={`Open ${plugin.name} settings and information`}
-                    onClick={() => openPluginModal(plugin, onRestartNeeded)}
+                    onClick={() => openPluginModal(Plugins[plugin.name], onRestartNeeded)}
                     className={cl("info-button")}
                 >
-                    {hasAnyVisibleSettings(plugin)
+                    {(PluginManifest[plugin.name].hasVisibleSettings ?? hasAnyVisibleSettings(Plugins[plugin.name]))
                         ? <CogWheel className={cl("info-icon")} />
                         : <InfoIcon className={cl("info-icon")} />
                     }

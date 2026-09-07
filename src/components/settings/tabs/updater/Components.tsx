@@ -147,7 +147,7 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                             if (await update()) {
                                 setUpdates([]);
 
-                                await new Promise<void>(r => {
+                                await new Promise<void>((r, reject) => {
                                     openModal(props => (
                                         <ConfirmModal
                                             {...props}
@@ -156,10 +156,7 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                                             confirmText="Restart"
                                             cancelText="Not now!"
                                             variant="primary"
-                                            onConfirm={() => {
-                                                relaunch();
-                                                r();
-                                            }}
+                                            onConfirm={() => relaunch().then(r, reject)}
                                             onCancel={r}
                                         />
                                     ));

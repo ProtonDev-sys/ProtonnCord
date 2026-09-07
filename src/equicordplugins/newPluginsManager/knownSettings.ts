@@ -6,7 +6,7 @@
 
 import { DataStore } from "@api/index";
 
-import plugins from "~plugins";
+import { PluginManifest as plugins } from "~plugins";
 
 import {
     getNewSettings as getNewSettingsFromSnapshots,
@@ -23,8 +23,7 @@ export const KNOWN_PLUGINS_LEGACY_DATA_KEY = "NewPluginsManager_KnownPlugins";
 export const KNOWN_SETTINGS_DATA_KEY = "NewPluginsManager_KnownSettings";
 
 function getSettingsSetForPlugin(plugin: string): Set<string> {
-    const settings = plugins[plugin]?.settings?.def || {};
-    return new Set(Object.keys(settings).filter(setting => setting !== "enabled"));
+    return new Set((plugins[plugin]?.settingsKeys ?? []).filter(setting => setting !== "enabled"));
 }
 
 function getCurrentSettings(pluginList: string[]): KnownPluginSettingsMap {

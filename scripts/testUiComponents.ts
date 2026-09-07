@@ -1179,7 +1179,10 @@ function loadShortcuts() {
         "@utils/discord": { getCurrentChannel: () => null, getCurrentGuild: () => null },
         "@utils/intlHash": { runtimeHashMessageKey() {} },
         "@utils/lazy": { SYM_LAZY_GET },
-        "@utils/native": { relaunch() { assert.fail("Unexpected relaunch"); } },
+        "@utils/native": {
+            relaunch() { assert.fail("Unexpected relaunch"); },
+            reload() { assert.fail("Unexpected reload"); }
+        },
         "@utils/patches": { canonicalizeMatch() {}, canonicalizeReplace() {}, canonicalizeReplacement() {} },
         "@utils/types": { __esModule: true, default: (value: object) => value, StartAt: {} },
         "@webpack": webpack
