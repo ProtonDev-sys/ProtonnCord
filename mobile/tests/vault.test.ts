@@ -127,3 +127,25 @@ test('unreadable vault never pretends protected conversations are ordinary', asy
 	assert.throws(() => vault.protectedChannel(USER, CHANNEL), /unavailable/)
 	assert.throws(() => vault.account(USER), /unavailable/)
 })
+
+test('malformed protected conversations cannot load as ordinary unprotected channels', async () => {
+	const identity = generateIdentity()
+	const raw = JSON.stringify({
+		version: 1,
+		accounts: {
+			[USER]: {
+				identity,
+				counter: 1,
+				trusted: {},
+				pending: {},
+				conversations: { [CHANNEL]: null },
+			},
+		},
+	})
+	const vault = new MobileVault({
+		read: async () => raw,
+		write: async () => {},
+	})
+	await assert.rejects(() => vault.load(), /Protected conversation/)
+	assert.throws(() => vault.protectedChannel(USER, CHANNEL), /unavailable/)
+})

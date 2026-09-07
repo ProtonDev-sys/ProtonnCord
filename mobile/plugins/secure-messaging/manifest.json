@@ -5,7 +5,7 @@
 	"description": "PCEM3 encrypted Discord text and attachments for Android, compatible with desktop Protonn Cord.",
 	"icon": "LockIcon",
 	"author": "Protonn Cord",
-	"version": "0.2.0-alpha2",
+	"version": "0.2.0-alpha3",
 	"dependencies": {
 		"revenge.api": { "version": ">=1 <2" },
 		"discord": { "version": ">=341.0" }

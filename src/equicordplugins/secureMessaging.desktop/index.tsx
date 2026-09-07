@@ -2388,6 +2388,27 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                                                 Copy profile
                                             </Button>
                                         )}
+                                        {keyState.profile.provider === "onekey" && (
+                                            <Button size="small" disabled={busy} onClick={async () => {
+                                                setBusy(true);
+                                                setError(null);
+                                                try {
+                                                    const result = await Native.exportMobilePairing(context.localUserId);
+                                                    if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
+                                                    if (isNativeFailure(result)) setError(failureMessage(result));
+                                                    else {
+                                                        copyToClipboard(result.token);
+                                                        showToast("OneKey-encrypted phone pairing copied. Import it in the mobile Secure Messaging settings.", Toasts.Type.SUCCESS);
+                                                    }
+                                                } catch {
+                                                    setError("Phone pairing could not be created. Unlock your OneKey vault and try again.");
+                                                } finally {
+                                                    setBusy(false);
+                                                }
+                                            }}>
+                                                Copy phone pairing
+                                            </Button>
+                                        )}
                                         <Button size="small" disabled={busy} onClick={() => void runKeyAction(() => Native.lockSecurityKeyVault())}>
                                             Lock
                                         </Button>

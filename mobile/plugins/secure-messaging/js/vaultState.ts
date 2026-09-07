@@ -21,6 +21,9 @@ import {
 } from './protocol'
 import type { PrivateIdentity, PublicIdentity } from './protocol'
 import type { ReplayRecord } from './replay'
+import { openMobilePairing } from './mobilePairing'
+import type { HistoricalIdentity } from './mobilePairing'
+import { parseIdentity, parsePublicIdentity } from './identityBackup'
 
 export interface Conversation {
 	members: string[]
@@ -31,6 +34,10 @@ export interface Conversation {
 export interface Account {
 	identity: PrivateIdentity
 	retiredIdentities?: PrivateIdentity[]
+	identityHistory?: HistoricalIdentity<PrivateIdentity>[]
+	peerIdentityHistory?: Record<string, HistoricalIdentity<PublicIdentity>[]>
+	pairingImportedAt?: number
+	announcementTimes?: Record<string, number>
 	counter: number
 	trusted: Record<string, PublicIdentity>
 	pending: Record<string, PublicIdentity>
@@ -64,6 +71,8 @@ function readVault(raw: string): Vault {
 	const parsed: unknown = JSON.parse(raw)
 	if (!record(parsed) || parsed.version !== 1 || !record(parsed.accounts))
 		throw new Error('Secure Messaging vault is invalid')
+	if (Object.keys(parsed.accounts).length > 16)
+		throw new Error('Too many mobile vault accounts')
 	for (const [userId, account] of Object.entries(parsed.accounts)) {
 		requireSnowflake(userId, 'vault account')
 		if (
@@ -76,8 +85,82 @@ function readVault(raw: string): Vault {
 			Number(account.counter) < 0
 		)
 			throw new Error('Secure Messaging account is invalid')
+		parseIdentity(account.identity)
+		for (const collection of [account.trusted, account.pending]) {
+			if (Object.keys(collection).length > 2000)
+				throw new Error('Too many mobile contacts')
+			for (const [peerId, identity] of Object.entries(collection)) {
+				requireSnowflake(peerId, 'vault contact')
+				if (peerId === userId)
+					throw new Error('A trusted contact cannot be the local account')
+				parsePublicIdentity(identity, peerId)
+			}
+		}
+		if (Object.keys(account.conversations).length > 2000)
+			throw new Error('Too many protected conversations')
+		for (const [channelId, conversation] of Object.entries(
+			account.conversations,
+		)) {
+			requireSnowflake(channelId, 'vault channel')
+			if (
+				!record(conversation) ||
+				!Array.isArray(conversation.members) ||
+				!Array.isArray(conversation.recipients) ||
+				conversation.members.length < 1 ||
+				conversation.members.length > 24 ||
+				conversation.recipients.length < 1 ||
+				conversation.recipients.length > 24 ||
+				(conversation.needsReview !== undefined &&
+					typeof conversation.needsReview !== 'boolean')
+			)
+				throw new Error('Protected conversation is invalid')
+			for (const ids of [conversation.members, conversation.recipients]) {
+				let previous = ''
+				for (const id of ids) {
+					requireSnowflake(id, 'protected participant')
+					if (id === userId || id <= previous)
+						throw new Error('Protected participants are invalid')
+					previous = id
+				}
+			}
+			const members = conversation.members
+			if (conversation.recipients.some(id => !members.includes(id)))
+				throw new Error('Protected recipients are not channel members')
+		}
+		if (account.retiredIdentities !== undefined) {
+			if (
+				!Array.isArray(account.retiredIdentities) ||
+				account.retiredIdentities.length > 4
+			)
+				throw new Error('Invalid local identity history')
+			for (const identity of account.retiredIdentities) parseIdentity(identity)
+		}
+		if (account.replay !== undefined) {
+			if (!Array.isArray(account.replay) || account.replay.length > 4096)
+				throw new Error('Invalid replay state')
+			for (const entry of account.replay) {
+				if (
+					!record(entry) ||
+					!Number.isSafeInteger(entry.counter) ||
+					Number(entry.counter) < 1 ||
+					typeof entry.envelopeId !== 'string'
+				)
+					throw new Error('Invalid replay entry')
+				for (const id of [entry.messageId, entry.channelId, entry.authorId])
+					requireSnowflake(id, 'replay metadata')
+				decode64(entry.fingerprint, 32)
+				decode64(entry.digest, 32)
+			}
+		}
 	}
-	return parsed as unknown as Vault
+	const vault = parsed as unknown as Vault
+	for (const account of Object.values(vault.accounts)) {
+		if (!account.identityHistory && account.retiredIdentities?.length)
+			account.identityHistory = account.retiredIdentities
+				.slice(-4)
+				.map(identity => ({ identity, retiredAt: Date.now() }))
+	}
+	return vault
 }
 
 function readEnvelope(parsed: Record<string, unknown>): OneKeyEnvelope {
@@ -273,7 +356,11 @@ export class MobileVault {
 						account.retiredIdentities = [
 							...(account.retiredIdentities ?? []),
 							account.identity,
-						]
+						].slice(-4)
+						account.identityHistory = [
+							...(account.identityHistory ?? []),
+							{ identity: account.identity, retiredAt: Date.now() },
+						].slice(-4)
 						for (const conversation of Object.values(account.conversations))
 							conversation.needsReview = true
 					}
@@ -304,6 +391,68 @@ export class MobileVault {
 		this.notify()
 	}
 
+	async importPairing(token: string, userId: string): Promise<void> {
+		if (!this.root || !this.rootFingerprint)
+			throw new Error('Unlock with your OneKey before importing phone pairing')
+		const pairing = openMobilePairing(
+			token,
+			this.root,
+			this.rootFingerprint,
+			userId,
+		)
+		const current = this.account(userId)
+		if (
+			pairing.currentFingerprint !==
+			publicIdentity(current.identity, userId).fingerprint
+		)
+			throw new Error(
+				'The PC identity does not match the active OneKey identity',
+			)
+		if (pairing.createdAt < (current.pairingImportedAt ?? 0))
+			throw new Error(
+				'This phone pairing is older than the one already imported',
+			)
+		const next: Account = JSON.parse(JSON.stringify(current))
+		next.trusted = pairing.trusted
+		next.conversations = { ...next.conversations, ...pairing.conversations }
+		for (const [id, candidate] of Object.entries(next.pending)) {
+			if (next.trusted[id]?.fingerprint === candidate.fingerprint)
+				delete next.pending[id]
+		}
+		for (const conversation of Object.values(next.conversations)) {
+			if (
+				conversation.recipients.some(
+					id => !next.trusted[id] || next.pending[id],
+				)
+			)
+				conversation.needsReview = true
+		}
+		const history = new Map<string, HistoricalIdentity<PrivateIdentity>>()
+		for (const item of [
+			...(next.identityHistory ?? []),
+			...pairing.identityHistory,
+		]) {
+			const fingerprint = publicIdentity(item.identity, userId).fingerprint
+			const previous = history.get(fingerprint)
+			if (!previous || item.retiredAt < previous.retiredAt)
+				history.set(fingerprint, item)
+		}
+		next.identityHistory = [...history.values()]
+			.sort((left, right) => right.retiredAt - left.retiredAt)
+			.slice(0, 4)
+		next.peerIdentityHistory = pairing.peerIdentityHistory
+		next.pairingImportedAt = pairing.createdAt
+		const previousEnvelope = this.envelope
+		this.value!.accounts[userId] = next
+		try {
+			await this.save()
+		} catch (error) {
+			if (this.value) this.value.accounts[userId] = current
+			this.envelope = previousEnvelope
+			throw error
+		}
+	}
+
 	async replace(
 		userId: string,
 		state: Pick<Account, 'identity' | 'trusted' | 'conversations'>,
@@ -321,11 +470,16 @@ export class MobileVault {
 		if (
 			publicIdentity(value.identity, userId).fingerprint !==
 			publicIdentity(state.identity, userId).fingerprint
-		)
+		) {
 			value.retiredIdentities = [
 				...(value.retiredIdentities ?? []),
 				value.identity,
-			]
+			].slice(-4)
+			value.identityHistory = [
+				...(value.identityHistory ?? []),
+				{ identity: value.identity, retiredAt: Date.now() },
+			].slice(-4)
+		}
 		value.identity = state.identity
 		value.counter = Math.max(value.counter, mobileCounterStart())
 		value.trusted = state.trusted

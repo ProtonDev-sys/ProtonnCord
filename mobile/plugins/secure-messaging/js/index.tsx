@@ -30,6 +30,7 @@ import {
 } from './crypto'
 import { openIdentityBackup } from './identityBackup'
 import { withMessageContent } from './message'
+import { observeAnnouncement } from './history'
 import { MessageReceiver } from './receive'
 import { installNightlyUpdates } from './updates'
 import {
@@ -37,6 +38,7 @@ import {
 	KEY_PREFIX,
 	MESSAGE_PREFIX,
 	PREVIOUS_MESSAGE_PREFIX,
+	LEGACY_MESSAGE_PREFIX,
 } from './protocol'
 import {
 	account,
@@ -63,7 +65,8 @@ function clearDecryptedContent(): void {
 function encryptedContent(content: string): boolean {
 	return (
 		content.startsWith(MESSAGE_PREFIX) ||
-		content.startsWith(PREVIOUS_MESSAGE_PREFIX)
+		content.startsWith(PREVIOUS_MESSAGE_PREFIX) ||
+		content.startsWith(LEGACY_MESSAGE_PREFIX)
 	)
 }
 
@@ -221,24 +224,8 @@ function patchMessageRenderer(
 								const candidate = verifyAnnouncement(content, authorId)
 								if (authorId !== userId) {
 									const state = account(userId)
-									const trusted = state.trusted[authorId]
-									const pending = state.pending[authorId]
-									if (
-										(!trusted ||
-											trusted.fingerprint !== candidate.fingerprint) &&
-										pending?.fingerprint !== candidate.fingerprint
-									) {
-										state.pending[authorId] = candidate
-										if (
-											trusted &&
-											trusted.fingerprint !== candidate.fingerprint
-										) {
-											for (const conversation of Object.values(
-												state.conversations,
-											))
-												if (conversation.recipients.includes(authorId))
-													conversation.needsReview = true
-										}
+									if (observeAnnouncement(state, candidate, message.id)) {
+										receiver.clear()
 										void saveVault().catch(() =>
 											notice(
 												'Key review could not be saved',
@@ -252,7 +239,18 @@ function patchMessageRenderer(
 								const state = account(userId)
 								trackEncryptedMessage(message)
 								const plaintext = receiver.render(
-									{ id: message.id, content, channelId, authorId },
+									{
+										id: message.id,
+										content,
+										channelId,
+										authorId,
+										editedAt:
+											message.edited_timestamp || message.editedTimestamp
+												? new Date(
+														message.edited_timestamp ?? message.editedTimestamp,
+													).getTime()
+												: undefined,
+									},
 									state,
 									userId,
 									() => refreshEncryptedMessage(message),
@@ -300,6 +298,8 @@ function SettingsComponent() {
 	const [importing, setImporting] = useState(false)
 	const [unlocking, setUnlocking] = useState(false)
 	const [updating, setUpdating] = useState(false)
+	const [pairing, setPairing] = useState('')
+	const [pairingBusy, setPairingBusy] = useState(false)
 	useEffect(() => subscribe(() => rerender(value => value + 1)), [])
 	const userId = currentUserId()
 	const state = userId && mobileVault.ready ? account(userId) : undefined
@@ -437,6 +437,47 @@ function SettingsComponent() {
 						<TableRow
 							label={userId ?? 'No signed-in Discord account'}
 							subLabel={own ? formatFingerprint(own.fingerprint) : undefined}
+						/>
+					</TableRowGroup>
+					<TableRowGroup title="Bring your PC chats">
+						<TableRow
+							label="OneKey-encrypted phone pairing"
+							subLabel="On your PC, unlock Secure Messaging and choose Copy phone pairing. Paste it here to import verified contacts, protected conversations and older history keys."
+						/>
+						<TextInput
+							label="Phone pairing"
+							placeholder="PCMP1:…"
+							value={pairing}
+							onChange={setPairing}
+						/>
+						<Button
+							text={pairingBusy ? 'Importing…' : 'Import PC chats'}
+							disabled={
+								pairingBusy ||
+								!mobileVault.ready ||
+								!mobileVault.configured ||
+								!pairing.trim()
+							}
+							onPress={async () => {
+								if (!userId) return
+								setPairingBusy(true)
+								try {
+									await mobileVault.importPairing(pairing.trim(), userId)
+									setPairing('')
+									clearDecryptedContent()
+									notice(
+										'PC chats imported',
+										'Verified contacts and protected conversations are ready. Open the same DM on your phone. Any changed membership or pending key still requires review.',
+									)
+								} catch (error) {
+									notice(
+										'Pairing blocked',
+										error instanceof Error ? error.message : String(error),
+									)
+								} finally {
+									setPairingBusy(false)
+								}
+							}}
 						/>
 					</TableRowGroup>
 					<TableRowGroup title="Use your PC identity">

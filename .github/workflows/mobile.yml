@@ -1,7 +1,7 @@
 name: Mobile nightly
 on:
     push:
-        branches: [nightly, 'agent/mobile-**']
+        branches: [nightly]
     pull_request:
         branches: [nightly]
     workflow_dispatch:

@@ -23,7 +23,7 @@ export interface IdentityBackup {
 	version: 1 | 2
 }
 
-function parseIdentity(value: any): PrivateIdentity {
+export function parseIdentity(value: any): PrivateIdentity {
 	if (
 		!value ||
 		typeof value !== 'object' ||
@@ -38,7 +38,7 @@ function parseIdentity(value: any): PrivateIdentity {
 	return identity
 }
 
-function parsePublicIdentity(
+export function parsePublicIdentity(
 	value: any,
 	expectedUserId: string,
 ): PublicIdentity {
@@ -79,7 +79,7 @@ function orderedSnowflakes(
 	return true
 }
 
-function parseState(value: any, userId: string) {
+export function parseState(value: any, userId: string) {
 	if (
 		!value.trusted ||
 		typeof value.trusted !== 'object' ||
