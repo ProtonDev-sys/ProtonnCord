@@ -11,6 +11,7 @@ interface Repo {
 	url: string
 	enabled: boolean
 	internal: boolean
+	name?: string | null
 }
 interface InstallPlan {
 	actions: Array<{ id: string; repo: string }>
@@ -84,7 +85,8 @@ export async function installNightlyUpdates(): Promise<boolean> {
 	const config = (await exists(path)) ? JSON.parse(await readFile(path)) : {}
 	if (!config || typeof config !== 'object' || Array.isArray(config))
 		throw new Error('The Revenge loader configuration is invalid')
-	await writeFile(`${path}.protonn-backup`, JSON.stringify(config))
+	if (!(await exists(`${path}.protonn-backup`)))
+		await writeFile(`${path}.protonn-backup`, JSON.stringify(config))
 	await writeFile(
 		path,
 		JSON.stringify({
@@ -92,5 +94,30 @@ export async function installNightlyUpdates(): Promise<boolean> {
 			customLoadUrl: { enabled: true, url: RUNTIME_URL },
 		}),
 	)
+	const configured = await callNativeMethod('revenge.plugins.repos.list', [])
+	const temporaryUrls = new Set([
+		'http://127.0.0.1:8080',
+		'http://localhost:8080',
+	])
+	if (
+		configured.some(
+			repo =>
+				repo.name === 'Protonn Cord Mobile' &&
+				temporaryUrls.has(repo.url.replace(/\/$/, '')),
+		)
+	) {
+		await callNativeMethod('revenge.plugins.repos.set', [
+			configured
+				.filter(
+					repo =>
+						!repo.internal &&
+						!(
+							repo.name === 'Protonn Cord Mobile' &&
+							temporaryUrls.has(repo.url.replace(/\/$/, ''))
+						),
+				)
+				.map(repo => ({ url: repo.url, enabled: repo.enabled })),
+		])
+	}
 	return result.pending.length > 0
 }

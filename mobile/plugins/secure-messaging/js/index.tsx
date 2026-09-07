@@ -32,6 +32,7 @@ import { openIdentityBackup } from './identityBackup'
 import { withMessageContent } from './message'
 import { observeAnnouncement } from './history'
 import { MessageReceiver } from './receive'
+import { captureSendPolicy } from './sendPolicy'
 import { installNightlyUpdates } from './updates'
 import {
 	decode64,
@@ -564,7 +565,26 @@ export default plugin({
 										return original.apply(this, args)
 									requireDm(channelId)
 									const state = account(userId)
-									const conversation = state.conversations[channelId]
+									const policy = captureSendPolicy(
+										state,
+										channelId,
+										memberSnapshot(channelId, userId),
+									)
+									const assertSendCurrent = () => {
+										if (
+											currentUserId() !== userId ||
+											!mobileVault.ready ||
+											mobileVault.locked ||
+											account(userId) !== state
+										)
+											throw new Error(
+												'Secure Messaging was locked or the account changed while preparing this send',
+											)
+										policy.assertCurrent(
+											state,
+											memberSnapshot(channelId, userId),
+										)
+									}
 									const options = args[3] as any
 									if (
 										message?.stickerIds?.length ||
@@ -577,17 +597,6 @@ export default plugin({
 									)
 										throw new Error(
 											'Stickers and forwards are not supported in protected mobile conversations yet',
-										)
-									if (!conversation || conversation.needsReview)
-										throw new Error(
-											'Review this conversation and run /pc on before sending',
-										)
-									if (
-										JSON.stringify(memberSnapshot(channelId, userId)) !==
-										JSON.stringify(conversation.members)
-									)
-										throw new Error(
-											'DM membership changed; run /pc on again after review',
 										)
 									const uploads = Array.isArray(
 										(args[3] as any)?.attachmentsToUpload,
@@ -602,26 +611,18 @@ export default plugin({
 												userId,
 											)
 										: null
+									assertSendCurrent()
 									state.counter += 1
 									const encrypted = encryptMessage({
 										channelId,
 										identity: state.identity,
 										plaintext: prepared?.plaintext ?? text,
-										recipients: conversation.recipients.map(
-											id => state.trusted[id]!,
-										),
+										recipients: policy.recipients,
 										senderUserId: userId,
 										counter: state.counter,
 									})
 									await saveVault()
-									if (
-										!mobileVault.ready ||
-										mobileVault.locked ||
-										account(userId) !== state
-									)
-										throw new Error(
-											'Secure Messaging was locked while preparing the send',
-										)
+									assertSendCurrent()
 									prepared?.apply()
 									return original.apply(this, [
 										channelId,
