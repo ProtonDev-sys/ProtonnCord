@@ -7,12 +7,39 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 const filename = "src/api/Notifications/NotificationComponent.tsx";
 const root = fileURLToPath(new URL("../", import.meta.url));
+
+test("notification dismissal releases the queue even if the caller's callback throws", async () => {
+    const source = readFileSync(new URL("../src/api/Notifications/Notifications.tsx", import.meta.url), "utf8");
+    const code = source.slice(source.indexOf("function _showNotification"), source.indexOf("function shouldBeNative"));
+    const { outputText } = transpileModule(code, {
+        compilerOptions: { target: ScriptTarget.ES2022, jsx: 2 }, fileName: "Notifications.tsx"
+    });
+    let rendered: { onClose(): void; } | null = null;
+    let cleared = false;
+    const show = runInNewContext(`${outputText}\n_showNotification;`, {
+        NotificationComponent: "fixture",
+        React: { createElement: (_type: unknown, props: { onClose(): void; }) => props },
+        getRoot: () => ({ render(props: typeof rendered) { rendered = props; if (props === null) cleared = true; } })
+    });
+    const error = new Error("Caller callback failed");
+    let settled = false;
+    const pending = show({ onClose() { throw error; } }, 1).then(() => { settled = true; });
+    const notification = rendered as { onClose(): void; } | null;
+    assert.ok(notification);
+    assert.throws(() => notification.onClose(), error);
+    await setImmediate();
+    assert.equal(cleared, true);
+    assert.equal(settled, true);
+    await pending;
+});
 
 interface Element {
     props: Record<string, unknown>;

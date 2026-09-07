@@ -45,30 +45,18 @@ export async function loadLazyChunks() {
 
         const validChunks = new Set<PropertyKey>();
         const invalidChunks = new Set<PropertyKey>();
-        const deferredRequires = new Set<PropertyKey>();
 
         const { promise: chunksSearchingDone, resolve: chunksSearchingResolve } = Promise.withResolvers<void>();
 
         // True if resolved, false otherwise
         const chunksSearchPromises = [] as Array<() => boolean>;
 
-        // This regex loads all language packs which makes webpack finds testing extremely slow, so for now, we prioritize using the one which doesnt include those
-        const CompleteLazyChunkRegex = canonicalizeMatch(/(?:(?:Promise\.all\(\[)?((?:\i\.e\("?[^)]+?"?\),?)+?)(?:\]\))?)\.then\(\i(?:\.\i)?\.bind\(\i,"?([^)]+?)"?(?:,[^)]+?)?\)\)/g);
+        // Only match direct bound entry points; broader matching also loads every language pack and slows webpack finds testing.
         const PartialLazyChunkRegex = canonicalizeMatch(/(?:(?:Promise\.all\(\[)?((?:\i\.e\("?[^)]+?"?\),?)+?)(?:\]\))?)\.then\(\i\.bind\(\i,"?([^)]+?)"?\)\)/g);
 
-        let foundCssDebuggingLoad = false;
-
         async function searchAndLoadLazyChunks(factoryCode: string) {
-            // Workaround to avoid loading the CSS debugging chunk which turns the app pink
-            // const hasCssDebuggingLoad = foundCssDebuggingLoad ? false : (foundCssDebuggingLoad = factoryCode.includes(".cssDebuggingEnabled&&"));
-
-            // Disabled for now since this causes lots of chunks concatenated into the same module get marked as invalid, and thus not loaded.
-            const hasCssDebuggingLoad = foundCssDebuggingLoad = false;
-
-            const lazyChunks = factoryCode.matchAll(hasCssDebuggingLoad ? CompleteLazyChunkRegex : PartialLazyChunkRegex);
+            const lazyChunks = factoryCode.matchAll(PartialLazyChunkRegex);
             const validChunkGroups = new Set<[chunkIds: PropertyKey[], entryPoint: PropertyKey]>();
-
-            const shouldForceDefer = false;
 
             await Promise.all(Array.from(lazyChunks).map(async ([, rawChunkIds, entryPoint]) => {
                 const chunkIds = rawChunkIds
@@ -87,16 +75,6 @@ export async function loadLazyChunks() {
                 let invalidChunkGroup = false;
 
                 for (const id of chunkIds) {
-                    if (hasCssDebuggingLoad) {
-                        if (chunkIds.length > 1) {
-                            throw new Error("Found multiple chunks in factory that loads the CSS debugging chunk");
-                        }
-
-                        invalidChunks.add(id);
-                        invalidChunkGroup = true;
-                        break;
-                    }
-
                     if (wreq.u(id) == null || wreq.u(id) === "undefined.js") continue;
 
                     const isWorkerAsset = await queue(() => withTimeout(
@@ -137,11 +115,6 @@ export async function loadLazyChunks() {
             // Requires the entry points for all valid chunk groups
             for (const [, entryPoint] of validChunkGroups) {
                 try {
-                    if (shouldForceDefer) {
-                        deferredRequires.add(entryPoint);
-                        continue;
-                    }
-
                     if (wreq.m[entryPoint]) wreq(entryPoint);
                 } catch (err) {
                     if (err instanceof TypeError && err.message.includes("reading 'nativeModules'")) {
@@ -198,11 +171,6 @@ export async function loadLazyChunks() {
             LazyChunkLoaderLogger.warn(error);
         } finally {
             Webpack.factoryListeners.delete(factoryListener);
-        }
-
-        // Require deferred entry points
-        for (const deferredRequire of deferredRequires) {
-            wreq(deferredRequire);
         }
 
         // All chunks Discord has mapped to asset files, even if they are not used anymore

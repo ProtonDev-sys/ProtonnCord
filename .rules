@@ -424,7 +424,7 @@ Replaced at build time. Reference only in plugin TS, never literally inside `rep
 
 ### `@api/*`
 
-`Settings`, `Commands`, `DataStore`, `ContextMenu`, `Badges`, `Notices`, `Notifications`, `MessageEvents`, `MessageUpdater`, `MessageAccessories`, `MessageDecorations`, `MessagePopover`, `MemberListDecorators`, `ServerList`, `ChatButtons`, `HeaderBar`, `UserArea`, `NicknameIcons`, `ProfileCollections`, `ProfileSections`, `AudioPlayer`, `UserSettings`, `UserSettingDefinitions`, `Styles`, `PluginManager`, `SettingsSync`.
+`Settings`, `Commands`, `DataStore`, `ContextMenu`, `Badges`, `Notices`, `Notifications`, `MessageEvents`, `MessageUpdater`, `MessageAccessories`, `MessageDecorations`, `MessagePopover`, `MemberListDecorators`, `ServerList`, `ChatButtons`, `HeaderBar`, `UserArea`, `NicknameIcons`, `ProfileCollections`, `ProfileSections`, `AudioPlayer`, `UserSettings`, `Styles`, `PluginManager`, `SettingsSync`.
 
 `@api/Commands` re-exports `sendBotMessage`, `findOption`, `ApplicationCommandInputType`, `ApplicationCommandOptionType`, `ApplicationCommandType`.
 

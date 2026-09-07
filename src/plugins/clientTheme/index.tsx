@@ -11,13 +11,15 @@ import { Devs } from "@utils/constants";
 import definePlugin, { OptionType, StartAt } from "@utils/types";
 
 import { ResetThemeColorComponent, ThemeSettingsComponent } from "./components/Settings";
-import { disableClientTheme, startClientTheme } from "./utils/styleUtils";
+import { DEFAULT_COLOR } from "./utils/colorUtils";
+import { createOrUpdateThemeColorVars, disableClientTheme, startClientTheme } from "./utils/styleUtils";
 
 export const settings = definePluginSettings({
     color: {
         type: OptionType.COMPONENT,
-        default: "313338",
-        component: ThemeSettingsComponent
+        default: DEFAULT_COLOR,
+        component: ThemeSettingsComponent,
+        onChange: createOrUpdateThemeColorVars
     },
     resetColor: {
         type: OptionType.COMPONENT,

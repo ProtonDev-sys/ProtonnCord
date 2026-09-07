@@ -40,10 +40,8 @@ export function initInput() {
         Mouse.event.emit("move", e);
     };
 
-    const onMouseDown = (e: MouseEvent) => {
+    const onMouseDown = () => {
         Mouse.down = true;
-
-        Mouse.event.emit("down", e);
     };
 
     const onMouseUp = (e: MouseEvent) => {
@@ -52,22 +50,16 @@ export function initInput() {
         Mouse.event.emit("up", e);
     };
 
-    const onMouseLeave = (e: MouseEvent) => {
-        Mouse.down = false;
-
-        Mouse.event.emit("up", e);
-    };
-
     targetCanvas.addEventListener("mousemove", onMouseMove);
     targetCanvas.addEventListener("mousedown", onMouseDown);
     targetCanvas.addEventListener("mouseup", onMouseUp);
-    targetCanvas.addEventListener("mouseleave", onMouseLeave);
+    targetCanvas.addEventListener("mouseleave", onMouseUp);
 
     return () => {
         Mouse.down = false;
         targetCanvas.removeEventListener("mousemove", onMouseMove);
         targetCanvas.removeEventListener("mousedown", onMouseDown);
         targetCanvas.removeEventListener("mouseup", onMouseUp);
-        targetCanvas.removeEventListener("mouseleave", onMouseLeave);
+        targetCanvas.removeEventListener("mouseleave", onMouseUp);
     };
 }

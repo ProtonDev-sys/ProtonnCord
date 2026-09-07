@@ -4,15 +4,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { popNotice, showNotice } from "@api/Notices";
 import { Settings } from "@api/Settings";
-import ErrorBoundary from "@components/ErrorBoundary";
 import { loadLazyChunks } from "@debug/loadLazyChunks";
 import { reporterData } from "@debug/reporterData";
 import { getIntlMessageFromHash } from "@utils/discord";
 import { canonicalizeMatch } from "@utils/patches";
 import { filters, findAll, search, wreq } from "@webpack";
-import { React, Toasts, useState } from "@webpack/common";
+import { Toasts } from "@webpack/common";
 
 import { CLIENT_VERSION, logger, PORT, settings } from ".";
 import { CompanionAuthenticator, createCompanionAuthenticator, isValidAuthSecret } from "./auth";
@@ -32,13 +30,15 @@ function areStrings(values: Array<string | RegExp>): values is string[] {
 }
 
 export function stopWs() {
-    socket?.close(1000, "Plugin Stopped");
-    socket = void 0;
+    const close = disconnect;
+    disconnect = undefined;
+    close?.();
 }
 
-export let socket: WebSocket | undefined;
+let disconnect: (() => void) | undefined;
 
 export function initWs(isManual = false) {
+    stopWs();
     const secret = settings.store.authSecret;
     if (!isValidAuthSecret(secret)) {
         logger.warn("Dev Companion is disabled until a valid authentication secret is configured");
@@ -53,17 +53,26 @@ export function initWs(isManual = false) {
         return;
     }
 
-    let wasConnected = false;
     let hasErrored = false;
     let authenticated = false;
     let authenticationFailed = false;
     let authenticator: CompanionAuthenticator | undefined;
     let authenticationTimeout: number | undefined;
     const authenticatedCommandTimes: number[] = [];
-    const ws = socket = new WebSocket(`ws://127.0.0.1:${PORT}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}`);
+    disconnect = closeConnection;
 
-    function sendData(data: OutgoingMessage) {
-        ws.send(JSON.stringify(data));
+    function closeConnection() {
+        clearAuthenticationTimeout();
+        ws.close(1000, "Connection replaced or stopped");
+    }
+
+    function isCurrentConnection() {
+        return disconnect === closeConnection && ws.readyState === WebSocket.OPEN;
+    }
+
+    function sendData(data: object) {
+        if (isCurrentConnection()) ws.send(JSON.stringify(data));
     }
 
     function clearAuthenticationTimeout() {
@@ -73,7 +82,7 @@ export function initWs(isManual = false) {
     }
 
     function failAuthentication() {
-        if (authenticationFailed || authenticated) return;
+        if (!isCurrentConnection() || authenticationFailed || authenticated) return;
         authenticationFailed = true;
         clearAuthenticationTimeout();
         logger.warn("Rejected unauthenticated Dev Companion connection");
@@ -90,7 +99,6 @@ export function initWs(isManual = false) {
 
     function finishAuthentication() {
         authenticated = true;
-        wasConnected = true;
         clearAuthenticationTimeout();
 
         logger.info("Authenticated Dev Companion connection");
@@ -146,16 +154,17 @@ export function initWs(isManual = false) {
     }
 
     ws.addEventListener("open", () => {
+        if (!isCurrentConnection()) return;
         authenticationTimeout = window.setTimeout(failAuthentication, AUTHENTICATION_TIMEOUT_MS);
         void createCompanionAuthenticator(secret).then(createdAuthenticator => {
-            if (authenticationFailed || socket !== ws || ws.readyState !== WebSocket.OPEN) return;
+            if (authenticationFailed || !isCurrentConnection()) return;
             authenticator = createdAuthenticator;
             ws.send(JSON.stringify(authenticator.hello));
         }).catch(failAuthentication);
     });
 
     ws.addEventListener("error", () => {
-        if (!wasConnected) return;
+        if (!isCurrentConnection() || !authenticated) return;
 
         hasErrored = true;
 
@@ -173,8 +182,9 @@ export function initWs(isManual = false) {
 
     ws.addEventListener("close", e => {
         clearAuthenticationTimeout();
-        if (socket === ws) socket = void 0;
-        if (!wasConnected || hasErrored) return;
+        if (disconnect !== closeConnection) return;
+        disconnect = undefined;
+        if (!authenticated || hasErrored) return;
 
         logger.info("Dev Companion disconnected with code", e.code);
 
@@ -189,6 +199,7 @@ export function initWs(isManual = false) {
     });
 
     ws.addEventListener("message", event => {
+        if (!isCurrentConnection()) return;
         if (typeof event.data !== "string" || event.data.length > MAX_COMPANION_MESSAGE_LENGTH) {
             failAuthentication();
             if (authenticated) ws.close(POLICY_VIOLATION, "Invalid message");
@@ -206,7 +217,7 @@ export function initWs(isManual = false) {
             }
 
             void authenticator.receive(message).then(result => {
-                if (authenticationFailed || socket !== ws || ws.readyState !== WebSocket.OPEN) return;
+                if (authenticationFailed || !isCurrentConnection()) return;
                 if (!result.authenticated) ws.send(JSON.stringify(result.response));
                 else finishAuthentication();
             }).catch(failAuthentication);
@@ -249,7 +260,7 @@ export function initWs(isManual = false) {
             const toSend = { nonce: requestNonce, ok: !error } as Record<string, unknown>;
             if (error) toSend.error = error;
             logger.debug("Replying to authenticated Dev Companion request");
-            ws.send(JSON.stringify(toSend));
+            sendData(toSend);
         }
         function replyData(data: OutgoingMessage) {
             const toSend: FullOutgoingMessage = {
@@ -257,7 +268,7 @@ export function initWs(isManual = false) {
                 nonce: requestNonce
             };
             logger.debug("Replying with data to authenticated Dev Companion request");
-            ws.send(JSON.stringify(toSend));
+            sendData(toSend);
         }
 
         switch (d.type) {
@@ -490,25 +501,8 @@ export function initWs(isManual = false) {
                 break;
             }
             case "allModules": {
-                const { promise, resolve, reject } = Promise.withResolvers<void>();
-                // wrap in try/catch to prevent crashing if notice api is not loaded
-                try {
-                    let closed = false;
-                    const close = () => {
-                        if (closed) return;
-                        closed = true;
-                        popNotice();
-                    };
-                    showNotice(<AllModulesNoti done={promise} close={close} />, "OK", () => {
-                        closed = true;
-                        popNotice();
-                    });
-                } catch (e) {
-                    console.error(e);
-                }
                 loadLazyChunks()
                     .then(() => {
-                        resolve();
                         replyData({
                             type: "moduleList",
                             data: {
@@ -518,14 +512,13 @@ export function initWs(isManual = false) {
                         });
                     })
                     .catch(e => {
-                        console.error(e);
+                        logger.error("Failed to load modules", e);
                         replyData({
                             type: "moduleList",
                             ok: false,
                             error: String(e),
                             data: null
                         });
-                        reject(e);
                     });
                 break;
             }
@@ -556,19 +549,3 @@ export function initWs(isManual = false) {
         }
     }
 }
-
-interface AllModulesNotiProps {
-    done: Promise<unknown>;
-    close: () => void;
-}
-
-const AllModulesNoti = ErrorBoundary.wrap(function ({ done, close }: AllModulesNotiProps) {
-    const [state, setState] = useState<0 | 1 | -1>(0);
-    done.then(setState.bind(null, 1)).catch(setState.bind(null, -1));
-    if (state === 1) setTimeout(close, 5000);
-    return (<>
-        {state === 0 && "Loading lazy modules, restarting could lead to errors"}
-        {state === 1 && "Loaded all lazy modules"}
-        {state === -1 && "Failed to load lazy modules, check console for errors"}
-    </>);
-}, { noop: true });

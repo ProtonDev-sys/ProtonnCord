@@ -5,35 +5,30 @@
  */
 
 import { BaseText } from "@components/BaseText";
-import { Button, Button as NewButton } from "@components/Button";
+import { Button } from "@components/Button";
 import { Flex } from "@components/Flex";
+import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
 import { Decoration, getPresets, Preset } from "@plugins/decor/lib/api";
-import { GUILD_ID, INVITE_KEY } from "@plugins/decor/lib/constants";
-import { useAuthorizationStore } from "@plugins/decor/lib/stores/AuthorizationStore";
+import { INVITE_KEY } from "@plugins/decor/lib/constants";
+import { Authorization, useAuthorizationStore } from "@plugins/decor/lib/stores/AuthorizationStore";
 import { useCurrentUserDecorationsStore } from "@plugins/decor/lib/stores/CurrentUserDecorationsStore";
 import { decorationToAvatarDecoration } from "@plugins/decor/lib/utils/decoration";
 import { settings } from "@plugins/decor/settings";
-import { cl, DecorationModalClasses, requireAvatarDecorationModal } from "@plugins/decor/ui";
+import { cl, DecorationModalClasses, requireAvatarDecorationModal, requireDialogOwner, useDialogActions } from "@plugins/decor/ui";
 import { AvatarDecorationModalPreview } from "@plugins/decor/ui/components";
 import DecorationGridCreate from "@plugins/decor/ui/components/DecorationGridCreate";
 import DecorationGridNone from "@plugins/decor/ui/components/DecorationGridNone";
 import DecorDecorationGridDecoration from "@plugins/decor/ui/components/DecorDecorationGridDecoration";
 import SectionedGridList from "@plugins/decor/ui/components/SectionedGridList";
-import { copyWithToast, openInviteModal } from "@utils/discord";
+import { copyWithToast } from "@utils/discord";
 import { Margins } from "@utils/margins";
 import { Queue } from "@utils/Queue";
 import { RenderModalProps, User } from "@vencord/discord-types";
-import { closeAllModals, ConfirmModal, FluxDispatcher, Forms, GuildStore, Modal, NavigationRouter, openModal, Parser, Tooltip, useEffect, UserStore, UserSummaryItem, UserUtils, useState } from "@webpack/common";
+import { ConfirmModal, Forms, Modal, openModal, Parser, Tooltip, useEffect, UserStore, UserSummaryItem, UserUtils, useState } from "@webpack/common";
 
 import { openCreateDecorationModal } from "./CreateDecorationModal";
 import { openGuidelinesModal } from "./GuidelinesModal";
-
-function usePresets() {
-    const [presets, setPresets] = useState<Preset[]>([]);
-    useEffect(() => { getPresets().then(setPresets); }, []);
-    return presets;
-}
 
 interface Section {
     title: string;
@@ -50,28 +45,28 @@ interface SectionHeaderProps {
 const fetchAuthorsQueue = new Queue();
 
 function SectionHeader({ section }: SectionHeaderProps) {
-    const hasSubtitle = typeof section.subtitle !== "undefined";
-    const hasAuthorIds = typeof section.authorIds !== "undefined";
-
     const [authors, setAuthors] = useState<User[]>([]);
 
     useEffect(() => {
+        let cancelled = false;
+        setAuthors([]);
         fetchAuthorsQueue.push(async () => {
-            if (!section.authorIds) return;
-
-            for (const authorId of section.authorIds) {
+            for (const authorId of new Set(section.authorIds ?? [])) {
+                if (cancelled) return;
                 const author = UserStore.getUser(authorId) ?? await UserUtils.getUser(authorId).catch(() => null);
+                if (cancelled) return;
                 if (author == null) continue;
 
                 setAuthors(authors => [...authors, author]);
             }
         });
+        return () => { cancelled = true; };
     }, [section.authorIds]);
 
     return <div>
         <Flex>
             <Forms.FormTitle style={{ flexGrow: 1 }}>{section.title}</Forms.FormTitle>
-            {hasAuthorIds && <UserSummaryItem
+            {section.authorIds?.length ? <UserSummaryItem
                 users={authors}
                 guildId={undefined}
                 renderIcon={false}
@@ -80,9 +75,9 @@ function SectionHeader({ section }: SectionHeaderProps) {
                 size={16}
                 showUserPopout
                 className={Margins.bottom8}
-            />}
+            /> : null}
         </Flex>
-        {hasSubtitle &&
+        {section.subtitle &&
             <Paragraph className={Margins.bottom8}>
                 {section.subtitle}
             </Paragraph>
@@ -90,7 +85,12 @@ function SectionHeader({ section }: SectionHeaderProps) {
     </div>;
 }
 
-function ChangeDecorationModal(props: RenderModalProps) {
+function ChangeDecorationModal({ owner, ...props }: RenderModalProps & { owner: Authorization; }) {
+    const actions = useDialogActions(props.onClose);
+    const authorization = useAuthorizationStore();
+    const [error, setError] = useState<string | null>(null);
+    const isCurrent = authorization.authorization === owner && authorization.isAuthorized();
+    const showError = (error: unknown) => setError(error instanceof Error ? error.message : "Could not change the decoration.");
     // undefined = not trying, null = none, Decoration = selected
     const [tryingDecoration, setTryingDecoration] = useState<Decoration | null | undefined>(undefined);
     const isTryingDecoration = typeof tryingDecoration !== "undefined";
@@ -101,22 +101,37 @@ function ChangeDecorationModal(props: RenderModalProps) {
         decorations,
         selectedDecoration,
         fetch: fetchUserDecorations,
-        select: selectDecoration
+        select: selectDecoration,
+        busy,
+        loading,
+        error: decorationError
     } = useCurrentUserDecorationsStore();
+    const notice = error ?? authorization.error ?? decorationError;
 
     useEffect(() => {
-        fetchUserDecorations();
-    }, []);
+        fetchUserDecorations(owner).catch(showError);
+    }, [owner]);
+
+    useEffect(() => {
+        if (!isCurrent) actions.close();
+    }, [isCurrent]);
 
     const activeSelectedDecoration = isTryingDecoration ? tryingDecoration : selectedDecoration;
-    const activeDecorationHasAuthor = typeof activeSelectedDecoration?.authorId !== "undefined";
     const hasDecorationPendingReview = decorations.some(d => d.reviewed === false);
 
-    const presets = usePresets();
+    const [presets, setPresets] = useState<Preset[]>([]);
+    useEffect(() => {
+        const controller = new AbortController();
+        getPresets(controller.signal).then(presets => {
+            if (!controller.signal.aborted) setPresets(presets);
+        }).catch(error => {
+            if (!controller.signal.aborted) showError(error);
+        });
+        return () => controller.abort();
+    }, [owner]);
     const presetDecorations = presets.flatMap(preset => preset.decorations);
 
     const activeDecorationPreset = presets.find(preset => preset.id === activeSelectedDecoration?.presetId);
-    const isActiveDecorationPreset = typeof activeDecorationPreset !== "undefined";
 
     const ownDecorations = decorations.filter(d => !presetDecorations.some(p => p.hash === d.hash));
 
@@ -138,64 +153,58 @@ function ChangeDecorationModal(props: RenderModalProps) {
 
     return <Modal
         {...props}
+        onClose={actions.close}
         title="Change Decoration"
+        notice={notice ? { type: "critical", message: notice } : undefined}
         size="lg"
         actions={[
             {
-                text: "Cancel",
+                text: busy ? "Close" : "Cancel",
                 variant: "secondary",
-                onClick: props.onClose
+                onClick: actions.close
             },
             {
                 text: "Apply",
                 variant: "primary",
+                loading: busy,
                 onClick: () => {
-                    selectDecoration(tryingDecoration!).then(props.onClose);
+                    if (tryingDecoration === undefined || busy || loading || !isCurrent) return;
+                    setError(null);
+                    selectDecoration(tryingDecoration, owner).then(actions.close).catch(showError);
                 },
-                disabled: !isTryingDecoration
+                disabled: !isTryingDecoration || busy || loading || !isCurrent || authorization.busy
             }
         ]}
         preview={
             <div className={cl("modal-footer-btn-container", Margins.top8)}>
                 <Tooltip text="Join Decor's Discord Server for notifications on your decoration's review, and when new presets are released">
-                    {tooltipProps => <NewButton
+                    {tooltipProps => <Link
                         {...tooltipProps}
-                        onClick={async () => {
-                            if (!GuildStore.getGuild(GUILD_ID)) {
-                                const inviteAccepted = await openInviteModal(INVITE_KEY);
-                                if (inviteAccepted) {
-                                    closeAllModals();
-                                    FluxDispatcher.dispatch({ type: "LAYER_POP_ALL" });
-                                }
-                            } else {
-                                props.onClose();
-                                FluxDispatcher.dispatch({ type: "LAYER_POP_ALL" });
-                                NavigationRouter.transitionToGuild(GUILD_ID);
-                            }
-                        }}
-                        variant="link"
+                        href={`https://discord.gg/${INVITE_KEY}`}
                     >
                         Discord Server
-                    </NewButton>}
+                    </Link>}
                 </Tooltip>
-                <NewButton
-                    onClick={() => openModal(modalProps => (
-                        <ConfirmModal
-                            {...modalProps}
-                            title="Log Out"
-                            subtitle="Are you sure you want to log out of Decor?"
-                            confirmText="Log Out"
-                            cancelText="Cancel"
-                            onConfirm={() => {
-                                useAuthorizationStore.getState().remove(UserStore.getCurrentUser().id);
-                                props.onClose();
-                            }}
-                        />
-                    ))}
+                <Button
+                    disabled={busy || authorization.busy || !isCurrent}
+                    onClick={() => {
+                        openModal(modalProps => (
+                            <ConfirmModal
+                                {...modalProps}
+                                title="Log Out"
+                                subtitle="Are you sure you want to log out of Decor?"
+                                confirmText="Log Out"
+                                cancelText="Cancel"
+                                onConfirm={() => {
+                                    authorization.remove(owner).then(actions.close).catch(showError);
+                                }}
+                            />
+                        ));
+                    }}
                     variant="dangerSecondary"
                 >
                     Log Out
-                </NewButton>
+                </Button>
             </div>
         }
     >
@@ -215,7 +224,15 @@ function ChangeDecorationModal(props: RenderModalProps) {
                                     {tooltipProps => <DecorationGridCreate
                                         className={cl("change-decoration-modal-decoration")}
                                         {...tooltipProps}
-                                        onSelect={!hasDecorationPendingReview ? (settings.store.agreedToGuidelines ? openCreateDecorationModal : openGuidelinesModal) : () => { }}
+                                        onSelect={() => {
+                                            if (hasDecorationPendingReview || busy || loading || !isCurrent) return;
+                                            setError(null);
+                                            const open = settings.store.agreedToGuidelines ? openCreateDecorationModal : openGuidelinesModal;
+                                            const signal = actions.begin();
+                                            open(owner, signal).catch(error => {
+                                                if (!signal.aborted) showError(error);
+                                            });
+                                        }}
                                     />}
                                 </Tooltip>;
                         }
@@ -228,6 +245,7 @@ function ChangeDecorationModal(props: RenderModalProps) {
                                     onSelect={item.reviewed !== false ? () => setTryingDecoration(item) : () => { }}
                                     isSelected={activeSelectedDecoration?.hash === item.hash}
                                     decoration={item}
+                                    owner={owner}
                                 />
                             )}
                         </Tooltip>;
@@ -244,23 +262,23 @@ function ChangeDecorationModal(props: RenderModalProps) {
                     avatarDecoration={avatarDecoration}
                     user={UserStore.getCurrentUser()}
                 />
-                {isActiveDecorationPreset && <Forms.FormTitle className="">Part of the {activeDecorationPreset.name} Preset</Forms.FormTitle>}
-                {typeof activeSelectedDecoration === "object" &&
+                {activeDecorationPreset && <Forms.FormTitle>Part of the {activeDecorationPreset.name} Preset</Forms.FormTitle>}
+                {activeSelectedDecoration &&
                     <BaseText
                         size="sm"
                         weight="semibold"
                         style={{ color: "var(--text-strong)" }}
                     >
-                        {activeSelectedDecoration?.alt}
+                        {activeSelectedDecoration.alt}
                     </BaseText>
                 }
-                {activeDecorationHasAuthor && (
+                {activeSelectedDecoration?.authorId && (
                     <BaseText key={`createdBy-${activeSelectedDecoration.authorId}`}>
                         Created by {Parser.parse(`<@${activeSelectedDecoration.authorId}>`)}
                     </BaseText>
                 )}
-                {isActiveDecorationPreset && (
-                    <Button onClick={() => copyWithToast(activeDecorationPreset.id)}>
+                {activeDecorationPreset && (
+                    <Button onClick={() => copyWithToast(activeDecorationPreset.id).catch(showError)}>
                         Copy Preset ID
                     </Button>
                 )}
@@ -270,5 +288,9 @@ function ChangeDecorationModal(props: RenderModalProps) {
     </Modal>;
 }
 
-export const openChangeDecorationModal = () =>
-    requireAvatarDecorationModal().then(() => openModal(props => <ChangeDecorationModal {...props} />));
+export const openChangeDecorationModal = async (owner: Authorization, signal: AbortSignal) => {
+    requireDialogOwner(owner, signal);
+    await requireAvatarDecorationModal();
+    requireDialogOwner(owner, signal);
+    return openModal(props => <ChangeDecorationModal {...props} owner={owner} />);
+};

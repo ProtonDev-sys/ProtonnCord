@@ -22,7 +22,7 @@ import { Badge } from "@components/Badge";
 import { BaseText } from "@components/BaseText";
 import { Switch } from "@components/Switch";
 import { classNameFactory } from "@utils/css";
-import { Tooltip, useRef } from "@webpack/common";
+import { React, Tooltip, useRef } from "@webpack/common";
 import type { MouseEventHandler, ReactNode } from "react";
 
 const cl = classNameFactory("vc-addon-");
@@ -47,6 +47,7 @@ interface Props {
 export function AddonCard({ disabled, isNew, sourceBadge, tooltip, name, infoButton, footer, author, enabled, setEnabled, description, onMouseEnter, onMouseLeave }: Props) {
     const titleRef = useRef<HTMLDivElement>(null);
     const titleContainerRef = useRef<HTMLDivElement>(null);
+    const titleId = React.useId();
 
     return (
         <div
@@ -60,6 +61,7 @@ export function AddonCard({ disabled, isNew, sourceBadge, tooltip, name, infoBut
                         <div ref={titleContainerRef} className={cl("title-container")}>
                             <div
                                 ref={titleRef}
+                                id={titleId}
                                 className={cl("title")}
                                 onMouseOver={() => {
                                     const title = titleRef.current!;
@@ -82,7 +84,7 @@ export function AddonCard({ disabled, isNew, sourceBadge, tooltip, name, infoBut
                     )}
                 </div>
 
-                <Tooltip text={tooltip}>
+                {sourceBadge != null && <Tooltip text={tooltip}>
                     {({ onMouseEnter, onMouseLeave }) => (
                         <div
                             className={cl("source")}
@@ -92,11 +94,12 @@ export function AddonCard({ disabled, isNew, sourceBadge, tooltip, name, infoBut
                             {sourceBadge}
                         </div>
                     )}
-                </Tooltip>
+                </Tooltip>}
 
                 {infoButton}
 
                 <Switch
+                    aria-labelledby={titleId}
                     checked={enabled}
                     onChange={setEnabled}
                     disabled={disabled}

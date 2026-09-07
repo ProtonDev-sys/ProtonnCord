@@ -5,7 +5,6 @@
  */
 
 const MAX_CLOUD_URL_LENGTH = 4096;
-const MAX_JSON_DEPTH = 32;
 const FORBIDDEN_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 /**
@@ -95,33 +94,6 @@ export function parseCloudBackendUrl(value: unknown): URL {
     return new URL(url.origin + "/");
 }
 
-function cloneJsonValue(value: unknown, depth = 0): JsonValue | undefined {
-    if (depth > MAX_JSON_DEPTH) return undefined;
-    if (value === null || typeof value === "boolean" || typeof value === "string") return value;
-    if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-
-    if (Array.isArray(value)) {
-        const output: JsonValue[] = [];
-        for (const item of value) {
-            const cloned = cloneJsonValue(item, depth + 1);
-            if (cloned !== undefined) output.push(cloned);
-        }
-        return output;
-    }
-
-    if (typeof value !== "object") return undefined;
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return undefined;
-
-    const output: Record<string, JsonValue> = {};
-    for (const [key, item] of Object.entries(value)) {
-        if (FORBIDDEN_OBJECT_KEYS.has(key)) continue;
-        const cloned = cloneJsonValue(item, depth + 1);
-        if (cloned !== undefined) output[key] = cloned;
-    }
-    return output;
-}
-
 function getRecord(value: unknown): Record<string, unknown> | undefined {
     if (value == null || typeof value !== "object" || Array.isArray(value)) return undefined;
     const prototype = Object.getPrototypeOf(value);
@@ -188,10 +160,11 @@ export function sanitizeCloudSettings(value: unknown, pluginRegistry: CloudPlugi
                         }
                         break;
                 }
+                if (!typeValid || (typeof value !== "string" && typeof value !== "boolean"
+                    && !(typeof value === "number" && Number.isFinite(value)))) continue;
                 const validation = definition.isValid?.call(pluginSettings, value);
-                if (!typeValid || validation === false || typeof validation === "string") continue;
-                const cloned = cloneJsonValue(value);
-                if (cloned !== undefined) safePlugin[settingName] = cloned;
+                if (validation === false || typeof validation === "string") continue;
+                safePlugin[settingName] = value;
             }
         }
 

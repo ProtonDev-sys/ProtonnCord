@@ -382,15 +382,6 @@ const settings = definePluginSettings({
     }
 });
 
-export function isOverriden(id: string): boolean {
-    return !!getOverride(id)?.enabled;
-}
-
-export function findOverride(id: string): SoundOverride | null {
-    const override = getOverride(id);
-    return override?.enabled ? override : null;
-}
-
 export default definePlugin({
     name: "CustomSounds",
     description: "Customize Discord's sounds.",
