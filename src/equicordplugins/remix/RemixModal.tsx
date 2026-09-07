@@ -5,42 +5,63 @@
  */
 
 import { RenderModalProps } from "@vencord/discord-types";
-import { Modal, React } from "@webpack/common";
+import { Modal, React, useEffect, useRef, useState } from "@webpack/common";
 
 import { sendRemix } from ".";
-import { brushCanvas, canvas, cropCanvas, ctx, exportImg, shapeCanvas } from "./editor/components/Canvas";
+import { exportImg } from "./editor/components/Canvas";
 import { Editor } from "./editor/Editor";
-import { resetBounds } from "./editor/tools/crop";
 import { SendIcon } from "./icons/SendIcon";
 
-type Props = {
+interface Props {
     modalProps: RenderModalProps;
     close: () => void;
     url?: string;
-};
-
-function reset() {
-    resetBounds();
-
-    if (!ctx || !canvas) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    brushCanvas.clearRect(0, 0, canvas.width, canvas.height);
-    shapeCanvas.clearRect(0, 0, canvas.width, canvas.height);
-    cropCanvas.clearRect(0, 0, canvas.width, canvas.height);
-}
-
-async function closeModal(closeFunc: () => void, save?: boolean) {
-    if (save) sendRemix(await exportImg());
-    reset();
-    closeFunc();
 }
 
 export default function RemixModal({ modalProps, close, url }: Props) {
+    const generation = useRef(0);
+    const pending = useRef(false);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    useEffect(() => () => {
+        generation.current++;
+        pending.current = false;
+    }, []);
+
+    function dismiss() {
+        generation.current++;
+        pending.current = false;
+        close();
+    }
+
+    async function send() {
+        if (pending.current) return;
+        const owner = generation.current;
+        pending.current = true;
+        setBusy(true);
+        setError(null);
+        try {
+            const blob = await exportImg();
+            if (owner !== generation.current) return;
+            await sendRemix(blob);
+            if (owner === generation.current) dismiss();
+        } catch {
+            if (owner === generation.current) setError("Could not prepare the image. Check the image and crop, then try again.");
+        } finally {
+            if (owner === generation.current) {
+                pending.current = false;
+                setBusy(false);
+            }
+        }
+    }
+
     return (
         <Modal
             {...modalProps}
+            onClose={dismiss}
             size="lg"
             title="Remix"
+            notice={error ? { message: error, type: "critical" } : undefined}
             actions={[
                 {
                     text: (
@@ -49,12 +70,14 @@ export default function RemixModal({ modalProps, close, url }: Props) {
                         </span>
                     ) as any,
                     variant: "primary",
-                    onClick: () => closeModal(close, true)
+                    disabled: busy,
+                    loading: busy,
+                    onClick: send
                 },
                 {
                     text: "Close",
                     variant: "dangerPrimary",
-                    onClick: () => closeModal(close)
+                    onClick: dismiss
                 }
             ]}
         >

@@ -18,6 +18,11 @@ const requireCreateStickerModal = extractAndLoadChunksLazy([".CREATE_STICKER_MOD
 const requireSettingsMenu = extractAndLoadChunksLazy(['type:"USER_SETTINGS_MODAL_OPEN"']);
 
 const validMediaTypes = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+const modalKey = "vc-remix";
+
+function openRemix(url?: string) {
+    openModal(modalProps => <RemixModal modalProps={modalProps} close={() => closeModal(modalKey)} url={url} />, { modalKey });
+}
 
 const UploadContextMenuPatch: NavContextMenuPatchCallback = (children, props) => {
     if (children.find(c => c?.props?.id === "vc-remix")) return;
@@ -25,11 +30,7 @@ const UploadContextMenuPatch: NavContextMenuPatchCallback = (children, props) =>
     children.push(<Menu.MenuItem
         id="vc-remix"
         label="Remix"
-        action={() => {
-            const key = openModal(props =>
-                <RemixModal modalProps={props} close={() => closeModal(key)} />
-            );
-        }}
+        action={() => openRemix()}
     />);
 };
 
@@ -48,11 +49,7 @@ const MessageContextMenuPatch: NavContextMenuPatchCallback = (children, props) =
         id="vc-remix"
         label="Remix"
         icon={PaintbrushIcon}
-        action={() => {
-            const key = openModal(modalProps =>
-                <RemixModal modalProps={modalProps} close={() => closeModal(key)} url={url} />
-            );
-        }}
+        action={() => openRemix(url)}
     />);
 };
 
@@ -63,7 +60,7 @@ export function sendRemix(blob: Blob) {
     if (reply) FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", currentChannelId });
 
     const file = new File([blob], "remix.png", { type: "image/png" });
-    UploadHandler.promptToUpload([file], channel, DraftType.ChannelMessage);
+    return UploadHandler.promptToUpload([file], channel, DraftType.ChannelMessage);
 }
 
 export default definePlugin({
@@ -80,5 +77,8 @@ export default definePlugin({
 
         await requireCreateStickerModal();
         await requireSettingsMenu();
+    },
+    stop() {
+        closeModal(modalKey);
     },
 });

@@ -31,27 +31,51 @@ export function heightFromBounds(bounds: { left: number, right: number, top: num
     return bounds.bottom - bounds.top;
 }
 
-export async function urlToImage(url: string) {
-    return new Promise<HTMLImageElement>(resolve => {
+export function urlToImage(url: string, signal?: AbortSignal) {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
+        function cleanup() {
+            img.onload = null;
+            img.onerror = null;
+            signal?.removeEventListener("abort", abort);
+        }
+        function abort() {
+            cleanup();
+            img.src = "";
+            reject(new Error("Image loading was cancelled."));
+        }
         img.crossOrigin = "anonymous";
-        img.onload = () => resolve(img);
+        img.onload = () => {
+            cleanup();
+            resolve(img);
+        };
+        img.onerror = () => {
+            cleanup();
+            reject(new Error("Could not load the image."));
+        };
+        if (signal?.aborted) {
+            abort();
+            return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
         img.src = url;
     });
 }
 
 export function imageToBlob(image: HTMLImageElement) {
-    return new Promise<File>(resolve => {
+    return new Promise<File>((resolve, reject) => {
         const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d")!;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+            reject(new Error("Image conversion is unavailable."));
+            return;
+        }
         canvas.width = image.width;
         canvas.height = image.height;
         ctx.drawImage(image, 0, 0);
-
         canvas.toBlob(blob => {
-            if (!blob) return;
-
-            resolve(new File([blob], "image.png", { type: "image/png" }));
+            if (blob) resolve(new File([blob], "image.png", { type: "image/png" }));
+            else reject(new Error("Could not convert the image."));
         });
     });
 }
