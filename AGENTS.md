@@ -4,7 +4,7 @@ Discord client mod forked from Equicord and Vencord. Preserve upstream attributi
 
 ## Runtime map
 
-- Read `docs/rewrite-acceptance.md` for feature/data compatibility. The catalog baseline protects existing plugin names and setting keys; never regenerate it to hide a regression.
+- Read `docs/rewrite-acceptance.md` for feature/data compatibility. Layouts and internal formats can change; preserve preferences through tested migrations. The catalog baseline protects existing identifiers; never regenerate it to hide a regression.
 - `src/Vencord.ts` is the public renderer entry. Keep its first `~plugins` import ordering; runtime startup/services live in `src/runtime`.
 - `src/api/PluginManager.ts` coordinates plugins. `src/api/pluginManager` pairs declarative registrations with cleanup; add both sides there and test partial failure/repeated start-stop.
 - `scripts/build/pluginManifest.mjs` generates metadata for the lazy renderer catalog. `src/shared/pluginDefinition.ts` preserves definition identity; uncertain metadata, change callbacks, and startup side effects require eager loading. Never evaluate visibility getters during catalog construction.

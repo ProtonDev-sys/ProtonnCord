@@ -18,7 +18,7 @@
 
 import "./styles.css";
 
-import { isPluginEnabled, stopPlugin } from "@api/PluginManager";
+import { hasAnyVisibleSettings, isPluginEnabled, stopPlugin } from "@api/PluginManager";
 import { PlainSettings, useSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
@@ -27,29 +27,27 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { HeadingTertiary } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { SettingsTab } from "@components/settings";
-import { getLoadedPluginDefinition, type PluginManifestEntry } from "@shared/pluginDefinition";
+import { getLoadedPluginDefinition } from "@shared/pluginDefinition";
 import { ChangeList } from "@utils/ChangeList";
-import { classNameFactory } from "@utils/css";
 import { isTruthy } from "@utils/guards";
-import { Logger } from "@utils/Logger";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
 import { reload } from "@utils/native";
 import { useCleanupEffect, useIntersection } from "@utils/react";
-import { PluginTag, PluginTags } from "@utils/types";
+import { PluginTags } from "@utils/types";
 import { Alerts, ConfirmModal, openModal, Parser, React, SearchableSelect, Select, TextInput, Toasts, Tooltip, useCallback, useMemo, useRef, useState } from "@webpack/common";
-import { JSX } from "react";
 
 import Plugins, { ExcludedPlugins, PluginManifest, PluginMeta } from "~plugins";
 
+import { CatalogCard, createPluginCatalogView, PluginFilter, SearchStatus } from "./catalogView";
 import { getReleaseNewPlugins } from "./newPluginRelease";
 import { PluginCard } from "./PluginCard";
 import { openWarningModal } from "./PluginModal";
 import { StockPluginsCard, UserPluginsCard } from "./PluginStatCards";
+import { cl, ExcludedReasons, logger, PluginDependencyList } from "./shared";
 import { UIElementsButton } from "./UIElements";
 
-export const cl = classNameFactory("vc-plugins-");
-export const logger = new Logger("PluginSettings", "#a6d189");
+export { cl, ExcludedReasons, logger, PluginDependencyList } from "./shared";
 
 function showErrorToast(message: string) {
     Toasts.show({
@@ -107,26 +105,22 @@ function ReloadRequiredCard({ required, enabledPlugins, openWarningModal, resetC
     );
 }
 
-const enum SearchStatus {
-    ALL,
-    FAVORITES,
-    ENABLED,
-    DISABLED,
-    EQUICORD,
-    VENCORD,
-    NEW,
-    USER_PLUGINS,
-    API_PLUGINS
-}
+const PAGE_SIZE = 36;
 
-export const ExcludedReasons: Record<"web" | "discordDesktop" | "vesktop" | "equibop" | "desktop" | "dev", string> = {
-    desktop: "Discord Desktop app or Vesktop/Equibop",
-    discordDesktop: "Discord Desktop app",
-    vesktop: "Vesktop/Equibop apps",
-    equibop: "Vesktop/Equibop apps",
-    web: "Vesktop/Equibop apps & Discord web",
-    dev: "Developer version of Protonn Cord"
-};
+const CatalogPluginCard = React.memo(function CatalogPluginCard({ card, onRestartNeeded }: { card: CatalogCard; onRestartNeeded(name: string, key: string): void; }) {
+    if (!card.disabled) return <PluginCard {...card} onRestartNeeded={onRestartNeeded} />;
+
+    const tooltip = card.requiredBy
+        ? <PluginDependencyList deps={card.requiredBy} />
+        : "This plugin is required for Protonn Cord to function.";
+    return (
+        <Tooltip text={tooltip}>
+            {({ onMouseLeave, onMouseEnter }) => (
+                <PluginCard {...card} onRestartNeeded={onRestartNeeded} onMouseLeave={onMouseLeave} onMouseEnter={onMouseEnter} />
+            )}
+        </Tooltip>
+    );
+});
 
 function ExcludedPluginsList({ search }: { search: string; }) {
     const matchingExcludedPlugins = search
@@ -194,124 +188,26 @@ export default function PluginSettings() {
         };
     }, []);
 
-    const depMap = useMemo(() => {
-        const o = {} as Record<string, string[]>;
-        for (const plugin in PluginManifest) {
-            const deps = PluginManifest[plugin].dependencies;
-            if (deps) {
-                for (const dep of deps) {
-                    o[dep] ??= [];
-                    o[dep].push(plugin);
-                }
-            }
-        }
-        return o;
-    }, []);
-
-    const sortedPlugins = useMemo(() =>
-        Object.values(PluginManifest).sort((a, b) => a.name.localeCompare(b.name)),
-        []
-    )
-        .toSorted((a, b) => Number(PlainSettings.plugins[b.name]?.isFavorite ?? false) - Number(PlainSettings.plugins[a.name]?.isFavorite ?? false));
-
+    const catalog = useMemo(() => createPluginCatalogView({
+        plugins: PluginManifest,
+        metadata: PluginMeta,
+        isEnabled: isPluginEnabled,
+        isDependency: name => getLoadedPluginDefinition(name)?.isDependency ?? false,
+        getSettings: name => PlainSettings.plugins[name],
+        hasVisibleSettings: name => hasAnyVisibleSettings(Plugins[name])
+    }), []);
     const hasUserPlugins = useMemo(() => !IS_STANDALONE && Object.values(PluginMeta).some(m => m.userPlugin), []);
-
-    const [searchValue, setSearchValue] = useState({ value: "", tags: [] as PluginTag[], status: SearchStatus.ALL });
-
+    const newPluginsSet = useMemo(() => getReleaseNewPlugins(VERSION, Object.keys(PluginManifest)), []);
+    const [searchValue, setSearchValue] = useState<PluginFilter>({ value: "", tags: [], status: SearchStatus.ALL });
+    const [page, setPage] = useState({ filter: searchValue, count: PAGE_SIZE });
+    const visibleCount = page.filter === searchValue ? page.count : PAGE_SIZE;
+    const view = catalog.read(searchValue, newPluginsSet, visibleCount);
+    const { enabledPlugins, matchingPlugins, counts: { totalStockPlugins, totalUserPlugins, enabledStockPlugins, enabledUserPlugins } } = view;
     const search = searchValue.value.toLowerCase();
     const onSearch = (query: string) => setSearchValue(prev => ({ ...prev, value: query }));
-
-    const pluginFilter = useCallback((plugin: PluginManifestEntry, newPluginsSet: Set<string> | null) => {
-        const { status, tags } = searchValue;
-
-        switch (status) {
-            case SearchStatus.FAVORITES:
-                if (!PlainSettings.plugins[plugin.name]?.isFavorite) return false;
-                break;
-            case SearchStatus.DISABLED:
-                if (isPluginEnabled(plugin.name)) return false;
-                break;
-            case SearchStatus.ENABLED:
-                if (!isPluginEnabled(plugin.name)) return false;
-                break;
-            case SearchStatus.EQUICORD:
-                if (!PluginMeta[plugin.name].folderName.startsWith("src/equicordplugins/")) return false;
-                break;
-            case SearchStatus.VENCORD:
-                if (!PluginMeta[plugin.name].folderName.startsWith("src/plugins/")) return false;
-                break;
-            case SearchStatus.NEW:
-                if (!newPluginsSet?.has(plugin.name)) return false;
-                break;
-            case SearchStatus.USER_PLUGINS:
-                if (!PluginMeta[plugin.name]?.userPlugin) return false;
-                break;
-            case SearchStatus.API_PLUGINS:
-                if (!plugin.name.endsWith("API")) return false;
-                break;
-        }
-
-        if (tags.length && tags.some(t => !plugin.tags?.includes(t))) return false;
-
-        if (!search.length) return true;
-
-        return (
-            plugin.name.toLowerCase().includes(search.replace(/\s+/g, "")) ||
-            plugin.name.match(/[A-Z]/g)?.join("").toLowerCase().includes(search) || // acronyms like BF for BetterFolders
-            plugin.description.toLowerCase().includes(search) ||
-            plugin.searchTerms?.some(t => t.toLowerCase().includes(search))
-        );
-    }, [searchValue, search]);
-
-    const newPluginsSet = getReleaseNewPlugins(VERSION, sortedPlugins.map(plugin => plugin.name));
-
     const handleRestartNeeded = useCallback((name: string, key: string) => changes.handleChange(`${name}:${key}`), [changes]);
-
-    const { plugins, requiredPlugins } = useMemo(() => {
-        const plugins = [] as JSX.Element[];
-        const requiredPlugins = [] as JSX.Element[];
-
-        const showApi = searchValue.status === SearchStatus.API_PLUGINS;
-        for (const p of sortedPlugins) {
-            if (p.hidden || (!p.hasSettings && p.name.endsWith("API") && !showApi))
-                continue;
-
-            if (!pluginFilter(p, newPluginsSet)) continue;
-
-            const isRequired = p.required || getLoadedPluginDefinition(p.name)?.isDependency || depMap[p.name]?.some(d => settings.plugins[d].enabled);
-
-            if (isRequired) {
-                const tooltipText = p.required || !depMap[p.name]
-                    ? "This plugin is required for Protonn Cord to function."
-                    : <PluginDependencyList deps={depMap[p.name]?.filter(d => settings.plugins[d].enabled)} />;
-
-                requiredPlugins.push(
-                    <Tooltip text={tooltipText} key={p.name}>
-                        {({ onMouseLeave, onMouseEnter }) => (
-                            <PluginCard
-                                onMouseLeave={onMouseLeave}
-                                onMouseEnter={onMouseEnter}
-                                onRestartNeeded={handleRestartNeeded}
-                                disabled={true}
-                                plugin={p}
-                            />
-                        )}
-                    </Tooltip>
-                );
-            } else {
-                plugins.push(
-                    <PluginCard
-                        onRestartNeeded={handleRestartNeeded}
-                        disabled={false}
-                        plugin={p}
-                        isNew={newPluginsSet?.has(p.name)}
-                        key={p.name}
-                    />
-                );
-            }
-        }
-        return { plugins, requiredPlugins };
-    }, [sortedPlugins, searchValue, newPluginsSet, depMap, settings.plugins, pluginFilter, handleRestartNeeded]);
+    const plugins = useMemo(() => view.cards.map(card => <CatalogPluginCard key={card.plugin.name} card={card} onRestartNeeded={handleRestartNeeded} />), [view.cards, handleRestartNeeded]);
+    const requiredPlugins = useMemo(() => view.requiredCards.map(card => <CatalogPluginCard key={card.plugin.name} card={card} onRestartNeeded={handleRestartNeeded} />), [view.requiredCards, handleRestartNeeded]);
 
     function resetCheckAndDo() {
         let restartNeeded = false;
@@ -353,27 +249,14 @@ export default function PluginSettings() {
         }
     }
 
-    // Code directly taken from supportHelper.tsx
-    const isApiPlugin = (plugin: string) => plugin.endsWith("API") || PluginManifest[plugin].required;
-
-    const totalPlugins = Object.keys(PluginManifest).filter(p => !isApiPlugin(p));
-    const enabledPlugins = Object.keys(PluginManifest).filter(p => isPluginEnabled(p) && !isApiPlugin(p));
-
-    const totalStockPlugins = totalPlugins.filter(p => !PluginMeta[p].userPlugin && !PluginManifest[p].hidden).length;
-    const totalUserPlugins = totalPlugins.filter(p => PluginMeta[p].userPlugin).length;
-    const enabledStockPlugins = enabledPlugins.filter(p => !PluginMeta[p].userPlugin).length;
-    const enabledUserPlugins = enabledPlugins.filter(p => PluginMeta[p].userPlugin).length;
-    const [visibleCount, setVisibleCount] = useState(36);
-
+    const showMore = useCallback(() => setPage({ filter: searchValue, count: Math.min(visibleCount + PAGE_SIZE, matchingPlugins) }), [searchValue, visibleCount, matchingPlugins]);
     const [sentinelRef, isSentinelVisible] = useIntersection();
     React.useEffect(() => {
-        if (isSentinelVisible && visibleCount < plugins.length) {
-            const timeout = setTimeout(() => setVisibleCount(v => Math.min(v + 36, plugins.length)), 100);
+        if (isSentinelVisible && visibleCount < matchingPlugins) {
+            const timeout = setTimeout(showMore, 100);
             return () => clearTimeout(timeout);
         }
-    }, [isSentinelVisible, visibleCount, plugins.length]);
-
-    const visiblePlugins = plugins.slice(0, visibleCount);
+    }, [isSentinelVisible, visibleCount, matchingPlugins, showMore]);
 
     return (
         <SettingsTab>
@@ -440,18 +323,21 @@ export default function PluginSettings() {
             </ErrorBoundary>
 
             <HeadingTertiary className={Margins.top20}>Plugins</HeadingTertiary>
+            <Paragraph aria-live="polite">{matchingPlugins} matching plugins{requiredPlugins.length ? ` and ${requiredPlugins.length} required` : ""}</Paragraph>
 
             {plugins.length || requiredPlugins.length
                 ? (
                     <>
                         <div className={cl("grid")}>
-                            {visiblePlugins.length
-                                ? visiblePlugins
+                            {plugins.length
+                                ? plugins
                                 : <Paragraph>No plugins meet the search criteria.</Paragraph>
                             }
                         </div>
-                        {visibleCount < plugins.length && (
-                            <div ref={sentinelRef} style={{ height: 32 }} />
+                        {visibleCount < matchingPlugins && (
+                            <div ref={sentinelRef} className={Margins.top16}>
+                                <Button variant="secondary" onClick={showMore}>Show more plugins ({plugins.length} of {matchingPlugins})</Button>
+                            </div>
                         )}
                     </>
                 )
@@ -471,14 +357,5 @@ export default function PluginSettings() {
                 }
             </div>
         </SettingsTab >
-    );
-}
-
-export function PluginDependencyList({ deps }: { deps: string[]; }) {
-    return (
-        <>
-            <Paragraph>This plugin is required by:</Paragraph>
-            {deps.map((dep: string) => <Paragraph key={dep} className={cl("dep-text")}>{dep}</Paragraph>)}
-        </>
     );
 }

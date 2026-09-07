@@ -21,8 +21,7 @@ export function NotificationSection() {
         <section className={Margins.top16}>
             <Heading>Notifications</Heading>
             <Paragraph className={Margins.bottom8}>
-                Settings for Notifications sent by Vencord.
-                This does NOT include Discord notifications (messages, etc)
+                Choose how Protonn Cord shows plugin notifications. Discord message notifications use Discord's own settings.
             </Paragraph>
             <Flex>
                 <Button onClick={openNotificationSettingsModal}>
@@ -95,7 +94,7 @@ function NotificationSettings() {
 
             <Heading className={Margins.top16 + " " + Margins.bottom8}>Missed Notification Count</Heading>
             <FormSwitch
-                title="When refocusing discord a notification will popup with how you missed"
+                title="Show missed notifications when returning to Discord"
                 value={settings.missed}
                 onChange={(v: boolean) => settings.missed = v}
             />

@@ -1,6 +1,6 @@
 # Rewrite acceptance
 
-The rewrite must retain the complete existing plugin catalog and saved settings. Refactoring implementation does not authorize removing features, resetting preferences, rotating encryption identities, or changing the user's enabled plugins.
+The rewrite must retain the complete existing feature catalog and the user's saved preferences. Internal architecture, settings layouts, and storage formats may change when that improves the product or measured performance. Preserve existing data through compatible readers or tested migrations; keeping the old representation byte-for-byte is not a requirement. Refactoring does not authorize losing features, resetting preferences, rotating encryption identities, or changing the user's enabled plugins.
 
 ## Catalog and user-visible behavior
 
@@ -19,7 +19,7 @@ The Protonn Cord additions include `SecureMessaging`, `SecureMessagingForwarding
 
 Acceptance requires:
 
-- Every baseline plugin name, saved-settings namespace, platform target, required/default-enable flag, and statically declared setting identifier survives. Existing optional plugins remain optional; enabled plugins remain enabled.
+- Every baseline feature and saved preference remains available. The catalog gate protects current identifiers and platform/default-enable behavior; an intentional rename needs an explicit migration or compatibility mapping and focused preservation checks. Existing optional plugins remain optional; enabled plugins remain enabled.
 - Registered commands, menus, buttons, render contributions, and event handlers retain their observable behavior. Enabling, disabling, restarting, changing account/channel, and closing windows do not leave stale listeners, timers, UI, or background work.
 - Settings pages, themes/QuickCSS, updater, notifications, and crash recovery work in the running client; representative enabled plugins from each applicable family receive live smoke coverage.
 - Normal desktop, standalone, browser-extension, and userscript builds retain their output contracts. A development build cannot update itself or write production settings.
@@ -28,18 +28,18 @@ Acceptance requires:
 
 Retain `Settings.plugins[plugin.name]`, including `enabled`, `isFavorite`, private settings, and unknown keys. The catalog check records 1,352 statically inferred setting identifiers, including private settings exposed by `withPrivateSettings`. Dynamic namespaces such as CustomSounds and OpenInApp require opaque preservation and focused feature tests; a source inventory cannot enumerate every runtime-generated value.
 
-Keep the existing `VencordData` / `VencordStore` IndexedDB database and object-store identity (`src/api/DataStore`), its plugin keys, and atomic multi-key/update behavior. Keep renderer/native settings, local themes, QuickCSS, UI preferences, and data-directory overrides from `src/main/utils/constants.ts`. Renaming these needs a versioned, repeatable migration with a recoverable original and an explicit rollback test. Unrelated and unknown user data must round-trip without loss.
+Preserve the contents and atomic multi-key/update behavior of the existing `VencordData` / `VencordStore` IndexedDB database (`src/api/DataStore`), renderer/native settings, local themes, QuickCSS, UI preferences, and data-directory overrides from `src/main/utils/constants.ts`. Storage names and representations can change through a versioned, repeatable migration with a recoverable original and an explicit rollback test. Unrelated and unknown user data must round-trip without loss.
 
 Offline backups retain their settings/QuickCSS/DataStore import/export contract. Cloud sync stays opt-in and restricted to the explicitly allowed fields in `src/api/SettingsSync/cloudPolicy.ts`; plugin DataStore records and secrets remain local. Neither a rewrite nor a backup import should silently enable plugins or cloud transfers.
 
-Preserve the complete installation-local Secure Messaging vault and quarantine state under `DATA_DIR/secure-messaging`, not just public keys. Contacts, participant selections, persistent review latches, counters, replay records, retired keys, and hardware protection are necessary to retain trust and history. The vault is bound to OS storage; copying `vault.bin` is not a portable backup. Keeping the established protocol/vault implementation while replacing its surrounding runtime is the preferred compatibility strategy.
+Preserve the complete installation-local Secure Messaging vault and quarantine state under `DATA_DIR/secure-messaging`, not just public keys. Contacts, participant selections, persistent review latches, counters, replay records, retired keys, and hardware protection are necessary to retain trust and history. The vault is bound to OS storage; copying `vault.bin` is not a portable backup. Vault and protocol representations may evolve with a demonstrated benefit, compatible historical reads, and migration/peer-compatibility tests. The current runtime changes do not need such a migration.
 
 ## Secure Messaging contract
 
 Read `src/equicordplugins/secureMessaging.desktop/README.md` before touching the secure path. The implementation and focused tests also govern these requirements:
 
 - Encryption remains opt-in for explicitly verified recipients in DMs/group DMs. Ordinary conversations retain ordinary Discord behavior. Participant/key changes persist a review requirement before further protected sends.
-- Existing PCEM1/2/3 messages and legacy attachment/text formats remain readable. Preserve signed account/channel binding, recipient selection, replay/edit ordering, and old-key history cutoffs. Identity and protocol changes are separate work.
+- Existing PCEM1/2/3 messages and legacy attachment/text formats remain readable, even if new writes use a different representation. Preserve signed account/channel binding, recipient selection, replay/edit ordering, and old-key history cutoffs. Protocol changes need their own compatibility and security validation.
 - Encryption, storage, review, listener, or vault-lock failures cancel protected sends. REST guards admit only the exact authorized encrypted payload/reservation; no failure may become plaintext fallback.
 - Plaintext stays out of Discord's message store, settings, and logs. Screenshot mode hides decrypted content and pauses protected sends; it must also cover newly created windows.
 - Attachments authenticate fully before display; deferred files load on explicit demand. Preserve upload-limit accounting, bounded caches, revocable URLs, and Downloads writes without overwriting existing files.
