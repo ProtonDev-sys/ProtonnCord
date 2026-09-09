@@ -23,6 +23,12 @@ import definePlugin from "@utils/types";
 import { React, useEffect, useState } from "@webpack/common";
 
 let lastState = false;
+const stateListeners = new Set<(enabled: boolean) => void>();
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const reverseMessage: MessageSendListener = (_, message) => {
+    if (lastState && message.content)
+        message.content = Array.from(graphemes.segment(message.content), part => part.segment).reverse().join("");
+};
 
 const ReverseMessageToggle: ChatBarButtonFactory = ({ isMainChat }) => {
     const [enabled, setEnabled] = useState(lastState);
@@ -30,17 +36,14 @@ const ReverseMessageToggle: ChatBarButtonFactory = ({ isMainChat }) => {
     function setEnabledValue(value: boolean) {
         lastState = value;
 
-        setEnabled(value);
+        for (const listener of stateListeners) listener(value);
     }
 
     useEffect(() => {
-        const listener: MessageSendListener = async (_, message) => {
-            if (enabled && message.content) message.content = message.content.split("").reverse().join("");
-        };
-
-        addMessagePreSendListener(listener);
-        return () => void removeMessagePreSendListener(listener);
-    }, [enabled]);
+        stateListeners.add(setEnabled);
+        setEnabled(lastState);
+        return () => { stateListeners.delete(setEnabled); };
+    }, []);
 
     if (!isMainChat) return null;
 
@@ -68,6 +71,8 @@ export default definePlugin({
     description: "Reverses the message content before sending it.",
     tags: ["Chat", "Fun"],
     dependencies: ["MessageEventsAPI", "ChatInputButtonAPI"],
+    start() { addMessagePreSendListener(reverseMessage); },
+    stop() { removeMessagePreSendListener(reverseMessage); },
     chatBarButton: {
         icon: ReverseMessageIcon,
         render: ReverseMessageToggle

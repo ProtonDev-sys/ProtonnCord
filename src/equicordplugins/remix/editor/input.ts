@@ -28,6 +28,7 @@ export function initInput() {
         Mouse.prevY = Mouse.y;
 
         const rect = targetCanvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
         const scaleX = targetCanvas.width / rect.width;
         const scaleY = targetCanvas.height / rect.height;
 
@@ -40,7 +41,11 @@ export function initInput() {
         Mouse.event.emit("move", e);
     };
 
-    const onMouseDown = () => {
+    const onMouseDown = (e: MouseEvent) => {
+        if (e.button !== 0) return;
+        onMouseMove(e);
+        Mouse.prevX = Mouse.x;
+        Mouse.prevY = Mouse.y;
         Mouse.down = true;
     };
 

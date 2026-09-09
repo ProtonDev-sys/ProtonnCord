@@ -13,7 +13,7 @@ import { classes } from "@utils/misc";
 import definePlugin, { StartAt } from "@utils/types";
 import { Guild } from "@vencord/discord-types";
 import { findByPropsLazy, findCssClassesLazy } from "@webpack";
-import { Parser, Tooltip, UserStore } from "@webpack/common";
+import { Parser, showToast, Toasts, Tooltip, UserStore } from "@webpack/common";
 
 const AvatarStyles = findCssClassesLazy("avatar", "zalgo", "clickable");
 const GuildManager = findByPropsLazy("joinGuild");
@@ -26,9 +26,9 @@ interface User {
 }
 
 function lurk(id: string) {
-    GuildManager.joinGuild(id, { lurker: true })
+    return GuildManager.joinGuild(id, { lurker: true })
         .then(() => { GuildManager.transitionToGuildSync(id); })
-        .catch(() => { throw new Error("Guild is not lurkable"); });
+        .catch(() => { showToast("This server preview is currently unavailable.", Toasts.Type.FAILURE); });
 }
 
 export default definePlugin({

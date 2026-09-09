@@ -65,6 +65,10 @@ export function refreshBadges() {
 }
 
 export function getBadges(userId: string) {
+    const badges = GlobalBadges[userId];
+    if (!Array.isArray(badges)) return;
+    if (badges.length === 0) return badges;
+
     const conditionalMods = {
         aero: settings.store.showAero,
         velocity: settings.store.showVelocity,
@@ -84,7 +88,7 @@ export function getBadges(userId: string) {
         record: settings.store.showReCord
     };
     const { showModStyle } = settings.store;
-    return GlobalBadges[userId]?.filter(({ mod }) => mod && !blockedMods.includes(mod)
+    return badges.filter(({ mod }) => mod && !blockedMods.includes(mod)
         && (!Object.hasOwn(conditionalMods, mod) || conditionalMods[mod])
     ).map(badge => {
         const mod = Object.hasOwn(serviceMap, badge.mod) ? serviceMap[badge.mod] : badge.mod;

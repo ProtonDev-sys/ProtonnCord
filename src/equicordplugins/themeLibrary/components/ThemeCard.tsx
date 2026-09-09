@@ -14,7 +14,7 @@ import type { Theme, ThemeLikeProps } from "@equicordplugins/themeLibrary/types"
 import { getThemeMetadataHttpsUrl } from "@shared/externalUrls";
 import { Margins } from "@utils/margins";
 import { User } from "@vencord/discord-types";
-import { FluxDispatcher, Modal, openModal, Parser, React, UserStore, UserUtils } from "@webpack/common";
+import { Modal, openModal, Parser, React, showToast, UserStore, UserUtils } from "@webpack/common";
 import { Constructor } from "type-fest";
 
 import { LikesComponent } from "./LikesComponent";
@@ -42,21 +42,21 @@ function makeDummyUser(user: { username: string; id?: string; avatar?: string; }
     if (!UserRecord) return fallbackUser as Partial<User> as User;
 
     const newUser = new UserRecord(fallbackUser);
-    FluxDispatcher.dispatch({
-        type: "USER_UPDATE",
-        user: newUser,
-    });
     return newUser;
 }
 
 export const ThemeCard: React.FC<ThemeCardProps> = ({ theme, themeLinks, likedThemes, setThemeLinks, removeButtons, removePreview }) => {
 
-    const getUser = (id: string, username: string) => UserUtils.getUser(id) ?? makeDummyUser({ username, id });
+    const getUser = async (id: string, username: string) => {
+        try { return await UserUtils.getUser(id) ?? makeDummyUser({ username, id }); }
+        catch { return makeDummyUser({ username, id }); }
+    };
 
     const handleAddRemoveTheme = () => {
-        const onlineThemeLinks = themeLinks.includes(`${apiUrl}/${theme.id}`)
-            ? themeLinks.filter(link => link !== `${apiUrl}/${theme.id}`)
-            : [...themeLinks, `${apiUrl}/${theme.id}`];
+        const currentLinks = Settings.themeLinks;
+        const onlineThemeLinks = currentLinks.includes(`${apiUrl}/${theme.id}`)
+            ? currentLinks.filter(link => link !== `${apiUrl}/${theme.id}`)
+            : [...currentLinks, `${apiUrl}/${theme.id}`];
 
         setThemeLinks(onlineThemeLinks);
         Settings.themeLinks = onlineThemeLinks;
@@ -65,7 +65,7 @@ export const ThemeCard: React.FC<ThemeCardProps> = ({ theme, themeLinks, likedTh
     const handleThemeAttributesCheck = () => {
         const requiresThemeAttributes = theme.requiresThemeAttributes ?? false;
 
-        if (requiresThemeAttributes && !Settings.plugins.ThemeAttributes.enabled) {
+        if (!Settings.themeLinks.includes(`${apiUrl}/${theme.id}`) && requiresThemeAttributes && !Settings.plugins.ThemeAttributes.enabled) {
             openModal(modalProps => (
                 <Modal
                     {...modalProps}
@@ -77,6 +77,7 @@ export const ThemeCard: React.FC<ThemeCardProps> = ({ theme, themeLinks, likedTh
                             variant: "primary",
                             onClick: () => {
                                 Settings.plugins.ThemeAttributes.enabled = true;
+                                showToast("Restart Discord to apply Theme Attributes.");
                                 modalProps.onClose();
                                 handleAddRemoveTheme();
                             }
@@ -100,7 +101,8 @@ export const ThemeCard: React.FC<ThemeCardProps> = ({ theme, themeLinks, likedTh
     };
 
     const handleViewSource = () => {
-        const content = window.atob(theme.content);
+        let content = "";
+        try { content = window.atob(theme.content); } catch { /* Use the theme's hosted source if its metadata is invalid. */ }
         const source = getThemeMetadataHttpsUrl(content, "source");
 
         if (source) {

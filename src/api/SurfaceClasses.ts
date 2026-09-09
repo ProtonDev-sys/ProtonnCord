@@ -83,8 +83,13 @@ function chainHandlers<E>(
     if (!second) return first;
 
     return (event: E) => {
-        first(event);
-        second(event);
+        for (const handler of [first, second]) {
+            try {
+                handler?.(event);
+            } catch (error) {
+                logger.error("Surface event handler failed", error);
+            }
+        }
     };
 }
 
@@ -93,8 +98,26 @@ function chainRefs<T>(first?: RefCallback<T>, second?: RefCallback<T>) {
     if (!second) return first;
 
     return (instance: T | null) => {
-        first(instance);
-        second(instance);
+        const cleanups: Array<() => void> = [];
+        for (const ref of [first, second]) {
+            if (!ref) continue;
+            try {
+                const cleanup = ref(instance);
+                if (instance !== null) cleanups.push(typeof cleanup === "function" ? cleanup : () => { ref(null); });
+            } catch (error) {
+                logger.error("Surface ref failed", error);
+            }
+        }
+        if (instance === null) return;
+        return () => {
+            for (const cleanup of cleanups) {
+                try {
+                    cleanup();
+                } catch (error) {
+                    logger.error("Surface ref cleanup failed", error);
+                }
+            }
+        };
     };
 }
 
@@ -131,20 +154,14 @@ function getSurfaceProps(surfaceId: SurfaceId) {
     const props: SurfaceProvidedProps = {};
 
     for (const provider of propsProviders.get(surfaceId) ?? []) {
-        let providedProps: SurfaceProvidedProps | undefined;
-
         try {
-            providedProps = provider();
+            const providedProps = provider();
+            if (providedProps) mergeSurfaceProvidedProps(props, providedProps);
         } catch (error) {
             if (!failedPropsProviders.has(provider)) {
                 failedPropsProviders.add(provider);
                 logger.error(`Surface props provider failed for ${surfaceId}`, error);
             }
-            continue;
-        }
-
-        if (providedProps) {
-            mergeSurfaceProvidedProps(props, providedProps);
         }
     }
 
@@ -154,13 +171,21 @@ function getSurfaceProps(surfaceId: SurfaceId) {
 function notifyOneSurface(surfaceId: SurfaceId) {
     const surfaceInstance = surfaceInstances.get(surfaceId)?.deref();
     if (surfaceInstance) {
-        surfaceInstance.forceUpdate();
+        try {
+            surfaceInstance.forceUpdate();
+        } catch (error) {
+            logger.error(`Failed to update surface ${surfaceId}`, error);
+        }
     } else {
         surfaceInstances.delete(surfaceId);
     }
 
     for (const listener of listeners.get(surfaceId) ?? []) {
-        listener();
+        try {
+            listener();
+        } catch (error) {
+            logger.error(`Surface listener failed for ${surfaceId}`, error);
+        }
     }
 }
 
@@ -169,8 +194,7 @@ export function addSurfacePropsProvider(surfaceId: SurfaceId, provider: SurfaceP
     notifyOneSurface(surfaceId);
 
     return () => {
-        propsProviders.get(surfaceId)?.delete(provider);
-        notifyOneSurface(surfaceId);
+        if (propsProviders.get(surfaceId)?.delete(provider)) notifyOneSurface(surfaceId);
     };
 }
 

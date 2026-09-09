@@ -533,6 +533,31 @@ test("failed starts release boot-time flux subscriptions and call the stop hook 
     assert.equal(errors.length, 1);
 });
 
+test("late Flux availability does not revive failed plugins and a successful retry subscribes", async () => {
+    for (const asynchronous of [false, true]) {
+        const { manager, add, settings, dispatcher, resourceCount } = loadManager();
+        const plugin = add({
+            name: "EarlyFailure",
+            flux: { TEST() {} },
+            start() {
+                if (asynchronous) return Promise.reject(new Error("unavailable"));
+                throw new Error("unavailable");
+            }
+        });
+        settings[plugin.name].enabled = true;
+        assert.equal(manager.startPlugin(plugin), asynchronous);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(plugin.started, false);
+        manager.subscribeAllPluginsFluxEvents(dispatcher);
+        assert.equal(resourceCount(), 0, "failed start cleanup remains effective when Flux becomes available");
+        plugin.start = () => {};
+        assert.equal(manager.startPlugin(plugin), true);
+        assert.equal(resourceCount(), 1);
+        assert.equal(manager.stopPlugin(plugin), true);
+        assert.equal(resourceCount(), 0);
+    }
+});
+
 test("command collisions preserve the existing owner while undoing earlier commands", () => {
     const { manager, add, registeredCommands, resourceCount } = loadManager();
     const existing = { name: "existing" };

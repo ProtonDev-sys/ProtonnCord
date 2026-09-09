@@ -64,7 +64,22 @@ export function removeMessagePopoverButton(identifier: string) {
     MessagePopoverButtonMap.delete(identifier);
 }
 
-function VencordPopoverButtons(props: { Component: React.ComponentType<MessagePopoverButtonItem>, message: Message; }) {
+interface PopoverProps { Component: React.ComponentType<MessagePopoverButtonItem>; message: Message; }
+const popoverComponents = new WeakMap<MessagePopoverButtonFactory, React.ComponentType<PopoverProps>>();
+
+function getPopoverComponent(render: MessagePopoverButtonFactory) {
+    let component = popoverComponents.get(render);
+    if (!component) {
+        component = ({ Component, message }: PopoverProps) => {
+            const item = render(message);
+            return item ? <Component {...item} /> : null;
+        };
+        popoverComponents.set(render, component);
+    }
+    return component;
+}
+
+function VencordPopoverButtons(props: PopoverProps) {
     const { Component, message } = props;
 
     const { messagePopoverButtons } = useSettings(["uiElements.messagePopoverButtons.*"]).uiElements;
@@ -72,20 +87,12 @@ function VencordPopoverButtons(props: { Component: React.ComponentType<MessagePo
     const elements = Array.from(MessagePopoverButtonMap.entries())
         .filter(([key]) => messagePopoverButtons[key]?.enabled !== false)
         .map(([key, { render }]) => {
-            try {
-                // FIXME: this should use proper React to ensure hooks work
-                const item = render(message);
-                if (!item) return null;
-
-                return (
-                    <ErrorBoundary noop key={key}>
-                        <Component {...item} />
-                    </ErrorBoundary>
-                );
-            } catch (err) {
-                logger.error(`[${key}]`, err);
-                return null;
-            }
+            const PopoverButton = getPopoverComponent(render);
+            return (
+                <ErrorBoundary noop key={key} onError={e => logger.error(`[${key}]`, e.error)}>
+                    <PopoverButton Component={Component} message={message} />
+                </ErrorBoundary>
+            );
         });
 
     return <>{elements}</>;

@@ -14,6 +14,7 @@ import * as catalogView from "../src/components/settings/tabs/plugins/catalogVie
 import { createPluginCatalogView, PluginFilter, SearchStatus } from "../src/components/settings/tabs/plugins/catalogView";
 import type { PluginManifestEntry } from "../src/shared/pluginDefinition";
 import { SettingsStore } from "../src/shared/SettingsStore";
+import { ChangeList } from "../src/utils/ChangeList";
 
 const all: PluginFilter = { value: "", tags: [], status: SearchStatus.ALL };
 
@@ -90,6 +91,14 @@ test("default-enabled dependants remain required without creating saved settings
     assert.equal(next.requiredCards[0], first.requiredCards[0], "unchanged required cards retain identity");
 });
 
+test("enabled stock totals exclude the same hidden plugins as the stock denominator", () => {
+    const f = fixture([{ name: "Visible", enabledByDefault: true }, { name: "Hidden", hidden: true, enabledByDefault: true }]);
+    const view = f.create().read(all, null, 36);
+    assert.equal(view.counts.totalStockPlugins, 1);
+    assert.equal(view.counts.enabledStockPlugins, 1);
+    assert.deepEqual(view.enabledPlugins, ["Visible", "Hidden"], "bulk disabling still covers hidden non-core plugins");
+});
+
 test("dynamic visibility, descriptions, hidden flags and in-place search terms remain live", () => {
     const f = fixture([{ name: "Dynamic", hasVisibleSettings: undefined, searchTerms: ["before"] }]);
     let hidden = false;
@@ -150,12 +159,13 @@ test("the actual settings tab creates one page, reuses it after private edits, a
         memo: () => "catalog-card", useEffect() {}, Fragment: "fragment"
     };
     const mocks: Record<string, unknown> = {
-        "@api/PluginManager": { isPluginEnabled: f.isEnabled, hasAnyVisibleSettings: () => false },
+        "@api/PluginManager": { isPluginEnabled: f.isEnabled, hasAnyVisibleSettings: () => false, pluginRequiresRestart: () => false,
+            stopPlugin: () => assert.fail("A plugin that never started does not need stopping") },
         "@api/Settings": { PlainSettings: f.store.plain, useSettings: () => f.store.store },
         "@components/settings": { SettingsTab: "tab" },
         "@components/ErrorBoundary": { __esModule: true, default: "boundary" },
         "@shared/pluginDefinition": { getLoadedPluginDefinition: () => undefined },
-        "@utils/ChangeList": { ChangeList: class { hasChanges = false; } },
+        "@utils/ChangeList": { ChangeList },
         "@utils/guards": { isTruthy: Boolean }, "@utils/margins": { Margins: {} },
         "@utils/misc": { classes: (...values: unknown[]) => values.filter(Boolean).join(" ") }, "@utils/native": {},
         "@utils/react": { useCleanupEffect() {}, useIntersection: () => [null, false] },
@@ -170,12 +180,12 @@ test("the actual settings tab creates one page, reuses it after private edits, a
                 return [hooks[index].value, (value: any) => { hooks[index].value = typeof value === "function" ? value(hooks[index].value) : value; }];
             }
         },
-        "~plugins": { __esModule: true, default: {}, PluginManifest: f.plugins, PluginMeta: f.metadata, ExcludedPlugins: {} },
+        "~plugins": { __esModule: true, default: Object.fromEntries(Object.keys(f.plugins).map(name => [name, { name, started: false }])), PluginManifest: f.plugins, PluginMeta: f.metadata, ExcludedPlugins: {} },
         "./catalogView": catalogView, "./newPluginRelease": { getReleaseNewPlugins: () => null },
         "./PluginCard": {}, "./PluginModal": {}, "./PluginStatCards": {}, "./UIElements": {},
         "./shared": { cl: (name: string) => name, logger: {}, ExcludedReasons: {}, PluginDependencyList: "dependencies" }
     };
-    for (const component of ["Button", "Card", "Divider", "Heading", "Paragraph"]) mocks[`@components/${component}`] = { [component === "Heading" ? "HeadingTertiary" : component]: component.toLowerCase() };
+    for (const component of ["BaseText", "Button", "Card", "Divider", "Heading", "Paragraph"]) mocks[`@components/${component}`] = { [component === "Heading" ? "HeadingTertiary" : component]: component.toLowerCase() };
     const code = transpileModule(readFileSync("src/components/settings/tabs/plugins/index.tsx", "utf8"), {
         compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
     }).outputText;
@@ -196,4 +206,11 @@ test("the actual settings tab creates one page, reuses it after private edits, a
     assert.equal(find(expanded, "catalog-card").length, 72);
     find(expanded, "input")[0].props.onChange("Plugin");
     assert.equal(find(render(), "catalog-card").length, 36, "a new filter resets the visible page without assuming card heights");
+    f.store.store.plugins.Plugin000.enabled = true;
+    render().props.children[0].props.resetCheckAndDo();
+    assert.equal(f.store.plain.plugins.Plugin000.enabled, false, "bulk disable includes a failed or unstarted enabled plugin");
+    const onRestartNeeded = find(render(), "catalog-card")[0].props.onRestartNeeded;
+    onRestartNeeded("Plugin000", "color");
+    onRestartNeeded("Plugin000", "color");
+    assert.equal(render().props.children[0].props.required, true, "repeated value edits must not cancel a restart warning");
 });

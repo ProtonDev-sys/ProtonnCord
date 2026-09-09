@@ -22,6 +22,7 @@ const allSounds = {
 };
 
 let chosenPack: typeof packs[keyof typeof packs];
+let active = false;
 let allowedIgnoredKeys = new Set<string>();
 const keysCurrentlyPressed = new Set<string>();
 const arrowKeys = new Set(["ArrowUp", "ArrowRight", "ArrowLeft", "ArrowDown"]);
@@ -45,7 +46,11 @@ function getRandomSound(soundsArray: SoundEntry[]) {
     }
 
     chosenSound.playing = true;
-    chosenSound.player.restart();
+    try {
+        void Promise.resolve(chosenSound.player.restart()).catch(() => { chosenSound.playing = false; });
+    } catch {
+        chosenSound.playing = false;
+    }
 }
 
 const keydown = (e: KeyboardEvent) => {
@@ -77,6 +82,7 @@ function clearSounds() {
 }
 
 function assignSounds(volume: number, pack: "operagx" | "osu") {
+    if (!active) return;
     clearSounds();
     chosenPack = packs[pack];
     allowedIgnoredKeys = new Set(chosenPack?.allowedIgnored ?? []);
@@ -139,16 +145,18 @@ export default definePlugin({
     dependencies: ["AudioPlayerAPI"],
     settings,
     start() {
+        active = true;
         assignSounds(settings.store.volume, settings.store.soundPack);
         document.addEventListener("keyup", keyup);
         document.addEventListener("keydown", keydown);
         window.addEventListener("blur", blur);
     },
     stop: () => {
-        clearSounds();
+        active = false;
         keysCurrentlyPressed.clear();
         document.removeEventListener("keyup", keyup);
         document.removeEventListener("keydown", keydown);
         window.removeEventListener("blur", blur);
+        clearSounds();
     },
 });

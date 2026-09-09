@@ -31,7 +31,7 @@ export function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
 }
 
 export async function fetchImageAsBlob(url: string): Promise<Blob> {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
     return await response.blob();
 }
@@ -203,14 +203,15 @@ async function loadCustomEmojiImages(emojis: CustomEmojiToken[]): Promise<Map<st
         if (!unique.has(key)) unique.set(key, emoji);
     });
 
-    const entries = await Promise.all(
-        Array.from(unique.entries()).map(async ([key, emoji]) => [key, await loadCustomEmojiImage(emoji)] as const)
-    );
-
-    return entries.reduce((acc, [key, image]) => {
-        if (image) acc.set(key, image);
-        return acc;
-    }, new Map<string, HTMLImageElement>());
+    const pending = unique.entries();
+    const images = new Map<string, HTMLImageElement>();
+    await Promise.all(Array.from({ length: Math.min(4, unique.size) }, async () => {
+        for (const [key, emoji] of pending) {
+            const image = await loadCustomEmojiImage(emoji);
+            if (image) images.set(key, image);
+        }
+    }));
+    return images;
 }
 
 function measureTextWithCustomEmojis(ctx: CanvasRenderingContext2D, text: string, fontSize: number): number {
@@ -407,7 +408,7 @@ export async function createQuoteImage(options: QuoteImageOptions): Promise<Blob
 
     const quote = fixUpQuote(rawQuote);
     const { text: quoteText, emojis } = extractCustomEmojis(quote);
-    const emojiImages = await loadCustomEmojiImages(emojis);
+    const [emojiImages, avatar] = await Promise.all([loadCustomEmojiImages(emojis), loadAvatarImage(avatarUrl)]);
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Failed to get 2D rendering context");
@@ -418,7 +419,6 @@ export async function createQuoteImage(options: QuoteImageOptions): Promise<Blob
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, CANVAS_CONFIG.width, CANVAS_CONFIG.height);
 
-    const avatar = await loadAvatarImage(avatarUrl);
     ctx.drawImage(avatar, 0, 0, CANVAS_CONFIG.height, CANVAS_CONFIG.height);
 
     if (grayScale) {

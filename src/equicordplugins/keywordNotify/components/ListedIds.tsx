@@ -7,22 +7,16 @@
 import { Button } from "@components/Button";
 import { Flex } from "@components/Flex";
 import { DeleteIcon } from "@components/Icons";
-import { useForceUpdater } from "@utils/react";
-import { TextInput, useState } from "@webpack/common";
+import { TextInput } from "@webpack/common";
 
 import { cl } from "..";
 
 export function ListedIds({ listIds, setListIds }: { listIds: string[]; setListIds: (v: string[]) => void; }) {
-    const update = useForceUpdater();
-    const [values] = useState(listIds);
-
-    async function onChange(e: string, index: number) {
-        values[index] = e.trim();
-        setListIds(values);
-        update();
+    function onChange(e: string, index: number) {
+        setListIds(listIds.map((value, i) => i === index ? e.trim() : value));
     }
 
-    const elements = values.map((currentValue: string, index: number) => {
+    const elements = listIds.map((currentValue: string, index: number) => {
         return (
             <Flex key={index} flexDirection="row" style={{ marginBottom: "5px" }}>
                 <div style={{ flexGrow: 1 }}>
@@ -34,9 +28,7 @@ export function ListedIds({ listIds, setListIds }: { listIds: string[]; setListI
                 </div>
                 <Button
                     onClick={() => {
-                        values.splice(index, 1);
-                        setListIds(values);
-                        update();
+                        setListIds(listIds.filter((_, i) => i !== index));
                     }}
                     variant="none"
                     size="iconOnly"

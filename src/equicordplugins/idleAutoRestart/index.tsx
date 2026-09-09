@@ -20,6 +20,7 @@ let lastActivity = 0;
 let lastActivityUpdate = 0;
 let restartTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let activityListenersAttached = false;
+let running = false;
 
 function clearRestartTimer() {
     if (!restartTimeoutId) return;
@@ -29,19 +30,20 @@ function clearRestartTimer() {
 }
 
 function getIdleMs() {
-    return Math.max(settings.store.idleMinutes, 1) * 60_000;
+    const minutes = settings.store.idleMinutes;
+    return (Number.isFinite(minutes) ? Math.max(minutes, 1) : 30) * 60_000;
 }
 
 function scheduleRestartCheck(delay = getIdleMs() - (Date.now() - lastActivity)) {
     clearRestartTimer();
-    if (!settings.store.isEnabled) return;
+    if (!running || !settings.store.isEnabled) return;
 
     restartTimeoutId = setTimeout(checkIdleTimeout, Math.min(Math.max(delay, 0), maxTimeoutMs));
 }
 
 function checkIdleTimeout() {
     restartTimeoutId = null;
-    if (!settings.store.isEnabled) return;
+    if (!running || !settings.store.isEnabled) return;
 
     if (VoiceStateStore.isCurrentClientInVoiceChannel()) {
         scheduleRestartCheck(voiceChannelRecheckMs);
@@ -84,7 +86,7 @@ function detachActivityListeners() {
 }
 
 function applyEnabledState(enabled: boolean) {
-    if (enabled) {
+    if (running && enabled) {
         attachActivityListeners();
         resetIdleTimer();
     } else {
@@ -144,10 +146,12 @@ export default definePlugin({
     },
 
     start() {
+        running = true;
         if (settings.store.isEnabled) applyEnabledState(true);
     },
 
     stop() {
+        running = false;
         clearRestartTimer();
         detachActivityListeners();
     },

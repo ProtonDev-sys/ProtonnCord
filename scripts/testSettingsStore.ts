@@ -158,3 +158,25 @@ test("removed listeners are not called by mutations or root replacement", () => 
     settings.store.nested.value = 1;
     settings.setData({ nested: { value: 2 } }, "nested.value");
 });
+
+test("failed settings listeners cannot block persistence, exact paths, prefixes or later root updates", async t => {
+    const errors = t.mock.method(console, "error", () => { });
+    const settings = new SettingsStore({ plugins: { Fixture: { options: { value: 0 } } } });
+    const events: string[] = [];
+    const fail = () => { throw new Error("listener failed"); };
+    settings.addGlobalChangeListener(fail);
+    settings.addGlobalChangeListener(() => events.push("persist"));
+    settings.addChangeListener("plugins.Fixture.options", fail);
+    settings.addChangeListener("plugins.Fixture.options", () => events.push("setting"));
+    settings.addChangeListener("plugins.Fixture.options.value", async () => { throw new Error("async listener failed"); });
+    settings.addChangeListener("plugins.Fixture.options.value", () => events.push("exact"));
+    settings.addPrefixChangeListener("plugins.Fixture", fail);
+    settings.addPrefixChangeListener("plugins.Fixture", () => events.push("prefix"));
+    assert.doesNotThrow(() => { settings.store.plugins.Fixture.options.value = 1; });
+    assert.deepEqual(events, ["persist", "setting", "exact", "prefix"]);
+    events.length = 0;
+    assert.doesNotThrow(() => settings.setData({ plugins: { Fixture: { options: { value: 2 } } } }, "plugins.Fixture.options.value"));
+    assert.deepEqual(events, ["exact", "prefix", "persist"]);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(errors.mock.callCount(), 7);
+});

@@ -69,6 +69,8 @@ export default definePlugin({
 
     stop() {
         document.removeEventListener("keydown", onKeydown);
+        currentlyReplyingId = null;
+        currentlyEditingId = null;
     },
 
     flux: {

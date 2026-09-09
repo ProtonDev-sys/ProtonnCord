@@ -19,9 +19,12 @@
 import { React, useEffect, useMemo, useReducer, useState } from "@webpack/common";
 import type { ActionDispatch, ReactNode } from "react";
 
+import { Logger } from "./Logger";
 import { checkIntersecting } from "./misc";
 
 export * from "./lazyReact";
+
+const logger = new Logger("ReactUtils");
 
 export const NoopComponent = () => null;
 
@@ -51,12 +54,12 @@ export const useIntersection = (intersectOnly = false): [
 
         if (!element) return;
 
-        if (checkIntersecting(element)) {
-            setIntersecting(true);
-            if (intersectOnly) return;
-        }
+        const visible = checkIntersecting(element);
+        setIntersecting(visible);
+        if (visible && intersectOnly) return;
 
-        observerRef.current = new IntersectionObserver(entries => {
+        const observer = new IntersectionObserver(entries => {
+            if (observerRef.current !== observer) return;
             for (const entry of entries) {
                 if (entry.target !== element) continue;
                 if (entry.isIntersecting && intersectOnly) {
@@ -68,7 +71,8 @@ export const useIntersection = (intersectOnly = false): [
                 }
             }
         });
-        observerRef.current.observe(element);
+        observerRef.current = observer;
+        observer.observe(element);
     }, [intersectOnly]);
 
     return [refCallback, isIntersecting];
@@ -105,17 +109,23 @@ export function useAwaiter<T>(factory: () => Promise<T>, providedOpts?: AwaiterO
         let isAlive = true;
         if (!state.pending) setState({ ...state, pending: true });
 
-        factory()
+        let result: Promise<T>;
+        try {
+            result = factory();
+        } catch (error) {
+            result = Promise.reject(error);
+        }
+        Promise.resolve(result)
             .then(value => {
                 if (!isAlive) return;
                 setState({ value, error: null, pending: false });
                 opts.onSuccess?.(value);
-            })
-            .catch(error => {
+            }, error => {
                 if (!isAlive) return;
                 setState({ value: opts.fallbackValue, error, pending: false });
                 opts.onError?.(error);
-            });
+            })
+            .catch(error => logger.error("Awaiter callback failed", error));
 
         return () => void (isAlive = false);
     }, opts.deps);
@@ -149,7 +159,7 @@ export function useTimer({ interval = 1000, deps = [] }: TimerOpts) {
             setTime(0);
             clearInterval(intervalId);
         };
-    }, deps);
+    }, [start, interval]);
 
     return time;
 }
@@ -158,16 +168,19 @@ interface FixedTimerOpts {
     initialTime?: number;
 }
 
-export function useFixedTimer({ interval = 1000, initialTime = Date.now() }: FixedTimerOpts) {
-    const [time, setTime] = useState(Date.now() - initialTime);
+export function useFixedTimer({ interval = 1000, initialTime }: FixedTimerOpts) {
+    const mountTime = useMemo(() => Date.now(), []);
+    const startTime = initialTime ?? mountTime;
+    const [time, setTime] = useState(Date.now() - startTime);
 
     useEffect(() => {
-        const intervalId = setInterval(() => setTime(Date.now() - initialTime), interval);
+        setTime(Date.now() - startTime);
+        const intervalId = setInterval(() => setTime(Date.now() - startTime), interval);
 
         return () => {
             clearInterval(intervalId);
         };
-    }, [initialTime]);
+    }, [startTime, interval]);
 
     return time;
 }

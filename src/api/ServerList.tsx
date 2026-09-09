@@ -28,6 +28,8 @@ export const enum ServerListRenderPosition {
 const componentsIn = new Map<ComponentType, number>();
 const componentsAbove = new Map<ComponentType, number>();
 const componentsBelow = new Map<ComponentType, number>();
+const componentKeys = new WeakMap<ComponentType, number>();
+let nextComponentKey = 0;
 
 function getRenderMap(position: ServerListRenderPosition) {
     switch (position) {
@@ -41,6 +43,7 @@ function getRenderMap(position: ServerListRenderPosition) {
 }
 
 export function addServerListElement(position: ServerListRenderPosition, renderFunction: ComponentType, priority = 0) {
+    if (!componentKeys.has(renderFunction)) componentKeys.set(renderFunction, nextComponentKey++);
     getRenderMap(position).set(renderFunction, priority);
 }
 
@@ -51,8 +54,8 @@ export function removeServerListElement(position: ServerListRenderPosition, rend
 export const renderAll = (position: ServerListRenderPosition) => {
     return Array.from(getRenderMap(position).entries())
         .sort((a, b) => b[1] - a[1])
-        .map(([Component], i) => (
-            <ErrorBoundary noop key={i}>
+        .map(([Component]) => (
+            <ErrorBoundary noop key={componentKeys.get(Component)}>
                 <Component />
             </ErrorBoundary>
         ));

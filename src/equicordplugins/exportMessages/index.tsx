@@ -15,7 +15,7 @@ import { showItemInFolder } from "@utils/native";
 import definePlugin, { OptionType } from "@utils/types";
 import { saveFile } from "@utils/web";
 import { Message } from "@vencord/discord-types";
-import { Menu, Toasts } from "@webpack/common";
+import { Menu, Toasts, UserStore } from "@webpack/common";
 
 import { ContactsList } from "./types";
 
@@ -62,15 +62,14 @@ function formatMessage(message: Message) {
 }
 
 async function exportMessage(message: Message) {
-    const timestamp = new Date(message.timestamp.toString()).toISOString().split("T")[0];
-    const filename = `message-${message.id}-${timestamp}.txt`;
-
-    const content = formatMessage(message);
-
     try {
+        const timestamp = new Date(message.timestamp.toString()).toISOString().split("T")[0];
+        const filename = `message-${message.id}-${timestamp}.txt`;
+        const content = formatMessage(message);
         if (IS_DISCORD_DESKTOP) {
             const data = new TextEncoder().encode(content);
             const result = await DiscordNative.fileManager.saveWithDialog(data, filename);
+            if (!result) return;
 
             if (result && settings.store.openFileAfterExport) {
                 showItemInFolder(result);
@@ -155,6 +154,7 @@ export default definePlugin({
         }
     ],
     getContacts(contacts: ContactsList[]) {
+        this.contactAccountId = UserStore.getCurrentUser()?.id;
         this.contactList = {
             friendsAdded: [...getUsernames(contacts, 1)],
             blockedUsers: [...getUsernames(contacts, 2)],
@@ -167,9 +167,18 @@ export default definePlugin({
             <button className="export-contacts-button" onClick={() => this.copyContactToClipboard()}>Export</button>
         </ErrorBoundary>;
     },
-    copyContactToClipboard() {
-        if (this.contactList) {
-            copyToClipboard(JSON.stringify(this.contactList));
+    stop() {
+        this.contactList = undefined;
+        this.contactAccountId = undefined;
+    },
+    async copyContactToClipboard() {
+        if (this.contactList && this.contactAccountId && this.contactAccountId === UserStore.getCurrentUser()?.id) {
+            try {
+                await copyToClipboard(JSON.stringify(this.contactList));
+            } catch {
+                Toasts.show({ message: "Could not copy contacts to clipboard.", type: Toasts.Type.FAILURE, id: Toasts.genId() });
+                return;
+            }
             Toasts.show({
                 message: "Contacts copied to clipboard successfully.",
                 type: Toasts.Type.SUCCESS,

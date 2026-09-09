@@ -14,7 +14,7 @@ export const CspBlockedUrls = new Set<string>();
 const CspErrorListeners = new Set<() => void>();
 
 document.addEventListener("securitypolicyviolation", ({ effectiveDirective, blockedURI }) => {
-    if (!blockedURI || !cssRelevantDirectives.includes(effectiveDirective as any)) return;
+    if (!blockedURI || !cssRelevantDirectives.includes(effectiveDirective as any) || CspBlockedUrls.has(blockedURI)) return;
 
     CspBlockedUrls.add(blockedURI);
 

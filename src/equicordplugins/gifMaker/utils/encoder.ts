@@ -11,6 +11,7 @@ import { decompressFrames, parseGIF } from "gifuct-js";
 
 import { CAPTIONS } from "../captions";
 import { measureTextLines } from "../captions/caption";
+import { loadGoogleFont } from "../fonts";
 import type { GifMakerOptions } from "../types";
 
 const MAX_FRAMES = 200;
@@ -61,6 +62,7 @@ async function getMediaBlobUrl(url: string): Promise<string> {
         if (data) return URL.createObjectURL(new Blob([data], { type }));
     }
     const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
     const blob = await res.blob();
     return URL.createObjectURL(blob);
 }
@@ -89,7 +91,10 @@ export function loadImage(url: string): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error(`Failed to load image: ${url}`));
+        img.onerror = () => {
+            cleanupBlobUrl(img);
+            reject(new Error("Failed to load image"));
+        };
         img.crossOrigin = "anonymous";
 
         const resolved = resolveMediaUrl(url);
@@ -136,6 +141,9 @@ export function loadVideo(url: string): Promise<HTMLVideoElement> {
             createVideoElement(blobUrl).then(video => {
                 blobUrlMap.set(video, blobUrl);
                 return video;
+            }, error => {
+                URL.revokeObjectURL(blobUrl);
+                throw error;
             })
         );
     }
@@ -170,7 +178,7 @@ async function encodeFrames(
 ): Promise<Blob> {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return new Blob();
+    if (!ctx) throw new Error("Failed to get canvas context for GIF encoding.");
     const captionHeight = getCaptionHeight(ctx, width, options);
     const gifHeight = height + captionHeight;
     canvas.width = width;
@@ -237,7 +245,7 @@ async function createGifFromVideo(url: string, options: GifMakerOptions): Promis
     try {
         const { duration } = video;
         const frameCount = Math.min(
-            Math.floor(duration * INTERNAL_FPS),
+            Math.max(1, Math.floor(duration * INTERNAL_FPS)),
             MAX_FRAMES
         );
 
@@ -269,6 +277,10 @@ function hasExt(url: string, ext: string): boolean {
 }
 
 export async function createGif(url: string, isVideo: boolean, options: GifMakerOptions): Promise<Blob> {
+    if (![options.width, options.height].every(value => Number.isSafeInteger(value) && value > 0 && value <= 8192)) {
+        throw new Error("GIF dimensions must be whole numbers between 1 and 8192.");
+    }
+    if (options.captionMode === "caption") await loadGoogleFont(options.fontFamily);
     if (isVideo) return createGifFromVideo(url, options);
     if (hasExt(url, ".gif")) {
         try {

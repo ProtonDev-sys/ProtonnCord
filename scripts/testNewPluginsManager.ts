@@ -193,6 +193,7 @@ function verifyCatalogFavorites() {
         "./styles.css": {},
         "@api/PluginManager": { isPluginEnabled: () => false },
         "@api/Settings": { PlainSettings: plainSettings, useSettings: () => store.store },
+        "@components/BaseText": { BaseText: "text" },
         "@components/Button": { Button: "button" },
         "@components/Card": { Card: "card" },
         "@components/Divider": { Divider: "divider" },

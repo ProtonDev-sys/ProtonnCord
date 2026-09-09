@@ -6,7 +6,7 @@
 
 import { folderIcon, folderIconsData, settings } from "./settings";
 
-export async function setFolderData(props: folderProp, newData: folderIcon) {
+export function setFolderData(props: folderProp, newData: folderIcon) {
     if (!settings.store.folderIcons) {
         settings.store.folderIcons = {};
     }

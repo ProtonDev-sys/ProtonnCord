@@ -64,7 +64,7 @@ export function getUserSetting<T = any>(group: string, name: string): UserSettin
     for (const key in UserSettings) {
         const userSetting = UserSettings[key];
 
-        if (userSetting.userSettingsAPIGroup === group && userSetting.userSettingsAPIName === name) {
+        if (userSetting?.userSettingsAPIGroup === group && userSetting.userSettingsAPIName === name) {
             return userSetting;
         }
     }

@@ -23,6 +23,7 @@ import { Heading } from "@components/Heading";
 import { Margins } from "@components/margins";
 import { Paragraph } from "@components/Paragraph";
 import { Devs } from "@utils/constants";
+import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { Activity, ActivityAssets, ActivityButton } from "@vencord/discord-types";
 import { ActivityFlags, ActivityStatusDisplayType, ActivityType } from "@vencord/discord-types/enums";
@@ -62,6 +63,15 @@ const enum NameFormat {
 
 const DISCORD_APP_ID = "1108588077900898414";
 const LASTFM_PLACEHOLDER_IMAGE_HASH = "2a96cbd8b46e442fc41c2b86b821562f";
+const logger = new Logger("MusicRichPresence");
+let active = false;
+let generation = 0;
+let pendingGeneration: number | undefined;
+
+function sourceKey() {
+    const { username, scrobblerBackend, instanceAPIBaseUrl, instanceBaseURL, apiKey } = settings.store;
+    return JSON.stringify([username, scrobblerBackend, instanceAPIBaseUrl, instanceBaseURL, apiKey]);
+}
 
 async function getApplicationAsset(key: string): Promise<string> {
     return (await ApplicationAssetUtils.fetchAssetIds(DISCORD_APP_ID, [key]))[0];
@@ -79,6 +89,7 @@ export const settings = definePluginSettings({
     scrobblerBackend: {
         description: "The scrobbler backend to use.",
         type: OptionType.SELECT,
+        onChange: invalidateListenBrainzCache,
         options: [
             {
                 "label": "Last.FM",
@@ -258,21 +269,45 @@ export default definePlugin({
     },
 
     start() {
+        active = true;
+        generation++;
+        clearInterval(this.updateInterval);
         this.updatePresence();
         this.updateInterval = setInterval(() => { this.updatePresence(); }, 16000);
     },
 
     stop() {
+        active = false;
+        generation++;
+        pendingGeneration = undefined;
         clearInterval(this.updateInterval);
+        setActivity(null);
     },
 
     async updatePresence() {
+        if (!active || pendingGeneration === generation) return;
         const { username, scrobblerBackend, instanceAPIBaseUrl, instanceBaseURL } = settings.store;
 
-        if (!username) return;
-        if (scrobblerBackend === "listenbrainz-compatible" && (!instanceAPIBaseUrl || !instanceBaseURL)) return;
+        if (!username || (scrobblerBackend === "listenbrainz-compatible" && (!instanceAPIBaseUrl || !instanceBaseURL))) {
+            setActivity(null);
+            return;
+        }
 
-        setActivity(await this.getActivity());
+        const requestGeneration = generation;
+        const accountId = AuthenticationStore.getId();
+        const source = sourceKey();
+        const isCurrent = () => active && requestGeneration === generation && accountId === AuthenticationStore.getId() && source === sourceKey();
+        pendingGeneration = requestGeneration;
+
+        try {
+            const activity = await this.getActivity();
+            if (isCurrent()) setActivity(activity);
+        } catch (error) {
+            logger.error("Failed to update music presence", error);
+            if (isCurrent()) setActivity(null);
+        } finally {
+            if (pendingGeneration === requestGeneration) pendingGeneration = undefined;
+        }
     },
 
     getLargeImage(track: TrackData): string | undefined {

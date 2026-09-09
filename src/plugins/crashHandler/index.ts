@@ -67,7 +67,12 @@ export default definePlugin({
     ],
 
     handleCrash(_this: any, errorState: any) {
-        DataStore.del("KeepCurrentChannel_previousData");
+        try {
+            void Promise.resolve(DataStore.del("KeepCurrentChannel_previousData"))
+                .catch(error => CrashHandlerLogger.error("Failed to clear the saved channel during crash recovery", error));
+        } catch (error) {
+            CrashHandlerLogger.error("Failed to clear the saved channel during crash recovery", error);
+        }
 
         if (IS_DEV) {
             try {
@@ -110,7 +115,8 @@ export default definePlugin({
             try {
                 if (!hasCrashedOnce) {
                     hasCrashedOnce = true;
-                    maybePromptToUpdate("Uh oh, Discord has just crashed... but good news, there is a Protonn Cord update available that might fix this issue! Would you like to update now?", true);
+                    void Promise.resolve(maybePromptToUpdate("Uh oh, Discord has just crashed... but good news, there is a Protonn Cord update available that might fix this issue! Would you like to update now?", true))
+                        .catch(error => CrashHandlerLogger.error("Failed to check for updates after a crash", error));
                 }
             } catch { }
 

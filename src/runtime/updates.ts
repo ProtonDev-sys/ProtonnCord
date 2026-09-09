@@ -8,7 +8,7 @@ import { popNotice, showNotice } from "@api/Notices";
 import { Settings } from "@api/Settings";
 import { openSettingsTabModal, UpdaterTab } from "@components/settings";
 import { relaunch } from "@utils/native";
-import { checkForUpdates, isOutdated, update, UpdateLogger } from "@utils/updater";
+import { checkForUpdates, isOutdated, repair, update, UpdateLogger } from "@utils/updater";
 
 import type { Dispose, RendererService } from "./bootstrap";
 
@@ -24,14 +24,15 @@ export function createUpdateService(): RendererService {
     async function runUpdateCheck() {
         if (disposed || checking) return;
         checking = true;
+        const branch = Settings.updateBranch;
         try {
             const outdated = await checkForUpdates();
-            if (disposed) return;
+            if (disposed || branch !== Settings.updateBranch) return;
             if (IS_DISCORD_DESKTOP) VencordNative.tray.setUpdateState(outdated);
             if (!outdated) return;
             if (Settings.autoUpdate) {
                 const didUpdate = await update();
-                if (disposed || !didUpdate) return;
+                if (disposed || branch !== Settings.updateBranch || !didUpdate) return;
                 if (IS_DISCORD_DESKTOP) VencordNative.tray.setUpdateState(false);
                 if (Settings.autoUpdateNotification && !notified) {
                     notified = true;
@@ -50,9 +51,10 @@ export function createUpdateService(): RendererService {
 
     async function checkFromTray() {
         if (disposed) return;
+        const branch = Settings.updateBranch;
         try {
             const outdated = await checkForUpdates();
-            if (disposed) return;
+            if (disposed || branch !== Settings.updateBranch) return;
             VencordNative.tray.setUpdateState(outdated);
             if (outdated)
                 showNotice("A Protonn Cord update is available!", "View Update", () => openSettingsTabModal(UpdaterTab!));
@@ -60,15 +62,16 @@ export function createUpdateService(): RendererService {
                 showNotice("No updates available, you're on the latest version!", "OK", popNotice);
         } catch (error) {
             UpdateLogger.error("Failed to check for updates from tray", error);
-            if (!disposed) showNotice("Failed to check for updates, check the console for more info", "OK", popNotice);
+            if (!disposed && branch === Settings.updateBranch)
+                showNotice("Failed to check for updates, check the console for more info", "OK", popNotice);
         }
     }
 
     async function repairFromTray() {
         if (disposed) return;
         try {
-            await update();
-            if (!disposed) relaunch();
+            const repaired = await repair();
+            if (!disposed && repaired) await relaunch();
         } catch (error) {
             UpdateLogger.error("Failed to repair Protonn Cord", error);
         }

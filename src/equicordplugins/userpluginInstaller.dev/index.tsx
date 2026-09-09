@@ -25,6 +25,9 @@ import { VariableWithCallbacks } from "./VariableWithCallbacks";
 export const Native = VencordNative.pluginHelpers.UserpluginInstaller as PluginNative<typeof import("./native")>;
 export const OpenSettingsModule = findByPropsLazy("openUserSettings");
 const AppsIcon = findComponentByCodeLazy("2.95H20a2 2 0");
+let active = false;
+let generation = 0;
+let notificationCallback: number | undefined;
 
 function shouldSkipUpdateNotification(pluginName: string): boolean {
     const normalizedPluginName = pluginName.toLowerCase();
@@ -71,16 +74,20 @@ export default definePlugin({
         </Notice.Warning>
     ),
     async checkPluginUpdates() {
+        const currentGeneration = generation;
+        this.pluginsWithUpdates.value({ finished: false, plugins: [] });
         for (const p of this.plugins.value()) {
+            if (!active || generation !== currentGeneration) return;
             if (await Native.isUpdateAvailableForPlugin(p.directory!)) {
-                const t = this.pluginsWithUpdates.value().plugins;
-                t.push(p.directory!);
+                if (!active || generation !== currentGeneration) return;
+                const t = [...this.pluginsWithUpdates.value().plugins, p.directory!];
                 this.pluginsWithUpdates.value({
                     finished: false,
                     plugins: t
                 });
             }
         }
+        if (!active || generation !== currentGeneration) return;
         const t = this.pluginsWithUpdates.value().plugins;
         this.pluginsWithUpdates.value({
             finished: true,
@@ -95,6 +102,8 @@ export default definePlugin({
         Icon: AppsIcon
     },
     async start() {
+        active = true;
+        const currentGeneration = ++generation;
         if (!VencordNative.pluginHelpers.UserpluginInstaller) return void Alerts.show({
             title: "UserpluginInstaller not fully loaded",
             body: "You need to restart to allow the native to be loaded :)",
@@ -106,14 +115,17 @@ export default definePlugin({
         });
 
         await Native.ensurePluginsDirectory();
+        if (!active || generation !== currentGeneration) return;
 
-        plSettings.customEntries.push(this.section);
+        if (!plSettings.customEntries.includes(this.section)) plSettings.customEntries.push(this.section);
 
-        this.pluginsWithUpdates.registerCallback((value, id) => {
+        if (notificationCallback !== undefined) this.pluginsWithUpdates.deregisterCallback(notificationCallback);
+        notificationCallback = this.pluginsWithUpdates.registerCallback((value, id) => {
             if (value.plugins.length === 0) return;
             if (shouldSkipUpdateNotification(value.plugins[value.plugins.length - 1]))
                 return;
             this.pluginsWithUpdates.deregisterCallback(id);
+            notificationCallback = undefined;
             if (settings.store.notifyIfUpdate)
                 showNotification({
                     title: "Some UserPlugins are out of date!",
@@ -126,13 +138,19 @@ export default definePlugin({
                 });
         });
         const pls = await Native.getUserplugins();
+        if (!active || generation !== currentGeneration) return;
         // @ts-ignore :trolley:
         this.plugins.value(pls);
         await this.checkPluginUpdates();
     },
     stop() {
+        active = false;
+        generation++;
+        if (notificationCallback !== undefined) this.pluginsWithUpdates.deregisterCallback(notificationCallback);
+        notificationCallback = undefined;
         // @ts-ignore
-        plSettings.customEntries.splice(plSettings.customEntries.indexOf(this.section), 1);
+        const index = plSettings.customEntries.indexOf(this.section);
+        if (index !== -1) plSettings.customEntries.splice(index, 1);
     },
     plugins: new VariableWithCallbacks<{
         name: string;

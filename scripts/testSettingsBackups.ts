@@ -7,8 +7,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInThisContext } from "node:vm";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { runInNewContext, runInThisContext } from "node:vm";
+import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 const code = transpileModule(readFileSync("src/api/SettingsSync/offline.ts", "utf8"), {
     compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
@@ -226,4 +226,39 @@ test("native backup save waits for completion and contains rejected saves", asyn
     f.io.failWrite = undefined;
     await f.api.downloadSettingsBackup("plugins");
     assert.deepEqual(JSON.parse(new TextDecoder().decode(f.io.saved[0])), { settings: f.io.settings });
+});
+
+test("backup controls reject a second action before the busy-state rerender", async () => {
+    const gate = Promise.withResolvers<void>();
+    let actions = 0;
+    const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
+    const mocks: Record<string, object> = {
+        "@api/SettingsSync/offline": {
+            uploadSettingsBackup: () => { actions++; return gate.promise; },
+            downloadSettingsBackup: async () => { actions++; }
+        },
+        "@components/settings/tabs/BaseTab": { SettingsTab: "tab", wrapTab: (component: unknown) => component },
+        "@utils/margins": { Margins: {} },
+        "@webpack/common": { useState: () => [false, () => undefined], useRef: () => ({ current: false }) },
+        "@components/Notice": { Notice: { Warning: "warning" } }
+    };
+    for (const name of ["Button", "Divider", "Flex", "Heading", "Paragraph"]) mocks[`@components/${name}`] = { [name]: name.toLowerCase() };
+    const source = transpileModule(readFileSync("src/components/settings/tabs/sync/BackupAndRestoreTab.tsx", "utf8"), {
+        fileName: "backup.tsx", compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
+    }).outputText;
+    const component = runInNewContext(source + "\nexports.default;", {
+        exports: {}, React, require(name: string) { assert.ok(name in mocks, name); return mocks[name]; }
+    });
+    function buttons(tree: any): any[] {
+        if (Array.isArray(tree)) return tree.flatMap(buttons);
+        if (!tree || typeof tree !== "object") return [];
+        return [...(tree.type === "button" ? [tree] : []), ...buttons(tree.props?.children)];
+    }
+    const controls = buttons(component());
+    const first = controls[0].props.onClick();
+    await controls[4].props.onClick();
+    assert.equal(actions, 1);
+    gate.resolve(); await first;
+    await controls[4].props.onClick();
+    assert.equal(actions, 2);
 });

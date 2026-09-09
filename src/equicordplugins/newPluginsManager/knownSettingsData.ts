@@ -8,24 +8,26 @@ export type KnownPluginSettingsMap = Map<string, Set<string>>;
 
 function toStringSet(value: unknown): Set<string> {
     if (value instanceof Set) {
-        return new Set(Array.from(value, String));
+        if (![...value].every(setting => typeof setting === "string")) throw new Error("Invalid known settings; original data was preserved");
+        return new Set(value);
     }
 
     if (Array.isArray(value)) {
-        return new Set(value.map(String));
+        if (!value.every(setting => typeof setting === "string")) throw new Error("Invalid known settings; original data was preserved");
+        return new Set(value);
     }
 
     if (typeof value === "string") {
         return new Set([value]);
     }
 
-    return new Set();
+    throw new Error("Invalid known settings; original data was preserved");
 }
 
 export function normalizeKnownSettings(value: unknown): KnownPluginSettingsMap {
     const normalized: KnownPluginSettingsMap = new Map();
     const addEntry = (plugin: unknown, settings: unknown) => {
-        if (typeof plugin !== "string") return;
+        if (typeof plugin !== "string" || normalized.has(plugin)) throw new Error("Invalid known settings; original data was preserved");
         normalized.set(plugin, toStringSet(settings));
     };
 
@@ -33,11 +35,13 @@ export function normalizeKnownSettings(value: unknown): KnownPluginSettingsMap {
         value.forEach((settings, plugin) => addEntry(plugin, settings));
     } else if (Array.isArray(value)) {
         value.forEach(entry => {
-            if (!Array.isArray(entry)) return;
+            if (!Array.isArray(entry) || entry.length !== 2) throw new Error("Invalid known settings; original data was preserved");
             addEntry(entry[0], entry[1]);
         });
     } else if (value && typeof value === "object") {
         Object.entries(value).forEach(([plugin, settings]) => addEntry(plugin, settings));
+    } else {
+        throw new Error("Invalid known settings; original data was preserved");
     }
 
     return normalized;
@@ -50,6 +54,7 @@ export function serializeKnownSettings(settings: KnownPluginSettingsMap): [strin
 export function isSerializedKnownSettings(value: unknown): value is [string, string[]][] {
     return Array.isArray(value) && value.every(entry => (
         Array.isArray(entry)
+        && entry.length === 2
         && typeof entry[0] === "string"
         && Array.isArray(entry[1])
         && entry[1].every(setting => typeof setting === "string")

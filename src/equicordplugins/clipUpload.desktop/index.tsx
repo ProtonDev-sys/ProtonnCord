@@ -12,6 +12,7 @@ import definePlugin from "@utils/types";
 import { findComponentByCodeLazy } from "@webpack";
 import { Menu } from "@webpack/common";
 
+import { disposeFFmpeg } from "./ffmpeg";
 import { abortActiveClipUploads, type ClipMetadata } from "./upload";
 import { openUploadClipFileModal } from "./UploadClipFileModal";
 
@@ -55,7 +56,10 @@ export default definePlugin({
         "channel-attach": ctxMenuPatch
     },
 
-    stop: abortActiveClipUploads,
+    stop() {
+        abortActiveClipUploads();
+        disposeFFmpeg();
+    },
 
     UploadClipFileButton: ErrorBoundary.wrap(({ channelId, clip }: ClipUploadActionProps) => {
         if (!clip) return null;

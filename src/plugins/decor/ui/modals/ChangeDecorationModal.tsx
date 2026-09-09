@@ -129,11 +129,11 @@ function ChangeDecorationModal({ owner, ...props }: RenderModalProps & { owner: 
         });
         return () => controller.abort();
     }, [owner]);
-    const presetDecorations = presets.flatMap(preset => preset.decorations);
+    const presetDecorationHashes = new Set(presets.flatMap(preset => preset.decorations.map(decoration => decoration.hash)));
 
     const activeDecorationPreset = presets.find(preset => preset.id === activeSelectedDecoration?.presetId);
 
-    const ownDecorations = decorations.filter(d => !presetDecorations.some(p => p.hash === d.hash));
+    const ownDecorations = decorations.filter(decoration => !presetDecorationHashes.has(decoration.hash));
 
     const data = [
         {

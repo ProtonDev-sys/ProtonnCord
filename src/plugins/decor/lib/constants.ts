@@ -40,7 +40,10 @@ export async function setBaseUrl(value: string): Promise<boolean> {
     let baseUrl: string | undefined;
     try {
         baseUrl = parseBaseUrl(value);
-        const response = await fetch(`${baseUrl}/api/config`, { signal: controller.signal, redirect: "error" });
+        const response = await fetch(`${baseUrl}/api/config`, {
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]),
+            redirect: "error"
+        });
         if (!response.ok) throw new Error("Could not load Decor configuration.");
         const config: unknown = await response.json();
         if (!isObject(config) || !("CDN_URL" in config) || !("CLIENT_ID" in config)

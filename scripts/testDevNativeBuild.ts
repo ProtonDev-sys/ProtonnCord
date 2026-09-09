@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 const BUILD_SCRIPT = "scripts/build/build.mjs";
 const OUTPUT_DIRECTORY = mkdtempSync(join(tmpdir(), "protonncord-native-build-"));
@@ -77,6 +77,8 @@ try {
         assert.equal(bundle.includes("UserpluginInstaller"), false, `${bundlePath} must not register UserpluginInstaller in production`);
     }
 } finally {
+    assert.equal(dirname(resolve(OUTPUT_DIRECTORY)), resolve(tmpdir()));
+    assert.ok(basename(OUTPUT_DIRECTORY).startsWith("protonncord-native-build-"));
     rmSync(OUTPUT_DIRECTORY, { recursive: true, force: true });
     assert.deepEqual(installedBuildHashes(), originalBuildHashes, "native build fixtures must never replace the installed build");
 }

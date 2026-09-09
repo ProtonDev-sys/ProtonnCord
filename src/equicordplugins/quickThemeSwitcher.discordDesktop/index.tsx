@@ -9,6 +9,7 @@ import { HeadingSecondary } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { debounce } from "@shared/debounce";
 import { Devs, IS_MAC } from "@utils/constants";
+import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType, StartAt } from "@utils/types";
 import { showToast, Toasts } from "@webpack/common";
 
@@ -32,6 +33,9 @@ let lastThemeCount = 0;
 let pluginStarted = false;
 let skipNextIndexUpdate = false;
 let startGeneration = 0;
+let refreshGeneration = 0;
+let lastThemeSignature = "";
+const logger = new Logger("QuickThemeSwitcher");
 const fileWatcherIntervalMs = 2000;
 
 function countLocalThemeItems(themes: ThemeItem[]) {
@@ -60,9 +64,16 @@ const refreshThemeList = async (silent = false, generation = startGeneration) =>
 
     const oldTheme = themeList[currentIndex];
     const oldCount = themeList.length;
+    const refresh = ++refreshGeneration;
 
-    const nextThemeList = await getAllThemes();
-    if (!pluginStarted || generation !== startGeneration) return;
+    let nextThemeList: ThemeItem[];
+    try {
+        nextThemeList = await getAllThemes();
+    } catch (error) {
+        logger.error("Could not refresh themes", error);
+        return;
+    }
+    if (!pluginStarted || generation !== startGeneration || refresh !== refreshGeneration) return;
 
     themeList = nextThemeList;
     currentIndex = findCurrentThemeIndex();
@@ -72,7 +83,7 @@ const refreshThemeList = async (silent = false, generation = startGeneration) =>
         if (~newIndex) currentIndex = newIndex;
     }
 
-    if (!silent && themeList.length !== oldCount) {
+    if (!silent && settings.store.showNotifications && themeList.length !== oldCount) {
         const diff = themeList.length - oldCount;
         const action = diff > 0 ? "Added" : "Removed";
         const count = Math.abs(diff);
@@ -96,7 +107,7 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         description: "Include online themes",
         default: true,
-        onChange: refreshThemeList,
+        onChange: () => void refreshThemeList(),
     },
     sortOrder: {
         type: OptionType.SELECT,
@@ -106,7 +117,7 @@ const settings = definePluginSettings({
             { label: "Z-A", value: "reverse" },
             { label: "Recent", value: "recent" },
         ],
-        onChange: refreshThemeList,
+        onChange: () => void refreshThemeList(),
     },
     autoRefresh: {
         type: OptionType.BOOLEAN,
@@ -215,7 +226,7 @@ function toggleCurrentTheme(enable: boolean) {
 
 async function reloadThemes() {
     await refreshThemeList(true);
-    showToast(`Reloaded ${themeList.length} themes`, Toasts.Type.SUCCESS);
+    if (pluginStarted) showToast(`Reloaded ${themeList.length} themes`, Toasts.Type.SUCCESS);
 }
 
 async function watchForLocalThemeChanges(generation = startGeneration) {
@@ -225,13 +236,14 @@ async function watchForLocalThemeChanges(generation = startGeneration) {
     if (!pluginStarted || generation !== startGeneration) return;
 
     const currentCount = countLocalThemeFiles(currentThemes);
+    const signature = currentThemes.map(theme => theme.fileName).sort().join("\n");
 
-    if (lastThemeCount && currentCount !== lastThemeCount) {
+    if (signature !== lastThemeSignature) {
         const diff = currentCount - lastThemeCount;
-        await refreshThemeList(false, generation);
+        await refreshThemeList(true, generation);
         if (!pluginStarted || generation !== startGeneration) return;
 
-        if (settings.store.showNotifications) {
+        if (diff !== 0 && settings.store.showNotifications) {
             const action = diff > 0 ? "Added" : "Removed";
             const count = Math.abs(diff);
             showToast(`${action} ${count} local theme${count > 1 ? "s" : ""}`, Toasts.Type.SUCCESS);
@@ -239,14 +251,21 @@ async function watchForLocalThemeChanges(generation = startGeneration) {
     }
 
     lastThemeCount = currentCount;
+    lastThemeSignature = signature;
+}
+
+function runFileWatch(generation: number) {
+    void watchForLocalThemeChanges(generation)
+        .catch(error => logger.error("Could not check local themes", error))
+        .finally(() => scheduleNextFileWatch(generation));
 }
 
 function startFileWatcher() {
-    if (fileWatcherRunning || !settings.store.autoRefresh || !settings.store.includeLocal) return;
+    if (!pluginStarted || fileWatcherRunning || !settings.store.autoRefresh || !settings.store.includeLocal) return;
 
     fileWatcherRunning = true;
     const generation = startGeneration;
-    void watchForLocalThemeChanges(generation).finally(() => scheduleNextFileWatch(generation));
+    runFileWatch(generation);
 }
 
 function scheduleNextFileWatch(generation = startGeneration) {
@@ -254,7 +273,7 @@ function scheduleNextFileWatch(generation = startGeneration) {
 
     fileWatcher = setTimeout(() => {
         fileWatcher = null;
-        void watchForLocalThemeChanges(generation).finally(() => scheduleNextFileWatch(generation));
+        runFileWatch(generation);
     }, fileWatcherIntervalMs);
 }
 
@@ -323,11 +342,13 @@ export default definePlugin({
         pluginStarted = true;
         const generation = ++startGeneration;
 
-        themeList = await getAllThemes();
+        const initialThemes = await getAllThemes();
         if (!pluginStarted || generation !== startGeneration) return;
+        themeList = initialThemes;
 
         currentIndex = findCurrentThemeIndex();
         lastThemeCount = countLocalThemeItems(themeList);
+        lastThemeSignature = themeList.filter(theme => theme.type === "local").map(theme => theme.id).sort().join("\n");
 
         document.addEventListener("keydown", handleKeyDown);
 

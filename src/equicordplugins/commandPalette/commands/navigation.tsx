@@ -43,7 +43,7 @@ function channelItems(): PaletteListItem[] {
 }
 
 function friendItems(): PaletteListItem[] {
-    const currentUserId = UserStore.getCurrentUser().id;
+    const currentUserId = UserStore.getCurrentUser()?.id;
 
     return RelationshipStore.getFriendIDs()
         .filter(id => id !== currentUserId)

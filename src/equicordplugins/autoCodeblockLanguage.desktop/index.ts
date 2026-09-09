@@ -8,6 +8,7 @@ import { isPluginEnabled } from "@api/PluginManager";
 import shikiCodeblocks from "@plugins/shikiCodeblocks.desktop";
 import { hljs, requireHljs } from "@plugins/shikiCodeblocks.desktop/utils/misc";
 import { EquicordDevs } from "@utils/constants";
+import { Logger } from "@utils/Logger";
 import definePlugin from "@utils/types";
 
 const PRIMARY_AUTO_LANGUAGES = [
@@ -467,7 +468,10 @@ export default definePlugin({
 
     start() {
         clearDetectionCaches();
-        void Promise.resolve(requireHljs()).finally(clearDetectionCaches);
+        void Promise.resolve(requireHljs()).then(clearDetectionCaches, error => {
+            clearDetectionCaches();
+            new Logger("AutoCodeblockLanguage").error("Could not load the language detector", error);
+        });
         installShikiWrapper();
     },
 

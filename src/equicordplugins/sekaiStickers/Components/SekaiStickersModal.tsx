@@ -9,7 +9,7 @@ import { FormSwitch } from "@components/FormSwitch";
 import { Heading } from "@components/Heading";
 import { characters } from "@equicordplugins/sekaiStickers/characters.json";
 import { RenderModalProps } from "@vencord/discord-types";
-import { ChannelStore, Modal, openModal, React, SelectedChannelStore, Slider, TextArea, UploadHandler } from "@webpack/common";
+import { ChannelStore, Modal, openModal, React, SelectedChannelStore, showToast, Slider, TextArea, Toasts, UploadHandler } from "@webpack/common";
 
 import Canvas from "./Canvas";
 import CharSelectModal from "./Picker";
@@ -23,12 +23,12 @@ export default function SekaiStickersModal({ modalProps, settings }: { modalProp
     const [isImgLoaded, setImgLoaded] = React.useState<boolean>(false);
     const [position, setPosition] = React.useState<{ x: number, y: number; }>({ x: characters[character].defaultText.x, y: characters[character].defaultText.y });
     const [spaceSize, setSpaceSize] = React.useState<number>(36);
-    let canvast!: HTMLCanvasElement;
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = "https://st.ayaka.one/img/" + characters[character].img;
+    const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+    const img = React.useMemo(() => new Image(), [character]);
 
     React.useEffect(() => {
+        let active = true;
+        canvasRef.current = null;
         setPosition({
             x: characters[character].defaultText.x,
             y: characters[character].defaultText.y
@@ -36,16 +36,28 @@ export default function SekaiStickersModal({ modalProps, settings }: { modalProp
         setFontSize(characters[character].defaultText.s);
         setRotate(characters[character].defaultText.r);
         setImgLoaded(false);
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+            void Promise.all([document.fonts.load("12px YurukaStd"), document.fonts.load("12px SSFangTangTi")])
+                .then(() => { if (active) setImgLoaded(true); })
+                .catch(() => { if (active) showToast("Could not load the sticker fonts.", Toasts.Type.FAILURE); });
+        };
+        img.onerror = () => { if (active) showToast("Could not load the sticker image.", Toasts.Type.FAILURE); };
+        img.src = "https://st.ayaka.one/img/" + characters[character].img;
+        return () => {
+            active = false;
+            img.onload = null;
+            img.onerror = null;
+        };
     }, [character]);
 
-    img.onload = () => { setImgLoaded(true); };
     const angle = (Math.PI * text.length) / 7;
 
     const draw = ctx => {
         ctx.canvas.width = 296;
         ctx.canvas.height = 256;
 
-        if (isImgLoaded && document.fonts.check("12px YurukaStd")) {
+        if (isImgLoaded && img.complete && img.naturalWidth > 0) {
             const hRatio = ctx.canvas.width / img.width;
             const vRatio = ctx.canvas.height / img.height;
             const ratio = Math.min(hRatio, vRatio);
@@ -90,9 +102,9 @@ export default function SekaiStickersModal({ modalProps, settings }: { modalProp
                     ctx.fillText(lines[i], 0, k);
                     k += spaceSize;
                 }
-                ctx.restore();
             }
-            canvast = ctx.canvas;
+            ctx.restore();
+            canvasRef.current = ctx.canvas;
         }
     };
     return (
@@ -111,11 +123,18 @@ export default function SekaiStickersModal({ modalProps, settings }: { modalProp
                 {
                     text: "Upload as Attachment",
                     variant: "primary",
+                    disabled: !isImgLoaded,
                     onClick: () => {
-                        if (settings.store.AutoCloseModal) modalProps.onClose();
-                        canvast.toBlob(blob => {
-                            const file = new File([blob as Blob], `${characters[character].character}-sekai_cards.png`, { type: "image/png" });
-                            UploadHandler.promptToUpload([file], ChannelStore.getChannel(SelectedChannelStore.getChannelId()), 0);
+                        const channel = ChannelStore.getChannel(SelectedChannelStore.getChannelId());
+                        if (!channel || !canvasRef.current) return;
+                        canvasRef.current.toBlob(blob => {
+                            if (!blob) {
+                                showToast("Could not export the sticker image.", Toasts.Type.FAILURE);
+                                return;
+                            }
+                            const file = new File([blob], `${characters[character].character}-sekai_cards.png`, { type: "image/png" });
+                            UploadHandler.promptToUpload([file], channel, 0);
+                            if (settings.store.AutoCloseModal) modalProps.onClose();
                         });
                     }
                 }
@@ -131,7 +150,7 @@ export default function SekaiStickersModal({ modalProps, settings }: { modalProp
                 </div>
                 <div style={{ marginRight: 10, width: "30vw" }}>
                     <Heading>Text</Heading>
-                    <TextArea onChange={setText} placeholder={text} rows={4} />
+                    <TextArea onChange={setText} value={text} rows={4} />
                     <Heading>Rotation</Heading>
                     <Slider markers={[-10, -5, 0, 5, 10]} stickToMarkers={false} minValue={-10} maxValue={10} asValueChanges={val => setRotate(val)} initialValue={rotate} keyboardStep={0.2} orientation={"horizontal"} onValueRender={(v: number) => String(v.toFixed(2))} />
                     <Heading>Font Size</Heading>

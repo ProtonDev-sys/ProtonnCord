@@ -18,6 +18,7 @@ let cachedSettings: MLSettings | null = null;
 let settingsOperationQueue: Promise<void> = Promise.resolve();
 
 export interface MLSettings {
+    [key: string]: unknown;
     logsDir: string;
     imageCacheDir: string;
     attachmentFileExtensions?: string;
@@ -31,6 +32,8 @@ function runSettingsOperation<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 async function normalizeSettings(value: Partial<MLSettings> | null | undefined): Promise<MLSettings> {
+    if (value !== null && value !== undefined && (typeof value !== "object" || Array.isArray(value)))
+        throw new Error("Invalid Message Logger settings object");
     const defaultLogsDir = await getDefaultNativeDataDir();
     const defaultImageCacheDir = await getDefaultNativeImageDir();
     const defaultExtensions = await getDefaultAttachmentFileExtensions();
@@ -42,6 +45,7 @@ async function normalizeSettings(value: Partial<MLSettings> | null | undefined):
         ? defaultExtensions
         : parseAllowedAttachmentExtensions(value.attachmentFileExtensions).join(",") || "none";
     return {
+        ...value,
         logsDir: normalizeDirectory(value?.logsDir, defaultLogsDir),
         imageCacheDir: normalizeDirectory(value?.imageCacheDir, defaultImageCacheDir),
         attachmentFileExtensions: extensions,
@@ -64,7 +68,9 @@ async function readSettingsFile(): Promise<unknown> {
         }
         if ((await handle.read(Buffer.allocUnsafe(1), 0, 1, content.byteLength)).bytesRead !== 0)
             throw new Error("Message Logger settings file grew while being read");
-        return JSON.parse(content.toString("utf8"));
+        const parsed = JSON.parse(content.toString("utf8"));
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Invalid Message Logger settings object");
+        return parsed;
     } finally {
         await handle.close();
     }
@@ -88,9 +94,11 @@ export async function getSettings(): Promise<MLSettings> {
         if (cachedSettings) return structuredClone(cachedSettings);
         try {
             cachedSettings = await normalizeSettings(await readSettingsFile() as Partial<MLSettings>);
-        } catch {
-            cachedSettings = await normalizeSettings(null);
-            await writeSettingsFile(cachedSettings).catch(() => undefined);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            const defaults = await normalizeSettings(null);
+            await writeSettingsFile(defaults);
+            cachedSettings = defaults;
         }
         return structuredClone(cachedSettings);
     });
@@ -101,7 +109,8 @@ export async function updateSettings(update: Partial<MLSettings>): Promise<MLSet
         if (!cachedSettings) {
             try {
                 cachedSettings = await normalizeSettings(await readSettingsFile() as Partial<MLSettings>);
-            } catch {
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
                 cachedSettings = await normalizeSettings(null);
             }
         }

@@ -979,6 +979,7 @@ async function readVaultStoredValue(): Promise<unknown | null> {
 }
 
 async function loadVault(): Promise<VaultFile> {
+    const sessionEpoch = securityKeySessionEpoch;
     if (cachedVault) return structuredClone(cachedVault);
     const stored = await readVaultStoredValue();
     if (stored === null) {
@@ -1017,8 +1018,13 @@ async function loadVault(): Promise<VaultFile> {
                 }
             }
         }
+        if (sessionEpoch !== securityKeySessionEpoch) throw new SecurityKeyVaultError("locked");
         cachedVault = structuredClone(vault);
         cachedVaultSignature = await getVaultSignature();
+        if (sessionEpoch !== securityKeySessionEpoch) {
+            cachedVault = null;
+            throw new SecurityKeyVaultError("locked");
+        }
         return structuredClone(vault);
     } catch (error) {
         if (error instanceof VaultOperationError || error instanceof SecurityKeyVaultError) throw error;
@@ -1040,7 +1046,7 @@ function createProtectedChannelIndex(vault: VaultFile): SecurityKeyVaultProtecte
 async function saveVault(
     vault: VaultFile,
     forcePlain = false,
-    expectedSessionEpoch?: number,
+    expectedSessionEpoch = securityKeySessionEpoch,
 ): Promise<void> {
     let ciphertext: Buffer;
     let nextHardwareProtected = false;
@@ -1076,12 +1082,14 @@ async function saveVault(
     } finally {
         await rm(temporaryPath, { force: true }).catch(() => undefined);
     }
+    if (expectedSessionEpoch !== securityKeySessionEpoch) throw new SecurityKeyVaultError("locked");
     cachedVault = structuredClone(vault);
     knownVaultHardwareProtected = nextHardwareProtected;
 }
 
 async function runSerialized<T>(operation: () => Promise<T>): Promise<T | NativeFailure> {
     const execute = async (): Promise<T | NativeFailure> => {
+        const sessionEpoch = securityKeySessionEpoch;
         let releaseLock: (() => Promise<void>) | null = null;
         try {
             validateStorageAvailability();
@@ -1089,7 +1097,13 @@ async function runSerialized<T>(operation: () => Promise<T>): Promise<T | Native
             await synchronizeCachedVault();
             await synchronizeQuarantineJournal();
             await persistVolatileQuarantines();
-            return await operation();
+            const result = await operation();
+            if (sessionEpoch !== securityKeySessionEpoch) {
+                cachedVault = null;
+                clearAuthenticatedAttachmentCache();
+                return unavailableFailure("security_key_locked");
+            }
+            return result;
         } catch (error) {
             return mapOperationFailure(error);
         } finally {
@@ -2891,6 +2905,7 @@ export async function decryptIncomingAttachments(
     input: DecryptIncomingAttachmentsInput,
     selection: "all" | "previews" | "text" | { attachmentId: string; } = "all",
 ): Promise<DecryptIncomingAttachmentsResult> {
+    const sessionEpoch = securityKeySessionEpoch;
     const callerFailure = validateIpcCaller(event);
     if (callerFailure) return callerFailure;
     const user = validateLocalUserId(localUserId);
@@ -2904,6 +2919,7 @@ export async function decryptIncomingAttachments(
     if (typeof selection === "object" && !attachments.some(attachment => attachment.id === selection.attachmentId))
         return invalidInput("The selected attachment must belong to this message");
     const decrypted = await decryptIncoming(event, user.value, message);
+    if (sessionEpoch !== securityKeySessionEpoch) return unavailableFailure("security_key_locked");
     if (decrypted.status !== "decrypted") return decrypted;
     if (!decrypted.attachmentBundle || decrypted.attachmentBundle.count !== attachments.length)
         return { status: "invalid_message" };
@@ -2942,6 +2958,7 @@ export async function decryptIncomingAttachments(
     try {
         if (bundle.manifest && await attachmentBundleRootFromDigests(bundle.id, bundle.manifest.map(file => file.digest)) !== bundle.root)
             return { status: "invalid_message" };
+        if (sessionEpoch !== securityKeySessionEpoch) return unavailableFailure("security_key_locked");
         if (selectedIndexes.length === 0)
             return { status: "decrypted", plaintext: decrypted.plaintext, attachments: [], deferredAttachments };
         const masterKey = decodeBase64Url(bundle.key, 32);
@@ -3007,6 +3024,10 @@ export async function decryptIncomingAttachments(
                     outcome.value.data.fill(0);
                 }
             };
+            if (sessionEpoch !== securityKeySessionEpoch) {
+                clearAuthenticatedOutcomes();
+                return unavailableFailure("security_key_locked");
+            }
             if (outcomes.some(outcome => outcome.status === "download_failed")) {
                 clearAuthenticatedOutcomes();
                 return { status: "failed", error: "attachment_download_failed" };
@@ -3020,6 +3041,10 @@ export async function decryptIncomingAttachments(
             if (!bundle.manifest && await attachmentBundleRoot(bundle.id, ciphertexts) !== bundle.root) {
                 for (const outcome of authenticated) outcome.value.data.fill(0);
                 return { status: "invalid_message" };
+            }
+            if (sessionEpoch !== securityKeySessionEpoch) {
+                clearAuthenticatedOutcomes();
+                return unavailableFailure("security_key_locked");
             }
             const resolved = authenticated.map(outcome => ({
                 id: attachments[outcome.index].id,

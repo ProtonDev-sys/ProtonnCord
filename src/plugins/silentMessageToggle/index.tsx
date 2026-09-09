@@ -21,7 +21,7 @@ import { addMessagePreSendListener, MessageSendListener, removeMessagePreSendLis
 import { definePluginSettings } from "@api/Settings";
 import { Devs, EquicordDevs } from "@utils/constants";
 import definePlugin, { IconComponent, OptionType } from "@utils/types";
-import { React, useEffect, useState } from "@webpack/common";
+import { React, useEffect, useRef, useState } from "@webpack/common";
 
 let lastState = false;
 
@@ -45,7 +45,7 @@ const settings = definePluginSettings({
         description: "Automatically disable the silent message toggle again after sending one",
         default: true
     }
-});
+}).withPrivateSettings<{ savedState?: boolean; }>();
 
 function SilentMessageDisabledIcon() {
     return (
@@ -74,17 +74,31 @@ const SilentMessageIcon: IconComponent = ({ height = 20, width = 20, className, 
     );
 };
 
-const SilentMessageToggle: ChatBarButtonFactory = ({ isMainChat }) => {
-    const [enabled, setEnabled] = useState(settings.store.persistState === "restarts" || lastState);
+const SilentMessageToggle: ChatBarButtonFactory = ({ isMainChat, channel }) => {
+    const { persistState } = settings.use(["persistState"]);
+    const [enabled, setEnabled] = useState(persistState === "restarts" ? settings.store.savedState ?? true : lastState);
+    const enabledRef = useRef(enabled);
 
     function setEnabledValue(value: boolean) {
+        enabledRef.current = value;
         if (settings.store.persistState !== "none") lastState = value;
+        if (settings.store.persistState === "restarts") settings.store.savedState = value;
         setEnabled(value);
     }
 
     useEffect(() => {
-        const listener: MessageSendListener = (_, message) => {
-            if (enabled) {
+        if (persistState === "none") setEnabledValue(false);
+        else {
+            lastState = enabledRef.current;
+            if (persistState === "restarts") settings.store.savedState = enabledRef.current;
+        }
+    }, [channel.id, persistState]);
+
+    useEffect(() => {
+        if (!isMainChat) return;
+        const listener: MessageSendListener = (channelId, message) => {
+            if (channelId !== channel.id) return;
+            if (enabledRef.current) {
                 if (settings.store.autoDisable) setEnabledValue(false);
                 if (!message.content.startsWith("@silent ")) message.content = "@silent " + message.content;
             }
@@ -92,7 +106,7 @@ const SilentMessageToggle: ChatBarButtonFactory = ({ isMainChat }) => {
 
         addMessagePreSendListener(listener);
         return () => void removeMessagePreSendListener(listener);
-    }, [enabled]);
+    }, [enabled, isMainChat, channel.id]);
 
     if (!isMainChat) return null;
 

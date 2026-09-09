@@ -20,15 +20,15 @@ const ALLOWED_MEDIA_HOSTS = new Set([
 ]);
 
 export async function fetchMedia(_: unknown, url: string) {
-    const parsed = URL.parse(url);
-    if (!parsed || !ALLOWED_MEDIA_HOSTS.has(parsed.hostname))
+    const parsed = typeof url === "string" ? URL.parse(url) : null;
+    if (!parsed || parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port || !ALLOWED_MEDIA_HOSTS.has(parsed.hostname))
         throw new Error("Invalid URL");
 
-    const res = await fetch(parsed, { headers: { Accept: "*/*" } });
+    const res = await fetch(parsed, { headers: { Accept: "*/*" }, redirect: "error", signal: AbortSignal.timeout(120_000) });
     if (!res.ok) throw new Error(`Server error ${res.status}`);
 
     const blob = await res.blob();
-    if (blob.size === 0) throw new Error(`Empty body (${res.status}) from ${url}`);
+    if (blob.size === 0) throw new Error(`Empty media body (${res.status})`);
 
     return {
         data: await blob.arrayBuffer(),

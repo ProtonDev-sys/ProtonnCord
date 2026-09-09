@@ -42,24 +42,39 @@ const enum ReplaceElements {
 }
 
 const embedUrlRe = /https:\/\/www\.youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/;
+const pendingRequests = new Set<AbortController>();
+let active = false;
+let generation = 0;
 
 async function embedDidMount(this: Component<Props>) {
+    let request: AbortController | undefined;
     try {
         const { embed } = this.props;
         const { replaceElements, dearrowByDefault } = settings.store;
+        const requestGeneration = generation;
 
-        if (!embed || embed.dearrow || embed.provider?.name !== "YouTube" || !embed.video?.url) return;
+        if (!active || !embed || embed.dearrow || embed.provider?.name !== "YouTube" || !embed.video?.url) return;
 
         const videoId = embedUrlRe.exec(embed.video.url)?.[1];
         if (!videoId) return;
 
-        const res = await fetch(`https://sponsor.ajay.app/api/branding?videoID=${videoId}`);
+        request = new AbortController();
+        pendingRequests.add(request);
+        const res = await fetch(`https://sponsor.ajay.app/api/branding?videoID=${videoId}`, {
+            signal: AbortSignal.any([request.signal, AbortSignal.timeout(10_000)])
+        });
         if (!res.ok) return;
 
-        const { titles, thumbnails } = await res.json();
+        const data = await res.json();
+        if (!active || request.signal.aborted || requestGeneration !== generation || this.props.embed !== embed || embed.dearrow) return;
+        const title = Array.isArray(data?.titles) ? data.titles[0] : undefined;
+        const thumbnail = Array.isArray(data?.thumbnails) ? data.thumbnails[0] : undefined;
 
-        const hasTitle = titles[0]?.votes >= 0;
-        const hasThumb = thumbnails[0]?.votes >= 0;
+        const hasTitle = typeof title?.title === "string" && Number.isFinite(title.votes) && title.votes >= 0
+            && replaceElements !== ReplaceElements.ReplaceThumbnailsOnly;
+        const hasThumb = embed.thumbnail && Number.isFinite(thumbnail?.votes) && thumbnail.votes >= 0
+            && Number.isFinite(thumbnail.timestamp) && thumbnail.timestamp >= 0
+            && replaceElements !== ReplaceElements.ReplaceTitlesOnly;
 
         if (!hasTitle && !hasThumb) return;
 
@@ -67,14 +82,14 @@ async function embedDidMount(this: Component<Props>) {
             enabled: dearrowByDefault
         };
 
-        if (hasTitle && replaceElements !== ReplaceElements.ReplaceThumbnailsOnly) {
-            const replacementTitle = titles[0].title.replace(/(^|\s)>(\S)/g, "$1$2");
+        if (hasTitle) {
+            const replacementTitle = title.title.replace(/(^|\s)>(\S)/g, "$1$2");
 
             embed.dearrow.oldTitle = dearrowByDefault ? embed.rawTitle : replacementTitle;
             if (dearrowByDefault) embed.rawTitle = replacementTitle;
         }
-        if (hasThumb && replaceElements !== ReplaceElements.ReplaceTitlesOnly) {
-            const replacementProxyURL = `https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=${videoId}&time=${thumbnails[0].timestamp}`;
+        if (hasThumb) {
+            const replacementProxyURL = `https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=${videoId}&time=${thumbnail.timestamp}`;
 
             embed.dearrow.oldThumb = dearrowByDefault ? embed.thumbnail.proxyURL : replacementProxyURL;
             if (dearrowByDefault) embed.thumbnail.proxyURL = replacementProxyURL;
@@ -82,7 +97,9 @@ async function embedDidMount(this: Component<Props>) {
 
         this.forceUpdate();
     } catch (err) {
-        new Logger("Dearrow").error("Failed to dearrow embed", err);
+        if (!request?.signal.aborted) new Logger("Dearrow").error("Failed to dearrow embed", err);
+    } finally {
+        if (request) pendingRequests.delete(request);
     }
 }
 
@@ -100,11 +117,11 @@ function DearrowButton({ component }: { component: Component<Props>; }) {
                     onClick={() => {
                         const { enabled, oldThumb, oldTitle } = embed.dearrow;
                         embed.dearrow.enabled = !enabled;
-                        if (oldTitle) {
+                        if (oldTitle != null) {
                             embed.dearrow.oldTitle = embed.rawTitle;
                             embed.rawTitle = oldTitle;
                         }
-                        if (oldThumb) {
+                        if (oldThumb != null && embed.thumbnail) {
                             embed.dearrow.oldThumb = embed.thumbnail.proxyURL;
                             embed.thumbnail.proxyURL = oldThumb;
                         }
@@ -172,6 +189,18 @@ export default definePlugin({
     tags: ["Media", "Utility"],
     authors: [Devs.Ven],
     settings,
+
+    start() {
+        active = true;
+        generation++;
+    },
+
+    stop() {
+        active = false;
+        generation++;
+        for (const request of pendingRequests) request.abort();
+        pendingRequests.clear();
+    },
 
     embedDidMount,
     renderButton(component: Component<Props>) {

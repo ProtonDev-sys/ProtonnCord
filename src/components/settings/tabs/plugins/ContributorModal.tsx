@@ -35,7 +35,7 @@ function ContributorModal({ user, modalProps }: { user: User; modalProps: Render
 
     useEffect(() => {
         if (!profile && !user.bot && user.id)
-            fetchUserProfile(user.id);
+            fetchUserProfile(user.id).catch(() => showToast("Could not load the contributor profile."));
     }, [user.id, user.bot, profile]);
 
     const githubName = profile?.connectedAccounts?.find(a => a.type === "github")?.name;
@@ -46,7 +46,7 @@ function ContributorModal({ user, modalProps }: { user: User; modalProps: Render
         const pluginsByAuthor = (VencordDevsById[user.id] || EquicordDevsById[user.id])
             ? allPlugins.filter(p => p.authors.includes(VencordDevsById[user.id] || EquicordDevsById[user.id]))
             : allPlugins.filter(p =>
-                PluginMeta[p.name]?.userPlugin && p.authors.some(a => a.id.toString() === user.id)
+                PluginMeta[p.name]?.userPlugin && p.authors.some(a => a.id?.toString() === user.id)
                 || p.authors.some(a => a.name === user.username)
             );
 

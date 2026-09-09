@@ -32,6 +32,8 @@ interface UsersDecorationsStore {
 }
 
 const logger = new Logger("Decor");
+const MAX_BATCH_SIZE = 50;
+const MAX_CONCURRENT_REQUESTS = 2;
 
 export const useUsersDecorationsStore: UsersDecorationsStore = proxyLazy(() => zustandCreate((set: (state: Partial<UsersDecorationsState>) => void, get: () => UsersDecorationsState) => {
     const queue = new Set<string>();
@@ -40,13 +42,19 @@ export const useUsersDecorationsStore: UsersDecorationsStore = proxyLazy(() => z
     let timer: ReturnType<typeof setTimeout> | undefined;
     const bulkFetch = async () => {
         timer = undefined;
-        if (!get().session || queue.size === 0) return;
-        const ids = [...queue];
-        queue.clear();
+        if (!get().session || queue.size === 0 || requests.size >= MAX_CONCURRENT_REQUESTS) return;
+        const ids: string[] = [];
+        for (const id of queue) {
+            ids.push(id);
+            queue.delete(id);
+            if (ids.length === MAX_BATCH_SIZE) break;
+        }
         const token = Symbol();
         for (const id of ids) inFlight.set(id, token);
         const controller = new AbortController();
         requests.add(controller);
+        if (queue.size > 0 && requests.size < MAX_CONCURRENT_REQUESTS)
+            timer ??= setTimeout(bulkFetch, 300);
         try {
             const decorations = await getUsersDecorations(ids, controller.signal);
             if (controller.signal.aborted || !get().session) return;
@@ -64,6 +72,8 @@ export const useUsersDecorationsStore: UsersDecorationsStore = proxyLazy(() => z
             for (const id of ids) {
                 if (inFlight.get(id) === token) inFlight.delete(id);
             }
+            if (get().session && queue.size > 0 && requests.size < MAX_CONCURRENT_REQUESTS)
+                timer ??= setTimeout(bulkFetch, 300);
         }
     };
 
@@ -76,7 +86,7 @@ export const useUsersDecorationsStore: UsersDecorationsStore = proxyLazy(() => z
             if (!force && ((cached && Date.now() - cached.fetchedAt < DECORATION_FETCH_COOLDOWN) || inFlight.has(userId))) return;
             if (queue.has(userId)) return;
             queue.add(userId);
-            timer ??= setTimeout(bulkFetch, 300);
+            if (requests.size < MAX_CONCURRENT_REQUESTS) timer ??= setTimeout(bulkFetch, 300);
         },
         set(userId, asset) {
             if (!get().session) return;

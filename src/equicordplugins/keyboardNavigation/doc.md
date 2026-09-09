@@ -18,6 +18,8 @@ registerAction({
             { id: 'test2', label: 'Test 2' },
         ]);
 
+        if (!choice) return; // The user dismissed the modal.
+
         // Log the selected choice with its label and ID
         console.log(`Selected ${choice.label} with the ID ${choice.id}`);
     },
@@ -40,10 +42,12 @@ registerAction({
         // Open a modal with a text input
         const text = await openSimpleTextInput();
 
+        if (text === null) return; // The user dismissed the modal.
+
         // Log the inputted text to console
         console.log(`They typed: ${text}`);
     },
 });
 ```
 
-When the `stringInputCommand` is triggered, a modal with a simple text input field appears. Users can input text, and the entered string is returned. In this case, we log their input to console.
+When the `stringInputCommand` is triggered, a modal with a simple text input field appears. Users can input text, and the entered string is returned. Both modal helpers return `null` when dismissed. `registerAction` returns a cleanup function; call it when the registering plugin stops.

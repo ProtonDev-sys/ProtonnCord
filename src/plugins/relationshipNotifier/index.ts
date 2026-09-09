@@ -19,9 +19,9 @@
 import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 
-import { onChannelDelete, onGuildDelete, onRelationshipRemove, removeFriend, removeGroup, removeGuild } from "./functions";
+import { onChannelDelete, onGuildDelete, onRelationshipRemove, removeFriend, removeGroup, removeGuild, resetManualRemovals } from "./functions";
 import settings from "./settings";
-import { syncAndRunChecks, syncFriends, syncGroups, syncGuilds } from "./utils";
+import { resetState, syncAndRunChecks, syncFriends, syncGroups, syncGuilds } from "./utils";
 
 let startupSyncTimeout: ReturnType<typeof setTimeout> | undefined;
 
@@ -64,6 +64,10 @@ export default definePlugin({
     ],
 
     flux: {
+        LOGOUT() {
+            resetState();
+            resetManualRemovals();
+        },
         GUILD_CREATE: syncGuilds,
         GUILD_DELETE: onGuildDelete,
         CHANNEL_CREATE: syncGroups,
@@ -78,6 +82,8 @@ export default definePlugin({
     },
 
     start() {
+        resetState(true);
+        resetManualRemovals();
         clearStartupSyncTimeout();
         startupSyncTimeout = setTimeout(() => {
             startupSyncTimeout = undefined;
@@ -86,6 +92,8 @@ export default definePlugin({
     },
 
     stop() {
+        resetState(false);
+        resetManualRemovals();
         clearStartupSyncTimeout();
     },
 

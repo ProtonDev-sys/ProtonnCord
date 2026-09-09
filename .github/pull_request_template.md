@@ -1,13 +1,16 @@
-<!--
-We do not accept PRs that were created by AI. You will be permanently blocked with no further warning if you submit AI generated PRs.
-Also do not use AI in communication, it makes me ill
--->
+## Changes
 
-## Describe your Changes
+Describe the problem, resulting behavior, and target branch.
 
-## Screenshots (if applicable)
+## Validation
 
-## Checklist before submitting
-<!-- Hint: [x] this is how to check boxes -->
-- [ ] I have read the [CONTRIBUTING.md](./CONTRIBUTING.md) file and made sure this pull request complies with it
-- [ ] This pull request was written by me, and not an AI agent
+List the checks run and any limitations. Include screenshots for visible UI changes when useful.
+
+## Compatibility
+
+Describe effects on existing features, preferences, and stored data, including any migration.
+
+## Checklist
+
+- [ ] I have read [CONTRIBUTING.md](https://github.com/ProtonDev-sys/ProtonnCord/blob/main/CONTRIBUTING.md).
+- [ ] I have reviewed the submitted changes and preserved upstream attribution.

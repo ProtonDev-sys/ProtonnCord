@@ -24,10 +24,11 @@ test("notification dismissal releases the queue even if the caller's callback th
     });
     let rendered: { onClose(): void; } | null = null;
     let cleared = false;
+    let clears = 0;
     const show = runInNewContext(`${outputText}\n_showNotification;`, {
         NotificationComponent: "fixture",
         React: { createElement: (_type: unknown, props: { onClose(): void; }) => props },
-        getRoot: () => ({ render(props: typeof rendered) { rendered = props; if (props === null) cleared = true; } })
+        getRoot: () => ({ render(props: typeof rendered) { rendered = props; if (props === null) { cleared = true; clears++; } } })
     });
     const error = new Error("Caller callback failed");
     let settled = false;
@@ -35,6 +36,8 @@ test("notification dismissal releases the queue even if the caller's callback th
     const notification = rendered as { onClose(): void; } | null;
     assert.ok(notification);
     assert.throws(() => notification.onClose(), error);
+    notification.onClose();
+    assert.equal(clears, 1, "an old dismissal callback must not clear a newer notification");
     await setImmediate();
     assert.equal(cleared, true);
     assert.equal(settled, true);

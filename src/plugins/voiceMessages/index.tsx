@@ -34,7 +34,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import { chooseFile } from "@utils/web";
 import { RenderModalProps } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
-import { Button, ChannelStore, CloudUploader, FluxDispatcher, Forms, Menu, MessageActions, Modal, openModal, PendingReplyStore, PermissionsBits, PermissionStore, SelectedChannelStore, showToast, Toasts, useEffect, useState } from "@webpack/common";
+import { Button, ChannelStore, closeModal, CloudUploader, FluxDispatcher, Forms, Menu, MessageActions, Modal, openModal, PendingReplyStore, PermissionsBits, PermissionStore, SelectedChannelStore, showToast, Toasts, useEffect, useRef, UserStore, useState } from "@webpack/common";
 import { ComponentType } from "react";
 
 import { VoiceRecorderDesktop } from "./components/DesktopRecorder";
@@ -47,6 +47,16 @@ export { DEFAULT_WAVEFORM } from "./waveform";
 const VOICE_MESSAGE_FLAG = 1 << 13;
 const SILENT_MESSAGE_FLAG = 4096;
 const DEFAULT_DURATION = 1;
+const modalKeys = new Set<string>();
+let generation = 0;
+
+function resetVoiceMessages() {
+    generation++;
+    for (const key of modalKeys) {
+        try { closeModal(key); } catch { }
+    }
+    modalKeys.clear();
+}
 
 const EMPTY_META: AudioMetadata = {
     waveform: DEFAULT_WAVEFORM,
@@ -62,8 +72,6 @@ export type VoiceRecorder = React.ComponentType<{
 
 export let VoiceMessage: ComponentType<VoiceMessageProps> = () => null;
 
-const VoiceRecorder = IS_DISCORD_DESKTOP ? VoiceRecorderDesktop : VoiceRecorderWeb;
-
 export const settings = definePluginSettings({
     noiseSuppression: {
         type: OptionType.BOOLEAN,
@@ -78,6 +86,7 @@ export const settings = definePluginSettings({
 });
 
 const ctxMenuPatch: NavContextMenuPatchCallback = (children, props) => {
+    if (!props.channel) return;
     if (props.channel.guild_id && !(PermissionStore.can(PermissionsBits.SEND_VOICE_MESSAGES, props.channel) && PermissionStore.can(PermissionsBits.SEND_MESSAGES, props.channel))) return;
 
     children.push(
@@ -89,7 +98,12 @@ const ctxMenuPatch: NavContextMenuPatchCallback = (children, props) => {
                 icon: Microphone
             }}
             label="Send Voice Message"
-            action={() => openModal(modalProps => <VoiceMessageModal modalProps={modalProps} />)}
+            action={() => {
+                const key = openModal(modalProps => <VoiceMessageModal modalProps={modalProps} channelId={props.channel.id} />, {
+                    onCloseCallback: () => modalKeys.delete(key)
+                });
+                modalKeys.add(key);
+            }}
         />
     );
 };
@@ -120,6 +134,9 @@ export default definePlugin({
         "channel-attach": ctxMenuPatch
     },
 
+    stop: resetVoiceMessages,
+    flux: { LOGOUT: resetVoiceMessages },
+
     sendAudio,
 });
 
@@ -128,92 +145,109 @@ type AudioMetadata = {
     duration: number,
 };
 
-export async function sendAudio(blob: Blob, meta: AudioMetadata) {
-    const channelId = SelectedChannelStore.getChannelId();
+export async function sendAudio(blob: Blob, meta: AudioMetadata, channelId = SelectedChannelStore.getChannelId(), accountId = UserStore.getCurrentUser()?.id) {
+    const currentGeneration = generation;
     const channel = ChannelStore.getChannel(channelId);
-    if (!channel) {
+    if (!channel || !accountId || UserStore.getCurrentUser()?.id !== accountId) {
         showToast("Failed to find the selected channel", Toasts.Type.FAILURE);
-        return;
+        return false;
     }
-    const reply = PendingReplyStore.getPendingReply(channelId);
-
-    const upload = new CloudUploader({
-        file: new File([blob], "voice-message.ogg", { type: "audio/ogg; codecs=opus" }),
-        isThumbnail: false,
-        platform: CloudUploadPlatform.WEB,
-    }, channelId);
-    upload.durationSecs = meta.duration;
-    upload.waveform = meta.waveform;
-
-    const message: MessageObject = {
-        content: "",
-        invalidEmojis: [],
-        tts: false,
-        validNonShortcutEmojis: [],
-    };
-    const contentOptions: MessageContentOptions = {
-        channelId,
-        command: null,
-        content: "",
-        uploads: [upload],
-    };
-    const options: SendMessageOptions = {
-        ...contentOptions,
-        ...(reply ? MessageActions.getSendMessageOptionsForReply(reply) ?? {} : {}),
-        attachmentsToUpload: [upload],
-        flags: VOICE_MESSAGE_FLAG | (silentMessageEnabled ? SILENT_MESSAGE_FLAG : 0),
-        location: "Voice Message",
-        stickerIds: [],
-    };
-    const props: SendMessageProps = {
-        channel,
-        content: "",
-        hasAttachments: true,
-        hasStickers: false,
-        openWarningPopout: () => undefined,
-    };
-
     try {
-        if (await _handlePreSend(channelId, message, options, props, contentOptions)) return;
-        if (reply) FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId });
+        const reply = PendingReplyStore.getPendingReply(channelId);
+
+        const upload = new CloudUploader({
+            file: new File([blob], "voice-message.ogg", { type: blob.type || "audio/ogg; codecs=opus" }),
+            isThumbnail: false,
+            platform: CloudUploadPlatform.WEB,
+        }, channelId);
+        upload.durationSecs = meta.duration;
+        upload.waveform = meta.waveform;
+
+        const message: MessageObject = {
+            content: "",
+            invalidEmojis: [],
+            tts: false,
+            validNonShortcutEmojis: [],
+        };
+        const contentOptions: MessageContentOptions = {
+            channelId,
+            command: null,
+            content: "",
+            uploads: [upload],
+        };
+        const options: SendMessageOptions = {
+            ...contentOptions,
+            ...(reply ? MessageActions.getSendMessageOptionsForReply(reply) ?? {} : {}),
+            attachmentsToUpload: [upload],
+            flags: VOICE_MESSAGE_FLAG | (silentMessageEnabled ? SILENT_MESSAGE_FLAG : 0),
+            location: "Voice Message",
+            stickerIds: [],
+        };
+        const props: SendMessageProps = {
+            channel,
+            content: "",
+            hasAttachments: true,
+            hasStickers: false,
+            openWarningPopout: () => undefined,
+        };
+
+        if (await _handlePreSend(channelId, message, options, props, contentOptions)) return false;
+        if (currentGeneration !== generation || UserStore.getCurrentUser()?.id !== accountId) return false;
         await MessageActions.sendMessage(channelId, message, true, options);
+        if (reply && UserStore.getCurrentUser()?.id === accountId && PendingReplyStore.getPendingReply(channelId) === reply)
+            FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId });
+        return true;
     } catch {
         showToast("Failed to send voice message", Toasts.Type.FAILURE);
+        return false;
     }
 }
 
 function useObjectUrl() {
     const [url, setUrl] = useState<string>();
+    const currentUrl = useRef<string | undefined>(undefined);
+    useEffect(() => () => {
+        if (currentUrl.current) URL.revokeObjectURL(currentUrl.current);
+        currentUrl.current = undefined;
+    }, []);
     const setWithFree = (blob: Blob) => {
-        if (url) URL.revokeObjectURL(url);
-        setUrl(URL.createObjectURL(blob));
+        if (currentUrl.current) URL.revokeObjectURL(currentUrl.current);
+        currentUrl.current = URL.createObjectURL(blob);
+        setUrl(currentUrl.current);
     };
 
     return [url, setWithFree] as const;
 }
 
-function VoiceMessageModal({ modalProps }: { modalProps: RenderModalProps; }) {
+function VoiceMessageModal({ modalProps, channelId }: { modalProps: RenderModalProps; channelId: string; }) {
     const [isRecording, setRecording] = useState(false);
     const [blob, setBlob] = useState<Blob>();
     const [blobUrl, setBlobUrl] = useObjectUrl();
+    const [sending, setSending] = useState(false);
+    const sendingRef = useRef(false);
+    const mounted = useRef(true);
+    const accountId = useRef(UserStore.getCurrentUser()?.id);
 
     const VoiceRecorder = IS_DISCORD_DESKTOP ? VoiceRecorderDesktop : VoiceRecorderWeb;
 
-    useEffect(() => () => {
-        if (blobUrl)
-            URL.revokeObjectURL(blobUrl);
-    }, [blobUrl]);
+    useEffect(() => {
+        mounted.current = true;
+        return () => { mounted.current = false; };
+    }, []);
 
-    const [meta, metaError] = useAwaiter(async () => {
+    const [meta, metaError, metaPending] = useAwaiter(async () => {
         if (!blob) return EMPTY_META;
 
         const audioContext = new AudioContext();
-        const audioBuffer = await audioContext.decodeAudioData(await blob.arrayBuffer());
-
-        return {
-            waveform: generateWaveform(audioBuffer.getChannelData(0), audioBuffer.sampleRate),
-            duration: audioBuffer.duration,
-        };
+        try {
+            const audioBuffer = await audioContext.decodeAudioData(await blob.arrayBuffer());
+            return {
+                waveform: generateWaveform(audioBuffer.getChannelData(0), audioBuffer.sampleRate),
+                duration: audioBuffer.duration,
+            };
+        } finally {
+            await audioContext.close();
+        }
     }, {
         deps: [blob],
         fallbackValue: EMPTY_META,
@@ -228,12 +262,23 @@ function VoiceMessageModal({ modalProps }: { modalProps: RenderModalProps; }) {
             actions={[{
                 text: "Send",
                 variant: "primary",
-                onClick: () => {
-                    sendAudio(blob!, meta ?? EMPTY_META);
-                    modalProps.onClose();
-                    showToast("Now sending voice message... Please be patient", Toasts.Type.MESSAGE);
+                onClick: async () => {
+                    if (!blob || isRecording || metaPending || sendingRef.current) return;
+                    if (!accountId.current || UserStore.getCurrentUser()?.id !== accountId.current) {
+                        showToast("The account changed. Reopen the voice message recorder to send.", Toasts.Type.FAILURE);
+                        return;
+                    }
+                    sendingRef.current = true;
+                    setSending(true);
+                    try {
+                        if (await sendAudio(blob, meta ?? EMPTY_META, channelId, accountId.current) && mounted.current)
+                            modalProps.onClose();
+                    } finally {
+                        sendingRef.current = false;
+                        if (mounted.current) setSending(false);
+                    }
                 },
-                disabled: !blob
+                disabled: !blob || isRecording || metaPending || sending
             }]}
         >
             <div className={cl("buttons")}>
@@ -246,9 +291,10 @@ function VoiceMessageModal({ modalProps }: { modalProps: RenderModalProps; }) {
                 />
 
                 <Button
+                    disabled={isRecording || sending}
                     onClick={async () => {
                         const file = await chooseFile("audio/*");
-                        if (file) {
+                        if (file && mounted.current) {
                             setBlob(file);
                             setBlobUrl(file);
                         }

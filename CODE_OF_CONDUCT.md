@@ -8,7 +8,7 @@ As such, we expect you to treat everyone with respect and contribute to an open 
 
 - Have empathy and be nice to others.
 - Be respectful of differing opinions, even if you disagree.
-- Hive and accept constructive criticism.
+- Give and accept constructive criticism.
 
 **DON'T:**
 

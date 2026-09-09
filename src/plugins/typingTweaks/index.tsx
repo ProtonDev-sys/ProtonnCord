@@ -59,7 +59,7 @@ const settings = definePluginSettings({
 export const buildSeveralUsers = ErrorBoundary.wrap(function buildSeveralUsers({ users, count, guildId }: { users: User[], count: number; guildId: string; }) {
     return (
         <>
-            {users.slice(0, count).map(user => (
+            {users.slice(0, 2).filter(isNonNullish).map(user => (
                 <React.Fragment key={user.id}>
                     <TypingUser user={user} guildId={guildId} />
                     {", "}
@@ -165,21 +165,14 @@ export default definePlugin({
 
     useTypingUsers(channel: Channel | undefined): User[] {
         try {
-            if (!channel) {
-                throw new Error("No channel");
-            }
-
-            const typingUsers = useStateFromStores([TypingStore], () => TypingStore.getTypingUsers(channel.id));
+            const typingUsers = useStateFromStores([TypingStore, RelationshipStore, UserStore], () =>
+                Object.keys(channel ? TypingStore.getTypingUsers(channel.id) : {})
+                    .filter(id => id && !RelationshipStore.isBlockedOrIgnored(id))
+                    .map(id => UserStore.getUser(id))
+                    .filter(isNonNullish), [channel?.id]);
             const myId = useStateFromStores([AuthenticationStore], () => AuthenticationStore.getId());
 
-            return Object.keys(typingUsers)
-                .filter(id => {
-                    if (!id || RelationshipStore.isBlockedOrIgnored(id)) return false;
-                    if (id === myId) return settings.store.amITyping;
-                    return true;
-                })
-                .map(id => UserStore.getUser(id))
-                .filter(isNonNullish);
+            return typingUsers.filter(user => user.id !== myId || settings.store.amITyping);
         } catch (e) {
             new Logger("TypingTweaks").error("Failed to get typing users:", e);
             return [];
@@ -197,9 +190,10 @@ export default definePlugin({
             let element = 0;
 
             return children.map(c => {
-                if (c.type !== "strong" && !(typeof c !== "string" && !React.isValidElement(c))) return c;
+                if (c == null || typeof c !== "object" || c.type !== "strong") return c;
 
-                const user = users[element++];
+                const user = users?.[element++];
+                if (!user) return c;
                 return <TypingUser key={user.id} guildId={guildId} user={user} />;
             });
         } catch (e) {

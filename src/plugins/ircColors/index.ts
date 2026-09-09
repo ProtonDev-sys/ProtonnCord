@@ -28,7 +28,11 @@ function calculateNameColorForUser(id?: string) {
     const { lightness } = settings.use(["lightness"]);
     const idHash = useMemo(() => id ? h64(id) : null, [id]);
 
-    return idHash && `hsl(${idHash % 360n}, 100%, ${lightness}%)`;
+    return idHash === null ? undefined : `hsl(${idHash % 360n}, 100%, ${getLightness(lightness)}%)`;
+}
+
+function getLightness(value: number) {
+    return Number.isFinite(value) && value >= 0 && value <= 100 ? value : 70;
 }
 
 const settings = definePluginSettings({
@@ -36,6 +40,7 @@ const settings = definePluginSettings({
         description: "Lightness, in %. Change if the colors are too light or too dark",
         type: OptionType.NUMBER,
         default: 70,
+        isValid: value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100 || "Enter a percentage between 0 and 100.",
     },
     memberListColors: {
         description: "Replace role colors in the member list",
@@ -128,7 +133,7 @@ export default definePlugin({
             : colorString;
 
         // guarantee minimum difference in dms
-        if (context?.channel?.isPrivate?.() && dmColor && userId) {
+        if (context?.channel?.isPrivate?.() && dmColor && dmColor === color && userId) {
             const currentUserId = UserStore.getCurrentUser()?.id;
             if (currentUserId && userId !== currentUserId) {
                 const currentUserColor = Number(h64(currentUserId) % 360n);
@@ -136,7 +141,7 @@ export default definePlugin({
                 const colorDiff = Math.min(Math.abs(currentUserColor - otherUserColor), 360 - Math.abs(currentUserColor - otherUserColor));
                 if (colorDiff < 70) {
                     const newColor = (otherUserColor + 180) % 360;
-                    return `hsl(${newColor}, 100%, ${settings.store.lightness}%)`;
+                    return `hsl(${newColor}, 100%, ${getLightness(settings.store.lightness)}%)`;
                 }
             }
         }

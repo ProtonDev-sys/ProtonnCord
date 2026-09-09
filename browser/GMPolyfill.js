@@ -37,10 +37,30 @@ function GM_fetch(url, opt) {
     return new Promise((resolve, reject) => {
         // https://www.tampermonkey.net/documentation.php?ext=dhdg#GM_xmlhttpRequest
         const options = { ...opt };
+        const signal = options.signal;
+        delete options.signal;
+        let request;
+        let settled = false;
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            signal?.removeEventListener("abort", onAbort);
+            callback(value);
+        };
+        const onAbort = () => {
+            finish(reject, signal.reason ?? new DOMException("The request was aborted", "AbortError"));
+            try { request?.abort(); } catch { }
+        };
+        if (signal?.aborted) {
+            onAbort();
+            return;
+        }
+        signal?.addEventListener("abort", onAbort, { once: true });
         options.url = url;
         options.data = options.body;
         options.responseType = "blob";
         options.onload = resp => {
+            if (settled) return;
             try {
                 var blob = resp.response;
                 resp.blob = () => Promise.resolve(blob);
@@ -49,15 +69,20 @@ function GM_fetch(url, opt) {
                 resp.json = async () => JSON.parse(await blob.text());
                 resp.headers = parseHeaders(resp.responseHeaders);
                 resp.ok = resp.status >= 200 && resp.status < 300;
-                resolve(resp);
+                finish(resolve, resp);
             } catch (error) {
-                reject(error);
+                finish(reject, error);
             }
         };
-        options.ontimeout = () => reject("fetch timeout");
-        options.onerror = () => reject("fetch error");
-        options.onabort = () => reject("fetch abort");
-        GM_xmlhttpRequest(options);
+        options.ontimeout = () => finish(reject, "fetch timeout");
+        options.onerror = () => finish(reject, "fetch error");
+        options.onabort = () => finish(reject, "fetch abort");
+        try {
+            request = GM_xmlhttpRequest(options);
+            if (signal?.aborted) request?.abort();
+        } catch (error) {
+            finish(reject, error);
+        }
     });
 }
 export const fetch = GM_fetch;

@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-const imageExtensions = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "avif", "svg"];
+const imageExtensions = ["png", "apng", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "avif", "svg"];
 const videoExtensions = ["mp4", "webm", "ogg", "avi", "wmv", "flv", "mov", "mkv", "m4v"];
 const supportedExtensions = [...imageExtensions, ...videoExtensions];
 
 const mimeToExtension: Record<string, string> = {
     "image/png": "png",
+    "image/apng": "apng",
     "image/jpeg": "jpg",
     "image/gif": "gif",
     "image/webp": "webp",
@@ -30,7 +31,7 @@ const mimeToExtension: Record<string, string> = {
 
 export function getExtensionFromMime(mimeType: string): string | undefined {
     const baseMime = mimeType.split(";")[0].trim().toLowerCase();
-    return mimeToExtension[baseMime];
+    return Object.hasOwn(mimeToExtension, baseMime) ? mimeToExtension[baseMime] : undefined;
 }
 
 const extensionToMime: Record<string, string> = {
@@ -46,6 +47,7 @@ const extensionToMime: Record<string, string> = {
     "avif": "image/avif",
     "svg": "image/svg+xml",
     "mp4": "video/mp4",
+    "m4v": "video/mp4",
     "webm": "video/webm",
     "ogg": "video/ogg",
     "avi": "video/x-msvideo",
@@ -56,7 +58,8 @@ const extensionToMime: Record<string, string> = {
 };
 
 export function getMimeFromExtension(ext?: string): string {
-    return extensionToMime[ext?.toLowerCase() ?? ""] || "application/octet-stream";
+    const normalized = ext?.toLowerCase() ?? "";
+    return Object.hasOwn(extensionToMime, normalized) ? extensionToMime[normalized] : "application/octet-stream";
 }
 
 export async function getExtensionFromBytes(blob: Blob): Promise<string | undefined> {
