@@ -1,0 +1,233 @@
+[
+  {
+    "path": "scripts/benchmarkDiscord.ts",
+    "baselineSha256": "4be7ec4f47ad6ca7f4644382e5a2985d235307f1370dd276acc4e64e9c17e3c4",
+    "reviewedSha256": "4be7ec4f47ad6ca7f4644382e5a2985d235307f1370dd276acc4e64e9c17e3c4",
+    "status": "reviewed",
+    "summary": "Reviewed every live navigation, metrics/profile, timing summary and cleanup path. Workload alternates two visible channels after four warmups; timeout samples fail the run. Requires real CDP, navigation and forced GC, so retained without execution. Limitations: legacy layoutObjects field actually stores LayoutCount, process CPU delta includes warmup/idle and other browser processes, and initial view is not restored. Values are neither isolated plugin costs nor FPS.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "Read-only full source review and TypeScript syntax parse; no client, profiler or benchmark execution."
+    ]
+  },
+  {
+    "path": "scripts/createDiscordMcpVideo.ts",
+    "baselineSha256": "4ef36d998de398ea127a8a34d89de7dc714f30f1db02f45bab12e86de85f5fe5",
+    "reviewedSha256": "19ad3a69e8af24bc76962c1ac232eecc9060d6bcbe017b606818626e463a5b08",
+    "status": "changed",
+    "summary": "Reviewed every static slide, HTML/CSS interpolation, render loop, argument-array ffmpeg/ffprobe invocation, output overwrite behavior and process/browser lifecycle. Removed unconditional recursive deletion of the configurable work directory: generation now fails if that directory already exists, preserving unrelated contents before launching a browser. Static promotional timing figures lack an in-file workload/source and must not be treated as newly validated measurements.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "Extracted renderSlides guard passed an offline EEXIST mock proving zero removal and zero browser launches. Entire source parsed; generator/browser/ffmpeg were not run and no video was produced."
+    ]
+  },
+  {
+    "path": "scripts/generateReport.ts",
+    "baselineSha256": "1dd715414c81b4288038d3abdba8a7329a9c48e728b58a8930da81da80483d66",
+    "reviewedSha256": "0a0ba079f05fae8e4268cca2a99c696a250c1a2c1fd3f9a9b9acc70a07d38bf6",
+    "status": "changed",
+    "summary": "Reviewed full reporter browser/bootstrap, console classification, timeout/completion handling, Markdown/Webhook formatting, exclusive report-artifact write and optional HMAC sender. Moved CANARY initialization before missing-environment diagnostics to prevent a temporal-dead-zone error on early exit. Browser injection and optional outgoing webhook were not invoked. Retained limitations: finish errors can interrupt reporting, timeout value is not normalized and ignored-error patterns are intentionally broad.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "Extracted early validation passed offline for Stable and Canary with no browser variable, preserving exit status 1 and useful diagnostics. Full source syntax parsed; no browser, injected code, secrets, artifact publication or webhook request executed."
+    ]
+  },
+  {
+    "path": "scripts/inspectVoiceTranscriberLive.ts",
+    "baselineSha256": "995f9fc4cd3b83fc3678a1bfb97c0642c204e861f8c6046be6c56ae33906ab9c",
+    "reviewedSha256": "995f9fc4cd3b83fc3678a1bfb97c0642c204e861f8c6046be6c56ae33906ab9c",
+    "status": "reviewed",
+    "summary": "Reviewed channel argument handling, page selection/navigation, playback polling, transcription/translation button flows and reported counts. Explicit flags can trigger remote processing through the installed plugin, and last-accessory/label selection assumes a quiet known conversation. Runner disconnects on failure but does not restore the starting route. No plaintext transcript is normally printed, though service errors may be returned.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "Read-only full source review and TypeScript syntax parse; no playback, account access, translation, transcription or CDP execution."
+    ]
+  },
+  {
+    "path": "scripts/testAuditRemainingScripts.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "ae773731905cc0307278b866711ed2603a873d9cce060ec94c154039e7f1cae2",
+    "status": "changed",
+    "summary": "Reviewed complete AST extraction tests for video-directory preservation and reporter missing-browser initialization. Only selected source functions/statements are transpiled; production entrypoints are never imported. Directory/browser/process/console operations use controlled mocks, and failure identity plus zero removal/launch counts ensure checks cannot silently succeed by skipping the intended guard.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "node --import=tsx --test scripts/testAuditRemainingScripts.ts passed two offline tests; all touched scripts passed diff whitespace checks. Existing testAudit runner discovers the new file."
+    ]
+  },
+  {
+    "path": "scripts/testBetterSessions.ts",
+    "baselineSha256": "413af143231950722ef91d54df3af619675112e7e7dc46d4a7955e06dd98d6a0",
+    "reviewedSha256": "413af143231950722ef91d54df3af619675112e7e7dc46d4a7955e06dd98d6a0",
+    "status": "reviewed",
+    "summary": "Reviewed complete VM session/store/modal fixtures, deferred reads/writes/REST, account ownership, stop/start cancellation, retry/coalescing, immutable persistence snapshots, viewed-label acknowledgement and interval bounds. All session identities, requests, notifications and timers are synthetic; hook mocks do not represent real React scheduling.",
+    "validation": [
+      "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
+      "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testCustomCommands.ts",
+    "baselineSha256": "da411e9f18fa3845187427c3f65f84ee22683a0fdf3e0aeab3b696d15980495d",
+    "reviewedSha256": "da411e9f18fa3845187427c3f65f84ee22683a0fdf3e0aeab3b696d15980495d",
+    "status": "reviewed",
+    "summary": "Reviewed local module loader with actual Commands API and read-only SettingsStore, tag normalization/defaults, owned registration rollback, foreign-name preservation, nested imports, obsolete handlers and reply identity after asynchronous sends. Send/preview/dispatch adapters are inert; all mutable fixtures are isolated per test and no real messages occur.",
+    "validation": [
+      "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
+      "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testDevCompanionSecurity.ts",
+    "baselineSha256": "215e7717e8e7030ccdc0c8d4f6cde79120fde6302883000c35800bef05f28404",
+    "reviewedSha256": "215e7717e8e7030ccdc0c8d4f6cde79120fde6302883000c35800bef05f28404",
+    "status": "reviewed",
+    "summary": "Reviewed synthetic authentication transcripts, exact schemas, command rate limits, pre-auth silence, disabled executable-string commands, stale socket/lazy-chunk completion and restart/stop cleanup. FakeWebSocket replaces transport before the bundled module loads; all stores, lookup, reload and notification paths are stubs. Global descriptors and disposable bundle are restored/removed; no new payloads or execution capability added.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "Offline five-script boundary sweep passed. Authentication and schema fixtures executed only against local generated stubs, with zero actual WebSocket connections or remote code execution."
+    ]
+  },
+  {
+    "path": "scripts/testDiscordMcpLive.ts",
+    "baselineSha256": "4be6a6c940c3f7deec1052cc4b2278961657f91aa070e9024235d99a659e4bf3",
+    "reviewedSha256": "4be6a6c940c3f7deec1052cc4b2278961657f91aa070e9024235d99a659e4bf3",
+    "status": "reviewed",
+    "summary": "Reviewed complete live MCP process/RPC, destination checks, account-wide listing/search/reads, media download, send/subscription/delete assertions and best-effort cleanup. Limitations retained: enables plugin and removes the legacy setting without restoration, RPC waiters have no process-exit/timeout settlement, cleanup rejection is swallowed, and downloaded media remains. Fixed recipient verification scopes the send but does not make broader account reads or live operations automatically authorized.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "Read-only full source review and TypeScript syntax parse; no live MCP server, CDP connection, account/message access or messaging operations executed."
+    ]
+  },
+  {
+    "path": "scripts/testFileUploadNativeBoundary.ts",
+    "baselineSha256": "60b551b1bb987dae0d138dff0816912270f2992e189198653a5e3c66ac99e9e9",
+    "reviewedSha256": "60b551b1bb987dae0d138dff0816912270f2992e189198653a5e3c66ac99e9e9",
+    "status": "reviewed",
+    "summary": "Reviewed all IPC-origin/plugin-state, endpoint approval persistence/scope, S3/WebDAV header/path, redirect, response-redaction, size/cancellation and upload-admission checks. Native bundle stubs Electron/data/settings; custom endpoint positive paths target only its ephemeral loopback server with synthetic credentials and sub-megabyte bodies. Real files remain under mkdtemp; existing rejection fixtures were retained without new attack behavior.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "Full offline suite passed with an outer fetch guard rejecting every non-loopback request; synthetic local server and disposable approval store were cleaned up. No actual upload provider or credentials were used."
+    ]
+  },
+  {
+    "path": "scripts/testMessageLoggerNativeDownloads.ts",
+    "baselineSha256": "3ae3d7fa7cabe09e5fd2a49153d7d9d51c23b8064afb858c201c196de78c2398",
+    "reviewedSha256": "113c20f81d533e9c6013dc2361cabafbbf3eb0e617674bff3f0c4a1149d3e593",
+    "status": "changed",
+    "summary": "Reviewed full URL/media/content/redirect/response-limit/deadline/limiter fixtures, native export inventory, cache quota/type/invalidation and directory-switch races. Bundles stub Electron/data and lower cache limits; fetches are synthetic except a local no-request assertion. Previously unledgered edits now assert oversized settings remain untouched before explicitly resetting the disposable fixture. All real files are beneath mkdtemp; final full-file review preserved assertions and bounded stream behavior.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "Offline five-script boundary sweep passed logger download checks; synthetic CDN adapters and disposable cache exercised actual helpers. No real Discord CDN request, user cache, credentials or live client accessed."
+    ]
+  },
+  {
+    "path": "scripts/testNewPluginsManager.ts",
+    "baselineSha256": "033d27194589af03a0c56f3cfe2ed3087a8dca43f74e08d5948b6c50e399c7e8",
+    "reviewedSha256": "e1c4de0e4fd2514e4f6c3d7af7ec1438393bd4bde3e6b40f53f2dc88d613d79e",
+    "status": "changed",
+    "summary": "Reviewed settings migration, manifest-only initialization, disabled-definition access traps, real catalog/card extraction and favorite/settings replacement cases. Added the missing BaseText mock required by current catalog imports without changing behavior assertions. VM cards and stores verify lazy metadata use rather than real component commits.",
+    "validation": [
+      "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
+      "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testOrbolayBridgeSecurity.ts",
+    "baselineSha256": "00964e0cd98fc98cace45e13025acaad3a5012e81cc1daa13f0609e73e8c06ff",
+    "reviewedSha256": "00964e0cd98fc98cace45e13025acaad3a5012e81cc1daa13f0609e73e8c06ff",
+    "status": "reviewed",
+    "summary": "Reviewed complete synthetic handshake/domain-separation/schema/sequence/deadline/rate cases and bundled fake-socket integration asserting no state reads before mutual authentication. Post-auth dispatches remain array entries, pairing settings are ephemeral, and cloud exclusion is checked. No live companion, real secret, notification or voice action is involved; existing command fixtures were not expanded.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "Offline five-script boundary sweep passed all Orbolay checks; transport is FakeWebSocket and no real connection or Discord action occurred."
+    ]
+  },
+  {
+    "path": "scripts/testPluginCleanup.ts",
+    "baselineSha256": "f4058fda74ed20c2ba42001129d274d34800cf69846fbbe2447524cdcdaa1b2e",
+    "reviewedSha256": "2110e57f090d00496abfa50daf5d5dcdbb2563a7a39670d8bf4d4c24dba7b127",
+    "status": "changed",
+    "summary": "Reviewed all Unindent cases, Remix canvas/image/input ownership, event dispatch ordering, crop cleanup and reply preservation. Updated the pointer fixture to provide the real left-button field and assert the additional mousedown position update now required by the reviewed input implementation. All cleanup assertions remain; no actual DOM, image fetch or upload occurs.",
+    "validation": [
+      "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
+      "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testQuestifyNativeBoundary.ts",
+    "baselineSha256": "57f068719b7bc9730e09cd7f629cef8eff531c95129486ff7255cd9177388b10",
+    "reviewedSha256": "57f068719b7bc9730e09cd7f629cef8eff531c95129486ff7255cd9177388b10",
+    "status": "reviewed",
+    "summary": "Reviewed complete in-memory bundle and fixed synthetic argument/response fixtures for sender origin, plugin enablement, URL/header binding, input bounds, redirect prohibition, response-token validation, stream cancellation and bounded errors. All fetches are controlled in-process responses and Electron is stubbed. Existing assertions were inspected without extending reward/progress automation or external protocol behavior.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "Offline node --import=tsx --test boundary sweep passed all five standalone scripts, including Questify; no real service or account request occurred."
+    ]
+  },
+  {
+    "path": "scripts/testRecentDMSwitcher.ts",
+    "baselineSha256": "9f50ffe9a71b03ac194623fd21771b5660f62564d2380358134b83efb7666fed",
+    "reviewedSha256": "9f50ffe9a71b03ac194623fd21771b5660f62564d2380358134b83efb7666fed",
+    "status": "reviewed",
+    "summary": "Reviewed complete per-account storage/listener/modal/key-event harness and load/save failure, replacement, cancellation, modifier, stale overlay, unavailable-channel and numeric-bound cases. Navigation and persistence are arrays/promises only; pending fixture writes do not access DataStore or live Discord.",
+    "validation": [
+      "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
+      "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testRemixLifecycle.ts",
+    "baselineSha256": "eff0994c71d66a93b13334a997fe1b7171a92e2944aec716043c337c504dccb9",
+    "reviewedSha256": "c3e0d6a3da65a265804fb1740f34d6ba5ff814fd03683e16c69106630f9d7f03",
+    "status": "changed",
+    "summary": "Reviewed hook/effect replay harness and canvas/URL cancellation, export failure/retry, input/tool lifetimes, modal duplicate submission/cancellation and menu upload ownership. Added SelectedChannelStore mock to supply the newly captured send destination; existing behavioral assertions preserved. Image, file, upload, DOM and React adapters are entirely synthetic.",
+    "validation": [
+      "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
+      "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testRichPresence.ts",
+    "baselineSha256": "4d9c1758379b19c5864a337d8e7e8c207ade92d6496275b900908747360bf9ba",
+    "reviewedSha256": "410acbaa9d1d800a88aa322af0838d77976b78a44dadc135d9e1ab5cb5283c19",
+    "status": "changed",
+    "summary": "Reviewed complete preset transactional storage, arRPC per-socket replacement, malformed inputs, browser visibility, reconnect/stop handling, Apple Music subprocess/metadata/artwork mocks and CustomRPC settings/timer/account cases. Deferred asset results exercise stale completion without opening sockets, processes or network requests; timing comes from controlled Date/timer state.",
+    "validation": [
+      "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
+      "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testUpdaterLive.ts",
+    "baselineSha256": "f07a4af9b540a2ac326948d5345a23af14765a120a88bfb4dbd8a06551b9f56c",
+    "reviewedSha256": "f07a4af9b540a2ac326948d5345a23af14765a120a88bfb4dbd8a06551b9f56c",
+    "status": "reviewed",
+    "summary": "Reviewed exact sourceRoot/built-head/main/remote-head preflight and before-after source-content fingerprint assertions. This runner calls real update and rebuild methods, so it can mutate the installed bundle even when expecting a no-op pull; remote advancement can race its precheck. Hashes cover changed file contents and HEAD, not every ignored output. Retained as an explicitly live integration check.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "Read-only full source review and TypeScript syntax parse; no Git network lookup, updater, CDP or rebuild operation executed."
+    ]
+  },
+  {
+    "path": "scripts/testWebAuthnLargeBlob.ts",
+    "baselineSha256": "eef5503c52a97fd23bf10ea2db8def4ed6a9029eed0b3c0a95445205a779854f",
+    "reviewedSha256": "c5bdd87286413dc6d598bfd625149282d162e4a27cebc0fd65d71f50f1f2e370",
+    "status": "changed",
+    "summary": "Reviewed the complete isolated localhost WebAuthn virtual-authenticator suite. Added installed Windows/macOS browser discovery so it no longer silently skips on this Windows checkout, retained sandboxing outside root Linux CI, and made server cleanup run after browser launch/close failures. PRF and large-blob assertions unchanged.",
+    "validation": [
+      "Original complete source review by delegated fixture auditor; root reviewed all changed launch/discovery/cleanup code.",
+      "Actual fresh headless Chrome localhost virtual-authenticator PRF and large-blob round trips passed on Windows; no physical security key, live Discord session or user profile used."
+    ]
+  },
+  {
+    "path": "scripts/testZipPreviewSecurity.ts",
+    "baselineSha256": "69f74f6aba6a477e225aaf2ab00ad074ad6eca85408cd0b0d927be6c097bc473",
+    "reviewedSha256": "69f74f6aba6a477e225aaf2ab00ad074ad6eca85408cd0b0d927be6c097bc473",
+    "status": "reviewed",
+    "summary": "Reviewed all contained archive construction/metadata mutation, lazy selected-entry extraction, bounds/path/flags/integrity rejection and actual-source deferred-attachment renderer assertions. Existing malformed inputs stay in memory and are not written or transmitted; maximum synthetic expansion input is 4 MiB. Structural guards supplement actual extraction checks and do not prove all archive formats safe.",
+    "validation": [
+      "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
+      "Offline five-script boundary sweep passed all ZIP assertions. No archive file, browser, download or external target was used."
+    ]
+  }
+]

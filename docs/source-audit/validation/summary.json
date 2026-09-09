@@ -1,0 +1,37 @@
+{
+  "date": "2026-09-09",
+  "baseCommit": "441b6a60c1e2e8242e54478d00247e2a6384661d",
+  "baselineReviewed": 1746,
+  "baselineTotal": 1746,
+  "newReviewed": 61,
+  "baselineDispositions": {
+    "reviewed": 1123,
+    "changed": 616,
+    "asset": 4,
+    "generated": 3,
+    "removed": 0
+  },
+  "auditRegressionCases": 427,
+  "reportedNodeTestExecutions": 999,
+  "fullGateExitCode": 0,
+  "webAuthn": "Initial gate skip resolved by installed-browser detection; isolated Chrome virtual PRF/large-blob test passed separately.",
+  "catalog": {
+    "plugins": 399,
+    "settingIdentifiers": 1352,
+    "desktopEligible": 388,
+    "deferred": 95,
+    "eager": 293
+  },
+  "builds": [
+    "desktop",
+    "Equibop",
+    "standalone desktop/Equibop",
+    "browser",
+    "Chromium extension",
+    "Firefox extension",
+    "userscript"
+  ],
+  "publicTypes": "Generated and strict consumer check passed",
+  "liveDiscordTested": false,
+  "installedOrPublished": false
+}

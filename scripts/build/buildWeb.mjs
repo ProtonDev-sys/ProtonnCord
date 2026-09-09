@@ -21,7 +21,7 @@
 
 import { readFileSync } from "fs";
 import { appendFile, mkdir, readFile, rm, writeFile } from "fs/promises";
-import { join } from "path";
+import { join, resolve, sep } from "path";
 import Zip from "zip-local";
 
 import { BUILD_TIMESTAMP, commonOpts, globPlugins, IS_DEV, IS_ANTI_CRASH_TEST, IS_REPORTER, IS_COMPANION_TEST, IS_STANDALONE, VERSION, commonRendererPlugins, buildOrWatchAll, stringifyValues } from "./common.mjs";
@@ -68,6 +68,7 @@ const buildConfigs = [
     {
         ...commonOptions,
         outfile: "dist/browser/extension.js",
+        plugins: [...(commonOptions.plugins ?? []), afterBuild("package-extensions", packageExtensions)],
         define: {
             ...commonOptions.define,
             IS_EXTENSION: "true"
@@ -77,6 +78,7 @@ const buildConfigs = [
     {
         ...commonOptions,
         inject: ["browser/GMPolyfill.js", ...(commonOptions?.inject || [])],
+        plugins: [...(commonOptions.plugins ?? []), afterBuild("embed-userscript-css", appendCssRuntime)],
         define: {
             ...commonOptions.define,
             IS_USERSCRIPT: "true",
@@ -84,7 +86,7 @@ const buildConfigs = [
         },
         outfile: "dist/ProtonnCord.user.js",
         banner: {
-            js: readFileSync("browser/userscript.meta.js", "utf-8").replace("%version%", `${VERSION}.${new Date().getTime()}`)
+            js: readFileSync("browser/userscript.meta.js", "utf-8").replace("%version%", `${VERSION}.${BUILD_TIMESTAMP}`)
         },
         footer: {
             // UserScripts get wrapped in an iife, so define Vencord prop on window that returns our local
@@ -118,6 +120,9 @@ async function buildExtension(target, files) {
     };
 
     const targetDirectory = join("dist/browser", target);
+    const outputRoot = resolve("dist/browser");
+    if (!resolve(targetDirectory).startsWith(outputRoot + sep))
+        throw new Error("Extension output must remain inside dist/browser.");
     await rm(targetDirectory, { recursive: true, force: true });
     await Promise.all(Object.entries(entries).map(async ([file, content]) => {
         const dest = join(targetDirectory, file);
@@ -129,27 +134,54 @@ async function buildExtension(target, files) {
     console.info("Unpacked Extension written to dist/browser/" + target);
 }
 
-const appendCssRuntime = readFile("dist/ProtonnCord.user.css", "utf-8").then(content => {
+async function appendCssRuntime() {
+    const content = await readFile("dist/ProtonnCord.user.css", "utf-8");
     const cssRuntime = `unsafeWindow._vcUserScriptRendererCss=${JSON.stringify(content)};`;
 
-    return appendFile("dist/ProtonnCord.user.js", cssRuntime);
-});
+    await appendFile("dist/ProtonnCord.user.js", cssRuntime);
+}
 
-if (!process.argv.includes("--skip-extension")) {
+/**
+ * @param {string} name
+ * @param {() => Promise<void>} callback
+ * @returns {import("esbuild").Plugin}
+ */
+function afterBuild(name, callback) {
+    return {
+        name,
+        setup(build) {
+            build.onEnd(result => result.errors.length ? undefined : callback());
+        }
+    };
+}
+
+async function packageExtensions() {
+    if (process.argv.includes("--skip-extension")) return;
     await Promise.all([
-        appendCssRuntime,
         buildExtension("chromium-unpacked", ["modifyResponseHeaders.json", "content.js", "manifest.json", "icon.png", "service-worker.js"]),
         buildExtension("firefox-unpacked", ["background.js", "content.js", "manifestv2.json", "icon.png"]),
     ]);
 
-    Zip.zip("dist/browser/chromium-unpacked", (_err, zip) => {
-        zip.compress().save("dist/extension-chrome.zip");
-        console.info("Packed Chromium Extension written to dist/extension-chrome.zip");
+    await Promise.all([
+        packExtension("chromium-unpacked", "extension-chrome.zip"),
+        packExtension("firefox-unpacked", "extension-firefox.zip"),
+    ]);
+}
+
+/** @returns {Promise<void>} */
+function packExtension(source, destination) {
+    return new Promise((resolve, reject) => {
+        Zip.zip(join("dist/browser", source), (error, zip) => {
+            if (error) return reject(error);
+            try {
+                zip.compress().save(join("dist", destination), error => {
+                    if (error) return reject(error);
+                    console.info("Packed extension written to dist/" + destination);
+                    resolve();
+                });
+            } catch (error) {
+                reject(error);
+            }
+        });
     });
-    Zip.zip("dist/browser/firefox-unpacked", (_err, zip) => {
-        zip.compress().save("dist/extension-firefox.zip");
-        console.info("Packed Firefox Extension written to dist/extension-firefox.zip");
-    });
-} else {
-    await appendCssRuntime;
 }

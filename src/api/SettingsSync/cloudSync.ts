@@ -342,35 +342,52 @@ interface ApplyResult {
     changed: boolean;
 }
 
-async function applyDownloads(downloads: SyncResponse["downloads"], context: CloudRequestContext): Promise<ApplyResult> {
+async function applyDownloads(downloads: SyncResponse["downloads"], context: CloudRequestContext, canApply: () => boolean): Promise<ApplyResult> {
     let changed = false;
+    const prepared = new Map<string, string>();
     for (const download of downloads) {
-        if (!isCurrentContext(context)) return { accepted: false, changed };
+        if (!canApply()) return { accepted: false, changed };
 
         let bytes: Uint8Array;
         try {
             bytes = fromBase64(download.value);
             if (await checksum(bytes) !== download.checksum) return { accepted: false, changed };
+            if (!canApply()) return { accepted: false, changed };
+            prepared.set(download.key, new TextDecoder("utf-8", { fatal: true }).decode(bytes));
         } catch {
             return { accepted: false, changed };
         }
 
-        if (download.key === "settings") {
+    }
+
+    // Stage every checksum/parse before writes and always apply QuickCSS last: its
+    // native change event legitimately advances the local settings revision.
+    let safeSettings: ReturnType<typeof sanitizeCloudSettings> | undefined;
+    try {
+        const value = prepared.get("settings");
+        if (value !== undefined) safeSettings = sanitizeCloudSettings(JSON.parse(value), cloudPluginRegistry);
+    } catch {
+        return { accepted: false, changed };
+    }
+    for (const key of ["settings", "quickCss"]) {
+        if (!prepared.has(key)) continue;
+        if (!canApply()) return { accepted: false, changed };
+        if (key === "settings") {
             try {
-                const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-                const safe = sanitizeCloudSettings(parsed, cloudPluginRegistry);
+                const safe = safeSettings!;
                 if (patchMatches(VencordNative.settings.get(), safe)) continue;
-                if (!isCurrentContext(context)) return { accepted: false, changed };
-                await importSettings(JSON.stringify({ settings: safe }), "plugins");
+                if (!canApply()) return { accepted: false, changed };
+                await importSettings(JSON.stringify({ settings: safe }), "plugins", { canApply });
                 changed = true;
             } catch {
                 return { accepted: false, changed };
             }
         } else {
             try {
-                const css = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-                if (await VencordNative.quickCss.get() === css) continue;
-                if (!isCurrentContext(context)) return { accepted: false, changed };
+                const css = prepared.get(key)!;
+                const currentCss = await VencordNative.quickCss.get();
+                if (!canApply()) return { accepted: false, changed };
+                if (currentCss === css) continue;
                 await VencordNative.quickCss.set(css);
                 changed = true;
             } catch {
@@ -540,7 +557,17 @@ async function putV2(context: CloudRequestContext, signal: AbortSignal, manual =
     return acknowledged;
 }
 
-async function getV2(context: CloudRequestContext, signal: AbortSignal, shouldNotify: boolean, force: boolean) {
+function canApplyDownloadedSettings(expectedRevision: number, shouldNotify: boolean) {
+    if (localSettingsRevision === expectedRevision) return true;
+    if (shouldNotify) showNotification({
+        title: "Cloud Settings",
+        body: "Your local settings changed during the download. Download again to apply cloud settings.",
+        noPersist: true,
+    });
+    return false;
+}
+
+async function getV2(context: CloudRequestContext, signal: AbortSignal, shouldNotify: boolean, force: boolean, localRevision: number) {
     const manifest = force ? [] : await getManifest(context.scope);
     const response = await doSyncV2(context, [], manifest, signal);
     if (!response) {
@@ -565,9 +592,11 @@ async function getV2(context: CloudRequestContext, signal: AbortSignal, shouldNo
         return false;
     }
 
-    const applied = await applyDownloads(response.downloads, context);
+    const canApply = () => isCurrentContext(context) && !signal.aborted && canApplyDownloadedSettings(localRevision, shouldNotify);
+    if (!canApply()) return false;
+    const applied = await applyDownloads(response.downloads, context, canApply);
     if (!applied.accepted || !isCurrentContext(context)) {
-        if (shouldNotify && isCurrentContext(context))
+        if (shouldNotify && isCurrentContext(context) && localSettingsRevision === localRevision)
             showNotification({ title: "Cloud Settings", body: "The cloud returned invalid settings data.", color: "var(--red-360)", noPersist: true });
         return false;
     }
@@ -633,7 +662,7 @@ async function putV1(context: CloudRequestContext, signal: AbortSignal) {
     return unchanged;
 }
 
-async function getV1(context: CloudRequestContext, signal: AbortSignal, shouldNotify: boolean, force: boolean) {
+async function getV1(context: CloudRequestContext, signal: AbortSignal, shouldNotify: boolean, force: boolean, localRevision: number) {
     if (!isCurrentContext(context) || signal.aborted) return false;
     const response = await fetch(new URL("/v1/settings", context.url), {
         headers: {
@@ -687,14 +716,16 @@ async function getV1(context: CloudRequestContext, signal: AbortSignal, shouldNo
     if (!isCurrentContext(context)) return false;
 
     const currentQuickCss = await VencordNative.quickCss.get();
+    const canApply = () => isCurrentContext(context) && !signal.aborted && canApplyDownloadedSettings(localRevision, shouldNotify);
+    if (!canApply()) return false;
     let changed = false;
     if (!patchMatches(VencordNative.settings.get(), document.settings)) {
-        if (!isCurrentContext(context)) return false;
-        await importSettings(JSON.stringify({ settings: document.settings }), "plugins");
+        if (!canApply()) return false;
+        await importSettings(JSON.stringify({ settings: document.settings }), "plugins", { canApply });
         changed = true;
     }
     if (document.quickCss !== undefined && currentQuickCss !== document.quickCss) {
-        if (!isCurrentContext(context)) return false;
+        if (!canApply()) return false;
         await VencordNative.quickCss.set(document.quickCss);
         changed = true;
     }
@@ -825,15 +856,16 @@ export const putCloudSettings = (manual = false) => runCloudOperation(async sign
 });
 
 async function getUnlocked(shouldNotify: boolean, force: boolean, signal: AbortSignal) {
+    const localRevision = localSettingsRevision;
     const context = await getCloudRequestContext();
     if (!isCurrentContext(context)) return false;
     const version = await getApiVersion(context.origin);
     if (version === "v2") {
-        const result = await getV2(context, signal, shouldNotify, force);
-        if (await getApiVersion(context.origin) === "v1") return await getV1(context, signal, shouldNotify, force);
+        const result = await getV2(context, signal, shouldNotify, force, localRevision);
+        if (await getApiVersion(context.origin) === "v1") return await getV1(context, signal, shouldNotify, force, localRevision);
         return result;
     }
-    return await getV1(context, signal, shouldNotify, force);
+    return await getV1(context, signal, shouldNotify, force, localRevision);
 }
 
 export const getCloudSettings = (shouldNotify = true, force = false) =>
@@ -917,6 +949,6 @@ export const eraseAllCloudData = () => {
 };
 
 export function shouldCloudSync(direction: "push" | "pull") {
-    const selected = localStorage.Vencord_cloudSyncDirection;
+    const selected = getCloudSyncDirection();
     return selected === direction || selected === "both";
 }

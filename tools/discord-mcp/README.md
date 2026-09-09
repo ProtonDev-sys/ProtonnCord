@@ -18,7 +18,9 @@ This local stdio MCP server talks to the `DiscordMCP` ProtonnCord plugin through
 Enable `DiscordMCP` in ProtonnCord and keep Discord running, then configure an MCP client to run:
 
 ```text
-node D:\Development\protonn-cord\ProtonnCord\tools\discord-mcp\server.mjs
+node tools/discord-mcp/server.mjs
 ```
 
-For isolated testing, `PROTONN_CORD_DISCORD_MCP_DIR` may point at a temporary bridge directory.
+Run that command from the checkout, or configure the MCP client with the absolute script path. Enabling the bridge grants the connected client access to these operations; returned data is then available to that client.
+
+For isolated testing, `PROTONN_CORD_DISCORD_MCP_DIR` may point at a temporary bridge directory. An explicit directory is exclusive: missing or invalid configuration fails instead of falling back to another profile. The stdio server currently ignores cancellation notifications, so canceling a client request does not guarantee that an already submitted operation was canceled.

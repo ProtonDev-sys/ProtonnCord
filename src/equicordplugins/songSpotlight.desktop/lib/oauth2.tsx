@@ -5,13 +5,15 @@
  */
 
 import { ApplicationIntegrationType } from "@vencord/discord-types/enums";
-import { OAuth2AuthorizeModal, openModal,showToast, Toasts } from "@webpack/common";
+import { OAuth2AuthorizeModal, openModal,showToast, Toasts, UserStore } from "@webpack/common";
 
 import { apiConstants, authFetch, getData } from "./api";
 import { useAuthorizationStore } from "./stores/AuthorizationStore";
 import { logger } from "./utils";
 
 export function presentOAuth2Modal() {
+    const userId = UserStore.getCurrentUser()?.id;
+    if (!userId) return;
     openModal(props => (
         <OAuth2AuthorizeModal
             {...props}
@@ -23,23 +25,26 @@ export function presentOAuth2Modal() {
             redirectUri={apiConstants.oauth2.redirectURL}
             cancelCompletesFlow={false}
             callback={async ({ location }) => {
-                if (!location) return;
+                if (!location || UserStore.getCurrentUser()?.id !== userId) return;
 
                 try {
                     const url = new URL(location);
+                    const redirect = new URL(apiConstants.oauth2.redirectURL);
+                    if (url.origin !== redirect.origin || url.pathname !== redirect.pathname) throw "Unexpected authorization callback";
                     url.searchParams.append("whois", "equicord");
 
                     const res = await authFetch(url);
                     if (!res) throw "Response wasn't ok";
 
                     const access = await res.text();
+                    if (UserStore.getCurrentUser()?.id !== userId) return;
                     if (!access) throw "Access token is missing";
 
                     const refresh = res.headers.get("X-Refresh-Token");
                     if (!refresh) throw "Refresh token is missing";
 
-                    useAuthorizationStore.getState().setToken(access, refresh);
-                    getData();
+                    useAuthorizationStore.getState().setToken(access, refresh, userId);
+                    await getData();
 
                     showToast("Successfully authorized!", Toasts.Type.SUCCESS);
                 } catch (error) {

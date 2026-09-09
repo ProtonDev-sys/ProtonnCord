@@ -87,15 +87,14 @@ export default definePlugin({
     ],
 
     wrapSort(comparator: Function, row: any) {
-        return row.type === 3 || row.type === 4
-            ? -getSince(row.user)
-            : comparator(row);
+        const since = row.type === 3 || row.type === 4 ? getSince(row.user).getTime() : NaN;
+        return Number.isFinite(since) ? -since : comparator(row);
     },
 
     makeSubtext(user: User, origSubtext: any) {
         const since = getSince(user);
         if (isNaN(since.getTime())) {
-            return null;
+            return origSubtext;
         }
 
         return (

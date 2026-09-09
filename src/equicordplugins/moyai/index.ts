@@ -54,6 +54,9 @@ const MOYAI = "🗿";
 const MOYAI_URL = "https://github.com/Equicord/Equibored/raw/main/sounds/moyai/moyai.mp3";
 const MOYAI_URL_HD = "https://github.com/Equicord/Equibored/raw/main/sounds/moyai/moyai.wav";
 const customMoyaiRe = /<a?:\w*moy?ai\w*:\d{17,20}>/gi;
+let generation = 0;
+let running = false;
+const playingAudio = new Set<HTMLAudioElement>();
 
 const settings = definePluginSettings({
     volume: {
@@ -95,8 +98,25 @@ export default definePlugin({
     tags: ["Fun"],
     settings,
 
+    start() {
+        generation++;
+        running = true;
+    },
+
+    stop() {
+        generation++;
+        running = false;
+        for (const audio of playingAudio) {
+            audio.pause();
+            audio.removeAttribute("src");
+            audio.load();
+        }
+        playingAudio.clear();
+    },
+
     flux: {
         async MESSAGE_CREATE({ optimistic, type, message, channelId }: IMessageCreate) {
+            const currentGeneration = generation;
             if (optimistic || type !== "MESSAGE_CREATE") return;
             if (message.state === "SENDING") return;
             if (channelId !== SelectedChannelStore.getChannelId()) return;
@@ -111,6 +131,7 @@ export default definePlugin({
             const moyaiCount = getMoyaiCount(content);
 
             for (let i = 0; i < moyaiCount; i++) {
+                if (generation !== currentGeneration || channelId !== SelectedChannelStore.getChannelId()) return;
                 boom();
                 await sleep(300);
             }
@@ -124,7 +145,7 @@ export default definePlugin({
             if (!name) return;
             if (name !== MOYAI && !name.includes("moyai") && !name.includes("moai")) return;
             if (settings.store.ignoreBots && UserStore.getUser(userId)?.bot) return;
-            if (settings.store.ignoreBlocked && RelationshipStore.isBlocked(messageAuthorId)) return;
+            if (settings.store.ignoreBlocked && (RelationshipStore.isBlocked(userId) || RelationshipStore.isBlocked(messageAuthorId))) return;
 
             boom();
         },
@@ -169,6 +190,7 @@ function getMoyaiCount(message: string) {
 }
 
 function boom() {
+    if (!running) return;
     if (!settings.store.triggerWhenUnfocused && !document.hasFocus()) return;
     const audioElement = document.createElement("audio");
 
@@ -176,6 +198,10 @@ function boom() {
         ? MOYAI_URL_HD
         : MOYAI_URL;
 
-    audioElement.volume = settings.store.volume;
-    void audioElement.play();
+    audioElement.volume = Math.min(1, Math.max(0, Number.isFinite(settings.store.volume) ? settings.store.volume : 0.5));
+    const cleanup = () => playingAudio.delete(audioElement);
+    audioElement.addEventListener("ended", cleanup, { once: true });
+    audioElement.addEventListener("error", cleanup, { once: true });
+    playingAudio.add(audioElement);
+    void audioElement.play().catch(cleanup);
 }

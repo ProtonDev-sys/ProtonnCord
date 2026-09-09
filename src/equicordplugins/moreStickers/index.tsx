@@ -12,11 +12,12 @@ import { Devs, EquicordDevs } from "@utils/constants";
 import { loadFFmpeg } from "@utils/ffmpeg";
 import definePlugin, { OptionType } from "@utils/types";
 import { Channel } from "@vencord/discord-types";
-import { React } from "@webpack/common";
+import { React, showToast, Toasts } from "@webpack/common";
 
 import { Packs, PickerContent, PickerHeader, PickerSidebar, Wrapper } from "./components";
 import { getStickerPack, getStickerPackMetas } from "./stickers";
 import { StickerPack, StickerPackMeta } from "./types";
+import { isStickerWorkerCurrent, registerStickerWorker, startStickerUploads, stopStickerUploads } from "./upload";
 import { cl, FFmpegStateContext } from "./utils";
 
 export const settings = definePluginSettings({
@@ -38,6 +39,8 @@ export default definePlugin({
     tags: ["Chat", "Emotes", "Media"],
     authors: [EquicordDevs.Leko, Devs.Arjix],
     settings,
+    start: startStickerUploads,
+    stop: stopStickerUploads,
 
     patches: [
         {
@@ -123,50 +126,33 @@ export default definePlugin({
         const [selectedStickerPackId, setSelectedStickerPackId] = React.useState<string | null>(null);
 
         const ffmpegLoaded = React.useState(false);
-        const ffmpeg = React.useState<FFmpeg>(new FFmpeg());
-
-        const getMetasSignature = (m: StickerPackMeta[]) => {
-            const ids: string[] = [];
-            for (const meta of m) {
-                ids.push(meta.id);
-            }
-
-            ids.sort();
-
-            let signature = "";
-            for (const id of ids) {
-                if (signature) signature += ",";
-                signature += id;
-            }
-
-            return signature;
-        };
+        const ffmpeg = React.useState<FFmpeg>(() => new FFmpeg());
 
         React.useEffect(() => {
-            (async () => {
-                const sps = (await Promise.all(
-                    stickerPackMetas.map(meta => getStickerPack(meta.id))
-                ))
-                    .filter((x): x is Exclude<typeof x, null> => x !== null);
-                setStickerPacks(sps);
-            })();
+            let cancelled = false;
+            Promise.all(stickerPackMetas.map(meta => getStickerPack(meta.id))).then(packs => {
+                if (!cancelled) setStickerPacks(packs.filter((pack): pack is StickerPack => pack !== null));
+            }).catch(() => { if (!cancelled) showToast("Could not load sticker packs", Toasts.Type.FAILURE); });
+            return () => { cancelled = true; };
         }, [stickerPackMetas]);
 
         React.useEffect(() => {
-            (async () => {
-                const metas = await getStickerPackMetas();
-                if (getMetasSignature(metas) !== getMetasSignature(stickerPackMetas)) {
-                    setStickerPackMetas(metas);
-                }
-            })();
+            let cancelled = false;
+            getStickerPackMetas().then(metas => {
+                if (!cancelled) setStickerPackMetas(metas);
+            }).catch(() => { if (!cancelled) showToast("Could not load sticker packs", Toasts.Type.FAILURE); });
+            return () => { cancelled = true; };
         }, []);
 
         React.useEffect(() => {
-            if (ffmpegLoaded[0]) return;
-
+            let cancelled = false;
+            ffmpegLoaded[1](false);
+            const dispose = registerStickerWorker(ffmpeg[0]);
             loadFFmpeg(ffmpeg[0]).then(() => {
-                ffmpegLoaded[1](true);
-            });
+                if (!cancelled && isStickerWorkerCurrent(ffmpeg[0])) ffmpegLoaded[1](true);
+                else dispose();
+            }).catch(() => { if (!cancelled) showToast("Could not load animated sticker support", Toasts.Type.FAILURE); });
+            return () => { cancelled = true; dispose(); };
         }, []);
 
         return (

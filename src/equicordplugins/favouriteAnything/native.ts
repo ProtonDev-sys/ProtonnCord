@@ -18,9 +18,9 @@ const allowedHosts = new Set([
 export async function fetchAttachment(_: unknown, attachment: MessageAttachment) {
     const { content_type, filename } = attachment;
     const url = URL.parse(attachment.url);
-    if (!url || !allowedHosts.has(url.hostname)) throw new Error("Invalid URL");
+    if (!url || url.protocol !== "https:" || url.username || url.password || url.port || !allowedHosts.has(url.hostname)) throw new Error("Invalid URL");
 
-    const res = await fetch(url, { headers: { Accept: "*/*" } });
+    const res = await fetch(url, { headers: { Accept: "*/*" }, redirect: "error", signal: AbortSignal.timeout(120_000) });
     if (!res.ok) throw new Error("Server error");
 
     const blob = await res.blob();

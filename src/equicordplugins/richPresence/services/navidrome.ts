@@ -326,8 +326,11 @@ async function getActivity(signal?: AbortSignal): Promise<Activity | null> {
 }
 
 async function updatePresence() {
+    const controller = abortController;
+    if (!controller || controller.signal.aborted) return;
     try {
-        const activity = await getActivity(abortController?.signal);
+        const activity = await getActivity(controller.signal);
+        if (abortController !== controller || controller.signal.aborted) return;
         setActivity(activity);
         if (!activity) {
             currentTrackId = undefined;
@@ -339,6 +342,7 @@ async function updatePresence() {
             cachedPauseTimestamp = undefined;
         }
     } catch (e: unknown) {
+        if (abortController !== controller || controller.signal.aborted) return;
         if (e instanceof Error && e.name === "AbortError") return;
         logger.error("Failed to update presence", e);
         setActivity(null);
@@ -351,15 +355,16 @@ async function updatePresence() {
         cachedTrackState = undefined;
     }
 
-    if (abortController && !abortController.signal.aborted) {
+    if (abortController === controller && !controller.signal.aborted) {
         const interval = (settings.store.nd_refreshInterval as number) ?? 10;
         updateTimer = setTimeout(updatePresence, interval * 1000);
     }
 }
 
 export function start() {
+    if (abortController && !abortController.signal.aborted) return;
     abortController = new AbortController();
-    updatePresence();
+    void updatePresence();
 }
 
 export function forceUpdate() {
@@ -373,7 +378,7 @@ export function forceUpdate() {
         abortController.abort();
         clearTimeout(updateTimer);
         abortController = new AbortController();
-        updatePresence();
+        void updatePresence();
     }
 }
 

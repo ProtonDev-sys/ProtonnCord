@@ -17,6 +17,8 @@ async function main() {
     assert.match(generate, /persist-credentials: false/, "selectable code must not retain checkout credentials");
     assert.doesNotMatch(generate, /secrets\./, "selectable code must run without repository secrets");
     assert.match(generate, /REPORT_WEBHOOK_BODY_FILE=/, "reporting code must emit an inert artifact");
+    assert.match(generate, /ref: \$\{\{ inputs\.ref \|\| github\.sha \}\}/,
+        "scheduled reports must test the triggering default-branch commit instead of a stale upstream branch");
     assert.match(publish, /github\.event\.repository\.default_branch/, "secret use must be limited to the default workflow ref");
     assert.match(publish, /environment: reporter-webhook/, "secret use must support protected-environment approval");
     assert.doesNotMatch(publish, /actions\/checkout|pnpm|esbuild|dist\/report\.mjs/, "the secret job must not execute selected repository code");

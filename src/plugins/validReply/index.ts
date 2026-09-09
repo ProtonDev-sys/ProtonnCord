@@ -8,7 +8,7 @@ import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { Channel, Message, User } from "@vencord/discord-types";
 import { findByCodeLazy } from "@webpack";
-import { FluxDispatcher, RestAPI } from "@webpack/common";
+import { FluxDispatcher, RestAPI, UserStore } from "@webpack/common";
 
 const enum ReferencedMessageState {
     Loaded,
@@ -27,6 +27,13 @@ interface Reply {
 
 const fetching = new Map<string, string>();
 let ReplyStore: any;
+let generation = 0;
+let active = false;
+
+function resetRequests() {
+    generation++;
+    fetching.clear();
+}
 
 const createMessageRecord = findByCodeLazy(".createFromServer(", ".isBlockedForMessage", "messageReference:");
 
@@ -59,15 +66,33 @@ export default definePlugin({
         ReplyStore = store;
     },
 
+    start() {
+        active = true;
+        resetRequests();
+    },
+
+    stop() {
+        active = false;
+        resetRequests();
+    },
+
+    flux: {
+        LOGOUT: resetRequests,
+        CONNECTION_OPEN: resetRequests
+    },
+
     async fetchReply(reply: Reply) {
-        const { channel_id: channelId, message_id: messageId } = reply.baseMessage.messageReference!;
+        const { channel_id: channelId, message_id: messageId } = reply.baseMessage.messageReference ?? {};
+        const accountId = UserStore.getCurrentUser()?.id;
+        if (!active || !accountId || !channelId || !messageId || !ReplyStore) return;
+        const currentGeneration = generation;
 
         if (fetching.has(messageId)) {
             return;
         }
         fetching.set(messageId, channelId);
 
-        RestAPI.get({
+        return RestAPI.get({
             url: `/channels/${channelId}/messages`,
             query: {
                 limit: 1,
@@ -76,8 +101,9 @@ export default definePlugin({
             retries: 2
         })
             .then(res => {
+                if (!active || currentGeneration !== generation || UserStore.getCurrentUser()?.id !== accountId) return;
                 const reply: Message | undefined = res?.body?.[0];
-                if (!reply) return;
+                if (!reply || reply.channel_id !== channelId) return;
 
                 if (reply.id !== messageId) {
                     ReplyStore.set(channelId, messageId, {
@@ -103,7 +129,7 @@ export default definePlugin({
             })
             .catch(() => { })
             .finally(() => {
-                fetching.delete(messageId);
+                if (currentGeneration === generation) fetching.delete(messageId);
             });
     }
 });

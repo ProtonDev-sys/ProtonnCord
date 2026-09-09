@@ -11,31 +11,31 @@ import { EquicordDevs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { RenderModalProps } from "@vencord/discord-types";
 import { Modal,openModal, React } from "@webpack/common";
-let boopSound: AudioPlayerInterface;
-let song: AudioPlayerInterface;
+let boopSound: AudioPlayerInterface | undefined;
+let song: AudioPlayerInterface | undefined;
+let active = false;
 
 function assignSong(url: string, volume: number) {
+    if (!active) return;
     song?.delete();
     song = createAudioPlayer(url, { volume, preload: true, persistent: true });
     song.load();
 }
 
 function assignBoop(url: string, volume: number) {
+    if (!active) return;
     boopSound?.delete();
     boopSound = createAudioPlayer(url, { volume, preload: true, persistent: true });
     boopSound.load();
 }
 
 function SoggyModal(props: RenderModalProps) {
-    if (settings.store.songVolume !== 0) {
-        React.useEffect(() => {
-            song?.loop();
-
-            return () => {
-                song?.stop();
-            };
-        }, []);
-    }
+    const { songVolume, songLink, imageLink } = settings.use(["songVolume", "songLink", "imageLink"]);
+    React.useEffect(() => {
+        const player = song;
+        if (songVolume !== 0) player?.loop();
+        return () => player?.stop();
+    }, [songVolume, songLink]);
 
     const boop = (e: React.MouseEvent<HTMLImageElement>) => {
         const { offsetX, offsetY } = e.nativeEvent;
@@ -56,7 +56,7 @@ function SoggyModal(props: RenderModalProps) {
     return (
         <Modal {...props} size="dynamic" title="Soggy Cat">
             <img
-                src={settings.store.imageLink}
+                src={imageLink}
                 onClick={boop}
                 style={{ display: "block" }}
             />
@@ -96,7 +96,7 @@ const settings = definePluginSettings({
         default: 0.25,
         markers: [0, 0.25, 0.5, 0.75, 1],
         stickToMarkers: false,
-
+        onChange(value) { if (song) song.volume = value * 100; },
     },
     boopVolume: {
         description: "Volume of the boop sound",
@@ -104,6 +104,7 @@ const settings = definePluginSettings({
         default: 0.2,
         markers: [0, 0.25, 0.5, 0.75, 1],
         stickToMarkers: false,
+        onChange(value) { if (boopSound) boopSound.volume = value * 100; },
     },
     tooltipText: {
         description: "The text shown when hovering over the button",
@@ -156,12 +157,16 @@ export default definePlugin({
     },
 
     start() {
+        active = true;
         assignBoop(settings.store.boopLink, settings.store.boopVolume * 100);
         assignSong(settings.store.songLink, settings.store.songVolume * 100);
     },
 
     stop() {
+        active = false;
         boopSound?.delete();
         song?.delete();
+        boopSound = undefined;
+        song = undefined;
     },
 });

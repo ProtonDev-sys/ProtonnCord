@@ -30,14 +30,16 @@ interface WatchingProps {
 const UserSummaryItem = findComponentByCodeLazy("defaultRenderUser", "showDefaultAvatarsForNullUsers");
 const AvatarStyles = findCssClassesLazy("moreUsers", "clickableAvatar", "avatar");
 const cl = classNameFactory("vc-whos-watching-");
+const wrappedComponents = new WeakMap<object, ReturnType<typeof ErrorBoundary.wrap>>();
 
 function getUsername(user: User): string {
     return RelationshipStore.getNickname(user.id) || user.globalName || user.username;
 }
 
 function Watching({ userIds, guildId }: WatchingProps): JSX.Element {
+    const resolved = useStateFromStores([UserStore, RelationshipStore], () => userIds.map(id => UserStore.getUser(id)));
     let missingUsers = 0;
-    const users = userIds.map(id => UserStore.getUser(id)).filter(user => Boolean(user) ? true : (missingUsers += 1, false));
+    const users = resolved.filter(user => Boolean(user) ? true : (missingUsers += 1, false));
 
     return (
         <div className={cl("content")}>
@@ -95,6 +97,7 @@ export default definePlugin({
         },
         {
             find: ",setIsForceShowSharingPopout:",
+            predicate: () => settings.store.showPanel,
             replacement: {
                 match: /"div"(?=.{0,50}stream:\i,canGoLive:\i)/,
                 replace: "$self.WrapperComponent"
@@ -103,11 +106,12 @@ export default definePlugin({
     ],
     WrapperComponent: ErrorBoundary.wrap(props => {
         const stream = useStateFromStores([ApplicationStreamingStore], () => ApplicationStreamingStore.getCurrentUserActiveStream());
+        const userIds: string[] = useStateFromStores([ApplicationStreamingStore], () => stream ? ApplicationStreamingStore.getViewerIds(stream) : []);
+        const resolved = useStateFromStores([UserStore], () => userIds.map(id => UserStore.getUser(id)));
         if (!stream) return <div {...props}>{props.children}</div>;
 
         let missingUsers = 0;
-        const userIds: string[] = ApplicationStreamingStore.getViewerIds(stream);
-        const users = userIds.map(id => UserStore.getUser(id)).filter(user => Boolean(user) ? true : (missingUsers += 1, false));
+        const users = resolved.filter(user => Boolean(user) ? true : (missingUsers += 1, false));
         const guildId = stream?.guildId ?? "";
 
         function renderMoreUsers(_label: string, count: number) {
@@ -168,11 +172,13 @@ export default definePlugin({
         );
     }),
     component: function ({ OriginalComponent }) {
-        return ErrorBoundary.wrap(props => {
+        const existing = wrappedComponents.get(OriginalComponent);
+        if (existing) return existing;
+        const wrapped = ErrorBoundary.wrap(props => {
             const stream = useStateFromStores([ApplicationStreamingStore], () => ApplicationStreamingStore.getCurrentUserActiveStream());
+            const viewers = useStateFromStores([ApplicationStreamingStore], () => stream ? ApplicationStreamingStore.getViewerIds(stream) : []);
             if (!stream) return null;
 
-            const viewers = ApplicationStreamingStore.getViewerIds(stream);
             const guildId = stream?.guildId ?? "";
 
             return <Tooltip text={<Watching userIds={viewers} guildId={guildId} />}>
@@ -183,5 +189,7 @@ export default definePlugin({
                 )}
             </Tooltip>;
         });
+        wrappedComponents.set(OriginalComponent, wrapped);
+        return wrapped;
     }
 });

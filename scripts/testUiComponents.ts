@@ -30,7 +30,7 @@ function loadComponent(path: string, hooks: Record<string, unknown> = {}, additi
         compilerOptions: { jsx: JsxEmit.React, module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
     }).outputText;
     return runInNewContext(code + "\nexports;", {
-        exports: {}, React, ...globals,
+        exports: {}, React, AbortSignal, ...globals,
         require(name: string) {
             if (name.endsWith(".css")) return {};
             assert.ok(name in mocks, name);
@@ -194,7 +194,9 @@ test("Decor public lookups check HTTP and response shapes and never request the 
     assert.equal(requests.length, 0);
     const controller = new AbortController();
     assert.deepEqual(structuredClone(await api.getUsersDecorations(["a", "b", "missing"], controller.signal)), { a: "asset", b: null, missing: null });
-    assert.equal(requests[0].signal, controller.signal);
+    assert.equal(requests[0].signal?.aborted, false);
+    controller.abort();
+    assert.equal(requests[0].signal?.aborted, true);
     assert.deepEqual(JSON.parse(new URL(requests[0].url).searchParams.get("ids") ?? "null"), ["a", "b", "missing"]);
     response.ok = false; await assert.rejects(api.getUsersDecorations(["a"]), /Could not load/);
     response.ok = true;
@@ -715,9 +717,11 @@ test("Decor preset requests forward cancellation and validate HTTP, nested recor
     const preset = { id: "preset", name: "Preset", description: null, decorations: [syntheticDecoration("a")], authorIds: ["first"] };
     const controller = new AbortController();
     const valid = f.api.getPresets(controller.signal);
-    assert.equal(f.requests[0].options.signal, controller.signal);
+    assert.equal(f.requests[0].options.signal?.aborted, false);
     assert.equal(f.requests[0].options.headers, undefined);
     f.respond(0, [preset]); assert.deepEqual(structuredClone(await valid), [preset]);
+    controller.abort();
+    assert.equal(f.requests[0].options.signal?.aborted, true);
     for (const body of [null, {}, [{ ...preset, authorIds: [123] }], [{ ...preset, decorations: [null] }], [preset, preset]]) {
         const index = f.requests.length;
         const result = f.api.getPresets();
@@ -1098,6 +1102,23 @@ test("legacy text colors do not mutate a shared or frozen style object", () => {
     assert.equal(result.props.style.color, "var(--text-muted, var(--text-default))");
     assert.equal(result.props.style.margin, 4);
     assert.notEqual(result.props.style, style);
+});
+
+test("editable text can enter editing from the keyboard without committing a change", () => {
+    for (const key of ["Enter", " "]) {
+        let editing = false;
+        let prevented = false;
+        const { EditableText } = loadComponent("src/components/settings/EditableText.tsx", {
+            useState: () => [editing, (value: boolean) => { editing = value; }]
+        });
+        const props = { value: "name", onChange: () => assert.fail("Entering editing must not save") };
+        const label = EditableText(props);
+        assert.equal(label.props.role, "button");
+        assert.equal(label.props.tabIndex, 0);
+        label.props.onKeyDown({ key, preventDefault() { prevented = true; } });
+        assert.equal(prevented, true);
+        assert.equal(EditableText(props).type, "input");
+    }
 });
 
 for (const action of ["Enter", "Escape", "blur"]) {

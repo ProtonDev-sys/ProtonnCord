@@ -9,11 +9,7 @@
         referrerpolicy="no-referrer">
     <style>
         html,
-        body,
-        #container {
-            position: absolute;
-            left: 0;
-            top: 0;
+        body {
             width: 100%;
             height: 100%;
             margin: 0;
@@ -21,28 +17,34 @@
             overflow: hidden;
         }
 
+        body {
+            display: flex;
+            flex-direction: column;
+        }
+
         header {
-            position: fixed;
+            flex: 0 0 auto;
+            box-sizing: border-box;
             display: flex;
             justify-content: space-between;
             align-items: center;
             padding: 10px;
             background: #1e1e1e;
-            color: #1e1e1e;
+            color: #ffffff;
             border-bottom: 1px solid #444;
             width: 100%;
             z-index: 10;
         }
 
         #container {
-            margin-top: 45px;
+            position: relative;
+            flex: 1;
+            min-height: 0;
+            min-width: 0;
             background-color: #1e1e1e;
             border: 1px solid #1e1e1e;
         }
 
-        .toolbar button:hover {
-            background: rgba(255, 255, 255, 0.1);
-        }
     </style>
 </head>
 
@@ -98,9 +100,12 @@
                     link.href = url;
                     link.download = 'style.css';
                     document.body.append(link);
-                    link.click();
-                    link.remove();
-                    URL.revokeObjectURL(url);
+                    try {
+                        link.click();
+                    } finally {
+                        link.remove();
+                        setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    }
                 };
 
                 document.getElementById('copyButton').onclick = () => {

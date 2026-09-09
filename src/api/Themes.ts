@@ -89,7 +89,7 @@ async function initThemes() {
 
     const links = new Set<string>();
 
-    for (const rawLink of enabledThemeLinks) {
+    for (const rawLink of Settings.enableOnlineThemes === false ? [] : enabledThemeLinks) {
         const match = /^@(light|dark) (.*)/.exec(rawLink);
         const link = match?.[2] ?? rawLink;
         const mode = getThemeActivationMode(rawLink, match?.[1]);
@@ -100,6 +100,11 @@ async function initThemes() {
     }
 
     if (IS_WEB) {
+        if (Settings.enableOnlineThemes === false) {
+            // Pausing remote themes must not depend on a local file read succeeding.
+            themesStyle.textContent = previousThemeBlobObjectURLs.map(link => `@import url("${link}");`).join("\n");
+            updatePopoutWindows();
+        }
         const themesToApply = enabledThemes.filter(theme =>
             shouldApplyTheme(getThemeActivationMode(theme), activeTheme)
         );
@@ -170,6 +175,7 @@ document.addEventListener("DOMContentLoaded", () => {
     SettingsStore.addChangeListener("useQuickCss", toggle);
 
     SettingsStore.addChangeListener("enabledThemeLinks", initThemes);
+    SettingsStore.addChangeListener("enableOnlineThemes", initThemes);
     SettingsStore.addChangeListener("enabledThemes", initThemes);
     SettingsStore.addChangeListener("themeActivationModes", initThemes);
 

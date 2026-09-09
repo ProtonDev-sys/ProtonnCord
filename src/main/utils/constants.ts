@@ -17,7 +17,7 @@
 */
 
 import { app } from "electron";
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { constants as FsConstants, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const suffix = IS_DEV ? "dev" : "";
@@ -48,28 +48,24 @@ export const ALLOWED_PROTOCOLS = [
 
 export const IS_VANILLA = /* @__PURE__ */ process.argv.includes("--vanilla");
 
-if (IS_DEV) {
+if (IS_DEV && !process.env.PROTONN_CORD_USER_DATA_DIR && !process.env.EQUICORD_USER_DATA_DIR) {
     const prodDir = join(DATA_DIR, "..");
     const settings = join(prodDir, "settings", "settings.json");
     const quickCss = join(prodDir, "settings", "quickCss.css");
 
-    let migrated = false;
-    if (existsSync(DEV_MIGRATED)) {
-        const content = readFileSync(DEV_MIGRATED, "utf-8");
-        migrated = content.includes("migrated");
-    }
-
-    if (!migrated) {
-        setTimeout(() => {
-            try {
-                if (existsSync(settings)) copyFileSync(settings, SETTINGS_FILE);
-                if (existsSync(quickCss)) copyFileSync(quickCss, QUICK_CSS_PATH);
-                writeFileSync(DEV_MIGRATED, "migrated");
-                app.relaunch();
-                app.exit(0);
-            } catch (err) {
-                console.error("[Protonn Cord] Failed to copy prod data:", err);
+    try {
+        const migrated = existsSync(DEV_MIGRATED) && readFileSync(DEV_MIGRATED, "utf-8").includes("migrated");
+        if (!migrated) {
+            // Constants load before the settings stores. Seed missing files now so
+            // development startup never overwrites edits or needs a forced restart.
+            mkdirSync(SETTINGS_DIR, { recursive: true });
+            for (const [source, destination] of [[settings, SETTINGS_FILE], [quickCss, QUICK_CSS_PATH]]) {
+                if (existsSync(source) && !existsSync(destination))
+                    copyFileSync(source, destination, FsConstants.COPYFILE_EXCL);
             }
-        }, 5000);
+            writeFileSync(DEV_MIGRATED, "migrated");
+        }
+    } catch (err) {
+        console.error("[Protonn Cord] Failed to copy prod data:", err);
     }
 }

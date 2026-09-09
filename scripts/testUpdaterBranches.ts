@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { runInNewContext } from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
@@ -55,10 +55,15 @@ async function testUpdaterControls(): Promise<void> {
         Select: "Select", ConfirmModal: "ConfirmModal",
         SettingsRouter: { openUserSettings: (route: string) => { openedRoutes.push(route); } },
         Toasts: { show: () => undefined, genId: () => "fixture", Type: {}, Position: {} },
-        openModal(factory: (props: object) => Element) {
+        openModal(factory: (props: object) => Element, options: { onCloseCallback(): void; }) {
             const modal = factory({});
             assert.equal(typeof modal.props.onCancel, "function");
-            (modal.props.onCancel as () => void)();
+            if (settings.updateBranch === "nightly") {
+                assert.equal(typeof options?.onCloseCallback, "function", "closing the success modal must release pending update state");
+                options.onCloseCallback();
+            } else {
+                (modal.props.onCancel as () => void)();
+            }
         },
     };
     const mocks: Record<string, object> = {
@@ -264,6 +269,8 @@ async function testGitBranches(): Promise<void> {
             /Unsupported Protonn Cord update branch/u,
         );
     } finally {
+        assert.equal(dirname(resolve(root)), resolve(tmpdir()));
+        assert.ok(basename(root).startsWith("protonn-cord-updater-branches-"));
         await rm(root, { force: true, recursive: true });
     }
 }

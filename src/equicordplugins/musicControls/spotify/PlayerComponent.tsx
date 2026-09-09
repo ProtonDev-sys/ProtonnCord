@@ -22,12 +22,11 @@ import { Flex } from "@components/Flex";
 import { CopyIcon, ImageIcon, LinkIcon, OpenExternalIcon } from "@components/Icons";
 import { Paragraph } from "@components/Paragraph";
 import { Span } from "@components/Span";
-import { debounce } from "@shared/debounce";
 import { classNameFactory } from "@utils/css";
 import { copyWithToast, openImageModal } from "@utils/discord";
 import { classes } from "@utils/misc";
 import { formatDuration } from "@utils/text";
-import { ContextMenuApi, FluxDispatcher, Menu, React, useEffect, useState, useStateFromStores } from "@webpack/common";
+import { ContextMenuApi, FluxDispatcher, lodash, Menu, React, useEffect, useMemo, useState, useStateFromStores } from "@webpack/common";
 
 import { settings } from "../settings";
 import { SeekBar } from "./SeekBar";
@@ -148,12 +147,12 @@ function Controls() {
     );
 }
 
-const seek = debounce((v: number) => {
-    SpotifyStore.seek(v);
-});
-
 function SpotifySeekBar() {
-    const { duration } = SpotifyStore.track!;
+    const { duration, id: trackId } = SpotifyStore.track!;
+    const seek = useMemo(() => lodash.debounce((value: number) => {
+        if (SpotifyStore.track?.id === trackId) void SpotifyStore.seek(value);
+    }, 300), [trackId]);
+    useEffect(() => () => seek.cancel(), [seek]);
 
     const [storePosition, isSettingPosition, isPlaying] = useStateFromStores(
         [SpotifyStore],
@@ -215,6 +214,10 @@ function SpotifySeekBar() {
 
 function AlbumContextMenu({ track }: { track: Track; }) {
     const volume = useStateFromStores([SpotifyStore], () => SpotifyStore.volume);
+    const setVolume = useMemo(() => lodash.debounce((value: number, deviceId?: string) => {
+        if (SpotifyStore.device?.id === deviceId) SpotifyStore.setVolume(value);
+    }, 300), []);
+    useEffect(() => () => setVolume.cancel(), [setVolume]);
 
     return (
         <Menu.Menu
@@ -248,7 +251,7 @@ function AlbumContextMenu({ track }: { track: Track; }) {
                         value={volume}
                         minValue={0}
                         maxValue={100}
-                        onChange={debounce((v: number) => SpotifyStore.setVolume(v))}
+                        onChange={(value: number) => setVolume(value, SpotifyStore.device?.id)}
                     />
                 )}
             />
@@ -357,7 +360,7 @@ export function SpotifyPlayer() {
         [SpotifyStore],
         () => SpotifyStore.device,
         null,
-        (prev, next) => prev?.id === next?.id
+        (prev, next) => prev?.id === next?.id && prev?.is_active === next?.is_active
     );
 
     const isPlaying = useStateFromStores([SpotifyStore], () => SpotifyStore.isPlaying);

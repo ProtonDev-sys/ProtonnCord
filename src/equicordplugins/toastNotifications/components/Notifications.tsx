@@ -28,6 +28,12 @@ function renderQueue(root: Root) {
     root.render(<>{NotificationQueue.map(n => n.element)}</>);
 }
 
+function finishNotification(notification: Pick<QueuedNotification, "onClose" | "resolve">) {
+    try { notification.onClose?.(); }
+    catch (error) { console.error("ToastNotifications close callback failed", error); }
+    finally { notification.resolve(); }
+}
+
 function getNotificationContainer() {
     // If the root container doesn't exist, create it.
     if (!RootContainer) {
@@ -84,9 +90,8 @@ export async function showNotification(notification: NotificationData) {
                     NotificationQueue = NotificationQueue.filter(n => n.key !== notificationKey);
                     if (NotificationQueue.length === oldLength) return;
 
-                    notification.onClose?.();
                     renderQueue(root);
-                    resolve();
+                    finishNotification({ onClose: notification.onClose, resolve });
                 }}
             />
         );
@@ -100,10 +105,9 @@ export async function showNotification(notification: NotificationData) {
         });
 
         // If the queue exceeds the maximum number of notifications, remove the oldest one.
-        if (NotificationQueue.length > (PluginSettings.store.maxNotifications ?? 3)) {
-            const removed = NotificationQueue.shift();
-            removed?.onClose?.();
-            removed?.resolve();
+        const maximum = Math.max(1, Math.min(5, Math.floor(PluginSettings.store.maxNotifications || 3)));
+        while (NotificationQueue.length > maximum) {
+            finishNotification(NotificationQueue.shift()!);
         }
 
         renderQueue(root);
@@ -115,9 +119,11 @@ export async function showNotification(notification: NotificationData) {
  * Called when the plugin is disabled.
  */
 export function teardownNotifications() {
+    const pending = NotificationQueue;
     NotificationQueue = [];
     RootContainer?.unmount();
     RootContainer = undefined;
     ToastContainer?.remove();
     ToastContainer = undefined;
+    pending.forEach(finishNotification);
 }

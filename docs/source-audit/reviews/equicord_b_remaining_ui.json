@@ -1,0 +1,1276 @@
+[
+  {
+    "path": "scripts/testAuditRemainingUi.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "b245b53399e1e340003faf84c25685e559186e4b91ac806dd5c4b1c2c0af13d2",
+    "status": "changed",
+    "summary": "Reviewed 22 isolated source-transpilation regressions covering notification filters, webhook exemption, modal retry concurrency, capture/join cancellation, filename decoding, node recycling, stale sidebar/translation state, React immutability, unit conversions, failed save feedback and voice button target selection. All client/network/media/account dependencies are inert mocks.",
+    "validation": [
+      "Full fixture review; every assertion exercises behavior or an externally visible lifecycle outcome.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed.",
+      "Repository ESLint intentionally excludes scripts; TypeScript validation is run by root broad gate.",
+      "No live client or external service actions."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/moreUserTags/consts.ts",
+    "baselineSha256": "36b3e35541a9f3c78b91cd7d4a2085b4e7699990b106b7fadc586b6364baf41e",
+    "reviewedSha256": "36b3e35541a9f3c78b91cd7d4a2085b4e7699990b106b7fadc586b6364baf41e",
+    "status": "reviewed",
+    "summary": "Reviewed webhook/followed-announcement detection, tag precedence and permission computation contracts; lazy component/store lookups remain static-review only.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/moreUserTags/index.tsx",
+    "baselineSha256": "d8f141ad0f0a3c2d480bfaec4bdbc621b6cc149bfbb93ae42a9331247310308f",
+    "reviewedSha256": "d08395b9e62bd12c7516853c3542514a0e4050bdd8d7c2453346e86be7e9ac56",
+    "status": "changed",
+    "summary": "Reviewed chat/profile/member tags and persisted visibility/text preferences; fixed the exclude-bots option incorrectly suppressing webhook tags that its description explicitly exempts.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/moreUserTags/settings.tsx",
+    "baselineSha256": "d9acef816d04c001a1e02a8c6903757da8de249be7e17bdafcb5dae465d795e5",
+    "reviewedSha256": "88d5769df9175dde8d77779f28dc9c0fe2f8d94fd780a7b9810e64dcc3618f56",
+    "status": "changed",
+    "summary": "Reviewed per-tag controlled text/toggle inputs, stable keys, default merge behavior and preservation of unrelated tag preferences.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/moreUserTags/styles.css",
+    "baselineSha256": "6123125eefc1dcd3bf015840c0d244524b249c354dc243a735959e5d44e9036b",
+    "reviewedSha256": "6123125eefc1dcd3bf015840c0d244524b249c354dc243a735959e5d44e9036b",
+    "status": "reviewed",
+    "summary": "Reviewed scoped tag alignment, verified-bot size and dark foreground selectors against tag render classes; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/moreUserTags/types.ts",
+    "baselineSha256": "b3a300a89ba067d7ef2f0cd3a618bf9197cfed602983464b4cde01063a5d3fae",
+    "reviewedSha256": "b3a300a89ba067d7ef2f0cd3a618bf9197cfed602983464b4cde01063a5d3fae",
+    "status": "reviewed",
+    "summary": "Reviewed tag condition/permission union and per-tag persisted settings types against producers and consumers.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/neverPausePreviews/index.tsx",
+    "baselineSha256": "b19cd15924c0dc5243db489aae29b8abf773fe48939becddf9978774d29ee776",
+    "reviewedSha256": "b19cd15924c0dc5243db489aae29b8abf773fe48939becddf9978774d29ee776",
+    "status": "reviewed",
+    "summary": "Reviewed preview focus/stream pause override declarations and resource-cost notice; runtime patch matching not executed or enhanced.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/newPluginsManager/index.tsx",
+    "baselineSha256": "225ca5167523186fd084529d3fca42834635a891de0d43574346f6474e70a331",
+    "reviewedSha256": "f7da9314efff90299a41f80a9dac5d9b9ace478595fcc0b126b59efa1bf3f574",
+    "status": "changed",
+    "summary": "Reviewed registration and exported known-settings API; await the modal-opening promise so Flux lifecycle error handling observes failures.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/newPluginsManager/knownSettings.ts",
+    "baselineSha256": "9dadd7a1d3e5481a87690976f7dbf1e7e75c78b810cf5e937f5287452cbca8da",
+    "reviewedSha256": "6b67b65cf0ad1fdbf64f6f2b9669d75f8f96f62c85bad0e737f7e9172969f3ff",
+    "status": "changed",
+    "summary": "Reviewed queued known-settings migration, serialized writes, union preservation of existing/future plugin settings and isolated edit snapshots.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/newPluginsManager/knownSettingsData.ts",
+    "baselineSha256": "fbf49fae97d6ad75be5f1d34e17d55ffc0315f291c3a31edfe764b6a4e2b9b1d",
+    "reviewedSha256": "c8b06f3d8ee97cdc92c6cfc4aa77033af91dae6c35f7794af826dfec341c7df8",
+    "status": "changed",
+    "summary": "Reviewed legacy Map/array/object normalization, duplicate and invalid-entry rejection, canonical serialization and new-setting comparison; original malformed data remains preserved.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/newPluginsManager/NewPluginsModal.tsx",
+    "baselineSha256": "434ac917544c7ec558f9014dce139d1faad062881e0582cba6bc5bcc0f0be00d",
+    "reviewedSha256": "ba886f5f7e82479b0e77592c611586f9166c5af7d13b662bfec0fba5894dbd73",
+    "status": "changed",
+    "summary": "Reviewed manifest-only plugin grouping, dependency notices, setting-save-before-restart feedback and modal opening; fixed concurrent opening and failed-persistence retry guards.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/newPluginsManager/styles.css",
+    "baselineSha256": "4fb38e933026dac8e963d8f7750229918f40933cffe15b26a3c305c6674aa789",
+    "reviewedSha256": "4fb38e933026dac8e963d8f7750229918f40933cffe15b26a3c305c6674aa789",
+    "status": "reviewed",
+    "summary": "Reviewed new-plugin modal grid, flexible sizing, header/footer spacing and text colors; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/noNitroUpsell/index.ts",
+    "baselineSha256": "5c60e2249fc54f05a9f20c72978b86f990b89c93be301f298101b651c3958ea4",
+    "reviewedSha256": "5c60e2249fc54f05a9f20c72978b86f990b89c93be301f298101b651c3958ea4",
+    "status": "reviewed",
+    "summary": "Reviewed local premium-display override startup/connection/stop behavior read-only; no entitlement changes, live validation or runtime override enhancements.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/normalizeMessageLinks/index.ts",
+    "baselineSha256": "206fe2710604fe4d3446b6f99afea5541e6e87237b816358ef7c58461d82a1d0",
+    "reviewedSha256": "206fe2710604fe4d3446b6f99afea5541e6e87237b816358ef7c58461d82a1d0",
+    "status": "reviewed",
+    "summary": "Reviewed canary/PTB host normalization and link-copy declaration read-only; transformation and existing host assumptions preserved.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/noRoleHeaders/index.ts",
+    "baselineSha256": "04c990206c32b0d8f0d26cb4fb4fad35c725378eb0ad7fe957de718e6eacc3dc",
+    "reviewedSha256": "04c990206c32b0d8f0d26cb4fb4fad35c725378eb0ad7fe957de718e6eacc3dc",
+    "status": "reviewed",
+    "summary": "Reviewed member role-header suppression metadata and patch declaration read-only; no runtime patch matching performed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/partyMode/index.ts",
+    "baselineSha256": "c4896a18643579bebc7a92861a606636c8bc40af82d9dc61f1f33e07066ea680",
+    "reviewedSha256": "c4896a18643579bebc7a92861a606636c8bc40af82d9dc61f1f33e07066ea680",
+    "status": "reviewed",
+    "summary": "Reviewed intensity mappings and enabled/visible lifecycle dispatch declarations; no live party-mode settings changed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/pingNotifications/index.tsx",
+    "baselineSha256": "1b526cd3e8daa2fde6cf34e7554394ac73c52badb19096751a654e7605e7b82b",
+    "reviewedSha256": "6208c046b59bb6d326e10f86e10b02abe094f0ca5f091969bacd5833106af5fe",
+    "status": "changed",
+    "summary": "Reviewed mention formatting, friend/DM toggles, DND/active-channel and muted/blocked filters; made the optional channel mute method safe so normal channels can produce notifications.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/pinIcon/index.tsx",
+    "baselineSha256": "d86f3c594e43d2f787b2339583804aa9284abdbf119c745322d1425966587a73",
+    "reviewedSha256": "d86f3c594e43d2f787b2339583804aa9284abdbf119c745322d1425966587a73",
+    "status": "reviewed",
+    "summary": "Reviewed pinned-message conditional decoration and error-boundary fallback; runtime patch matching remains unverified.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/primaryStreamAudio/index.ts",
+    "baselineSha256": "665011b88a753766c0c96261957445c433a580a593c30553235fc3c251dd7149",
+    "reviewedSha256": "665011b88a753766c0c96261957445c433a580a593c30553235fc3c251dd7149",
+    "status": "reviewed",
+    "summary": "Reviewed tracked media pruning, DOM visibility/stream matching, gain versus element volume and stop restoration; no live media or runtime patch checks performed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/primaryStreamAudio/logic.ts",
+    "baselineSha256": "02a0c3b2b5568fe3e005429256482ceff13b8957e1e6ad0be539635d3036886d",
+    "reviewedSha256": "02a0c3b2b5568fe3e005429256482ceff13b8957e1e6ad0be539635d3036886d",
+    "status": "reviewed",
+    "summary": "Reviewed stream/participant identity candidates, speaking-flag prioritization, selected/DOM fallbacks and local volume/mute preservation; existing synthetic checks passed. Identity heuristics remain platform-dependent.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/randomVoice/index.tsx",
+    "baselineSha256": "e6a0546a8b32c33f88f27215897f9395fc03982d71cbef36f175ce681bf3ec0a",
+    "reviewedSha256": "74182f065ec4a19bbfea09a476dd98112a1f2ce296205d52aaee366bfe4eb291",
+    "status": "changed",
+    "summary": "Reviewed every keybind, channel filter, menu setting and join lifecycle branch; cancel delayed join work on stop/account change or superseding selection, reject obsolete desktop-source completions and ignore held-key repeats.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/randomVoice/styles.css",
+    "baselineSha256": "0d6a5a203d0e2ba60869d8c8807817d159f27ea919516f5e6905b0598009132e",
+    "reviewedSha256": "64c94c453127e86630666b015d40bad30adf6b18f14c12133c7be6d319995b78",
+    "status": "changed",
+    "summary": "Corrected quoted CSS variable that made keybind label color invalid; reviewed remaining layout selectors and passed stylesheet lint.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/recentDMSwitcher/index.tsx",
+    "baselineSha256": "ececf35419884e88a63f3a4957f4d5c7bb3bf42b96a7d941264ac6d631f47926",
+    "reviewedSha256": "ececf35419884e88a63f3a4957f4d5c7bb3bf42b96a7d941264ac6d631f47926",
+    "status": "reviewed",
+    "summary": "Reviewed account-owned async history hydration, normalized IDs, current-owner persistence feedback, cycling/overlay keyboard state, blur/unmount cleanup and display fallbacks; preserved existing prior fixes.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/recentDMSwitcher/styles.css",
+    "baselineSha256": "bc9f374d2bac49c658d604a611726d6d9244887b812e0eddbe9289b8cd0cc319",
+    "reviewedSha256": "bc9f374d2bac49c658d604a611726d6d9244887b812e0eddbe9289b8cd0cc319",
+    "status": "reviewed",
+    "summary": "Reviewed recent-DM wrapping cards, avatar dimensions, selected state and truncation behavior; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/repeatMessages/index.tsx",
+    "baselineSha256": "969b87edd08e9597f63c911f5b9cae2370dc47a0eab2225665e96604f46e3325",
+    "reviewedSha256": "969b87edd08e9597f63c911f5b9cae2370dc47a0eab2225665e96604f46e3325",
+    "status": "reviewed",
+    "summary": "Read-only review of explicit repeat/reply actions, attachment serialization, mention suppression and modifier listeners; no messages sent and no repeat automation enhanced. Optional sticker-array and detached send-error handling remain runtime limitations.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/replyPingControl/index.ts",
+    "baselineSha256": "7fc2d1a1815a530cac82e165d90ea0d290dd14acf0829b1accb9f65b2c8ae980",
+    "reviewedSha256": "7fc2d1a1815a530cac82e165d90ea0d290dd14acf0829b1accb9f65b2c8ae980",
+    "status": "reviewed",
+    "summary": "Reviewed cached whitelist/blacklist parsing, blacklist precedence, reply lookup and deduplicated client-side mention mutation; no server-side notification behavior or patches exercised.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/richMagnetLinks/index.tsx",
+    "baselineSha256": "40ee78103d16b88e3ae2b07f5d29d7d8272920fe919cc69fbf5184fbb53401bb",
+    "reviewedSha256": "9591eefd85a75354fca771bcbd35c74c016b7196f9c4e018b1ff08a607bb509d",
+    "status": "changed",
+    "summary": "Reviewed magnet matching, compose/link exclusions and filename rendering; removed redundant percent/plus decoding after URLSearchParams so literal plus and percent characters survive.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/richMagnetLinks/styles.css",
+    "baselineSha256": "dfc6d3b87352f133b6eeeae55611bc0792122b1de82ac61424b7657e0c4d2ae4",
+    "reviewedSha256": "dfc6d3b87352f133b6eeeae55611bc0792122b1de82ac61424b7657e0c4d2ae4",
+    "status": "reviewed",
+    "summary": "Reviewed magnet anchor/icon sizing, specificity and hover behavior; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/rpcEditor/index.tsx",
+    "baselineSha256": "309560d311758c88493665b0af16bc01a05f4e4716af2876e32bbf62b82524c6",
+    "reviewedSha256": "309560d311758c88493665b0af16bc01a05f4e4716af2876e32bbf62b82524c6",
+    "status": "reviewed",
+    "summary": "Reviewed preserved activity settings storage, variable substitution and activity field application read-only; no RPC/presence mutation or runtime patch enhancement performed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/rpcEditor/ReplaceSettings.tsx",
+    "baselineSha256": "0f7936f5084477e18b5374f1414eb6acd4ead5815eb93801ec427e0f19838a45",
+    "reviewedSha256": "0f7936f5084477e18b5374f1414eb6acd4ead5815eb93801ec427e0f19838a45",
+    "status": "reviewed",
+    "summary": "Reviewed activity editor controls, application-ID validation, trailing blank entry, enabled flags and all editable fields. Live presence publishing and URL acceptance assumptions remain static-review only.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/saveFavoriteGIFs/index.tsx",
+    "baselineSha256": "0263be6e9f85cb582f077f71cd7b806075bc14b8c2e512920d2edc077cc5e3ed",
+    "reviewedSha256": "c12f45ea75746974741a5accefb74e101338602d39a7512ed61f74780cd14437",
+    "status": "changed",
+    "summary": "Reviewed favorite URL export, bounded reachability workers and file dialog branches; prevent follow-up success after save failure and describe unconfirmed browser/native dialog output as an export request.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/scheduledMessages/components/ChatBarButton.tsx",
+    "baselineSha256": "31f40e8243f2c32c65f0c6e265668f75a92c40cb2a03089425bdf833e45d80aa",
+    "reviewedSha256": "31f40e8243f2c32c65f0c6e265668f75a92c40cb2a03089425bdf833e45d80aa",
+    "status": "reviewed",
+    "summary": "Reviewed schedule-mode state updater registration/cleanup, main-chat visibility, toggle and modal context action; no scheduling action executed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/scheduledMessages/components/Icons.tsx",
+    "baselineSha256": "3687ebb23e2ca17de5cb459a703b570c75275da5982593b8b64942a6e5ee1e92",
+    "reviewedSha256": "3687ebb23e2ca17de5cb459a703b570c75275da5982593b8b64942a6e5ee1e92",
+    "status": "reviewed",
+    "summary": "Reviewed calendar/timer/error SVG dimensions, fills and presentation-only props.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/scheduledMessages/components/MessageAccessory.tsx",
+    "baselineSha256": "17d70bc771c1bfa2a2c3b61a61908854d64bb8c9f07529a009ba8440cac2ae07",
+    "reviewedSha256": "17d70bc771c1bfa2a2c3b61a61908854d64bb8c9f07529a009ba8440cac2ae07",
+    "status": "reviewed",
+    "summary": "Reviewed phantom lookup and scheduled-time/remaining-time display; countdown is render-driven and no live scheduler was exercised.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/scheduledMessages/components/ScheduleTimeModal.tsx",
+    "baselineSha256": "d97471ef7ec38f1e32f3aa47157ad644d231a15fd68199001f97f86d52b3ee40",
+    "reviewedSha256": "d97471ef7ec38f1e32f3aa47157ad644d231a15fd68199001f97f86d52b3ee40",
+    "status": "reviewed",
+    "summary": "Read-only review of delay/time validation, modal controls and draft clearing after enqueue. Local-time input minimum and asynchronous draft ownership remain documented runtime limitations; no scheduled-send behavior enhanced.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/scheduledMessages/components/ViewScheduledModal.tsx",
+    "baselineSha256": "f656af2ca313838e56bcfee72ccf4bd0cb6f55a93e6beab182867dbe0a6dbecd",
+    "reviewedSha256": "f656af2ca313838e56bcfee72ccf4bd0cb6f55a93e6beab182867dbe0a6dbecd",
+    "status": "reviewed",
+    "summary": "Read-only review of scheduled-list snapshot, per-entry delete/clear actions, display info and empty state; live queue mutation not exercised.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/scheduledMessages/index.tsx",
+    "baselineSha256": "c76065116e10133792811df57cf9fd180b6a75b700d285bb2c9e274c9ed84de1",
+    "reviewedSha256": "c76065116e10133792811df57cf9fd180b6a75b700d285bb2c9e274c9ed84de1",
+    "status": "reviewed",
+    "summary": "Read-only review of registration, pre-send attachment conversion, phantom reaction events and scheduler start/stop. Pending pre-send/start work is not cancellation-proven; no automation or runtime patch changes.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/scheduledMessages/styles.css",
+    "baselineSha256": "5e4a3f2f236045de1d150ba1a43c477eccab167b7513cf56fdb9f77f1e392ae4",
+    "reviewedSha256": "5e4a3f2f236045de1d150ba1a43c477eccab167b7513cf56fdb9f77f1e392ae4",
+    "status": "reviewed",
+    "summary": "Reviewed every scheduled-message modal/list/phantom stylesheet rule, theme contrast selectors and scoped layout; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/scheduledMessages/types.ts",
+    "baselineSha256": "1c8048c8ba2bf6c6a096e49383969eb4e184956cc19ec6584f302ea84aa09d0a",
+    "reviewedSha256": "1c8048c8ba2bf6c6a096e49383969eb4e184956cc19ec6584f302ea84aa09d0a",
+    "status": "reviewed",
+    "summary": "Reviewed schedule queue, attachment/reaction and phantom/Flux message type contracts against all consumers.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/scheduledMessages/utils.ts",
+    "baselineSha256": "4b2e04e10eda70871110b4917a3dfbd880a06f47d32c0621f9e055243b4733ba",
+    "reviewedSha256": "4b2e04e10eda70871110b4917a3dfbd880a06f47d32c0621f9e055243b4733ba",
+    "status": "reviewed",
+    "summary": "Read-only review of complete queue persistence, phantom media/rendering, reaction debounce and scheduler/send flow. Queue is not account-scoped, removal precedes send and in-flight sends are not canceled by stop; no sending/retry capability was changed or exercised.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/screenRecorder.equibop/index.tsx",
+    "baselineSha256": "7c5923a2b2635ee82e17803977705a5cebc0bc29a58f6ac1f7381c5a5ec1dcb6",
+    "reviewedSha256": "4745ab01a8d44f8c3c5eec1f49cced40d25a51bd383d0da86db8c7e545ffd4c9",
+    "status": "changed",
+    "summary": "Reviewed capture start/finish menu transitions and user upload prompt; added cleanup of media tracks, dynamic stop menu and pending permission results on disable, with stale queued upload suppression and permission failure handling.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/serverSearch/index.tsx",
+    "baselineSha256": "e9dcd3f7d71f928d3a5fb39ab0b813e902737a6b463d271a7829373469980cee",
+    "reviewedSha256": "e9dcd3f7d71f928d3a5fb39ab0b813e902737a6b463d271a7829373469980cee",
+    "status": "reviewed",
+    "summary": "Reviewed server-list button registration/removal and quick-switcher dispatch; live navigation was not invoked.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/serverSearch/styles.css",
+    "baselineSha256": "eae2952001a58b3e1c6342f0e2f469f6c90eb2f66a8b3d04ac4df477c908acb6",
+    "reviewedSha256": "eae2952001a58b3e1c6342f0e2f469f6c90eb2f66a8b3d04ac4df477c908acb6",
+    "status": "reviewed",
+    "summary": "Reviewed search button hover, icon contrast and geometry selectors; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/showMessageEmbeds/index.tsx",
+    "baselineSha256": "1a676e5c52e3cf9656683a3d77266903d6d86fb338d286a0546c9596c5726245",
+    "reviewedSha256": "1a676e5c52e3cf9656683a3d77266903d6d86fb338d286a0546c9596c5726245",
+    "status": "reviewed",
+    "summary": "Reviewed embed/link context eligibility, URL normalization, server unfurl error handling, conversion and local message update ordering read-only; live unfurl and runtime patch compatibility unverified.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/showRolesInChat/index.tsx",
+    "baselineSha256": "7e7b5518349bdf10a5129bebe53b111abdcc44b543384ae3017a2a8b6f87a5a8",
+    "reviewedSha256": "7e7b5518349bdf10a5129bebe53b111abdcc44b543384ae3017a2a8b6f87a5a8",
+    "status": "reviewed",
+    "summary": "Reviewed highest-role selection, bot/color settings, exclusions and contextual hide/unhide actions against member/role store subscriptions.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/showRolesInChat/styles.css",
+    "baselineSha256": "072d709448e94938bf0dfd0aa79b25f291defcbff17a5b65cffdee78ea7d7841",
+    "reviewedSha256": "072d709448e94938bf0dfd0aa79b25f291defcbff17a5b65cffdee78ea7d7841",
+    "status": "reviewed",
+    "summary": "Reviewed role icon/name alignment, compact mode and ellipsis sizing; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/showSongName/index.tsx",
+    "baselineSha256": "d7e33ec09e28b590b5bd7fed38f7b21f04dd87490e062240d030eaa9bacb60b6",
+    "reviewedSha256": "d7e33ec09e28b590b5bd7fed38f7b21f04dd87490e062240d030eaa9bacb60b6",
+    "status": "reviewed",
+    "summary": "Reviewed song-title activity display replacement and fallback declaration read-only; no runtime patch matching performed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/sidebarChat/index.tsx",
+    "baselineSha256": "3ff738a2611a80cae7015d06834306885f30ea7fee27e76dd5b70dbb30243d9c",
+    "reviewedSha256": "f9bb6b36a23c3b6358243611c9d7bee31dfb9cb1dfea3451a63218c1c905db35",
+    "status": "changed",
+    "summary": "Reviewed sidebar/popout restore lifecycle, secure chat gate, headers, menu actions and forum loading; guarded absent context objects and stale forum component completions after channel changes.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/sidebarChat/store.ts",
+    "baselineSha256": "2553514fddd3b0b51c3947a459e923737947f4a83e2200f14ed21fbc67f02eda",
+    "reviewedSha256": "f241b4d5f14b7a3c7f118361e0d90b181265c59ed06d63a43932191191f24ffb",
+    "status": "changed",
+    "summary": "Reviewed persisted sidebar/popout state, previous/close transitions and always-on-top synchronization; existing private channel IDs now bypass user-DM creation and stale DM resolves cannot reopen a closed/replaced sidebar.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/sidebarChat/styles.css",
+    "baselineSha256": "e39ffa34b5b00501b371b01e12fdff4c76d1701282c3d7049d4827f0d855eb5d",
+    "reviewedSha256": "e39ffa34b5b00501b371b01e12fdff4c76d1701282c3d7049d4827f0d855eb5d",
+    "status": "reviewed",
+    "summary": "Reviewed sidebar/popout flex containment, overflow and theme styles including broad existing min-width selector; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/signature/index.tsx",
+    "baselineSha256": "fbe1f51c6cabffb08d87c6ea23d3d30b9c4934c9265ca1514f9389be1fcd1407",
+    "reviewedSha256": "fbe1f51c6cabffb08d87c6ea23d3d30b9c4934c9265ca1514f9389be1fcd1407",
+    "status": "reviewed",
+    "summary": "Reviewed signature settings, main-chat toggle, context checkbox, command-local feedback and pre-send text composition read-only; no messages sent or automatic sending behavior enhanced.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/silenceUsers/index.ts",
+    "baselineSha256": "b95864c13cbd8b1ce650b542e932afa067bccb7a62c1cac4b3507d0dcf08a976",
+    "reviewedSha256": "b95864c13cbd8b1ce650b542e932afa067bccb7a62c1cac4b3507d0dcf08a976",
+    "status": "reviewed",
+    "summary": "Reviewed cached user-ID parsing, notification/message interception and stop unsubscription; client-only suppression behavior preserved without live events.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/snowfall/index.tsx",
+    "baselineSha256": "0c0de46a4c56f5b61207f05c3f66128f342074a47acb163ac409eb406fd88b99",
+    "reviewedSha256": "2bacde12e01765f241f4d368eb413dc53bc4b0790566a48f0b361ca14c53a803",
+    "status": "changed",
+    "summary": "Reviewed complete snow option/style/image data, node animation/reuse and visibility/resize/unmount lifecycle; recycle a snowflake only while it is still attached to avoid duplicate transition-event queue entries.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/splitLargeMessages/index.ts",
+    "baselineSha256": "01cadc1c39287def571484cd5bd77b9032af1c1a73fefd32694a6a483a876bda",
+    "reviewedSha256": "01cadc1c39287def571484cd5bd77b9032af1c1a73fefd32694a6a483a876bda",
+    "status": "reviewed",
+    "summary": "Read-only review of length listener lifecycle, channel slowmode checks, chunk sending and unsent draft recovery; no automation, bypass, delay or retry behavior enhanced or executed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/splitLargeMessages/splitMessage.ts",
+    "baselineSha256": "9a7b96a62af2f92aa8d86e8853a2c7cd79e2f4c330a2f6168e01f5f2993f1a91",
+    "reviewedSha256": "9a7b96a62af2f92aa8d86e8853a2c7cd79e2f4c330a2f6168e01f5f2993f1a91",
+    "status": "reviewed",
+    "summary": "Reviewed pure split-boundary selection and content reconstruction read-only; unchanged UTF-16 and integer-limit assumptions are not a promise of Unicode grapheme preservation.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/statusWhileActive.desktop/index.ts",
+    "baselineSha256": "ec2c9a9f2a5959f6590d12bbe7c1c26635f9241d5a41a9220774b3739182bc76",
+    "reviewedSha256": "ec2c9a9f2a5959f6590d12bbe7c1c26635f9241d5a41a9220774b3739182bc76",
+    "status": "reviewed",
+    "summary": "Reviewed voice-status save/restore and user-state event gating read-only; live status writes and cross-account restoration were not exercised.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/steamStatusSync/index.tsx",
+    "baselineSha256": "11b7d0f209ed04ae91d123875980243436ce700f3f2ec5679dbf5ccb9da2bed2",
+    "reviewedSha256": "4e24bce63e00d560f76f373787e4ecdb93c111eb50f172a937c5fdd675b16d03",
+    "status": "changed",
+    "summary": "Reviewed Steam status mappings and activity-visibility preference; ignore absent game visibility and unmapped status so partial updates do not force invisibility or launch an undefined status URI.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/stickerBlocker/index.tsx",
+    "baselineSha256": "7e6899f6c0782d21e2606e0a51f318f89ed127d5fb5cf223c99f1b0aa3526c45",
+    "reviewedSha256": "7e6899f6c0782d21e2606e0a51f318f89ed127d5fb5cf223c99f1b0aa3526c45",
+    "status": "reviewed",
+    "summary": "Reviewed blocked sticker ID cache, immutable toggle persistence, placeholder controls and picker/message context eligibility; render patch remains static-review only.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/timezones/database.tsx",
+    "baselineSha256": "ecc1cbaf364af05bc4aa50dce5b118c068021a2fb4caf5f918fb90664b77f7b1",
+    "reviewedSha256": "ecc1cbaf364af05bc4aa50dce5b118c068021a2fb4caf5f918fb90664b77f7b1",
+    "status": "reviewed",
+    "summary": "Reviewed database cache/list loading, credentialed requests, OAuth callback and toast branches read-only; no authentication/network calls executed. Modal cancellation settlement and database-list replacement remain runtime limitations.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/timezones/index.tsx",
+    "baselineSha256": "92215837686ed52b0013a3b1d5cfdfb818ffb2a5fd71f0a4fff10ea9d020050b",
+    "reviewedSha256": "9c9800c0f67282b329d139cc88aec8c4c8a75aee089b707a070d1cfe4d1ddf55",
+    "status": "changed",
+    "summary": "Reviewed complete timezone display, bounded formatter cache, profile timers, preference migration and startup; clear cached database timezone only after delete succeeds.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/timezones/styles.css",
+    "baselineSha256": "baf9f05fe55225d9f74fa5981c49f9418048ff12562d56bea3e22acbb29c4b06",
+    "reviewedSha256": "baf9f05fe55225d9f74fa5981c49f9418048ff12562d56bea3e22acbb29c4b06",
+    "status": "reviewed",
+    "summary": "Reviewed timezone placement, tooltip and local-time style rules; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/timezones/TimezoneModal.tsx",
+    "baselineSha256": "f7fd7636a5a882bb3380a2f1177aefa2a160c539d778d367f0273f2148e3590b",
+    "reviewedSha256": "40a824f4e2146f3b0a07f69170760c31f7e57a5b2d44518024674018f5d1072d",
+    "status": "changed",
+    "summary": "Reviewed local/database timezone selection, supported-zone options and persistence feedback; keep the modal open if the remote database reports a save failure.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/toneIndicators/index.tsx",
+    "baselineSha256": "a520236d7326ed9c1483bc7701298a7e09aaa6807fbb1106772670bc519f075d",
+    "reviewedSha256": "9053ede604d7e849f5755b9015bafa51607fc8ed1472c52c938668a2b7125106",
+    "status": "changed",
+    "summary": "Reviewed indicator parsing/caching, escaped prefixes, boundary matching and tree traversal; use a prototype-free custom map, ignore empty descriptions, preserve unmatched text and clone React elements instead of mutating props.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/toneIndicators/indicators.ts",
+    "baselineSha256": "4f9656913ddf5111d60fdd3fcacba8df3c8e0c38d77049950c3e34a973fe385d",
+    "reviewedSha256": "4f9656913ddf5111d60fdd3fcacba8df3c8e0c38d77049950c3e34a973fe385d",
+    "status": "reviewed",
+    "summary": "Reviewed complete default tone-indicator mapping and alias conventions against custom lookup precedence.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/toneIndicators/ToneIndicator.tsx",
+    "baselineSha256": "86e3fdb233ae1b059a319c0014caf9a8c92cac69e4fd98a71d908acc7db16ec9",
+    "reviewedSha256": "86e3fdb233ae1b059a319c0014caf9a8c92cac69e4fd98a71d908acc7db16ec9",
+    "status": "reviewed",
+    "summary": "Reviewed tone indicator tooltip props and selectable text rendering.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/translatePlus/index.tsx",
+    "baselineSha256": "afa06c74326442e175b40737965dd16582a32a78f875b1744930957ef4cb32c1",
+    "reviewedSha256": "afa06c74326442e175b40737965dd16582a32a78f875b1744930957ef4cb32c1",
+    "status": "reviewed",
+    "summary": "Reviewed Translate+ context/popover registration and message accessory integration; translation is initiated only through existing user actions and no network executed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/translatePlus/misc/languages.ts",
+    "baselineSha256": "25878dc6d67a396c52a774a92a2b31af68823dd08e9f87951b8e2fe36ad585e7",
+    "reviewedSha256": "25878dc6d67a396c52a774a92a2b31af68823dd08e9f87951b8e2fe36ad585e7",
+    "status": "reviewed",
+    "summary": "Reviewed full language label/code mapping including Toki Pona and Shavian entries; historical mapping retained without claiming current remote-service coverage.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/translatePlus/misc/types.ts",
+    "baselineSha256": "6e87ec0a22396c2273204d4d3c3f5057e9ef7f41998aebbf7c86de4ab26d9cee",
+    "reviewedSha256": "6e87ec0a22396c2273204d4d3c3f5057e9ef7f41998aebbf7c86de4ab26d9cee",
+    "status": "reviewed",
+    "summary": "Reviewed translation payload, icon prop and class-factory declarations against component consumers.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/translatePlus/settings.ts",
+    "baselineSha256": "240f5767e5b527ef463479d26de363786150998ad8658818f9379259e75f9bae",
+    "reviewedSha256": "240f5767e5b527ef463479d26de363786150998ad8658818f9379259e75f9bae",
+    "status": "reviewed",
+    "summary": "Reviewed target/artistic-language options, defaults and restart flags; existing preferences preserved.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/translatePlus/style.css",
+    "baselineSha256": "7ab1dc7c23a68b38af1e2b6d0d0fb305892719e322fabb65f50a916a85ae5af7",
+    "reviewedSha256": "7ab1dc7c23a68b38af1e2b6d0d0fb305892719e322fabb65f50a916a85ae5af7",
+    "status": "reviewed",
+    "summary": "Reviewed translated accessory wrapping, icon spacing and keyboard-focus dismissal styles; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/translatePlus/utils/accessory.tsx",
+    "baselineSha256": "2c29446396b557bc5d5550ff42958b9c500f3deee748e72f540e41cd2b577a3d",
+    "reviewedSha256": "fa9e899c9a89f79cde4ea195053dfdf3fb8102465f97a266f544b85cc28d6541",
+    "status": "changed",
+    "summary": "Reviewed translation UI mount/unmount and request ownership; old view cleanup cannot delete a newer setter, edited message content resets translation, and obsolete responses cannot overwrite newer translations.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/translatePlus/utils/icon.tsx",
+    "baselineSha256": "ea442a8662316682ca4c8fc375040842e1fa6c58b19ff9144f463cd70ac3f9ea",
+    "reviewedSha256": "ea442a8662316682ca4c8fc375040842e1fa6c58b19ff9144f463cd70ac3f9ea",
+    "status": "reviewed",
+    "summary": "Reviewed translation icon paths, dimensions, class composition and currentColor inheritance.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/translatePlus/utils/translator.ts",
+    "baselineSha256": "35160abeedb7739da7897e9ef79a4715ff43f56a69a9f3544265578bfd301378",
+    "reviewedSha256": "35160abeedb7739da7897e9ef79a4715ff43f56a69a9f3544265578bfd301378",
+    "status": "reviewed",
+    "summary": "Reviewed pinned dictionary loaders/cache retry, language detection, punctuation conversion and remote translation fallbacks read-only; no network exercised, remote response schemas remain service assumptions.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/unitConverter/converter.ts",
+    "baselineSha256": "76a83ec79ebf7bc9eedcf2a242adf30401fad1402ee69ff43124093aefc9b1f2",
+    "reviewedSha256": "0d6e0e3f77c78249dbf3bc6a3db50897aa1fd13177de0c2b78d2f77fc7688e1b",
+    "status": "changed",
+    "summary": "Reviewed every unit regex/conversion and replacement ordering; process speed before distance, carry rounded inches into feet and avoid treating ordinary input words as inch units; restored singular foot recognition.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/unitConverter/ConverterAccessory.tsx",
+    "baselineSha256": "e9e252a4e84dbd64259e27206adff4a4b3d3208618d84aa11244ed1d955213eb",
+    "reviewedSha256": "6e53ab89ca5b5d2ca92aca6b4d041c33d1fc034ffb26465b8508409b2db81b5f",
+    "status": "changed",
+    "summary": "Reviewed conversion accessory and icon rendering; reset converted text when message identity/content changes and preserve a newer mounted setter during older view cleanup.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/unitConverter/index.tsx",
+    "baselineSha256": "60ab0f9a896555445c1f18997056fc72d123bbf3371abda36aa82186cb794d71",
+    "reviewedSha256": "238ecc5d10cc1d4685c0d57db6f2d4c14d0864ff2d79b87e715428533272da5c",
+    "status": "changed",
+    "summary": "Reviewed conversion popover/settings registration; declare MessageAccessoriesAPI dependency and remove accessory/setter state on stop.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/unitConverter/style.css",
+    "baselineSha256": "367644972710ddef74c655ee1d54d91f59bca3c273d1678d5ffb259b5b931001",
+    "reviewedSha256": "367644972710ddef74c655ee1d54d91f59bca3c273d1678d5ffb259b5b931001",
+    "status": "reviewed",
+    "summary": "Reviewed conversion text, icon spacing and accessible dismissal focus styles; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/universalMention/index.tsx",
+    "baselineSha256": "961817d30843e6042a6cbc9098239a36c41217e97840de1f63cecb1ec5f7a644",
+    "reviewedSha256": "961817d30843e6042a6cbc9098239a36c41217e97840de1f63cecb1ec5f7a644",
+    "status": "reviewed",
+    "summary": "Read-only review of cached user autocomplete candidates, settings and filters; no mention-access override/patch or discovery capability enhanced or exercised.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/vcPanelSettings/index.tsx",
+    "baselineSha256": "15542225f7ac122fdd6e7c6c5560a177cdaedf993dbb7b062da8a5c6aadd726f",
+    "reviewedSha256": "15542225f7ac122fdd6e7c6c5560a177cdaedf993dbb7b062da8a5c6aadd726f",
+    "status": "reviewed",
+    "summary": "Reviewed all volume/device/camera state controls and event subscription cleanup, visibility preferences and panel toggle; no live audio settings or runtime patch validation.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/vcPanelSettings/style.css",
+    "baselineSha256": "9315d6782cabd4f26cb0f36e8b03884f0bc33fe5e31da647e42afb1ad109b162",
+    "reviewedSha256": "9315d6782cabd4f26cb0f36e8b03884f0bc33fe5e31da647e42afb1ad109b162",
+    "status": "reviewed",
+    "summary": "Reviewed panel-settings hover affordance stylesheet; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceButtons/index.tsx",
+    "baselineSha256": "88b7b7022b54a9e29a0f3c221014e49d3981fb31ef4f1883b361122ec8246273",
+    "reviewedSha256": "88b7b7022b54a9e29a0f3c221014e49d3981fb31ef4f1883b361122ec8246273",
+    "status": "reviewed",
+    "summary": "Reviewed voice user-button placement and settings visibility composition; runtime patch declaration remains unexecuted.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceButtons/settings.ts",
+    "baselineSha256": "9deff2db5c01aa28bece71672d8c5f4934e450e86ae46851bd8481cafd86bb86",
+    "reviewedSha256": "9deff2db5c01aa28bece71672d8c5f4934e450e86ae46851bd8481cafd86bb86",
+    "status": "reviewed",
+    "summary": "Reviewed every voice-button preference/default and dependent-control disabling condition; current preferences preserved.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceButtons/styles.css",
+    "baselineSha256": "ce2860272ff6d4f514029862d0d2b3fa992f00795c0cb8f2f779bd25b66bf9e9",
+    "reviewedSha256": "ce2860272ff6d4f514029862d0d2b3fa992f00795c0cb8f2f779bd25b66bf9e9",
+    "status": "reviewed",
+    "summary": "Reviewed voice row ordering, padding and collapsed-list visibility selectors; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceButtons/utils.tsx",
+    "baselineSha256": "65dc09c3192c176ff707c627cb20d9f93a949135a6644c3bd0d605defe7e8eaa",
+    "reviewedSha256": "438bfcbc5e5dd6f06507ca1a3dc68b5d148224e893cffc4f3e73d0cf64b57ca4",
+    "status": "changed",
+    "summary": "Reviewed self/local/server mute/deafen action selection and optional soundboard/video toggles; fixed other-user server actions wrongly toggling the moderator self state and made displayed mute state follow the same target decision.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceChannelLog/components/LogsButton.tsx",
+    "baselineSha256": "edc75cabaa9dfb4838c45a9f619cc3d17af50c430aca1c425c1510ecb764917e",
+    "reviewedSha256": "edc75cabaa9dfb4838c45a9f619cc3d17af50c430aca1c425c1510ecb764917e",
+    "status": "reviewed",
+    "summary": "Reviewed selected voice-channel toolbar button visibility and log-modal invocation; no live channel actions performed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceChannelLog/components/VoiceChannelLogEntryComponent.css",
+    "baselineSha256": "90aed37ac8b4802e115eb54f2bb2090d8da462a57431f0acaf6c330af38ef462",
+    "reviewedSha256": "90aed37ac8b4802e115eb54f2bb2090d8da462a57431f0acaf6c330af38ef462",
+    "status": "reviewed",
+    "summary": "Reviewed full voice-log timestamp, icon, avatar, action, separator and scroller stylesheet; stylesheet lint passed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceChannelLog/components/VoiceChannelLogEntryComponent.tsx",
+    "baselineSha256": "9c6d09fc276c62996e7bd93c39935592399409ef33480384063ea162e7017bee",
+    "reviewedSha256": "9c6d09fc276c62996e7bd93c39935592399409ef33480384063ea162e7017bee",
+    "status": "reviewed",
+    "summary": "Reviewed complete event description/identity presentation, activity icons, profile links and sound preview/download actions; no live media or navigation performed.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceChannelLog/components/VoiceChannelLogEntryIcons.tsx",
+    "baselineSha256": "51f42f09b0ae27c3512d3c983cc3bd90a3dd543e01f43e3c4e40e599a9e0280e",
+    "reviewedSha256": "51f42f09b0ae27c3512d3c983cc3bd90a3dd543e01f43e3c4e40e599a9e0280e",
+    "status": "reviewed",
+    "summary": "Reviewed all ten event type icon/color mappings and SVG presentation paths against the log-event union.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceChannelLog/components/VoiceChannelLogModal.tsx",
+    "baselineSha256": "5cfb5cd68ccb80055a1319bf08599586dd118369b91823ed01b8087fdcf80dc3",
+    "reviewedSha256": "5cfb5cd68ccb80055a1319bf08599586dd118369b91823ed01b8087fdcf80dc3",
+    "status": "reviewed",
+    "summary": "Reviewed useSyncExternalStore log subscription, channel filter, date grouping, clear action and empty state.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceChannelLog/index.tsx",
+    "baselineSha256": "28e2f966f7a68b2297ec018490e914727d9849c0522a5b44856c973e062b97a7",
+    "reviewedSha256": "1c3adbd87c5b1a831415cc1a848c45f07415ef347e52eeab704d82b1dee79134",
+    "status": "changed",
+    "summary": "Reviewed complete voice event/session/activity handling and bounded metadata cache; invalidate async activity-name completions after session/stop/account changes and reset session bookkeeping on start.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceChannelLog/logs.ts",
+    "baselineSha256": "2c75c9f71791aaade5befc942db908a944769b0c0ca151db1114c6bf5a248b91",
+    "reviewedSha256": "2c75c9f71791aaade5befc942db908a944769b0c0ca151db1114c6bf5a248b91",
+    "status": "reviewed",
+    "summary": "Reviewed immutable per-channel snapshot replacement, stable empty snapshots and subscription cleanup; existing logs remain memory-only and user-clearable.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceChannelLog/settings.ts",
+    "baselineSha256": "cdac77a116980ffb8a7ab71aa137ca4c620d44a39d71a6c6191c1d7c6231264f",
+    "reviewedSha256": "cdac77a116980ffb8a7ab71aa137ca4c620d44a39d71a6c6191c1d7c6231264f",
+    "status": "reviewed",
+    "summary": "Reviewed all voice-log event visibility preferences, blocked-user filtering, sound volume and requested extension options; file extension does not promise media transcoding.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceChannelLog/types.ts",
+    "baselineSha256": "0e4b5ab1dd397b014d58ce0272f1a2bed35f7b9b5c2be62a6da5c7ec5ccb196a",
+    "reviewedSha256": "0e4b5ab1dd397b014d58ce0272f1a2bed35f7b9b5c2be62a6da5c7ec5ccb196a",
+    "status": "reviewed",
+    "summary": "Reviewed complete voice log event, snapshot, participant, emoji and activity payload interfaces against all event handlers and components.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceChannelLog/utils.ts",
+    "baselineSha256": "99871a0761a48639bdc2074d082836c32551181ace15092a75266baab47def99",
+    "reviewedSha256": "4bbc7f0b2d816ca89a0ff46e36b4fabc8becbbcf968fe2c8641695c5c8890338",
+    "status": "changed",
+    "summary": "Reviewed elapsed-time formatting, emoji/media URLs and save branches; reject failed HTTP responses before reading/saving their bodies and catch native save failures with UI feedback.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/voiceRejoin/index.tsx",
+    "baselineSha256": "87c99fea817c815e4dbd2433883806c83571a7f1e2b59f3644429eeeaa0b419b",
+    "reviewedSha256": "87c99fea817c815e4dbd2433883806c83571a7f1e2b59f3644429eeeaa0b419b",
+    "status": "reviewed",
+    "summary": "Read-only review of persisted voice-session cache, reconnect generation cancellation, channel polling and call-ended/timeout options; no reconnect automation enhanced or exercised. Cross-account persistent keys remain a limitation.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/wigglyText/index.tsx",
+    "baselineSha256": "0630eb5476b6ca28c072b6af1319e43ded6780a4bc325150cae6e84a5a3ba899",
+    "reviewedSha256": "5a4f8d6622783b822b68a5f77e3e5390f5c6506cc33d825036e732f547356066",
+    "status": "changed",
+    "summary": "Reviewed style lifecycle, all wiggle parsing/rendering branches and example settings; safe style updates/stop when disabled, clone nested React elements and input arrays, and keep Unicode code points whole in per-character rendering.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/wigglyText/ui/components/ExampleWiggle.tsx",
+    "baselineSha256": "80f68e92a113abb89bb71ea5440d6fbc7ab565fa06243c02ed391d06049964f8",
+    "reviewedSha256": "818be105c2c5da34a47a7203dbdc2d21c6266d79468cf762f71fa49fca4004f6",
+    "status": "changed",
+    "summary": "Reviewed example wiggle spans/animation offsets; preserve complete Unicode code points instead of splitting surrogate pairs.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/writeUpperCase/index.ts",
+    "baselineSha256": "8ae670974d944813de7c8c64d06d9ae9b80d42ebdc7120e7d6502c9dd08fb422",
+    "reviewedSha256": "8ae670974d944813de7c8c64d06d9ae9b80d42ebdc7120e7d6502c9dd08fb422",
+    "status": "reviewed",
+    "summary": "Reviewed blocked-prefix parsing, sentence/whitespace preservation and pre-send listener start/stop lifecycle; no messages sent.",
+    "validation": [
+      "Full file semantic review (complete source, CSS or type declaration).",
+      "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
+      "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
+      "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
+    ]
+  }
+]

@@ -34,7 +34,7 @@ async function measure(before) {
   const web = {};
   runInNewContext(compile(load('web.ts', before)), {
     exports: web, setImmediate,
-    document: { createElement: () => input = { style: {}, files: [], click() {} }, body: { appendChild() {}, removeChild() {} } }
+    document: { createElement: () => input = { style: {}, files: [], click() {}, remove() {} }, body: { appendChild() {}, removeChild() {} } }
   });
   web.chooseFile('text/plain').then(value => { settled = true; result = value; });
   await new Promise(setImmediate);
@@ -53,4 +53,4 @@ Expected output:
 {"source":"working tree","renders":100,"observers":1,"disconnects":1,"layoutReads":1,"cancellation":{"settled":true,"result":null}}
 ```
 
-Run the seven focused regression checks with `pnpm exec tsx --test scripts/testChooseFile.ts scripts/testUseIntersection.ts`. They also cover file selection, empty selection, element replacement, observer mode changes, one-shot visibility, and cleanup. No application interaction or network access is required.
+Run the focused regression checks with `pnpm exec tsx --test scripts/testChooseFile.ts scripts/testUseIntersection.ts`. They also cover file selection, empty selection, element replacement, observer mode changes, one-shot visibility, and cleanup. No application interaction or network access is required.

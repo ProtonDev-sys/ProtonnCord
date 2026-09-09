@@ -11,10 +11,9 @@ import { BaseText } from "@components/BaseText";
 import { Flex } from "@components/Flex";
 import { ImageIcon, LinkIcon, OpenExternalIcon } from "@components/Icons";
 import { SeekBar } from "@equicordplugins/musicControls/spotify/SeekBar";
-import { debounce } from "@shared/debounce";
 import { copyWithToast, openImageModal } from "@utils/discord";
 import { classes } from "@utils/misc";
-import { ContextMenuApi, FluxDispatcher, Menu, React, useEffect, useState, useStateFromStores } from "@webpack/common";
+import { ContextMenuApi, FluxDispatcher, lodash, Menu, React, useEffect, useMemo, useState, useStateFromStores } from "@webpack/common";
 
 import { type PlayerState, type Repeat, TidalStore } from "./TidalStore";
 
@@ -31,7 +30,6 @@ function Svg(path: string, label: string) {
     return () => (
         <svg
             className={classes(cl("button-icon"), cl(label))}
-            aria-labelledby="title"
             height="24"
             width="24"
             viewBox="0 0 24 24"
@@ -39,7 +37,6 @@ function Svg(path: string, label: string) {
             aria-label={label}
             focusable={false}
         >
-            <title id="title">{label}</title>
             <path d={path} />
         </svg>
     );
@@ -146,13 +143,13 @@ function Controls() {
     );
 }
 
-const seek = debounce((v: number) => {
-    TidalStore.seek(v);
-});
-
 function TdlSeekBar() {
     const { songDuration, id: videoId } = TidalStore.track ?? { songDuration: 0, id: 0 };
     const durationMs = songDuration * 1000;
+    const seek = useMemo(() => lodash.debounce((value: number) => {
+        if (TidalStore.track?.id === videoId) TidalStore.seek(value);
+    }, 300), [videoId]);
+    useEffect(() => () => seek.cancel(), [seek]);
 
     const [storePosition, isPlaying] = useStateFromStores(
         [TidalStore],
@@ -211,6 +208,9 @@ function TdlSeekBar() {
 }
 
 function AlbumContextMenu({ track }: { track: PlayerState["track"]; }) {
+    const volume = useStateFromStores([TidalStore], () => TidalStore.volume);
+    const setVolume = useMemo(() => lodash.debounce((value: number) => TidalStore.setVolume(value), 300), []);
+    useEffect(() => () => setVolume.cancel(), [setVolume]);
     return (
         <Menu.Menu
             navId="tdl-album-menu"
@@ -232,10 +232,10 @@ function AlbumContextMenu({ track }: { track: PlayerState["track"]; }) {
                     <Menu.MenuSliderControl
                         {...props}
                         ref={ref}
-                        value={TidalStore.volume}
+                        value={volume}
                         minValue={0}
                         maxValue={100}
-                        onChange={debounce((v: number) => TidalStore.setVolume(v))}
+                        onChange={setVolume}
                     />
                 )}
             />

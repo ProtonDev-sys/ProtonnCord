@@ -9,7 +9,7 @@ import "./style.css";
 import { Devs, EquicordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { Channel } from "@vencord/discord-types";
-import { GuildStore, React, SelectedGuildStore } from "@webpack/common";
+import { GuildStore, React } from "@webpack/common";
 import { JSX } from "react";
 
 import { isEnabled, returnChannelBadge, settings } from "./settings";
@@ -61,8 +61,7 @@ export default definePlugin({
         const isPrivate = channel.isPrivate() || threadMetadata?.locked || channel.isArchivedThread();
         const isNSFW = nsfw || channel.isNSFW();
 
-        const selectedGuildId = SelectedGuildStore.getGuildId();
-        const guild = selectedGuildId ? GuildStore.getGuild(selectedGuildId) : null;
+        const guild = channel.guild_id ? GuildStore.getGuild(channel.guild_id) : null;
 
         const badgeConditions = [
             { id: 6101, condition: isPrivate, title: "This channel is locked." },

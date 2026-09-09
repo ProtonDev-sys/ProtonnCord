@@ -1,6 +1,6 @@
 # Rendering performance measurements, 4 September 2026
 
-This change removes repeated work in custom notifications, Timezones message headers, and Secure Messaging mention checks. It adds no dependencies. The measurements below compare actual source from nightly commit `21ee734fd3380f075bffadcdf7f61205dcf3260a` with the implementation in this PR.
+These historical measurements describe the changes introduced on 4 September 2026 in custom notifications, Timezones message headers, and Secure Messaging mention checks. They compare actual source from nightly commit `21ee734fd3380f075bffadcdf7f61205dcf3260a` with that implementation. Later fixes can change the current working tree; the recorded timings are not measurements of every subsequent revision.
 
 These are isolated code-path measurements on synthetic data. They do not measure Discord FPS, total CPU use, startup time, DOM layout, or encryption/decryption latency.
 

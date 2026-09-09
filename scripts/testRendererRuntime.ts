@@ -379,9 +379,9 @@ function updateFixture(flags = { web: false, disabled: false, dev: false }, sile
     const intervals = new Set<() => void>();
     const notices: string[] = [];
     const trayStates: boolean[] = [];
-    const state = { checks: 0, updates: 0, relaunches: 0 };
+    const state = { checks: 0, updates: 0, relaunches: 0, repairSucceeds: true };
     let check = async () => true;
-    const settings = { autoUpdate: silent, autoUpdateNotification: !silent };
+    const settings = { autoUpdate: silent, autoUpdateNotification: !silent, updateBranch: "main" };
     const module = loadService<typeof import("../src/runtime/updates")>("updates", {
         "@api/Notices": { popNotice() {}, showNotice: (message: string) => { notices.push(message); } },
         "@api/Settings": { Settings: settings },
@@ -391,6 +391,7 @@ function updateFixture(flags = { web: false, disabled: false, dev: false }, sile
             checkForUpdates: () => { state.checks++; return check(); },
             isOutdated: false,
             update: async () => { state.updates++; return true; },
+            repair: async () => { state.updates++; return state.repairSucceeds; },
             UpdateLogger: { error() {} },
         },
     }, {
@@ -458,4 +459,22 @@ test("the public entry retains first plugin import and exposes only frozen runti
     assert.equal(firstImport?.moduleSpecifier.getText(source), '"~plugins"');
     assert.match(source.text, /export const Runtime = Object\.freeze\(\{ getRuntimeStatus \}\)/u);
     assert.match(source.text, /startRenderer\(\);/u);
+});
+
+test("updater drops stale branch notices and repair only restarts after success", async () => {
+    const f = updateFixture(undefined, true);
+    const check = deferred<boolean>();
+    f.setCheck(() => check.promise);
+    const service = f.createUpdateService();
+    const initial = service.runInitial!();
+    f.settings.updateBranch = "nightly";
+    check.resolve(true);
+    await initial;
+    assert.equal(f.state.updates, 0);
+    assert.equal(f.notices.length, 0);
+    assert.deepEqual(f.trayStates, [false]);
+    f.state.repairSucceeds = false;
+    await [...f.listeners.repair][0]();
+    assert.equal(f.state.relaunches, 0);
+    service.dispose();
 });

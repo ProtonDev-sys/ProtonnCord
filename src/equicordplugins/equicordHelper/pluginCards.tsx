@@ -20,7 +20,7 @@ import { Message } from "@vencord/discord-types";
 import { showToast, Tooltip, useMemo } from "@webpack/common";
 import { JSX } from "react";
 
-import plugins, { ExcludedPlugins } from "~plugins";
+import { ExcludedPlugins, PluginManifest as plugins } from "~plugins";
 
 export function ChatPluginCard({ url, description }: { url: string, description: string; }) {
     const pluginNameFromUrl = new URL(url).pathname.split("/")[2];
@@ -31,7 +31,7 @@ export function ChatPluginCard({ url, description }: { url: string, description:
 
     const pluginName = actualPluginName || pluginNameFromUrl;
 
-    useSettings([`plugins.${pluginName ?? ""}.enabled`]);
+    useSettings();
 
     if (!pluginName) return null;
 
@@ -75,8 +75,8 @@ export function ChatPluginCard({ url, description }: { url: string, description:
         return o;
     }, []);
 
-    const required = isPluginRequired(pluginName);
-    const dependents = depMap[p.name]?.filter(d => isPluginEnabled(d));
+    const dependents = depMap[p.name]?.filter(d => isPluginEnabled(d)) ?? [];
+    const required = isPluginRequired(pluginName) || dependents.length > 0;
 
     if (required) {
         const tooltipText = p.required || !dependents.length

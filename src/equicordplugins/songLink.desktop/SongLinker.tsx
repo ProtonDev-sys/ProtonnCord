@@ -19,12 +19,15 @@ interface SongLinkerProps {
 
 export default function SongLinker({ url, onResolved }: SongLinkerProps) {
     const [songData, setSongData] = useState<SongLinkResult>();
+    const [failed, setFailed] = useState(false);
+    const { servicesSettings, userCountry } = settings.use(["servicesSettings", "userCountry"]);
 
     useEffect(() => {
         let cancelled = false;
 
         async function loadSongData() {
-            const cached = pl.getFromCache(url);
+            setFailed(false);
+            const cached = pl.getFromCache(url, userCountry);
             if (cached) {
                 setSongData(cached);
                 onResolved?.(url, cached);
@@ -34,14 +37,17 @@ export default function SongLinker({ url, onResolved }: SongLinkerProps) {
             setSongData(undefined);
 
             try {
-                const sd = await Native.getTrackData(url);
+                const sd = await Native.getTrackData(url, userCountry);
                 if (cancelled) return;
 
-                pl.addToCache(url, sd);
+                pl.addToCache(url, sd, userCountry);
                 setSongData(sd);
                 onResolved?.(url, sd);
             } catch (error) {
-                if (!cancelled) console.error("Failed to fetch song link", error);
+                if (!cancelled) {
+                    setFailed(true);
+                    console.error("Failed to fetch song link", error);
+                }
             }
         }
 
@@ -50,7 +56,7 @@ export default function SongLinker({ url, onResolved }: SongLinkerProps) {
         return () => {
             cancelled = true;
         };
-    }, [url]);
+    }, [url, userCountry]);
 
     return <BaseText>
         {
@@ -63,13 +69,11 @@ export default function SongLinker({ url, onResolved }: SongLinkerProps) {
                     </BaseText>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", marginTop: "10px" }}>
                         {
-                            Object.keys(songData.links).map(service => settings.store.servicesSettings[service]?.enabled && Providers[service] && <Button key={`${service}-${url}`} style={{
+                            Object.keys(songData.links).map(service => servicesSettings[service]?.enabled && Providers[service] && <Button key={`${service}-${url}`} style={{
                                 width: "20px !important"
                                 // @ts-ignore
                             }} variant="secondary" onClick={() => {
-                                // FIXME: fix type error
-                                // @ts-expect-error ???
-                                VencordNative.native.openExternal(settings.store.servicesSettings[service].openInNative && Providers[service].native ? songData.links[service].nativeUri : songData.links[service].url);
+                                VencordNative.native.openExternal(servicesSettings[service].openInNative && Providers[service].native && songData.links[service].nativeUri ? songData.links[service].nativeUri : songData.links[service].url);
                             }}>
                                 <img
                                     src={Providers[service].logo}
@@ -80,7 +84,7 @@ export default function SongLinker({ url, onResolved }: SongLinkerProps) {
                         }
                     </div>
                 </div>
-            </Card> : <BaseText>Loading song link...</BaseText>
+            </Card> : <BaseText>{failed ? "Could not load this song link." : "Loading song link..."}</BaseText>
         }
     </BaseText >;
 }

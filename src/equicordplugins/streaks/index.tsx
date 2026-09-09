@@ -16,9 +16,29 @@ import { ChannelStore, moment, Tooltip, UserStore } from "@webpack/common";
 
 import { settings } from "./settings";
 import { useAuthorizationStore } from "./stores/AuthorizationStore";
-import { useStreaksStore } from "./stores/StreaksStore";
+import { setStreaksActive, useStreaksStore } from "./stores/StreaksStore";
 
 const cl = classNameFactory("vc-streaks-");
+const pendingRefreshes = new Map<string, ReturnType<typeof setTimeout>>();
+let active = false;
+let generation = 0;
+
+function clearRefreshes() {
+    generation++;
+    for (const timer of pendingRefreshes.values()) clearTimeout(timer);
+    pendingRefreshes.clear();
+}
+
+async function initialize() {
+    if (!active) return;
+    clearRefreshes();
+    const currentGeneration = generation;
+    useAuthorizationStore.getState().init();
+    if (useAuthorizationStore.getState().isAuthorized()) {
+        await useStreaksStore.getState().migrate();
+        if (active && currentGeneration === generation) await useStreaksStore.getState().fetch();
+    }
+}
 
 const STREAK_THRESHOLDS = {
     ELITE: 100,
@@ -40,6 +60,7 @@ const colorFor = (streak: number) => {
 };
 
 const StreakBadge = ({ userId }: { userId: string; }) => {
+    settings.use();
     const streaks = useStreaksStore(state => state.streaks);
     const streak = streaks[userId];
 
@@ -70,27 +91,33 @@ export default definePlugin({
     tags: ["Friends", "Fun"],
     dependencies: ["MessageDecorationsAPI", "MemberListDecoratorsAPI", "ConcatenatedModules"],
     settings,
+    async start() {
+        active = true;
+        setStreaksActive(true);
+        await initialize();
+    },
+    stop() {
+        active = false;
+        clearRefreshes();
+        setStreaksActive(false);
+    },
 
     flux: {
         async CONNECTION_OPEN() {
-            useAuthorizationStore.getState().init();
-            if (useAuthorizationStore.getState().isAuthorized()) {
-                await useStreaksStore.getState().migrate();
-                await useStreaksStore.getState().fetch();
-            }
+            await initialize();
         },
         async MESSAGE_CREATE({ optimistic, type, message, channelId }: { optimistic: boolean; type: string; message: Message; channelId: string; }) {
-            if (optimistic || type !== "MESSAGE_CREATE" || message.state === "SENDING") return;
+            if (!active || optimistic || type !== "MESSAGE_CREATE" || !message || message.state === "SENDING") return;
             if (message.author?.bot) return;
 
             const channel = ChannelStore.getChannel(channelId);
-            if (!channel.isDM()) return;
+            if (!channel?.isDM()) return;
 
             const recipientId = channel.recipients[0];
             if (!recipientId) return;
 
             const me = UserStore.getCurrentUser()?.id;
-            if (!useAuthorizationStore.getState().isAuthorized()) return;
+            if (!me || !useAuthorizationStore.getState().isAuthorized()) return;
 
             const today = moment().format("YYYY-MM-DD");
             const cached = useStreaksStore.getState().streaks[recipientId];
@@ -102,16 +129,23 @@ export default definePlugin({
                     useStreaksStore.getState().update(recipientId);
                 }
             } else if (message.author.id === recipientId) {
-                if (!theirFlag) {
-                    setTimeout(async () => {
-                        const before = useStreaksStore.getState().streaks[recipientId]?.count;
-                        await useStreaksStore.getState().refresh(recipientId);
-                        const after = useStreaksStore.getState().streaks[recipientId]?.count;
+                if (!theirFlag && !pendingRefreshes.has(recipientId)) {
+                    const currentGeneration = generation;
+                    pendingRefreshes.set(recipientId, setTimeout(async () => {
+                        try {
+                            if (!active || generation !== currentGeneration || UserStore.getCurrentUser()?.id !== me) return;
+                            const before = useStreaksStore.getState().streaks[recipientId]?.count;
+                            await useStreaksStore.getState().refresh(recipientId);
+                            if (!active || generation !== currentGeneration || UserStore.getCurrentUser()?.id !== me) return;
+                            const after = useStreaksStore.getState().streaks[recipientId]?.count;
 
-                        if (before === after) {
-                            useStreaksStore.getState().update(recipientId);
+                            if (before === after) {
+                                await useStreaksStore.getState().update(recipientId);
+                            }
+                        } finally {
+                            if (generation === currentGeneration) pendingRefreshes.delete(recipientId);
                         }
-                    }, 1000);
+                    }, 1000));
                 }
             }
         },

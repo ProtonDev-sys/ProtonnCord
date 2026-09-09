@@ -59,17 +59,20 @@ export default definePlugin({
     ],
 
     CountBadge: ErrorBoundary.wrap(({ channel }: { channel: Channel; }) => {
+        const { showOnMutedChannels, notificationCountLimit } = settings.use();
         const unreadCount = useStateFromStores([ReadStateStore], () => ReadStateStore.getUnreadCount(channel.id));
+        const muted = useStateFromStores([UserGuildSettingsStore, JoinedThreadsStore], () =>
+            UserGuildSettingsStore.isChannelMuted(channel.guild_id, channel.id) || JoinedThreadsStore.isMuted(channel.id));
         if (!unreadCount) return null;
 
-        if (!settings.store.showOnMutedChannels && (UserGuildSettingsStore.isChannelMuted(channel.guild_id, channel.id) || JoinedThreadsStore.isMuted(channel.id)))
+        if (!showOnMutedChannels && muted)
             return null;
 
         return (
             <NumberBadge
                 color="var(--brand-500)"
                 count={
-                    unreadCount > 99 && settings.store.notificationCountLimit
+                    unreadCount > 99 && notificationCountLimit
                         ? "+99"
                         : unreadCount
                 }

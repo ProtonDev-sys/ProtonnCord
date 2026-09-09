@@ -8,23 +8,35 @@ import { NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { Channel, Message, User } from "@vencord/discord-types";
-import { ChannelStore, Constants, Menu, NavigationRouter, RestAPI, SelectedChannelStore, SelectedGuildStore, Toasts } from "@webpack/common";
+import { ChannelStore, Constants, Menu, NavigationRouter, RestAPI, SelectedChannelStore, Toasts, UserStore } from "@webpack/common";
+
+let navigationGeneration = 0;
 
 function jumpToFirstMessage(channelId: string, guildId?: string | null) {
+    navigationGeneration++;
     NavigationRouter.transitionTo(`/channels/${guildId ?? "@me"}/${channelId}/0`);
 }
 
 async function jumpToLastMessage(channelId: string, guildId?: string | null) {
-    const res = await RestAPI.get({
-        url: Constants.Endpoints.MESSAGES(channelId),
-        query: { limit: 1 }
-    });
-    const messageId = res.body?.[0]?.id;
-    if (!messageId) return;
-    NavigationRouter.transitionTo(`/channels/${guildId ?? "@me"}/${channelId}/${messageId}`);
+    const generation = ++navigationGeneration;
+    const accountId = UserStore.getCurrentUser()?.id;
+    try {
+        const res = await RestAPI.get({
+            url: Constants.Endpoints.MESSAGES(channelId),
+            query: { limit: 1 }
+        });
+        if (generation !== navigationGeneration || accountId !== UserStore.getCurrentUser()?.id) return;
+        const messageId = res.body?.[0]?.id;
+        if (!messageId) return;
+        NavigationRouter.transitionTo(`/channels/${guildId ?? "@me"}/${channelId}/${messageId}`);
+    } catch {
+        if (generation === navigationGeneration) Toasts.show({ type: Toasts.Type.FAILURE, message: "Failed to find the last message.", id: Toasts.genId() });
+    }
 }
 
 async function jumpToUserMessage(channelId: string, guildId: string, userId: string, first: boolean) {
+    const generation = ++navigationGeneration;
+    const accountId = UserStore.getCurrentUser()?.id;
     try {
         const res = await RestAPI.get({
             url: Constants.Endpoints.SEARCH_GUILD(guildId),
@@ -36,7 +48,10 @@ async function jumpToUserMessage(channelId: string, guildId: string, userId: str
             }
         });
 
-        const messageId = res.body?.messages?.[0]?.[0]?.id;
+        if (generation !== navigationGeneration || accountId !== UserStore.getCurrentUser()?.id) return;
+        const results: Message[] = res.body?.messages?.flat?.() ?? [];
+        const messageId = results.find(message => message.author?.id === userId && message.channel_id === channelId && (message as Message & { hit?: boolean; }).hit)?.id
+            ?? results.find(message => message.author?.id === userId && message.channel_id === channelId)?.id;
         if (!messageId) {
             Toasts.show({
                 type: Toasts.Type.FAILURE,
@@ -48,6 +63,7 @@ async function jumpToUserMessage(channelId: string, guildId: string, userId: str
 
         NavigationRouter.transitionTo(`/channels/${guildId}/${channelId}/${messageId}`);
     } catch (e) {
+        if (generation !== navigationGeneration || accountId !== UserStore.getCurrentUser()?.id) return;
         Toasts.show({
             type: Toasts.Type.FAILURE,
             message: "Failed to search for messages.",
@@ -101,8 +117,8 @@ const UserMenuPatch: NavContextMenuPatchCallback = (children, { user, channel }:
 
 const MessageMenuPatch: NavContextMenuPatchCallback = (children, { message }: { message: Message; }) => {
     if (!message) return;
-    const channelId = SelectedChannelStore.getChannelId();
-    const guildId = SelectedGuildStore.getGuildId();
+    const channelId = message.channel_id;
+    const guildId = ChannelStore.getChannel(channelId)?.guild_id;
     if (!channelId || !guildId) return;
     children.push(
         <Menu.MenuItem
@@ -123,6 +139,9 @@ export default definePlugin({
     description: "Adds context menu options to jump to the start or bottom of a channel/DM.",
     tags: ["Chat", "Utility"],
     authors: [Devs.Samwich, Devs.thororen],
+    stop() {
+        navigationGeneration++;
+    },
     contextMenus: {
         "channel-context": ChannelMenuPatch,
         "gdm-context": ChannelMenuPatch,

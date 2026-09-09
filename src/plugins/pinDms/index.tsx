@@ -18,7 +18,7 @@ import { Clickable, ContextMenuApi, FluxDispatcher, Menu, React } from "@webpack
 import { contextMenus } from "./components/contextMenu";
 import { openCategoryModal, requireSettingsModal } from "./components/CreateCategoryModal";
 import { DEFAULT_CHUNK_SIZE } from "./constants";
-import { canMoveCategory, canMoveCategoryInDirection, Category, categoryLen, collapseCategory, getAllUncollapsedChannels, getCategoryByIndex, getCategoryChannels, getSections, init, isPinned, moveCategory, removeCategory, usePinnedDms } from "./data";
+import { canMoveCategory, canMoveCategoryInDirection, Category, categoryLen, collapseCategory, getAllUncollapsedChannels, getCategoryByIndex, getCategoryChannels, getSections, init, isPinned, moveCategory, removeCategory, reset, usePinnedDms } from "./data";
 
 interface ChannelComponentProps {
     children: React.ReactNode,
@@ -165,8 +165,14 @@ export default definePlugin({
 
     startAt: StartAt.WebpackReady,
     start: init,
+    stop() {
+        reset();
+        this._instance = undefined;
+        this.sections = null;
+    },
     flux: {
         CONNECTION_OPEN: init,
+        LOGOUT: reset,
     },
 
     usePinnedDms,
@@ -178,7 +184,7 @@ export default definePlugin({
 
     makeProps(instance, { sections }: { sections: number[]; }) {
         this._instance = instance;
-        this.sections = sections;
+        this.sections = [...sections];
 
         this.sections.splice(1, 0, ...this.getSections());
 

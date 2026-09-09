@@ -28,15 +28,20 @@
     cursor: pointer;
 }
 
-.vc-settings-quickActions-pill:hover {
-    background: var(--control-secondary-background-hover);
-    transform: translateY(-1px);
-    box-shadow: var(--elevation-high);
+.vc-settings-quickActions-pill:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
 }
 
 .vc-settings-quickActions-pill:focus-visible {
     outline: 2px solid var(--border-focus);
     outline-offset: 2px;
+}
+
+.vc-settings-quickActions-pill:hover:not(:disabled) {
+    background: var(--control-secondary-background-hover);
+    transform: translateY(-1px);
+    box-shadow: var(--elevation-high);
 }
 
 .vc-settings-quickActions-img {

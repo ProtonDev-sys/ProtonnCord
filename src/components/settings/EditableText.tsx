@@ -35,7 +35,15 @@ export function EditableText({ value, onChange, className }: EditableTextProps) 
     ) : (
         <BaseText
             className={className}
+            role="button"
+            tabIndex={0}
             onClick={() => setEditing(true)}
+            onKeyDown={e => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setEditing(true);
+                }
+            }}
             style={{ cursor: "pointer" }}
         >
             {value}

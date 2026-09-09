@@ -19,7 +19,7 @@ test("plugin enable defaults use the manifest without loading disabled definitio
         compilerOptions: { target: ScriptTarget.ES2022, module: ModuleKind.CommonJS }
     }).outputText;
     let loads = 0;
-    let definition: { settings: { def: Record<string, { default: number; }>; }; } | undefined;
+    let definition: { settings: { def: Record<string, { default: number | { items: string[]; }; }>; }; } | undefined;
     const plugins = Object.defineProperty({}, "Optional", {
         get() {
             if (!definition) {
@@ -36,7 +36,7 @@ test("plugin enable defaults use the manifest without loading disabled definitio
     };
     const store = runInNewContext(`${code}\nexports.SettingsStore;`, {
         exports: {}, settings, PluginManifest, plugins, SettingsStoreClass: SettingsStore,
-        IS_REPORTER: false, OptionType: { SELECT: 2 }, getLoadedPluginDefinition: () => definition
+        IS_REPORTER: false, OptionType: { SELECT: 2 }, getLoadedPluginDefinition: () => definition, structuredClone
     });
     assert.equal(store.store.plugins.Optional.enabled, false);
     assert.equal(store.store.plugins.Required.enabled, true);
@@ -52,6 +52,12 @@ test("plugin enable defaults use the manifest without loading disabled definitio
     assert.equal(loads, 1, "the definition is consulted only for a missing plugin option");
     definition!.settings.def.dynamic = { default: 9 };
     assert.equal(store.store.plugins.Optional.dynamic, 9, "loaded definitions may add settings beyond their static manifest");
+    const defaults = { items: ["original"] };
+    definition!.settings.def.object = { default: defaults };
+    store.store.plugins.Optional.object.items.push("edited");
+    assert.deepEqual(defaults.items, ["original"], "stored settings must not mutate the reset default");
+    delete store.store.plugins.Optional.object;
+    assert.deepEqual([...store.store.plugins.Optional.object.items], ["original"]);
     assert.equal(loads, 1);
 });
 

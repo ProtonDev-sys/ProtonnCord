@@ -55,7 +55,7 @@ export type SongLinkResult = {
 };
 
 export const Native = VencordNative.pluginHelpers.SongLink as PluginNative<typeof import("./native")>;
-const MUSIC_LINK_REGEX = /https:\/\/(?:open|play)\.spotify\.com\/track\/[a-zA-Z0-9]+|https:\/\/(?:music|itunes)\.apple\.com\/[a-z]{2}\/album\/\S+|https:\/\/music\.youtube\.com\/watch\?v=[0-9A-Za-z_-]+|https:\/\/tidal\.com\/track\/[0-9]+\/u/g;
+const MUSIC_LINK_REGEX = /https:\/\/(?:open|play)\.spotify\.com\/track\/[a-zA-Z0-9]+|https:\/\/(?:music|itunes)\.apple\.com\/[a-z]{2}\/album\/\S+|https:\/\/music\.youtube\.com\/watch\?v=[0-9A-Za-z_-]+|https:\/\/(?:listen\.)?tidal\.com\/(?:browse\/)?track\/[0-9]+/g;
 const MAX_SONG_LINK_CACHE_ENTRIES = 100;
 
 function extractMusicLinks(content: string) {
@@ -112,7 +112,7 @@ function SongLinkerList({ urls }: { urls: string[]; }) {
     const seenKeys = new Set<string>();
     const dedupedUrls = urls.filter(url => {
         const key = resolvedKeys[url];
-        if (key === null) return true;
+        if (key == null) return true;
         if (seenKeys.has(key)) return false;
         seenKeys.add(key);
         return true;
@@ -141,7 +141,8 @@ export default definePlugin({
     Providers,
     cache: ({} as Record<string, SongLinkResult | undefined>),
     cacheKeys: [] as string[],
-    getFromCache(link: string) {
+    getFromCache(link: string, country = settings.store.userCountry) {
+        link = `${country}\0${link}`;
         const cached = this.cache[link];
         if (!cached) return undefined;
 
@@ -151,7 +152,8 @@ export default definePlugin({
 
         return cached;
     },
-    addToCache(link, data: SongLinkResult) {
+    addToCache(link: string, data: SongLinkResult, country = settings.store.userCountry) {
+        link = `${country}\0${link}`;
         const existingIndex = this.cacheKeys.indexOf(link);
         if (existingIndex >= 0) this.cacheKeys.splice(existingIndex, 1);
         this.cacheKeys.push(link);
@@ -212,7 +214,7 @@ export default definePlugin({
                         return;
                     }
 
-                    sendMessage(ctx.channel.id, { content: formatted });
+                    await sendMessage(ctx.channel.id, { content: formatted });
                 } catch (e: any) {
                     sendBotMessage(ctx.channel.id, {
                         content: "Failed to resolve music link",

@@ -80,15 +80,17 @@ interface OpenImageProps {
 
 function openImage({ url, width, height, event }: OpenImageProps) {
     event?.stopPropagation();
-    const u = new URL(url, window.location.href);
+    if (typeof url !== "string" || !url) return;
+    let u: URL;
+    try { u = new URL(url, window.location.href); } catch { return; }
 
     const format = url.startsWith("/")
         ? "png"
         : u.searchParams.get("animated") === "true"
             ? "gif"
-            : settings.store.format;
+            : ["png", "jpg", "webp"].includes(settings.store.format) ? settings.store.format : "webp";
 
-    u.searchParams.set("size", settings.store.imgSize);
+    u.searchParams.set("size", ["128", "256", "512", "1024", "2048", "4096"].includes(settings.store.imgSize) ? settings.store.imgSize : "1024");
     u.pathname = u.pathname.replace(/\.(png|jpe?g|webp)$/, `.${format}`);
     url = u.toString();
 

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
@@ -17,7 +17,11 @@ import { createPluginNativesPlugin, getNativeExportNames } from "./build/pluginN
 
 async function fixture(t, files) {
     const directory = await mkdtemp(join(tmpdir(), "protonncord-native-test-"));
-    t.after(() => rm(directory, { recursive: true, force: true }));
+    t.after(() => {
+        assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
+        assert.ok(basename(directory).startsWith("protonncord-native-test-"));
+        return rm(directory, { recursive: true, force: true });
+    });
     for (const [name, contents] of Object.entries(files)) {
         const path = join(directory, name);
         await mkdir(dirname(path), { recursive: true });

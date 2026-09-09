@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { AudioPlayerInternal, AudioPlayerOptions, audioProcessorFunctions, AudioType, identifyAudioType, playAudio } from "@api/AudioPlayer";
+import { AudioPlayerInternal, AudioPlayerOptions, audioProcessorFunctions, AudioType, handleAudioError, identifyAudioType, playAudio } from "@api/AudioPlayer";
 import { EquicordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 
@@ -107,7 +107,7 @@ export default definePlugin({
             player.ensureAudio().then(audio => {
                 audio.currentTime = 0;
                 this.handlePlayPromise(player, audio.play());
-            });
+            }).catch(error => handleAudioError(player, error));
         } else {
             if (!player.persistent) {
                 player.destroyAudio();
@@ -117,16 +117,13 @@ export default definePlugin({
                 player._audio?.then(audio => {
                     audio.pause();
                     audio.currentTime = 0;
-                });
+                }).catch(error => handleAudioError(player, error));
             }
         }
     },
 
     handlePlayPromise(player: AudioPlayerInternal, playPromise: Promise<void> | void) {
-        playPromise?.catch(error => {
-            if (error?.name === "AbortError") return;
-            player.onError?.(error);
-        });
+        playPromise?.catch(error => handleAudioError(player, error));
     },
 
     processAudio(player: AudioPlayerInternal) {
@@ -146,19 +143,19 @@ export default definePlugin({
 
         if (player.preprocessDataCurrent.audio !== player.preprocessDataPrevious?.audio) {
             player.destroyAudio();
-            player.persistent && player.ensureAudio();
+            player.persistent && player.ensureAudio().catch(error => handleAudioError(player, error));
         }
 
         if (player.preprocessDataCurrent.volume !== player.preprocessDataPrevious?.volume) {
             player._audio?.then(audio => {
                 audio.volume = player._volume;
-            });
+            }).catch(error => handleAudioError(player, error));
         }
 
         if (player.preprocessDataCurrent.speed !== player.preprocessDataPrevious?.speed) {
             player._audio?.then(audio => {
                 audio.playbackRate = player._speed;
-            });
+            }).catch(error => handleAudioError(player, error));
         }
     },
 
@@ -190,6 +187,6 @@ export default definePlugin({
 
         player.processAudio = () => this.processAudio(player);
         player.processAudio();
-        player.preload && player.ensureAudio();
+        player.preload && player.ensureAudio().catch(error => handleAudioError(player, error));
     }
 });

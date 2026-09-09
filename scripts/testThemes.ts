@@ -142,7 +142,7 @@ test("ClientTheme settings subscribe to color changes and send lowercase theme v
 
 function fixture() {
     const settings = {
-        enabledThemeLinks: [] as string[], enabledThemes: [] as string[], useQuickCss: true,
+        enabledThemeLinks: [] as string[], enabledThemes: [] as string[], useQuickCss: true, enableOnlineThemes: true,
         themeActivationModes: {} as Record<string, "always" | "light" | "dark">
     };
     const styles = new Map<string, { textContent: string; disabled: boolean; }>();
@@ -263,6 +263,24 @@ test("legacy theme prefixes retain activation behavior and allow explicit overri
     settings.themeActivationModes[settings.enabledThemeLinks[0]] = "always";
     await api.initThemes();
     assert.ok(styles.get("vencord-themes")?.textContent.includes("https://example.com/light.css"));
+});
+
+test("pausing online themes preserves selected links and removes them even if local reads fail", async () => {
+    const { api, settings, styles, themeData } = fixture();
+    const link = "https://example.com/theme.css";
+    settings.enabledThemeLinks = [link];
+    await api.initThemes();
+    assert.ok(styles.get("vencord-themes")?.textContent.includes(link));
+    settings.enableOnlineThemes = false;
+    settings.enabledThemes = ["unavailable.css"];
+    themeData.set("unavailable.css", Promise.reject(new Error("Local file unavailable")));
+    await api.initThemes();
+    assert.equal(styles.get("vencord-themes")?.textContent.includes(link), false);
+    assert.deepEqual(settings.enabledThemeLinks, [link]);
+    settings.enabledThemes = [];
+    settings.enableOnlineThemes = true;
+    await api.initThemes();
+    assert.ok(styles.get("vencord-themes")?.textContent.includes(link));
 });
 
 function readFunction(path: string, name: string) {

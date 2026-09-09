@@ -62,8 +62,8 @@ export default {
             invoke<IpcRes<UpdaterDiagnostics>>(IpcEvents.GET_UPDATER_DIAGNOSTICS, branch),
         getUpdates: (branch: UpdaterBranch = "main") =>
             invoke<IpcRes<Record<"hash" | "author" | "message", string>[]>>(IpcEvents.GET_UPDATES, branch),
-        update: (branch: UpdaterBranch = "main") => invoke<IpcRes<boolean>>(IpcEvents.UPDATE, branch),
-        rebuild: () => invoke<IpcRes<boolean>>(IpcEvents.BUILD),
+        update: (branch: UpdaterBranch = "main", force = false) => invoke<IpcRes<boolean>>(IpcEvents.UPDATE, branch, force),
+        rebuild: (branch?: UpdaterBranch) => invoke<IpcRes<boolean>>(IpcEvents.BUILD, branch),
         getRepo: () => invoke<IpcRes<string>>(IpcEvents.GET_REPO),
     },
 

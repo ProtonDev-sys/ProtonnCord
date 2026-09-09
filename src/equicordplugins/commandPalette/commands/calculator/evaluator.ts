@@ -40,7 +40,7 @@ class Parser {
     }
 
     private skipSpaces() {
-        while (this.peek() === " ") this.pos += 1;
+        while (/\s/.test(this.peek())) this.pos += 1;
     }
 
     private word(): string {
@@ -74,7 +74,7 @@ class Parser {
     }
 
     private term(): Value {
-        let left = this.factor();
+        let left = this.unary();
 
         for (; ;) {
             this.skipSpaces();
@@ -87,7 +87,7 @@ class Parser {
                 this.pos += 1;
             } else if (isOf) {
                 this.pos += 2;
-                const right = this.factor();
+                const right = this.unary();
                 const leftValue = left.pct ? left.v / 100 : left.v;
                 left = { v: leftValue * (right.pct ? right.v / 100 : right.v), pct: false };
                 continue;
@@ -95,7 +95,7 @@ class Parser {
                 break;
             }
 
-            const right = this.factor();
+            const right = this.unary();
             const a = left.pct ? left.v / 100 : left.v;
             const b = right.pct ? right.v / 100 : right.v;
             if (op === "*") left = { v: a * b, pct: false };
@@ -107,11 +107,11 @@ class Parser {
     }
 
     private factor(): Value {
-        const base = this.unary();
+        const base = this.primary();
         this.skipSpaces();
         if (this.peek() === "^") {
             this.pos += 1;
-            const exponent = this.factor();
+            const exponent = this.unary();
             const a = base.pct ? base.v / 100 : base.v;
             const b = exponent.pct ? exponent.v / 100 : exponent.v;
             return { v: a ** b, pct: false };
@@ -121,12 +121,13 @@ class Parser {
 
     private unary(): Value {
         this.skipSpaces();
-        if (this.peek() === "-") {
+        if (this.peek() === "-" || this.peek() === "+") {
+            const negative = this.peek() === "-";
             this.pos += 1;
             const value = this.unary();
-            return { v: -value.v, pct: value.pct };
+            return { v: negative ? -value.v : value.v, pct: value.pct };
         }
-        return this.primary();
+        return this.factor();
     }
 
     private primary(): Value {
@@ -143,8 +144,8 @@ class Parser {
 
         if (/[a-z]/i.test(this.peek())) {
             const name = this.word();
-            if (name in CONSTANTS) return this.percentSuffix({ v: CONSTANTS[name], pct: false });
-            if (name in FUNCTIONS) {
+            if (Object.hasOwn(CONSTANTS, name)) return this.percentSuffix({ v: CONSTANTS[name], pct: false });
+            if (Object.hasOwn(FUNCTIONS, name)) {
                 this.skipSpaces();
                 if (this.peek() !== "(") throw new Error("Expected paren after function");
                 this.pos += 1;
@@ -157,7 +158,7 @@ class Parser {
             throw new Error(`Unknown identifier ${name}`);
         }
 
-        const match = /^\d[\d,]*(\.\d+)?/.exec(this.input.slice(this.pos));
+        const match = /^(?:\d[\d,]*(?:\.\d*)?|\.\d+)/.exec(this.input.slice(this.pos));
         if (!match) throw new Error("Expected number");
         this.pos += match[0].length;
         return this.percentSuffix({ v: parseFloat(match[0].replaceAll(",", "")), pct: false });

@@ -1,6 +1,6 @@
 {
     "name": "protonn-cord",
-    "private": "true",
+    "private": true,
     "version": "1.15.1.8",
     "description": "Protonn Cord, a Discord client mod",
     "homepage": "https://github.com/ProtonDev-sys/ProtonnCord#readme",
@@ -86,7 +86,7 @@
         "testSecureMessagingLive": "tsx scripts/testSecureMessagingLive.ts",
         "createDiscordMcpVideo": "tsx scripts/createDiscordMcpVideo.ts",
         "benchmarkDiscord": "tsx scripts/benchmarkDiscord.ts",
-        "test": "pnpm testNativeLifecycle && pnpm testDataStoreUpdates && pnpm testBrowser && pnpm testMoreStickersStorage && pnpm testCoreUtilities && pnpm testRenderPerformance && pnpm testDevNativeBuild && pnpm testUserpluginUpdateReview && pnpm testUserpluginPathSafety && pnpm testMessageLoggerNativeWrites && pnpm testMessageLoggerNativeDownloads && pnpm testFileUploadNativeBoundary && pnpm testZipPreviewSecurity && pnpm testExternalUrlBoundary && pnpm testDevCompanionSecurity && pnpm testInstallerSecurity && pnpm testExtensionPublishWorkflow && pnpm testCspPolicyBoundary && pnpm testQuestifyNativeBoundary && pnpm testOrbolayBridgeSecurity && pnpm testCloudSyncPrivacy && pnpm testCloudDataStoreContract && pnpm testNavidromeAssetPrivacy && pnpm testReporterWorkflowIsolation && pnpm testUpdaterBranches && pnpm testPluginReleaseMarkers && pnpm testTsc && pnpm testUpdaterClassification && pnpm testUpdaterGit && pnpm testUpdaterHttp && pnpm testUpdaterRepository:built && pnpm testMessageEventsPriority && pnpm testMainProcessStdio && pnpm testSecureMessagingPerformance && pnpm testSecureMessagingEmbedUrls && pnpm testSecureMessagingOptimisticRendering && pnpm testSecureMessagingForwarding && pnpm testWebAuthnLargeBlob && pnpm testOneKeyIdentity && pnpm testSecureMessagingSecurityKey && pnpm testSecureMessagingRestGuard && pnpm testSecureMessagingHistory && pnpm testSecureMessagingPlaintextRendering && pnpm testSecureMessagingAttachments && pnpm testSecureMessaging && pnpm testSecureMessagingNative && pnpm lint:fix && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
+        "test": "pnpm testAudit && pnpm testNativeLifecycle && pnpm testDataStoreUpdates && pnpm testBrowser && pnpm testMoreStickersStorage && pnpm testCoreUtilities && pnpm testRenderPerformance && pnpm testDevNativeBuild && pnpm testUserpluginUpdateReview && pnpm testUserpluginPathSafety && pnpm testMessageLoggerNativeWrites && pnpm testMessageLoggerNativeDownloads && pnpm testFileUploadNativeBoundary && pnpm testZipPreviewSecurity && pnpm testExternalUrlBoundary && pnpm testDevCompanionSecurity && pnpm testInstallerSecurity && pnpm testExtensionPublishWorkflow && pnpm testCspPolicyBoundary && pnpm testQuestifyNativeBoundary && pnpm testOrbolayBridgeSecurity && pnpm testCloudSyncPrivacy && pnpm testCloudDataStoreContract && pnpm testNavidromeAssetPrivacy && pnpm testReporterWorkflowIsolation && pnpm testUpdaterBranches && pnpm testPluginReleaseMarkers && pnpm testTsc && pnpm testUpdaterClassification && pnpm testUpdaterGit && pnpm testUpdaterHttp && pnpm testUpdaterRepository:built && pnpm testMessageEventsPriority && pnpm testMainProcessStdio && pnpm testSecureMessagingPerformance && pnpm testSecureMessagingEmbedUrls && pnpm testSecureMessagingOptimisticRendering && pnpm testSecureMessagingForwarding && pnpm testWebAuthnLargeBlob && pnpm testOneKeyIdentity && pnpm testSecureMessagingSecurityKey && pnpm testSecureMessagingRestGuard && pnpm testSecureMessagingHistory && pnpm testSecureMessagingPlaintextRendering && pnpm testSecureMessagingAttachments && pnpm testSecureMessaging && pnpm testSecureMessagingNative && pnpm lint:fix && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
         "testWeb": "pnpm lint:fix && pnpm buildWeb && pnpm testTsc",
         "testTsc": "tsc --noEmit",
         "testInstallerSecurity": "node scripts/testInstallerSecurity.mjs",
@@ -97,7 +97,8 @@
         "testOneKeyIdentity": "tsx scripts/testOneKeyIdentity.ts",
         "testSecureMessagingSecurityKey": "tsx scripts/testSecureMessagingSecurityKey.ts",
         "testSecureMessagingForwarding": "tsx scripts/testSecureMessagingForwarding.ts",
-        "testWebAuthnLargeBlob": "tsx scripts/testWebAuthnLargeBlob.ts"
+        "testWebAuthnLargeBlob": "tsx scripts/testWebAuthnLargeBlob.ts",
+        "testAudit": "node scripts/runAuditTests.mjs"
     },
     "dependencies": {
         "@ffmpeg/ffmpeg": "^0.12.10",
@@ -157,6 +158,6 @@
     },
     "packageManager": "pnpm@11.21.0",
     "engines": {
-        "node": ">=22"
+        "node": "^22.13.0 || >=24.0.0"
     }
 }

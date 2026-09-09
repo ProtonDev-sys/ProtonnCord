@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
+import { join } from "node:path";
 
 import puppeteer from "puppeteer-core";
 
@@ -30,6 +31,12 @@ function browserExecutable(): string | null {
     const candidates = [
         process.env.CHROMIUM_BIN,
         process.env.CHROME_PATH,
+        ...(process.platform === "win32" ? [
+            join(process.env.ProgramFiles ?? "C:\\Program Files", "Google/Chrome/Application/chrome.exe"),
+            join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Microsoft/Edge/Application/msedge.exe"),
+            ...(process.env.LOCALAPPDATA ? [join(process.env.LOCALAPPDATA, "Google/Chrome/Application/chrome.exe")] : []),
+        ] : []),
+        ...(process.platform === "darwin" ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"] : []),
         "/usr/bin/google-chrome",
         "/usr/bin/google-chrome-stable",
         "/usr/bin/chromium",
@@ -62,12 +69,13 @@ async function main(): Promise<void> {
     const address = server.address();
     assert.ok(address && typeof address !== "string");
 
-    const browser = await puppeteer.launch({
-        args: ["--disable-dev-shm-usage", "--no-sandbox"],
-        executablePath,
-        headless: true,
-    });
+    let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
     try {
+        browser = await puppeteer.launch({
+            args: ["--disable-dev-shm-usage", ...(process.platform === "linux" && process.getuid?.() === 0 ? ["--no-sandbox"] : [])],
+            executablePath,
+            headless: true,
+        });
         const page = await browser.newPage();
         await page.goto(`http://localhost:${address.port}/`, { waitUntil: "domcontentloaded" });
         const session = await page.createCDPSession();
@@ -249,8 +257,11 @@ async function main(): Promise<void> {
             await (session as any).send("WebAuthn.disable");
         }
     } finally {
-        await browser.close();
-        await new Promise<void>(resolve => server.close(() => resolve()));
+        try {
+            await browser?.close();
+        } finally {
+            await new Promise<void>(resolve => server.close(() => resolve()));
+        }
     }
 
     console.log("WebAuthn virtual security-key PRF and large-blob round trips passed");

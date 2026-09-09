@@ -1,0 +1,28 @@
+[
+  {
+    "archive": "desktop.asar",
+    "entries": 11,
+    "requiredEntries": true
+  },
+  {
+    "archive": "equibop.asar",
+    "entries": 11,
+    "requiredEntries": true
+  },
+  {
+    "archive": "extension-chrome.zip",
+    "entries": 8,
+    "manifestVersion": 3,
+    "version": "1.15.1.8"
+  },
+  {
+    "archive": "extension-firefox.zip",
+    "entries": 7,
+    "manifestVersion": 2,
+    "version": "1.15.1.8"
+  },
+  {
+    "userscriptEmbeddedCssBytes": 197420,
+    "literalMatch": true
+  }
+]

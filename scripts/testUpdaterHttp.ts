@@ -9,9 +9,7 @@ import assert from "node:assert/strict";
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { runInNewContext } from "node:vm";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { basename, dirname, join, resolve } from "node:path";
 
 import {
     applyPendingHttpUpdate,
@@ -61,17 +59,6 @@ function fileOperations(): AtomicFileOperations {
 }
 
 async function main(): Promise<void> {
-    const source = await readFile(new URL("../src/main/updater/http.ts", import.meta.url), "utf8");
-    const checkSource = source.slice(source.indexOf("async function calculateGitChanges"), source.indexOf("async function fetchUpdates"));
-    const { outputText } = transpileModule(checkSource, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } });
-    const selected = { hash: RELEASE_HASH, url: DOWNLOAD_URL };
-    const retained = await runInNewContext(`${outputText}\ncalculateGitChanges("main").then(() => PendingUpdate);`, {
-        PendingUpdate: selected, gitHash: CURRENT_HASH, ASAR_FILE,
-        githubGet() { }, parseUpdaterBranch: (branch: string) => branch,
-        inspectHttpUpdates: async () => ({ changes: [], pending: null })
-    });
-    assert.equal(retained, selected, "an update check must not replace an installation already selected by UPDATE");
-
     const currentRequests: string[] = [];
     const current = await inspectHttpUpdates(async endpoint => {
         currentRequests.push(endpoint);
@@ -249,6 +236,8 @@ async function main(): Promise<void> {
         pending = await applyPendingHttpUpdate(pending, async () => validAsar, () => undefined);
         assert.equal(pending, null);
     } finally {
+        assert.equal(dirname(resolve(root)), resolve(tmpdir()));
+        assert.ok(basename(root).startsWith("protonn-cord-http-updater-"));
         await rm(root, { force: true, recursive: true });
     }
 

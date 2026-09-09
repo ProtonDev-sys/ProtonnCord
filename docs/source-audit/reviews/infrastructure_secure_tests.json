@@ -1,0 +1,288 @@
+[
+  {
+    "path": "docs/performance-secure-attachments.md",
+    "baselineSha256": "e0b268e3e43adb965f0ea50cefddcc4c21f431096596da1042d71caee4ada885",
+    "reviewedSha256": "e0b268e3e43adb965f0ea50cefddcc4c21f431096596da1042d71caee4ada885",
+    "status": "reviewed",
+    "summary": "Reviewed transfer-count claims, manual-download/cache behavior, expired-URL selection and compatibility limits against complete native and renderer fixtures. Exact fixture sizes and outcomes agree; inert .exe contents are never launched, and the document correctly excludes network latency/FPS claims. Historical refresh comparison is stated as fixture behavior; current refresh selection was rerun.",
+    "validation": [
+      "Complete file contents, isolation boundaries, assertions and evidence limits reviewed.",
+      "Reproduced native transfer counts 1311208 total, 195 preview, 1311013 deferred and 7679 detached-text ciphertext bytes; attachment/cache/download/fallback and related renderer checks passed offline."
+    ]
+  },
+  {
+    "path": "docs/performance-secure-history-rendering.md",
+    "baselineSha256": "a4b2fc9e3e39002796e8319ec4183884391ecc27d2d56ee4a8b8c29981f66c2b",
+    "reviewedSha256": "a4b2fc9e3e39002796e8319ec4183884391ecc27d2d56ee4a8b8c29981f66c2b",
+    "status": "reviewed",
+    "summary": "Reviewed every claim and command against the synthetic accessory fixture: exact before/after parser counts, unchanged grouping/render counts, baseline requirement and five regression checks agree. Explicitly distinguishes mocked invocation counts from browser CPU/FPS measurements.",
+    "validation": [
+      "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
+      "Reproduced --benchmark against cbd83c03: before 172/1325/440/5150 parses and after 50/50/100/100, with identical grouping and render counts; default checks also passed."
+    ]
+  },
+  {
+    "path": "docs/performance-secure-receive-prefetch.md",
+    "baselineSha256": "4cd1f1852a2c8fb51559915e18a39c3ac1b48d500ae89aebdb148fa04ce274bb",
+    "reviewedSha256": "4cd1f1852a2c8fb51559915e18a39c3ac1b48d500ae89aebdb148fa04ce274bb",
+    "status": "reviewed",
+    "summary": "Reviewed receive lifecycle, four-promise speculative admission, selected-channel/account/gate restrictions and shared-cache documentation against the complete receive fixture and production-function extraction. Clearly identifies mocked cryptography/stores and requires separate live latency validation; no live speedup or independent cryptographic assurance claimed.",
+    "validation": [
+      "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
+      "Focused receive cases passed within the 66-test offline sweep; package command wiring inspected. Live create/edit/history latency validation remains explicitly unperformed in this audit."
+    ]
+  },
+  {
+    "path": "scripts/benchmarkSecureMessaging.ts",
+    "baselineSha256": "7e64671f68c7e00bc061f524e657cc587713a26eba49ad8bb22e7011cda7600b",
+    "reviewedSha256": "7e64671f68c7e00bc061f524e657cc587713a26eba49ad8bb22e7011cda7600b",
+    "status": "reviewed",
+    "summary": "Reviewed generated synthetic identities, fixed 109-character payload, recipient-capacity probe, warmups, iteration counts and sorted percentile summaries. Measures only repeated local crypto helper operations with cached imports; decryption uses the first selected recipient and does not include vault/IPC/network/render/replay-store work. Reports runtime and workload without implying an end-to-end improvement.",
+    "validation": [
+      "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
+      "Offline benchmark completed under Node v24.14.0; capacity 10 for the fixture, encryption samples 20/10/5 and 40 decrypt samples each at 1/8/10 recipients. Timings are local observations, not acceptance thresholds."
+    ]
+  },
+  {
+    "path": "scripts/benchmarkSecureMessagingMentions.ts",
+    "baselineSha256": "6c1b9f16464d12245639e75ef5bb1e51b533124a46f271babfad578ca0f43af8",
+    "reviewedSha256": "6c1b9f16464d12245639e75ef5bb1e51b533124a46f271babfad578ca0f43af8",
+    "status": "reviewed",
+    "summary": "Reviewed synthetic mention fixtures, legacy parsing fallback, invalid input cases and whitelisted protocol/lookup VM loader. Optional baseline is resolved by argument-array git calls, both versions receive the same verification, warmups and alternating sample order. Correctness mode exits before baseline lookup or timing; no live client or credentials used.",
+    "validation": [
+      "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
+      "Offline node --import=tsx scripts/benchmarkSecureMessagingMentions.ts --check passed all fixture assertions. Timing comparison was not needed and was not run."
+    ]
+  },
+  {
+    "path": "scripts/testAuditSecureLiveIsolation.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "5eeaf9f367d7e28f1f01eafc0b825d5158ae5c06d54e87d3b9ff01c09488a212",
+    "status": "changed",
+    "summary": "Reviewed complete AST-only regression harness extracting four named functions from the live source without importing its entry point or puppeteer. All page, REST, directory and timer operations use inert controlled mocks; tests preserve text/whitespace drafts, constrain cleanup filenames and retain unresolved deletion errors outside the history window while allowing successful retries. VM Error identity is shared to preserve the real same-realm error branch.",
+    "validation": [
+      "Complete original source plus every final edit and new fixture reviewed for retained assertions, cleanup and isolation.",
+      "node --import=tsx --test scripts/testAuditSecureLiveIsolation.ts passed six tests with no external network, browser, filesystem mutation or live state. New test is discovered by the existing testAudit runner."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessaging.ts",
+    "baselineSha256": "0f0c14a75b362fab65925606741b2eb2a5dd4fad071cf3114dcc807325c3d677",
+    "reviewedSha256": "0f0c14a75b362fab65925606741b2eb2a5dd4fad071cf3114dcc807325c3d677",
+    "status": "reviewed",
+    "summary": "Reviewed all existing synthetic protocol and rendering helper assertions: canonical parsing/version compatibility, metadata preservation, bounded wire authorizations, grouping/gates, attachment preflight/retries, account-bound keys and local authentication rejection cases. All generated keys/messages remain in memory; CloudUpload actions are inert and source-pattern checks are distinguished from real runtime behavior. Existing malformed input cases were inspected without extending payloads or protocol behavior.",
+    "validation": [
+      "Complete file contents, isolation boundaries, assertions and evidence limits reviewed.",
+      "Offline node --import=tsx scripts/testSecureMessaging.ts passed; reported compact savings 96/30/30 characters for its envelope/attachment/sticker fixtures. This is implementation regression evidence, not a formal cryptographic audit."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingAttachmentCache.ts",
+    "baselineSha256": "84c6369c1abc7f208a4fde7ba43b24a46e2bc97dbd1e11368321f0811d97d21f",
+    "reviewedSha256": "dae172dca4885a46d69d0b26503bb1271b6ca091a4b20f011f18b8bc8f49a717",
+    "status": "changed",
+    "summary": "Reviewed complete isolated VM with whitelisted imports and synthetic native/REST/Blob adapters. Assertions cover preview-only admission beside a large deferred file, stale account/cache completion suppression, URL refresh selection, shared clicks, legacy rows and revocation. Prior unledgered cleanup changes add t.after cache disposal to timer-owning cases; all assertions remain intact and no real save/CDN request occurs.",
+    "validation": [
+      "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
+      "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingAttachmentFallback.ts",
+    "baselineSha256": "2c786ae65cd386cbfd6c252c1cc7cad42b96f6e0920403ed23c64fa2deb48fd1",
+    "reviewedSha256": "2c786ae65cd386cbfd6c252c1cc7cad42b96f6e0920403ed23c64fa2deb48fd1",
+    "status": "reviewed",
+    "summary": "Reviewed AST extraction of the actual send-preparation fallback and complete cases for filename omission, text detachment, mandatory legacy fallback, non-size errors and account/generation invalidation. Native send is mocked except isolated encryption size checks with generated fixture identities; no Discord endpoint or upload is used.",
+    "validation": [
+      "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
+      "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingAttachmentManifest.ts",
+    "baselineSha256": "9085c3892cc5d6cc318563aac8a1888e922975ed458ab2effc48dbe7541bf77a",
+    "reviewedSha256": "9085c3892cc5d6cc318563aac8a1888e922975ed458ab2effc48dbe7541bf77a",
+    "status": "reviewed",
+    "summary": "Reviewed independent ordered-root reference calculation, version compatibility, canonical parsing bounds, Unicode filename budgeting, flags/MIME classification and real envelope lengths. VM fallback cases retain every attachment reference and validate resulting local decrypt payloads. Malformed fixtures are contained parser assertions, with no exploit reproduction or external requests.",
+    "validation": [
+      "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
+      "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingAttachmentMetadata.ts",
+    "baselineSha256": "c60a4f8944b6e4dda47c1e7bd020075f29f36001110f16d14d46a7d74f351cbb",
+    "reviewedSha256": "c60a4f8944b6e4dda47c1e7bd020075f29f36001110f16d14d46a7d74f351cbb",
+    "status": "reviewed",
+    "summary": "Reviewed EventEmitter-backed CloudUpload fixture and local File encryption round-trips covering deferred apply, idempotence, retries, replacement source files, failed preflight, per-file descriptions/spoilers and reserved detached-text metadata. Upload/delete methods are inert; ciphertext manifest/root checks use actual helpers with synthetic bytes.",
+    "validation": [
+      "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
+      "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingCaches.ts",
+    "baselineSha256": "afea9943cb78fd25d8ff02faf7f906899dd57f65a79a46c0d5b1b67dd3544858",
+    "reviewedSha256": "afea9943cb78fd25d8ff02faf7f906899dd57f65a79a46c0d5b1b67dd3544858",
+    "status": "reviewed",
+    "summary": "Reviewed entire local-module harness and native/unfurl/attachment mocks. Assertions exercise suppression, reentrant callbacks, account/generation cancellation, shared promises, transient TTLs, review queue cancellation, metadata normalization and authentication failure states. Test-scoped Date mocks avoid real backoff; no real REST/CDN/IPC operation is reachable through the supplied adapters.",
+    "validation": [
+      "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
+      "Offline four-script node --import=tsx --test sweep passed 66 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingCryptoCache.ts",
+    "baselineSha256": "1ff749926aa8c47f3dd731f6d3ccf820453e3dd5dfc7202ec90a69fe7d6c0f6e",
+    "reviewedSha256": "1ff749926aa8c47f3dd731f6d3ccf820453e3dd5dfc7202ec90a69fe7d6c0f6e",
+    "status": "reviewed",
+    "summary": "Reviewed fresh synthetic identities, repeated encryption/decryption import counts, replacement private-key cache invalidation and the 256-entry fingerprint bound. Direct local cryptographic calls check cache work and correctness; fixture counters do not establish protocol security or OS key storage properties.",
+    "validation": [
+      "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
+      "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingDownloadControls.ts",
+    "baselineSha256": "f2a0e8f96e1db496ab20dcaa5b0539d5a29d0a44f91f348e25b9d4ab336f40c2",
+    "reviewedSha256": "f2a0e8f96e1db496ab20dcaa5b0539d5a29d0a44f91f348e25b9d4ab336f40c2",
+    "status": "reviewed",
+    "summary": "Reviewed full production AST patch extraction, exact-one match checks and synthetic generic-file/common/video callbacks, including both ZipPreview orders, reused React callback hrefs, preserved ordinary actions and inert native-save mocks. Optional public-fixture input is parsed and matched only; downloaded source is not executed. No live browser, download or file-save operation occurs.",
+    "validation": [
+      "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
+      "Offline four-script node --import=tsx --test sweep passed 66 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingEmbedUrls.ts",
+    "baselineSha256": "2f8ffb5aa99d0fee057f891e82f0ebe40d6c05adda3f21578df4c8089fc9321d",
+    "reviewedSha256": "2f8ffb5aa99d0fee057f891e82f0ebe40d6c05adda3f21578df4c8089fc9321d",
+    "status": "reviewed",
+    "summary": "Reviewed complete URL suppression, balanced delimiter, escaping parity, normalization/deduplication, credential rejection, ten-URL bound and media-type tests. Pure parsing uses reserved/example addresses without fetching; repeated calls assert scanner state resets and hidden code does not consume the visible URL budget.",
+    "validation": [
+      "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
+      "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingForwarding.ts",
+    "baselineSha256": "d42b6c98539f35644e54c2385ddccd831cdce12f43e2cca47398de9b72a1be92",
+    "reviewedSha256": "d42b6c98539f35644e54c2385ddccd831cdce12f43e2cca47398de9b72a1be92",
+    "status": "reviewed",
+    "summary": "Reviewed all route combinations covered, mention/markdown sanitization, embed text selection and Discord attachment URL binding assertions. Runtime integration is checked by source patterns for selective attachments/embeds and fresh encrypted copies. No send, network access or real identities occur; source assertions are structural rather than live routing evidence.",
+    "validation": [
+      "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
+      "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingHistory.ts",
+    "baselineSha256": "2c4558269d53bdf4cf6862c5dbc05354bc687b8a3df8a611d6b6178eab0d5339",
+    "reviewedSha256": "2c4558269d53bdf4cf6862c5dbc05354bc687b8a3df8a611d6b6178eab0d5339",
+    "status": "reviewed",
+    "summary": "Reviewed AST extraction and isolated deferred-history invocation tests, including receiver/argument identity, both failure modes, account/stop cancellation and exactly-once resume. A minimal minified MessageManager fixture checks replacement wiring; absent actual Discord stores/runtime limits integration claims. No history requests leave the VM.",
+    "validation": [
+      "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
+      "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingLayoutStability.ts",
+    "baselineSha256": "6a749551e17fd78375f3ba6444d71dbee8965aae094574afc8212802134a9b18",
+    "reviewedSha256": "6a749551e17fd78375f3ba6444d71dbee8965aae094574afc8212802134a9b18",
+    "status": "reviewed",
+    "summary": "Reviewed scroll threshold, finite compensation and actual stabilizer against synthetic connected elements and controlled animation frames. The fixture checks one anchor correction, settled-layout idempotence and yielding to user scroll, restores mocked globals in finally and verifies both cache integration calls. No browser layout or FPS measurement is made.",
+    "validation": [
+      "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
+      "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingLive.ts",
+    "baselineSha256": "c2e3f3f7fa3e96c74f1469b6e94d6dc7e471a691890fdc0449490ce0f2e5ba3e",
+    "reviewedSha256": "f640566172ed5c395ff43885dc2baf87106bbb0c620c34259ce0d0b9c22e2e1c",
+    "status": "changed",
+    "summary": "Reviewed the complete live runner: disposable-path/client/preexisting-vault checks, fixed destination/recipient preflight, synthetic trust/configuration, real composer/REST/media operations, response registry, assertions and aggregate cleanup. Narrow data-protection fixes reject existing text or whitespace drafts before typing, restrict incidental download cleanup to this run's unique PNG filename variants, and retain failed DELETE evidence even when a proof ID is outside the latest 100 history rows. Live transport, message operations and authentication fixtures were otherwise retained; automatic cleanup is not guaranteed after a lost response or interrupted process.",
+    "validation": [
+      "Complete original source plus every final edit and new fixture reviewed for retained assertions, cleanup and isolation.",
+      "Live runner was never imported or executed; no CDP connection, account access, Discord message, credentials or download operation occurred. Six extracted-function offline tests passed for the three changed guards, including permanent/transient deletion errors and unrelated concurrent downloads. Diff whitespace check passed; ESLint excludes these scripts, so no lint coverage is claimed."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingNative.ts",
+    "baselineSha256": "430cc492d473422545545c9f316c1c2bc2fcf93ce4bdc78ddb590ef43a912fed",
+    "reviewedSha256": "430cc492d473422545545c9f316c1c2bc2fcf93ce4bdc78ddb590ef43a912fed",
+    "status": "reviewed",
+    "summary": "Reviewed the complete native harness and lifecycle, storage fault matrix, selective attachment I/O, local replay/history/rotation assertions, cross-module counters and OneKey cancellation/migration cases. Bundles override Electron, data/download directories, filesystem fault adapters and hardware cipher; all real files stay beneath one mkdtemp root removed in finally, and fetch/timer/clock/environment overrides are restored. Platform defines exercise branch behavior rather than real Linux/Windows key-store durability. Existing rejection fixtures were reviewed without expanding attack behavior.",
+    "validation": [
+      "Complete file contents, isolation boundaries, assertions and evidence limits reviewed.",
+      "Offline native suite passed with an outer deny-all fetch stub; its internal synthetic CDN adapters reported 3 requests/1311208 bytes for the complete bundle, 1/195 for previews and 1/7679 for detached text. No live client, credentials, OS safeStorage or physical device used."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingOptimisticRendering.ts",
+    "baselineSha256": "b6c9b9e7b7e1d4b3ac17c25bfcee7248b324a874d7fe45d877f5808837aba4f5",
+    "reviewedSha256": "b6c9b9e7b7e1d4b3ac17c25bfcee7248b324a874d7fe45d877f5808837aba4f5",
+    "status": "reviewed",
+    "summary": "Reviewed real cache/grouping helpers with synthetic ciphertext, provisional/canonical settlement, failure precedence, media separation, exact 60-second expiry and 128-entry eviction. Source guards check renderer integration; no real cryptographic result or React commit is fabricated as live evidence.",
+    "validation": [
+      "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
+      "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingPerformance.ts",
+    "baselineSha256": "30ee457315e42ab89a58dd6b5c718a731a77d4d689292f5f6b059faa06343909",
+    "reviewedSha256": "30ee457315e42ab89a58dd6b5c718a731a77d4d689292f5f6b059faa06343909",
+    "status": "reviewed",
+    "summary": "Reviewed direct FIFO/concurrency/permit-release tests, exact byte-view reuse/copy, counted key-review ordering and grouping index invalidation. Source-pattern checks cover queue placement, bounded caches, batching and lifecycle wiring but are not behavioral proof of all those paths. The test records work bounds rather than timing or FPS.",
+    "validation": [
+      "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
+      "Offline four-script node --import=tsx --test sweep passed 66 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingPlaintextRendering.ts",
+    "baselineSha256": "5b2d4973a92eb539d74539ef502d37013b0bc8354cac78cb69d132edf3dd15da",
+    "reviewedSha256": "5b2d4973a92eb539d74539ef502d37013b0bc8354cac78cb69d132edf3dd15da",
+    "status": "reviewed",
+    "summary": "Reviewed full AST/VM accessory and batch fixture, per-row memo identity, parser-call counters, hidden/blocked/edited/optimistic branches and optional read-only git baseline comparison. Hooks, renderer, parser and stores are synthetic, so counts quantify avoided parsing work rather than browser performance. Default execution performs no subprocess or network action.",
+    "validation": [
+      "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
+      "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingReceive.ts",
+    "baselineSha256": "206099b204c09d76a55a36fa887e9e5d0ed88d408becf1a91a67da614a4bc49b",
+    "reviewedSha256": "206099b204c09d76a55a36fa887e9e5d0ed88d408becf1a91a67da614a4bc49b",
+    "status": "reviewed",
+    "summary": "Reviewed all extracted receive functions, controlled native promises, actual cache/metadata/task modules and complete-store-record lookup. Cases cover admission and shared work, four-request history bound, guard states, invalidation, rejection retries, metadata preservation and detached-text selection. Module loading is restricted to local alphabetic sibling modules and all Discord/native operations are synthetic.",
+    "validation": [
+      "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
+      "Offline four-script node --import=tsx --test sweep passed 66 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingRestGuard.ts",
+    "baselineSha256": "ecab25db6c813d043d6341371d40ff3eb7303b6a19f17cc4b7467f02d71672da",
+    "reviewedSha256": "ecab25db6c813d043d6341371d40ff3eb7303b6a19f17cc4b7467f02d71672da",
+    "status": "reviewed",
+    "summary": "Reviewed error-response shape, preservation of original promise rejection and callback completion followed by a successful queue operation. Four source guards connect the helper to POST/PATCH wrappers; the sequential synthetic queue demonstrates completion behavior but is not a real Discord dispatcher test.",
+    "validation": [
+      "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
+      "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
+    ]
+  },
+  {
+    "path": "scripts/testSecureMessagingSecurityKey.ts",
+    "baselineSha256": "b63a45c0a8100ee44835a2c8ea5965ecf1458d81151c37c78646399dd7004df1",
+    "reviewedSha256": "b63a45c0a8100ee44835a2c8ea5965ecf1458d81151c37c78646399dd7004df1",
+    "status": "reviewed",
+    "summary": "Reviewed complete synthetic USB packet adapter, generated-key profiles, provider/version round-trips, session key transfer, protected-index limits and local envelope authentication assertions plus source/document guards. Electron is stubbed and no real ceremony or Windows hardware helper is invoked. The esbuild module and files use a disposable directory removed in finally after loading; hardware/OS security properties are not established by these mocks.",
+    "validation": [
+      "Complete file contents, isolation boundaries, assertions and evidence limits reviewed.",
+      "Offline node --import=tsx scripts/testSecureMessagingSecurityKey.ts passed PRF, large-blob and fake OneKey checks; no hardware, browser or live vault was accessed."
+    ]
+  }
+]

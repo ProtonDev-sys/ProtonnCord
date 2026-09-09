@@ -27,3 +27,13 @@ export function serializeErrors<Args extends unknown[], Result>(
         }
     };
 }
+
+/** Share one queue between operations that use the same source tree or archive. */
+export function createOperationQueue() {
+    let tail = Promise.resolve();
+    return function enqueue<Result>(operation: () => Result | Promise<Result>): Promise<Result> {
+        const result = tail.then(operation);
+        tail = result.then(() => undefined, () => undefined);
+        return result;
+    };
+}

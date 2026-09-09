@@ -1,6 +1,6 @@
 # Runtime rewrite
 
-This branch replaces the runtime infrastructure while retaining the existing feature implementations and saved-data formats. The comparison baseline is commit `6c6222b1c`; the frozen compatibility inventory is in `plugin-catalog-baseline.json`.
+This document records the initial runtime infrastructure rewrite and its measurements. The comparison baseline is commit `6c6222b1c`; the frozen compatibility inventory is in `plugin-catalog-baseline.json`. The subsequent [complete source audit](source-audit/README.md) reviews every tracked file and makes further changes while preserving feature identifiers and saved-data compatibility.
 
 ## Architecture
 
@@ -27,7 +27,7 @@ The retained catalog contains **399 plugins and 1,352 statically identified sett
 
 Settings measurements compare both implementations in the same VM harness using `pnpm exec tsx scripts/benchmarkSettingsStore.ts`. Timing varies by machine and load; the allocation assertion is deterministic. The lookup fixture retains the same 66,048 filter calls and resets its cache after a callback runs. Native figures describe direct registry initialization; enabled plugins can subsequently request deferred modules.
 
-The normal desktop manifest contains 388 platform-eligible entries: 97 can load on demand and 291 remain eager. Enabled plugins and transitive imports can load members of the deferred group; this classification is not a measurement of a particular user's startup.
+The current normal desktop manifest contains 388 platform-eligible entries: 95 can load on demand and 293 remain eager. Enabled plugins and transitive imports can load members of the deferred group; this classification is not a measurement of a particular user's startup.
 
 The plugin-browser fixture uses 388 entries and asserts 36 initial card elements, zero new card elements after an unrelated private-setting edit, 72 after requesting more, and a reset to 36 when filters change. Page-entry tests assert no page/modal implementation is imported merely to register the settings sidebar. These are UI work-count checks, not frame-time measurements.
 

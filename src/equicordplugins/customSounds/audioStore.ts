@@ -23,6 +23,7 @@ export interface StoredAudioFile {
 
 let cachedAudioFiles: Record<string, StoredAudioFile> | null = null;
 let audioFilesLoadPromise: Promise<Record<string, StoredAudioFile>> | null = null;
+let audioFilesMutationQueue = Promise.resolve();
 
 async function loadAudioFiles(): Promise<Record<string, StoredAudioFile>> {
     if (cachedAudioFiles) return cachedAudioFiles;
@@ -39,9 +40,15 @@ async function loadAudioFiles(): Promise<Record<string, StoredAudioFile>> {
     return audioFilesLoadPromise;
 }
 
-async function persistAudioFiles(files: Record<string, StoredAudioFile>) {
-    cachedAudioFiles = files;
-    await set(STORAGE_KEY, files);
+function updateAudioFiles(update: (files: Record<string, StoredAudioFile>) => void) {
+    const mutation = audioFilesMutationQueue.then(async () => {
+        const files = { ...await loadAudioFiles() };
+        update(files);
+        await set(STORAGE_KEY, files);
+        cachedAudioFiles = files;
+    });
+    audioFilesMutationQueue = mutation.catch(() => void 0);
+    return mutation;
 }
 
 export async function saveAudio(file: File): Promise<string> {
@@ -54,14 +61,9 @@ export async function saveAudio(file: File): Promise<string> {
 
     const dataUri = await generateDataURI(buffer, file.type, file.name);
 
-    const current = { ...await loadAudioFiles() };
-    current[id] = {
-        id,
-        name: file.name,
-        type: file.type,
-        dataUri
-    };
-    await persistAudioFiles(current);
+    await updateAudioFiles(current => {
+        current[id] = { id, name: file.name, type: file.type, dataUri };
+    });
     return id;
 }
 
@@ -70,31 +72,29 @@ export async function getAllAudio(): Promise<Record<string, StoredAudioFile>> {
 }
 
 async function generateDataURI(buffer: ArrayBuffer, type: string, name: string): Promise<string> {
-    try {
-        let mimeType = type || "audio/mpeg";
+    let mimeType = type;
 
-        if (!mimeType || mimeType === "application/octet-stream") {
-            if (name) {
-                const extension = name.split(".").pop()?.toLowerCase();
-                switch (extension) {
-                    case "ogg": mimeType = "audio/ogg"; break;
-                    case "mp3": mimeType = "audio/mpeg"; break;
-                    case "wav": mimeType = "audio/wav"; break;
-                    case "m4a":
-                    case "mp4": mimeType = "audio/mp4"; break;
-                    case "flac": mimeType = "audio/flac"; break;
-                    case "aac": mimeType = "audio/aac"; break;
-                    case "webm": mimeType = "audio/webm"; break;
-                    case "wma": mimeType = "audio/x-ms-wma"; break;
-                    default: mimeType = "audio/mpeg";
-                }
-            }
+    if (!mimeType || mimeType === "application/octet-stream") {
+        const extension = name.split(".").pop()?.toLowerCase();
+        switch (extension) {
+            case "ogg": mimeType = "audio/ogg"; break;
+            case "mp3": mimeType = "audio/mpeg"; break;
+            case "wav": mimeType = "audio/wav"; break;
+            case "m4a":
+            case "mp4": mimeType = "audio/mp4"; break;
+            case "flac": mimeType = "audio/flac"; break;
+            case "aac": mimeType = "audio/aac"; break;
+            case "webm": mimeType = "audio/webm"; break;
+            case "wma": mimeType = "audio/x-ms-wma"; break;
+            default: mimeType = "audio/mpeg";
         }
+    }
 
+    try {
         const uint8Array = new Uint8Array(buffer);
         const blob = new Blob([uint8Array], { type: mimeType });
 
-        return new Promise((resolve, reject) => {
+        return await new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result as string);
             reader.onerror = reject;
@@ -113,7 +113,7 @@ async function generateDataURI(buffer: ArrayBuffer, type: string, name: string):
         }
 
         const base64 = btoa(binary);
-        return `data:${type || "audio/mpeg"};base64,${base64}`;
+        return `data:${mimeType};base64,${base64}`;
     }
 }
 
@@ -124,12 +124,12 @@ export async function getAudioDataURI(id: string): Promise<string | undefined> {
 
     if (entry.dataUri) {
         if (entry.buffer) {
-            const current = { ...await loadAudioFiles() };
-            if (current[id]?.buffer) {
-                const { buffer: _, ...entryWithoutBuffer } = current[id];
-                current[id] = entryWithoutBuffer;
-                await persistAudioFiles(current);
-            }
+            await updateAudioFiles(current => {
+                if (current[id]?.buffer) {
+                    const { buffer: _, ...entryWithoutBuffer } = current[id];
+                    current[id] = entryWithoutBuffer;
+                }
+            });
         }
 
         return entry.dataUri;
@@ -139,18 +139,16 @@ export async function getAudioDataURI(id: string): Promise<string | undefined> {
 
     const dataUri = await generateDataURI(entry.buffer, entry.type, entry.name);
 
-    const current = { ...await loadAudioFiles() };
-    if (current[id]) {
-        const { buffer: _, ...entryWithoutBuffer } = current[id];
-        current[id] = { ...entryWithoutBuffer, dataUri };
-        await persistAudioFiles(current);
-    }
+    await updateAudioFiles(current => {
+        if (current[id]) {
+            const { buffer: _, ...entryWithoutBuffer } = current[id];
+            current[id] = { ...entryWithoutBuffer, dataUri };
+        }
+    });
 
     return dataUri;
 }
 
 export async function deleteAudio(id: string): Promise<void> {
-    const all = { ...await loadAudioFiles() };
-    delete all[id];
-    await persistAudioFiles(all);
+    await updateAudioFiles(all => { delete all[id]; });
 }

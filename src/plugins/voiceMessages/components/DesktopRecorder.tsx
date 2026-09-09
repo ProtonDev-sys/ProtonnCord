@@ -17,14 +17,45 @@
 */
 
 import { PluginNative } from "@utils/types";
-import { Button, MediaEngineStore, showToast, Toasts, useState } from "@webpack/common";
+import { Button, MediaEngineStore, showToast, Toasts, useEffect, useRef, useState } from "@webpack/common";
 
 import { settings, type VoiceRecorder } from "..";
 
 const Native = VencordNative.pluginHelpers.VoiceMessages as PluginNative<typeof import("../native")>;
+let recordingOwner: symbol | undefined;
 
 export const VoiceRecorderDesktop: VoiceRecorder = ({ setAudioBlob, onRecordingChange }) => {
     const [recording, setRecording] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const busyRef = useRef(false);
+    const recordingRef = useRef(false);
+    const mounted = useRef(true);
+    const owner = useRef(Symbol("voice-recording"));
+    const voiceModule = useRef<any>(undefined);
+
+    const releaseOwner = () => {
+        if (recordingOwner === owner.current) recordingOwner = undefined;
+    };
+
+    const discardRecording = (filePath: string) => {
+        releaseOwner();
+        if (filePath) void Native.readRecording(filePath).catch(() => { });
+    };
+
+    useEffect(() => {
+        mounted.current = true;
+        return () => {
+            mounted.current = false;
+            if (recordingRef.current) {
+                recordingRef.current = false;
+                try {
+                    voiceModule.current?.stopLocalAudioRecording(discardRecording);
+                } catch {
+                    releaseOwner();
+                }
+            }
+        };
+    }, []);
 
     const changeRecording = (recording: boolean) => {
         setRecording(recording);
@@ -32,39 +63,74 @@ export const VoiceRecorderDesktop: VoiceRecorder = ({ setAudioBlob, onRecordingC
     };
 
     function toggleRecording() {
-        const discordVoice = DiscordNative.nativeModules.requireModule("discord_voice");
-        const nowRecording = !recording;
-
-        if (nowRecording) {
-            discordVoice.startLocalAudioRecording(
-                {
-                    echoCancellation: settings.store.echoCancellation,
-                    noiseCancellation: settings.store.noiseSuppression,
-                    deviceId: MediaEngineStore.getInputDeviceId(),
-                },
-                (success: boolean) => {
-                    if (success)
-                        changeRecording(true);
-                    else
-                        showToast("Failed to start recording", Toasts.Type.FAILURE);
-                }
-            );
-        } else {
-            discordVoice.stopLocalAudioRecording(async (filePath: string) => {
-                if (filePath) {
-                    const buf = await Native.readRecording(filePath);
-                    if (buf)
-                        setAudioBlob(new Blob([new Uint8Array(buf)], { type: "audio/ogg; codecs=opus" }));
-                    else
-                        showToast("Failed to finish recording", Toasts.Type.FAILURE);
-                }
-                changeRecording(false);
-            });
+        if (busyRef.current) return;
+        if (!recordingRef.current && recordingOwner && recordingOwner !== owner.current) {
+            showToast("Another voice recording is in progress", Toasts.Type.FAILURE);
+            return;
+        }
+        busyRef.current = true;
+        setBusy(true);
+        try {
+            const discordVoice = voiceModule.current = DiscordNative.nativeModules.requireModule("discord_voice");
+            if (!recordingRef.current) {
+                recordingOwner = owner.current;
+                discordVoice.startLocalAudioRecording(
+                    {
+                        echoCancellation: settings.store.echoCancellation,
+                        noiseCancellation: settings.store.noiseSuppression,
+                        deviceId: MediaEngineStore.getInputDeviceId(),
+                    },
+                    (success: boolean) => {
+                        if (!mounted.current) {
+                            if (success) {
+                                try { discordVoice.stopLocalAudioRecording(discardRecording); }
+                                catch { releaseOwner(); }
+                            } else releaseOwner();
+                            return;
+                        }
+                        busyRef.current = false;
+                        setBusy(false);
+                        recordingRef.current = success;
+                        if (success) {
+                            changeRecording(true);
+                        } else {
+                            releaseOwner();
+                            showToast("Failed to start recording", Toasts.Type.FAILURE);
+                        }
+                    }
+                );
+            } else {
+                recordingRef.current = false;
+                discordVoice.stopLocalAudioRecording(async (filePath: string) => {
+                    releaseOwner();
+                    try {
+                        const buf = filePath ? await Native.readRecording(filePath) : null;
+                        if (!mounted.current) return;
+                        if (buf) setAudioBlob(new Blob([new Uint8Array(buf)], { type: "audio/ogg; codecs=opus" }));
+                        else showToast("Failed to finish recording", Toasts.Type.FAILURE);
+                    } catch {
+                        if (mounted.current) showToast("Failed to finish recording", Toasts.Type.FAILURE);
+                    } finally {
+                        if (mounted.current) {
+                            changeRecording(false);
+                            busyRef.current = false;
+                            setBusy(false);
+                        }
+                    }
+                });
+            }
+        } catch {
+            releaseOwner();
+            recordingRef.current = false;
+            changeRecording(false);
+            busyRef.current = false;
+            setBusy(false);
+            showToast("Failed to change recording state", Toasts.Type.FAILURE);
         }
     }
 
     return (
-        <Button onClick={toggleRecording}>
+        <Button disabled={busy} onClick={toggleRecording}>
             {recording ? "Stop" : "Start"} recording
         </Button>
     );

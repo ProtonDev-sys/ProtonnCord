@@ -1,0 +1,123 @@
+[
+  {
+    "path": "scripts/testClientsideGuildIcons.ts",
+    "baselineSha256": "46981e89c1059ab231081b95c96cd38e47f3990abccf717199ea53fb01c9d657",
+    "reviewedSha256": "46981e89c1059ab231081b95c96cd38e47f3990abccf717199ea53fb01c9d657",
+    "status": "reviewed",
+    "summary": "Read complete direct pure-storage checks: legacy image data URL becomes a MIME-preserving Blob, existing Blob identity is reused, remote/invalid values are rejected, and rewrite flags distinguish migrated/canonical maps. The fixture only checks container data and size, not full image decoding or UI URL lifetime.",
+    "validation": [
+      "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
+      "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
+    ]
+  },
+  {
+    "path": "scripts/testCrashHandler.ts",
+    "baselineSha256": "979451876f63fad1d3d3162b60c4bd226bff98257d3dc02ee8df6c240e49d6fc",
+    "reviewedSha256": "979451876f63fad1d3d3162b60c4bd226bff98257d3dc02ee8df6c240e49d6fc",
+    "status": "reviewed",
+    "summary": "Read actual-source AST method extraction and all four isolated recovery branches. Controlled timeout/immediate queues verify reentrancy, guard release after React updates, disabled/cooldown/failure behavior and one-time update prompting. Existing audit-core tests separately cover asynchronous deletion/prompt failures; this file does not render real React.",
+    "validation": [
+      "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
+      "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
+    ]
+  },
+  {
+    "path": "scripts/testMessageLoggerNativeWrites.ts",
+    "baselineSha256": "e7fe418b37764bf514ee35c2a8d53ed5dcd5523ef440cc62bfa163501c780f51",
+    "reviewedSha256": "e7fe418b37764bf514ee35c2a8d53ed5dcd5523ef440cc62bfa163501c780f51",
+    "status": "reviewed",
+    "summary": "Read complete normalization, bounded-read, exclusive-create, concurrent-write/quota and contained cache-root alias checks plus source guards for removed arbitrary filename bridge. Real filesystem work is confined to a verified mkdtemp directory; linked targets and canonical roots are also inside it, with finally cleanup. Cross-platform path-only probes are distinguished from actual host filesystem coverage.",
+    "validation": [
+      "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
+      "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
+    ]
+  },
+  {
+    "path": "scripts/testNativeBridgeSubscriptions.ts",
+    "baselineSha256": "5089e679848675b828725eb4f0c170b5b5f927a5526dd6c54c12ea809bacddcb",
+    "reviewedSha256": "5089e679848675b828725eb4f0c170b5b5f927a5526dd6c54c12ea809bacddcb",
+    "status": "reviewed",
+    "summary": "Read complete actual-source VM loaders for Electron and browser bridge subscription behavior. Whitelisted mocks isolate IPC/DataStore and assert duplicate callback independence, idempotent disposal, Electron-event stripping and persisted QuickCSS after listeners leave. No real preload/Electron process is loaded.",
+    "validation": [
+      "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
+      "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
+    ]
+  },
+  {
+    "path": "scripts/testNativeStorage.ts",
+    "baselineSha256": "80e98e1b33bdf1db9a639d01fa2ba67c5485ceccb3d69236f5244a2e05298eab",
+    "reviewedSha256": "80e98e1b33bdf1db9a639d01fa2ba67c5485ceccb3d69236f5244a2e05298eab",
+    "status": "reviewed",
+    "summary": "Read native settings root validation, CRX v2/v3 payload extraction, awaited extension install and in-memory atomic settings failure matrix. All extension/network/Electron/filesystem mutations are mocked; asserts previous data and published object identity survive open/write/fsync/close/rename failures. This does not model OS crash durability or all hostile archives.",
+    "validation": [
+      "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
+      "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
+    ]
+  },
+  {
+    "path": "scripts/testNavidromeAssetPrivacy.ts",
+    "baselineSha256": "c5502bdfcf465f3f193cf69c7119e718bea09b10d5f2b36dac951b803892cf91",
+    "reviewedSha256": "c5502bdfcf465f3f193cf69c7119e718bea09b10d5f2b36dac951b803892cf91",
+    "status": "reviewed",
+    "summary": "Read privacy normalization assertions and static source guards for removed authenticated cover-art construction, legacy-mode fallback, UI explanation and resolver arguments. The source-pattern checks are spelling/structure sensitive and alone do not prove runtime information flow; normalization is executed directly and rich-presence tests supply behavioral coverage. No credentials or real services used.",
+    "validation": [
+      "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
+      "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
+    ]
+  },
+  {
+    "path": "scripts/testOneKeyIdentity.ts",
+    "baselineSha256": "6c5df6b375b9c53ce05861c11eabaa72a24d3c6b978b6984ef72ec4a188d9688",
+    "reviewedSha256": "6c5df6b375b9c53ce05861c11eabaa72a24d3c6b978b6984ef72ec4a188d9688",
+    "status": "reviewed",
+    "summary": "Read fixed synthetic-root known-answer derivation, input immutability, account separation, Ed25519 signature verification, X25519 public-key derivation and canonical profile-input checks. Fixture keys are deterministic public test vectors; the test performs local cryptography only and is not a claim about vault storage, secret handling or full protocol security.",
+    "validation": [
+      "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
+      "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
+    ]
+  },
+  {
+    "path": "scripts/testPrimaryStreamAudio.ts",
+    "baselineSha256": "432591371ff3d00f60ba5c34700ce138ee29cec46f1dc15978a8d4af157c2c2b",
+    "reviewedSha256": "432591371ff3d00f60ba5c34700ce138ee29cec46f1dc15978a8d4af157c2c2b",
+    "status": "reviewed",
+    "summary": "Read complete pure-store cases for selected-stream switching, normal voice exclusion, existing local mute/volume and DOM-primary fallback candidate restriction. Assertions exercise actual logic with synthetic participants/audio records; they do not certify host audio-graph attachment or live playback.",
+    "validation": [
+      "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
+      "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
+    ]
+  },
+  {
+    "path": "scripts/testUploadFileNames.ts",
+    "baselineSha256": "1871cd966d003e192dff92ac7094c6a9b64be2ab98ec03800bb07acf3478f35b",
+    "reviewedSha256": "1871cd966d003e192dff92ac7094c6a9b64be2ab98ec03800bb07acf3478f35b",
+    "status": "reviewed",
+    "summary": "Read actual-source VM fixtures integrating anonymization with extension correction. Assertions cover unknown/compound suffixes, enabled predicate coordination, opt-in/out and spoiler idempotence, bounded random lengths, fallback methods, timestamps and custom date formats. Random checks validate character/length contracts, not statistical randomness; no uploads occur.",
+    "validation": [
+      "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
+      "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
+    ]
+  },
+  {
+    "path": "scripts/testUrlCleaning.ts",
+    "baselineSha256": "b0a3c1fea0e7d3a92f058a5e92ecafc957b559a06bdde21bec7d770589394be4",
+    "reviewedSha256": "b0a3c1fea0e7d3a92f058a5e92ecafc957b559a06bdde21bec7d770589394be4",
+    "status": "reviewed",
+    "summary": "Read complete deferred-fetch VM and catalog/provider validation cases. Assertions cover whole-name duplicate query removal, raw rules/exceptions, input preservation, failed catalog replacement, abort and stale stopped/superseded responses. It uses small ordinary regex fixtures; synchronous arbitrary catalog regex complexity remains outside this test and no real catalog is fetched.",
+    "validation": [
+      "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
+      "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
+    ]
+  },
+  {
+    "path": "scripts/testVoiceMessageTranscriber.ts",
+    "baselineSha256": "243c275042b399152d21037beb4ddb9f2e6be297b23fad37a304335a918ff71c",
+    "reviewedSha256": "243c275042b399152d21037beb4ddb9f2e6be297b23fad37a304335a918ff71c",
+    "status": "reviewed",
+    "summary": "Read direct option/container/transcript/waveform checks. Synthetic bytes and generated sinusoidal samples exercise voice flags, playback fallback, language options, invalid timestamp removal, audio signatures and varying waveform bins. Two eligibility assertions intentionally share the same data and do not independently test authorship; no provider download or transcription model runs.",
+    "validation": [
+      "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
+      "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
+    ]
+  }
+]

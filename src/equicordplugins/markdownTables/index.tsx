@@ -71,7 +71,9 @@ interface MarkdownTableRendererProps {
 }
 
 let shouldInstallTableRule = false;
-let installedRules: MarkdownRules | null = null;
+const installedRules = new Map<MarkdownRules, MarkdownRule>();
+const installTimers = new Set<number>();
+let waitingForParser = false;
 
 type MarkdownRules = Record<string, Partial<MarkdownRule> | undefined>;
 
@@ -344,7 +346,12 @@ function createTableRule(order: number): MarkdownRule {
     };
 }
 function scheduleTableRuleInstall(parser: { defaultRules?: MarkdownRules; }) {
-    window.setTimeout(() => installTableRuleForParser(parser), 0);
+    if (!shouldInstallTableRule) return;
+    const timer = window.setTimeout(() => {
+        installTimers.delete(timer);
+        installTableRuleForParser(parser);
+    }, 0);
+    installTimers.add(timer);
 }
 
 function installTableRuleForParser(parser: { defaultRules?: MarkdownRules; }) {
@@ -353,9 +360,10 @@ function installTableRuleForParser(parser: { defaultRules?: MarkdownRules; }) {
     const rules = parser.defaultRules;
     if (!rules || rules[TABLE_RULE]) return;
 
-    installedRules = rules;
     const paragraphOrder = typeof rules.paragraph?.order === "number" ? rules.paragraph.order : 1;
-    rules[TABLE_RULE] = createTableRule(paragraphOrder - 0.5);
+    const rule = createTableRule(paragraphOrder - 0.5);
+    installedRules.set(rules, rule);
+    rules[TABLE_RULE] = rule;
 }
 
 export default definePlugin({
@@ -388,13 +396,23 @@ export default definePlugin({
             scheduleTableRuleInstall(Parser);
         }
 
-        waitFor("parseTopic", scheduleTableRuleInstall);
+        if (!waitingForParser) {
+            waitingForParser = true;
+            waitFor("parseTopic", parser => {
+                waitingForParser = false;
+                scheduleTableRuleInstall(parser);
+            });
+        }
     },
 
     stop() {
         shouldInstallTableRule = false;
-        if (installedRules) delete installedRules[TABLE_RULE];
-        installedRules = null;
+        for (const timer of installTimers) window.clearTimeout(timer);
+        installTimers.clear();
+        for (const [rules, rule] of installedRules) {
+            if (rules[TABLE_RULE] === rule) delete rules[TABLE_RULE];
+        }
+        installedRules.clear();
     },
 
     getTableRule(paragraphOrder = 1) {

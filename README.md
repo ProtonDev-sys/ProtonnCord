@@ -24,7 +24,7 @@ Read the [Secure Messaging protocol, operational rules, limits, and threat model
 
 ## Install from source
 
-[Git](https://git-scm.com/downloads), Node.js 22 or newer, and the repository-pinned `pnpm` version are required. Do not build or inject from an Administrator/root terminal; doing so can leave Discord files owned by the wrong account.
+[Git](https://git-scm.com/downloads), Node.js 22.13+ from the 22.x line or Node.js 24+, and the repository-pinned `pnpm` version are required. CI uses Node.js 24. Do not build or inject from an Administrator/root terminal; doing so can leave Discord files owned by the wrong account.
 
 ```shell
 git clone https://github.com/ProtonDev-sys/ProtonnCord.git
@@ -46,17 +46,18 @@ Prebuilt release artifacts are published on the [latest Protonn Cord release](ht
 
 ## Updating
 
-Open **Settings → Protonn Cord → Updater**. A local source build compares its current branch with the same branch in `ProtonDev-sys/ProtonnCord`, updates only by fast-forward, rebuilds, and then offers to restart Discord. Detached, unpublished, diverged, or dirty-behind checkouts stop with an explicit error instead of being reset. A standalone build downloads the current Protonn Cord release artifact from this repository.
+Open **Settings → Protonn Cord → Updater** and choose `main`, `staging`, or `nightly`. Source builds use the selected branch in `ProtonDev-sys/ProtonnCord`, require a safe branch transition, update by fast-forward, and rebuild before offering a restart. Detached, unpublished, diverged, or conflicting dirty checkouts stop with an explicit error instead of being reset. Standalone builds download the release artifact for the selected branch. Failed updates preserve the error state and do not trigger a success restart.
 
 ## Development and testing
 
 Install dependencies once, then run the complete non-live gate:
 
 ```shell
+pnpm build
 pnpm test
 ```
 
-That gate builds the standalone desktop artifact, type-checks, verifies the updater against a disposable Git remote, checks updater repository/release selection, exercises Secure Messaging protocol and native fault cases, checks message-event ordering, runs linters, and regenerates plugin metadata. Restore a normal local desktop build afterwards with `pnpm build` when required.
+Build the desktop test inputs first. The gate then type-checks, verifies the updater against a disposable Git remote, checks updater repository/release selection, exercises Secure Messaging protocol and native fault cases, checks message-event ordering, runs linters, and regenerates plugin metadata. Some checks replace files in `dist`; restore a normal local desktop build afterwards with `pnpm build` if this checkout supplies your running client.
 
 Use `pnpm build --dev` (or the existing `pnpm dev` watcher) while developing. Development builds use the separate development data directory and compile the Protonn Cord updater completely disabled, so an in-progress local build cannot check out, rebuild, or replace itself. Use `--disable-updater` without `--dev` when testing against the normal local data directory while retaining the same updater-off guarantee.
 
