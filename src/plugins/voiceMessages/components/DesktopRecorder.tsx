@@ -19,15 +19,14 @@
 import { PluginNative } from "@utils/types";
 import { Button, MediaEngineStore, showToast, Toasts, useEffect, useRef, useState } from "@webpack/common";
 
-import { settings, type VoiceRecorder } from "..";
+import { settings, useBusyState, type VoiceRecorder } from "..";
 
 const Native = VencordNative.pluginHelpers.VoiceMessages as PluginNative<typeof import("../native")>;
 let recordingOwner: symbol | undefined;
 
 export const VoiceRecorderDesktop: VoiceRecorder = ({ setAudioBlob, onRecordingChange }) => {
     const [recording, setRecording] = useState(false);
-    const [busy, setBusy] = useState(false);
-    const busyRef = useRef(false);
+    const [busy, setBusy] = useBusyState();
     const recordingRef = useRef(false);
     const mounted = useRef(true);
     const owner = useRef(Symbol("voice-recording"));
@@ -63,12 +62,11 @@ export const VoiceRecorderDesktop: VoiceRecorder = ({ setAudioBlob, onRecordingC
     };
 
     function toggleRecording() {
-        if (busyRef.current) return;
+        if (busy.current) return;
         if (!recordingRef.current && recordingOwner && recordingOwner !== owner.current) {
             showToast("Another voice recording is in progress", Toasts.Type.FAILURE);
             return;
         }
-        busyRef.current = true;
         setBusy(true);
         try {
             const discordVoice = voiceModule.current = DiscordNative.nativeModules.requireModule("discord_voice");
@@ -88,7 +86,6 @@ export const VoiceRecorderDesktop: VoiceRecorder = ({ setAudioBlob, onRecordingC
                             } else releaseOwner();
                             return;
                         }
-                        busyRef.current = false;
                         setBusy(false);
                         recordingRef.current = success;
                         if (success) {
@@ -113,7 +110,6 @@ export const VoiceRecorderDesktop: VoiceRecorder = ({ setAudioBlob, onRecordingC
                     } finally {
                         if (mounted.current) {
                             changeRecording(false);
-                            busyRef.current = false;
                             setBusy(false);
                         }
                     }
@@ -123,14 +119,13 @@ export const VoiceRecorderDesktop: VoiceRecorder = ({ setAudioBlob, onRecordingC
             releaseOwner();
             recordingRef.current = false;
             changeRecording(false);
-            busyRef.current = false;
             setBusy(false);
             showToast("Failed to change recording state", Toasts.Type.FAILURE);
         }
     }
 
     return (
-        <Button disabled={busy} onClick={toggleRecording}>
+        <Button disabled={busy.current} onClick={toggleRecording}>
             {recording ? "Stop" : "Start"} recording
         </Button>
     );

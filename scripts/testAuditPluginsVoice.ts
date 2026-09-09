@@ -14,10 +14,10 @@ import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 const React = { Fragment: "fragment", createElement: (type: unknown, props: any, ...children: unknown[]) => ({ type, props: props ?? {}, children }) };
 
-function load(path: string, mocks: Record<string, any>, globals: Record<string, unknown> = {}) {
+function load(path: string, mocks: Record<string, any>, globals: Record<string, unknown> = {}, expose = "") {
     const modules = { "@utils/constants": { Devs: {} },
         "@utils/types": { __esModule: true, default: (value: unknown) => value, OptionType: {} }, ...mocks };
-    const code = transpileModule(readFileSync(path, "utf8"), {
+    const code = transpileModule(readFileSync(path, "utf8") + expose, {
         fileName: path,
         compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
     }).outputText;
@@ -26,8 +26,8 @@ function load(path: string, mocks: Record<string, any>, globals: Record<string, 
 
 function hooks() {
     const slots: any[] = [];
-    const cleanups: Array<() => void> = [];
-    const effects: Array<() => (() => void) | void> = [];
+    const cleanups = new Map<number, () => void>();
+    const effects: Array<() => void> = [];
     let index = 0;
     const common = {
         useState(initial: any) {
@@ -39,22 +39,32 @@ function hooks() {
             const slot = index++;
             return slots[slot] ??= { current: initial };
         },
-        useEffect(effect: () => (() => void) | void) {
+        useEffect(effect: () => (() => void) | void, deps: unknown[]) {
             const slot = index++;
-            if (slot in slots) return;
-            slots[slot] = true;
-            effects.push(effect);
+            if (slots[slot]?.length === deps.length && slots[slot].every((value: unknown, index: number) => Object.is(value, deps[index]))) return;
+            slots[slot] = deps;
+            effects.push(() => {
+                cleanups.get(slot)?.();
+                const cleanup = effect();
+                if (cleanup) cleanups.set(slot, cleanup);
+                else cleanups.delete(slot);
+            });
         }
     };
     return { common, render(component: (props: any) => any, props: any) {
         index = 0;
         const result = component(props);
-        for (const effect of effects.splice(0)) {
-            const cleanup = effect();
-            if (cleanup) cleanups.push(cleanup);
-        }
+        for (const effect of effects.splice(0)) effect();
         return result;
-    }, unmount() { for (const cleanup of cleanups.splice(0)) cleanup(); } };
+    }, unmount() { for (const cleanup of cleanups.values()) cleanup(); cleanups.clear(); } };
+}
+
+function recorderSettings(common: ReturnType<typeof hooks>["common"]) {
+    return load("src/plugins/voiceMessages/index.tsx", {
+        "@api/Settings": { definePluginSettings: () => ({ store: {} }) },
+        "@utils/css": { classNameFactory: () => () => "" },
+        "@webpack/common": common, "./waveform": {}
+    });
 }
 
 function webFixture() {
@@ -81,7 +91,7 @@ function webFixture() {
         }
     }
     const component = load("src/plugins/voiceMessages/components/WebRecorder.tsx", {
-        "..": { settings: { store: {} } },
+        "..": recorderSettings(state.common),
         "@webpack/common": { ...state.common, Button: "button", MediaEngineStore: { getInputDeviceId: () => "device" },
             showToast: (text: string) => toasts.push(text), Toasts: { Type: {} } }
     }, { navigator: { mediaDevices: { getUserMedia: () => new Promise(resolve => requests.push(resolve)) } }, MediaRecorder: Recorder }).VoiceRecorderWeb;
@@ -147,6 +157,34 @@ test("voice previews run their timer only while recording and release it on unmo
     }
 });
 
+test("voice modal owns each selected Blob URL and never previews a previous selection", () => {
+    const state = hooks();
+    const revoked: string[] = [];
+    let created = 0;
+    const component = load("src/plugins/voiceMessages/index.tsx", {
+        "@api/Settings": { definePluginSettings: () => ({ store: {} }) },
+        "@utils/css": { classNameFactory: () => () => "" },
+        "@utils/react": { useAwaiter: () => [{ waveform: "fixture", duration: 1 }, null, false] },
+        "@webpack/common": { ...state.common, Modal: "modal", Button: "button", Forms: { FormTitle: "title" }, UserStore: { getCurrentUser: () => ({ id: "self" }) } },
+        "./components/DesktopRecorder": { VoiceRecorderDesktop: "recorder" },
+        "./components/VoicePreview": { VoicePreview: "preview" }, "./waveform": {}
+    }, { IS_DISCORD_DESKTOP: true, URL: { createObjectURL: () => `blob:${++created}`, revokeObjectURL: (url: string) => revoked.push(url) } },
+    "\nexport { VoiceMessageModal };").VoiceMessageModal;
+    const render = () => state.render(component, { modalProps: {}, channelId: "channel" });
+    let modal = render();
+    assert.equal(modal.children[2].props.src, undefined);
+    assert.equal(created, 0);
+    for (let selection = 1; selection <= 2; selection++) {
+        modal.children[0].children[0].props.setAudioBlob(new Blob([String(selection)], { type: "audio/ogg" }));
+        assert.equal(render().children[2].props.src, undefined, "obsolete audio is hidden before the selection effect commits");
+        modal = render();
+        assert.equal(modal.children[2].props.src, `blob:${selection}`);
+    }
+    assert.deepEqual(revoked, ["blob:1"]);
+    state.unmount();
+    assert.deepEqual(revoked, ["blob:1", "blob:2"]);
+});
+
 function desktopFixture() {
     const state = hooks();
     const starts: Array<(success: boolean) => void> = [];
@@ -156,7 +194,7 @@ function desktopFixture() {
     const toasts: string[] = [];
     let failRead = false;
     const component = load("src/plugins/voiceMessages/components/DesktopRecorder.tsx", {
-        "..": { settings: { store: {} } },
+        "..": recorderSettings(state.common),
         "@webpack/common": { ...state.common, Button: "button", MediaEngineStore: { getInputDeviceId: () => "device" },
             showToast: (text: string) => toasts.push(text), Toasts: { Type: {} } }
     }, { VencordNative: { pluginHelpers: { VoiceMessages: { readRecording: async (path: string) => {

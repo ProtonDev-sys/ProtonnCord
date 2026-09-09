@@ -70,6 +70,16 @@ export type VoiceRecorder = React.ComponentType<{
     onRecordingChange?(recording: boolean): void;
 }>;
 
+// The ref blocks a second action before React renders the disabled button.
+export function useBusyState() {
+    const busy = useRef(false);
+    const [, setBusy] = useState(false);
+    return [busy, (value: boolean) => {
+        busy.current = value;
+        setBusy(value);
+    }] as const;
+}
+
 export let VoiceMessage: ComponentType<VoiceMessageProps> = () => null;
 
 export const settings = definePluginSettings({
@@ -203,28 +213,11 @@ export async function sendAudio(blob: Blob, meta: AudioMetadata, channelId = Sel
     }
 }
 
-function useObjectUrl() {
-    const [url, setUrl] = useState<string>();
-    const currentUrl = useRef<string | undefined>(undefined);
-    useEffect(() => () => {
-        if (currentUrl.current) URL.revokeObjectURL(currentUrl.current);
-        currentUrl.current = undefined;
-    }, []);
-    const setWithFree = (blob: Blob) => {
-        if (currentUrl.current) URL.revokeObjectURL(currentUrl.current);
-        currentUrl.current = URL.createObjectURL(blob);
-        setUrl(currentUrl.current);
-    };
-
-    return [url, setWithFree] as const;
-}
-
 function VoiceMessageModal({ modalProps, channelId }: { modalProps: RenderModalProps; channelId: string; }) {
     const [isRecording, setRecording] = useState(false);
     const [blob, setBlob] = useState<Blob>();
-    const [blobUrl, setBlobUrl] = useObjectUrl();
-    const [sending, setSending] = useState(false);
-    const sendingRef = useRef(false);
+    const [preview, setPreview] = useState<{ blob: Blob; url: string; }>();
+    const [sending, setSending] = useBusyState();
     const mounted = useRef(true);
     const accountId = useRef(UserStore.getCurrentUser()?.id);
 
@@ -234,6 +227,13 @@ function VoiceMessageModal({ modalProps, channelId }: { modalProps: RenderModalP
         mounted.current = true;
         return () => { mounted.current = false; };
     }, []);
+
+    useEffect(() => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        setPreview({ blob, url });
+        return () => URL.revokeObjectURL(url);
+    }, [blob]);
 
     const [meta, metaError, metaPending] = useAwaiter(async () => {
         if (!blob) return EMPTY_META;
@@ -263,41 +263,33 @@ function VoiceMessageModal({ modalProps, channelId }: { modalProps: RenderModalP
                 text: "Send",
                 variant: "primary",
                 onClick: async () => {
-                    if (!blob || isRecording || metaPending || sendingRef.current) return;
+                    if (!blob || isRecording || metaPending || sending.current) return;
                     if (!accountId.current || UserStore.getCurrentUser()?.id !== accountId.current) {
                         showToast("The account changed. Reopen the voice message recorder to send.", Toasts.Type.FAILURE);
                         return;
                     }
-                    sendingRef.current = true;
                     setSending(true);
                     try {
                         if (await sendAudio(blob, meta ?? EMPTY_META, channelId, accountId.current) && mounted.current)
                             modalProps.onClose();
                     } finally {
-                        sendingRef.current = false;
                         if (mounted.current) setSending(false);
                     }
                 },
-                disabled: !blob || isRecording || metaPending || sending
+                disabled: !blob || isRecording || metaPending || sending.current
             }]}
         >
             <div className={cl("buttons")}>
                 <VoiceRecorder
-                    setAudioBlob={blob => {
-                        setBlob(blob);
-                        setBlobUrl(blob);
-                    }}
+                    setAudioBlob={setBlob}
                     onRecordingChange={setRecording}
                 />
 
                 <Button
-                    disabled={isRecording || sending}
+                    disabled={isRecording || sending.current}
                     onClick={async () => {
                         const file = await chooseFile("audio/*");
-                        if (file && mounted.current) {
-                            setBlob(file);
-                            setBlobUrl(file);
-                        }
+                        if (file && mounted.current) setBlob(file);
                     }}
                 >
                     Upload File
@@ -309,7 +301,7 @@ function VoiceMessageModal({ modalProps, channelId }: { modalProps: RenderModalP
                 ? <Paragraph className={cl("error")}>Failed to parse selected audio file: {metaError.message}</Paragraph>
                 : (
                     <VoicePreview
-                        src={blobUrl}
+                        src={preview && preview.blob === blob ? preview.url : undefined}
                         waveform={meta.waveform}
                         recording={isRecording}
                     />

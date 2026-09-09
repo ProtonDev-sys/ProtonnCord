@@ -5,27 +5,15 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { composeSecureForwardText, secureForwardRoute } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
+import { loadTestModule } from "./utils/loadTestModule";
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
 function load(file: string, imports: Record<string, unknown>, globals: Record<string, unknown> = {}, expose = "") {
-    const code = transpileModule(readFileSync(file, "utf8") + expose, {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    return runInNewContext(`${code}\nexports;`, {
-        exports: {}, React, URL, Set, File, AbortController, Uint8Array, console,
-        require(name: string) {
-            if (name.includes(".css")) return {};
-            assert.ok(Object.hasOwn(imports, name), `Unexpected import: ${name}`);
-            return imports[name];
-        }, ...globals
-    });
+    return loadTestModule(file, imports, { React, URL, Set, File, AbortController, Uint8Array, console, ...globals }, expose);
 }
 const questPath = "src/equicordplugins/questify/";
 const statuses = ["UNCLAIMED", "CLAIMED", "IGNORED", "EXPIRED"];

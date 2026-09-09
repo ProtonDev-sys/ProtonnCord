@@ -5,10 +5,9 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -22,18 +21,7 @@ function load(file: string, mocks: Record<string, unknown> = {}, globals: Record
         "@utils/Logger": { Logger: class { error() {} } },
         ...mocks
     };
-    const code = transpileModule(readFileSync(file, "utf8") + expose, {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    return runInNewContext(`${code}\nexports;`, {
-        exports: {}, React, Promise, console, URL,
-        require(name: string) {
-            if (name.includes(".css")) return {};
-            assert.ok(Object.hasOwn(imports, name), `Unexpected import: ${name}`);
-            return imports[name];
-        },
-        ...globals
-    });
+    return loadTestModule(file, imports, { React, Promise, console, URL, ...globals }, expose);
 }
 
 test("InvisibleChat keeps decrypted URLs local by default and does not mutate shared embeds", async () => {

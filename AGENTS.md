@@ -14,6 +14,8 @@ Discord client mod based on Equicord/Vencord, with an Android Secure Messaging c
 
 Preserve plugin IDs, enabled states, favorites and unknown saved fields. Storage changes need migration and failure/retry coverage. `scripts/fixtures/plugin-catalog-baseline.json` is a compatibility fixture; do not regenerate it to hide removals.
 
+Prefer the smallest maintainable change. Remove duplicate or dead logic when behavior is preserved; share existing repeated code instead of adding speculative layers. Keep production and test-code growth visible in review.
+
 Use existing APIs and dispose listeners, timers, media tracks and pending work on stop/unmount. Keep privileged work in native modules and validate renderer arguments there. For encryption or pairing changes, read the desktop Secure Messaging and mobile READMEs; preserve trust review, history and fail-closed behavior.
 
 Check the branch/worktree before editing. Keep task notes and review ledgers outside the submitted tree. Put concise validation results in the PR.

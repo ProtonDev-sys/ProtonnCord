@@ -5,12 +5,10 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import indicators from "../src/equicordplugins/toneIndicators/indicators";
+import { loadTestModule } from "./utils/loadTestModule";
 
 const React = {
     createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children: children.length === 1 ? children[0] : children } }),
@@ -39,18 +37,9 @@ function load(file: string, mocks: Record<string, unknown> = {}, globals: Record
         "@components/ErrorBoundary": { __esModule: true, default: Object.assign("boundary", { wrap: (component: unknown) => component }) },
         ...mocks
     };
-    const code = transpileModule(readFileSync("src/equicordplugins/" + file, "utf8") + expose, {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    return runInNewContext(code + "\nexports;", {
-        exports: {}, React, Promise, console, URL, URLSearchParams, Blob, File, TextEncoder,
-        require(name: string) {
-            if (name.includes(".css")) return {};
-            assert.ok(Object.hasOwn(imports, name), "Unexpected import: " + name);
-            return imports[name];
-        },
-        ...globals
-    });
+    return loadTestModule("src/equicordplugins/" + file, imports, {
+        React, Promise, console, URL, URLSearchParams, Blob, File, TextEncoder, ...globals
+    }, expose);
 }
 
 test("PingNotifications works with ordinary channels that have no isMuted method and respects guild mute", () => {
