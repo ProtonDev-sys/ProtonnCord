@@ -1,16 +1,11 @@
 ## Changes
 
-Describe the problem, resulting behavior, and target branch.
+<!-- Explain the problem and the resulting behavior. -->
 
 ## Validation
 
-List the checks run and any limitations. Include screenshots for visible UI changes when useful.
+<!-- List checks run and anything still unverified. Add screenshots when useful. -->
 
 ## Compatibility
 
-Describe effects on existing features, preferences, and stored data, including any migration.
-
-## Checklist
-
-- [ ] I have read [CONTRIBUTING.md](https://github.com/ProtonDev-sys/ProtonnCord/blob/main/CONTRIBUTING.md).
-- [ ] I have reviewed the submitted changes and preserved upstream attribution.
+<!-- Note changed defaults, stored data or migrations; omit this section if none. -->

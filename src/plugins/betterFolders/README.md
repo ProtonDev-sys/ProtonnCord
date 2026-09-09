@@ -1,11 +1,9 @@
 # Better Folders
 
-Better Folders offers a variety of options to improve your folder experience
+Configure server folders to:
 
-Always show the folder icon, regardless of if the folder is open or not
-
-Only have one folder open at a time
-
-Open folders in a sidebar:
+- Keep the folder icon visible when open.
+- Allow only one open folder at a time.
+- Open folders in a sidebar.
 
 ![A folder open in a separate sidebar](https://github.com/user-attachments/assets/432d3146-8091-4bae-9c1e-c19046c72947)
