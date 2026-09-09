@@ -35,3 +35,6 @@ ExtensionCache/
 
 # wakatime related stuff
 .wakatime-project
+
+# Local review records; validation results belong in the PR and CI.
+/docs/source-audit/

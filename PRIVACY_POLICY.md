@@ -1,31 +1,29 @@
 # Privacy and data handling
 
-Protonn Cord processes Discord account, channel, message and media data to provide its enabled features. Data handling depends on your plugins, settings, build target and connected services. This document describes the client implementation; it does not describe the retention practices of every external provider.
+Protonn Cord processes Discord account, channel, message and media data for the features you enable. Plugins and connected services determine what is stored and sent.
 
-## Data on your device
+## Local data
 
-Preferences, plugin configuration, themes and QuickCSS are stored locally. Plugins can also store records in IndexedDB, keep message or notification history, create downloads, and process recordings or transcripts. Some integrations save credentials or API keys in local configuration. Ordinary settings and exports should be treated as sensitive files, not assumed to be encrypted.
+Settings, themes and QuickCSS are stored in the configured data directory or browser profile. Plugins may also keep IndexedDB records, message/notification history, downloads, recordings or transcripts. Some integrations store credentials locally. Treat settings files and exports as sensitive; ordinary settings are not encrypted by default.
 
-Desktop storage uses the configured Protonn Cord data directory; development builds use a separate directory unless explicitly overridden. Browser builds use the browser profile's storage. Disabling a plugin generally preserves its saved preferences and records. Removing a build or disabling cloud sync does not itself erase all local data. See the [backup implementation](src/api/SettingsSync/offline.ts) and [data-directory configuration](src/main/utils/constants.ts) for the current storage behavior.
+Use the plugin's own controls to clear stored data; disabling it usually retains that data. Removing a build or disabling sync does not erase every local record. See the [backup implementation](src/api/SettingsSync/offline.ts) and [data-directory configuration](src/main/utils/constants.ts).
 
-## Network requests and optional integrations
+## External services
 
-Update checks and installer downloads contact GitHub according to the selected update channel and update settings. Themes, fonts, badges, images and media libraries can load resources from other hosts. Enabled plugins may contact translation, transcription, music, profile, upload or other services, including a server you configure. These requests can disclose your IP address, the requested resource, and information the feature submits, such as selected text, audio, media or account identifiers.
+Updates and installer downloads contact GitHub. Themes, fonts, badges, images and media libraries can load from other hosts. Enabled integrations may send text, audio, media or account identifiers to translation, transcription, music, upload or other configured services. Requests also expose your IP address and requested resource to the receiving service.
 
-Review a plugin's settings and provider before enabling an integration or entering credentials. Themes and QuickCSS can also reference remote resources. Discord continues to process ordinary account activity under its own [privacy policy](https://discord.com/privacy).
+Review the feature and provider before enabling it or entering credentials. Themes and QuickCSS can reference remote resources. Ordinary Discord activity remains subject to [Discord's privacy policy](https://discord.com/privacy).
 
-## Cloud settings sync
+## Cloud sync
 
-Cloud authentication is opt-in. The client supports compatible Equicord, Vencord and self-hosted backends. The current sync policy allows a restricted subset of preferences and QuickCSS; the selected backend can read that data. QuickCSS can contain private URLs or other text you enter, so review it before syncing. Plugin DataStore records, private plugin configuration and credential fields are excluded by the current [cloud policy](src/api/SettingsSync/cloudPolicy.ts).
+Cloud authentication is opt-in. Compatible Equicord, Vencord or self-hosted backends receive allowlisted preferences and QuickCSS, which they can read. Review QuickCSS for private URLs or secrets before syncing. The current [cloud policy](src/api/SettingsSync/cloudPolicy.ts) excludes credential fields, private plugin configuration and plugin DataStore records.
 
-Older clients may have uploaded fields that the current client excludes. The sync page can request deletion of settings or the account on the selected backend, but the client cannot verify provider backups or erase data from every previous backend. Previously shared credentials should be rotated, and all clients using the account should be updated. Provider retention and deletion practices remain the provider's responsibility.
+Older clients may have uploaded excluded fields. The sync page can request deletion from the selected backend; it cannot verify retained backups or erase every former backend. Update other clients and rotate credentials that were previously synced.
 
-## Secure Messaging
+## Encrypted messages and bridges
 
-Secure Messaging encrypts content only for explicitly selected, verified conversations. Its installation-local vault uses operating-system storage protection and has different backup and recovery requirements from ordinary settings. Discord still receives routing information and ciphertext, including observable timing and sizes. The implementation does not provide forward secrecy or post-compromise security. Read the [protocol, storage and operational limits](src/equicordplugins/secureMessaging.desktop/README.md) before relying on it.
+Secure Messaging applies only to selected, verified conversations. Discord still sees routing, timing, sizes and ciphertext. Its installation-local vault has different backup/recovery requirements from ordinary settings. Read the [protocol and recovery guide](src/equicordplugins/secureMessaging.desktop/README.md).
 
-## Local bridges and custom code
+Enabling [DiscordMCP](tools/discord-mcp/README.md) gives connected software access to supported account operations and returned data. That software's handling and retention policies apply too. Custom plugins and development tools can add further access.
 
-Enabling a local bridge such as DiscordMCP gives connected software access to the bridge's supported operations using the signed-in Discord account. Returned messages and downloaded files become available to that connected software, whose own handling and retention policies then apply. See the [DiscordMCP capabilities](tools/discord-mcp/README.md). Custom plugins and development tools can introduce additional data access beyond the bundled defaults.
-
-When reporting a problem, review logs, screenshots and exported files before sharing them. Do not include credentials, private messages or the Secure Messaging vault in a public issue.
+Before sharing logs, screenshots or exports, remove private messages and credentials. Never attach the Secure Messaging vault to a public issue.

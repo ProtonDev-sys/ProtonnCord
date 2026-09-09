@@ -3,28 +3,19 @@
 [![Tests](https://github.com/ProtonDev-sys/ProtonnCord/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/ProtonDev-sys/ProtonnCord/actions/workflows/test.yml)
 [![Latest release](https://img.shields.io/github/release/ProtonDev-sys/ProtonnCord.svg?label=latest)](https://github.com/ProtonDev-sys/ProtonnCord/releases/tag/latest)
 
-Protonn Cord is a desktop-focused fork of [Equicord](https://github.com/Equicord/Equicord), which is itself a fork of [Vencord](https://github.com/Vendicated/Vencord). It keeps the wider plugin ecosystem while adding Protonn Cord-specific desktop features and release infrastructure.
-
-## Highlights
-
-- More than 300 bundled Equicord and Vencord plugins.
-- Opt-in Secure Messaging for DMs and group DMs, including authenticated encrypted text, replies, edits, stickers, GIF links, and ordinary attachments.
-- A Protonn Cord updater that checks this repository instead of the upstream Equicord remote.
-- Desktop, browser-extension, and userscript build targets.
+Protonn Cord is a Discord client mod based on [Equicord](https://github.com/Equicord/Equicord) and [Vencord](https://github.com/Vendicated/Vencord). It includes their plugins, optional Secure Messaging, and its own updater. Desktop, browser-extension and userscript builds are supported; [Android Secure Messaging](mobile/README.md) is a separate companion plugin.
 
 ## Secure Messaging
 
-Secure Messaging is non-ratcheting end-to-end encryption for explicitly selected and verified participants. Each message body and attachment is encrypted once with fresh symmetric key material; only the small content key is wrapped separately for each selected recipient and the sender. Adding somebody to a group does not grant access to earlier encrypted history, so any earlier content they need must be sent again as a new encrypted message.
+Secure Messaging encrypts DM/group-DM text and attachments for explicitly selected, verified participants. Adding someone does not give them access to earlier encrypted history. The protocol is non-ratcheting and provides neither forward secrecy nor post-compromise security.
 
-Encrypted attachments are authenticated completely before display. Their normal download actions are intercepted by Protonn Cord, decrypted in the trusted desktop process, and saved directly to the operating system's Downloads directory without overwriting an existing file.
+Attachments authenticate before display and decrypt locally. Authentication identifies the sender; it is not a malware scan, and Discord sees only ciphertext. Open files only from senders you trust.
 
-Authentication proves which verified sender supplied the bytes; it does not prove a file is harmless. Discord can scan only the opaque ciphertext, not the decrypted attachment, so open files only when you trust the sender and continue to rely on your operating system and antivirus protections.
-
-Read the [Secure Messaging protocol, operational rules, limits, and threat model](./src/equicordplugins/secureMessaging.desktop/README.md) before relying on it. It is implementation evidence, not a formal proof or independent security audit, and it does not provide forward secrecy or post-compromise security.
+Read the [setup, protocol and recovery guide](src/equicordplugins/secureMessaging.desktop/README.md) before use. [Privacy and data handling](PRIVACY_POLICY.md) covers local storage, cloud sync and external integrations.
 
 ## Install from source
 
-[Git](https://git-scm.com/downloads), Node.js 22.13+ from the 22.x line or Node.js 24+, and the repository-pinned `pnpm` version are required. CI uses Node.js 24. Do not build or inject from an Administrator/root terminal; doing so can leave Discord files owned by the wrong account.
+Use [Git](https://git-scm.com/downloads), Node.js 24 (as CI does), and the `pnpm` version pinned in `package.json`. Other supported Node versions are listed there. Build and inject as your normal user to avoid incorrect file ownership.
 
 ```shell
 git clone https://github.com/ProtonDev-sys/ProtonnCord.git
@@ -35,38 +26,28 @@ pnpm build
 pnpm inject
 ```
 
-Useful maintenance commands:
+Use `pnpm uninject` to remove the injection or `pnpm repair` to repair it.
 
-```shell
-pnpm uninject
-pnpm repair
-```
-
-Prebuilt release artifacts are published on the [latest Protonn Cord release](https://github.com/ProtonDev-sys/ProtonnCord/releases/tag/latest). The local injector uses Equicord's Equilotl installer engine, but the code and updater repository remain Protonn Cord.
+Prebuilt artifacts are on the [latest release](https://github.com/ProtonDev-sys/ProtonnCord/releases/tag/latest). The injector uses Equicord's Equilotl installer engine.
 
 ## Updating
 
-Open **Settings → Protonn Cord → Updater** and choose `main`, `staging`, or `nightly`. Source builds use the selected branch in `ProtonDev-sys/ProtonnCord`, require a safe branch transition, update by fast-forward, and rebuild before offering a restart. Detached, unpublished, diverged, or conflicting dirty checkouts stop with an explicit error instead of being reset. Standalone builds download the release artifact for the selected branch. Failed updates preserve the error state and do not trigger a success restart.
+Choose `main`, `staging`, or `nightly` in **Settings → Protonn Cord → Updater**. Source builds fast-forward the selected branch from this repository and rebuild. Detached, unpublished, diverged or conflicting dirty checkouts stop with an error. Standalone builds download that channel's release. A restart is offered after a successful update.
 
 ## Development and testing
 
-Install dependencies once, then run the complete non-live gate:
+After installing dependencies, run the desktop gate:
 
 ```shell
 pnpm build
 pnpm test
 ```
 
-Build the desktop test inputs first. The gate then type-checks, verifies the updater against a disposable Git remote, checks updater repository/release selection, exercises Secure Messaging protocol and native fault cases, checks message-event ordering, runs linters, and regenerates plugin metadata. Some checks replace files in `dist`; restore a normal local desktop build afterwards with `pnpm build` if this checkout supplies your running client.
+The gate uses built desktop inputs, runs regressions and type/lint checks, and can modify formatting and `dist`. Review the diff. Restore `pnpm build` afterwards if this checkout supplies your running client. Additional checks are listed in `package.json`; Android has its [own build recipe](mobile/README.md).
 
-Use `pnpm build --dev` (or the existing `pnpm dev` watcher) while developing. Development builds use the separate development data directory and compile the Protonn Cord updater completely disabled, so an in-progress local build cannot check out, rebuild, or replace itself. Use `--disable-updater` without `--dev` when testing against the normal local data directory while retaining the same updater-off guarantee.
+`pnpm build --dev` and `pnpm dev` use separate development data and disable updates. `--disable-updater` keeps the normal data profile with updates disabled. Use an isolated checkout or `--outdir=<directory>` for preview builds.
 
-Two additional scripts exercise a running Discord client through its remote-debugging endpoint:
-
-- `pnpm testSecureMessagingLive` sends, edits, forwards, downloads, retries, renders, opens encrypted images in Discord's media viewer without downloading them, and deletes real proof messages in its explicitly authorized DM. It refuses to run without `PROTONN_CORD_SECURE_MESSAGING_LIVE_TEST=I_UNDERSTAND_THIS_IS_DISPOSABLE` and matching absolute `PROTONN_CORD_SECURE_MESSAGING_LIVE_DATA_DIR` / `PROTONN_CORD_USER_DATA_DIR` values whose directory name contains `secure-messaging-live`. The Discord process must use that directory, have Secure Messaging enabled before startup when attachment patch coverage is required, and expose its debugging endpoint.
-- `pnpm testUpdaterLive` first proves that the connected Discord process uses this checkout's Git backend, `main` branch, and built HEAD; it refuses to update if remote `main` has advanced, then exercises the real no-op pull and desktop rebuild.
-
-The live scripts are deliberately excluded from `pnpm test` because they require a signed-in Discord session and mutate external state. The real-composer proof verifies both recipient decryption and the sender's plaintext render after Discord replaces its optimistic nonce ID with the confirmed server message ID. Secure Messaging creates and then removes proof messages, temporary trust/configuration, and one Downloads file; if a run is interrupted, inspect those locations before retrying. Both scripts default to `http://127.0.0.1:9222`; set `DISCORD_DEBUG_URL` to use another explicitly authorized debugging endpoint.
+Live runners are excluded from `pnpm test`. They can change real messages, settings, downloads or installed builds. Read each runner's preflight requirements and use its required profile, branch and authorized destination. `testSecureMessagingLive` requires explicit disposable-profile opt-in; `testUpdaterLive` requires an exact installed `main` checkout. Inspect proof messages, temporary configuration and downloads after an interrupted run.
 
 Build the browser extension and userscript with:
 

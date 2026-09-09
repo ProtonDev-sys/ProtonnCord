@@ -30,7 +30,7 @@ const pluginDirectories = [
     "src/plugins/_api", "src/plugins/_core", "src/plugins",
     "src/equicordplugins/_api", "src/equicordplugins/_core", "src/equicordplugins",
 ];
-const baselinePath = resolve("docs/plugin-catalog-baseline.json");
+const baselinePath = resolve("scripts/fixtures/plugin-catalog-baseline.json");
 
 function propertyValue(object: ts.ObjectLiteralExpression, name: string): ts.Expression | undefined {
     for (const property of object.properties) {
