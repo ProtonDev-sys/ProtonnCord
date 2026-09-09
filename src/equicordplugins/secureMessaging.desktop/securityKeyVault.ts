@@ -25,6 +25,7 @@ import {
     session,
 } from "electron";
 
+import { sealMobilePairing } from "./mobilePairing";
 import {
     createOneKeyCipherScript,
     deriveOneKeyBindingPublicKey,
@@ -556,6 +557,11 @@ export function deriveActiveOneKeyPrivateIdentity(localUserId: string): PrivateI
 
 export function isOneKeySecurityKeyVaultActive(): boolean {
     return activeKey !== null && activeProfile?.provider === "onekey";
+}
+
+export function createActiveOneKeyMobilePairing(localUserId: string, state: unknown): string {
+    if (!activeKey || activeProfile?.provider !== "onekey") throw new SecurityKeyVaultError("locked");
+    return sealMobilePairing(activeKey, activeProfile.rootFingerprint, localUserId, state);
 }
 
 export function wrapSecurityKeyVaultValue(
