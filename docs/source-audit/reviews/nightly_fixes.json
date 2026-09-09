@@ -2,7 +2,7 @@
   {
     "path": "scripts/testAuditNightlyInterop.ts",
     "baselineSha256": null,
-    "reviewedSha256": "328da61c15c712b1b8ed530dd909d7e61ca53d81c949a9a08ecb28291b5263cf",
+    "reviewedSha256": "7b353ddb4e8643a036c3d9bc7c08b70b1183d2c2af97a8be97f0a59cfdc94075",
     "status": "changed",
     "summary": "Reviewed sixteen isolated interop/preservation regressions: actual mobile counter-floor rejection before desktop encryption, monotonic local edits, pre/post-await pairing account checks, filtered native snapshot with real HKDF/AES-GCM sealing, current/retired phone contact preservation, changed-peer review and bounded earliest-cutoff history, contact/conversation/history cap rejection, rollback and strict retirement equality, plus durable protection and failure latching/retry/reload across pending/rejected/queued saves. Mobile crypto/bridge dependencies are inert mocks for state tests; sealing uses synthetic Node crypto material.",
     "validation": [
@@ -13,7 +13,8 @@
       "Native IPC, audit SecureState and forwarding regressions passed in the targeted desktop group; all network, vault and hardware actions used synthetic fixtures.",
       "No live Discord, clipboard, CDP, hardware, identity-exporter, install or deployment actions.",
       "Final pairing preservation rerun passed: 28 entries across 16 isolated interop tests and real mobile pairing/vault/send-policy suites; mobile TypeScript and scoped Biome formatting passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/mobilePairing.ts",
@@ -29,6 +30,7 @@
       "Native IPC, audit SecureState and forwarding regressions passed in the targeted desktop group; all network, vault and hardware actions used synthetic fixtures.",
       "No live Discord, clipboard, CDP, hardware, identity-exporter, install or deployment actions.",
       "Final pairing preservation rerun passed: 28 entries across 16 isolated interop tests and real mobile pairing/vault/send-policy suites; mobile TypeScript and scoped Biome formatting passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   }
 ]
