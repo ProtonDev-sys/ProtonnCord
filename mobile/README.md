@@ -30,6 +30,8 @@ To bring existing PC chats across, unlock Secure Messaging on the PC and choose 
 
 Pairing is an explicit snapshot, not continuous synchronization or a complete desktop vault backup. Copy a new pairing after changing verified contacts on the PC. Without pairing, verify peer announcements on the phone before enabling conversations.
 
+Importing PC chats preserves phone-only verified contacts and existing review requirements. If a PC contact key differs from the phone's current key, affected conversations require review and the displaced phone key remains available for earlier history. Retired keys merge within the existing four-key limit; an earlier recorded cutoff is preserved, and a newly displaced phone key retires at import time. An import that would exceed the contact or conversation limits is rejected without replacing the phone's state.
+
 OneKey protection encrypts the mobile vault beneath its Android Keystore layer. Derived identity keys exist in the app's memory while unlocked. The wallet recovery phrase does not reproduce this device-bound secret. Bluetooth is not supported by this USB implementation.
 
 ## Encrypted chats

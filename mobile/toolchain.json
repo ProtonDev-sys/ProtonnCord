@@ -1,7 +1,7 @@
 {
-  "revengeNativeRevision": "9a1426d0a3df000beb4174d0071d4d80e8be42fc",
-  "revengeRuntimeRevision": "6f22fe1d5843160320a4a06644e816bb11f0c929",
-  "runtimeRelease": "mobile-runtime-6f22fe1",
-  "bunVersion": "1.3.4",
-  "denoVersion": "2.7.4"
+	"revengeNativeRevision": "9a1426d0a3df000beb4174d0071d4d80e8be42fc",
+	"revengeRuntimeRevision": "6f22fe1d5843160320a4a06644e816bb11f0c929",
+	"runtimeRelease": "mobile-runtime-6f22fe1",
+	"bunVersion": "1.3.4",
+	"denoVersion": "2.7.4"
 }

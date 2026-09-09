@@ -1,0 +1,76 @@
+{
+  "timestamp": "2026-09-09T22:18:36.928Z",
+  "sourceHead": "fc938d2c83fb325d3d48113035d1635b33d8d081",
+  "node": "v24.14.0",
+  "supplementalDesktop": {
+    "files": 8,
+    "tests": 39,
+    "passed": 39,
+    "failed": 0,
+    "skipped": 0,
+    "exit": 0,
+    "log": "supplemental-desktop.log"
+  },
+  "syntheticBenchmarks": {
+    "secureMessaging": {
+      "exit": 0,
+      "recipients": [
+        1,
+        8,
+        10
+      ],
+      "plaintextLength": 109
+    },
+    "settingsStore": {
+      "exit": 0,
+      "beforeAllocations": 2100001,
+      "afterAllocations": 4,
+      "rounds": 7,
+      "iterationsPerRound": 100000
+    },
+    "log": "supplemental-desktop.log"
+  },
+  "mobile": {
+    "files": 11,
+    "tests": 41,
+    "passed": 41,
+    "failed": 0,
+    "skipped": 0,
+    "exit": 0,
+    "command": "npm exec --yes --package=bun@1.3.4 -- bun run test",
+    "log": "mobile-js.log",
+    "typecheck": {
+      "exit": 0,
+      "command": "npm exec --yes --package=bun@1.3.4 -- bun run lint:types",
+      "log": "mobile-types.log"
+    }
+  },
+  "toolSyntaxOnly": {
+    "files": 3,
+    "passed": true
+  },
+  "notRun": [
+    "four live desktop scripts",
+    "identity exporter",
+    "release preparation",
+    "runtime linker",
+    "Kotlin/Android/device checks"
+  ],
+  "reviewedMobileHashes": {
+    "mobile/plugins/secure-messaging/src/test/kotlin/uk/co/protonn/securemessaging/OneKeyWireTest.kt": "6f4caa2618d5c810d4c19cde372c1934308a756d1a599cae1bbd785d33783cdb",
+    "mobile/tests/attachment-runtime.test.ts": "b439493642ccc2fcb5565c790fad7cad5e32d568de65d80f96f0070b99eff2b3",
+    "mobile/tests/attachments.test.ts": "4a2fc21905625a335f5fc454fe9f33ecb7d7d817e8348d1f59077ba7512e7d86",
+    "mobile/tests/crypto.test.ts": "339966007457a4d952ea23b8ef3f8a5c350e155d27de44b0d667aab6a002f216",
+    "mobile/tests/identity-backup.test.ts": "e638a016f200a116a5fee731dbfd5982c0c71d7ec564f4d3ab600682f50e31ed",
+    "mobile/tests/legacy.test.ts": "d2b9f92f59511a1c395eb99f18bab20673b91753b96b85c7ea7891f6b72cfc73",
+    "mobile/tests/message.test.ts": "579e6b0e2e66270e43ab5e15e3b0968d694cc200975bf255ce9aa5962753e484",
+    "mobile/tests/onekey.test.ts": "cbded12ff69e045f1a5cb994bfeba8c6f52091cba8a12cfa6cf584fd53697590",
+    "mobile/tests/pairing.test.ts": "18187b7bf3584e7c0f05d8e2a43feb44e74a028b29983da0758c4d96ac7b7a06",
+    "mobile/tests/receive.test.ts": "7d22a8432af0ce33262be791c23159243ff49a5581abc31efad552795ebaa91c",
+    "mobile/tests/send-policy.test.ts": "06118fcf84bc7553cf6579db1974b67f51f830b8b2500954526efa6d408f2847",
+    "mobile/tests/vault.test.ts": "d2e4ba929fc1a113440373dd373fedd61eeb51fd75eb8b1b6176125a10477552",
+    "mobile/tools/Export-DesktopIdentity.ps1": "f23cea4d2f0452f7c02ebcadbae7040fb5e2d0d41b0838206d51598ec72b36d4",
+    "mobile/tools/link-runtime-workspaces.mjs": "8e49bce995dc94038dcdde1a90dfe40764e612fc3a42fc8059379a3d9678ec1a",
+    "mobile/tools/prepare-release.mjs": "fd059065bfa559944ba7e361b64f4b6697ad526a72575553daf11fa53cabc26c"
+  }
+}

@@ -8,7 +8,8 @@
     "validation": [
       "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
       "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testCrashHandler.ts",
@@ -19,7 +20,8 @@
     "validation": [
       "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
       "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testMessageLoggerNativeWrites.ts",
@@ -30,7 +32,8 @@
     "validation": [
       "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
       "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testNativeBridgeSubscriptions.ts",
@@ -41,7 +44,8 @@
     "validation": [
       "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
       "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testNativeStorage.ts",
@@ -52,7 +56,8 @@
     "validation": [
       "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
       "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testNavidromeAssetPrivacy.ts",
@@ -63,7 +68,8 @@
     "validation": [
       "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
       "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testOneKeyIdentity.ts",
@@ -74,7 +80,8 @@
     "validation": [
       "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
       "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testPrimaryStreamAudio.ts",
@@ -85,7 +92,8 @@
     "validation": [
       "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
       "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testUploadFileNames.ts",
@@ -96,7 +104,8 @@
     "validation": [
       "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
       "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testUrlCleaning.ts",
@@ -107,7 +116,8 @@
     "validation": [
       "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
       "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testVoiceMessageTranscriber.ts",
@@ -118,6 +128,7 @@
     "validation": [
       "Complete source, assertions, fixtures, module loading and cleanup boundaries reviewed.",
       "Offline node --import=tsx --test sweep passed: 11 files, 26 runner tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   }
 ]

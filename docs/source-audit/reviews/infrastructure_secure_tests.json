@@ -8,7 +8,8 @@
     "validation": [
       "Complete file contents, isolation boundaries, assertions and evidence limits reviewed.",
       "Reproduced native transfer counts 1311208 total, 195 preview, 1311013 deferred and 7679 detached-text ciphertext bytes; attachment/cache/download/fallback and related renderer checks passed offline."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "docs/performance-secure-history-rendering.md",
@@ -19,7 +20,8 @@
     "validation": [
       "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
       "Reproduced --benchmark against cbd83c03: before 172/1325/440/5150 parses and after 50/50/100/100, with identical grouping and render counts; default checks also passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "docs/performance-secure-receive-prefetch.md",
@@ -30,7 +32,8 @@
     "validation": [
       "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
       "Focused receive cases passed within the 66-test offline sweep; package command wiring inspected. Live create/edit/history latency validation remains explicitly unperformed in this audit."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/benchmarkSecureMessaging.ts",
@@ -41,7 +44,8 @@
     "validation": [
       "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
       "Offline benchmark completed under Node v24.14.0; capacity 10 for the fixture, encryption samples 20/10/5 and 40 decrypt samples each at 1/8/10 recipients. Timings are local observations, not acceptance thresholds."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/benchmarkSecureMessagingMentions.ts",
@@ -52,7 +56,8 @@
     "validation": [
       "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
       "Offline node --import=tsx scripts/benchmarkSecureMessagingMentions.ts --check passed all fixture assertions. Timing comparison was not needed and was not run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditSecureLiveIsolation.ts",
@@ -63,7 +68,8 @@
     "validation": [
       "Complete original source plus every final edit and new fixture reviewed for retained assertions, cleanup and isolation.",
       "node --import=tsx --test scripts/testAuditSecureLiveIsolation.ts passed six tests with no external network, browser, filesystem mutation or live state. New test is discovered by the existing testAudit runner."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessaging.ts",
@@ -74,7 +80,8 @@
     "validation": [
       "Complete file contents, isolation boundaries, assertions and evidence limits reviewed.",
       "Offline node --import=tsx scripts/testSecureMessaging.ts passed; reported compact savings 96/30/30 characters for its envelope/attachment/sticker fixtures. This is implementation regression evidence, not a formal cryptographic audit."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingAttachmentCache.ts",
@@ -85,7 +92,8 @@
     "validation": [
       "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
       "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingAttachmentFallback.ts",
@@ -96,7 +104,8 @@
     "validation": [
       "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
       "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingAttachmentManifest.ts",
@@ -107,7 +116,8 @@
     "validation": [
       "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
       "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingAttachmentMetadata.ts",
@@ -118,7 +128,8 @@
     "validation": [
       "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
       "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingCaches.ts",
@@ -129,7 +140,8 @@
     "validation": [
       "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
       "Offline four-script node --import=tsx --test sweep passed 66 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingCryptoCache.ts",
@@ -140,7 +152,8 @@
     "validation": [
       "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
       "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingDownloadControls.ts",
@@ -151,7 +164,8 @@
     "validation": [
       "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
       "Offline four-script node --import=tsx --test sweep passed 66 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingEmbedUrls.ts",
@@ -162,7 +176,8 @@
     "validation": [
       "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
       "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingForwarding.ts",
@@ -173,7 +188,8 @@
     "validation": [
       "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
       "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingHistory.ts",
@@ -184,7 +200,8 @@
     "validation": [
       "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
       "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingLayoutStability.ts",
@@ -195,7 +212,8 @@
     "validation": [
       "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
       "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingLive.ts",
@@ -206,18 +224,19 @@
     "validation": [
       "Complete original source plus every final edit and new fixture reviewed for retained assertions, cleanup and isolation.",
       "Live runner was never imported or executed; no CDP connection, account access, Discord message, credentials or download operation occurred. Six extracted-function offline tests passed for the three changed guards, including permanent/transient deletion errors and unrelated concurrent downloads. Diff whitespace check passed; ESLint excludes these scripts, so no lint coverage is claimed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingNative.ts",
     "baselineSha256": "430cc492d473422545545c9f316c1c2bc2fcf93ce4bdc78ddb590ef43a912fed",
-    "reviewedSha256": "430cc492d473422545545c9f316c1c2bc2fcf93ce4bdc78ddb590ef43a912fed",
-    "status": "reviewed",
-    "summary": "Reviewed the complete native harness and lifecycle, storage fault matrix, selective attachment I/O, local replay/history/rotation assertions, cross-module counters and OneKey cancellation/migration cases. Bundles override Electron, data/download directories, filesystem fault adapters and hardware cipher; all real files stay beneath one mkdtemp root removed in finally, and fetch/timer/clock/environment overrides are restored. Platform defines exercise branch behavior rather than real Linux/Windows key-store durability. Existing rejection fixtures were reviewed without expanding attack behavior.",
+    "reviewedSha256": "32bdf78184358b4e0295ba3e3f73fe4a8eb9e8cec12e4fc4187531f1629d8c9b",
+    "status": "changed",
+    "summary": "Reviewed entire original native fixture plus merged phone export rejection cases for hostile callers, invalid accounts and locked keys. Retained isolated storage/Electron/hardware mocks and original security assertions.",
     "validation": [
-      "Complete file contents, isolation boundaries, assertions and evidence limits reviewed.",
-      "Offline native suite passed with an outer deny-all fetch stub; its internal synthetic CDN adapters reported 3 requests/1311208 bytes for the complete bundle, 1/195 for previews and 1/7679 for detached text. No live client, credentials, OS safeStorage or physical device used."
-    ]
+      "Full prior fixture review plus all merge additions reviewed; complete native suite passed on combined source."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingOptimisticRendering.ts",
@@ -228,7 +247,8 @@
     "validation": [
       "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
       "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingPerformance.ts",
@@ -239,7 +259,8 @@
     "validation": [
       "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
       "Offline four-script node --import=tsx --test sweep passed 66 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingPlaintextRendering.ts",
@@ -250,7 +271,8 @@
     "validation": [
       "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
       "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingReceive.ts",
@@ -261,7 +283,8 @@
     "validation": [
       "Complete file contents, source dependencies, workload/assertions and stated validation limits reviewed.",
       "Offline four-script node --import=tsx --test sweep passed 66 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingRestGuard.ts",
@@ -272,17 +295,18 @@
     "validation": [
       "Complete file contents, imports, fixture isolation, assertions, asynchronous cleanup and integration limits reviewed.",
       "Offline node --import=tsx --test sweep of these 12 scripts passed: 92 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testSecureMessagingSecurityKey.ts",
     "baselineSha256": "b63a45c0a8100ee44835a2c8ea5965ecf1458d81151c37c78646399dd7004df1",
-    "reviewedSha256": "b63a45c0a8100ee44835a2c8ea5965ecf1458d81151c37c78646399dd7004df1",
-    "status": "reviewed",
-    "summary": "Reviewed complete synthetic USB packet adapter, generated-key profiles, provider/version round-trips, session key transfer, protected-index limits and local envelope authentication assertions plus source/document guards. Electron is stubbed and no real ceremony or Windows hardware helper is invoked. The esbuild module and files use a disposable directory removed in finally after loading; hardware/OS security properties are not established by these mocks.",
+    "reviewedSha256": "f96a3afbc79360aeeefd360e9fd82e20f41f493c61e004346682bc820d0f3b22",
+    "status": "changed",
+    "summary": "Reviewed complete original provider/PRF/large-blob/OneKey fixture plus pairing sealer checks and updated desktop/phone documentation assertions. Retained locked/wrong-provider rejection and ciphertext-only output checks.",
     "validation": [
-      "Complete file contents, isolation boundaries, assertions and evidence limits reviewed.",
-      "Offline node --import=tsx scripts/testSecureMessagingSecurityKey.ts passed PRF, large-blob and fake OneKey checks; no hardware, browser or live vault was accessed."
-    ]
+      "Original full review plus complete new assertions/doc-regex diff review; targeted full suite passed."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   }
 ]

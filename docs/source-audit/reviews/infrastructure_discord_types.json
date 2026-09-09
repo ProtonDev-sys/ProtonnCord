@@ -8,7 +8,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/CONTRIBUTING.md",
@@ -19,7 +20,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/LICENSE",
@@ -30,7 +32,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/README.md",
@@ -41,7 +44,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/enums/activity.ts",
@@ -52,7 +56,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/enums/application.ts",
@@ -63,7 +68,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/enums/channel.ts",
@@ -74,7 +80,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/enums/commands.ts",
@@ -85,7 +92,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/enums/guild.ts",
@@ -96,7 +104,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/enums/index.ts",
@@ -107,7 +116,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/enums/messages.ts",
@@ -118,7 +128,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/enums/misc.ts",
@@ -129,7 +140,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/enums/quests.ts",
@@ -140,7 +152,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/enums/settings.ts",
@@ -151,7 +164,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/enums/user.ts",
@@ -162,7 +176,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/enums/voice.ts",
@@ -173,7 +188,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/package.json",
@@ -184,7 +200,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/Activity.d.ts",
@@ -195,7 +212,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/Application.d.ts",
@@ -206,7 +224,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/Channel.d.ts",
@@ -217,7 +236,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/Guild.d.ts",
@@ -228,7 +248,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/GuildMember.d.ts",
@@ -239,7 +260,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/Record.d.ts",
@@ -250,7 +272,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/Role.d.ts",
@@ -261,7 +284,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/User.d.ts",
@@ -272,7 +296,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/index.d.ts",
@@ -283,7 +308,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/messages/Commands.d.ts",
@@ -294,7 +320,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/messages/Embed.d.ts",
@@ -305,7 +332,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/messages/Emoji.d.ts",
@@ -316,7 +344,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/messages/Message.d.ts",
@@ -327,7 +356,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/messages/Sticker.d.ts",
@@ -338,7 +368,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/common/messages/index.d.ts",
@@ -349,7 +380,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/components.d.ts",
@@ -360,7 +392,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/components/Modal.d.ts",
@@ -371,7 +404,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/flux.d.ts",
@@ -382,7 +416,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/fluxEvents.d.ts",
@@ -394,7 +429,8 @@
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Strict TypeScript consumer fixture with skipLibCheck=false passed.",
       "All 2,365 parsed union members are unique and sorted; extraction comment not executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/index.d.ts",
@@ -405,7 +441,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/menu.d.ts",
@@ -416,7 +453,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/modules/CloudUpload.d.ts",
@@ -427,7 +465,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/modules/index.d.ts",
@@ -438,7 +477,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/AccessibilityStore.d.ts",
@@ -449,7 +489,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ActiveJoinedThreadsStore.d.ts",
@@ -460,7 +501,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ApplicationCommandIndexStore.d.ts",
@@ -471,7 +513,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ApplicationStore.d.ts",
@@ -482,7 +525,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ApplicationStreamPreviewStore.d.ts",
@@ -493,7 +537,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ApplicationStreamingSettingsStore.d.ts",
@@ -504,7 +549,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ApplicationStreamingStore.d.ts",
@@ -515,7 +561,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/AuthSessionsStore.d.ts",
@@ -526,7 +573,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/AuthenticationStore.d.ts",
@@ -537,7 +585,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/AuthorizedAppsStore.d.ts",
@@ -548,7 +597,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/BasicGuildStore.d.ts",
@@ -559,7 +609,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/CallStore.d.ts",
@@ -570,7 +621,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ChannelMemberStore.d.ts",
@@ -581,7 +633,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ChannelRTCStore.d.ts",
@@ -592,7 +645,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ChannelSectionStore.d.ts",
@@ -603,7 +657,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ChannelStore.d.ts",
@@ -614,7 +669,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ClientThemesBackgroundStore.d.ts",
@@ -625,7 +681,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/CollapsedVoiceChannelStore.d.ts",
@@ -636,7 +693,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ConnectedAccountsStore.d.ts",
@@ -647,7 +705,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/DraftStore.d.ts",
@@ -658,7 +717,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/EditMessageStore.d.ts",
@@ -669,7 +729,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/EmojiStore.d.ts",
@@ -680,7 +741,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ExpandedGuildFolderStore.d.ts",
@@ -691,7 +753,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ExperimentStore.d.ts",
@@ -702,7 +765,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/FluxStore.d.ts",
@@ -713,7 +777,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/FriendsStore.d.ts",
@@ -724,7 +789,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/GuildAvailabilityStore.d.ts",
@@ -735,7 +801,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/GuildChannelStore.d.ts",
@@ -746,7 +813,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/GuildMemberCountStore.d.ts",
@@ -757,7 +825,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/GuildMemberStore.d.ts",
@@ -768,7 +837,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/GuildRoleStore.d.ts",
@@ -779,7 +849,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/GuildScheduledEventStore.d.ts",
@@ -790,7 +861,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/GuildStore.d.ts",
@@ -801,7 +873,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/InstantInviteStore.d.ts",
@@ -812,7 +885,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/InviteStore.d.ts",
@@ -823,7 +897,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/JoinedThreadsStore.d.ts",
@@ -834,7 +909,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/LocaleStore.d.ts",
@@ -845,7 +921,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/MediaEngineStore.d.ts",
@@ -856,7 +933,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Strict TypeScript consumer fixture with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/MessageStore.d.ts",
@@ -867,7 +945,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/NotificationSettingsStore.d.ts",
@@ -878,7 +957,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/OverridePremiumTypeStore.d.ts",
@@ -889,7 +969,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/PendingReplyStore.d.ts",
@@ -900,7 +981,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/PermissionStore.d.ts",
@@ -911,7 +993,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/PopoutWindowStore.d.ts",
@@ -922,7 +1005,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Strict TypeScript consumer fixture with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/PresenceStore.d.ts",
@@ -933,7 +1017,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/PrivateChannelSortStore.d.ts",
@@ -944,7 +1029,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/QuestStore.d.ts",
@@ -955,7 +1041,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Strict TypeScript consumer fixture with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/RTCConnectionStore.d.ts",
@@ -966,7 +1053,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ReadStateStore.d.ts",
@@ -977,7 +1065,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ReferencedMessageStore.d.ts",
@@ -988,7 +1077,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/RelationshipStore.d.ts",
@@ -999,7 +1089,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/RunningGameStore.d.ts",
@@ -1010,7 +1101,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/SafetyHubStore.d.ts",
@@ -1021,7 +1113,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/SelectedChannelStore.d.ts",
@@ -1032,7 +1125,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/SelectedGuildStore.d.ts",
@@ -1043,7 +1137,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/SessionsStore.d.ts",
@@ -1054,7 +1149,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/SortedGuildStore.d.ts",
@@ -1065,7 +1161,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/SoundboardStore.d.ts",
@@ -1076,7 +1173,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/SpellCheckStore.d.ts",
@@ -1087,7 +1185,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/SpotifyStore.d.ts",
@@ -1098,7 +1197,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/StickersStore.d.ts",
@@ -1109,7 +1209,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/StreamerModeStore.d.ts",
@@ -1120,7 +1221,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ThemeStore.d.ts",
@@ -1131,7 +1233,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/ThreadMemberListStore.d.ts",
@@ -1142,7 +1245,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/TypingStore.d.ts",
@@ -1153,7 +1257,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/UploadAttachmentStore.d.ts",
@@ -1164,7 +1269,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/UserAffinitiesStore.d.ts",
@@ -1175,7 +1281,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/UserGuildJoinRequestStore.d.ts",
@@ -1186,7 +1293,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/UserGuildSettingsStore.d.ts",
@@ -1197,7 +1305,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/UserProfileSettingsStore.d.ts",
@@ -1208,7 +1317,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/UserProfileStore.d.ts",
@@ -1219,7 +1329,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Strict TypeScript consumer fixture with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/UserSettingsProtoStore.d.ts",
@@ -1230,7 +1341,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Strict TypeScript consumer fixture with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/UserStore.d.ts",
@@ -1241,7 +1353,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/VoiceStateStore.d.ts",
@@ -1252,7 +1365,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/WindowStore.d.ts",
@@ -1263,7 +1377,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/stores/index.d.ts",
@@ -1274,7 +1389,8 @@
     "validation": [
       "Complete file read; declared data shapes, missing-value behavior and cross-type references reviewed.",
       "Standalone strict declaration compile with skipLibCheck=false passed; no host runtime operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/src/utils.d.ts",
@@ -1285,7 +1401,8 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Package standalone strict declaration compile with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "packages/discord-types/webpack/index.d.ts",
@@ -1297,7 +1414,8 @@
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Strict TypeScript consumer fixture with skipLibCheck=false passed.",
       "Compared helper signature with https://raw.githubusercontent.com/webpack/webpack/main/lib/runtime/HasOwnPropertyRuntimeModule.js."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditDiscordTypes.ts",
@@ -1308,6 +1426,7 @@
     "validation": [
       "Complete file read; public exports, type relationships and documented limits reviewed.",
       "Strict TypeScript consumer fixture with skipLibCheck=false passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   }
 ]

@@ -1,0 +1,252 @@
+[
+  {
+    "path": "mobile/plugins/secure-messaging/js/attachmentRuntime.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "4ae1e88567df5abaac6b5477356138c716696c73eb9d57c344250fcd44762736",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "changed",
+    "summary": "Reviewed the full mobile upload/decrypt/render/cache flow and native contracts. Added pre-read cumulative source-size validation and failure wiping, encrypted-output size rejection, outer description/spoiler clearing, generation checks before applying uploads, bounded streamed downloads and transport-length-checked arrayBuffer fallback. Cleanup failures retain paths for retry; generation-specific plaintext cache paths avoid late deletion races; startup cleanup gates attachment rendering.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "Scoped Biome check passed for these three files; mobile tsc --noEmit returned exit0. Eight source-isolated attachment-runtime regression cases passed with inert native/file/crypto mocks.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed.",
+      "Streaming readers enforce the expected byte count while reading. React Native arrayBuffer fallback requires matching Content-Length and verifies the resulting bytes; absence of both streaming and transport length fails closed, and pre-allocation safety depends on truthful transport length."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/attachments.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "03e5ce081e262d96588e25fd9398da2b27fc072033454c951caa4d0398597a95",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "changed",
+    "summary": "Reviewed every legacy/current attachment/rich/detached-text parser and serializer, canonical metadata/manifest validation, count/byte/dimension constraints, AEAD context/key derivation, bundle digests and plaintext/key wiping. Preserved upstream formats and interoperability; no network/native operations or protocol expansion.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed.",
+      "Added narrow documented Biome suppression for the intentional ASCII control-character filename rejection; validation regex unchanged. Full mobile tests/types and lint passed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/crypto.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "ad9ca19e53a3135cf9c04db62068e987df691406a2ec68c9225e7c2bbc829628",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "reviewed",
+    "summary": "Reviewed all Ed25519/X25519/HKDF/AES-GCM helpers, domain separation, HPKE label/key schedule, identity validation, announcements, recipient/mention binding, counter limits and message authentication/wiping. This is source review and compatibility reasoning, not independent cryptographic certification or a hardware test.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/history.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "75d61345198e4aaacf3fc769699f5cf0bb294dc77fa26574c99e2f4f37533b6a",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "changed",
+    "summary": "Reviewed Discord snowflake times, pending-announcement ordering, peer-retirement history and conversation review latches. Cross-reviewed services-agent change requiring envelope time, Discord message creation and optional edit time all strictly precede a retired-key cutoff.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed.",
+      "Services agent reported12 isolated interop cases and real mobile pairing/vault/OneKey suites passed; reviewed its final source delta independently. Broader test results are recorded by fixture owner."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/identityBackup.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "5c3a738779ffff6dfb8c98efcfb101c9f0e4faae6a301736d0ced03452180589",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "reviewed",
+    "summary": "Reviewed exact backup/key/state schemas, author/key-pair consistency, trusted peer and protected conversation constraints, PBKDF2/AES-GCM decoding, generic error handling and sensitive byte cleanup. Legacy/current formats retained; import actions were not performed against user data.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/index.tsx",
+    "baselineSha256": null,
+    "reviewedSha256": "498fd07192221826ec20b7251a1cd14c7c326ca710573880910344062428ee78",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "changed",
+    "summary": "Reviewed complete settings UI, local commands, message rendering, account/membership/send-policy guards, attachment staging and plugin cleanup. Added startup owned-cache cleanup before vault loading; existing protected-send interception stays installed during initialization. Real Discord send/edit/render hook matching and hardware dialogs remain unverified.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "Scoped Biome check passed for these three files; mobile tsc --noEmit returned exit0. Eight source-isolated attachment-runtime regression cases passed with inert native/file/crypto mocks.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/message.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "c63da2f8c24dde35fd2a4bf0f07d582a55208b48a38f6364d8bb9c08e11c5bea",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "reviewed",
+    "summary": "Reviewed immutable message cloning with original prototype and optional attachment replacement; original message objects and unrelated fields are preserved.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/mobilePairing.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "4132c87bad0193505b0bb57a0ba7466fd6cce07615ebc5d8bd84bae62b00eb09",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "reviewed",
+    "summary": "Reviewed bounded OneKey/account-bound pairing envelope, HKDF/AAD separation, strict state/peer history schemas, cutoff constraints and decrypted/key byte cleanup. No real pairing token, key or account was used.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/oneKey.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "f94276c211e574c059ee340c252c050e7f328a7d0124a8d189ad7115d8866309",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "reviewed",
+    "summary": "Reviewed fixed profile input, root binding/fingerprint derivation, per-account Ed25519/X25519 identity separation, seed/key size and creation-time validation, and temporary private byte wiping. No real device secret or USB exchange was accessed.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/protocol.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "680ced135b05c9de83afeeb7d7c6d6c1df68dd09315aaa5b3ff36cd300d0290f",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "reviewed",
+    "summary": "Reviewed full PCEK1 and PCEM1/2/3 parsing/canonicalization, strict UTF-8/base64url, exact fields, bounded recipients/mentions/ciphertexts, snowflake binding and canonical recipient ordering. No transport/runtime patch or protocol expansion.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/receive.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "32d5992249494260431c332588768fa11203237a8e360aa233883d3f93f792ec",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "changed",
+    "summary": "Reviewed bounded message/account cache, retirement filtering, sender verification and local historical keys, durable replay acceptance before plaintext publication, generation/account invalidation and cached-edit checks. Actual user message history was not accessed.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed.",
+      "Root reviewed final Biome import/format-only diff; runtime statements and JSON values retained. Full mobile suite/types passed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/replay.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "f8b4706261261d48685e107da7a9a758eaf3e28faa865e30ca3c493bfd465a4e",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "reviewed",
+    "summary": "Reviewed signature-postcondition replay tracking, exact-message digest reuse, changed-identity/stale-edit rejection, counter/envelope collision checks and 4096-entry window retention. Retention remains a bounded window, not an unlimited replay archive.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/sendPolicy.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "b2fa6b65587138856e709773ae503b6ef49567701c6a4cebc4bbfabf0a56524d",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "reviewed",
+    "summary": "Reviewed captured account/identity/conversation/member/recipient state and repeated current-policy assertions; changed membership, pending keys and review latches fail closed before an already-supported send.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/updates.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "febf0827b5d6343d1517fcb6bc424004259a0ddebea59b6b0d124c45dd4386ac",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "changed",
+    "summary": "Reviewed full nightly repository/install-plan restriction, existing-loader backup/preservation and loopback repository cleanup logic. This executable update/install path was reviewed read-only and not run; no repository, loader, download or installation actions performed.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed.",
+      "Root reviewed final Biome import/format-only diff; runtime statements and JSON values retained. Full mobile suite/types passed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/vault.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "3bd913e90e622d270a4101f694e423cb6bad8b8409a9f56cbf2294b27e8b69b8",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "changed",
+    "summary": "Reviewed native vault adapter success checking and exported account/identity helpers; added a cleanup-only native method type matching the scoped owned-cache implementation. Existing attachment, random, OneKey and vault native contracts retained.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "Scoped Biome check passed for these three files; mobile tsc --noEmit returned exit0. Eight source-isolated attachment-runtime regression cases passed with inert native/file/crypto mocks.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/js/vaultState.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "203a01adb13508ba82654e119aaa97af7fbd9ea9941ed262c808346ac6b16d4a",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "changed",
+    "summary": "Reviewed complete mobile vault and final pairing/persistence changes. Durable channel protection stays active during pending writes; save failures latch operations closed until explicit retry/reload. Pairing preserves phone-only contacts, review latches and bounded retired history, retires replaced phone keys at import time with earliest existing cutoff, and rejects oversized merged state before publication.",
+    "validation": [
+      "Independent full source review plus root final complete semantic diff;16 interop regressions and42 mobile cases passed, including failed writes, caps and encrypted restart/history preservation."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/src/main/AndroidManifest.xml",
+    "baselineSha256": null,
+    "reviewedSha256": "343d5be1ac17cdd45d1a2f2ddc616c509290e655869125a9422a96d88aa66066",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "reviewed",
+    "summary": "Reviewed the complete minimal Android manifest; no additional components, permissions, providers, intent filters or exported surface are declared here.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/src/main/kotlin/uk/co/protonn/securemessaging/OneKeyUsb.kt",
+    "baselineSha256": null,
+    "reviewedSha256": "5d186a27dc3844b3a3e7eade1df9cf6244bd07416d428047456cc01225e3abe1",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "changed",
+    "summary": "Reviewed complete device selection, permission registration, bounded USB transfer/packet exchange and cleanup. Cancel now settles a pending permission Deferred and rechecks cancellation before opening an exchange; wire commands remain unchanged. Real Android permission behavior, firmware and USB compatibility require device validation.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed.",
+      "Static Kotlin/coroutine/path review only; root owns Android build/unit validation. No hardware validation claimed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/src/main/kotlin/uk/co/protonn/securemessaging/OneKeyWire.kt",
+    "baselineSha256": null,
+    "reviewedSha256": "79b6465562e03371e44cb1f56bbd31a106508b8bc97f9975bca4a0f1a2ee5469",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "reviewed",
+    "summary": "Reviewed complete bounded varint/field parser, feature validation, secret extraction, failure redaction, packet generation/header validation and temporary byte wiping. No hardware protocol actions performed or new device commands added.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed.",
+      "Static Kotlin/coroutine/path review only; root owns Android build/unit validation. No hardware validation claimed."
+    ]
+  },
+  {
+    "path": "mobile/plugins/secure-messaging/src/main/kotlin/uk/co/protonn/securemessaging/SecureMessagingPlugin.kt",
+    "baselineSha256": null,
+    "reviewedSha256": "39fce9cf9131621f7f15b5733f81fcb5d566a1443b79dbdf2d4d0e9e7ef81ced",
+    "reviewedHashEncoding": "utf8-lf",
+    "status": "changed",
+    "summary": "Reviewed every registered native method, Android Keystore vault encryption, AtomicFile load/save/reset, random byte limits and attachment read/share path boundaries. Reset now removes AtomicFile recovery files. Added cleanup-only startup removal restricted to canonical plugin cache directories and exact produced filename patterns; no recursion or unrelated paths. Android/device execution remains unverified.",
+    "validation": [
+      "Complete file contents and adjacent producer/consumer contracts substantively reviewed.",
+      "No Android device, real USB/OneKey, live Discord/CDP, user credentials or account/network actions performed.",
+      "Static Kotlin/coroutine/path review only; root owns Android build/unit validation. No hardware validation claimed."
+    ]
+  }
+]

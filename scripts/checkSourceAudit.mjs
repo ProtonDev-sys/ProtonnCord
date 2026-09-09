@@ -5,6 +5,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -23,6 +24,16 @@ const delegatedOwners = new Map([
     ["infrastructure_plugin_tests", "infrastructure"],
     ["infrastructure_remaining_tests", "infrastructure"]
 ]);
+
+function reviewHash(contents, encoding = "raw") {
+    if (encoding === "utf8-lf") {
+        if (!isUtf8(contents) || contents.includes(0)) throw new Error("UTF-8 text hash requested for binary data");
+        contents = Buffer.from(contents.toString("utf8").replace(/\r\n/g, "\n"));
+    } else if (encoding !== "raw") {
+        throw new Error("invalid reviewed hash encoding");
+    }
+    return createHash("sha256").update(contents).digest("hex");
+}
 
 for (const file of readdirSync(join(directory, "reviews")).filter(file => file.endsWith(".json"))) {
     const records = JSON.parse(readFileSync(join(directory, "reviews", file), "utf8"));
@@ -54,8 +65,12 @@ for (const file of readdirSync(join(directory, "reviews")).filter(file => file.e
         } else if (!/^[a-f0-9]{64}$/.test(record.reviewedSha256 ?? "")) {
             errors.push(`${record.path}: missing reviewed-version SHA-256`);
         } else {
-            const current = createHash("sha256").update(readFileSync(record.path)).digest("hex");
-            if (current !== record.reviewedSha256) errors.push(`${record.path}: changed since review`);
+            try {
+                const current = reviewHash(readFileSync(record.path), record.reviewedHashEncoding);
+                if (current !== record.reviewedSha256) errors.push(`${record.path}: changed since review`);
+            } catch (error) {
+                errors.push(`${record.path}: ${error.message}`);
+            }
         }
         reviewed.set(record.path, record);
     }

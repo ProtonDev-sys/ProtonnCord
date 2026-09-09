@@ -8,7 +8,8 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "Read-only full source review and TypeScript syntax parse; no client, profiler or benchmark execution."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/createDiscordMcpVideo.ts",
@@ -19,7 +20,8 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "Extracted renderSlides guard passed an offline EEXIST mock proving zero removal and zero browser launches. Entire source parsed; generator/browser/ffmpeg were not run and no video was produced."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/generateReport.ts",
@@ -30,7 +32,8 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "Extracted early validation passed offline for Stable and Canary with no browser variable, preserving exit status 1 and useful diagnostics. Full source syntax parsed; no browser, injected code, secrets, artifact publication or webhook request executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/inspectVoiceTranscriberLive.ts",
@@ -41,7 +44,8 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "Read-only full source review and TypeScript syntax parse; no playback, account access, translation, transcription or CDP execution."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditRemainingScripts.ts",
@@ -52,7 +56,8 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "node --import=tsx --test scripts/testAuditRemainingScripts.ts passed two offline tests; all touched scripts passed diff whitespace checks. Existing testAudit runner discovers the new file."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testBetterSessions.ts",
@@ -63,7 +68,8 @@
     "validation": [
       "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
       "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testCustomCommands.ts",
@@ -74,7 +80,8 @@
     "validation": [
       "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
       "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testDevCompanionSecurity.ts",
@@ -85,7 +92,8 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "Offline five-script boundary sweep passed. Authentication and schema fixtures executed only against local generated stubs, with zero actual WebSocket connections or remote code execution."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testDiscordMcpLive.ts",
@@ -96,7 +104,8 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "Read-only full source review and TypeScript syntax parse; no live MCP server, CDP connection, account/message access or messaging operations executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testFileUploadNativeBoundary.ts",
@@ -107,7 +116,8 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "Full offline suite passed with an outer fetch guard rejecting every non-loopback request; synthetic local server and disposable approval store were cleaned up. No actual upload provider or credentials were used."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testMessageLoggerNativeDownloads.ts",
@@ -118,7 +128,8 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "Offline five-script boundary sweep passed logger download checks; synthetic CDN adapters and disposable cache exercised actual helpers. No real Discord CDN request, user cache, credentials or live client accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testNewPluginsManager.ts",
@@ -129,7 +140,8 @@
     "validation": [
       "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
       "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testOrbolayBridgeSecurity.ts",
@@ -140,7 +152,8 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "Offline five-script boundary sweep passed all Orbolay checks; transport is FakeWebSocket and no real connection or Discord action occurred."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testPluginCleanup.ts",
@@ -151,7 +164,8 @@
     "validation": [
       "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
       "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testQuestifyNativeBoundary.ts",
@@ -162,7 +176,8 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "Offline node --import=tsx --test boundary sweep passed all five standalone scripts, including Questify; no real service or account request occurred."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testRecentDMSwitcher.ts",
@@ -173,7 +188,8 @@
     "validation": [
       "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
       "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testRemixLifecycle.ts",
@@ -184,7 +200,8 @@
     "validation": [
       "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
       "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testRichPresence.ts",
@@ -195,7 +212,8 @@
     "validation": [
       "Complete file contents, import adapters, assertions, asynchronous ownership and limits reviewed.",
       "Seven-file offline node --import=tsx --test sweep passed 114 runner tests, zero failures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testUpdaterLive.ts",
@@ -206,7 +224,8 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "Read-only full source review and TypeScript syntax parse; no Git network lookup, updater, CDP or rebuild operation executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testWebAuthnLargeBlob.ts",
@@ -217,7 +236,8 @@
     "validation": [
       "Original complete source review by delegated fixture auditor; root reviewed all changed launch/discovery/cleanup code.",
       "Actual fresh headless Chrome localhost virtual-authenticator PRF and large-blob round trips passed on Windows; no physical security key, live Discord session or user profile used."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testZipPreviewSecurity.ts",
@@ -228,6 +248,7 @@
     "validation": [
       "Complete source, all assertions/callers and final changes reviewed for isolation, state ownership and stated limits.",
       "Offline five-script boundary sweep passed all ZIP assertions. No archive file, browser, download or external target was used."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   }
 ]

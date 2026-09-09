@@ -3,8 +3,8 @@
 import { callNativeMethod } from '@revenge-mod/modules/native'
 import { publicIdentity } from './crypto'
 import { MobileVault } from './vaultState'
-import type { Account } from './vaultState'
 import type { PrivateIdentity } from './protocol'
+import type { Account } from './vaultState'
 
 export type { Account, Conversation } from './vaultState'
 
@@ -42,6 +42,7 @@ export function replaceIdentity(
 
 declare module '@revenge-mod/modules/native' {
 	export interface NativeMethods {
+		'uk.co.protonn.secure-messaging.attachment.cleanup': [[], boolean]
 		'uk.co.protonn.secure-messaging.attachment.read': [[uri: string], string]
 		'uk.co.protonn.secure-messaging.attachment.share': [[path: string], string]
 		'uk.co.protonn.secure-messaging.random': [[size: number], string]

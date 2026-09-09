@@ -12,7 +12,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBChannelTabs.ts (6 passed).",
       "Scoped ESLint and stylelint for changed plugin directories passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBCommandMedia.ts",
@@ -26,7 +27,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBComponents.ts",
@@ -42,7 +44,8 @@
       "Scoped ESLint and stylelint for changed plugin directories passed.",
       "No live Discord actions performed.",
       "Component regression suite remains 8/8 after wrapper composition check; scoped CollapsibleUI ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBFavourites.ts",
@@ -56,7 +59,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBFileUpload.ts",
@@ -70,7 +74,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBInteractions.ts",
@@ -83,7 +88,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBKeyboard.ts",
@@ -95,7 +101,8 @@
       "Full file semantic review.",
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBLogStorage.ts",
@@ -110,7 +117,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBLogStorage.ts (9 passed).",
       "Scoped plugin ESLint and stylelint passed.",
       "No live Discord actions or private user files accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBMedia.ts",
@@ -122,7 +130,8 @@
       "Full file semantic review.",
       "pnpm exec tsx scripts/testAuditEquicordBMedia.ts (10 passed).",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBMessages.ts",
@@ -137,7 +146,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBLogStorage.ts (9 passed).",
       "Scoped plugin ESLint and stylelint passed.",
       "No live Discord actions or private user files accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBPalette.ts",
@@ -148,7 +158,8 @@
     "validation": [
       "pnpm exec tsx scripts/testAuditEquicordBPalette.ts (8 passed).",
       "Whole-tree tsc reported no errors in this file."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBProfiles.ts",
@@ -160,7 +171,8 @@
       "Full file semantic review.",
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBSounds.ts",
@@ -173,7 +185,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordBStickerStorage.ts",
@@ -187,7 +200,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/_api/audioPlayer.ts",
@@ -200,7 +214,8 @@
       "node ./node_modules/tsx/dist/cli.mjs --test scripts/testAuditEquicordBComponents.ts (6 passed)",
       "node ./node_modules/eslint/bin/eslint.js src/equicordplugins/_api/audioPlayer.ts (passed)",
       "External Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/_api/extraContextMenusAPI.ts",
@@ -210,7 +225,8 @@
     "summary": "Reviewed the required GIF picker patch and instance guard; delegates the existing menu object without retaining listeners.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/_api/headerBar.ts",
@@ -220,7 +236,8 @@
     "summary": "Reviewed header-bar and channel-toolbar insertion points and delegated API calls; no local state or cleanup issue found.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/_api/profileCollections.ts",
@@ -230,7 +247,8 @@
     "summary": "Reviewed all three profile-surface patches and preserved arguments forwarding plus the sidebar marker.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/_api/profileSections.ts",
@@ -240,7 +258,8 @@
     "summary": "Reviewed sidebar and both modal variants; retained user-ID extraction and explicit surface flags.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/_api/surfaceClasses.ts",
@@ -250,7 +269,8 @@
     "summary": "Reviewed every semantic-surface insertion and member-list instance tracking; preserved delegation to the limited SurfaceClasses props API.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/_api/userArea.ts",
@@ -260,7 +280,8 @@
     "summary": "Reviewed layout injection and enabled Declutter preference checks; tooltip and nameplate choices remain live at rendering.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/advancedPermissions/index.tsx",
@@ -270,7 +291,8 @@
     "summary": "Reviewed saved-card capture, collapsed state, settings and all patch branches; retained the visual permissions rearrangement without changing permission decisions.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/altKrispSwitch/index.tsx",
@@ -280,7 +302,8 @@
     "summary": "Reviewed the popout-specific noise cancellation guard; retained None/Krisp switching without affecting other suppression controls.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/alwaysExpandProfiles/index.ts",
@@ -290,7 +313,8 @@
     "summary": "Reviewed the all-match profile redirect and kept existing expansion behavior without additional runtime state.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/autoCodeblockLanguage.desktop/index.ts",
@@ -302,7 +326,8 @@
       "Full file read and semantic review; external Discord patch matching was not live-tested.",
       "node ./node_modules/tsx/dist/cli.mjs --test scripts/testAuditEquicordBComponents.ts (5 passed)",
       "Scoped ESLint and BetterActivities stylesheet stylelint passed for batch-1 changed source files"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterActivities/components/ActivityTooltip.tsx",
@@ -312,7 +337,8 @@
     "summary": "Reviewed current-user absence handling, ActivityView inputs and error-boundary scope; retained the lightweight tooltip.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterActivities/components/Caret.tsx",
@@ -324,7 +350,8 @@
       "Full file read and semantic review; external Discord patch matching was not live-tested.",
       "node ./node_modules/tsx/dist/cli.mjs --test scripts/testAuditEquicordBComponents.ts (5 passed)",
       "Scoped ESLint and BetterActivities stylesheet stylelint passed for batch-1 changed source files"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterActivities/components/CarouselControls.tsx",
@@ -334,7 +361,8 @@
     "summary": "Reviewed previous/next wraparound and dot selection with the caller's multi-activity guard; retained carousel selection behavior.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterActivities/components/TwitchIcon.tsx",
@@ -344,7 +372,8 @@
     "summary": "Reviewed the static SVG path, viewBox and prop forwarding; retained existing Twitch artwork.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterActivities/index.tsx",
@@ -354,7 +383,8 @@
     "summary": "Reviewed MemberListActivities settings migration, conditional patches and stop cleanup; preserved old saved preferences.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterActivities/patch-helpers/activityList.tsx",
@@ -364,7 +394,8 @@
     "summary": "Reviewed icon deduplication, Twitch placement, custom-status exclusion and default icon fallback; retained ordering and tooltip inputs.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterActivities/patch-helpers/popout.tsx",
@@ -374,7 +405,8 @@
     "summary": "Reviewed presence selection, current-activity reconciliation and carousel/list rendering; retained distinct original and generic activity props.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterActivities/settings.tsx",
@@ -384,7 +416,8 @@
     "summary": "Reviewed all option identifiers, defaults, reload flags and divider markup; existing preferences remain intact.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterActivities/styles.css",
@@ -396,7 +429,8 @@
       "Full file read and semantic review; external Discord patch matching was not live-tested.",
       "node ./node_modules/tsx/dist/cli.mjs --test scripts/testAuditEquicordBComponents.ts (5 passed)",
       "Scoped ESLint and BetterActivities stylesheet stylelint passed for batch-1 changed source files"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterActivities/types.ts",
@@ -408,7 +442,8 @@
       "Full file read and semantic review; external Discord patch matching was not live-tested.",
       "node ./node_modules/tsx/dist/cli.mjs --test scripts/testAuditEquicordBComponents.ts (5 passed)",
       "Scoped ESLint and BetterActivities stylesheet stylelint passed for batch-1 changed source files"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterActivities/utils.tsx",
@@ -420,7 +455,8 @@
       "Full file read and semantic review; external Discord patch matching was not live-tested.",
       "node ./node_modules/tsx/dist/cli.mjs --test scripts/testAuditEquicordBComponents.ts (5 passed)",
       "Scoped ESLint and BetterActivities stylesheet stylelint passed for batch-1 changed source files"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterBanReasons/index.tsx",
@@ -430,7 +466,8 @@
     "summary": "Reviewed legacy string normalization, reason editing, duration selection and modal callbacks; retained the distinction between zero-second deletion and Discord defaults.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterBanReasons/styles.css",
@@ -440,7 +477,8 @@
     "summary": "Reviewed grid, duration and add/remove-control selectors against editor markup; retained existing layout.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterBlockedUsers/index.tsx",
@@ -452,7 +490,8 @@
       "Full file read and semantic review; external Discord patch matching was not live-tested.",
       "node ./node_modules/tsx/dist/cli.mjs --test scripts/testAuditEquicordBComponents.ts (5 passed)",
       "Scoped ESLint and BetterActivities stylesheet stylelint passed for batch-1 changed source files"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterBlockedUsers/styles.css",
@@ -462,7 +501,8 @@
     "summary": "Reviewed selectable user-list text and search radius rules; retained intended text selection.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterInvites/index.tsx",
@@ -474,7 +514,8 @@
       "Full file read and semantic review; external Discord patch matching was not live-tested.",
       "node ./node_modules/tsx/dist/cli.mjs --test scripts/testAuditEquicordBComponents.ts (5 passed)",
       "Scoped ESLint and BetterActivities stylesheet stylelint passed for batch-1 changed source files"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterInvites/style.css",
@@ -484,7 +525,8 @@
     "summary": "Reviewed avatar dimensions, wrapping header text and expiry-icon layout; no change needed.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterPlusReacts/index.ts",
@@ -494,7 +536,8 @@
     "summary": "Reviewed multiple-plus normalization, message index selection and reference consumption; retained missing-message fallback.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/blockKrisp/index.ts",
@@ -504,7 +547,8 @@
     "summary": "Reviewed desktop/browser module-loading guards and support reporting; retained optional Krisp-loading prevention.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelBadges/index.tsx",
@@ -516,7 +560,8 @@
       "Full file read and semantic review; external Discord patch matching was not live-tested.",
       "node ./node_modules/tsx/dist/cli.mjs --test scripts/testAuditEquicordBComponents.ts (5 passed)",
       "Scoped ESLint and BetterActivities stylesheet stylelint passed for batch-1 changed source files"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelBadges/settings.tsx",
@@ -526,7 +571,8 @@
     "summary": "Reviewed all toggle/label/color defaults and type/special-ID mappings, including unknown types; preserved every setting identifier.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelBadges/style.css",
@@ -536,7 +582,8 @@
     "summary": "Reviewed all badge-type selectors, overflow and container alignment against renderer keys; retained custom-color fallback styling.",
     "validation": [
       "Full file read and semantic review; external Discord patch matching was not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/components/BookmarkContainer.tsx",
@@ -550,7 +597,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/components/ChannelTab.tsx",
@@ -564,7 +612,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/components/ChannelTabsContainer.tsx",
@@ -578,7 +627,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/components/ContextMenus.tsx",
@@ -592,7 +642,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/components/KeybindSettings.tsx",
@@ -606,7 +657,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/index.tsx",
@@ -620,7 +672,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/style.css",
@@ -634,7 +687,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/util/bookmarks.ts",
@@ -648,7 +702,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/util/constants.tsx",
@@ -662,7 +717,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/util/folderIcons.tsx",
@@ -676,7 +732,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/util/icons.ts",
@@ -690,7 +747,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/util/index.ts",
@@ -704,7 +762,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/util/keybinds.ts",
@@ -719,7 +778,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBChannelTabs.ts (6 passed).",
       "Scoped ESLint and stylelint for changed plugin directories passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/util/tabs.tsx",
@@ -733,7 +793,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/util/types.ts",
@@ -747,7 +808,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/util/unread.ts",
@@ -761,7 +823,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/channelTabs/util/unreadState.ts",
@@ -775,7 +838,8 @@
       "pnpm exec eslint src/equicordplugins/channelTabs (passed).",
       "pnpm exec stylelint src/equicordplugins/channelTabs/style.css (passed).",
       "External Discord patch matching and UI behavior were not live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/cleanerChannelGroups/index.ts",
@@ -790,7 +854,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBChannelTabs.ts (6 passed).",
       "Scoped ESLint and stylelint for changed plugin directories passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/clickableRoles/index.tsx",
@@ -805,7 +870,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBChannelTabs.ts (6 passed).",
       "Scoped ESLint and stylelint for changed plugin directories passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/clickableRoles/style.css",
@@ -820,7 +886,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBChannelTabs.ts (6 passed).",
       "Scoped ESLint and stylelint for changed plugin directories passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/clientSideBlock/index.tsx",
@@ -835,7 +902,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBChannelTabs.ts (6 passed).",
       "Scoped ESLint and stylelint for changed plugin directories passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/collapsibleUi/index.tsx",
@@ -851,7 +919,8 @@
       "Scoped ESLint and stylelint for changed plugin directories passed.",
       "No live Discord actions performed.",
       "Component regression suite remains 8/8 after wrapper composition check; scoped CollapsibleUI ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/collapsibleUi/settings.ts",
@@ -866,7 +935,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBChannelTabs.ts (6 passed).",
       "Scoped ESLint and stylelint for changed plugin directories passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/collapsibleUi/style.css",
@@ -881,7 +951,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBChannelTabs.ts (6 passed).",
       "Scoped ESLint and stylelint for changed plugin directories passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/api/index.ts",
@@ -896,7 +967,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/api/registry.ts",
@@ -911,7 +983,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/api/types.ts",
@@ -926,7 +999,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/commands/calculator/evaluator.ts",
@@ -941,7 +1015,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/commands/custom.tsx",
@@ -956,7 +1031,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/commands/discordActions.tsx",
@@ -971,7 +1047,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/commands/equicord.tsx",
@@ -986,7 +1063,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/commands/index.ts",
@@ -1001,7 +1079,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/commands/navigation.tsx",
@@ -1016,7 +1095,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/commands/openSettings.ts",
@@ -1031,7 +1111,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/commands/pluginManagement.tsx",
@@ -1046,7 +1127,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/commands/sendDm.tsx",
@@ -1061,7 +1143,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/index.tsx",
@@ -1076,7 +1159,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/search/ranker.ts",
@@ -1091,7 +1175,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/settings.tsx",
@@ -1106,7 +1191,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/state/aliases.ts",
@@ -1121,7 +1207,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/state/frecency.ts",
@@ -1136,7 +1223,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/state/hotkeys.ts",
@@ -1151,7 +1239,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/state/persist.ts",
@@ -1166,7 +1255,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/state/pins.ts",
@@ -1181,7 +1271,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/style.css",
@@ -1196,7 +1287,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/ui/ActionBar.tsx",
@@ -1211,7 +1303,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/ui/ActionsPanel.tsx",
@@ -1226,7 +1319,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/ui/MessageMarkdownPreview.tsx",
@@ -1241,7 +1335,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/ui/Palette.tsx",
@@ -1256,7 +1351,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/ui/PaletteIcon.tsx",
@@ -1271,7 +1367,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/ui/ResultsList.tsx",
@@ -1286,7 +1383,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/ui/icons.tsx",
@@ -1301,7 +1399,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/ui/keyboard.ts",
@@ -1316,7 +1415,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/ui/markdownPaste.ts",
@@ -1331,7 +1431,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/ui/openPalette.tsx",
@@ -1346,7 +1447,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/ui/pages/DetailPage.tsx",
@@ -1361,7 +1463,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/commandPalette/ui/pages/FormPage.tsx",
@@ -1376,7 +1479,8 @@
       "pnpm exec stylelint src/equicordplugins/commandPalette/style.css (passed).",
       "Whole-tree tsc reported no CommandPalette or Equicord B test errors; concurrent unrelated owner errors were reported to root.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/copyAttachmentLinks/index.tsx",
@@ -1389,7 +1493,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/copyMessageTimestamp/index.tsx",
@@ -1402,7 +1507,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/copyProfileColors/index.tsx",
@@ -1415,7 +1521,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customFolderIcons/components.tsx",
@@ -1428,7 +1535,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customFolderIcons/index.tsx",
@@ -1441,7 +1549,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customFolderIcons/settings.tsx",
@@ -1454,7 +1563,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customFolderIcons/util.tsx",
@@ -1467,7 +1577,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customSounds/SoundOverrideComponent.tsx",
@@ -1480,7 +1591,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customSounds/audioStore.ts",
@@ -1493,7 +1605,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customSounds/index.tsx",
@@ -1506,7 +1619,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customSounds/settingsImport.ts",
@@ -1519,7 +1633,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customSounds/styles.css",
@@ -1532,7 +1647,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customSounds/types.ts",
@@ -1545,7 +1661,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBSounds.ts (7 passed).",
       "Scoped plugin ESLint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customUserColors/SetColorModal.tsx",
@@ -1558,7 +1675,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customUserColors/index.tsx",
@@ -1571,7 +1689,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customUserColors/styles.css",
@@ -1584,7 +1703,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/downloadAllAttachments/index.tsx",
@@ -1597,7 +1717,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/dragFavoriteEmotes/index.tsx",
@@ -1610,7 +1731,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/dragFavoriteEmotes/styles.css",
@@ -1623,7 +1745,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/dragify/dragState.ts",
@@ -1636,7 +1759,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/dragify/ghost.tsx",
@@ -1649,7 +1773,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/dragify/index.tsx",
@@ -1662,7 +1787,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/dragify/invite.ts",
@@ -1675,7 +1801,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/dragify/style.css",
@@ -1688,7 +1815,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/dragify/targets.ts",
@@ -1701,7 +1829,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/dragify/utils.ts",
@@ -1714,7 +1843,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBInteractions.ts (7 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/equicordToolbox/index.tsx",
@@ -1728,7 +1858,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/equicordToolbox/menu.tsx",
@@ -1742,7 +1873,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/equicordToolbox/styles.css",
@@ -1756,7 +1888,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/exportMessages/index.tsx",
@@ -1770,7 +1903,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/exportMessages/styles.css",
@@ -1784,7 +1918,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/exportMessages/types.ts",
@@ -1798,7 +1933,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/favouriteAnything/components.tsx",
@@ -1812,7 +1948,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/favouriteAnything/index.tsx",
@@ -1826,7 +1963,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/favouriteAnything/native.ts",
@@ -1840,7 +1978,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/favouriteAnything/polyfills.ts",
@@ -1854,7 +1993,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/favouriteAnything/stores.ts",
@@ -1868,7 +2008,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/favouriteAnything/style.css",
@@ -1882,7 +2023,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/favouriteAnything/types.ts",
@@ -1896,7 +2038,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/favouriteAnything/utils.ts",
@@ -1910,7 +2053,8 @@
       "pnpm testTsc (passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/constants.ts",
@@ -1924,7 +2068,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/index.tsx",
@@ -1938,7 +2083,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/native.ts",
@@ -1952,7 +2098,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/nativeApprovals.ts",
@@ -1966,7 +2113,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/nativeNetwork.ts",
@@ -1980,7 +2128,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/settings.tsx",
@@ -1994,7 +2143,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/styles.css",
@@ -2008,7 +2158,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/types.ts",
@@ -2022,7 +2173,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/utils/apngToGif.ts",
@@ -2036,7 +2188,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/utils/getMediaUrl.ts",
@@ -2050,7 +2203,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/utils/s3.ts",
@@ -2064,7 +2218,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/utils/sharex.ts",
@@ -2078,7 +2233,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fileUpload/utils/upload.ts",
@@ -2092,7 +2248,8 @@
       "pnpm exec tsx scripts/testFileUploadNativeBoundary.ts (passed; isolated temporary data and local test server).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or public upload actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/findReply/ReplyNavigator.tsx",
@@ -2106,7 +2263,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/findReply/index.tsx",
@@ -2120,7 +2278,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/findReply/styles.css",
@@ -2134,7 +2293,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/followVoiceUser/index.tsx",
@@ -2148,7 +2308,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fontLoader/index.tsx",
@@ -2162,7 +2323,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fontLoader/styles.css",
@@ -2176,7 +2338,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/frequentQuickSwitcher/index.tsx",
@@ -2190,7 +2353,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fullVcPfp/index.tsx",
@@ -2204,7 +2368,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fullVcPfp/style.css",
@@ -2218,7 +2383,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifMaker/captions/caption.ts",
@@ -2232,7 +2398,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifMaker/captions/index.ts",
@@ -2246,7 +2413,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifMaker/captions/none.ts",
@@ -2260,7 +2428,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifMaker/captions/speechbubble.ts",
@@ -2274,7 +2443,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifMaker/fonts.ts",
@@ -2288,7 +2458,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifMaker/index.tsx",
@@ -2302,7 +2473,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifMaker/native.ts",
@@ -2316,7 +2488,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifMaker/styles.css",
@@ -2330,7 +2503,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifMaker/types.ts",
@@ -2344,7 +2518,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifMaker/utils/contextMenu.ts",
@@ -2358,7 +2533,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifMaker/utils/encoder.ts",
@@ -2372,7 +2548,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifMaker/utils/gifPicker.ts",
@@ -2386,7 +2563,8 @@
       "Scoped ESLint and stylelint passed.",
       "Whole-tree tsc found no errors in this slice; currently blocked by scripts/testAuditUpdater.ts:146 outside this ownership.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/colors.ts",
@@ -2399,7 +2577,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/components/ProfilePopoutComponent.tsx",
@@ -2412,7 +2591,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/components/ProfileTabComponent.tsx",
@@ -2425,7 +2605,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/components/RepoCard.tsx",
@@ -2438,7 +2619,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/components/RepoSubTabs.tsx",
@@ -2451,7 +2633,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/components/ReposModal.tsx",
@@ -2464,7 +2647,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/components/SortIcon.tsx",
@@ -2477,7 +2661,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/components/Star.tsx",
@@ -2490,7 +2675,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/githubApi.ts",
@@ -2503,7 +2689,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/index.tsx",
@@ -2516,7 +2703,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/styles.css",
@@ -2529,7 +2717,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/types.ts",
@@ -2542,7 +2731,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/githubRepos/utils.ts",
@@ -2555,7 +2745,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/guildPickerDumper/index.tsx",
@@ -2568,7 +2759,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/hopOn/index.tsx",
@@ -2581,7 +2773,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/husk/index.tsx",
@@ -2594,7 +2787,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/iconViewer/components/IconsTab.tsx",
@@ -2607,7 +2801,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/iconViewer/components/Modals.tsx",
@@ -2620,7 +2815,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/iconViewer/index.tsx",
@@ -2633,7 +2829,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/iconViewer/styles.css",
@@ -2646,7 +2843,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/iconViewer/types.ts",
@@ -2659,7 +2857,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/iconViewer/utils.ts",
@@ -2672,7 +2871,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/ignoreCalls/index.tsx",
@@ -2685,7 +2885,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/ignoreCalls/styles.css",
@@ -2698,7 +2899,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/inRole/RoleMembersModal.tsx",
@@ -2711,7 +2913,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/inRole/index.tsx",
@@ -2724,7 +2927,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/inRole/style.css",
@@ -2737,7 +2941,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/ingtoninator/index.tsx",
@@ -2750,7 +2955,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/instantScreenshare/index.tsx",
@@ -2763,7 +2969,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/instantScreenshare/utils.tsx",
@@ -2776,7 +2983,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBProfiles.ts (10 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/invisibleChat.desktop/components/DecryptionModal.tsx",
@@ -2789,7 +2997,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/invisibleChat.desktop/components/EncryptionModal.tsx",
@@ -2802,7 +3011,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/invisibleChat.desktop/index.tsx",
@@ -2815,7 +3025,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/inviteDefaults/index.ts",
@@ -2828,7 +3039,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/jumpTo/index.tsx",
@@ -2841,7 +3053,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keyboardNavigation/commands.tsx",
@@ -2854,7 +3067,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keyboardNavigation/components/CommandPalette.tsx",
@@ -2867,7 +3081,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keyboardNavigation/components/MultipleChoice.tsx",
@@ -2880,7 +3095,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keyboardNavigation/components/TextInput.tsx",
@@ -2893,7 +3109,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keyboardNavigation/components/style.css",
@@ -2906,7 +3123,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keyboardNavigation/doc.md",
@@ -2919,7 +3137,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keyboardNavigation/index.tsx",
@@ -2932,7 +3151,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keyboardSounds/index.ts",
@@ -2945,7 +3165,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keyboardSounds/packs.ts",
@@ -2958,7 +3179,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBKeyboard.ts (9 passed).",
       "Scoped ESLint and stylelint passed.",
       "No live Discord, clipboard, media playback or external network actions performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/markdownTables/index.tsx",
@@ -2973,7 +3195,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBLogStorage.ts (9 passed).",
       "Scoped plugin ESLint and stylelint passed.",
       "No live Discord actions or private user files accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/markdownTables/parser.ts",
@@ -2988,7 +3211,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBLogStorage.ts (9 passed).",
       "Scoped plugin ESLint and stylelint passed.",
       "No live Discord actions or private user files accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/markdownTables/styles.css",
@@ -3003,7 +3227,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBLogStorage.ts (9 passed).",
       "Scoped plugin ESLint and stylelint passed.",
       "No live Discord actions or private user files accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/mediaPlaybackSpeed/components/SpeedIcon.tsx",
@@ -3018,7 +3243,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBLogStorage.ts (9 passed).",
       "Scoped plugin ESLint and stylelint passed.",
       "No live Discord actions or private user files accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/mediaPlaybackSpeed/index.tsx",
@@ -3033,7 +3259,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBLogStorage.ts (9 passed).",
       "Scoped plugin ESLint and stylelint passed.",
       "No live Discord actions or private user files accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/mediaPlaybackSpeed/styles.css",
@@ -3048,7 +3275,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBLogStorage.ts (9 passed).",
       "Scoped plugin ESLint and stylelint passed.",
       "No live Discord actions or private user files accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageBurst/index.ts",
@@ -3063,7 +3291,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBLogStorage.ts (9 passed).",
       "Scoped plugin ESLint and stylelint passed.",
       "No live Discord actions or private user files accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageFetchTimer/index.tsx",
@@ -3078,7 +3307,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBLogStorage.ts (9 passed).",
       "Scoped plugin ESLint and stylelint passed.",
       "No live Discord actions or private user files accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/LoggedMessageManager.ts",
@@ -3095,7 +3325,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/components/FolderSelectInput.tsx",
@@ -3112,7 +3343,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/components/LogsButton.tsx",
@@ -3129,7 +3361,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/components/LogsModal.tsx",
@@ -3146,7 +3379,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/components/hooks.ts",
@@ -3163,7 +3397,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/db.ts",
@@ -3180,7 +3415,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/index.tsx",
@@ -3197,7 +3433,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/list.ts",
@@ -3214,7 +3451,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/native/attachmentDownload.ts",
@@ -3231,7 +3469,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/native/cacheFile.ts",
@@ -3248,7 +3487,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/native/export.ts",
@@ -3265,7 +3505,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/native/import.ts",
@@ -3282,7 +3523,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/native/index.ts",
@@ -3299,7 +3541,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/native/logSessions.ts",
@@ -3314,7 +3557,8 @@
       "pnpm exec tsx scripts/testAuditEquicordBLogStorage.ts (9 passed).",
       "Scoped plugin ESLint and stylelint passed.",
       "No live Discord actions or private user files accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/native/settings.ts",
@@ -3331,7 +3575,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/native/utils.ts",
@@ -3348,7 +3593,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/settings.tsx",
@@ -3365,7 +3611,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/styles.css",
@@ -3382,7 +3629,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/types.ts",
@@ -3399,7 +3647,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/utils/LimitedMap.ts",
@@ -3416,7 +3665,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/utils/cleanUp.ts",
@@ -3433,7 +3683,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/utils/constants.ts",
@@ -3450,7 +3701,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/utils/contextMenu.tsx",
@@ -3467,7 +3719,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/utils/index.ts",
@@ -3484,7 +3737,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/utils/memoize.ts",
@@ -3501,7 +3755,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/utils/misc.ts",
@@ -3518,7 +3773,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/utils/parseQuery.ts",
@@ -3535,7 +3791,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/utils/saveImage/ImageManager.ts",
@@ -3552,7 +3809,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/utils/saveImage/index.ts",
@@ -3569,7 +3827,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLoggerEnhanced/utils/settingsUtils.ts",
@@ -3586,7 +3845,8 @@
       "No live Discord actions or private user files accessed.",
       "Existing testMessageLoggerNativeDownloads.ts and testMessageLoggerNativeWrites.ts passed using synthetic/local fixtures.",
       "Existing collection, evasion and deleted-message recovery algorithms were not enhanced or live-tested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messagePeek/index.tsx",
@@ -3600,7 +3860,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messagePeek/style.css",
@@ -3615,7 +3876,8 @@
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions.",
       "Root re-read full file and confirmed retained disposition while correcting ledger vocabulary."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/micLoopbackTester/index.tsx",
@@ -3629,7 +3891,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreCommands/index.ts",
@@ -3643,7 +3906,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreCommands/utils.ts",
@@ -3657,7 +3921,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/components/categories.tsx",
@@ -3671,7 +3936,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/components/icons.tsx",
@@ -3685,7 +3951,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/components/index.ts",
@@ -3700,7 +3967,8 @@
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions.",
       "Root re-read full file and confirmed retained disposition while correcting ledger vocabulary."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/components/misc.tsx",
@@ -3714,7 +3982,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/components/picker.tsx",
@@ -3728,7 +3997,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/index.tsx",
@@ -3742,7 +4012,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/lineEmojis.ts",
@@ -3756,7 +4027,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/lineStickers.ts",
@@ -3770,7 +4042,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/migrate-v1.ts",
@@ -3784,7 +4057,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/stickers.ts",
@@ -3798,7 +4072,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/style.css",
@@ -3813,7 +4088,8 @@
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions.",
       "Root re-read full file and confirmed retained disposition while correcting ledger vocabulary."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/types.ts",
@@ -3828,7 +4104,8 @@
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions.",
       "Root re-read full file and confirmed retained disposition while correcting ledger vocabulary."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/upload.ts",
@@ -3842,7 +4119,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreStickers/utils.tsx",
@@ -3856,6 +4134,7 @@
       "pnpm exec tsx --test scripts/testAuditEquicordBCommandMedia.ts scripts/testAuditEquicordBStickerStorage.ts scripts/testMoreStickersStorage.ts (17 passed).",
       "Scoped ESLint and stylelint passed.",
       "Native microphone, live sends, network and IndexedDB behavior tested only with isolated mocks; no live client actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   }
 ]

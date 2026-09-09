@@ -7,7 +7,8 @@
     "summary": "Reviewed the AngleBracketsIcon concatenation patch and exported icon-module binding; retained the minimal shared module extraction and attribution.",
     "validation": [
       "Full source read and semantic review of data flow, settings and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/animalese/index.ts",
@@ -18,7 +19,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts scripts/testClientsideGuildIcons.ts (10 passing tests)",
       "Targeted ESLint over changed plugin sources and testAuditEquicordAAsync.ts passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/atSomeone/index.ts",
@@ -29,7 +31,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts scripts/testClientsideGuildIcons.ts (10 passing tests)",
       "Targeted ESLint over changed plugin sources and testAuditEquicordAAsync.ts passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/autoJumpToMessage/index.ts",
@@ -39,7 +42,8 @@
     "summary": "Reviewed notification routing, focus setting and muted-channel guard; existing declarative Flux lifecycle and channel navigation require no change.",
     "validation": [
       "Full source read and semantic review of data flow, settings and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/autoZipper/index.ts",
@@ -50,7 +54,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts scripts/testClientsideGuildIcons.ts (10 passing tests)",
       "Targeted ESLint over changed plugin sources and testAuditEquicordAAsync.ts passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/bannersEverywhere/index.tsx",
@@ -61,7 +66,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts scripts/testClientsideGuildIcons.ts (10 passing tests)",
       "Targeted ESLint over changed plugin sources and testAuditEquicordAAsync.ts passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/bannersEverywhere/style.css",
@@ -71,7 +77,8 @@
     "summary": "Reviewed banner positioning, mask gradient and sibling stacking rules; retained the member-list presentation without changing layout.",
     "validation": [
       "Full source read and semantic review of data flow, settings and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/baseDecoder/index.tsx",
@@ -82,7 +89,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts scripts/testClientsideGuildIcons.ts (10 passing tests)",
       "Targeted ESLint over changed plugin sources and testAuditEquicordAAsync.ts passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterAudioPlayer/index.tsx",
@@ -93,7 +101,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts scripts/testClientsideGuildIcons.ts (10 passing tests)",
       "Targeted ESLint over changed plugin sources and testAuditEquicordAAsync.ts passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterAudioPlayer/styles.css",
@@ -103,7 +112,8 @@
     "summary": "Reviewed full-size overlay canvas, inherited radius and pointer-events none; retained player interaction and layout.",
     "validation": [
       "Full source read and semantic review of data flow, settings and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterCommands/index.ts",
@@ -113,7 +123,8 @@
     "summary": "Reviewed optional argument/newline patches and explicit refresh command; failures remain caught and feedback remains local. No source change required.",
     "validation": [
       "Full source read and semantic review of data flow, settings and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterForwards/components.tsx",
@@ -123,7 +134,8 @@
     "summary": "Reviewed guild/channel footer subscriptions, lazy icon lookups, attachment/embed option indexing and disabled selection controls; retained UI implementation.",
     "validation": [
       "Full source read and semantic review of data flow, settings and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterForwards/index.tsx",
@@ -133,7 +145,8 @@
     "summary": "Reviewed forwarding patches, preference migration, context provider and resend flow. Retained existing behavior; no changes to restriction-bypass or resend capabilities were made.",
     "validation": [
       "Full source read and semantic review of data flow, settings and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/betterForwards/style.css",
@@ -143,7 +156,8 @@
     "summary": "Reviewed footer spacing, icon sizing, hover styles, preview scroll bounds and tag truncation; retained scoped presentation.",
     "validation": [
       "Full source read and semantic review of data flow, settings and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/blockKeywords/index.tsx",
@@ -154,7 +168,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts scripts/testClientsideGuildIcons.ts (10 passing tests)",
       "Targeted ESLint over changed plugin sources and testAuditEquicordAAsync.ts passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/blockKeywords/styles.css",
@@ -164,7 +179,8 @@
     "summary": "Reviewed helper panel spacing, error text sizing and pattern-card layout; retained styles.",
     "validation": [
       "Full source read and semantic review of data flow, settings and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/bypassPinPrompt/index.ts",
@@ -174,7 +190,8 @@
     "summary": "Reviewed the three pin/unpin confirmation substitutions; retained the user-selected prompt shortcut and original pin functions.",
     "validation": [
       "Full source read and semantic review of data flow, settings and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/bypassStatus/index.tsx",
@@ -184,7 +201,8 @@
     "summary": "Reviewed own-status notification whitelist parsing, silent-ping/focus/self-message guards, context menus and cache reset. This concerns the local users DND preferences; retained implementation.",
     "validation": [
       "Full source read and semantic review of data flow, settings and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/cleanChannelName/index.ts",
@@ -195,7 +213,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts scripts/testClientsideGuildIcons.ts (10 passing tests)",
       "Targeted ESLint over changed plugin sources and testAuditEquicordAAsync.ts passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/clientsideGuildIcons/iconStorage.ts",
@@ -206,7 +225,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts scripts/testClientsideGuildIcons.ts (10 passing tests)",
       "Targeted ESLint over changed plugin sources and testAuditEquicordAAsync.ts passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/clientsideGuildIcons/index.tsx",
@@ -217,7 +237,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts scripts/testClientsideGuildIcons.ts (10 passing tests)",
       "Targeted ESLint over changed plugin sources and testAuditEquicordAAsync.ts passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/clipUpload.desktop/UploadClipFileModal.tsx",
@@ -228,7 +249,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (13 passing tests)",
       "Targeted ESLint over changed TypeScript sources passed; vendored sprite JavaScript remains lint-exempt."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/clipUpload.desktop/ffmpeg.ts",
@@ -239,7 +261,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (13 passing tests)",
       "Targeted ESLint over changed TypeScript sources passed; vendored sprite JavaScript remains lint-exempt."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/clipUpload.desktop/fields.tsx",
@@ -249,7 +272,8 @@
     "summary": "Reviewed typed form controls, local date conversion, participant friend filtering and application option deduplication; retained selected IDs absent from live stores.",
     "validation": [
       "Full source read and semantic review of settings, event/data flow and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/clipUpload.desktop/index.tsx",
@@ -260,7 +284,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (13 passing tests)",
       "Targeted ESLint over changed TypeScript sources passed; vendored sprite JavaScript remains lint-exempt."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/clipUpload.desktop/native.ts",
@@ -271,7 +296,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (13 passing tests)",
       "Targeted ESLint over changed TypeScript sources passed; vendored sprite JavaScript remains lint-exempt."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/clipUpload.desktop/upload.ts",
@@ -282,7 +308,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (13 passing tests)",
       "Targeted ESLint over changed TypeScript sources passed; vendored sprite JavaScript remains lint-exempt."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/clipsEnhancements.discordDesktop/index.tsx",
@@ -292,7 +319,8 @@
     "summary": "Reviewed duration/FPS option copies and sort, setting migration and presence-tag matching; retained existing option catalog and activity selection behavior.",
     "validation": [
       "Full source read and semantic review of settings, event/data flow and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/contentWarning/index.tsx",
@@ -303,7 +331,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (13 passing tests)",
       "Targeted ESLint over changed TypeScript sources passed; vendored sprite JavaScript remains lint-exempt."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/contentWarning/styles.css",
@@ -313,7 +342,8 @@
     "summary": "Reviewed blur/brightness, transition and hover-reveal selectors; retained the existing content-warning visual strength.",
     "validation": [
       "Full source read and semantic review of settings, event/data flow and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/copyChannelMention/index.tsx",
@@ -323,7 +353,8 @@
     "summary": "Reviewed channel/thread guards and clipboard mention formatting; retained declarative context-menu lifecycle.",
     "validation": [
       "Full source read and semantic review of settings, event/data flow and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/copyRoleMention/index.tsx",
@@ -333,7 +364,8 @@
     "summary": "Reviewed role lookup across settings and developer menus, excluding the everyone role; retained user-triggered clipboard formatting.",
     "validation": [
       "Full source read and semantic review of settings, event/data flow and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/copyStatusUrls/index.ts",
@@ -343,7 +375,8 @@
     "summary": "Reviewed activity-button metadata lookup and indexed clipboard action with success/failure feedback; retained lazy resolution and explicit right-click behavior.",
     "validation": [
       "Full source read and semantic review of settings, event/data flow and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/copyUserMediaUrls/index.tsx",
@@ -353,7 +386,8 @@
     "summary": "Reviewed global/server avatar and banner fallbacks, animated extensions and high-resolution URLs; retained conditional menu items and clipboard feedback.",
     "validation": [
       "Full source read and semantic review of settings, event/data flow and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/copyUserMention/index.tsx",
@@ -363,7 +397,8 @@
     "summary": "Reviewed user guards, mention syntax, menu registrations and static icon path; retained the explicit clipboard action.",
     "validation": [
       "Full source read and semantic review of settings, event/data flow and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/cursorBuddy/fathorse.js",
@@ -374,7 +409,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (13 passing tests)",
       "Targeted ESLint over changed TypeScript sources passed; vendored sprite JavaScript remains lint-exempt."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/cursorBuddy/index.tsx",
@@ -385,7 +421,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (13 passing tests)",
       "Targeted ESLint over changed TypeScript sources passed; vendored sprite JavaScript remains lint-exempt."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/cursorBuddy/oneko.js",
@@ -396,7 +433,8 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (13 passing tests)",
       "Targeted ESLint over changed TypeScript sources passed; vendored sprite JavaScript remains lint-exempt."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/cursorBuddy/styles.css",
@@ -406,7 +444,8 @@
     "summary": "Reviewed modal/color flex alignment and spacing; retained small scoped styles.",
     "validation": [
       "Full source read and semantic review of settings, event/data flow and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customStatusTimeouts/index.tsx",
@@ -416,7 +455,8 @@
     "summary": "Reviewed positive finite duration parsing, cached presets, setting invalidation and forever sorting; retained configuration defaults and stop-time cache reset.",
     "validation": [
       "Full source read and semantic review of settings, event/data flow and lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customTimestamps/index.tsx",
@@ -426,7 +466,8 @@
     "summary": "Reviewed timestamp-format settings, calendar/relative replacement and shared minute refresh subscriptions; retained lazy moment setup and disposal when the final subscriber leaves.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customTimestamps/utils.tsx",
@@ -438,7 +479,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/customTimestamps/style.css",
@@ -448,7 +490,8 @@
     "summary": "Reviewed info-card and sticky preview positioning, contrast and borders; retained existing styles.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/declutter/index.tsx",
@@ -458,7 +501,8 @@
     "summary": "Reviewed every UI-removal predicate and replacement, saved-setting migration and Decor compatibility; retained existing defaults, preview exceptions and restart behavior.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/declutter/style.css",
@@ -468,7 +512,8 @@
     "summary": "Reviewed section separators, heading typography and accessibility-notice spacing; retained presentation.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/disableCameras/index.tsx",
@@ -478,7 +523,8 @@
     "summary": "Reviewed the self-video default substitution; retained the existing disabled-camera behavior and upstream attribution.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/discordDevBanner/index.tsx",
@@ -488,7 +534,8 @@
     "summary": "Reviewed release-channel banner activation and both banner-content replacement variants; retained plugin metadata and render delegate.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/discordDevBanner/components/index.tsx",
@@ -498,7 +545,8 @@
     "summary": "Reviewed the component barrel exports and their import cycle; definitions are read at render time and require no change.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/discordDevBanner/components/makeDevBanner.tsx",
@@ -510,7 +558,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/discordDevBanner/components/FormatSetting.tsx",
@@ -520,7 +569,8 @@
     "summary": "Reviewed controlled format input, empty-value handling, preview and autosizing; retained custom format behavior.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/discordDevBanner/components/consts.ts",
@@ -532,7 +582,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/discordDevBanner/components/icons.tsx",
@@ -542,7 +593,8 @@
     "summary": "Read the static SVG components and path definitions; retained runtime/client brand glyphs and inherited currentColor sizing.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/discordDevBanner/styles.css",
@@ -552,7 +604,8 @@
     "summary": "Reviewed multiline copy, error color, inline icon sizing and growing input styles; retained visual presentation.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/discordMcp.desktop/policy.ts",
@@ -562,7 +615,8 @@
     "summary": "Reviewed the complete fixed tool list and all snowflake, text, pagination, search-filter and delete-ledger validators; retained strict input limits and explicit recorded-message checks.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/discordMcp.desktop/native.ts",
@@ -574,7 +628,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/discordMcp.desktop/index.ts",
@@ -586,7 +641,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/elementHighlighter.dev/index.tsx",
@@ -598,7 +654,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/elementHighlighter.dev/styles.css",
@@ -608,7 +665,8 @@
     "summary": "Reviewed overlay/tooltip fixed positioning, containment, pointer isolation, color swatches and keybind controls; retained diagnostic layout.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/equibopStreamFixes.equibop/index.tsx",
@@ -618,7 +676,8 @@
     "summary": "Reviewed quality settings, encoder calculations, fallback state parsing and patch predicates. Retained the implementation; no changes to premium-quality restriction bypass were made.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/equicordHelper/index.tsx",
@@ -630,7 +689,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/equicordHelper/pluginButtons.tsx",
@@ -642,7 +702,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/equicordHelper/pluginCards.tsx",
@@ -654,7 +715,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/equicordHelper/utils.tsx",
@@ -666,7 +728,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/equicordHelper/pluginCards.css",
@@ -676,7 +739,8 @@
     "summary": "Reviewed wrapping chat card layout, title visibility and description width bounds; retained presentation.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/exitSounds/index.tsx",
@@ -686,7 +750,8 @@
     "summary": "Reviewed server/sound controls, explicit local preview and awaited disconnect sound request with failure handling; retained configuration and deaf/voice guards.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/exitSounds/styles.css",
@@ -696,7 +761,8 @@
     "summary": "Reviewed sound input layout and guild icon dimensions; retained scoped styles.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fastDeleteChannels/index.tsx",
@@ -708,7 +774,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fixFileExtensions/index.tsx",
@@ -718,7 +785,8 @@
     "summary": "Reviewed extension mappings, case-insensitive lookup, compound tar handling and AnonymiseFileNames compatibility; retained filename-only transformation.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/fixFileExtensions/README.MD",
@@ -728,7 +796,8 @@
     "summary": "Read the short feature description and checked it against the filename-only implementation; retained documentation.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/friendCodes/index.tsx",
@@ -738,7 +807,8 @@
     "summary": "Reviewed friend-panel insertion patch and render getter; retained existing placement and plugin attribution.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/friendCodes/FriendCodesPanel.tsx",
@@ -750,7 +820,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/friendCodes/types.ts",
@@ -760,7 +831,8 @@
     "summary": "Reviewed invite response fields and optional-data representation against the panel uses; retained the public invite shape.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/friendCodes/styles.css",
@@ -770,7 +842,8 @@
     "summary": "Reviewed invite card borders, label typography and empty/loading state alignment; retained visual presentation.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/friendTags/index.tsx",
@@ -782,7 +855,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/friendTags/styles.css",
@@ -794,7 +868,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/friendshipRanks/index.tsx",
@@ -804,7 +879,8 @@
     "summary": "Reviewed rank thresholds, friendship lookup, badge registration, modal and live friend decoration subscription; retained all rank labels/icons and preferences.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/friendshipRanks/styles.css",
@@ -814,7 +890,8 @@
     "summary": "Reviewed rank modal alignment and chat decoration dimensions; retained small scoped styles.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/ghosted/index.tsx",
@@ -826,7 +903,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/ghosted/GhostedUsersModal.tsx",
@@ -836,7 +914,8 @@
     "summary": "Reviewed channel/name/avatar resolution, local clear actions, navigation and snapshot list state; retained explicit clear-all behavior and missing-channel guards.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/ghosted/Boo.tsx",
@@ -848,7 +927,8 @@
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 passing focused regressions)",
       "node --import tsx --test scripts/testDiscordMcp.ts passed in isolated fake queue; no live bridge used.",
       "Targeted ESLint over this changed TypeScript batch passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/ghosted/IconGhost.tsx",
@@ -858,7 +938,8 @@
     "summary": "Read the static ghost path and fill-driven rendering; retained the visual glyph.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/ghosted/styles.css",
@@ -868,7 +949,8 @@
     "summary": "Reviewed ghost/indicator sizing, modal row hover states and channel detail styles; retained presentation.",
     "validation": [
       "Full file read and semantic review of behavior, imports, data flow and applicable lifecycle."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/components/contextMenus.tsx",
@@ -880,7 +962,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/components/modals.tsx",
@@ -890,7 +973,8 @@
     "summary": "Create, move and rename wait for persistence, keep the modal/input open on failure with a visible alert, and guard repeated submissions with a ref and disabled controls.",
     "validation": [
       "Full source review; production ESLint passed; isolated modal persistence failure/retry/duplicate-submit regression passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/index.tsx",
@@ -902,7 +986,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/settings.tsx",
@@ -914,7 +999,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/style.css",
@@ -926,7 +1012,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/types.ts",
@@ -938,7 +1025,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/utils/cleanUrl.ts",
@@ -950,7 +1038,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/utils/collectionManager.ts",
@@ -960,7 +1049,8 @@
     "summary": "Reviewed cache/index lookup, GIF identity and mutations. Serialize mutations against fresh cache snapshots, clone changed collection objects, publish cache only after persistence succeeds, guard stale reloads and duplicate/missing rename/move targets.",
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (4 passed); production ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/utils/getFormat.ts",
@@ -972,7 +1062,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/utils/getGif.ts",
@@ -984,7 +1075,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/utils/getUrlExtension.ts",
@@ -996,7 +1088,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/utils/isAudio.ts",
@@ -1008,7 +1101,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/utils/misc.ts",
@@ -1020,7 +1114,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/utils/refreshUrl.ts",
@@ -1032,7 +1127,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/utils/settingsUtils.ts",
@@ -1044,7 +1140,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/gifCollections/utils/uuidv4.ts",
@@ -1056,7 +1153,8 @@
       "Full source semantic review of collection data, UI actions and persistence.",
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (3 passing groups; import safety, media extension handling, independent IDs and one-write refresh)",
       "Targeted ESLint for gifCollections and its audit tests passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordAAsync.ts",
@@ -1067,17 +1165,19 @@
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAAsync.ts (19 tests passed)",
       "Targeted ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordACollections.ts",
     "baselineSha256": null,
-    "reviewedSha256": "378b17a80bf29253dd7fe115b8ff4bb4168f829e97ae65f7bd34d3ddcb3c06d9",
+    "reviewedSha256": "98458aa8a826caa58a6beec1bc8ac4b091f5848b667b0a778f3ab797c4d42066",
     "status": "changed",
     "summary": "Four isolated regressions for import validation, media extensions, copied GIF identities, and failed/concurrent collection persistence.",
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordACollections.ts (4 passed)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/globalBadges/index.tsx",
@@ -1087,7 +1187,8 @@
     "summary": "Reviewed badge rendering, refresh interval start/stop, stale-load cancellation, toolbox error feedback and context menu; retained. Confirmed parent Badges API now reaches this plugin only while enabled.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/globalBadges/settings.tsx",
@@ -1097,7 +1198,8 @@
     "summary": "Reviewed all 16 client filters, multi-select update loop, prefix/suffix preference and API URL refresh callback; retained existing settings names/defaults and custom endpoint support.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/globalBadges/styles.css",
@@ -1107,7 +1209,8 @@
     "summary": "Reviewed the scoped settings-server button sizing; retained its full-width 50px control.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/globalBadges/utils.ts",
@@ -1120,7 +1223,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied",
       "node --import tsx --test scripts/testBadges.ts scripts/testAuditEquicordAState.ts (23 passed; missing/empty badge distinction preserved without settings reads)"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/googleThat/index.tsx",
@@ -1130,7 +1234,8 @@
     "summary": "Reviewed explicit slash-command link construction, percent-encoded query, engine table and custom URL/hyperlink/embed preferences; retained. Command output alone causes no unsolicited request or send.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/hideChatButtons/index.tsx",
@@ -1142,7 +1247,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/hideMessages/index.tsx",
@@ -1154,7 +1260,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/hideMessages/styles.css",
@@ -1164,7 +1271,8 @@
     "summary": "Reviewed scoped eye-toggle dimensions and flex alignment against the header render function; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/hideServers/HiddenServersStore.ts",
@@ -1176,7 +1284,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/hideServers/components/HiddenServersButton.tsx",
@@ -1188,7 +1297,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/hideServers/components/HiddenServersMenu.tsx",
@@ -1200,7 +1310,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/hideServers/components/style.css",
@@ -1210,7 +1321,8 @@
     "summary": "Reviewed all scoped menu, row, folder and icon rules; retained, with the matching row-button class corrected in its component.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/hideServers/index.tsx",
@@ -1222,7 +1334,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/hideServers/settings.tsx",
@@ -1234,7 +1347,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/homeTyping/index.tsx",
@@ -1246,7 +1360,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/homeTyping/styles.css",
@@ -1256,7 +1371,8 @@
     "summary": "Reviewed the single scoped dots-spacing rule against the typing icon class; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/iRememberYou/components/data.tsx",
@@ -1268,7 +1384,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/iRememberYou/components/ui.tsx",
@@ -1280,7 +1397,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/iRememberYou/index.tsx",
@@ -1292,7 +1410,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/iRememberYou/styles.css",
@@ -1302,7 +1421,8 @@
     "summary": "Reviewed scoped collection grid, avatar, tooltip, ID and search layout rules; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/idleAutoRestart/index.tsx",
@@ -1314,7 +1434,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keywordNotify/components/Collapsible.css",
@@ -1324,7 +1445,8 @@
     "summary": "Reviewed scoped collapsible control spacing and pointer affordance; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keywordNotify/components/Collapsible.tsx",
@@ -1334,7 +1456,8 @@
     "summary": "Reviewed unconditional local open-state hook and conditional child mounting; retained button-based disclosure behavior.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keywordNotify/components/FormGenericLabel.css",
@@ -1344,7 +1467,8 @@
     "summary": "Reviewed label wrapper/text/border and disabled styling against component class names; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keywordNotify/components/FormGenericLabel.tsx",
@@ -1354,7 +1478,8 @@
     "summary": "Reviewed label title/description/child composition, optional divider and scoped disabled styling; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keywordNotify/components/KeywordEntries.tsx",
@@ -1366,7 +1491,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keywordNotify/components/ListPrioritySelector.tsx",
@@ -1376,7 +1502,8 @@
     "summary": "Reviewed controlled whitelist/blacklist selection, exact persisted enum values and serialization; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keywordNotify/components/ListedIds.tsx",
@@ -1388,7 +1515,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keywordNotify/index.tsx",
@@ -1400,7 +1528,8 @@
       "Full-file semantic review and call-site inspection",
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "Production TypeScript ESLint passed; tsc follow-up type corrections applied"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/keywordNotify/style.css",
@@ -1410,7 +1539,8 @@
     "summary": "Reviewed scoped delete-button hover feedback and ignore-case switch spacing; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/lastActive/index.tsx",
@@ -1420,7 +1550,8 @@
     "summary": "Reviewed user-invoked channel/guild search parameters, exact-author result selection, captured destination navigation, null-channel handling and failure toasts; retained existing contextual search behavior.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/limitlessScreenshare/CustomRange.tsx",
@@ -1430,7 +1561,8 @@
     "summary": "Reviewed slider normalization, rounded display, throttled change callback and unmount cancellation. Retained existing streaming path; no capability-gate changes.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/limitlessScreenshare/SettingsPresetList.tsx",
@@ -1440,7 +1572,8 @@
     "summary": "Reviewed preset add/remove controls, minimum-value validation, numeric parsing, ordering and protected Source preset; retained existing settings UI.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/limitlessScreenshare/index.tsx",
@@ -1450,7 +1583,8 @@
     "summary": "Reviewed the complete patch set, resolution/FPS control composition, source-quality defaults and preset selection. Retained without modifying the existing capability bypass or extending streaming behavior.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/limitlessScreenshare/settings.tsx",
@@ -1460,7 +1594,8 @@
     "summary": "Reviewed persisted max-resolution/FPS and rounding settings, default presets, source sentinel and validation relationships; retained existing option schema.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/limitlessScreenshare/style.css",
@@ -1470,7 +1605,8 @@
     "summary": "Reviewed scoped preset cards and compact input dimensions; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/limitlessScreenshare/utils.ts",
@@ -1480,7 +1616,8 @@
     "summary": "Reviewed forward/inverse range formulas against CustomRange; retained. Equal endpoints produce a non-finite normalized value which the existing caller handles as zero.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordAState.ts",
@@ -1491,7 +1628,8 @@
     "validation": [
       "pnpm exec tsx --test scripts/testAuditEquicordAState.ts (10 tests passed)",
       "node --import tsx --test scripts/testBadges.ts scripts/testAuditEquicordAState.ts (23 passed; missing/empty badge distinction preserved without settings reads)"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/loginWithQR/images.ts",
@@ -1504,7 +1642,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/loginWithQR/index.tsx",
@@ -1517,7 +1656,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/loginWithQR/jsqr.d.ts",
@@ -1527,7 +1667,8 @@
     "summary": "Reviewed the jsqr type re-export shim against the decoder import; retained declaration-only module compatibility.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/loginWithQR/ui/index.ts",
@@ -1537,7 +1678,8 @@
     "summary": "Reviewed scoped class factory and lazy spinner component/type declarations; retained supported spinner variants.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/loginWithQR/ui/modals/QrModal.tsx",
@@ -1550,7 +1692,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/loginWithQR/ui/modals/VerifyModal.tsx",
@@ -1563,7 +1706,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/loginWithQR/ui/styles.css",
@@ -1576,7 +1720,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageColors/constants.ts",
@@ -1586,7 +1731,8 @@
     "summary": "Reviewed color parser enum values, interpolation tokens and all display preferences; retained settings schema and base regex sources.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageColors/index.tsx",
@@ -1599,7 +1745,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageColors/styles.css",
@@ -1609,7 +1756,8 @@
     "summary": "Reviewed scoped block/background color rendering and dark/light text contrast rules; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLinkTooltip/index.tsx",
@@ -1622,7 +1770,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageLinkTooltip/style.css",
@@ -1632,7 +1781,8 @@
     "summary": "Reviewed tooltip width and viewport-relative maximum; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageNotifier/index.ts",
@@ -1642,7 +1792,8 @@
     "summary": "Reviewed cached notification-user ID parsing, selected-channel/default-message gates, explicit notification navigation and cache cleanup; retained current notification behavior.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageTranslate/index.tsx",
@@ -1655,7 +1806,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageTranslate/settings.ts",
@@ -1665,7 +1817,8 @@
     "summary": "Reviewed validated ID-list settings, cached ignore/excluded-language sets, target language and presentation options; retained all names/defaults and lifecycle initialization.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageTranslate/styles.css",
@@ -1675,7 +1828,8 @@
     "summary": "Reviewed translation indicator, subtext and icon styling against all presentation modes; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageTranslate/types.ts",
@@ -1685,7 +1839,8 @@
     "summary": "Reviewed transport/cache/message type roles and optional translated sentences; retained, with response validation performed in the transport helper.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/messageTranslate/utils/translate.ts",
@@ -1698,7 +1853,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/middleClickTweaks/index.ts",
@@ -1711,7 +1867,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moyai/index.ts",
@@ -1724,7 +1881,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/hoverOnly.css",
@@ -1737,7 +1895,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/index.tsx",
@@ -1750,7 +1909,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/settings.tsx",
@@ -1763,7 +1923,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/PlayerComponent.tsx",
@@ -1776,7 +1937,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/SeekBar.ts",
@@ -1786,7 +1948,8 @@
     "summary": "Reviewed lazy Discord slider subclass and derived-state value synchronization; retained the existing wrapped component contract.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/SpotifyStore.ts",
@@ -1799,7 +1962,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/lyrics/api.tsx",
@@ -1812,7 +1976,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/lyrics/components/ctxMenu.tsx",
@@ -1822,7 +1987,8 @@
     "summary": "Reviewed current-line copy eligibility, saved provider markers, alternative-provider prerequisites and explicit provider-change dispatch; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/lyrics/components/lyrics.tsx",
@@ -1835,7 +2001,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/lyrics/components/modal.tsx",
@@ -1845,7 +2012,8 @@
     "summary": "Reviewed track metadata/header, full-lyrics display, current-line emphasis and timestamp seek actions; retained behavior, with import formatting normalized by ESLint.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/lyrics/components/util.tsx",
@@ -1858,7 +2026,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/lyrics/providers/SpotifyAPI/index.ts",
@@ -1871,7 +2040,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/lyrics/providers/lrclibAPI/index.ts",
@@ -1884,7 +2054,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/lyrics/providers/store.ts",
@@ -1897,7 +2068,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/lyrics/providers/translator/index.ts",
@@ -1910,7 +2082,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/lyrics/providers/translator/languages.ts",
@@ -1920,7 +2093,8 @@
     "summary": "Reviewed the complete language option catalog, code/label pairs and English default; retained the existing supported selection list.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/lyrics/providers/types.ts",
@@ -1930,7 +2104,8 @@
     "summary": "Reviewed lyric timestamps/null text, provider enum storage values and alternate-version shape; retained persisted format.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/spotify/spotifyStyles.css",
@@ -1940,7 +2115,8 @@
     "summary": "Reviewed full player/seek/button/metadata styling and scoped selectors; retained theme variables and interaction rules.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/styles.css",
@@ -1950,7 +2126,8 @@
     "summary": "Reviewed the complete shared Spotify/Tidal lyric stylesheet, note animations, modal and karaoke states and reduced-motion rules; retained its existing visual behavior.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/tidal/TidalPlayer.tsx",
@@ -1963,7 +2140,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/tidal/TidalStore.ts",
@@ -1976,7 +2154,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/tidal/lyrics/api.tsx",
@@ -1989,7 +2168,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/tidal/lyrics/components/ctxMenu.tsx",
@@ -1999,7 +2179,8 @@
     "summary": "Reviewed selected-lyric lookup, disabled empty-copy state and clipboard action; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/tidal/lyrics/components/lyrics.tsx",
@@ -2012,7 +2193,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/tidal/lyrics/components/modal.tsx",
@@ -2022,7 +2204,8 @@
     "summary": "Reviewed track heading, lyric timestamps, current-line state and seek actions; retained behavior, with import formatting normalized by ESLint.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/tidal/lyrics/components/util.tsx",
@@ -2035,7 +2218,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/tidal/lyrics/providers/store.ts",
@@ -2048,7 +2232,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/tidal/lyrics/types.ts",
@@ -2058,7 +2243,8 @@
     "summary": "Reviewed the seconds/text shape consumed by parser, stores and lyric UI; retained.",
     "validation": [
       "Full-file semantic review and call-site inspection"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/tidal/tidalStyles.css",
@@ -2071,7 +2257,8 @@
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)",
       "Affected production TypeScript ESLint passed; changed media CSS stylelint passed",
       "Global tsc passed during the review batch; root owns the final broad gate"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/musicControls/parseSyncedLyrics.ts",
@@ -2081,17 +2268,19 @@
     "summary": "Added a shared sorted LRC parser preserving fractional/repeated timestamps and embedded brackets while ignoring metadata/invalid times and normalizing empty musical lines.",
     "validation": [
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts (15 tests passed)"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordAMedia.ts",
     "baselineSha256": null,
-    "reviewedSha256": "c51906f881a2228aec4868654f93d31d0278a28d440a4177150948dd460d8f12",
+    "reviewedSha256": "1dc869266a34c2560afdfff32bcc15f77a035f71e1442cff89f662274ec0874b",
     "status": "changed",
     "summary": "Offline VM and hook regression fixtures for reviewed Equicord A media, lifecycle, token races, account isolation and modal persistence behavior.",
     "validation": [
       "pnpm exec tsx --test scripts/testAuditEquicordAMedia.ts: 46 passed"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/noPushToTalk/index.ts",
@@ -2101,7 +2290,8 @@
     "summary": "Reviewed the complete voice-activity permission/warning patch set. Retained without modifying the existing server-policy bypass or broadening its capabilities.",
     "validation": [
       "Full-file semantic review; no capability-enhancing changes"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/noRPC.discordDesktop/index.ts",
@@ -2111,7 +2301,8 @@
     "summary": "Reviewed the single desktop RPC startup patch and module-loading match scope; retained RPC suppression behavior.",
     "validation": [
       "Full-file semantic review; no capability-enhancing changes"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/platformSpoofer/index.tsx",
@@ -2121,7 +2312,8 @@
     "summary": "Reviewed all declared platform labels/defaults, current-user guards and Gateway identification patches. Retained without strengthening spoofing/evasion behavior.",
     "validation": [
       "Full-file semantic review; no capability-enhancing changes"
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/notificationTitle.discordDesktop/index.tsx",
@@ -2134,7 +2326,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/pendingFriendRequest/index.tsx",
@@ -2147,7 +2340,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/persistentAudioPlayback/index.tsx",
@@ -2160,7 +2354,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/persistentAudioPlayback/styles.css",
@@ -2170,7 +2365,8 @@
     "summary": "Reviewed scoped floating-player layout, volume/seek controls, waveform styling, pointer layering and narrow-screen rules; retained existing presentation.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/polishWording/index.ts",
@@ -2183,7 +2379,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/profileSets/components/confirmModal.tsx",
@@ -2196,7 +2393,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/profileSets/components/presetList.tsx",
@@ -2209,7 +2407,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/profileSets/components/presetManager.tsx",
@@ -2222,7 +2421,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/profileSets/components/profileSetsTab.tsx",
@@ -2235,7 +2435,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/profileSets/index.tsx",
@@ -2248,7 +2449,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/profileSets/styles.css",
@@ -2258,7 +2460,8 @@
     "summary": "Reviewed profile editor, avatar list, selection/focus states and pagination styles; retained scoped layout and saved preference semantics.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/profileSets/utils/actions.ts",
@@ -2271,7 +2474,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/profileSets/utils/profile.ts",
@@ -2284,7 +2488,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/profileSets/utils/storage.ts",
@@ -2297,7 +2502,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/quickThemeSwitcher.discordDesktop/index.tsx",
@@ -2310,7 +2516,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/quoter/components/QuoteIcon.tsx",
@@ -2320,7 +2527,8 @@
     "summary": "Reviewed static quote action SVG geometry, viewBox and currentColor inheritance; retained icon asset.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/quoter/index.tsx",
@@ -2333,7 +2541,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/quoter/types.ts",
@@ -2343,7 +2552,8 @@
     "summary": "Reviewed font choices, 1200x600 canvas geometry, font-size and spacing definitions and image option types; retained public settings and output dimensions.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/quoter/utils.tsx",
@@ -2356,7 +2566,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/RemixModal.tsx",
@@ -2369,7 +2580,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/editor/Editor.tsx",
@@ -2379,7 +2591,8 @@
     "summary": "Reviewed abortable remote-image loading, stale completion checks, file selection and readiness/error UI; retained existing lifecycle cleanup.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/editor/components/Canvas.tsx",
@@ -2389,7 +2602,8 @@
     "summary": "Reviewed generation-scoped image/canvas ownership, object URL cleanup, input disposer, crop validation and export rejection; retained existing implementation.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/editor/components/SettingColorComponent.tsx",
@@ -2399,7 +2613,8 @@
     "summary": "Reviewed number-to-padded-hex conversion and controlled color-picker callback; retained established color settings.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/editor/components/Toolbar.tsx",
@@ -2409,7 +2624,8 @@
     "summary": "Reviewed effect-managed tool subscription, drawing style synchronization, crop/brush clearing, size and shape controls; retained behavior.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/editor/components/colorStyles.css",
@@ -2419,7 +2635,8 @@
     "summary": "Reviewed scoped color picker row, swatch sizing and text wrapping; retained stylesheet.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/editor/input.ts",
@@ -2432,7 +2649,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/editor/tools/brush.ts",
@@ -2442,7 +2660,8 @@
     "summary": "Reviewed brush event subscription lifecycle, current-size application and drawing context checks; retained stroke behavior.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/editor/tools/crop.ts",
@@ -2455,7 +2674,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/editor/tools/eraser.ts",
@@ -2465,7 +2685,8 @@
     "summary": "Reviewed erase stroke and restoration of source-over composition, size setting, and move-handler registration cleanup; retained behavior.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/editor/tools/shape.ts",
@@ -2475,7 +2696,8 @@
     "summary": "Reviewed shape preview/commit lifecycle, signed rectangle dimensions, non-negative ellipse radii, arrow drawing and listener cleanup; retained behavior.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/editor/utils/canvas.ts",
@@ -2485,7 +2707,8 @@
     "summary": "Reviewed drawing/bounds helpers, abortable URL image load, event cleanup and image-to-File failure handling; retained implementation.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/editor/utils/eventEmitter.ts",
@@ -2495,7 +2718,8 @@
     "summary": "Reviewed internal move/up event dispatch and handler removal; event names are fixed by local callers and registration lifetimes are bounded by tool selection.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/icons/SendIcon.tsx",
@@ -2505,7 +2729,8 @@
     "summary": "Reviewed static decorative Send SVG, currentColor path, explicit size and aria-hidden attribute; retained asset.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/index.tsx",
@@ -2518,7 +2743,8 @@
       "pnpm exec eslint (modified profile/playback/formatting/theme/quoter/remix source) --fix (passed).",
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed).",
       "pnpm exec tsc --noEmit --pretty false (passed before final Remix channel/input/crop edits; parent broad gate covers final tree)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/remix/styles.css",
@@ -2528,7 +2754,8 @@
     "summary": "Reviewed scoped editor, toolbar, controls and canvas sizing; retained existing UI layout.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/searchFix/index.tsx",
@@ -2538,7 +2765,8 @@
     "summary": "Reviewed search offset and sort reversal patch plus documented 5000-offset limitation; retained the existing offset-zero behavior and ordinary search semantics.",
     "validation": [
       "Full semantic source review; dependency/caller paths inspected where needed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordAProfiles.ts",
@@ -2548,17 +2776,19 @@
     "summary": "Thirteen isolated source-execution cases for placeholder preservation, notification cache misses, cancellation failure, playback replacement/stop/position stability, scoped preset storage/migration/clears, modal dismissal, stale theme startup, Quoter disposal and Remix input cleanup; no client/auth/network operations.",
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordAProfiles.ts (13 passed)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/README.md",
     "baselineSha256": "3a88f0d0a4a22ff34125309e09bb7357696ca963ccc609f93eee19b3ff629037",
-    "reviewedSha256": "3a88f0d0a4a22ff34125309e09bb7357696ca963ccc609f93eee19b3ff629037",
-    "status": "reviewed",
-    "summary": "Read the full mandatory protocol, attachment compatibility, OneKey setup, trust, replay, metadata and endpoint-limit documentation before modifications; retained the explicit non-ratcheting and non-audited security claims.",
+    "reviewedSha256": "fdef967369be57d1c985dd2548aeff61c8973f547c82154b2ee2e91170a85523",
+    "status": "changed",
+    "summary": "Reviewed integrated phone-pairing contract and final preservation clarifications, including one active sending desktop, blocked phone-origin desktop edits, phone-only contacts, displaced/retired key history and persistent conversation review. Current protected forwarding behavior is accurately documented.",
     "validation": [
-      "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+      "Full original review plus complete merge/final documentation diff review; desktop SecurityKey doc-contract assertions and mobile pairing/history tests passed."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/announcementReviewCache.ts",
@@ -2568,7 +2798,8 @@
     "summary": "Reviewed message/account/edit-keyed review coalescing, four-task concurrency, failed-entry retry, generation invalidation and settled-entry expiry; retained key-change review behavior.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/attachmentCache.ts",
@@ -2578,7 +2809,8 @@
     "summary": "Reviewed account-scoped cache, authenticated blob rendering, URL authority/path validation, deferred file downloads, reserved memory accounting, retry limits and object URL revocation; retained authenticated preview semantics.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/attachmentEditValidation.ts",
@@ -2588,7 +2820,8 @@
     "summary": "Reviewed exact ordered attachment-ID comparison and null-as-unchanged edit semantics; retained fail-closed validation.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/attachmentUploads.ts",
@@ -2598,7 +2831,8 @@
     "summary": "Reviewed original-upload retention, media metadata cleanup, exact ciphertext-size checks before encryption, sequential byte encryption and opaque upload replacement; retained attachment settings and metadata.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/attachments.ts",
@@ -2608,7 +2842,8 @@
     "summary": "Reviewed every legacy/current plaintext and attachment format, strict canonical parsers, HKDF/AAD separation, digest/AEAD checks, metadata bounds, image dimension readers and buffer cleanup; preserved protocol bytes.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/conversationSelection.ts",
@@ -2618,7 +2853,8 @@
     "summary": "Reviewed filtering to currently trusted recipients and the initial one-to-one DM default; retained explicit group recipient selection.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/crypto.ts",
@@ -2628,7 +2864,8 @@
     "summary": "Reviewed identity validation, keyed import/fingerprint caches, HPKE per-recipient wrapping, signed canonical context, AEAD verification and content-key cleanup; preserved v1-v3 protocol compatibility.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/decryptCache.ts",
@@ -2638,7 +2875,8 @@
     "summary": "Reviewed coalesced decrypt/retry tasks, account/message/edit/nonce keys, detached-text expansion, transient expiry, prefetch cap and generation cancellation; retained behavior.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/embedCache.ts",
@@ -2648,7 +2886,8 @@
     "summary": "Reviewed local message clones, decrypt-before-unfurl ordering, URL-only disclosure, bounded unfurl queue/cache, stale-entry checks and sticker reconstruction; retained documented preview tradeoff.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/embedUrls.ts",
@@ -2658,7 +2897,8 @@
     "summary": "Reviewed URL scheme/credential/length validation, code-span skipping, punctuation balancing, deduplication and visible plaintext until media preview exists; retained behavior.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/exactArrayBuffer.ts",
@@ -2668,7 +2908,8 @@
     "summary": "Reviewed zero-copy use only for a full ArrayBuffer view and defensive copy for slices or other backing buffers; retained exact-byte semantics.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/forwarding.ts",
@@ -2678,7 +2919,8 @@
     "summary": "Reviewed protection routing, bound Discord attachment URLs, label/mention sanitization, selected embed extraction and bounded copied text; retained native-forward blocking for protected sources.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/keyReviewGate.ts",
@@ -2688,7 +2930,8 @@
     "summary": "Reviewed per-account/peer latest-attempt ordering, outstanding counts, failed review latch and explicit reset; retained fail-closed send gating.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/layoutStability.ts",
@@ -2698,7 +2941,8 @@
     "summary": "Reviewed finite scroll metrics, viewport anchor selection, three-frame restoration, direct-scroll detection and weak ownership; retained bounded layout compensation.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/mentionNotifications.ts",
@@ -2708,7 +2952,8 @@
     "summary": "Reviewed parsed recipient-only mention allowlist, exclusion of the author, disabled automatic parsing and authenticated-plaintext compatibility fallback; retained metadata semantics.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/messageGrouping.ts",
@@ -2718,7 +2963,8 @@
     "summary": "Reviewed weak array index cache, mutation invalidation, same-author/time/accessory checks and decrypted-content eligibility; retained grouping boundaries.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/messageMetadata.ts",
@@ -2728,20 +2974,19 @@
     "summary": "Reviewed string/Date-like edit timestamp normalization, invalid sentinel behavior and strict string snowflake nonce validation; retained canonical native inputs.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/native.ts",
     "baselineSha256": "7fc198331dd8819c8ca9cb5c1740b09eda809bc6047d75666331a1cf04ae376b",
-    "reviewedSha256": "08ba9fc2408786bde85476db5769aa2238ebcba53f735454d2d5f93553bd6c48",
+    "reviewedSha256": "126ce45a29fdecb33ee8addad8a4277a39dd353ec2634e8ac34221f678335c7a",
     "status": "changed",
-    "summary": "Reviewed complete IPC validation, vault/quarantine formats and migration, atomic persistence, mutex/queue, trust and replay rules, downloads, cache and capture lifecycle. Added session checks so lock invalidates late operation results, vault publication and attachment cache replenishment.",
+    "summary": "Reviewed merged serialized OneKey-only encrypted phone snapshot export. It excludes changed peers and unreviewed/disabled/mismatched conversations, preserves audit cache/session epochs and leaves counters/replay installation-local. No plaintext private-key export is introduced.",
     "validation": [
-      "Full semantic source review; native startup remains declaration-only.",
-      "pnpm exec eslint src/equicordplugins/secureMessaging.desktop/native.ts src/equicordplugins/secureMessaging.desktop/oneKeyWindowsVault.ts src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts (passed).",
-      "node --import tsx --test scripts/testAuditEquicordASecureState.ts (4 passed; all I/O, hardware and ceremony surfaces mocked).",
-      "pnpm testSecureMessagingNative (passed with temporary fixture stores and mocked Electron/OneKey/network)."
-    ]
+      "Full original audit plus additive merge source review; native IPC suite and new origin/input/locked export cases passed with mocked hardware/services."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/oneKeyVault.ts",
@@ -2751,7 +2996,8 @@
     "summary": "Reviewed deterministic user-separated identity derivation, key buffer cleanup, exact device/interface selection and bounded framed WebUSB/Protobuf exchange; retained physical-confirmation requirements and script argument quoting.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/oneKeyWindowsVault.ts",
@@ -2763,7 +3009,8 @@
       "Full semantic source review; native startup remains declaration-only.",
       "pnpm exec eslint src/equicordplugins/secureMessaging.desktop/native.ts src/equicordplugins/secureMessaging.desktop/oneKeyWindowsVault.ts src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts (passed).",
       "node --import tsx --test scripts/testAuditEquicordASecureState.ts (4 passed; all I/O, hardware and ceremony surfaces mocked)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/optimisticRendering.ts",
@@ -2773,7 +3020,8 @@
     "summary": "Reviewed 128-entry/60-second plaintext cache, access ordering, provisional-to-canonical settlement and explicit clearing; retained temporary display behavior.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/protocol.ts",
@@ -2783,7 +3031,8 @@
     "summary": "Reviewed exact keys, canonical encodings, versioned envelope tuples, Discord context binding, recipient/mention ordering and wire-size limits; preserved serialization and compatibility.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/restGuardFailure.ts",
@@ -2793,19 +3042,19 @@
     "summary": "Reviewed structured failure response and callback-or-throw settlement for Discord REST callers; retained asynchronous callback semantics.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts",
     "baselineSha256": "0a00e74d82650feb8181b0b5e11be3e5496334b603dd0ceb16aa0e65bb84f648",
-    "reviewedSha256": "c3ba9994b7cf77aae4bd1f1b751a02100005ae8668258bdddc72b9c6a307f77f",
+    "reviewedSha256": "cd5f8640fde8110942aa0e2141f5fe7e4f5007784c9caa0ab3ab4220308a4583",
     "status": "changed",
-    "summary": "Reviewed complete profile/envelope validation, encryption and key cleanup, WebAuthn verification and isolated ceremony permissions/navigation. Abort the ceremony deadline timer after completion to release pending work.",
+    "summary": "Reviewed additive active-OneKey-only pairing sealer and preserved audit cancellation/timer cleanup. Pairing uses the existing protected root and refuses other providers or locked state.",
     "validation": [
-      "Full semantic source review; native startup remains declaration-only.",
-      "pnpm exec eslint src/equicordplugins/secureMessaging.desktop/native.ts src/equicordplugins/secureMessaging.desktop/oneKeyWindowsVault.ts src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts (passed).",
-      "node --import tsx --test scripts/testAuditEquicordASecureState.ts (4 passed; all I/O, hardware and ceremony surfaces mocked)."
-    ]
+      "Complete original review plus merged helper review; security-key and interop suites passed using generated synthetic key material."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/styles.css",
@@ -2815,7 +3064,8 @@
     "summary": "Reviewed decrypted-content replacement, screenshot-mode hiding, mention styling, grouped rows, modal/fingerprint layout and overflow behavior; retained scoped privacy UI.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/taskQueue.ts",
@@ -2825,7 +3075,8 @@
     "summary": "Reviewed positive-integer concurrency validation and slot handoff in finally for success/failure; retained queued-task ordering.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/wireAuthorizations.ts",
@@ -2835,7 +3086,8 @@
     "summary": "Reviewed exact channel/content/file/scope/edit keys, bounded lifetimes, one-use counts, atomic multi-file consumption and revocation/reset; retained fail-closed authorization contracts.",
     "validation": [
       "Full semantic source review; no live vault, hardware, client or network operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditEquicordASecureState.ts",
@@ -2845,17 +3097,19 @@
     "summary": "Seven isolated native/renderer lifecycle regressions for lock cancellation, late buffer disposal, temporary-file cleanup, deadline cancellation, visibility subscription, stale review completion and stale-account announcement; all sensitive services mocked.",
     "validation": [
       "node --import tsx --test scripts/testAuditEquicordASecureState.ts (7 passed)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessaging.desktop/index.tsx",
     "baselineSha256": "62e3b22c1e8f1e20c60b43858e251edb9e2e8e3f684ba97de00167c21d46658c",
-    "reviewedSha256": "c0ef6742be8b691367fc3368b374cb0773172756717b421643915d6c330042ba",
+    "reviewedSha256": "7e2e4da254663c8ed02245d0b4bcb7481a0018c8422a3b405a0ceb7148e543a2",
     "status": "changed",
-    "summary": "Reviewed all renderer guards, account transitions, sending/editing/attachment authorization, key-review dialogs, visibility hooks and start/stop cleanup. Resync visibility on subscribe, isolate obsolete review completion, and reject stale-account identity/configuration/trust actions.",
+    "summary": "Reviewed integration of phone-pairing UI with audit lifecycle guards. Export checks account before/after awaiting native work and awaits clipboard success; edits reject mobile-range or non-increasing counters before posting. Existing recipient, conversation, attachment and account checks retained.",
     "validation": [
-      "Seven isolated secure-state regression cases passed; renderer ESLint passed."
-    ]
+      "Complete audit source review plus independent additive merge review and full final diff;16 new interop regressions and targeted desktop/mobile suites passed. Final full gate required on committed merged branch."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/sedEnhanced/index.ts",
@@ -2865,7 +3119,8 @@
     "summary": "Reviewed sed grammar, opt-in regex and invalid-flag handling, own-message reply selection and empty-edit deletion; retained command behavior and regex preference.",
     "validation": [
       "Full semantic source review; focused production ESLint passed where changed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/sekaiStickers/Components/Canvas.tsx",
@@ -2875,7 +3130,8 @@
     "summary": "Guard absent canvas/context and type the DOM ref; retained drawing callback lifecycle.",
     "validation": [
       "Full semantic source review; focused production ESLint passed where changed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/sekaiStickers/Components/Picker.tsx",
@@ -2885,7 +3141,8 @@
     "summary": "Reviewed static character filtering, modal selection and image loading; retained index-based selection and grid.",
     "validation": [
       "Full semantic source review; focused production ESLint passed where changed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/sekaiStickers/Components/SekaiStickersModal.tsx",
@@ -2895,7 +3152,8 @@
     "summary": "Memoize the image per character, wait for font loading, ignore stale image callbacks, preserve canvas reference and balanced transforms, guard export readiness/null blobs, and capture upload destination before asynchronous export.",
     "validation": [
       "Isolated image reuse and captured-channel export regression passed; ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/sekaiStickers/characters.json.ts",
@@ -2905,7 +3163,8 @@
     "summary": "Validated the complete 359-row literal dataset, all required fields and numeric/text defaults, relative PNG paths and six-digit colors. Retained duplicate external ID because selection uses array indexes.",
     "validation": [
       "Full JSON literal parse and every-row schema/path/value checks: no invalid rows; 358 unique external IDs."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/sekaiStickers/index.tsx",
@@ -2915,7 +3174,8 @@
     "summary": "Register fonts before loading so previews can await them, coalesce pending starts, mark loaded only after success and remove failed font faces to permit retry; retained button/settings.",
     "validation": [
       "Full semantic source review; focused production ESLint passed where changed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/sekaiStickers/kanade.svg.tsx",
@@ -2925,7 +3185,8 @@
     "summary": "Reviewed complete fixed SVG path, transform, fill and 24-unit view box; retained self-contained icon geometry.",
     "validation": [
       "Full SVG source review; no dynamic URLs or event handlers."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/showBadgesInChat/index.tsx",
@@ -2935,7 +3196,8 @@
     "summary": "Subscribe badge rows to visibility/order settings so existing messages update immediately; retained flag mapping, premium labels and donor/contributor sources.",
     "validation": [
       "Full semantic source review; focused production ESLint passed where changed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/showBadgesInChat/settings.tsx",
@@ -2945,7 +3207,8 @@
     "summary": "Reviewed persisted positions/visibility, stable drag payloads, bounded moves and keyboard ordering; retained all settings and accessible buttons.",
     "validation": [
       "Full semantic source review; focused production ESLint passed where changed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/showBadgesInChat/styles.css",
@@ -2955,7 +3218,8 @@
     "summary": "Reviewed scoped row, editor, avatar and disabled badge styles; retained layout.",
     "validation": [
       "Full semantic source review; focused production ESLint passed where changed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/showResourceChannels/index.ts",
@@ -2965,7 +3229,8 @@
     "summary": "Reviewed resource-channel visibility patch; retained presentation preference without changing channel authorization.",
     "validation": [
       "Full semantic source review; focused production ESLint passed where changed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/soggy/index.tsx",
@@ -2975,7 +3240,8 @@
     "summary": "Make audio playback effect unconditional, subscribe modal playback settings, propagate volume changes, guard audio creation when stopped and release player references.",
     "validation": [
       "Isolated disabled/start/mute/stop lifecycle regression passed; ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songLink.desktop/Providers.ts",
@@ -2985,7 +3251,8 @@
     "summary": "Reviewed complete static provider object and 21 embedded PNG assets. Retained provider names and three native-app support flags.",
     "validation": [
       "AST confirms one object-literal declaration with no executable expressions; all 21 base64 PNGs have valid signatures and 128x128 dimensions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songLink.desktop/Settings.tsx",
@@ -2995,7 +3262,8 @@
     "summary": "Reviewed per-provider enabled/native preferences and live settings subscription; retained controls and defaults.",
     "validation": [
       "Full semantic source review; focused production ESLint passed where changed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songLink.desktop/SongLinker.tsx",
@@ -3005,7 +3273,8 @@
     "summary": "Expose failed lookups, subscribe country/service preferences, cancel obsolete results, include country in lookup/cache and fall back to web URL if native URI is absent.",
     "validation": [
       "Full semantic source review; focused production ESLint passed where changed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songLink.desktop/index.tsx",
@@ -3015,7 +3284,8 @@
     "summary": "Isolate bounded LRU cache by country, preserve pending link rows, recognize ordinary Tidal URLs and await command sending so failures reach its handler.",
     "validation": [
       "SongLink country isolation, 100-entry bound and Tidal extraction regression passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songLink.desktop/native.ts",
@@ -3025,7 +3295,8 @@
     "summary": "Bound lookup to 15 seconds, validate HTTP status/data/external URLs, permit only supported music URI schemes, and guard missing settings. Native module remains declaration-only at import.",
     "validation": [
       "Mocked invalid-input/status/schema/URI regression passed; no actual network request."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/index.tsx",
@@ -3035,7 +3306,8 @@
     "summary": "Reviewed profile patches, connection refresh and settings/collection registrations; await authorization rehydration so startup errors follow the plugin lifecycle.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/lib/api.ts",
@@ -3045,7 +3317,8 @@
     "summary": "Bind refreshes and song mutations to the initiating account/token, coalesce same-token refreshes, prevent obsolete sign-out/publication, restrict credential-bearing requests to the API origin, preserve Headers, bound requests and validate song payloads.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/lib/oauth2.tsx",
@@ -3055,7 +3328,8 @@
     "summary": "Validate exact callback origin/path, capture account across authorization and await initial song loading; prevent installing old-account tokens after a switch.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/lib/stores/AuthorizationStore.ts",
@@ -3065,7 +3339,8 @@
     "summary": "Allow explicit account targeting for token refresh/deletion, validate token shapes, preserve other accounts on targeted sign-out and guard legacy migration inputs; retain explicit all-token sign-out behavior.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/lib/stores/SongStore.ts",
@@ -3075,7 +3350,8 @@
     "summary": "Reviewed immutable account-indexed song updates, deletion and self-cache projection; retained API contract now used with captured account IDs.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/lib/stores/zustand.d.ts",
@@ -3085,7 +3361,8 @@
     "summary": "Reviewed Zustand state/update/persistence declarations against runtime consumers; retained lightweight typed adapters.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/lib/utils.ts",
@@ -3095,7 +3372,8 @@
     "summary": "Reviewed duration formatting, artwork tooltip cases and scoped CSS/logger definitions; retained display contracts.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/native.ts",
@@ -3105,7 +3383,8 @@
     "summary": "Reviewed three delegated handler IPC functions and fetch-adapter registration; retained existing module initialization and service parser/validator contracts.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/service.ts",
@@ -3115,7 +3394,8 @@
     "summary": "Ignore obsolete or unmounted native song rendering results after song identity changes.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/settings.tsx",
@@ -3125,7 +3405,8 @@
     "summary": "Reviewed collapse, initial-song-limit, preview-volume and manager settings; retained all preference keys/defaults.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/style.css",
@@ -3135,7 +3416,8 @@
     "summary": "Reviewed complete scoped typography, controls, song grids, progress rings, lists and animations; retained styling.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/ui/common.tsx",
@@ -3145,7 +3427,8 @@
     "summary": "Reviewed fixed SVG icons, lazy classes/spinner binding, explicit-content label and preview control; add an accessible play/pause label.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/ui/components/AudioPlayer.tsx",
@@ -3155,7 +3438,8 @@
     "summary": "Clean replaced/unmounted nodes and time listeners, use current stop callbacks, sort track indexes numerically, ignore obsolete play failures, avoid pausing the selected node and propagate preview volume.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/ui/components/ProgressCircle.tsx",
@@ -3165,7 +3449,8 @@
     "summary": "Schedule animation frames only for an active preview and cancel on stop/unmount; guard zero/nonfinite duration and slice calculations.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/ui/components/ServiceIcon.tsx",
@@ -3175,7 +3460,8 @@
     "summary": "Reviewed supported-service icon lookup and labels with null fallback; retained icon/tooltip rendering.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/ui/settings/AddSong.tsx",
@@ -3185,7 +3471,8 @@
     "summary": "Disable URL edits during parsing, discard unmounted parse results, and resolve the current add callback when the modal completes.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/ui/settings/SongList.tsx",
@@ -3195,7 +3482,8 @@
     "summary": "Reviewed six-slot editing, duplicate-song checks and immutable reorder/removal; guard drag calculations when no rows remain.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/ui/settings/index.tsx",
@@ -3205,7 +3493,8 @@
     "summary": "Catch loading/save/delete rejections, provide loading retry, rerun loading after account changes, preserve initiating account for deletion, and discard clipboard imports after account changes.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/ui/songs/CollapsedProfileSongs.tsx",
@@ -3215,7 +3504,8 @@
     "summary": "Discard obsolete thumbnail results after the profile/song list changes; retained four-cover summary and profile navigation.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/ui/songs/ProfileSongs.tsx",
@@ -3225,7 +3515,8 @@
     "summary": "Fetch the current profile when reused for another user, ignore obsolete failures and reset the expansion state by user.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/ui/songs/WidgetSongs.tsx",
@@ -3235,7 +3526,8 @@
     "summary": "Fetch the current user when widget props change and ignore obsolete failures; retained empty/owned/profile song views.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/songSpotlight.desktop/ui/songs/index.tsx",
@@ -3245,7 +3537,8 @@
     "summary": "Use immutable functional loaded-track updates, numeric playback ordering, safe duration lookup and per-song component identity; retained public song actions and display.",
     "validation": [
       "Full semantic source review; SongSpotlight production ESLint passed; full TypeScript check passed; 26 isolated media regressions passed including seven SongSpotlight cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/statusPresets/index.tsx",
@@ -3255,7 +3548,8 @@
     "summary": "Subscribe to preset settings, remove by actual entry key and copy saved custom status without mutating its original object; reviewed select/save/delete/context menus.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/statusPresets/style.css",
@@ -3265,7 +3559,8 @@
     "summary": "Reviewed status editor alignment, delete affordance and menu styling; retained styles.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/stopAutoUnread/index.ts",
@@ -3275,7 +3570,8 @@
     "summary": "Reviewed the single automatic-unread acknowledgement predicate patch and metadata; retained behavior.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/streaks/constants.ts",
@@ -3285,7 +3581,8 @@
     "summary": "Reviewed the fixed API and OAuth URLs and client identifier; retained public service configuration.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/streaks/index.tsx",
@@ -3295,7 +3592,8 @@
     "summary": "Initialize authorization on enable, coalesce recipient refreshes through completion, cancel timers and stale account results on stop/reconnect, guard missing channels and subscribe badge colors.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/streaks/settings.tsx",
@@ -3305,7 +3603,8 @@
     "summary": "Reviewed all streak color and authorization preferences; handle authorization rejection before migration/fetch follow-up.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/streaks/stores/AuthorizationStore.tsx",
@@ -3315,7 +3614,8 @@
     "summary": "Clear cached streak state on account changes, store tokens under the captured account, validate callback origin/path and token shape, bound OAuth requests and always reject cancellation/failure.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/streaks/stores/StreaksStore.ts",
@@ -3325,7 +3625,8 @@
     "summary": "Scope fetch/update/refresh results to active account/token/generation, validate remote streaks, deduplicate legacy migration and preserve changed local data after upload.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/streaks/style.css",
@@ -3335,7 +3636,8 @@
     "summary": "Reviewed inline badge flex alignment and typography; retained styles.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/streamingCodecDisabler/index.ts",
@@ -3345,7 +3647,8 @@
     "summary": "Capture original capabilities once per media engine, bound capability callback waits, ignore obsolete responses, and restore supported codec flags on stop. VP8/VP9 preferences retained; no corresponding engine setters are established in this source.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/talkInReverse/index.tsx",
@@ -3355,7 +3658,8 @@
     "summary": "Move message reversal to one plugin-owned listener, synchronize chat buttons, and reverse Unicode graphemes without breaking emoji or combining marks.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/themeLibrary/components/LikesComponent.tsx",
@@ -3365,7 +3669,8 @@
     "summary": "Synchronize loaded like props, compare numeric/string IDs consistently, prevent duplicate requests while authorization is pending and preserve confirmed state when optional refresh fails.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/themeLibrary/components/ThemeCard.tsx",
@@ -3375,7 +3680,8 @@
     "summary": "Await user lookup with local fallback, avoid injecting fake users into global Flux, read current theme links after confirmation and only prompt for attributes when adding a theme.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/themeLibrary/components/ThemeInfoModal.tsx",
@@ -3385,7 +3691,8 @@
     "summary": "Decode base64 source as UTF-8 with invalid-data fallback, validate display timestamps and disambiguate duplicate tag keys; reviewed metadata/modal actions.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/themeLibrary/components/ThemeTab.tsx",
@@ -3395,7 +3702,8 @@
     "summary": "Validate fetched theme records and likes shape, bound requests, discard unmounted results, subscribe live theme links and use immutable sorting with complete filter dependencies.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/themeLibrary/components/styles.css",
@@ -3405,7 +3713,8 @@
     "summary": "Reviewed theme grid/card layout, previews, modal and accessibility-related visibility styles; retained presentation.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/themeLibrary/index.tsx",
@@ -3415,7 +3724,8 @@
     "summary": "Reviewed settings-tab registration, plugin metadata and declaration-only helper resolution; retained lifecycle.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/themeLibrary/native.ts",
@@ -3425,7 +3735,8 @@
     "summary": "Reject malformed names and HTTP download failures before asynchronous file writes; retained safe-path guard and declaration-only native module startup.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/themeLibrary/types.ts",
@@ -3435,7 +3746,8 @@
     "summary": "Reviewed theme/API metadata contracts; accept normal like arrays and numeric/string identifiers matching API normalization.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/themeLibrary/utils/Icons.tsx",
@@ -3445,7 +3757,8 @@
     "summary": "Reviewed all static SVG controls for paths, dimensions and prop forwarding; retained icons.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/themeLibrary/utils/auth.tsx",
@@ -3455,7 +3768,8 @@
     "summary": "Serialize token mutations and invalidate stale loads; reject unauthorized HTTP statuses, scope OAuth callback to initiating account and fixed return URL, and preserve newer tokens during stale revoke completion.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/themeLibrary/utils/settings.tsx",
@@ -3465,7 +3779,8 @@
     "summary": "Reviewed authorizing, revoking, copy-token and warning preferences; route token reads through coherent token cache.",
     "validation": [
       "Full semantic review; focused media suite passed 33 isolated cases; changed production directories passed ESLint; preceding full TypeScript check passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/tidalEmbeds/index.tsx",
@@ -3475,7 +3790,8 @@
     "summary": "Review fixed Tidal iframe destination and numeric track/album extraction; require an actual supported URL path before suppressing the original embed.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/title/index.ts",
@@ -3485,7 +3801,8 @@
     "summary": "Reviewed configurable title root replacement and title refresh on startup/settings change; retained restart-dependent patch behavior.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/toastNotifications/README.md",
@@ -3495,7 +3812,8 @@
     "summary": "Read the complete notification settings and CSS-variable reference against implementation; retained documented options and hover restart behavior.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/toastNotifications/components/NotificationComponent.tsx",
@@ -3505,7 +3823,8 @@
     "summary": "Subscribe live timeout/opacity, keep zero-timeout notifications, clean timers using current callback, and replace nested buttons with a keyboard-accessible container and labelled close button.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/toastNotifications/components/Notifications.tsx",
@@ -3515,7 +3834,8 @@
     "summary": "Settle pending notification promises on teardown and eviction, isolate callback failures and enforce the configured queue bound after lowering the limit.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/toastNotifications/components/styles.css",
@@ -3525,7 +3845,8 @@
     "summary": "Reviewed all corner placement, stacking, pointer handling, card, context header, icon and progress animation styling; retained theme variables.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/toastNotifications/index.tsx",
@@ -3535,7 +3856,8 @@
     "summary": "Reviewed notification policy, mute/mention/friend preferences, allowlists and routing; clear existing notifications on connection/account transitions.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/toggleVideoBind/index.ts",
@@ -3545,7 +3867,8 @@
     "summary": "Reviewed cached key preferences, exact modifier matching, repeat suppression and listener cleanup; retain lazy video-state lookup until the key handler executes.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/triviaAI/index.tsx",
@@ -3555,7 +3878,8 @@
     "summary": "Share manual-answer flow across menu and popover, capture response mode/account, suppress obsolete results after account changes or stop and catch completion failures.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/triviaAI/settings.ts",
@@ -3565,7 +3889,8 @@
     "summary": "Reviewed custom AI endpoint/key/model, context, image and explicit response-mode preferences; retained defaults and password field.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/triviaAI/utils.ts",
@@ -3575,7 +3900,8 @@
     "summary": "Reviewed cached-message context parsing and payloads; bound image/API requests, reject credential redirects, validate string answers, await explicit reply delivery and suppress chatbar insertion after channel navigation.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/unlimitedAccounts/index.ts",
@@ -3585,7 +3911,8 @@
     "summary": "Reviewed account-limit patches and infinity behavior; validate nonnegative integer settings and safely handle malformed persisted values.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/unreadBadgeCount/index.tsx",
@@ -3595,7 +3922,8 @@
     "summary": "Subscribe unread badge preferences and mute/thread stores before conditional return so the display updates without requiring a new message.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/urlHighlighter/index.tsx",
@@ -3605,7 +3933,8 @@
     "summary": "Reviewed escaped glob compilation/cache and URL props; subscribe pattern editor updates and label its remove control.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/urlHighlighter/styles.css",
@@ -3615,7 +3944,8 @@
     "summary": "Reviewed highlight variables, bold treatment, editor grid and controls; retained presentation.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpfp/AvatarModal.tsx",
@@ -3625,7 +3955,8 @@
     "summary": "Route writes through serialized persistence, keep modal/input on failures, guard duplicate saves and obsolete file reads, and handle missing user data.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpfp/index.tsx",
@@ -3635,7 +3966,8 @@
     "summary": "Validate stored/downloaded avatar maps, separate local overrides from remote entries without changing the stored record format, serialize writes, preserve cache on storage failure and ignore stale startup results.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpfp/styles.css",
@@ -3645,7 +3977,8 @@
     "summary": "Reviewed settings, avatar preview, drag/drop and theme colors; retained styles.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; isolated media regression suite passed 36 cases."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpluginInstaller.dev/VariableWithCallbacks.ts",
@@ -3655,7 +3988,8 @@
     "summary": "Use unique monotonic callback identifiers and snapshot iteration so simultaneous subscriptions and self-removal preserve other listeners.",
     "validation": [
       "Full semantic review; TypeScript passed; production ESLint passed; 38 isolated media tests plus existing userplugin review/path fixture checks passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpluginInstaller.dev/components/SettingsTab.tsx",
@@ -3665,7 +3999,8 @@
     "summary": "Reviewed discovery, install/update review actions and enable/uninstall controls; handle newly installed unloaded definitions and uninstall errors, normalize repository suffixes, and remove update entries immutably without negative-index splices.",
     "validation": [
       "Full semantic review; TypeScript passed; production ESLint passed; 38 isolated media tests plus existing userplugin review/path fixture checks passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpluginInstaller.dev/components/UserpluginInstallButton.tsx",
@@ -3675,7 +4010,8 @@
     "summary": "Subscribe once to plugin updates and live channel preferences, guard missing channels, respect direct allowlisted channels and normalize repository identity.",
     "validation": [
       "Full semantic review; TypeScript passed; production ESLint passed; 38 isolated media tests plus existing userplugin review/path fixture checks passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpluginInstaller.dev/index.tsx",
@@ -3685,7 +4021,8 @@
     "summary": "Guard startup and update-check publication by lifecycle generation, clean notification subscriptions and remove only the owned settings section; reset update results for each scan.",
     "validation": [
       "Full semantic review; TypeScript passed; production ESLint passed; 38 isolated media tests plus existing userplugin review/path fixture checks passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpluginInstaller.dev/misc/constants.ts",
@@ -3695,7 +4032,8 @@
     "summary": "Reviewed repository-link recognition, fixed channel list, restart persistence failure handling and explicit post-install actions; retained public interface.",
     "validation": [
       "Full semantic review; TypeScript passed; production ESLint passed; 38 isolated media tests plus existing userplugin review/path fixture checks passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpluginInstaller.dev/misc/pluginValidate.txt",
@@ -3705,7 +4043,8 @@
     "summary": "Read full install-review HTML, title-event contract, warning acknowledgement and styles; retained explicit user review flow. Native interpolation is now escaped and review window sandboxed.",
     "validation": [
       "Full semantic review; TypeScript passed; production ESLint passed; 38 isolated media tests plus existing userplugin review/path fixture checks passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpluginInstaller.dev/misc/setGitPath.txt",
@@ -3715,7 +4054,8 @@
     "summary": "Read full local Git-path form, action events and help text; retained form. Native operations now actually use the configured executable path.",
     "validation": [
       "Full semantic review; TypeScript passed; production ESLint passed; 38 isolated media tests plus existing userplugin review/path fixture checks passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpluginInstaller.dev/misc/style.css",
@@ -3725,17 +4065,19 @@
     "summary": "Reviewed plugin settings grid, notices, action controls and hover styles; retained CSS.",
     "validation": [
       "Full semantic review; TypeScript passed; production ESLint passed; 38 isolated media tests plus existing userplugin review/path fixture checks passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpluginInstaller.dev/native.ts",
     "baselineSha256": "9070aa00677139f3f0f0d2b4113103ed5a5fda7aa44d3318a02e7a22e65decd2",
-    "reviewedSha256": "6098abdafc83ac0a303f99dc654844f7373ef5642f980b5abca4f96c4a829186",
+    "reviewedSha256": "29cd01381ef04a73f0fcdd0cdeca320c913c5a4d1fc872945bec7c842963f26d",
     "status": "changed",
     "summary": "Propagate async install/uninstall failures, reject missing metadata and closed reviews, clean cancelled clones, sandbox review windows, escape metadata literally, honor Git path, bound Git processes and use packed-ref-safe revision queries. All mutation review/path checks retained; no client, Git fetch, clone, update or build executed during review.",
     "validation": [
       "Full semantic review; TypeScript passed; production ESLint passed; 38 isolated media tests plus existing userplugin review/path fixture checks passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpluginInstaller.dev/repositorySafety.ts",
@@ -3745,7 +4087,8 @@
     "summary": "Reviewed HTTPS repository parser, direct-child path resolution, canonical-directory and junction checks; retained defensive validation and tested in isolated fixtures.",
     "validation": [
       "Full semantic review; TypeScript passed; production ESLint passed; 38 isolated media tests plus existing userplugin review/path fixture checks passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpluginInstaller.dev/updateReview.ts",
@@ -3755,7 +4098,8 @@
     "summary": "Reviewed immutable revision plan, bounded NUL metadata parsing, display sanitization, safe source links and explicit apply/cancel presenter; retained review-first behavior.",
     "validation": [
       "Full semantic review; TypeScript passed; production ESLint passed; 38 isolated media tests plus existing userplugin review/path fixture checks passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/userpluginInstaller.dev/yaml-js.d.ts",
@@ -3765,7 +4109,8 @@
     "summary": "Reviewed the YAML parser declaration used only for optional support-channel metadata; retained compatibility declaration.",
     "validation": [
       "Full semantic review; TypeScript passed; production ESLint passed; 38 isolated media tests plus existing userplugin review/path fixture checks passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceChatUtils/index.tsx",
@@ -3775,7 +4120,8 @@
     "summary": "Reviewed manual channel moderation batches and mention insertion; cancel remaining queued actions after disable or account changes while preserving request ordering and existing wait preferences.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceJoinMessages/index.ts",
@@ -3785,7 +4131,8 @@
     "summary": "Reviewed visible-channel/friend gating and local ephemeral notifications; catch message-load failures and discard delayed notifications after disable/account transitions.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceMessageTranscriber.desktop/audioValidation.ts",
@@ -3795,7 +4142,8 @@
     "summary": "Reviewed bounded signature matching for supported OGG/WAV/FLAC/WebM/MP3/MP4 containers; retained format recognition and offline fixtures.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceMessageTranscriber.desktop/index.tsx",
@@ -3805,7 +4153,8 @@
     "summary": "Reviewed audio preparation, model preferences, language selection, result cache and transcript UI; guard stale cache deletion, key components by account/message/source, subscribe auto-transcribe and terminate workers/clear private results on account changes or stop.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceMessageTranscriber.desktop/native.ts",
@@ -3815,7 +4164,8 @@
     "summary": "Restrict credential-free HTTPS CDN URLs and reject redirects, bound requests and streamed body accumulation before audio validation; native module remains declaration-only.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceMessageTranscriber.desktop/options.ts",
@@ -3825,7 +4175,8 @@
     "summary": "Reviewed voice-message flag/media selection, malformed metadata playback fallback and translation-language selection; retained behavior and checked existing fixtures.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceMessageTranscriber.desktop/style.css",
@@ -3835,7 +4186,8 @@
     "summary": "Reviewed transcript layout, scroll limits, playback, progress and error presentation; retained styling.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceMessageTranscriber.desktop/transcriptionData.ts",
@@ -3845,7 +4197,8 @@
     "summary": "Reviewed text/timestamp normalization and formatted transcript output; reject nonfinite, negative or reversed timestamp ranges.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceMessageTranscriber.desktop/utils.ts",
@@ -3855,7 +4208,8 @@
     "summary": "Reviewed all language labels, audio downmix and embedded worker source; release resources on construction failure, surface worker startup errors, validate model URL protocol, abort downloads and prevent late cache writes after worker termination.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceStats/index.tsx",
@@ -3865,7 +4219,8 @@
     "summary": "Reviewed voice session accounting and profile display; serialize storage writes, retry failed dirty totals, reject malformed saved counts, avoid stale startup publication and reset active tracking on account connection changes.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceStats/styles.css",
@@ -3875,7 +4230,8 @@
     "summary": "Reviewed the single profile-section spacing rule; retained styling.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/waitForSlot/index.tsx",
@@ -3885,7 +4241,8 @@
     "summary": "Reviewed queue context menu, capacity tracking, sound and optional join; invalidate queued channels and notice callbacks on stop/account connection changes.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/webpackTarball/index.tsx",
@@ -3895,7 +4252,8 @@
     "summary": "Reviewed explicit source-export controls and metadata; surface export/load failures and reset loading state after completion.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/webpackTarball/tar.ts",
@@ -3905,7 +4263,8 @@
     "summary": "Reviewed TAR header, checksum, padding and download construction; write only a supplied byte view and append the two required zero end blocks.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/webpackTarball/webpack.ts",
@@ -3915,7 +4274,8 @@
     "summary": "Reviewed local webpack inspection helpers and explicit lazy-loading operation; restore an absent Function prototype descriptor by deletion so failures do not leave a global accessor behind.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 43 isolated media tests and existing voice-transcription fixtures passed; no live transcription, client interaction or runtime export executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/whitelistedEmojis/index.tsx",
@@ -3925,7 +4285,8 @@
     "summary": "Validate persisted/imported emoji records before publishing or writing, deduplicate bulk names within the submitted batch, use a prototype-free grouping map and serialize startup against writes with stop-generation protection.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 46 isolated media regressions and existing ZIP parser fixtures passed; no live attachment fetch or client operation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/whitelistedEmojis/style.css",
@@ -3935,7 +4296,8 @@
     "summary": "Reviewed the full settings-list, guild grouping, images and controls stylesheet; retained presentation.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 46 isolated media regressions and existing ZIP parser fixtures passed; no live attachment fetch or client operation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/whitelistedEmojis/types.ts",
@@ -3945,7 +4307,8 @@
     "summary": "Reviewed context-menu and persisted emoji contracts, including optional Unicode surrogates and guild metadata; retained stored format.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 46 isolated media regressions and existing ZIP parser fixtures passed; no live attachment fetch or client operation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/whosWatching/index.tsx",
@@ -3955,7 +4318,8 @@
     "summary": "Reviewed own-stream viewer presentation; subscribe viewer/user changes, honor the showPanel patch preference and cache wrapped icon component types to avoid repeated remounts.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 46 isolated media regressions and existing ZIP parser fixtures passed; no live attachment fetch or client operation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/whosWatching/styles.css",
@@ -3965,7 +4329,8 @@
     "summary": "Reviewed avatar sizing and spectator-heading spacing; retained styling.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 46 isolated media regressions and existing ZIP parser fixtures passed; no live attachment fetch or client operation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/zipPreview/archive.ts",
@@ -3975,7 +4340,8 @@
     "summary": "Read complete ZIP central/local directory validation, path/size/ratio/entry limits, async bounded inflation, range overlap checks and CRC validation; retained the existing defensive archive parser after offline fixture checks.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 46 isolated media regressions and existing ZIP parser fixtures passed; no live attachment fetch or client operation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/zipPreview/components.tsx",
@@ -3985,7 +4351,8 @@
     "summary": "Reviewed inline navigation, text/image modals and downloads; clear stale animation work, publish the completed result directly, avoid syntax-highlighting very large text and create image URLs inside effect cleanup.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 46 isolated media regressions and existing ZIP parser fixtures passed; no live attachment fetch or client operation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/zipPreview/index.tsx",
@@ -3995,17 +4362,19 @@
     "summary": "Reviewed attachment patch and secure deferred-blob exclusion; clear private archive state on account connection transitions as well as stop.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 46 isolated media regressions and existing ZIP parser fixtures passed; no live attachment fetch or client operation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/zipPreview/native.ts",
     "baselineSha256": "7b312e37e7f0053a73e46c670035e2ddf9d330f76eb5ebda7447b67167646359",
-    "reviewedSha256": "a48a4d5093667254ffad23219a97100090f523bd6e2a13c7632c42efdcd9d6e8",
+    "reviewedSha256": "298674747b4ecce83c138b6e3fd45c77bc4159893d67d38187c0a099565c5db9",
     "status": "changed",
     "summary": "Reviewed native preview confirmation, fixed CDN path construction, timeout and streamed size guard; release reader locks and cancel failed streams. Native startup remains declaration-only.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 46 isolated media regressions and existing ZIP parser fixtures passed; no live attachment fetch or client operation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/zipPreview/style.css",
@@ -4015,7 +4384,8 @@
     "summary": "Reviewed full animation, breadcrumb, row, image and reduced-motion styles; restore visible keyboard focus on interactive preview controls.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 46 isolated media regressions and existing ZIP parser fixtures passed; no live attachment fetch or client operation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/zipPreview/utils.ts",
@@ -4025,6 +4395,7 @@
     "summary": "Bound active archive downloads, abort renderer requests on clear, discard stale native results before parsing and reject extracted entries after lifecycle reset; retained lazy entry extraction and its existing concurrency queue.",
     "validation": [
       "Full semantic review; changed production directories passed ESLint; 46 isolated media regressions and existing ZIP parser fixtures passed; no live attachment fetch or client operation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   }
 ]

@@ -1,0 +1,188 @@
+[
+  {
+    "path": "mobile/plugins/secure-messaging/src/test/kotlin/uk/co/protonn/securemessaging/OneKeyWireTest.kt",
+    "baselineSha256": null,
+    "reviewedSha256": "6f4caa2618d5c810d4c19cde372c1934308a756d1a599cae1bbd785d33783cdb",
+    "status": "reviewed",
+    "summary": "Reviewed all four JUnit tests covering initialization/request fields, exact 64-byte framing across boundary sizes, maximum length and truncated field/secret rejection, and required PIN/firmware features. Every payload is an in-memory ByteArray and no Android USB class/device is used. Request cleanup is explicit; the suite validates the pure wire codec rather than hardware ceremonies.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "Four in-memory JUnit cases reviewed statically. Native Gradle/Android validation is owned separately by root; this agent did not run hardware/device or Kotlin tests."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tests/attachment-runtime.test.ts",
+    "baselineSha256": null,
+    "status": "reviewed",
+    "summary": "Reviewed all eight actual-source VM cases for attachment metadata projection, aggregate source bounds, failed-read buffer wiping, lock during cache-write cancellation, exact-length streamed/non-streamed response limits, cleanup retries and startup cache readiness. Whitelisted native/file/crypto adapters perform no real I/O; large file cases use virtual length/fill objects. The fixture explicitly resolves root TypeScript6 for transpileModule because mobile TypeScript7 lacks that API, and source paths resolve from import.meta.url independently of cwd.",
+    "validation": [
+      "Complete new file, all supplied mocks, asynchronous gates and exact assertions reviewed.",
+      "After services/UI source freeze, npm exec --yes --package=bun@1.3.4 -- bun run test passed all 41 cases across 11 mobile test files with zero failures/skips; lint:types also exited 0. Full output retained in docs/source-audit/validation/mobile-js.log and mobile-types.log. No live/device or real account operations occurred."
+    ],
+    "reviewedHashEncoding": "utf8-lf",
+    "reviewedSha256": "b439493642ccc2fcb5565c790fad7cad5e32d568de65d80f96f0070b99eff2b3"
+  },
+  {
+    "path": "mobile/tests/attachments.test.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "d35bcaf5e9a3444a0723eb127ad083352fc377b2755751ef32fa0dfedaac0370",
+    "status": "changed",
+    "summary": "Reviewed every desktop/mobile helper import and assertion: bidirectional attachment bytes/metadata, matching manifest/root and rich/detached formats, literal prefix preservation and upload filename material. Fixed random input is scoped to this synthetic test process; no attachment runtime or network/native adapter is imported. Interoperability agreement is narrower than independent cryptographic assurance.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "After services/UI source freeze, npm exec --yes --package=bun@1.3.4 -- bun run test passed all 41 cases across 11 mobile test files with zero failures/skips; lint:types also exited 0. Full output retained in docs/source-audit/validation/mobile-js.log and mobile-types.log. No live/device or real account operations occurred.",
+      "Root reviewed final Biome import/format-only diff; runtime statements and JSON values retained. Full mobile suite/types passed."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tests/crypto.test.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "339966007457a4d952ea23b8ef3f8a5c350e155d27de44b0d667aab6a002f216",
+    "status": "reviewed",
+    "summary": "Reviewed generated in-memory identities, bidirectional signed announcements and PCEM3 ciphertext, Unicode plaintext and modified-content rejection. Mobile randomness is supplied by Node crypto; desktop helpers are imported from this exact checkout. No device, user vault, credential or network operation occurs, and a generic rejection assertion does not isolate which validation layer rejected the mutation.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "After services/UI source freeze, npm exec --yes --package=bun@1.3.4 -- bun run test passed all 41 cases across 11 mobile test files with zero failures/skips; lint:types also exited 0. Full output retained in docs/source-audit/validation/mobile-js.log and mobile-types.log. No live/device or real account operations occurred."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tests/identity-backup.test.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "e638a016f200a116a5fee731dbfd5982c0c71d7ec564f4d3ab600682f50e31ed",
+    "status": "reviewed",
+    "summary": "Reviewed strict UTF-8 cases and local PCIB1/2 sealing/opening with a public fixture password, fixed salt/nonce, PBKDF2 parameters and version-bound AAD. Assertions cover old identity-only normalization, trusted peers/conversations and mismatched private/public keys. Test-only repeated material is not production randomness guidance; the real PowerShell exporter and clipboard are never invoked.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "After services/UI source freeze, npm exec --yes --package=bun@1.3.4 -- bun run test passed all 41 cases across 11 mobile test files with zero failures/skips; lint:types also exited 0. Full output retained in docs/source-audit/validation/mobile-js.log and mobile-types.log. No live/device or real account operations occurred."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tests/legacy.test.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "e8dad7dd8dc56855b11b5c531c66f0edde03b9b77b9a688943549c0dc74afa8e",
+    "status": "changed",
+    "summary": "Reviewed complete independent Node/HPKE construction of PCEM1/2 ciphertext, canonical header/signature agreement, bidirectional reading, changed-channel rejection and participant-only mentions. Only generated synthetic keys and local buffers are used; no legacy-message publication or live recipient exists. These fixtures preserve read compatibility without adding legacy send paths to the application.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "After services/UI source freeze, npm exec --yes --package=bun@1.3.4 -- bun run test passed all 41 cases across 11 mobile test files with zero failures/skips; lint:types also exited 0. Full output retained in docs/source-audit/validation/mobile-js.log and mobile-types.log. No live/device or real account operations occurred.",
+      "Root reviewed final Biome import/format-only diff; runtime statements and JSON values retained. Full mobile suite/types passed."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tests/message.test.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "579e6b0e2e66270e43ab5e15e3b0968d694cc200975bf255ce9aa5962753e484",
+    "status": "reviewed",
+    "summary": "Reviewed the complete prototype-preservation smoke test: a synthetic Discord-like class retains its method on the plaintext render projection. The single case verifies callable prototype behavior, not full Discord message semantics or mutation of the original message.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "After services/UI source freeze, npm exec --yes --package=bun@1.3.4 -- bun run test passed all 41 cases across 11 mobile test files with zero failures/skips; lint:types also exited 0. Full output retained in docs/source-audit/validation/mobile-js.log and mobile-types.log. No live/device or real account operations occurred."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tests/onekey.test.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "91122afe2742dac950ee49a2f491f6e607bbc9fd5835f67ee31270c43aea4f75",
+    "status": "changed",
+    "summary": "Reviewed local desktop/mobile profile-input, binding, root and account-key derivation agreement plus bidirectional self-message compatibility and invalid material/account/device separation. Random fixture roots stand in for device output, so this validates derivation interoperability rather than USB transport, PIN enforcement or physical OneKey behavior.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "After services/UI source freeze, npm exec --yes --package=bun@1.3.4 -- bun run test passed all 41 cases across 11 mobile test files with zero failures/skips; lint:types also exited 0. Full output retained in docs/source-audit/validation/mobile-js.log and mobile-types.log. No live/device or real account operations occurred.",
+      "Root reviewed final Biome import/format-only diff; runtime statements and JSON values retained. Full mobile suite/types passed."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tests/pairing.test.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "668db9bb6d3d48cd639e3a451670501cdd9d26d1c54e27bf8157ff704f6aef77",
+    "status": "changed",
+    "summary": "Reviewed complete real encrypted desktop-to-phone pairing, restart, history and failure fixture. Added phone-only current-contact preservation, changed-peer history readability, repeated import/cutoff stability and persistent review assertions while retaining prior tests.",
+    "validation": [
+      "Full fixture and final semantic/import-only diff review;42-case mobile suite passed including this new preservation test."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tests/receive.test.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "14fcb7b64f4a6341935a563dcbc05e8ccab7459577199d397607c033e1aeb38c",
+    "status": "changed",
+    "summary": "Reviewed generated message/replay fixture and receiver persistence gates: out-of-order history, exact rerenders, copies/counter conflicts, edit rollback, delayed-save publication, lock invalidation and storage failure. Every persistence operation is controlled in-memory work; signed wire helpers execute locally and no Discord store/event or native cache is touched.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "After services/UI source freeze, npm exec --yes --package=bun@1.3.4 -- bun run test passed all 41 cases across 11 mobile test files with zero failures/skips; lint:types also exited 0. Full output retained in docs/source-audit/validation/mobile-js.log and mobile-types.log. No live/device or real account operations occurred.",
+      "Root reviewed final Biome import/format-only diff; runtime statements and JSON values retained. Full mobile suite/types passed."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tests/send-policy.test.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "bf277592ce6fbd80274f72f8f77cc949689a0d5edf1a5e9668678887977df62a",
+    "status": "changed",
+    "summary": "Reviewed cloned recipient-policy snapshot assertions and invalidation after changed membership, trusted key, pending review or removed conversation. The complete file exercises the actual pure policy helper with synthetic accounts; it does not invoke an upload/send path or claim protection for unhooked network callers.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "After services/UI source freeze, npm exec --yes --package=bun@1.3.4 -- bun run test passed all 41 cases across 11 mobile test files with zero failures/skips; lint:types also exited 0. Full output retained in docs/source-audit/validation/mobile-js.log and mobile-types.log. No live/device or real account operations occurred.",
+      "Root reviewed final Biome import/format-only diff; runtime statements and JSON values retained. Full mobile suite/types passed."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tests/vault.test.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "d2e4ba929fc1a113440373dd373fedd61eeb51fd75eb8b1b6176125a10477552",
+    "status": "reviewed",
+    "summary": "Reviewed complete in-memory storage adapter and OneKey vault lifecycle: migration/history, ciphertext opacity, locked restart, wrong-device refusal, identity replacement refusal, retry after save failure and malformed/tampered state remaining unavailable. Generated fixture secrets never reach a device or Android Keystore. Persistence/Keystore crash durability is outside these string-backed fixtures.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "After services/UI source freeze, npm exec --yes --package=bun@1.3.4 -- bun run test passed all 41 cases across 11 mobile test files with zero failures/skips; lint:types also exited 0. Full output retained in docs/source-audit/validation/mobile-js.log and mobile-types.log. No live/device or real account operations occurred."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tools/Export-DesktopIdentity.ps1",
+    "baselineSha256": null,
+    "reviewedSha256": "f23cea4d2f0452f7c02ebcadbae7040fb5e2d0d41b0838206d51598ec72b36d4",
+    "status": "reviewed",
+    "summary": "Reviewed the complete legacy Windows exporter statically: explicit account selection, DPAPI/v10 vault access, exclusion of changed peers/review-required conversations, PCIB2 PBKDF2/AES-GCM framing and encrypted clipboard publication. It operates on actual OS-protected secrets when deliberately invoked and refuses security-key envelopes; it is not a complete vault/history/counter backup. Limitations: password is a String argument, plaintext parsed objects are not reliably wipeable, and several pre-try failure paths can bypass buffer clearing. No exporter execution or actual vault/Local State/clipboard access performed.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "Syntax-only validation passed (PowerShell AST parser for exporter, node --check for both JavaScript tools). Tools were not executed: no vault, clipboard, workspace links, version/release modifications or network operations."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tools/link-runtime-workspaces.mjs",
+    "baselineSha256": null,
+    "reviewedSha256": "6f211d42440d355baa119e633fe490693b9485edb4d3a825e5a36a90c1232430",
+    "status": "changed",
+    "summary": "Reviewed the complete runtime workspace linker: scans lib/plugins package manifests, restricts names to the @revenge-mod scope and simple suffix, and creates node_modules links using directory junctions on Windows. No existing target is overwritten, but an existing link target is not verified and missing root input fails through path resolution. Intended caller supplies the separately pinned clean runtime checkout; no source edit or link creation occurred during review.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "Syntax-only validation passed (PowerShell AST parser for exporter, node --check for both JavaScript tools). Tools were not executed: no vault, clipboard, workspace links, version/release modifications or network operations.",
+      "Root reviewed final Biome import/format-only diff; runtime statements and JSON values retained. Full mobile suite/types passed."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  },
+  {
+    "path": "mobile/tools/prepare-release.mjs",
+    "baselineSha256": null,
+    "reviewedSha256": "746e7042de52ea50864a141cbfb60b434530487d2190290fdfb23501570da4cc",
+    "status": "changed",
+    "summary": "Reviewed complete version guard and two JSON rewrites: only 0.2.<run>.<attempt>-nightly versions are accepted, and all configured channel labels receive the same plugin version. Paths are fixed relative to the mobile build workspace and no publish/network step exists. Writes are sequential rather than atomic, so a later parse/write failure can leave partial local version preparation; CI uses a disposable build checkout. Not executed.",
+    "validation": [
+      "Complete file contents, imports/callers, assertions, data ownership and execution boundaries reviewed.",
+      "Syntax-only validation passed (PowerShell AST parser for exporter, node --check for both JavaScript tools). Tools were not executed: no vault, clipboard, workspace links, version/release modifications or network operations.",
+      "Root reviewed final Biome import/format-only diff; runtime statements and JSON values retained. Full mobile suite/types passed."
+    ],
+    "reviewedHashEncoding": "utf8-lf"
+  }
+]

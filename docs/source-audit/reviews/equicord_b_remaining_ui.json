@@ -2,7 +2,7 @@
   {
     "path": "scripts/testAuditRemainingUi.ts",
     "baselineSha256": null,
-    "reviewedSha256": "b245b53399e1e340003faf84c25685e559186e4b91ac806dd5c4b1c2c0af13d2",
+    "reviewedSha256": "535408f290327507e84e8e9c60ac2ad392df468b7c283172d5b3bbbffb85ecd5",
     "status": "changed",
     "summary": "Reviewed 22 isolated source-transpilation regressions covering notification filters, webhook exemption, modal retry concurrency, capture/join cancellation, filename decoding, node recycling, stale sidebar/translation state, React immutability, unit conversions, failed save feedback and voice button target selection. All client/network/media/account dependencies are inert mocks.",
     "validation": [
@@ -10,7 +10,8 @@
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed.",
       "Repository ESLint intentionally excludes scripts; TypeScript validation is run by root broad gate.",
       "No live client or external service actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreUserTags/consts.ts",
@@ -23,7 +24,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreUserTags/index.tsx",
@@ -36,7 +38,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreUserTags/settings.tsx",
@@ -49,7 +52,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreUserTags/styles.css",
@@ -62,7 +66,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/moreUserTags/types.ts",
@@ -75,7 +80,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/neverPausePreviews/index.tsx",
@@ -88,7 +94,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/newPluginsManager/index.tsx",
@@ -101,7 +108,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/newPluginsManager/knownSettings.ts",
@@ -114,7 +122,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/newPluginsManager/knownSettingsData.ts",
@@ -127,7 +136,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/newPluginsManager/NewPluginsModal.tsx",
@@ -140,7 +150,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/newPluginsManager/styles.css",
@@ -153,7 +164,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/noNitroUpsell/index.ts",
@@ -166,7 +178,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/normalizeMessageLinks/index.ts",
@@ -179,7 +192,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/noRoleHeaders/index.ts",
@@ -192,7 +206,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/partyMode/index.ts",
@@ -205,7 +220,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/pingNotifications/index.tsx",
@@ -218,7 +234,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/pinIcon/index.tsx",
@@ -231,7 +248,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/primaryStreamAudio/index.ts",
@@ -244,7 +262,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/primaryStreamAudio/logic.ts",
@@ -257,7 +276,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/randomVoice/index.tsx",
@@ -270,7 +290,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/randomVoice/styles.css",
@@ -283,7 +304,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/recentDMSwitcher/index.tsx",
@@ -296,7 +318,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/recentDMSwitcher/styles.css",
@@ -309,7 +332,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/repeatMessages/index.tsx",
@@ -322,7 +346,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/replyPingControl/index.ts",
@@ -335,7 +360,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richMagnetLinks/index.tsx",
@@ -348,7 +374,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richMagnetLinks/styles.css",
@@ -361,7 +388,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/rpcEditor/index.tsx",
@@ -374,7 +402,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/rpcEditor/ReplaceSettings.tsx",
@@ -387,7 +416,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/saveFavoriteGIFs/index.tsx",
@@ -400,7 +430,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/scheduledMessages/components/ChatBarButton.tsx",
@@ -413,7 +444,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/scheduledMessages/components/Icons.tsx",
@@ -426,7 +458,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/scheduledMessages/components/MessageAccessory.tsx",
@@ -439,7 +472,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/scheduledMessages/components/ScheduleTimeModal.tsx",
@@ -452,7 +486,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/scheduledMessages/components/ViewScheduledModal.tsx",
@@ -465,7 +500,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/scheduledMessages/index.tsx",
@@ -478,7 +514,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/scheduledMessages/styles.css",
@@ -491,7 +528,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/scheduledMessages/types.ts",
@@ -504,7 +542,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/scheduledMessages/utils.ts",
@@ -517,7 +556,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/screenRecorder.equibop/index.tsx",
@@ -530,7 +570,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/serverSearch/index.tsx",
@@ -543,7 +584,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/serverSearch/styles.css",
@@ -556,7 +598,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/showMessageEmbeds/index.tsx",
@@ -569,7 +612,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/showRolesInChat/index.tsx",
@@ -582,7 +626,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/showRolesInChat/styles.css",
@@ -595,7 +640,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/showSongName/index.tsx",
@@ -608,7 +654,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/sidebarChat/index.tsx",
@@ -621,7 +668,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/sidebarChat/store.ts",
@@ -634,7 +682,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/sidebarChat/styles.css",
@@ -647,7 +696,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/signature/index.tsx",
@@ -660,7 +710,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/silenceUsers/index.ts",
@@ -673,7 +724,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/snowfall/index.tsx",
@@ -686,7 +738,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/splitLargeMessages/index.ts",
@@ -699,7 +752,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/splitLargeMessages/splitMessage.ts",
@@ -712,7 +766,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/statusWhileActive.desktop/index.ts",
@@ -725,7 +780,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/steamStatusSync/index.tsx",
@@ -738,7 +794,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/stickerBlocker/index.tsx",
@@ -751,7 +808,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/timezones/database.tsx",
@@ -764,7 +822,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/timezones/index.tsx",
@@ -777,7 +836,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/timezones/styles.css",
@@ -790,7 +850,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/timezones/TimezoneModal.tsx",
@@ -803,7 +864,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/toneIndicators/index.tsx",
@@ -816,7 +878,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/toneIndicators/indicators.ts",
@@ -829,7 +892,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/toneIndicators/ToneIndicator.tsx",
@@ -842,7 +906,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/translatePlus/index.tsx",
@@ -855,7 +920,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/translatePlus/misc/languages.ts",
@@ -868,7 +934,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/translatePlus/misc/types.ts",
@@ -881,7 +948,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/translatePlus/settings.ts",
@@ -894,7 +962,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/translatePlus/style.css",
@@ -907,7 +976,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/translatePlus/utils/accessory.tsx",
@@ -920,7 +990,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/translatePlus/utils/icon.tsx",
@@ -933,7 +1004,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/translatePlus/utils/translator.ts",
@@ -946,7 +1018,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/unitConverter/converter.ts",
@@ -959,7 +1032,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/unitConverter/ConverterAccessory.tsx",
@@ -972,7 +1046,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/unitConverter/index.tsx",
@@ -985,7 +1060,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/unitConverter/style.css",
@@ -998,7 +1074,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/universalMention/index.tsx",
@@ -1011,7 +1088,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/vcPanelSettings/index.tsx",
@@ -1024,7 +1102,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/vcPanelSettings/style.css",
@@ -1037,7 +1116,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceButtons/index.tsx",
@@ -1050,7 +1130,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceButtons/settings.ts",
@@ -1063,7 +1144,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceButtons/styles.css",
@@ -1076,7 +1158,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceButtons/utils.tsx",
@@ -1089,7 +1172,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceChannelLog/components/LogsButton.tsx",
@@ -1102,7 +1186,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceChannelLog/components/VoiceChannelLogEntryComponent.css",
@@ -1115,7 +1200,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceChannelLog/components/VoiceChannelLogEntryComponent.tsx",
@@ -1128,7 +1214,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceChannelLog/components/VoiceChannelLogEntryIcons.tsx",
@@ -1141,7 +1228,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceChannelLog/components/VoiceChannelLogModal.tsx",
@@ -1154,7 +1242,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceChannelLog/index.tsx",
@@ -1167,7 +1256,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceChannelLog/logs.ts",
@@ -1180,7 +1270,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceChannelLog/settings.ts",
@@ -1193,7 +1284,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceChannelLog/types.ts",
@@ -1206,7 +1298,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceChannelLog/utils.ts",
@@ -1219,7 +1312,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/voiceRejoin/index.tsx",
@@ -1232,7 +1326,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/wigglyText/index.tsx",
@@ -1245,7 +1340,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/wigglyText/ui/components/ExampleWiggle.tsx",
@@ -1258,7 +1354,8 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/writeUpperCase/index.ts",
@@ -1271,6 +1368,7 @@
       "Scoped ESLint for all assigned TypeScript/TSX paths passed; scoped stylelint for all assigned CSS paths passed.",
       "pnpm exec tsx --test scripts/testAuditRemainingUi.ts: 22 tests passed using isolated offline mocks.",
       "No live Discord, account, network, media capture, message sends or runtime patch matching performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   }
 ]

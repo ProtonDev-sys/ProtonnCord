@@ -33,7 +33,11 @@ import kotlinx.coroutines.withTimeout
 internal class OneKeyUsb(private val context: Context) {
     private val busy = Mutex()
     private val cancelled = AtomicBoolean(false)
-    fun cancel() { cancelled.set(true) }
+    @Volatile private var permissionResult: CompletableDeferred<Unit>? = null
+    fun cancel() {
+        cancelled.set(true)
+        permissionResult?.completeExceptionally(IllegalStateException("OneKey unlock was cancelled"))
+    }
 
     private fun devices(manager: UsbManager): List<UsbDevice> = manager.deviceList.values.filter {
         it.vendorId == 0x1209 && it.productId in setOf(0x4f4b, 0x53c1) &&
@@ -68,9 +72,12 @@ internal class OneKeyUsb(private val context: Context) {
         else context.registerReceiver(receiver, IntentFilter(action))
         val pending = PendingIntent.getBroadcast(context, 8721, Intent(action).setPackage(context.packageName), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_CANCEL_CURRENT)
         try {
+            permissionResult = result
+            check(!cancelled.get()) { "OneKey unlock was cancelled" }
             manager.requestPermission(device, pending)
             withTimeout(120_000) { result.await() }
         } finally {
+            if (permissionResult === result) permissionResult = null
             pending.cancel()
             context.unregisterReceiver(receiver)
         }
@@ -89,6 +96,7 @@ internal class OneKeyUsb(private val context: Context) {
             }
             val device = devices.single()
             permission(manager, device)
+            check(!cancelled.get()) { "OneKey unlock was cancelled" }
             return withContext(Dispatchers.IO) { withTimeout(120_000) { exchange(manager, device) } }
         } finally { busy.unlock() }
     }
@@ -116,6 +124,7 @@ internal class OneKeyUsb(private val context: Context) {
     }
 
     private suspend fun exchange(manager: UsbManager, device: UsbDevice): ByteArray {
+        check(!cancelled.get()) { "OneKey unlock was cancelled" }
         val usbInterface = (0 until device.interfaceCount).map(device::getInterface).firstOrNull { candidate ->
             candidate.id == 0 && candidate.interfaceClass == 255 &&
                 (0 until candidate.endpointCount).map(candidate::getEndpoint).let { endpoints ->

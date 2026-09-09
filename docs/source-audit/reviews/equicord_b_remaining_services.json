@@ -2,7 +2,7 @@
   {
     "path": "scripts/testAuditRemainingServicesPresence.ts",
     "baselineSha256": null,
-    "reviewedSha256": "cfc67640e2573ff8a02f6abecc95bfacb4bf6b72e870bab1682c423287fa44c6",
+    "reviewedSha256": "c0f6be22b59d4855fec91e51b281085773aab27c12a7b6d443a057bebc9158c9",
     "status": "changed",
     "summary": "Reviewed nine source-isolated regressions for legacy preference preservation, service partial failures, bounded asset-cache ownership/retry, obsolete AudioBookShelf credentials and 401 retries, Jellyfin privacy/zero progress, Navidrome polling restart, malformed tosu messages and reactive masked settings controls.",
     "validation": [
@@ -11,12 +11,13 @@
       "pnpm testTsc passed.",
       "Repository ESLint intentionally excludes scripts; source lint passed.",
       "No live service, Discord message, account, debugger, companion or completion actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditRemainingServicesState.ts",
     "baselineSha256": null,
-    "reviewedSha256": "4d11c403e7669c3cac956609a6cb56be5dda2ecaf8bea3cb1f99897c00676e38",
+    "reviewedSha256": "bfc46c2b0d4efbae56fa366cd241e56fa1418410894a15e050de90d7cdc70834",
     "status": "changed",
     "summary": "Reviewed seven source-isolated regressions for Questify version migration, category deduplication and cancellation of pending startup, plus Secure Messaging forwarding route preservation and cancellation during preparation/protection checks and multi-destination work. All completion/native/network actions use inert mocks.",
     "validation": [
@@ -25,7 +26,8 @@
       "pnpm testTsc passed.",
       "Repository ESLint intentionally excludes scripts; source lint passed.",
       "No live service, Discord message, account, debugger, companion or completion actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/orbolayBridge/index.tsx",
@@ -39,7 +41,8 @@
       "Scoped source ESLint passed.",
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "Existing Orbolay authenticated protocol and renderer boundary fixtures passed with synthetic keys and mocked sockets; no live companion or Discord commands."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/orbolayBridge/protocol.ts",
@@ -53,7 +56,8 @@
       "Scoped source ESLint passed.",
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "Existing Orbolay authenticated protocol and renderer boundary fixtures passed with synthetic keys and mocked sockets; no live companion or Discord commands."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/components/questButton.tsx",
@@ -69,7 +73,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/components/questButtonSettings.tsx",
@@ -85,7 +90,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/components/questFeaturesSetting.tsx",
@@ -101,7 +107,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/components/questNotificationsSetting.tsx",
@@ -117,7 +124,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/components/questTileContextMenu.tsx",
@@ -133,7 +141,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/components/questTilesSetting.tsx",
@@ -149,7 +158,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/components/reorderQuestsSetting.tsx",
@@ -165,7 +175,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/components/settingsModal.tsx",
@@ -181,7 +192,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/components/shared.tsx",
@@ -197,7 +209,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/index.tsx",
@@ -214,7 +227,8 @@
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed.",
       "Lifecycle, settings persistence, native loader and webpack subscription group passed: 68 tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/native.ts",
@@ -230,7 +244,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/nativePolicy.ts",
@@ -246,7 +261,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/settings.css",
@@ -262,7 +278,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/settings/access.ts",
@@ -278,7 +295,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/settings/dangerous.ts",
@@ -294,7 +312,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/settings/def.ts",
@@ -310,7 +329,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/settings/fetching.ts",
@@ -326,7 +346,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/settings/ignoredQuests.ts",
@@ -342,7 +363,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/settings/notices.tsx",
@@ -358,7 +380,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/settings/rerender.ts",
@@ -374,7 +397,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/settings/restartTracking.ts",
@@ -390,7 +414,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/settings/store.ts",
@@ -406,7 +431,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/state.ts",
@@ -422,7 +448,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/styles.css",
@@ -438,7 +465,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/utils/completion.ts",
@@ -454,7 +482,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/utils/fetching.ts",
@@ -470,7 +499,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/utils/filtering.ts",
@@ -486,7 +516,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/utils/logging.ts",
@@ -502,7 +533,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/utils/questState.ts",
@@ -518,7 +550,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/utils/questTiles.ts",
@@ -534,7 +567,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/questify/utils/ui.ts",
@@ -550,7 +584,8 @@
       "Questify settings/order/startup-cancellation regressions passed with all completion/native actions mocked.",
       "Existing Questify native boundary suite passed using mocked fetch and synthetic credentials; no live completion, spoofing, debugger or runtime patch execution.",
       "Questify CSS stylelint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/SettingsPanel.tsx",
@@ -565,7 +600,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/index.tsx",
@@ -581,7 +617,8 @@
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions.",
       "Lifecycle, settings persistence, native loader and webpack subscription group passed: 68 tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/migration.ts",
@@ -596,7 +633,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/native.ts",
@@ -611,7 +649,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/services/assetCache.ts",
@@ -626,7 +665,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/services/audiobookshelf.ts",
@@ -641,7 +681,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/services/gensokyoRadio.ts",
@@ -656,7 +697,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/services/jellyfin.ts",
@@ -671,7 +713,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/services/navidrome.ts",
@@ -686,7 +729,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/services/navidromePrivacy.ts",
@@ -701,7 +745,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/services/statsfm.ts",
@@ -716,7 +761,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/services/tosu.ts",
@@ -731,7 +777,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/settings.ts",
@@ -746,7 +793,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/types/audiobookshelf.ts",
@@ -761,7 +809,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/types/gensokyoRadio.ts",
@@ -776,7 +825,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/types/index.ts",
@@ -791,7 +841,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/types/jellyfin.ts",
@@ -806,7 +857,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/types/statsfm.ts",
@@ -821,7 +873,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/richPresence/types/tosu.ts",
@@ -836,7 +889,8 @@
       "Plugin catalog passed: 399 plugins and 1352 setting identifiers retained.",
       "pnpm exec tsx --test scripts/testAuditRemainingServicesPresence.ts scripts/testAuditRemainingServicesState.ts passed: 16 isolated regressions.",
       "Existing RichPresence and Navidrome privacy suites passed; no live service/account/presence actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/equicordplugins/secureMessagingForwarding.desktop/index.ts",
@@ -852,6 +906,7 @@
       "Seven isolated state tests passed including forwarding route preservation and async account/runtime/protection cancellation.",
       "Existing SecureMessagingForwarding, cryptographic/protocol and native IPC suites passed using fixtures and temporary data; no live Discord sends.",
       "Lifecycle, settings persistence, native loader and webpack subscription group passed: 68 tests."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   }
 ]

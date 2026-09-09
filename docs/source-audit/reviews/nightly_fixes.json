@@ -1,0 +1,34 @@
+[
+  {
+    "path": "scripts/testAuditNightlyInterop.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "328da61c15c712b1b8ed530dd909d7e61ca53d81c949a9a08ecb28291b5263cf",
+    "status": "changed",
+    "summary": "Reviewed sixteen isolated interop/preservation regressions: actual mobile counter-floor rejection before desktop encryption, monotonic local edits, pre/post-await pairing account checks, filtered native snapshot with real HKDF/AES-GCM sealing, current/retired phone contact preservation, changed-peer review and bounded earliest-cutoff history, contact/conversation/history cap rejection, rollback and strict retirement equality, plus durable protection and failure latching/retry/reload across pending/rejected/queued saves. Mobile crypto/bridge dependencies are inert mocks for state tests; sealing uses synthetic Node crypto material.",
+    "validation": [
+      "Full source and integration-contract review.",
+      "pnpm exec tsx --test scripts/testAuditNightlyInterop.ts passed: 16 tests.",
+      "Root TypeScript and scoped desktop source ESLint passed.",
+      "Targeted real mobile pairing/vault/OneKey plus desktop security-key group passed: 25 entries including interop regressions.",
+      "Native IPC, audit SecureState and forwarding regressions passed in the targeted desktop group; all network, vault and hardware actions used synthetic fixtures.",
+      "No live Discord, clipboard, CDP, hardware, identity-exporter, install or deployment actions.",
+      "Final pairing preservation rerun passed: 28 entries across 16 isolated interop tests and real mobile pairing/vault/send-policy suites; mobile TypeScript and scoped Biome formatting passed."
+    ]
+  },
+  {
+    "path": "src/equicordplugins/secureMessaging.desktop/mobilePairing.ts",
+    "baselineSha256": null,
+    "reviewedSha256": "286f06a64b2f60637a700c34b3bb165cece58289d85213624e012a8f6b69937b",
+    "status": "changed",
+    "summary": "Reviewed new main-process pairing sealing helper: account/root size validation, strict Base64URL fingerprint decoding, separate HKDF context, random 96-bit AES-GCM nonce, account/root fingerprint AAD, two-MiB plaintext bound and temporary key/plaintext zeroing. Only the authenticated ciphertext token reaches the renderer. Original desktop/mobile pairing interoperability fixtures and a real sealing roundtrip over synthetic snapshot data passed.",
+    "validation": [
+      "Full source and integration-contract review.",
+      "pnpm exec tsx --test scripts/testAuditNightlyInterop.ts passed: 16 tests.",
+      "Root TypeScript and scoped desktop source ESLint passed.",
+      "Targeted real mobile pairing/vault/OneKey plus desktop security-key group passed: 25 entries including interop regressions.",
+      "Native IPC, audit SecureState and forwarding regressions passed in the targeted desktop group; all network, vault and hardware actions used synthetic fixtures.",
+      "No live Discord, clipboard, CDP, hardware, identity-exporter, install or deployment actions.",
+      "Final pairing preservation rerun passed: 28 entries across 16 isolated interop tests and real mobile pairing/vault/send-policy suites; mobile TypeScript and scoped Biome formatting passed."
+    ]
+  }
+]

@@ -4,11 +4,12 @@
 import {
 	existsSync,
 	mkdirSync,
-	readFileSync,
 	readdirSync,
+	readFileSync,
 	symlinkSync,
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+
 const root = resolve(process.argv[2])
 for (const directory of ['lib', 'plugins']) {
 	if (!existsSync(join(root, directory))) continue

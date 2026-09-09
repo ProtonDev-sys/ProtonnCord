@@ -9,7 +9,8 @@
       "node --import=tsx --test scripts/testAuditPluginsAliases.ts (3 passing); all storage and context hooks are in-memory mocks.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "d9375c3bf4edf9f9d9d0dc4408b6129103f4df706713f96d4f7c6fcff4bdb9d2"
+    "reviewedSha256": "d9375c3bf4edf9f9d9d0dc4408b6129103f4df706713f96d4f7c6fcff4bdb9d2",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsCore.ts",
@@ -21,7 +22,8 @@
       "pnpm exec tsx --test scripts/testAuditPluginsCore.ts: 3 passed.",
       "Complete source/harness review; inspected mocks, assertions and non-live execution boundaries.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsDecor.ts",
@@ -33,7 +35,8 @@
       "pnpm exec tsx --test scripts/testAuditPluginsDecor.ts: 4 passed; final source checked by tsc with no errors in these files.",
       "Complete source/harness review; inspected mocks, assertions and non-live execution boundaries.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsIdentity.ts",
@@ -45,7 +48,8 @@
       "Complete file read; relevant host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsIdentity.ts: 7 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsMedia.ts",
@@ -57,7 +61,8 @@
       "node --import=tsx --test scripts/testAuditPluginsMedia.ts: 12 passed; mocked side effects only.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "e5f293ef6f6e7bae37d8697c2c64e2dfaa9359a5664dda11fae29c5b2ca1c585"
+    "reviewedSha256": "e5f293ef6f6e7bae37d8697c2c64e2dfaa9359a5664dda11fae29c5b2ca1c585",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsMessages.ts",
@@ -68,7 +73,8 @@
     "validation": [
       "Complete harness and additions read; node --import=tsx --test scripts/testAuditPluginsMessages.ts: 9 passed with synthetic globals.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsNames.ts",
@@ -79,7 +85,8 @@
     "validation": [
       "Complete new test file read; node --import=tsx --test scripts/testAuditPluginsNames.ts: 4 passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsNative.ts",
@@ -91,7 +98,8 @@
       "node --import=tsx --test scripts/testAuditPluginsNative.ts: 6 passed; only synthetic data and mocked side effects.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "05bca8c689ec55060cd30917a754af91eff26200f61597cc84c8ccdb38c3873e"
+    "reviewedSha256": "05bca8c689ec55060cd30917a754af91eff26200f61597cc84c8ccdb38c3873e",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsNavigation.ts",
@@ -103,7 +111,8 @@
       "node --import=tsx --test scripts/testAuditPluginsNavigation.ts: 6 passed; only synthetic data and mocked side effects.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "af4bfa3499d7e7c004b38639e7cc161e8c4bc25cfd4543284fc9de946d8eef76"
+    "reviewedSha256": "af4bfa3499d7e7c004b38639e7cc161e8c4bc25cfd4543284fc9de946d8eef76",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsNotifications.ts",
@@ -115,7 +124,8 @@
       "Complete new test file read.",
       "node --import=tsx --test scripts/testAuditPluginsNotifications.ts: 3 passed; all stores, user lookups and notifications mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsPresence.ts",
@@ -127,7 +137,8 @@
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsPresence.ts: 3 passed; transport, activity and timer mocks.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsReviews.ts",
@@ -139,7 +150,8 @@
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsShiki.ts",
@@ -150,7 +162,8 @@
     "validation": [
       "Complete new test file read; node --import=tsx --test scripts/testAuditPluginsShiki.ts: 7 passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsTranslation.ts",
@@ -161,7 +174,8 @@
     "validation": [
       "Complete new test file read; node --import=tsx --test scripts/testAuditPluginsTranslation.ts: 4 passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsUi.ts",
@@ -172,7 +186,8 @@
       "Complete harness and additions read; node --import=tsx --test scripts/testAuditPluginsUi.ts: 9 passed with synthetic globals.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "d08863656cbd9ac60817ad476e873ec3d1b160544d54ce14040aa84822703bc5"
+    "reviewedSha256": "d08863656cbd9ac60817ad476e873ec3d1b160544d54ce14040aa84822703bc5",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsUtilities.ts",
@@ -183,7 +198,8 @@
     "validation": [
       "Complete harness and additions read; node --import=tsx --test scripts/testAuditPluginsUtilities.ts: 15 passed with synthetic globals.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsVoice.ts",
@@ -195,7 +211,8 @@
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "Voice recorder/preview/send/native unit cases: 10 passed; existing transcription/waveform checks passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "scripts/testAuditPluginsWeb.ts",
@@ -207,7 +224,8 @@
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsWeb.ts: 9 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/badges/fixDiscordBadgePadding.css",
@@ -217,7 +235,8 @@
     "validation": [
       "Full stylesheet read; checked selector scope and stated 2px-to-1px layout purpose."
     ],
-    "reviewedSha256": "9d88bca36d077f2b47253d0ccbeb6e0b4289070bd4bd125e02c8bfae7d4f9841"
+    "reviewedSha256": "9d88bca36d077f2b47253d0ccbeb6e0b4289070bd4bd125e02c8bfae7d4f9841",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/badges/index.tsx",
@@ -227,7 +246,8 @@
     "validation": [
       "node --import=tsx --test scripts/testBadges.ts (13 passing); complete source read."
     ],
-    "reviewedSha256": "3953d4af427547a735cc9e806f601093430fa60515ca8035f18050339e23ca05"
+    "reviewedSha256": "3953d4af427547a735cc9e806f601093430fa60515ca8035f18050339e23ca05",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/badges/modals.tsx",
@@ -237,7 +257,8 @@
     "validation": [
       "Complete source read and call-site review in badges/index.tsx; no live external navigation performed."
     ],
-    "reviewedSha256": "4fbebb667e74c8f1d43f35339780b704575fed90c97c4d200950f395ed9340af"
+    "reviewedSha256": "4fbebb667e74c8f1d43f35339780b704575fed90c97c4d200950f395ed9340af",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/chatButtons.ts",
@@ -247,7 +268,8 @@
     "validation": [
       "Complete source read; inspected replacement ordering and captured arguments. Live Discord patch matching not run."
     ],
-    "reviewedSha256": "645d783287ed618093f2f28abbe9ed57ee7fdc2a4a12e6a7e2e9b02d89d1e0d1"
+    "reviewedSha256": "645d783287ed618093f2f28abbe9ed57ee7fdc2a4a12e6a7e2e9b02d89d1e0d1",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/commands.ts",
@@ -257,7 +279,8 @@
     "validation": [
       "Complete source read; checked captures and shared API call signatures. Live patch matching not run."
     ],
-    "reviewedSha256": "c029263c34cba4974dee1715adb45af2999f997ff9dac6a6838433fd4495e206"
+    "reviewedSha256": "c029263c34cba4974dee1715adb45af2999f997ff9dac6a6838433fd4495e206",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/contextMenu.ts",
@@ -267,7 +290,8 @@
     "validation": [
       "Complete source read; traced regex capture use, nameMap membership, and registerMenuItem side effects. Live patch matching not run."
     ],
-    "reviewedSha256": "3c333f6b8b0c74466a068b6d176033ac53687229311015be5c878d3ef76dec10"
+    "reviewedSha256": "3c333f6b8b0c74466a068b6d176033ac53687229311015be5c878d3ef76dec10",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/dynamicImageModalApi.ts",
@@ -277,7 +301,8 @@
     "validation": [
       "Complete source read; checked the replacement's boolean grouping and intended width/height contract."
     ],
-    "reviewedSha256": "76e9f04d0d231deb69cc95d50975b60f4aae377aae6f59280b6b303437d8d02b"
+    "reviewedSha256": "76e9f04d0d231deb69cc95d50975b60f4aae377aae6f59280b6b303437d8d02b",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/memberListDecorators/index.tsx",
@@ -287,7 +312,8 @@
     "validation": [
       "Complete source read; checked both insertion paths and managed stylesheet relationship."
     ],
-    "reviewedSha256": "05bad3d4473f4c87da3de5775b34cd15569d54cfc384f8d1695fe41c54d9ac8f"
+    "reviewedSha256": "05bad3d4473f4c87da3de5775b34cd15569d54cfc384f8d1695fe41c54d9ac8f",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/memberListDecorators/style.css",
@@ -297,7 +323,8 @@
     "validation": [
       "Full stylesheet read; compared selectors with member-list adapter additions."
     ],
-    "reviewedSha256": "4a5cf56b8e39e62560cfdd8515e92734a6728db519133d19618f88705553eedc"
+    "reviewedSha256": "4a5cf56b8e39e62560cfdd8515e92734a6728db519133d19618f88705553eedc",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/messageAccessories.ts",
@@ -307,7 +334,8 @@
     "validation": [
       "Complete source read; checked array capture and props forwarding. Live patch matching not run."
     ],
-    "reviewedSha256": "1d4d2704966437e687753cdc75215d9e169a8879d56e49418d7fc608d3300249"
+    "reviewedSha256": "1d4d2704966437e687753cdc75215d9e169a8879d56e49418d7fc608d3300249",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/messageDecorations/index.tsx",
@@ -317,7 +345,8 @@
     "validation": [
       "Complete source read; checked arguments forwarding and managedStyle ownership."
     ],
-    "reviewedSha256": "0d81377aca478cb6205097bcc72c1df3d6fee59bfe825838fd1228d796ce4c2f"
+    "reviewedSha256": "0d81377aca478cb6205097bcc72c1df3d6fee59bfe825838fd1228d796ce4c2f",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/messageDecorations/style.css",
@@ -327,7 +356,8 @@
     "validation": [
       "Full stylesheet read; inspected inline/vertical alignment and size constraints."
     ],
-    "reviewedSha256": "1fef43f50de4f36a944e85700b505da3494ee33a9cdaa7417ff772d26a3f9a2e"
+    "reviewedSha256": "1fef43f50de4f36a944e85700b505da3494ee33a9cdaa7417ff772d26a3f9a2e",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/messageEvents.ts",
@@ -337,7 +367,8 @@
     "validation": [
       "node --import=tsx scripts/testMessageEventsPriority.ts (passed); complete source read. Live patch matching not run."
     ],
-    "reviewedSha256": "a82deb182ad0750efb81ac4635df8ee229269192b7580c28a80be63762bb35cc"
+    "reviewedSha256": "a82deb182ad0750efb81ac4635df8ee229269192b7580c28a80be63762bb35cc",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/messagePopover.ts",
@@ -347,7 +378,8 @@
     "validation": [
       "Complete source read; traced all replacement captures and retained conditional output. Live patch matching not run."
     ],
-    "reviewedSha256": "aa8ae517ac889f7eff0090b04ffc97f1caf3b8179a2e7077eab053b9da9ffc90"
+    "reviewedSha256": "aa8ae517ac889f7eff0090b04ffc97f1caf3b8179a2e7077eab053b9da9ffc90",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/messageUpdater.ts",
@@ -357,7 +389,8 @@
     "validation": [
       "Complete source read; checked the narrowly scoped comparison-list replacement."
     ],
-    "reviewedSha256": "3e75a190435c187b18ccd53647fb3d7a117424826b0144f4f54e1c723dc2663d"
+    "reviewedSha256": "3e75a190435c187b18ccd53647fb3d7a117424826b0144f4f54e1c723dc2663d",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/nicknameIcons.ts",
@@ -367,7 +400,8 @@
     "validation": [
       "Complete source read; traced both render calls and optional user-id access. Live patch matching not run."
     ],
-    "reviewedSha256": "b8e53c1d849488c80b4b9292713da75649ce5d4ccfd1899ca7bbb3c760b82b39"
+    "reviewedSha256": "b8e53c1d849488c80b4b9292713da75649ce5d4ccfd1899ca7bbb3c760b82b39",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/notices.ts",
@@ -377,7 +411,8 @@
     "validation": [
       "Complete source read; checked the notice-id discriminator and nextNotice call placement."
     ],
-    "reviewedSha256": "22de25e8986830e701663eecd06baa1ba02000a96eb550fc36f2cab74111fbed"
+    "reviewedSha256": "22de25e8986830e701663eecd06baa1ba02000a96eb550fc36f2cab74111fbed",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/serverList.ts",
@@ -387,7 +422,8 @@
     "validation": [
       "Complete source read; inspected all three patch output positions and shared renderAll arguments."
     ],
-    "reviewedSha256": "cb842f5c76dc1602b91d220a7cb4616f11862e12a23a9a5b109d9ef951500324"
+    "reviewedSha256": "cb842f5c76dc1602b91d220a7cb4616f11862e12a23a9a5b109d9ef951500324",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_api/userSettings.ts",
@@ -397,7 +433,8 @@
     "validation": [
       "Complete source read; inspected metadata forwarding in all three wrapper patterns."
     ],
-    "reviewedSha256": "1b194cff73bcd0a043dc2933419dc23c16ca36aed49ea4a1c58a81730368114f"
+    "reviewedSha256": "1b194cff73bcd0a043dc2933419dc23c16ca36aed49ea4a1c58a81730368114f",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_core/concatenatedComponentExtractor.tsx",
@@ -407,7 +444,8 @@
     "validation": [
       "Complete source read; checked extracted function references and exported setter identity. Live patch matching not run."
     ],
-    "reviewedSha256": "b843d1c24d7485d38bbf1bc856dc7f49f6a664ce05c0cab13b21ba1dacd3bf6a"
+    "reviewedSha256": "b843d1c24d7485d38bbf1bc856dc7f49f6a664ce05c0cab13b21ba1dacd3bf6a",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_core/noTrack.ts",
@@ -417,7 +455,8 @@
     "validation": [
       "Complete source read; traced Function.prototype/window mutations and synchronous XHR. No telemetry-evasion improvement or live execution performed; limitation reported to root."
     ],
-    "reviewedSha256": "3b339765c655f1340767647ba0e95af018f4bbc9d0b4f6c06cd4dc8669d17b6d"
+    "reviewedSha256": "3b339765c655f1340767647ba0e95af018f4bbc9d0b4f6c06cd4dc8669d17b6d",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_core/settings.tsx",
@@ -427,7 +466,8 @@
     "summary": "Retained root-only settings section insertion, duplicate-section guard, custom entry support, location fallback, and native/browser version rows; existing setting keys and internal section identifiers remain stable.",
     "validation": [
       "Complete source read; checked nullable root nodes, nested builder paths, and native version fallback. Live patch matching not run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/_core/supportHelper.tsx",
@@ -438,7 +478,8 @@
     "validation": [
       "Complete source read and native relaunch contract inspection; pnpm exec tsx --test scripts/testAuditPluginsCore.ts (3 passed); eslint source passed. Live dialogs and message sends not exercised.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/accountPanelServerProfile/README.md",
@@ -448,7 +489,8 @@
     "summary": "Account-panel right-click documentation matches the available server-profile action; remote screenshots are illustrative links and carry no local executable content.",
     "validation": [
       "Complete Markdown read against adjacent implementation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/accountPanelServerProfile/index.tsx",
@@ -458,7 +500,8 @@
     "summary": "Retained channel/user guards, ordinary-popout fallbacks and AlwaysExpandProfiles integration; modal opening occurs in an effect, and the alternate selection is cleared on popout close. No preference or profile routing change needed.",
     "validation": [
       "Complete source read; pnpm exec tsx --test scripts/testBadges.ts previously passed account-panel fixtures. Live Discord patch matching not run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/alwaysAnimate/index.ts",
@@ -468,7 +511,8 @@
     "summary": "Confirmed each animation group has a retained restart-required preference; broad animation substitutions leave destructuring defaults untouched. No additional render loop or background task is introduced.",
     "validation": [
       "Complete source read; existing AlwaysAnimate fixtures passed in scripts/testBadges.ts. Live patch matching not run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/alwaysExpandRoles/README.md",
@@ -478,7 +522,8 @@
     "summary": "Role-list expansion description matches the default expanded state and optional arrow setting.",
     "validation": [
       "Complete Markdown read against adjacent plugin."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/alwaysExpandRoles/index.ts",
@@ -488,7 +533,8 @@
     "summary": "Retained ShowAllRoles-to-AlwaysExpandRoles settings migration and expanded-state patch with non-expanded measurement correction; hideArrow remains optional and restart-required.",
     "validation": [
       "Complete source read; traced migration and all three replacements. Live patch matching not run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/alwaysTrust/index.tsx",
@@ -498,7 +544,8 @@
     "summary": "Reviewed domain and file-warning suppression. Both existing preferences default true when this optional plugin is enabled; that removes client safety prompts. Left behavior unchanged and made no warning-bypass improvements.",
     "validation": [
       "Complete source read; inspected both preference-gated replacements. No bypass reproduction or live execution performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/anonymiseFileNames/index.tsx",
@@ -508,7 +555,8 @@
     "summary": "Retained per-upload overrides, bounded random names, literal date formatting, extension correction and single spoiler-prefix handling. Upload and command settings remain compatible.",
     "validation": [
       "Complete source read; scripts/testUploadFileNames.ts all 5 filename fixtures passed in combined test run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/appleMusic.desktop/README.md",
@@ -518,7 +566,8 @@
     "summary": "macOS Music requirement and track formatting placeholders agree with platform visibility and formatter implementation.",
     "validation": [
       "Complete Markdown read against index and native implementation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/appleMusic.desktop/index.tsx",
@@ -528,7 +577,8 @@
     "summary": "Retained single-flight presence polling, generation invalidation on stop, finite refresh interval fallback, concurrent artwork requests and timestamp guards. Existing format strings and option values remain stable.",
     "validation": [
       "Complete source read; scripts/testRichPresence.ts passed Apple Music formatting, lifecycle, interval and native parsing fixtures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/appleMusic.desktop/native.ts",
@@ -539,7 +589,8 @@
     "validation": [
       "Complete source read; scripts/testAuditPluginsNative.ts two deadline/retry fixtures and scripts/testRichPresence.ts native metadata fixture passed; eslint passed. No macOS commands or remote music requests executed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/arRPC.web/index.tsx",
@@ -549,7 +600,8 @@
     "summary": "Retained validated local RPC envelopes, per-socket last-update identity, bounded asset/application caches and stale-connection rejection. Stop clears only owned activities, caches and socket callbacks become inert. Legacy name migration remains.",
     "validation": [
       "Complete source read; scripts/testRichPresence.ts passed web RPC envelope, cache, stop, retry and connection fixtures."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/autoDndWhilePlaying.discordDesktop/README.md",
@@ -559,7 +611,8 @@
     "summary": "Prior-status restoration documentation matches the automatic status change and manual-change cancellation behavior.",
     "validation": [
       "Complete Markdown read against adjacent implementation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/autoDndWhilePlaying.discordDesktop/index.ts",
@@ -570,7 +623,8 @@
     "validation": [
       "Complete source read; scripts/testAuditPluginsUtilities.ts normal restoration, restart and manual-invisible fixture passed; eslint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterFolders/FolderSideBar.tsx",
@@ -580,7 +634,8 @@
     "summary": "Retained expanded/nonempty folder filtering, fullscreen hiding, lazy guild-bar rendering and preference-controlled width transitions. Limitation: animated renders synchronously query and measure the guild bar.",
     "validation": [
       "Complete source read; traced all three store subscriptions and visibility/animation branches. Visual/live check not run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterFolders/README.md",
@@ -590,7 +645,8 @@
     "summary": "Folder sidebar, one-open-folder and icon options match the implementation; screenshot is illustrative.",
     "validation": [
       "Complete Markdown read against both TSX files."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterFolders/index.tsx",
@@ -601,7 +657,8 @@
     "validation": [
       "Complete source read; traced all patch predicates, queue ownership and folder-selection state transitions. Live patch matching not run.",
       "Additional relevant fixtures in scripts/testUiComponents.ts passed during Decor review (53 total tests)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterFolders/style.css",
@@ -611,7 +668,8 @@
     "summary": "Sidebar grid area is scoped to the inserted BetterFolders grid class; nested list height/padding rules are scoped to plugin classes. Discord grid area names are documented as intentional fixed layout contracts.",
     "validation": [
       "Complete stylesheet read against index/FolderSideBar selectors."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterGifAltText/index.ts",
@@ -622,7 +680,8 @@
     "validation": [
       "Complete source read; scripts/testAuditPluginsUtilities.ts two GIF regression fixtures passed; eslint passed. Live patch matching not run.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterGifPicker/index.ts",
@@ -632,7 +691,8 @@
     "summary": "Retained the single initial-state substitution that opens GIF Favorites; no background work or settings state exists.",
     "validation": [
       "Complete source read; inspected patch anchor and initial-state-only match. Live patch matching not run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterRoleContext/README.md",
@@ -642,7 +702,8 @@
     "summary": "Role color copy, role edit and role icon actions match adjacent menu construction.",
     "validation": [
       "Complete Markdown read against index implementation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterRoleContext/index.tsx",
@@ -652,7 +713,8 @@
     "summary": "Retained guild/role guards, manage-roles gate for the edit action, current-guild context handling, and explicit icon/member actions. Limitation: startup enables Discord developer mode without restoring it, and role-member popout assumes the current channel remains available.",
     "validation": [
       "Complete source read; traced menu construction, permission gate, lazy lookups and developer-mode side effect. No live role/member requests executed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterRoleDot/index.ts",
@@ -662,7 +724,8 @@
     "summary": "Retained click-to-copy role colors and separate restart-required preferences for dot/name combination and profile role dots. No persisted data conversion needed.",
     "validation": [
       "Complete source read; inspected all preference gates and clipboard-only action. Live patch matching not run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterSessions/README.md",
@@ -672,7 +735,8 @@
     "summary": "Device naming, exact timestamps and optional new-session notifications match the UI and background-check settings.",
     "validation": [
       "Complete Markdown read against the session UI and polling code."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterSessions/components/RenameButton.tsx",
@@ -682,7 +746,8 @@
     "summary": "Rename action passes the selected session into the modal and respects cache-loading disabled state. No account/session data is sent by this button.",
     "validation": [
       "Complete source read; traced index disabled prop and RenameModal account ownership check."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterSessions/components/RenameModal.tsx",
@@ -692,7 +757,8 @@
     "summary": "Retained modal-open account key and cache ownership checks, awaited persistence before close, retryable failure toast and keyboard save/reset paths.",
     "validation": [
       "Complete source read; scripts/testBetterSessions.ts rename failure and changed-account fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterSessions/components/icons.tsx",
@@ -702,7 +768,8 @@
     "summary": "Inspected browser/client SVG components and lazy mobile icon lookup. Icons contain fixed local paths, inherit requested dimensions/classes and use currentColor; no remote image loads or event side effects.",
     "validation": [
       "Complete source read including SVG definitions and mobile lookup; visual rendering not exercised."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterSessions/index.tsx",
@@ -712,7 +779,8 @@
     "summary": "Retained generation/account guards around session reads, single-flight polling, interval bounds, expired-session pruning and per-view NEW label tracking. Stop clears polling and account caches.",
     "validation": [
       "Complete source read; scripts/testBetterSessions.ts all 11 lifecycle, cache, notification, rename and timing fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterSessions/styles.css",
@@ -722,7 +790,8 @@
     "summary": "Scoped rename/new-session/footer/icon/description rules preserve readable badges and compact device layout; no global device-menu selector override.",
     "validation": [
       "Complete stylesheet read against emitted class names."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterSessions/types.ts",
@@ -732,7 +801,8 @@
     "summary": "Session ID hash, Date timestamp and client OS/platform/location shape match all UI and polling uses; alias preserves shared session field identity.",
     "validation": [
       "Complete type source read and cross-check against index/modal/utils consumers."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterSessions/utils.ts",
@@ -742,7 +812,8 @@
     "summary": "Retained account-scoped DataStore keys, current-account cache checks, versioned external-store subscription, copied persistence snapshots and platform/OS fallbacks. Malformed stored Maps can reject load; callers report the error rather than overwrite data.",
     "validation": [
       "Complete source read; scripts/testBetterSessions.ts cache ownership, reactive names and snapshot fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterSettings/README.md",
@@ -752,7 +823,8 @@
     "summary": "Toggleable fade removal, settings loading and categorized cog menu match the three preferences. Existing speed description is qualitative; no new measured performance claim was established.",
     "validation": [
       "Complete Markdown read against index preferences/patches."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterSettings/fullHeightContext.css",
@@ -762,7 +834,8 @@
     "summary": "Height-cap override targets only settings-cog menus and their active descendants; managed style is removed on stop.",
     "validation": [
       "Complete stylesheet read and index lifecycle check."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterSettings/index.tsx",
@@ -772,7 +845,8 @@
     "summary": "Retained guarded layer replacement, focus lock, unmount transition dispatch, managed-style cleanup and recursive section transformation with logout extraction and plugin/theme menus. Prefetch/fade patches remain preference-gated.",
     "validation": [
       "Complete source read; traced fallback when lazy components are unavailable and nested logout/menu construction. Live patch matching not run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/betterUploadButton/index.ts",
@@ -782,7 +856,8 @@
     "summary": "Retained attach-button-only handler override so ordinary chat actions are untouched; existing double-click upload becomes click and ordinary click becomes context menu.",
     "validation": [
       "Complete source read; verified missing/non-attachment props return no override. Live patch matching not run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/biggerStreamPreview/index.tsx",
@@ -792,7 +867,8 @@
     "summary": "Retained explicit context-menu action that resolves an available stream preview and opens a modal only when a URL exists; missing user/stream contexts return no menu.",
     "validation": [
       "Complete source read; traced user/stream context guards and preview URL absence path. No remote preview requested."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/blurNsfw/index.ts",
@@ -803,7 +879,8 @@
     "validation": [
       "Complete source read; scripts/testAuditPluginsUtilities.ts finite-value/import/disabled-style fixture passed; eslint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/callTimer/Timer.tsx",
@@ -813,7 +890,8 @@
     "summary": "Retained fixed-timer hook, duration formatting and tooltip/text branches. Limitation: normal-color text uses two hardcoded Discord CSS class hashes and settings are read without a dedicated subscription.",
     "validation": [
       "Complete source read and TimerText/Icon consumer check; live rendering not exercised."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/callTimer/TimerIcon.tsx",
@@ -823,7 +901,8 @@
     "summary": "Stopwatch SVG uses fixed local geometry, caller dimensions/class and theme-derived color; no executable/remote asset behavior.",
     "validation": [
       "Complete source read including SVG path and prop defaults."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/callTimer/alignedChatInputFix.css",
@@ -833,7 +912,8 @@
     "summary": "Reviewed panel/RTC height fit-content adjustment. Selectors intentionally span Discord panel children, so visual interaction with other panel plugins remains an untested limitation.",
     "validation": [
       "Complete stylesheet read and managed-style registration check."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/callTimer/index.tsx",
@@ -844,7 +924,8 @@
     "validation": [
       "Complete source read; traced initial batches, self channel moves, passive pruning, subscription option and render null guards. No live voice or additional guild subscriptions executed.",
       "Additional relevant fixtures in scripts/testUiComponents.ts passed during Decor review (53 total tests)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/callTimer/timerText.tsx",
@@ -854,7 +935,8 @@
     "summary": "Timer text is rendered as escaped React text with compact monospace styling and caller class; no state, listeners or external content execution.",
     "validation": [
       "Complete source read against Timer callsite."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/characterCounter/README.md",
@@ -864,7 +946,8 @@
     "summary": "Character-count documentation and illustrative screenshots match the chat input overlay.",
     "validation": [
       "Complete Markdown read against adjacent component."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/characterCounter/index.tsx",
@@ -874,7 +957,8 @@
     "summary": "Retained message length thresholds, optional warning colors and selected-text count; document selection listener is removed on unmount. Current selection count can include text outside the input while it retains focus; account absence is handled only by the component error boundary.",
     "validation": [
       "Complete source read; inspected effect cleanup, premium-limit selection and empty-input guard. Live input patch matching not run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/characterCounter/style.css",
@@ -884,7 +968,8 @@
     "summary": "Counter overlay ignores pointer events and stays bottom-right of input; selected count uses theme brand color and sizing is locally scoped.",
     "validation": [
       "Complete stylesheet read against emitted class names."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/clearURLs/README.md",
@@ -894,7 +979,8 @@
     "summary": "Tracking parameter removal and ClearURLs rules attribution match the provider-based cleaner; the long URL is an illustrative example, not executed.",
     "validation": [
       "Complete Markdown read against cleaner behavior."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/clearURLs/index.ts",
@@ -904,7 +990,8 @@
     "summary": "Retained abortable rule catalog loading, validated regex compilation, full-name parameter matching, exceptions, duplicate parameter removal and unchanged/malformed URL preservation. Remote regex complexity remains dependent on the trusted upstream rule catalog.",
     "validation": [
       "Complete source read; scripts/testUrlCleaning.ts all five catalog lifecycle and URL-cleaning fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/clientTheme/README.md",
@@ -914,7 +1001,8 @@
     "summary": "Theme picker overview and illustrative media agree with client-side color customization; no protocol entitlement changes are described or implemented.",
     "validation": [
       "Complete Markdown read against theme settings and color overrides."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/clientTheme/clientTheme.css",
@@ -924,7 +1012,8 @@
     "summary": "Settings and color swatch styling stays under plugin classes; controls retain flex spacing and theme-based input borders.",
     "validation": [
       "Complete stylesheet read against settings component classes."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/clientTheme/components/Settings.tsx",
@@ -934,7 +1023,8 @@
     "summary": "Retained reactive color/theme reads, normalized imported hex values, luminance-based contrast guidance and explicit theme switch/reset actions using lowercase host theme values.",
     "validation": [
       "Complete source read; scripts/testThemes.ts settings subscription/theme-value fixture passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/clientTheme/index.tsx",
@@ -944,7 +1034,8 @@
     "summary": "Retained DOM-ready theme startup, managed color-change callback and complete stop delegation; persisted color remains in the existing component setting key.",
     "validation": [
       "Complete source read; scripts/testThemes.ts ClientTheme lifecycle fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/clientTheme/utils/colorUtils.ts",
@@ -954,7 +1045,8 @@
     "summary": "Retained six-digit color normalization and grayscale/primary HSL conversion. Relative luminance uses existing sRGB transfer coefficients and callers normalize input before conversion.",
     "validation": [
       "Complete source read; scripts/testThemes.ts primary/grayscale/invalid-color fixture passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/clientTheme/utils/styleUtils.ts",
@@ -964,7 +1056,8 @@
     "summary": "Retained concurrent stylesheet fetches with partial-failure tolerance, stopped/superseded request invalidation, finite base-color validation and paired style removal. Style updates cannot recreate nodes while disabled.",
     "validation": [
       "Complete source read; scripts/testThemes.ts ClientTheme cancellation and missing-base fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/colorSighted/index.ts",
@@ -974,7 +1067,8 @@
     "summary": "Retained visual-only status mask replacement and mobile badge display override; optional plugin does not write presence or account state.",
     "validation": [
       "Complete source read; inspected both display patches. Live patch matching not run."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/consoleJanitor/README.md",
@@ -984,7 +1078,8 @@
     "summary": "Documentation accurately describes console filtering and a representative warning; suppression reduces diagnostic evidence when enabled.",
     "validation": [
       "Complete Markdown read against existing filtering code."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/consoleJanitor/index.tsx",
@@ -995,7 +1090,8 @@
     "validation": [
       "Complete source read; traced initialization/allowlist rebuild and each patch predicate. No live log suppression or token-bearing output inspected.",
       "Additional relevant fixtures in scripts/testUiComponents.ts passed during Decor review (53 total tests)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/consoleShortcuts/index.ts",
@@ -1006,7 +1102,8 @@
     "validation": [
       "Complete source read; traced start/stop ownership, blocked preview cleanup and getter resolution. No live console/debugger execution or branch changes performed.",
       "Additional relevant fixtures in scripts/testUiComponents.ts passed during Decor review (53 total tests)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/copyEmojiMarkdown/README.md",
@@ -1016,7 +1113,8 @@
     "summary": "Custom versus Unicode emoji copy examples match the retained copyUnicode setting and formatted output.",
     "validation": [
       "Complete Markdown read against formatter."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/copyEmojiMarkdown/index.tsx",
@@ -1027,7 +1125,8 @@
     "validation": [
       "Complete source read; traced custom/default emoji branches and missing image source handling. Live picker not exercised.",
       "Additional relevant fixtures in scripts/testUiComponents.ts passed during Decor review (53 total tests)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/copyFileContents/README.md",
@@ -1037,7 +1136,8 @@
     "summary": "Text attachment copy action description matches the inline/modal button and partial-content guard.",
     "validation": [
       "Complete Markdown read against implementation."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/copyFileContents/index.tsx",
@@ -1048,7 +1148,8 @@
     "validation": [
       "Complete source read; traced inline/modal patch props and async clipboard error path. Live patch matching not run.",
       "Additional relevant fixtures in scripts/testUiComponents.ts passed during Decor review (53 total tests)."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/copyFileContents/style.css",
@@ -1058,7 +1159,8 @@
     "summary": "Copy button margin and cursor style are scoped to its plugin class.",
     "validation": [
       "Complete stylesheet read against button class."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/copyStickerLinks/README.md",
@@ -1068,7 +1170,8 @@
     "summary": "Copy/Open Link options match sticker context-menu actions.",
     "validation": [
       "Complete Markdown read against message/expression menu code."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/copyStickerLinks/index.tsx",
@@ -1078,7 +1181,8 @@
     "summary": "Retained format-specific CDN/media-proxy sticker links, selected-sticker lookup, Lottie exclusion and ExpressionCloner separator integration. Open actions use the existing native external-URL boundary.",
     "validation": [
       "Complete source read; inspected format mapping and context guards. No external links opened."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/copyUserURLs/index.tsx",
@@ -1088,7 +1192,8 @@
     "summary": "Retained optional-user guard and escaped-link clipboard format using the selected user ID; no remote user lookup or message send occurs.",
     "validation": [
       "Complete source read; traced context-menu guard and copy action."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/crashHandler/index.ts",
@@ -1099,7 +1204,8 @@
     "validation": [
       "Complete source read; scripts/testAuditPluginsUtilities.ts storage/update failure fixture and scripts/testCrashHandler.ts four recovery-guard fixtures passed; eslint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/customCommands/CreateTagModal.tsx",
@@ -1109,7 +1215,8 @@
     "summary": "Retained inline tag/argument validation, duplicate-name notice, newline editing and retryable registration error display. Save closes only after synchronous validation/registration succeeds.",
     "validation": [
       "Complete source read; checked addTag transaction path and parse/validate sharing with runtime."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/customCommands/SettingsTagList.tsx",
@@ -1119,7 +1226,8 @@
     "summary": "Retained reactive tagsList subscription, filtered tag enumeration and explicit edit/delete/create actions with accessible names. No copied list state can go stale.",
     "validation": [
       "Complete source read against settings and dialog consumers."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/customCommands/index.ts",
@@ -1129,7 +1237,8 @@
     "summary": "Retained MessageTags migration, owned command marker, foreign-command protection, rollback on failed registration, settings-driven synchronization and late-send reply identity checks. Argument substitution preserves literal equals/defaults and local previews do not send.",
     "validation": [
       "Complete source read; scripts/testCustomCommands.ts all seven parser, lifecycle, registration, rollback and send-completion fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/customCommands/settings.ts",
@@ -1139,7 +1248,8 @@
     "summary": "Retained validation of stored tag shapes, copy-on-write add/remove, and register-before-persist ordering so failed registration does not replace stored tags.",
     "validation": [
       "Complete source read; scripts/testCustomCommands.ts edit/rename failure and imported nested-change fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/customCommands/styles.css",
@@ -1149,7 +1259,8 @@
     "summary": "Tag cards use a scoped three-column grid with flexible title and compact action buttons.",
     "validation": [
       "Complete stylesheet read against SettingsTagList markup."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/customIdle/README.md",
@@ -1159,7 +1270,8 @@
     "summary": "Idle timeout and explicit disable behavior agree with the zero-to-Infinity runtime contract.",
     "validation": [
       "Complete Markdown read against settings and timeout conversion."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/customIdle/index.ts",
@@ -1170,7 +1282,8 @@
     "validation": [
       "Complete source read; scripts/testAuditPluginsUtilities.ts invalid/zero/120-minute fixture passed; eslint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/customRPC/README.md",
@@ -1180,7 +1293,8 @@
     "summary": "Custom game-activity overview and screenshot match retained profile presence configuration.",
     "validation": [
       "Complete Markdown read against settings/runtime."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/customRPC/RpcSettings.tsx",
@@ -1190,7 +1304,8 @@
     "summary": "Retained reactive RPC fields, numeric/date bounds, retryable preset loading, single-operation guard and explicit save/load/delete actions. Preset loads rebuild fields to clear stale form errors; stored legacy strings are retained.",
     "validation": [
       "Complete source read; traced all field keys and preset action success/failure/finally paths. Existing scripts/testRichPresence.ts preset/storage fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/customRPC/index.tsx",
@@ -1200,7 +1315,8 @@
     "summary": "Retained account/generation invalidation, debounced edits, bounded asset cache, independent image failure handling, paired buttons and bounded/restartable timestamp loops. Stop/logout cancel pending updates and clear owned activity.",
     "validation": [
       "Complete source read; scripts/testRichPresence.ts CustomRPC lifecycle, cache, image/button, timestamp and loop fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/customRPC/presets.ts",
@@ -1210,7 +1326,8 @@
     "summary": "Retained activity-only key allowlist, numeric/enum validation, malformed-data preservation, transactional DataStore updates and replacement semantics that remove omitted fields without altering plugin enablement.",
     "validation": [
       "Complete source read; scripts/testRichPresence.ts all four preset validation/transaction fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/customRPC/settings.css",
@@ -1220,7 +1337,8 @@
     "summary": "RPC field pairs, preset controls and error styling remain under plugin classes; disabled state has both control disabling and visual indication.",
     "validation": [
       "Complete stylesheet read against settings component classes."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/dearrow/README.md",
@@ -1230,7 +1348,8 @@
     "summary": "YouTube embed replacement purpose and service attribution match the implementation; illustrative media was not requested.",
     "validation": [
       "Complete Markdown read against network and display code."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/dearrow/index.tsx",
@@ -1241,7 +1360,8 @@
     "validation": [
       "Complete source read; scripts/testAuditPluginsMedia.ts three cancellation/identity/validation fixtures passed; eslint passed. Component unmount cannot be observed through the current host patch and remains a live compatibility limit.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/dearrow/styles.css",
@@ -1251,7 +1371,8 @@
     "summary": "Dearrow icon grayscale and top-right overlay are scoped to plugin toggle classes; SVG geometry remains local in the TSX component.",
     "validation": [
       "Complete stylesheet read against rendered button classes."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/README.md",
@@ -1261,7 +1382,8 @@
     "summary": "Custom-decoration overview explicitly discloses user-ID lookups, identify-scope sign-in, service-bound/account-bound token storage and upload review. Reauthentication explanation matches the new token key and service scope checks.",
     "validation": [
       "Complete Markdown read against all Decor network, authorization and settings source."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/index.tsx",
@@ -1271,7 +1393,8 @@
     "summary": "Retained generation-controlled configuration/authorization startup, account reset, subscription cleanup and public-store shutdown. Asset URLs encode one path segment and raw previews accept only local-origin Blob URLs.",
     "validation": [
       "Complete source read; scripts/testUiComponents.ts Decor lifecycle and avatar URL fixtures passed. Live patches not matched."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/lib/api.ts",
@@ -1282,7 +1405,8 @@
     "validation": [
       "Complete source read; scripts/testAuditPluginsDecor.ts deadline/cancellation fixture and scripts/testUiComponents.ts public/private/preset/upload boundary fixtures passed; eslint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/lib/constants.ts",
@@ -1293,7 +1417,8 @@
     "validation": [
       "Complete source read; scripts/testAuditPluginsDecor.ts timed-out configuration fixture and existing atomic/cancelled config fixture passed; eslint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/lib/stores/AuthorizationStore.tsx",
@@ -1304,7 +1429,8 @@
     "validation": [
       "Complete source read; scripts/testAuditPluginsDecor.ts exchange timeout/no-save fixture and existing authorization/account/storage fixtures in testUiComponents passed; eslint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/lib/stores/CurrentUserDecorationsStore.ts",
@@ -1314,7 +1440,8 @@
     "summary": "Retained one owned write, coalesced reads, abort-on-write/clear, current-authorization checks and success-only cache publication. Old finally handlers cannot clear replacement loading/busy state.",
     "validation": [
       "Complete source read; scripts/testUiComponents.ts private read/write, failure/retry, account/clear and selected/public state fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/lib/stores/UsersDecorationsStore.ts",
@@ -1325,7 +1452,8 @@
     "validation": [
       "Complete source read; scripts/testAuditPluginsDecor.ts 123-ID batch/concurrency/stop fixture and existing timing/coalescing/cache fixtures in testUiComponents passed; eslint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/lib/utils/decoration.ts",
@@ -1335,7 +1463,8 @@
     "summary": "Retained animation asset conversion and bounded PNG-header inspection before uploads, requiring a valid IHDR header and nonzero square dimensions. File bytes are not decoded or executed in this helper.",
     "validation": [
       "Complete source read; scripts/testUiComponents.ts PNG/header and deferred upload validation fixtures passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/settings.tsx",
@@ -1345,7 +1474,8 @@
     "summary": "Retained started-plugin guard for decoration editing, explicit Profile settings navigation and existing hidden baseUrl/agreedToGuidelines keys. Service changes take effect through startup configuration.",
     "validation": [
       "Complete source read against plugin started lifecycle and profile entry."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/components/DecorDecorationGridDecoration.tsx",
@@ -1355,7 +1485,8 @@
     "summary": "Grid wrapper retains authorization owner with the selected decoration and passes it into context actions; displayed assets use the common conversion helper.",
     "validation": [
       "Complete source read against context menu and caller props."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/components/DecorSection.tsx",
@@ -1365,7 +1496,8 @@
     "summary": "Retained authorization/current-decoration subscriptions, account-aware error reporting, cancellable lazy dialog opening and explicit change/remove controls. Disabled/busy states follow authorization and store writes.",
     "validation": [
       "Complete source read; checked promise chains and unmounted action signal handling against useDialogActions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/components/DecorationContextMenu.tsx",
@@ -1375,7 +1507,8 @@
     "summary": "Retained copy failure handling and explicit delete confirmation restricted to the current authorized decoration owner. Confirmation closes on account change and waits for delete success.",
     "validation": [
       "Complete source read; traced owner/author gate, modal effect and private mutation error handling."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/components/DecorationGridCreate.tsx",
@@ -1385,7 +1518,8 @@
     "summary": "Create tile is always unselected and forwards the explicit selection action, displaying the host localized Create label.",
     "validation": [
       "Complete source read and ChangeDecorationModal pending-review guard check."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/components/DecorationGridNone.tsx",
@@ -1395,7 +1529,8 @@
     "summary": "None tile forwards selection state/action and uses localized text; selecting none remains distinct from not editing.",
     "validation": [
       "Complete source read against null-versus-undefined selection handling."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/components/Grid.tsx",
@@ -1405,7 +1540,8 @@
     "summary": "Generic decoration grid keeps stable caller-provided keys through React fragments and does not mutate item data.",
     "validation": [
       "Complete source read against SectionedGridList item identity."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/components/SectionedGridList.tsx",
@@ -1415,7 +1551,8 @@
     "summary": "Sectioned grid retains section/item keys, scoped scroll class and per-section header/item rendering; no extra store or side effect.",
     "validation": [
       "Complete source read against grid and modal data construction."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/components/index.ts",
@@ -1425,7 +1562,8 @@
     "summary": "Host component setters preserve live export bindings for extracted grid/preview components; preview has a null fallback before extraction. Undefined grid exports still depend on successful host chunk extraction.",
     "validation": [
       "Complete source read against plugin extraction patches and lazy dialog load requirements."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/index.ts",
@@ -1435,7 +1573,8 @@
     "summary": "Retained per-dialog abort controller, cancellation on replacement/close/unmount and account authorization checks before and after host chunk loading. Effect replay reactivates the local action owner correctly.",
     "validation": [
       "Complete source read; scripts/testUiComponents.ts dialog close/unmount/replay fixture passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/modals/ChangeDecorationModal.tsx",
@@ -1446,7 +1585,8 @@
     "validation": [
       "Complete source read; verified Set membership matches previous exact hash equality; scripts/testUiComponents.ts underlying Decor action/cancellation fixtures passed; eslint passed. Live modal rendering not exercised.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/modals/CreateDecorationModal.tsx",
@@ -1456,7 +1596,8 @@
     "summary": "Retained account ownership, bounded preflight header validation, cancellation of obsolete file selections, Blob URL revoke on replacement/unmount and explicit submit-for-review behavior. Name/file inputs remain locked during upload.",
     "validation": [
       "Complete source read; scripts/testUiComponents.ts PNG/deferred upload/dialog lifecycle fixtures passed. Live upload not performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/modals/GuidelinesModal.tsx",
@@ -1466,7 +1607,8 @@
     "summary": "Guidelines acceptance only follows explicit Continue and successful editor opening; owner changes or close abort pending chunk work. Existing guidelines preference persists without widening upload permissions.",
     "validation": [
       "Complete source read against openCreateDecorationModal ownership checks and useDialogActions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/decor/ui/styles.css",
@@ -1476,7 +1618,8 @@
     "summary": "Decoration editor/grid styles are plugin-scoped with fixed four-column list sizing, scroll containment and separate preview/form layouts. Host modal widths remain a live visual compatibility limit.",
     "validation": [
       "Complete stylesheet read against all emitted Decor classes; no live visual QA."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/devCompanion.dev/auth.ts",
@@ -1486,7 +1629,8 @@
     "summary": "Defensively reviewed exact auth envelopes, 32-byte nonce/secret encoding, role-separated HMAC transcripts, nonextractable CryptoKey import and fail-closed asynchronous phase transitions. No authentication or remote command capability was expanded.",
     "validation": [
       "Complete source read; traced challenge/confirmation phase guards and terminal failure. No live connection, traffic or credentials accessed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/devCompanion.dev/index.tsx",
@@ -1496,7 +1640,8 @@
     "summary": "Retained development-only startup, empty-secret-disabled connection behavior, masked auth input, secret validation and stop delegation. Settings identifiers/client version remain compatible.",
     "validation": [
       "Complete source read against authenticator and socket initialization. No debugger/client connection started."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/devCompanion.dev/initWs.tsx",
@@ -1506,7 +1651,8 @@
     "summary": "Defensively reviewed loopback-only transport, authenticated response gating, connection identity checks, auth deadline, command rate/size bounds and disabled remote compilation/function finds. Existing limits include synchronous regex evaluation and reload paths outside the shared persistence barrier.",
     "validation": [
       "Complete source read of all socket events and command branches. No connection, remote commands or vulnerability reproduction performed; no offensive/debugger capability improvements."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/devCompanion.dev/types/index.ts",
@@ -1516,7 +1662,8 @@
     "summary": "Retained the existing Recieve namespace export spelling to preserve imports and protocol type API compatibility.",
     "validation": [
       "Complete source read and import cross-check in initWs/util."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/devCompanion.dev/types/recieve.ts",
@@ -1526,7 +1673,8 @@
     "summary": "Reviewed exact-key runtime schemas, plain-object checks, bounded strings/arrays, safe integer IDs/nonces and version tuples. Invalid regex syntax is caught by command processing; length bounds alone do not bound regex execution time.",
     "validation": [
       "Complete source read of every command schema against initWs consumers. No adversarial regex execution or remote operation performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/devCompanion.dev/types/send.ts",
@@ -1536,7 +1684,8 @@
     "summary": "Reviewed outgoing success/failure envelope, request nonce and module/version payload types. Existing source/report payload boundaries remain unchanged.",
     "validation": [
       "Complete type source read against replyData and authenticated initial responses; no module extraction performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/devCompanion.dev/util.tsx",
@@ -1546,7 +1695,8 @@
     "summary": "Defensively reviewed source extraction helpers, unique-module selection and plugin-toggle bookkeeping without enabling or repairing remote workflows. Existing limitation: the remote-toggle reload path bypasses the shared awaited settings-flush helper.",
     "validation": [
       "Complete source read; no live debugger, toggle, reload, dynamic lookup or wire-protocol operation performed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/disableCallIdle/index.ts",
@@ -1556,7 +1706,8 @@
     "validation": [
       "Complete source read; checked both patch targets and no mutable runtime state."
     ],
-    "reviewedSha256": "9100ff1d5e98402caca96920932f8e46c1ed689c536db30cd1b0cf9b7d8f1ed8"
+    "reviewedSha256": "9100ff1d5e98402caca96920932f8e46c1ed689c536db30cd1b0cf9b7d8f1ed8",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/dontRoundMyTimestamps/index.ts",
@@ -1566,7 +1717,8 @@
     "validation": [
       "Complete source read; checked idempotent start and stop reset."
     ],
-    "reviewedSha256": "95af98cd3875e8b0636e13cb5bb5fb435a24f69b6f5d162c5f6410ff4cff9ff4"
+    "reviewedSha256": "95af98cd3875e8b0636e13cb5bb5fb435a24f69b6f5d162c5f6410ff4cff9ff4",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/experiments/hideBugReport.css",
@@ -1576,7 +1728,8 @@
     "validation": [
       "Complete stylesheet and importing module read."
     ],
-    "reviewedSha256": "54aebc6f04b8d17e06fed14359f815b405c0e25e64bf036fb99c11532da17d00"
+    "reviewedSha256": "54aebc6f04b8d17e06fed14359f815b405c0e25e64bf036fb99c11532da17d00",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/experiments/index.tsx",
@@ -1586,7 +1739,8 @@
     "validation": [
       "Complete source read without executing developer-access or experiment patches."
     ],
-    "reviewedSha256": "bb46ac198b54204348e13d2409a8ec8a9bceeee6511058d87f67db0798c65374"
+    "reviewedSha256": "bb46ac198b54204348e13d2409a8ec8a9bceeee6511058d87f67db0798c65374",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/expressionCloner/index.tsx",
@@ -1599,7 +1753,8 @@
       "ESLint passed for this source file.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "38b60df2bb7046d83421aeaa8593307e943d5a181f6440234be33501397c70fc"
+    "reviewedSha256": "38b60df2bb7046d83421aeaa8593307e943d5a181f6440234be33501397c70fc",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/f8break/index.ts",
@@ -1609,7 +1764,8 @@
     "validation": [
       "Complete source read; event handler identity is shared between start and stop."
     ],
-    "reviewedSha256": "2c69b6e1dfd3ec4f2e29e25723e04311c52f872a70703c13077ebe9fb95c0e1f"
+    "reviewedSha256": "2c69b6e1dfd3ec4f2e29e25723e04311c52f872a70703c13077ebe9fb95c0e1f",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fakeNitro/index.tsx",
@@ -1619,7 +1775,8 @@
     "validation": [
       "Complete source read in overlapping segments to recover tool truncation; no premium/permission patch, message send, or conversion workflow executed."
     ],
-    "reviewedSha256": "2279274ddb807c7a2fa8e84443bc2bcab6de99f69ac2a9898c5215f4f6e8962b"
+    "reviewedSha256": "2279274ddb807c7a2fa8e84443bc2bcab6de99f69ac2a9898c5215f4f6e8962b",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fakeProfileThemes/index.tsx",
@@ -1629,7 +1786,8 @@
     "validation": [
       "Complete source read; checked missing-current-user handling and error-boundary fallback."
     ],
-    "reviewedSha256": "17d8be957245ccd3bf482d6dc28a1558258ac5b761f6ee81da7c818eb2706d99"
+    "reviewedSha256": "17d8be957245ccd3bf482d6dc28a1558258ac5b761f6ee81da7c818eb2706d99",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fakeProfileThemes/styles.css",
@@ -1639,7 +1797,8 @@
     "validation": [
       "Complete stylesheet read with matching preview class in index.tsx."
     ],
-    "reviewedSha256": "6699b668f98615199541ef1c87637df362b4838e65c10b2f1a009da23e4f06f0"
+    "reviewedSha256": "6699b668f98615199541ef1c87637df362b4838e65c10b2f1a009da23e4f06f0",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/favEmojiFirst/README.md",
@@ -1649,7 +1808,8 @@
     "validation": [
       "Complete README read and compared with plugin description; external images not fetched."
     ],
-    "reviewedSha256": "292e3d39ca6b1200561830fc848fff85b3f15cc1f83abe5aa9e53dacdf0c779b"
+    "reviewedSha256": "292e3d39ca6b1200561830fc848fff85b3f15cc1f83abe5aa9e53dacdf0c779b",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/favEmojiFirst/components/modals/ClearAliasesConfirmModal.tsx",
@@ -1659,7 +1819,8 @@
     "validation": [
       "Complete component and clearAliases caller read."
     ],
-    "reviewedSha256": "1f5e90e8067f4410659f565c1bccdb7c9417f620f8f56f1f84d5e66d3092cfc6"
+    "reviewedSha256": "1f5e90e8067f4410659f565c1bccdb7c9417f620f8f56f1f84d5e66d3092cfc6",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/favEmojiFirst/components/modals/SetAliasModal.tsx",
@@ -1669,7 +1830,8 @@
     "validation": [
       "Complete component read and saveAlias result-contract inspection."
     ],
-    "reviewedSha256": "66594e8159ce3dc1500c71d0911070277ddc310d70c1ad2faa449e9c50463784"
+    "reviewedSha256": "66594e8159ce3dc1500c71d0911070277ddc310d70c1ad2faa449e9c50463784",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/favEmojiFirst/components/modals/types.ts",
@@ -1679,7 +1841,8 @@
     "validation": [
       "Complete type file and both consumer components read."
     ],
-    "reviewedSha256": "3cbb5b2fa7033486d747c15179796ee9bb790f6423e5f0f5e6a3071c96b85fd5"
+    "reviewedSha256": "3cbb5b2fa7033486d747c15179796ee9bb790f6423e5f0f5e6a3071c96b85fd5",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/favEmojiFirst/index.tsx",
@@ -1692,7 +1855,8 @@
       "ESLint passed for this source file.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "366f6df2605ff4a3a3e8075f6803c6982a6f743378fbccf4dd9833f444322a23"
+    "reviewedSha256": "366f6df2605ff4a3a3e8075f6803c6982a6f743378fbccf4dd9833f444322a23",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/favEmojiFirst/styles.css",
@@ -1702,7 +1866,8 @@
     "validation": [
       "Complete stylesheet read and classNameFactory call-site comparison."
     ],
-    "reviewedSha256": "2956acddb4ecb089476e6e76b670ba4b0b053dcfc333a8ded98e2935c0029159"
+    "reviewedSha256": "2956acddb4ecb089476e6e76b670ba4b0b053dcfc333a8ded98e2935c0029159",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fixCodeblockGap/index.ts",
@@ -1712,7 +1877,8 @@
     "validation": [
       "Complete source read; compared replacement with its identical find string."
     ],
-    "reviewedSha256": "8ba09f634b2778cb288bd1dfc93f02294b8d07bc387c30202bff6c3dffe35733"
+    "reviewedSha256": "8ba09f634b2778cb288bd1dfc93f02294b8d07bc387c30202bff6c3dffe35733",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fixImagesQuality/README.md",
@@ -1722,7 +1888,8 @@
     "validation": [
       "Complete README and source read."
     ],
-    "reviewedSha256": "188834d06f7dc44a14f7a25f8f28d53b862dbb767247c6d411fa9afca081b025"
+    "reviewedSha256": "188834d06f7dc44a14f7a25f8f28d53b862dbb767247c6d411fa9afca081b025",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fixImagesQuality/index.tsx",
@@ -1733,7 +1900,8 @@
       "Complete source read.",
       "node --import=tsx --test scripts/testUiComponents.ts (53 passing), including image origin, freeze and resize cases."
     ],
-    "reviewedSha256": "1eb29b05c2b4a00663be483c151596ba94b07c1bee9ea1e2c4bd1715265018f4"
+    "reviewedSha256": "1eb29b05c2b4a00663be483c151596ba94b07c1bee9ea1e2c4bd1715265018f4",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fixSpotifyEmbeds.desktop/index.tsx",
@@ -1743,7 +1911,8 @@
     "validation": [
       "Complete source and native implementation read."
     ],
-    "reviewedSha256": "50c2c57d34fd855fc68f8e3deb22c9147f64996f1db73d1b7c4762d76e75e96b"
+    "reviewedSha256": "50c2c57d34fd855fc68f8e3deb22c9147f64996f1db73d1b7c4762d76e75e96b",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fixSpotifyEmbeds.desktop/native.ts",
@@ -1756,7 +1925,8 @@
       "ESLint passed for this source file.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "b58a0a37ba87b7fa1a85514cae697b7c1acc1b8501a5313e66077fe09479a5c4"
+    "reviewedSha256": "b58a0a37ba87b7fa1a85514cae697b7c1acc1b8501a5313e66077fe09479a5c4",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fixYoutubeEmbeds.desktop/README.md",
@@ -1766,7 +1936,8 @@
     "validation": [
       "Complete README read and native/source comparison; external screenshot not fetched."
     ],
-    "reviewedSha256": "f137018861cbeebb8711d51342b9c4cb43994cab858944fa75db2e94ab87380c"
+    "reviewedSha256": "f137018861cbeebb8711d51342b9c4cb43994cab858944fa75db2e94ab87380c",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fixYoutubeEmbeds.desktop/index.tsx",
@@ -1776,7 +1947,8 @@
     "validation": [
       "Complete source read; checked description length branches and error boundary."
     ],
-    "reviewedSha256": "d30e375d21de4b4f277d949ece9abb61496f4ecf48a31f74829494fcba2f9ead"
+    "reviewedSha256": "d30e375d21de4b4f277d949ece9abb61496f4ecf48a31f74829494fcba2f9ead",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fixYoutubeEmbeds.desktop/native.ts",
@@ -1786,7 +1958,8 @@
     "validation": [
       "Complete native source read without running iframe code or the workaround."
     ],
-    "reviewedSha256": "15b214df0c6e8505b8c94cf5ff84edd56c5a1932154dcfbea2d91ccb2446891f"
+    "reviewedSha256": "15b214df0c6e8505b8c94cf5ff84edd56c5a1932154dcfbea2d91ccb2446891f",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/forceOwnerCrown/index.ts",
@@ -1797,7 +1970,8 @@
       "Complete source read.",
       "node --import=tsx --test scripts/testUiComponents.ts (53 passing), including unavailable guild-context crown fallbacks."
     ],
-    "reviewedSha256": "485664e0e68be16ca806a08d3bca2eea72beb718da8328652ac477d0d97ddd27"
+    "reviewedSha256": "485664e0e68be16ca806a08d3bca2eea72beb718da8328652ac477d0d97ddd27",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/friendInvites/index.ts",
@@ -1807,7 +1981,8 @@
     "validation": [
       "Complete source read; checked awaited action order and empty-list handling."
     ],
-    "reviewedSha256": "2c86aa55e6d1bd1a6ca828b99490c4d992fedf5860e247b3ff58e461fa8e02fe"
+    "reviewedSha256": "2c86aa55e6d1bd1a6ca828b99490c4d992fedf5860e247b3ff58e461fa8e02fe",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fullSearchContext/README.md",
@@ -1817,7 +1992,8 @@
     "validation": [
       "Complete README and source read; external image not fetched."
     ],
-    "reviewedSha256": "4e724f2feaf70790c5ac495b42bd07218034385cec66f568bdd793a6a29ee3ec"
+    "reviewedSha256": "4e724f2feaf70790c5ac495b42bd07218034385cec66f568bdd793a6a29ee3ec",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fullSearchContext/index.tsx",
@@ -1827,7 +2003,8 @@
     "validation": [
       "Complete source read; checked menu props and limited message-actions patch scope."
     ],
-    "reviewedSha256": "b09cf0b185da3ec705cab115e4b234364b257a393d5dd416e5432877bf505c0d"
+    "reviewedSha256": "b09cf0b185da3ec705cab115e4b234364b257a393d5dd416e5432877bf505c0d",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fullUserInChatbox/README.md",
@@ -1837,7 +2014,8 @@
     "validation": [
       "Complete README and matching source read; linked video not fetched."
     ],
-    "reviewedSha256": "acfd56d7e1233f1e8c224ef69a1a46c77b37291c367e8b56f14dab7059152b74"
+    "reviewedSha256": "acfd56d7e1233f1e8c224ef69a1a46c77b37291c367e8b56f14dab7059152b74",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/fullUserInChatbox/index.tsx",
@@ -1847,7 +2025,8 @@
     "validation": [
       "Complete source read; checked explicit fallback component invocation and error boundary props."
     ],
-    "reviewedSha256": "696bbcd6455da1bdf1ef0ac9212b395bab4b01a53a2ff60bfeeb5349193687e1"
+    "reviewedSha256": "696bbcd6455da1bdf1ef0ac9212b395bab4b01a53a2ff60bfeeb5349193687e1",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/gameActivityToggle/index.tsx",
@@ -1860,7 +2039,8 @@
       "ESLint passed for this source file.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "ab1d56cbe883ef355c2ed2c62764e99e2aadf7e27ab355f7ebbd17e3c2e92bbf"
+    "reviewedSha256": "ab1d56cbe883ef355c2ed2c62764e99e2aadf7e27ab355f7ebbd17e3c2e92bbf",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/gifPaste/index.ts",
@@ -1870,7 +2050,8 @@
     "validation": [
       "Complete source read; no message sent or picker opened."
     ],
-    "reviewedSha256": "64da0852628317781e37a3846f9dd615edbe5d43deb1ea123e108e6ab1afb99d"
+    "reviewedSha256": "64da0852628317781e37a3846f9dd615edbe5d43deb1ea123e108e6ab1afb99d",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/greetStickerPicker/index.tsx",
@@ -1880,7 +2061,8 @@
     "validation": [
       "Complete source read without sending greets or running alternate send paths."
     ],
-    "reviewedSha256": "94e23a5069f7e7ec3ef4792c24767f48f7a7f676e7187fd0adf41152ee1ff8e8"
+    "reviewedSha256": "94e23a5069f7e7ec3ef4792c24767f48f7a7f676e7187fd0adf41152ee1ff8e8",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/hideAttachments/index.tsx",
@@ -1893,7 +2075,8 @@
       "ESLint passed for this source file.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "d8c7e22cc981a43d763a507af733ec498f174932bd5b041b8e9f627cdd13d3ec"
+    "reviewedSha256": "d8c7e22cc981a43d763a507af733ec498f174932bd5b041b8e9f627cdd13d3ec",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/hideAttachments/styles.css",
@@ -1903,7 +2086,8 @@
     "validation": [
       "Complete stylesheet and accessory call-site read."
     ],
-    "reviewedSha256": "2bec2216e1aea1860ee56699e408fea2503c599f47abd1814850f5e9cb0077de"
+    "reviewedSha256": "2bec2216e1aea1860ee56699e408fea2503c599f47abd1814850f5e9cb0077de",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/iLoveSpam/index.ts",
@@ -1913,7 +2097,8 @@
     "validation": [
       "Complete source read and migration/name comparison; no flagged-message or send workflow executed."
     ],
-    "reviewedSha256": "b404ab232add0ea0b4d7f991a3281d5ee66c0fea73f9f4c1419eb018ab266dd0"
+    "reviewedSha256": "b404ab232add0ea0b4d7f991a3281d5ee66c0fea73f9f4c1419eb018ab266dd0",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/ignoreActivities/README.md",
@@ -1923,7 +2108,8 @@
     "validation": [
       "Complete README and implementation read; images not fetched."
     ],
-    "reviewedSha256": "674d047b15bad642b9ec9b4623d016fed0cc6c11cac2202ddfbd5fd6ef621991"
+    "reviewedSha256": "674d047b15bad642b9ec9b4623d016fed0cc6c11cac2202ddfbd5fd6ef621991",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/ignoreActivities/index.tsx",
@@ -1933,7 +2119,8 @@
     "validation": [
       "Complete source read; traced cache rebuilds from start and settings changes, filter precedence, and editor cleanup."
     ],
-    "reviewedSha256": "245d5be5101e20b0d1c1412c92ad129cbb24e80b0e2574cc61b8d271b5a55f60"
+    "reviewedSha256": "245d5be5101e20b0d1c1412c92ad129cbb24e80b0e2574cc61b8d271b5a55f60",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/imageFilename/README.md",
@@ -1943,7 +2130,8 @@
     "validation": [
       "Complete README and source read; image not fetched."
     ],
-    "reviewedSha256": "2194bc6f4f743b08f4312bf51dc714444fe11ea4e1511aec60ab6786ee87b966"
+    "reviewedSha256": "2194bc6f4f743b08f4312bf51dc714444fe11ea4e1511aec60ab6786ee87b966",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/imageFilename/index.ts",
@@ -1953,7 +2141,8 @@
     "validation": [
       "Complete source read; checked path versus query extension handling and anchored host matching."
     ],
-    "reviewedSha256": "d9e7ae119be67c42c07e46f0c7cec9266eb1097f9e5c9b2c5a0b6c8638a53e7e"
+    "reviewedSha256": "d9e7ae119be67c42c07e46f0c7cec9266eb1097f9e5c9b2c5a0b6c8638a53e7e",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/imageLink/README.md",
@@ -1963,7 +2152,8 @@
     "validation": [
       "Complete README and source read."
     ],
-    "reviewedSha256": "183ec42222fd0f7d91e31ed4e271d1639ab8d551e85c7af2679fc9559be991ac"
+    "reviewedSha256": "183ec42222fd0f7d91e31ed4e271d1639ab8d551e85c7af2679fc9559be991ac",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/imageLink/index.ts",
@@ -1973,7 +2163,8 @@
     "validation": [
       "Complete source read and find/replacement scope inspection."
     ],
-    "reviewedSha256": "be2a146f239540a279b7332b37b15a3193f2f2e1e5a7b5c4e1fc40a351046573"
+    "reviewedSha256": "be2a146f239540a279b7332b37b15a3193f2f2e1e5a7b5c4e1fc40a351046573",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/imageZoom/README.md",
@@ -1983,7 +2174,8 @@
     "validation": [
       "Complete README and component read; external assets not fetched."
     ],
-    "reviewedSha256": "d86e4de7aa4693719048b028e67459943442c521e24b2dce50805a63eeaf3934"
+    "reviewedSha256": "d86e4de7aa4693719048b028e67459943442c521e24b2dce50805a63eeaf3934",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/imageZoom/components/Magnifier.tsx",
@@ -1996,7 +2188,8 @@
       "ESLint passed for this source file.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "671cac9bd04607216d27293bcc390f9c22dfc393e3bd6bff3760dad1ae5c6cef"
+    "reviewedSha256": "671cac9bd04607216d27293bcc390f9c22dfc393e3bd6bff3760dad1ae5c6cef",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/imageZoom/constants.ts",
@@ -2006,7 +2199,8 @@
     "validation": [
       "Complete constants file and all importing ImageZoom files read."
     ],
-    "reviewedSha256": "2251f1df08de3a5ad2e6673b6b084e540eaa93288e8fcb10ce3eb72b1e65f38f"
+    "reviewedSha256": "2251f1df08de3a5ad2e6673b6b084e540eaa93288e8fcb10ce3eb72b1e65f38f",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/imageZoom/index.tsx",
@@ -2019,7 +2213,8 @@
       "ESLint passed for this source file.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "e641deecf9df597aad921aa2e58aaecbc59072920f79f725270f661dbb3e1892"
+    "reviewedSha256": "e641deecf9df597aad921aa2e58aaecbc59072920f79f725270f661dbb3e1892",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/imageZoom/styles.css",
@@ -2029,7 +2224,8 @@
     "validation": [
       "Complete stylesheet and rendered class usage read."
     ],
-    "reviewedSha256": "4e35ea95504667e466fadded05ca1bd0546d43fef7c7770fc7dbdab7208653c2"
+    "reviewedSha256": "4e35ea95504667e466fadded05ca1bd0546d43fef7c7770fc7dbdab7208653c2",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/imageZoom/utils/waitFor.ts",
@@ -2039,7 +2235,8 @@
     "validation": [
       "Complete helper and Magnifier lifecycle call-site read."
     ],
-    "reviewedSha256": "c53c385775899acb6b52d72ae2ac119fad50f74aaf0fc6fdafd8ccdba4d0bcac"
+    "reviewedSha256": "c53c385775899acb6b52d72ae2ac119fad50f74aaf0fc6fdafd8ccdba4d0bcac",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/implicitRelationships/README.md",
@@ -2049,7 +2246,8 @@
     "validation": [
       "Complete README and source read; external screenshot not fetched."
     ],
-    "reviewedSha256": "e98a871b69896cce17ac8814cfadacb46f697aa43ca10bfb24132c974a9310a9"
+    "reviewedSha256": "e98a871b69896cce17ac8814cfadacb46f697aa43ca10bfb24132c974a9310a9",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/implicitRelationships/index.ts",
@@ -2059,7 +2257,8 @@
     "validation": [
       "Complete source read without fetching affinities, requesting members or executing relationship patches."
     ],
-    "reviewedSha256": "8beddf0866a03a006846944dfbefc26d33c4219274165092019663e75e400e06"
+    "reviewedSha256": "8beddf0866a03a006846944dfbefc26d33c4219274165092019663e75e400e06",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/ircColors/README.md",
@@ -2069,7 +2268,8 @@
     "validation": [
       "Complete README and implementation read; linked theme not fetched."
     ],
-    "reviewedSha256": "5f46c2a5341e78853e064d201aec144b04f5f8dd89f88ced2a6bc796ee0bce80"
+    "reviewedSha256": "5f46c2a5341e78853e064d201aec144b04f5f8dd89f88ced2a6bc796ee0bce80",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/ircColors/index.ts",
@@ -2082,7 +2282,8 @@
       "ESLint passed for this source file.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "ae45a147632115e8103d17cec46c564f4a07a589e6dbf356935ed37c2c10b111"
+    "reviewedSha256": "ae45a147632115e8103d17cec46c564f4a07a589e6dbf356935ed37c2c10b111",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/keepCurrentChannel/index.ts",
@@ -2095,7 +2296,8 @@
       "ESLint passed for this source file.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "b7533558c68267e711a0e57a12268f94c9a3382250920c0717082c96153495f4"
+    "reviewedSha256": "b7533558c68267e711a0e57a12268f94c9a3382250920c0717082c96153495f4",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/loadingQuotes/index.ts",
@@ -2108,7 +2310,8 @@
       "ESLint passed for this source file.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "402303617b27d46fd002870bc6a1a4a7a0bf91d6bd0b1a78608f10ca8a62d21b"
+    "reviewedSha256": "402303617b27d46fd002870bc6a1a4a7a0bf91d6bd0b1a78608f10ca8a62d21b",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/loadingQuotes/quotes.txt",
@@ -2118,7 +2321,8 @@
     "validation": [
       "Complete text asset read; compared line filtering with loadingQuotes/index.ts."
     ],
-    "reviewedSha256": "ab320fcff19dd00bf422ad664f6cd970678fe366fb4b1ff1299e5aecc9bc84a6"
+    "reviewedSha256": "ab320fcff19dd00bf422ad664f6cd970678fe366fb4b1ff1299e5aecc9bc84a6",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/memberCount/CircleIcon.tsx",
@@ -2128,7 +2332,8 @@
     "validation": [
       "Complete SVG component and matching stylesheet read."
     ],
-    "reviewedSha256": "338f323e413d675bfefc0c6090a28326477b841cf5f1ed2db82f8575b0da3858"
+    "reviewedSha256": "338f323e413d675bfefc0c6090a28326477b841cf5f1ed2db82f8575b0da3858",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/memberCount/MemberCount.tsx",
@@ -2140,7 +2345,8 @@
       "ESLint passed for this source file; lifecycle store checks run in testAuditPluginsNavigation.ts.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "659a7bb7964f821afc48e11a916b2e97037da4faedc03bb2b42cffb0ed2e9216"
+    "reviewedSha256": "659a7bb7964f821afc48e11a916b2e97037da4faedc03bb2b42cffb0ed2e9216",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/memberCount/OnlineMemberCountStore.ts",
@@ -2153,7 +2359,8 @@
       "ESLint passed for this source file.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "a94a8eaf647f82b876a1375c2556df521896d8b77ecc06f017fc98c9e986a84d"
+    "reviewedSha256": "a94a8eaf647f82b876a1375c2556df521896d8b77ecc06f017fc98c9e986a84d",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/memberCount/VoiceIcon.tsx",
@@ -2163,7 +2370,8 @@
     "validation": [
       "Complete SVG component and CSS consumer read."
     ],
-    "reviewedSha256": "79314424a5bf76ae510a46cbc89678f40ca7f5b8f1c163ce1ec595b195b28e68"
+    "reviewedSha256": "79314424a5bf76ae510a46cbc89678f40ca7f5b8f1c163ce1ec595b195b28e68",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/memberCount/index.tsx",
@@ -2175,7 +2383,8 @@
       "ESLint passed for this source file; lifecycle behavior covered by testAuditPluginsNavigation.ts.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
     ],
-    "reviewedSha256": "a4cf7abdd12344e694f554c859f1a533f1c7ea94cf8357f959c723492efa084d"
+    "reviewedSha256": "a4cf7abdd12344e694f554c859f1a533f1c7ea94cf8357f959c723492efa084d",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/memberCount/style.css",
@@ -2185,7 +2394,8 @@
     "validation": [
       "Complete stylesheet and all rendered icon/widget class references read."
     ],
-    "reviewedSha256": "96bbb152a4c7bbd1d2df537ebf630a18972e64cd68a6930b0fce12d6bf687649"
+    "reviewedSha256": "96bbb152a4c7bbd1d2df537ebf630a18972e64cd68a6930b0fce12d6bf687649",
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/mentionAvatars/README.md",
@@ -2195,7 +2405,8 @@
     "summary": "Read feature description and screenshot links; accurately describes user avatars and role icons, no executable content.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/mentionAvatars/index.tsx",
@@ -2207,7 +2418,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/mentionAvatars/styles.css",
@@ -2217,7 +2429,8 @@
     "summary": "Read complete scoped mention/icon sizing, margins and ServerInfo exclusion; preserved layout and selector behavior.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageClickActions/README.md",
@@ -2227,7 +2440,8 @@
     "summary": "Read legacy shortcut description and screenshot link; still describes supported defaults, though advanced actions are documented through settings.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageClickActions/ReactEmojiSetting.tsx",
@@ -2239,7 +2453,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageClickActions/index.ts",
@@ -2252,7 +2467,8 @@
       "Targeted source ESLint passed.",
       "node --import=tsx --test scripts/testAuditPluginsMessages.ts: 5 passed, synthetic data and mocked side effects.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageClickActions/styles.css",
@@ -2262,7 +2478,8 @@
     "summary": "Read full scoped emoji picker sizing, flex alignment, interaction cursor and preview styling; no unnecessary global styling.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageLatency/README.md",
@@ -2272,7 +2489,8 @@
     "summary": "Read indicator documentation, clock-drift caveats, gateway-only and grouping limits plus demo links; caveats match implementation.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageLatency/index.tsx",
@@ -2282,7 +2500,8 @@
     "summary": "Reviewed nonce timestamp extraction, Kotlin legacy offset, self/bot filters, duration units and tooltip indicator rendering. Malformed nonce extraction remains contained by ErrorBoundary; patch constructs a wrapped tooltip component during host render and depends on current host message structure.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageLinkEmbeds/index.tsx",
@@ -2295,7 +2514,8 @@
       "Targeted source ESLint passed.",
       "node --import=tsx --test scripts/testAuditPluginsMessages.ts: 5 passed, synthetic data and mocked side effects.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageLogger/HistoryModal.tsx",
@@ -2305,7 +2525,8 @@
     "summary": "Complete defensive read of edit-history modal, date tabs, diff toggle and history indexing. Assumes logger-initialized timestamps/history; no logging, retention or privacy-bypass capability changed or exercised.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageLogger/deleteStyleOverlay.css",
@@ -2315,7 +2536,8 @@
     "summary": "Read complete deleted-message overlay rule; preserved its scoped status color behavior. Defensive read only.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageLogger/deleteStyleText.css",
@@ -2325,7 +2547,8 @@
     "summary": "Read full deleted-message text variable overrides and fallbacks; preserved. Defensive read only.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageLogger/diffUtils.ts",
@@ -2335,7 +2558,8 @@
     "summary": "Complete defensive read of tokenization and LCS diff construction. Recorded quadratic matrix allocation and repeated suffix-to-array tokenization; static custom-emoji branch has an inconsistent slice comparison. No retained-message or privacy-bypass functionality improved or exercised.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageLogger/index.tsx",
@@ -2345,7 +2569,8 @@
     "summary": "Complete defensive read of settings, ignore lists, context removal, patch contracts, nonce normalization, history/attachment retention and diff rendering. Retains unbounded in-memory history/diff-disable set, mutation during render and queued updates without stop/account guards; shouldIgnore catch returns false. No retention or privacy-bypass functionality changed or exercised.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/messageLogger/messageLogger.css",
@@ -2355,7 +2580,8 @@
     "summary": "Read all scoped deleted attachment, spoiler, modal and added/removed diff rules including pseudo-elements and disabled overrides. Preserved styles; defensive read only.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/moreQuickReactions/README.md",
@@ -2365,7 +2591,8 @@
     "summary": "Read feature description and screenshot reference; reflects customizable quick reaction display.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/moreQuickReactions/index.ts",
@@ -2378,7 +2605,8 @@
       "Targeted ESLint and full pnpm testTsc passed.",
       "testAuditPluginsUtilities.ts: 9 passed, including invalid-number grid bounds.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/moreQuickReactions/styles.css",
@@ -2388,7 +2616,8 @@
     "summary": "Read full grid sizing, compact scaling, emoji dimensions and scoped menu padding; columns variable matches plugin patch.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/musicRichPresence/index.tsx",
@@ -2401,7 +2630,8 @@
       "Targeted source ESLint passed.",
       "node --import=tsx --test scripts/testAuditPluginsPresence.ts: 3 passed; transport, activity and timer mocks.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/musicRichPresence/lastfm.ts",
@@ -2414,7 +2644,8 @@
       "Targeted source ESLint passed.",
       "node --import=tsx --test scripts/testAuditPluginsPresence.ts: 3 passed; transport, activity and timer mocks.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/musicRichPresence/listenbrainz.ts",
@@ -2427,7 +2658,8 @@
       "Targeted source ESLint passed.",
       "node --import=tsx --test scripts/testAuditPluginsPresence.ts: 3 passed; transport, activity and timer mocks.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/mutualGroupDMs/index.tsx",
@@ -2439,7 +2671,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/mutualGroupDMs/style.css",
@@ -2449,7 +2682,8 @@
     "summary": "Read both scoped modal tab spacing rules and CSS variable override; preserved required tab fit.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/newGuildSettings/index.tsx",
@@ -2462,7 +2696,8 @@
       "Targeted source ESLint passed.",
       "node --import=tsx --test scripts/testAuditPluginsMessages.ts: 5 passed, synthetic data and mocked side effects.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noBlockedMessages/index.ts",
@@ -2476,7 +2711,8 @@
       "Full pnpm testTsc passed after this source batch.",
       "testAuditPluginsUtilities.ts: 9 passed; exact ID, boolean suppression and invalid-number cases mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noDeepLinks.web/index.ts",
@@ -2486,7 +2722,8 @@
     "summary": "Read entire required web-only deep-link modal replacement; retained narrow host patch and no owned lifecycle state.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noDevtoolsWarning/index.ts",
@@ -2496,7 +2733,8 @@
     "summary": "Complete defensive read of console warning/token-hiding callback patch. Preserved without modifying or exercising token visibility or warning bypass behavior.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noF1/index.ts",
@@ -2506,7 +2744,8 @@
     "summary": "Read exact F1 key-list replacement and plugin metadata; no global event listener or broader key binding mutation.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noMaskedUrlPaste/README.md",
@@ -2516,7 +2755,8 @@
     "summary": "Read entire one-line feature description; matches selected-text paste behavior.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noMaskedUrlPaste/index.ts",
@@ -2526,7 +2766,8 @@
     "summary": "Read host paste selection-branch patch; preserves unmasked URL preference without retained listeners or state.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noMiddleClickPaste/index.ts",
@@ -2536,7 +2777,8 @@
     "summary": "Read platform visibility and left/middle mouse handling; one stable mouseup listener is removed in stop. Hidden flag controls unsupported-platform visibility.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noMosaic/index.ts",
@@ -2546,7 +2788,8 @@
     "summary": "Read all visual-media/full-width and optional inline-video patch rules; restart-marked option aligns with patch predicate. Runtime depends on host media type structures.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noOnboardingDelay/index.ts",
@@ -2556,7 +2799,8 @@
     "summary": "Read complete onboarding-cover timing patch; retains exact host delay literal replacement and no runtime state. No onboarding access checks enhanced or exercised.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noPendingCount/index.ts",
@@ -2566,7 +2810,8 @@
     "summary": "Read all request/offer count patches and real request-count helper. Badge suppression preserves message-request tab visibility via underlying channel-ID set; options correctly require restart.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noProfileThemes/index.ts",
@@ -2576,7 +2821,8 @@
     "summary": "Read premium customization display predicate and missing-current-user handling; preserves own profile theme and hides others locally.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noReplyMention/index.tsx",
@@ -2590,7 +2836,8 @@
       "Full pnpm testTsc passed after this source batch.",
       "testAuditPluginsUtilities.ts: 9 passed; exact ID, boolean suppression and invalid-number cases mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noServerEmojis/index.ts",
@@ -2600,7 +2847,8 @@
     "summary": "Read unicode/custom emoji filter and all/current-guild modes; null channel handled explicitly and unrelated emoji types remain visible.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noSystemBadge.discordDesktop/index.ts",
@@ -2610,7 +2858,8 @@
     "summary": "Read desktop-only badge/tray setter patch; scoped to native indicator setters and no plugin-owned resources.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noTypingAnimation/index.ts",
@@ -2620,7 +2869,8 @@
     "summary": "Read typing-dot focused-prop replacement; preserved host animation stop behavior and scoped patch anchor.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noUnblockToJump/README.md",
@@ -2630,7 +2880,8 @@
     "summary": "Read jump-popup behavior description and screenshot reference; no executable content.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/noUnblockToJump/index.ts",
@@ -2640,7 +2891,8 @@
     "summary": "Complete defensive read of blocked/ignored-message jump confirmation bypass. No bypass functionality changed or exercised.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/notificationVolume/README.md",
@@ -2651,7 +2903,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsUtilities.ts: 9 passed; exact ID, boolean suppression and invalid-number cases mocked."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/notificationVolume/index.ts",
@@ -2665,7 +2918,8 @@
       "Full pnpm testTsc passed after this source batch.",
       "testAuditPluginsUtilities.ts: 9 passed; exact ID, boolean suppression and invalid-number cases mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/onePingPerDM/README.md",
@@ -2675,7 +2929,8 @@
     "summary": "Read unread-DM audio throttling description and purpose; matches implementation reset through host unread state.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/onePingPerDM/index.ts",
@@ -2685,7 +2940,8 @@
     "summary": "Read complete user-ID validation/cache lifecycle, channel/mention exemptions and unread-ID comparison. Startup builds exact ID set, stop clears it, missing users/channels safely bypass throttling; host unread update order remains required.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/openInApp/README.md",
@@ -2695,7 +2951,8 @@
     "summary": "Read supported app list; source additionally supports VRCX and Telegram through settings, documentation is non-exhaustive.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/openInApp/index.ts",
@@ -2709,7 +2966,8 @@
       "Full pnpm testTsc passed after this source batch.",
       "testAuditPluginsNative.ts: 6 passed; mocked short links, deadlines, host matching and failure fallback.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/openInApp/native.ts",
@@ -2723,7 +2981,8 @@
       "Full pnpm testTsc passed after this source batch.",
       "testAuditPluginsNative.ts: 6 passed; mocked short links, deadlines, host matching and failure fallback.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/overrideForumDefaults/index.tsx",
@@ -2733,7 +2992,8 @@
     "summary": "Read forum layout/sort settings and getter patch; preserves per-channel host overrides while changing default getters only.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/pauseInvitesForever/README.md",
@@ -2743,7 +3003,8 @@
     "summary": "Read indefinite invite pause description and screenshot link; matches UI intent.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/pauseInvitesForever/index.tsx",
@@ -2757,7 +3018,8 @@
       "Full pnpm testTsc passed after this source batch.",
       "testAuditPluginsMessages.ts: 6 passed; mocked permission/rejection/duplicate request checks.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/permissionFreeWill/README.md",
@@ -2767,7 +3029,8 @@
     "summary": "Complete defensive read of permission lockout/onboarding bypass documentation and explicit self-lockout warning. No bypass changes or execution.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/permissionFreeWill/index.ts",
@@ -2777,7 +3040,8 @@
     "summary": "Complete defensive read of restart-marked permission lockout/onboarding patches and canonicalized replacement. Preserved without improving or exercising permission-management bypasses.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/permissionsViewer/components/RolesAndUsersPermissions.tsx",
@@ -2790,7 +3054,8 @@
       "Targeted source ESLint passed.",
       "Full pnpm testTsc passed after this source batch.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/permissionsViewer/components/UserPermissions.tsx",
@@ -2803,7 +3068,8 @@
       "Targeted source ESLint passed.",
       "Full pnpm testTsc passed after this source batch.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/permissionsViewer/components/icons.tsx",
@@ -2813,7 +3079,8 @@
     "summary": "Read all three self-contained permission state SVGs and titles; preserved theme colors and paths.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/permissionsViewer/index.tsx",
@@ -2823,7 +3090,8 @@
     "summary": "Read full menu/profile integrations, owner bit aggregation and lazy permission chunk use. Retained host menu stale-guild/member assumptions and async chunk-load error contract; no role impersonation/access behavior enhanced.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/permissionsViewer/styles.css",
@@ -2833,7 +3101,8 @@
     "summary": "Read all user-header, permission modal split/scrollers, role/user indicators, tooltip and copied host role-button rules; constrained flex heights/widths preserve overflow handling.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/permissionsViewer/utils.ts",
@@ -2843,7 +3112,8 @@
     "summary": "Read role membership filtering, configured sorting, overwrite sorting and lazy permission-spec loader. Input role lists are caller-owned copies at inspected callers; mixed member/role comparator preserves host ordering and snapshot assumptions.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/petpet/index.ts",
@@ -2857,7 +3127,8 @@
       "Full pnpm testTsc passed after this source batch.",
       "testAuditPluginsMedia.ts: 10 passed; synthetic resource-bound and video lifecycle checks.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/pictureInPicture/index.tsx",
@@ -2871,7 +3142,8 @@
       "Full pnpm testTsc passed after this source batch.",
       "testAuditPluginsMedia.ts: 10 passed; synthetic resource-bound and video lifecycle checks.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/pictureInPicture/styles.css",
@@ -2881,7 +3153,8 @@
     "summary": "Read complete scoped PiP button normal/hover theme rules; preserved.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/pinDms/components/CreateCategoryModal.tsx",
@@ -2894,7 +3167,8 @@
       "Targeted source ESLint passed.",
       "Full pnpm testTsc passed after this source batch.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/pinDms/components/contextMenu.tsx",
@@ -2904,7 +3178,8 @@
     "summary": "Read full pin/create/unpin and custom-order menu construction for DM and group-DM contexts; host channel menu props assumed present after matching menu group.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/pinDms/constants.ts",
@@ -2914,7 +3189,8 @@
     "summary": "Read chunk size, default color and complete numeric swatch palette; preserved values and IDs.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/pinDms/data.ts",
@@ -2928,7 +3204,8 @@
       "Full pnpm testTsc passed after this source batch.",
       "testAuditPluginsNavigation.ts: 6 passed; synthetic account reset and duplicate pin checks.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/pinDms/index.tsx",
@@ -2941,7 +3218,8 @@
       "Targeted source ESLint passed.",
       "Full pnpm testTsc passed after this source batch.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/pinDms/styles.css",
@@ -2951,7 +3229,8 @@
     "summary": "Read all scoped category headers, color-picker layout, modal grid and collapse icon rotation rules; preserved.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/plainFolderIcon/index.ts",
@@ -2961,7 +3240,8 @@
     "summary": "Read exact host folder class injection and metadata; retains plain-icon preference without owned state.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/plainFolderIcon/style.css",
@@ -2971,7 +3251,8 @@
     "summary": "Read complete scoped transition, transform and fallback folder-color styles; preserved.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/platformIndicators/index.tsx",
@@ -2983,7 +3264,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/platformIndicators/style.css",
@@ -2993,7 +3275,8 @@
     "summary": "Read all indicator flex spacing and profile/message alignment rules; preserved.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/previewMessage/README.md",
@@ -3003,7 +3286,8 @@
     "summary": "Read preview description and screenshot reference; local preview behavior matches source.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/previewMessage/index.tsx",
@@ -3015,7 +3299,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/quickMention/README.md",
@@ -3025,7 +3310,8 @@
     "summary": "Read mention-button description and screenshot link; preserved.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/quickMention/index.tsx",
@@ -3037,7 +3323,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/quickReply/README.md",
@@ -3047,7 +3334,8 @@
     "summary": "Read Ctrl/Shift navigation shortcuts and screenshot link; matches source.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/quickReply/index.ts",
@@ -3059,7 +3347,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reactErrorDecoder/index.ts",
@@ -3071,7 +3360,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/readAllNotificationsButton/index.tsx",
@@ -3081,7 +3371,8 @@
     "summary": "Read full guild selectable/vocal/joined-thread unread collection and bulk acknowledgement. Start/stop server-list registration is symmetric. Host channel collection shapes and duplicate acknowledgement handling retained; no live acknowledgement performed.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/readAllNotificationsButton/style.css",
@@ -3091,7 +3382,8 @@
     "summary": "Read full scoped button sizing, text and hover theme styling; preserved.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/relationshipNotifier/functions.ts",
@@ -3103,7 +3395,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/relationshipNotifier/index.ts",
@@ -3115,7 +3408,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/relationshipNotifier/settings.ts",
@@ -3125,7 +3419,8 @@
     "summary": "Read every notice/offline/friend/request/server/group setting and default; preserved identifiers.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/relationshipNotifier/types.ts",
@@ -3135,7 +3430,8 @@
     "summary": "Read complete event and lightweight guild/group payload interfaces; preserved source contracts.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/relationshipNotifier/utils.ts",
@@ -3147,7 +3443,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/replaceGoogleSearch/README.md",
@@ -3157,7 +3454,8 @@
     "summary": "Read alternative search engine description and screenshot; preserved.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/replaceGoogleSearch/index.tsx",
@@ -3169,7 +3467,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/replyTimestamp/README.md",
@@ -3179,7 +3478,8 @@
     "summary": "Read replied-preview timestamp documentation and screenshot link; preserved.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/replyTimestamp/index.tsx",
@@ -3189,7 +3489,8 @@
     "summary": "Read loaded-reference discrimination, same-day/full-date formatting, separator and host patch. Missing/deleted references return null; host timestamp formats retained behind ErrorBoundary.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/replyTimestamp/style.css",
@@ -3199,7 +3500,8 @@
     "summary": "Read complete timestamp margin/width override; preserved.",
     "validation": [
       "Complete file read and behavior/contract review."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/revealAllSpoilers/index.ts",
@@ -3211,7 +3513,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reverseImageSearch/index.tsx",
@@ -3223,7 +3526,8 @@
       "Complete file read and behavior/contract review.",
       "Targeted source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/auth.tsx",
@@ -3235,7 +3539,8 @@
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/components/BlockedUserModal.tsx",
@@ -3247,7 +3552,8 @@
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/components/MessageButton.tsx",
@@ -3258,7 +3564,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/components/ReviewBadge.tsx",
@@ -3269,7 +3576,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/components/ReviewComponent.tsx",
@@ -3280,7 +3588,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/components/ReviewModal.tsx",
@@ -3291,7 +3600,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/components/ReviewsView.tsx",
@@ -3303,7 +3613,8 @@
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/entities.ts",
@@ -3314,43 +3625,47 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/index.tsx",
     "baselineSha256": "4ff385e68969bb91b194eee9ec5148989dde1c2508db6a03eb18f1ab6a36ba82",
-    "reviewedSha256": "cdc24055a9dfde722021e10a3a0e2812f16d9578ff442b700f164548efff4806",
+    "reviewedSha256": "0bb7d080497a2015ccde256842eeb7b3f0e0c1ac3a332ba9a43550d7eb6d4bf7",
     "status": "changed",
     "summary": "Owned the delayed notification timer and invalidated initialization/responses on stop, logout and connection changes; await authorization/cache updates, capture the appeal token and scope legacy lastReviewId using a new optional lastReviewAccountId. Existing legacy value is retained for the first active account.",
     "validation": [
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/reviewDbApi.ts",
     "baselineSha256": "88d4ee75b886919ed91aee52bf259bd157c0e580ad3e843324fd9eb6e02b67dc",
-    "reviewedSha256": "1c9137b5a4d18506726a043aec94e262d3d55c492afeb3df08951cbdc64e6171",
+    "reviewedSha256": "ba99df125a61006213f50ff54a72ab7889f76954ee4698f3c3079145670af205",
     "status": "changed",
     "summary": "Bound authenticated requests to their starting account, added ten-second deadlines, contained network/JSON/list failures, validated review rows and vote arrays, and return explicit unblock success while awaiting local cache persistence.",
     "validation": [
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/settings.tsx",
     "baselineSha256": "b8342d02c07911b767f84612c9ea6f4484e77da58af882a696923cb15b8d03d9",
-    "reviewedSha256": "5742316d1ac1737fcde6709b9e24b30f3fbaacd413e222de486e3b1017c201bc",
+    "reviewedSha256": "9cc12239e4d6a308406b372a58afcbb092e293546ad69ddbc7f286ecc3ec4a74",
     "status": "changed",
     "summary": "Reviewed all option defaults, authorization, support and website links. Added an optional private account ID paired with the existing last-review notification cursor; no public setting or ID removed.",
     "validation": [
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/style.css",
@@ -3361,7 +3676,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/reviewDB/utils.tsx",
@@ -3372,7 +3688,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "node --import=tsx --test scripts/testAuditPluginsReviews.ts: five passed; full testTsc and changed-source ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/roleColorEverywhere/index.tsx",
@@ -3384,7 +3701,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsUtilities.ts and testAuditPluginsUi.ts: 20 combined passed; source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/secretRingTone/index.ts",
@@ -3395,7 +3713,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review; no live client/service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/seeSummaries/README.md",
@@ -3406,7 +3725,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review; no live client/service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/seeSummaries/index.tsx",
@@ -3417,7 +3737,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review; no live client/service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/sendTimestamps/index.tsx",
@@ -3429,7 +3750,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsUtilities.ts and testAuditPluginsUi.ts: 20 combined passed; source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/sendTimestamps/styles.css",
@@ -3440,7 +3762,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review; no live client/service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/serverInfo/GuildInfoModal.tsx",
@@ -3452,7 +3775,8 @@
       "Complete file read and behavior/contract review.",
       "Changed-source ESLint passed; defensive null guards reviewed without member requests.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/serverInfo/README.md",
@@ -3463,7 +3787,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review; no live client/service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/serverInfo/index.tsx",
@@ -3475,7 +3800,8 @@
       "Complete file read and behavior/contract review.",
       "Changed-source ESLint passed; defensive null guards reviewed without member requests.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/serverInfo/styles.css",
@@ -3486,7 +3812,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review; no live client/service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/serverListIndicators/index.tsx",
@@ -3498,7 +3825,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsUtilities.ts and testAuditPluginsUi.ts: 20 combined passed; source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/serverListIndicators/styles.css",
@@ -3509,7 +3837,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review; no live client/service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/api/languages.ts",
@@ -3521,19 +3850,21 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/api/shiki.ts",
     "baselineSha256": "343b3e68a263a1de7b3cc06fa48c7b44702e1f829da608e14aaf24b2d679655c",
-    "reviewedSha256": "b67dd555992f14ef287f65ca715a63eb9eeb0702ed626f941152d3900f7b910f",
+    "reviewedSha256": "b5325fb43a2b1866e2e564be54712c6c9c0b1119522ad34d42cfd5422d4463a6",
     "status": "changed",
     "summary": "Rebuilt worker lifetime ownership: invalidate delayed startup, reject/reset readiness on stop, clear loaded state, bound worker calls, de-duplicate language/theme work and apply only the newest theme. Canonicalize language aliases before tokenization. External worker transport remains the installed dependency contract; no real worker executed.",
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/api/themes.ts",
@@ -3545,7 +3876,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/components/ButtonRow.tsx",
@@ -3556,7 +3888,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/components/Code.tsx",
@@ -3567,7 +3900,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/components/CopyButton.tsx",
@@ -3578,7 +3912,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/components/Header.tsx",
@@ -3589,7 +3924,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/components/Highlighter.tsx",
@@ -3601,7 +3937,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/devicon.css",
@@ -3612,7 +3949,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/hooks/useCopyCooldown.ts",
@@ -3624,7 +3962,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/hooks/useShikiSettings.ts",
@@ -3636,7 +3975,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/hooks/useTheme.ts",
@@ -3647,7 +3987,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/index.tsx",
@@ -3659,7 +4000,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/previewExample.tsx",
@@ -3670,7 +4012,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/settings.ts",
@@ -3682,7 +4025,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/shiki.css",
@@ -3693,7 +4037,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/types.ts",
@@ -3704,7 +4049,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/utils/color.ts",
@@ -3715,7 +4061,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/utils/createStyle.ts",
@@ -3727,7 +4074,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/shikiCodeblocks.desktop/utils/misc.ts",
@@ -3738,7 +4086,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsShiki.ts: seven isolated cases passed; Shiki source ESLint passed. Worker/native/network behavior mocked."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showAllMessageButtons/index.ts",
@@ -3749,7 +4098,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showConnections/VerifiedIcon.tsx",
@@ -3760,7 +4110,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showConnections/index.tsx",
@@ -3772,7 +4123,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsUi.ts: nine cases passed including cancellation/schema fixture; source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showConnections/styles.css",
@@ -3783,7 +4135,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showHiddenChannels/components/HiddenChannelLockScreen.tsx",
@@ -3794,7 +4147,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showHiddenChannels/index.tsx",
@@ -3805,7 +4159,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showHiddenChannels/style.css",
@@ -3816,7 +4171,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showHiddenThings/README.md",
@@ -3827,7 +4183,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showHiddenThings/index.ts",
@@ -3838,19 +4195,21 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showMeYourName/index.tsx",
     "baselineSha256": "4b6fc41c53123cf2a3c68e08eb29ed299f1e7f1383f3ec57db8ea5272e5d07c5",
-    "reviewedSha256": "e38b12638b14a0bad68dc733be77cf9e9ea81326a2deef2f4d8c89421af2f9dd",
+    "reviewedSha256": "8d58a6115c0e71f34b8c91a6cd84babd306be47f57a569dd5dbb9be6d1b0e23f",
     "status": "changed",
     "summary": "Read the complete 69 KB implementation, all templates/settings/migrations, CSS conversion, effects, hover and host patches. Keep bot formatting pure, respect reduced motion and voice setting, serialize immutable nickname persistence and guard startup/hover cleanup. Global settings-based hover rerenders and repeated computed-style reads remain performance limits.",
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsNames.ts: four isolated cases passed; source ESLint and earlier full testTsc passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showMeYourName/style.css",
@@ -3861,7 +4220,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showTimeoutDuration/README.md",
@@ -3872,7 +4232,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showTimeoutDuration/index.tsx",
@@ -3884,7 +4245,8 @@
       "Complete file read and behavior/contract review.",
       "Changed-source ESLint passed; bounded local logic reviewed without external side effects.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/showTimeoutDuration/styles.css",
@@ -3895,7 +4257,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/silentMessageToggle/index.tsx",
@@ -3907,7 +4270,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsMessages.ts: nine cases passed; source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/silentTyping/index.tsx",
@@ -3918,7 +4282,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/sortFriendRequests/index.tsx",
@@ -3930,7 +4295,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsUtilities.ts: fifteen cases passed; source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/sortFriendRequests/styles.css",
@@ -3941,7 +4307,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/spotifyCrack/index.ts",
@@ -3952,7 +4319,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/spotifyShareCommands/index.ts",
@@ -3964,7 +4332,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsMessages.ts: nine cases passed; source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/startupTimings/StartupTimingPage.tsx",
@@ -3976,7 +4345,8 @@
       "Complete file read and behavior/contract review.",
       "Changed-source ESLint passed; bounded local logic reviewed without external side effects.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/startupTimings/index.tsx",
@@ -3987,7 +4357,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/stickerPaste/README.md",
@@ -3998,7 +4369,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/stickerPaste/index.ts",
@@ -4009,7 +4381,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/streamerModeOnStream/index.ts",
@@ -4021,7 +4394,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsUtilities.ts: fifteen cases passed; source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/superReactionTweaks/README.md",
@@ -4032,7 +4406,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/superReactionTweaks/index.ts",
@@ -4044,7 +4419,8 @@
       "Complete file read and behavior/contract review.",
       "Changed-source ESLint passed; bounded local logic reviewed without external side effects.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/tenorGifSearch/index.tsx",
@@ -4055,7 +4431,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/textReplace/index.tsx",
@@ -4067,7 +4444,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsMessages.ts: nine cases passed; source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/textReplace/styles.css",
@@ -4078,7 +4456,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/themeAttributes/README.md",
@@ -4089,7 +4468,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "Static semantic review only; no client or external-service operations."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/themeAttributes/index.ts",
@@ -4101,7 +4481,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsUtilities.ts: fifteen cases passed; source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/translate/TranslateIcon.tsx",
@@ -4113,7 +4494,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsTranslation.ts: four isolated cases passed; changed source ESLint passed after destructuring fix.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/translate/TranslateModal.tsx",
@@ -4125,7 +4507,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsTranslation.ts: four isolated cases passed; changed source ESLint passed after destructuring fix.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/translate/TranslationAccessory.tsx",
@@ -4137,7 +4520,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsTranslation.ts: four isolated cases passed; changed source ESLint passed after destructuring fix.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/translate/index.tsx",
@@ -4149,7 +4533,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsTranslation.ts: four isolated cases passed; changed source ESLint passed after destructuring fix.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/translate/languages.ts",
@@ -4160,7 +4545,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsTranslation.ts: four isolated cases passed; changed source ESLint passed after destructuring fix."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/translate/native.ts",
@@ -4172,7 +4558,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsTranslation.ts: four isolated cases passed; changed source ESLint passed after destructuring fix.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/translate/settings.tsx",
@@ -4184,7 +4571,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsTranslation.ts: four isolated cases passed; changed source ESLint passed after destructuring fix.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/translate/styles.css",
@@ -4195,7 +4583,8 @@
     "validation": [
       "Complete file read and behavior/contract review.",
       "testAuditPluginsTranslation.ts: four isolated cases passed; changed source ESLint passed after destructuring fix."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/translate/utils.ts",
@@ -4207,7 +4596,8 @@
       "Complete file read and behavior/contract review.",
       "testAuditPluginsTranslation.ts: four isolated cases passed; changed source ESLint passed after destructuring fix.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/typingIndicator/index.tsx",
@@ -4219,7 +4609,8 @@
       "Complete file read; relevant host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsIdentity.ts: 7 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/typingIndicator/style.css",
@@ -4229,7 +4620,8 @@
     "summary": "Read all indicator/avatars/dots selectors, dimensions and hover affordance; retained scoped layout.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/typingTweaks/index.tsx",
@@ -4241,7 +4633,8 @@
       "Complete file read; relevant host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsIdentity.ts: 7 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/typingTweaks/style.css",
@@ -4251,7 +4644,8 @@
     "summary": "Read nested avatar alignment and typing-user cursor styles; retained scoped selectors.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/unindent/index.ts",
@@ -4261,7 +4655,8 @@
     "summary": "Read common-indent calculation, tab conversion, blank-line behavior, fenced-block scan and send/edit hooks. Existing focused Unindent edge cases passed in the earlier cleanup suite; malformed/unclosed fences intentionally remain untouched.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/unlockedAvatarZoom/README.md",
@@ -4271,7 +4666,8 @@
     "summary": "Read avatar-crop zoom description and external demo reference; no local asset changes.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/unlockedAvatarZoom/index.ts",
@@ -4281,7 +4677,8 @@
     "summary": "Read slider defaults/range and the isolated crop maxValue patch. Host maxValue marker and imported nonnumeric settings remain host-contract/input-validation limits; no entitlement or upload behavior is altered.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/unsuppressEmbeds/index.tsx",
@@ -4291,7 +4688,8 @@
     "summary": "Read suppression flag updates, reply snapshot handling, delete-menu placement and current-author embed permission guard. Server authorization remains authoritative. Optional context shape and fire-and-forget REST failure presentation remain limits; no messages or flags changed during audit.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/userMessagesPronouns/PronounsChatComponent.tsx",
@@ -4303,7 +4701,8 @@
       "Complete file read; relevant host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsIdentity.ts: 7 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/userMessagesPronouns/README.md",
@@ -4313,7 +4712,8 @@
     "summary": "Read pronoun feature description and preview reference; retained.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/userMessagesPronouns/index.ts",
@@ -4323,7 +4723,8 @@
     "summary": "Read PronounDB settings migration and timestamp/compact-name injection patches; IDs and placement retained.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/userMessagesPronouns/settings.ts",
@@ -4333,7 +4734,8 @@
     "summary": "Read capitalization choices and show-self default; retained stored values and defaults.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/userMessagesPronouns/utils.ts",
@@ -4345,7 +4747,8 @@
       "Complete file read; relevant host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsIdentity.ts: 7 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/userVoiceShow/README.md",
@@ -4355,7 +4758,8 @@
     "summary": "Read profile/member-list voice indicator description and both preview references.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/userVoiceShow/components.tsx",
@@ -4365,7 +4769,8 @@
     "summary": "Read all SVG/icon and tooltip code, voice-state subscriptions, channel permission/locked-state branches and per-channel click-timer cancellation. Defensive review only of hidden-channel integration; no navigation, membership discovery or voice joining executed. User/permission cache rerender and per-instance timer ownership remain limits.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/userVoiceShow/index.tsx",
@@ -4375,7 +4780,8 @@
     "summary": "Read profile/member/message feature settings, decorator guards, friends-list patch and stop-time timer cleanup; retained API dependencies and IDs.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/userVoiceShow/style.css",
@@ -4385,7 +4791,8 @@
     "summary": "Read every voice icon, tooltip, member-row, guild-icon and profile sizing selector; retained scoped presentation.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/usrbg/index.tsx",
@@ -4397,7 +4804,8 @@
       "Complete file read; relevant host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsIdentity.ts: 7 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/usrbg/styles.css",
@@ -4407,7 +4815,8 @@
     "summary": "Read full-width settings button styling; retained.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/validReply/README.md",
@@ -4417,7 +4826,8 @@
     "summary": "Read hover-to-load behavior description and demonstration reference.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/validReply/index.ts",
@@ -4429,7 +4839,8 @@
       "Complete file read; relevant host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsIdentity.ts: 7 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/validUser/index.tsx",
@@ -4439,7 +4850,8 @@
     "summary": "Read complete unknown-mention lookup, badge mapping/inference, profile cache mutation, hover queue/retry and rendering patches defensively. No user lookups or profile spoofing exercised/improved. Unbounded retry scheduling, retry-unit ambiguity, absent stop/account guards and StrictMode mountedRef behavior remain documented limits.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/vcDoubleClick/index.ts",
@@ -4449,7 +4861,8 @@
     "summary": "Read all channel/mention/active-now patches, per-channel double-click counters, current-channel shortcut and timer cleanup. Existing stop ownership retained; callback throwing before counter deletion and changing host event shapes remain limits.",
     "validation": [
       "Complete file read; relevant host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/vcNarrator/VoiceSetting.tsx",
@@ -4461,7 +4874,8 @@
       "Complete file read; relevant host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsIdentity.ts: 7 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/vcNarrator/index.tsx",
@@ -4473,7 +4887,8 @@
       "Complete file read; relevant host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsIdentity.ts: 7 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/vcNarrator/settings.ts",
@@ -4485,7 +4900,8 @@
       "Complete file read; relevant host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsIdentity.ts: 7 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/viewIcons/index.tsx",
@@ -4497,7 +4913,8 @@
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "Changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/viewRaw/index.tsx",
@@ -4507,7 +4924,8 @@
     "summary": "Read raw modal, sorted message clone and author-sensitive-field/message-logger-property removal, all entity context menus and alternate click mappings. Read-only inspection; no private data copied. Generic user/profile serialization still exposes its supplied cached fields, and cyclic/BigInt or absent-author shapes remain limits.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/viewRaw/style.css",
@@ -4517,7 +4935,8 @@
     "summary": "Read scoped code-block/pre sizing and box sizing; retained.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/voiceDownload/index.tsx",
@@ -4529,7 +4948,8 @@
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "Changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/voiceDownload/style.css",
@@ -4539,19 +4959,21 @@
     "summary": "Read download sizing, placement and interaction colors; retained.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/voiceMessages/components/DesktopRecorder.tsx",
     "baselineSha256": "3bef31ca8149ecfff170d7f959e7b7ab5a8ae7455efb624383e24224b006a5fb",
-    "reviewedSha256": "4fd2222bab1e17fe248aabc661c05ee10f1a0153651291d149a93df569e214bc",
+    "reviewedSha256": "36f3560ddbd9ace6110c82dd4bcd35049089254d70e4b91fd235fe1490a7559a",
     "status": "changed",
     "summary": "Native recorder now locks pending transitions and concurrent modal ownership, stops recordings on unmount, discards late successful starts and temporary outputs, and contains read/start/stop failures. Native callbacks remain dependent on the host completing; no microphone/native API was exercised.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "Voice recorder/preview/send/native unit cases: 10 passed; existing transcription/waveform checks passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/voiceMessages/components/VoicePreview.tsx",
@@ -4563,7 +4985,8 @@
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "Voice recorder/preview/send/native unit cases: 10 passed; existing transcription/waveform checks passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/voiceMessages/components/WebRecorder.tsx",
@@ -4575,19 +4998,21 @@
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "Voice recorder/preview/send/native unit cases: 10 passed; existing transcription/waveform checks passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/voiceMessages/index.tsx",
     "baselineSha256": "333417f929727ce4737270263357e6a5bfeef48464b49ceff7e9148b4ea5b2a7",
-    "reviewedSha256": "1cba10b9de7ad71c5c841ce37aa549d3e0c3fcdf2d390b4a62d9bed37ae41c4d",
+    "reviewedSha256": "72a94ba3e2fc4231e4e0bf36c6a484f99a20f5a0c2b5b1040dd8c474fd758116",
     "status": "changed",
     "summary": "Preserved file/recording/send-hook/voice-and-silent flags. Modal captures destination/account, keeps failed/cancelled recordings open, prevents overlapping sends, preserves newer pending replies and closes owned modals on stop/logout. Object URLs and decoding AudioContexts are released; late file choices are ignored and actual MIME type is retained. Host send completion and unsupported-format fallback remain host contracts.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "Voice recorder/preview/send/native unit cases: 10 passed; existing transcription/waveform checks passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/voiceMessages/native.ts",
@@ -4599,7 +5024,8 @@
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "Voice recorder/preview/send/native unit cases: 10 passed; existing transcription/waveform checks passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/voiceMessages/styles.css",
@@ -4610,7 +5036,8 @@
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "Voice recorder/preview/send/native unit cases: 10 passed; existing transcription/waveform checks passed; changed source ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/voiceMessages/waveform.ts",
@@ -4621,7 +5048,8 @@
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "Voice recorder/preview/send/native unit cases: 10 passed; existing transcription/waveform checks passed; changed source ESLint passed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/volumeBooster/README.md",
@@ -4631,7 +5059,8 @@
     "summary": "Read platform volume-limit description and user/stream demonstrations; retained.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/volumeBooster/index.ts",
@@ -4641,19 +5070,21 @@
     "summary": "Read slider patches, web gain-node creation, sink selection, local-volume retention and outbound sync cap. Host audio graph ownership and imported nonfinite multiplier/volume values remain limits; no live audio or stream operations performed.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/webContextMenus.web/index.ts",
     "baselineSha256": "120bf0ca9d3a1eac3d86de7279b9650f2ba63575656365881cc1ebba8beb1783",
-    "reviewedSha256": "9062a2b082913e372c892f0adf43f97b6e2d9ad36a318d381a8d739eccbda760",
+    "reviewedSha256": "8f3ee0919d92335898e0b9223af897f792cf9c3a7204093e4980fe2243b06521",
     "status": "changed",
     "summary": "Read platform listener substitutions and every menu patch. Added image fetch deadlines, bitmap release/conversion-error handling and awaited clipboard/save operations. Cut requires successful copy and unchanged focus/selection/channel; paste and image actions ignore stopped generations, and clipboard denial is surfaced. Listener ownership flag resets on stop.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsWeb.ts: 9 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/webKeybinds.web/index.ts",
@@ -4663,7 +5094,8 @@
     "summary": "Read navigation preference, native-shortcut override choice, patch sites and per-platform modifier expansion; zoom shortcuts remain blocked as intended.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/webPWA.browser/index.tsx",
@@ -4675,7 +5107,8 @@
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsWeb.ts: 9 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/webPWA.browser/styles.css",
@@ -4685,7 +5118,8 @@
     "summary": "Read managed root color scheme, titlebar environment variables, trailing overlay positioning and standalone hiding; retained platform styling with existing managed cleanup.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/webScreenShareFixes.web/index.ts",
@@ -4695,7 +5129,8 @@
     "summary": "Read bitrate/stereo SDP replacement strings defensively; retained host-specific behavior without exercising or improving restriction bypass paths.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/whoReacted/README.md",
@@ -4705,7 +5140,8 @@
     "summary": "Read avatar reaction display and click-to-profile explanation plus preview reference.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/whoReacted/index.tsx",
@@ -4715,7 +5151,8 @@
     "summary": "Read reaction fetch queue, 100-user cap, shared host cache injection, avatar rendering, blocking integration and scroll anchoring. Host-cache alias/connection timing, fetched=true retention after failures, uncapped queued work and absent stop/account guards remain limits; no reaction-user collection performed.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/xsOverlay/README.md",
@@ -4725,7 +5162,8 @@
     "summary": "Read local VR notification setup, transport preference and both demonstration references.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/xsOverlay/index.tsx",
@@ -4737,7 +5175,8 @@
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsWeb.ts: 9 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/xsOverlay/native.ts",
@@ -4749,7 +5188,8 @@
       "Complete file read; relevant behavior, host contracts and retained limits reviewed.",
       "node --import=tsx --test scripts/testAuditPluginsWeb.ts: 9 passed; changed source ESLint passed.",
       "Final isolated plugin audit sweep: 119 passed across 18 scripts; no live client, microphone, network or native transport actions."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/youtubeAdblock.desktop/README.md",
@@ -4759,7 +5199,8 @@
     "summary": "Read locally scoped adblock description, renamed README title and upstream AdGuard attribution; retained as documentation of existing behavior.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/youtubeAdblock.desktop/adguard.js",
@@ -4769,7 +5210,8 @@
     "summary": "Read the full vendored selector list, mutation observer, ad skip timers, recursive property rewrite and JSON/Response monkey patches defensively. Existing recursive cost, unowned timers/observer/global wrappers and third-party page assumptions are recorded; no code injection/ad bypass executed or enhanced.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/youtubeAdblock.desktop/index.ts",
@@ -4779,7 +5221,8 @@
     "summary": "Read plugin registration, tags and native implementation pointer; retained identifiers.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   },
   {
     "path": "src/plugins/youtubeAdblock.desktop/native.ts",
@@ -4789,6 +5232,7 @@
     "summary": "Read window/frame listeners, setting gate, substring URL matching and native script execution route defensively only. Exact-origin validation, owned listener cleanup and asynchronous execution-error handling remain limits; no injection or third-party page execution performed.",
     "validation": [
       "Complete file read; relevant behavior, host contracts and retained limits reviewed."
-    ]
+    ],
+    "reviewedHashEncoding": "utf8-lf"
   }
 ]
