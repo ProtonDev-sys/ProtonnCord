@@ -18,14 +18,13 @@
 
 import { Button, MediaEngineStore, showToast, Toasts, useEffect, useRef, useState } from "@webpack/common";
 
-import { settings, type VoiceRecorder } from "..";
+import { settings, useBusyState, type VoiceRecorder } from "..";
 
 export const VoiceRecorderWeb: VoiceRecorder = ({ setAudioBlob, onRecordingChange }) => {
     const [recording, setRecording] = useState(false);
     const [paused, setPaused] = useState(false);
-    const [busy, setBusy] = useState(false);
+    const [busy, setBusy] = useBusyState();
     const recorderRef = useRef<MediaRecorder | undefined>(undefined);
-    const busyRef = useRef(false);
     const generation = useRef(0);
     const mounted = useRef(true);
 
@@ -54,8 +53,7 @@ export const VoiceRecorderWeb: VoiceRecorder = ({ setAudioBlob, onRecordingChang
     };
 
     async function toggleRecording() {
-        if (busyRef.current) return;
-        busyRef.current = true;
+        if (busy.current) return;
         setBusy(true);
         const currentGeneration = generation.current;
         const currentRecorder = recorderRef.current;
@@ -66,7 +64,6 @@ export const VoiceRecorderWeb: VoiceRecorder = ({ setAudioBlob, onRecordingChang
                 currentRecorder.stream.getTracks().forEach(track => track.stop());
                 recorderRef.current = undefined;
                 changeRecording(false);
-                busyRef.current = false;
                 setBusy(false);
                 showToast("Failed to finish recording", Toasts.Type.FAILURE);
             }
@@ -101,7 +98,6 @@ export const VoiceRecorderWeb: VoiceRecorder = ({ setAudioBlob, onRecordingChang
                 recorderRef.current = undefined;
                 changeRecording(false);
                 setPaused(false);
-                busyRef.current = false;
                 setBusy(false);
                 if (failed) showToast("Failed to finish recording", Toasts.Type.FAILURE);
                 else setAudioBlob(new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "audio/webm" }));
@@ -123,7 +119,6 @@ export const VoiceRecorderWeb: VoiceRecorder = ({ setAudioBlob, onRecordingChang
             }
         } finally {
             if (mounted.current && generation.current === currentGeneration) {
-                busyRef.current = false;
                 setBusy(false);
             }
         }
@@ -131,12 +126,12 @@ export const VoiceRecorderWeb: VoiceRecorder = ({ setAudioBlob, onRecordingChang
 
     return (
         <>
-            <Button disabled={busy} onClick={toggleRecording}>
+            <Button disabled={busy.current} onClick={toggleRecording}>
                 {recording ? "Stop" : "Start"} recording
             </Button>
 
             <Button
-                disabled={!recording || busy}
+                disabled={!recording || busy.current}
                 onClick={() => {
                     const recorder = recorderRef.current;
                     if (!recorder || recorder.state === "inactive") return;
