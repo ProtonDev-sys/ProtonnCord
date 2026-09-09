@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { migratePluginSettings, Settings } from "@api/Settings";
+import { PlainSettings, Settings } from "@api/Settings";
 import { Logger } from "@utils/Logger";
 
 import { settings, SettingsStore } from "./settings";
@@ -79,18 +79,18 @@ function setStoreValue(key: SettingsKey, value: boolean | string | number) {
 export function migrateOldSettings() {
     if (Settings.plugins.RichPresence._migrated) return;
 
-    migratePluginSettings("RichPresence", "AudioBookShelfRichPresence", "GensokyoRadioRPC", "JellyfinRichPresence", "StatsfmPresence", "TosuRPC");
+    const existingKeys = new Set(Object.keys(PlainSettings.plugins.RichPresence ?? {}));
 
     for (const migration of migrations) {
-        const oldSettings = Settings.plugins[migration.oldPlugin];
+        const oldSettings = PlainSettings.plugins[migration.oldPlugin];
         if (!oldSettings) continue;
 
-        if (oldSettings.enabled) {
+        if (oldSettings.enabled && !existingKeys.has(migration.enableKey)) {
             setStoreValue(migration.enableKey, true);
         }
 
         for (const [oldKey, newKey] of Object.entries(migration.keys)) {
-            if (oldSettings[oldKey] != null) {
+            if (oldSettings[oldKey] != null && !existingKeys.has(newKey)) {
                 setStoreValue(newKey, oldSettings[oldKey]);
             }
         }
@@ -98,8 +98,8 @@ export function migrateOldSettings() {
         logger.info(`Migrated settings from ${migration.oldPlugin}`);
     }
 
-    const tosuSettings = Settings.plugins.TosuRPC;
-    if (tosuSettings?.enabled) {
+    const tosuSettings = PlainSettings.plugins.TosuRPC;
+    if (tosuSettings?.enabled && !existingKeys.has("tosu_enabled")) {
         setStoreValue("tosu_enabled", true);
     }
 

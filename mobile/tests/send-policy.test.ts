@@ -8,6 +8,7 @@ import {
 } from '../plugins/secure-messaging/js/crypto'
 import { captureSendPolicy } from '../plugins/secure-messaging/js/sendPolicy'
 import type { Account } from '../plugins/secure-messaging/js/vaultState'
+
 setRandomSource(size => Uint8Array.from(randomBytes(size)))
 const PEER = '100000000000000002',
 	CHANNEL = '100000000000000003'

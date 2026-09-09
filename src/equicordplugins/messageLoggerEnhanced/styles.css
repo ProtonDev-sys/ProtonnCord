@@ -53,7 +53,7 @@
     margin-left: 12px;
 }
 
-.msg-logger-modal-from-deleted {
+.vc-msg-logger-enhanced-modal-from-deleted {
     color: var(--status-danger);
 }
 
@@ -86,10 +86,6 @@
 .vc-msg-logger-enhanced-folder-upload-button {
     margin: 6px;
     padding: 4px 8px;
-}
-
-.vc-updater-modal-content {
-    padding: 1rem 2rem;
 }
 
 .vc-msg-logger-enhanced-modal {

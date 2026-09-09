@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
@@ -43,7 +43,11 @@ async function compileUpdater(standalone: boolean, disabled = false) {
 
 test("HTTP updates require an actual archive file, including standalone builds with unpacked folders", async t => {
     const directory = await mkdtemp(join(tmpdir(), "protonncord-updater-backend-"));
-    t.after(() => rm(directory, { recursive: true, force: true }));
+    t.after(() => {
+        assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
+        assert.ok(basename(directory).startsWith("protonncord-updater-backend-"));
+        return rm(directory, { recursive: true, force: true });
+    });
     const targets = [
         { path: join(directory, "desktop"), archive: false },
         { path: join(directory, "equibop"), archive: false },
@@ -126,9 +130,12 @@ test("renderer update status follows the native backend instead of the standalon
                 } },
             });
             assert.equal(calls.length, 0, "rendering or importing update controls performs no diagnostic IPC");
+            assert.equal(await updater.checkForUpdates(), false, "a branch switch discards the old response");
+            assert.equal(updater.isNewer, false);
+            assert.deepEqual(calls, ["changes:nightly", "diagnostics:nightly"]);
+
             assert.equal(await updater.checkForUpdates(), backend === "http");
             assert.equal(updater.isNewer, backend === "git");
-            assert.deepEqual(calls, ["changes:nightly", "diagnostics:nightly"]);
 
             remoteChanges = [];
             assert.equal(await updater.checkForUpdates(), false);
@@ -136,7 +143,7 @@ test("renderer update status follows the native backend instead of the standalon
             remoteChanges = [{ hash: "b".repeat(40), author: "Fixture", message: "Fixture" }];
             assert.equal(await updater.checkForUpdates(), true);
             assert.equal(updater.isNewer, false);
-            assert.equal(calls.filter(call => call.startsWith("diagnostics:")).length, 3, "each explicit check performs exactly one diagnostics request");
+            assert.equal(calls.filter(call => call.startsWith("diagnostics:")).length, 4, "each explicit check performs exactly one diagnostics request");
         }
     }
 });

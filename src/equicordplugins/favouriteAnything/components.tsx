@@ -10,7 +10,7 @@ import { LazyComponentWrapper } from "@utils/lazyReact";
 import { Embed, ListRow, Message, MessageAttachment, ScrollerBaseRef } from "@vencord/discord-types";
 import { ChannelType } from "@vencord/discord-types/enums";
 import { findByCodeLazy, findComponentByCode, findComponentByCodeLazy, findCssClassesLazy, proxyLazyWebpack } from "@webpack";
-import { ChannelStore, ExpressionPickerStore, ListScrollerThin, lodash, PermissionsBits, PermissionStore, React, useCallback, useEffect, useMemo, useRef, useState, useStateFromStores } from "@webpack/common";
+import { ChannelStore, ExpressionPickerStore, ListScrollerThin, lodash, PermissionsBits, PermissionStore, React, Toasts, useCallback, useEffect, useMemo, useRef, useState, useStateFromStores } from "@webpack/common";
 import { ReactNode } from "react";
 
 import { SignedUrlsStore } from "./stores";
@@ -90,7 +90,7 @@ export function FilePicker({ onSelectItem }: FilePickerProps) {
 
     const [rowHeights, handleResize] = useListScroller();
 
-    const handleSubmit = useCallback((url: string) => onSelectItem({ url }), []);
+    const handleSubmit = useCallback((url: string) => onSelectItem({ url }), [onSelectItem]);
     const handleChange = useCallback((query: string) => ExpressionPickerStore.setSearchQuery(query), []);
     const handleClear = useCallback(() => ExpressionPickerStore.setSearchQuery(""), []);
 
@@ -188,6 +188,7 @@ function Demo() {
 
 export function FilePickerItem({ url, file, channel, onResize, onSubmit, reducePadding }: FilePickerItemProps) {
     const [isFetching, setIsFetching] = useState(false);
+    const fetching = useRef(false);
 
     const ref = useRef<HTMLDivElement>(null);
     useResizeObserver(ref, ({ height }) => onResize(url, height), [onResize, url]);
@@ -212,17 +213,24 @@ export function FilePickerItem({ url, file, channel, onResize, onSubmit, reduceP
         switch (true) {
             case canAttachFiles:
                 return async () => {
+                    if (fetching.current) return;
+                    fetching.current = true;
                     setIsFetching(true);
-                    await sendAttachment(attachment, channel!);
-                    ExpressionPickerStore.closeExpressionPicker();
-                    setIsFetching(false);
+                    try {
+                        if (await sendAttachment(attachment, channel!)) ExpressionPickerStore.closeExpressionPicker();
+                    } catch {
+                        Toasts.show({ message: "Couldn't send favourite file", id: Toasts.genId(), type: Toasts.Type.FAILURE });
+                    } finally {
+                        fetching.current = false;
+                        setIsFetching(false);
+                    }
                 };
             case canSendMessages:
                 return () => onSubmit(url);
             default:
                 return null;
         }
-    }, [attachment, canAttachFiles, canSendMessages, channel, url]);
+    }, [attachment, canAttachFiles, canSendMessages, channel, url, onSubmit]);
 
     return (
         <div ref={ref} className={cl("attachment-container", reducePadding && "reduced-padding")}>

@@ -44,6 +44,7 @@ function getRoleIconSrc(role: Role) {
 
 function RolesAndUsersPermissionsComponent({ permissions, guild, modalProps, header }: { permissions: Array<RoleOrUserPermission>; guild: Guild; modalProps: RenderModalProps; header: string; }) {
     const guildPermissionSpecMap = useMemo(() => getGuildPermissionSpecMap(guild), [guild.id]);
+    permissions = useMemo(() => [...permissions].sort((a, b) => a.type - b.type), [permissions]);
 
     useStateFromStores(
         [GuildMemberStore],
@@ -51,10 +52,6 @@ function RolesAndUsersPermissionsComponent({ permissions, guild, modalProps, hea
         null,
         (old, current) => old.length === current.length
     );
-
-    useEffect(() => {
-        permissions.sort((a, b) => a.type - b.type);
-    }, [permissions]);
 
     useEffect(() => {
         const usersToRequest = permissions
@@ -144,7 +141,7 @@ function RolesAndUsersPermissionsComponent({ permissions, guild, modalProps, hea
                                                 permission.type === PermissionOverwriteType.ROLE
                                                     ? role?.name ?? "Unknown Role"
                                                     : permission.type === PermissionOverwriteType.MEMBER
-                                                        ? (user != null && getUniqueUsername(user)) ?? "Unknown User"
+                                                        ? user != null ? getUniqueUsername(user) : "Unknown User"
                                                         : (
                                                             <Flex gap="0.2em">
                                                                 @owner
@@ -161,6 +158,8 @@ function RolesAndUsersPermissionsComponent({ permissions, guild, modalProps, hea
                     <div className={cl("modal-divider")} />
                     <ScrollerThin className={cl("modal-perms")} orientation="auto">
                         {Object.values(PermissionsBits).map(bit => {
+                            const spec = guildPermissionSpecMap[String(bit)];
+                            if (!spec) return null;
                             const overrideType = (() => {
                                 const { permissions, overwriteAllow, overwriteDeny } = selectedItem;
 
@@ -185,11 +184,11 @@ function RolesAndUsersPermissionsComponent({ permissions, guild, modalProps, hea
                                         {overrideType === "allowed" && <PermissionAllowedIcon />}
                                         {overrideType === "denied" && <PermissionDeniedIcon />}
                                     </div>
-                                    <Text variant="text-md/normal">{guildPermissionSpecMap[String(bit)].title}</Text>
+                                    <Text variant="text-md/normal">{spec.title}</Text>
 
                                     <Tooltip text={
                                         (() => {
-                                            const { description } = guildPermissionSpecMap[String(bit)];
+                                            const { description } = spec;
                                             return typeof description === "function" ? i18n.intl.format(description, {}) : description;
                                         })()
                                     }>

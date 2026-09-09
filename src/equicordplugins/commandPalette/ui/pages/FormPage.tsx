@@ -160,7 +160,7 @@ export function FormPage({ spec, ctx, formRef }: FormPageProps) {
         return initial;
     });
     const [error, setError] = useState<string | null>(null);
-    const [submitting, setSubmitting] = useState(false);
+    const submitting = useRef(false);
     const [files, setFiles] = useState<Record<string, File[]>>({});
     const firstInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
     const statesRef = useRef(states);
@@ -172,24 +172,23 @@ export function FormPage({ spec, ctx, formRef }: FormPageProps) {
     const visibleFields = spec.fields.filter(f => !f.visible || f.visible(values));
 
     const submit = async () => {
-        if (submitting) return;
-
-        const currentValues = getValues(statesRef.current, spec.fields);
-        const extras: FormSubmitExtras = { files: filesRef.current };
-        const validationError = spec.validate?.(currentValues, extras) ?? null;
-        if (validationError) {
-            setError(validationError);
-            return;
-        }
-
-        setError(null);
-        setSubmitting(true);
+        if (submitting.current) return;
+        submitting.current = true;
         try {
+            const currentValues = getValues(statesRef.current, spec.fields);
+            const extras: FormSubmitExtras = { files: filesRef.current };
+            const validationError = spec.validate?.(currentValues, extras) ?? null;
+            if (validationError) {
+                setError(validationError);
+                return;
+            }
+
+            setError(null);
             await spec.submit(currentValues, ctx, extras);
         } catch (e) {
             setError(e instanceof Error ? e.message : "Something went wrong.");
         } finally {
-            setSubmitting(false);
+            submitting.current = false;
         }
     };
 

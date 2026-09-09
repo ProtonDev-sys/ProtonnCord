@@ -11,6 +11,7 @@ import { MessagePopoverButtonMap } from "@api/MessagePopover";
 import { SettingsPluginUiElements, useSettings } from "@api/Settings";
 import { BaseText } from "@components/BaseText";
 import { Card } from "@components/Card";
+import ErrorBoundary from "@components/ErrorBoundary";
 import { PlaceholderIcon } from "@components/Icons";
 import { Paragraph } from "@components/Paragraph";
 import { Switch } from "@components/Switch";
@@ -58,8 +59,8 @@ function Section(props: {
     const switches = Array.from(buttonMap, ([name, { icon }]) => {
         const Icon = icon ?? PlaceholderIcon;
         return (
-            <Paragraph size="md" weight="semibold" key={name} className={cl("switches-row")}>
-                <Icon height={20} width={20} />
+            <BaseText size="md" weight="semibold" key={name} className={cl("switches-row")}>
+                <ErrorBoundary noop><Icon height={20} width={20} /></ErrorBoundary>
                 {name}
                 <Switch
                     aria-label={name}
@@ -68,7 +69,7 @@ function Section(props: {
                         settings[name] = { ...settings[name], enabled: v };
                     }}
                 />
-            </Paragraph>
+            </BaseText>
         );
     });
 

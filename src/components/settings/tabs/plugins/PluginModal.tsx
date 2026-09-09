@@ -26,7 +26,6 @@ import { Button } from "@components/Button";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Flex } from "@components/Flex";
 import { Paragraph } from "@components/Paragraph";
-import { debounce } from "@shared/debounce";
 import { gitRemote } from "@shared/vencordUserAgent";
 import { classNameFactory } from "@utils/css";
 import { makeLazy } from "@utils/lazy";
@@ -35,7 +34,7 @@ import { classes, isObjectEmpty } from "@utils/misc";
 import { OptionType, Plugin, PluginTag } from "@utils/types";
 import { RenderModalProps, User } from "@vencord/discord-types";
 import { findComponentByCodeLazy, findCssClasses } from "@webpack";
-import { Clickable, FluxDispatcher, Modal, openModal, React, Text, Toasts, Tooltip, useEffect, useMemo, UserStore, UserSummaryItem, UserUtils, useState } from "@webpack/common";
+import { Clickable, FluxDispatcher, Modal, openModal, React, Text, Toasts, Tooltip, useEffect, useMemo, useRef, UserStore, UserSummaryItem, UserUtils, useState } from "@webpack/common";
 import { Constructor } from "type-fest";
 
 import { PluginMeta } from "~plugins";
@@ -43,6 +42,7 @@ import { PluginMeta } from "~plugins";
 import { OptionComponentMap } from "./components";
 import { openContributorModal } from "./ContributorModal";
 import { FavoriteButton, GithubButton, WebsiteButton } from "./PluginModalButtons";
+import { createSettingChangeScheduler } from "./settingUpdates";
 
 const cl = classNameFactory("vc-plugin-modal-");
 
@@ -92,26 +92,44 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
     // avoid layout shift by showing dummy users while loading users
     const fallbackAuthors = useMemo(() => [makeDummyUser({ username: "Loading...", id: "-1465912127305809920" })], []);
     const [authors, setAuthors] = useState<Partial<User>[]>([]);
+    const [settingsVersion, setSettingsVersion] = useState(0);
+    const restartCallback = useRef(onRestartNeeded);
+    restartCallback.current = onRestartNeeded;
+    const settingChanges = useMemo(() => createSettingChangeScheduler((key, newValue) => {
+        const option = plugin.settings?.def[key];
+        if (!option || option.type === OptionType.CUSTOM) return;
+        pluginSettings[key] = newValue;
+        if (option.restartNeeded) restartCallback.current(key);
+    }), [plugin, pluginSettings]);
+
+    useEffect(() => () => settingChanges.flush(), [settingChanges]);
 
     useEffect(() => {
+        let cancelled = false;
+        setAuthors([]);
         (async () => {
             for (const user of plugin.authors.slice(0, 6)) {
+                if (cancelled) break;
                 try {
                     const author = user.id
                         ? await UserUtils.getUser(String(user.id))
                             .catch(() => makeDummyUser({ username: user.name }))
                         : makeDummyUser({ username: user.name });
 
-                    setAuthors(a => [...a, author]);
+                    if (!cancelled) setAuthors(a => [...a, author]);
                 } catch (e) {
                     continue;
                 }
             }
         })();
+        return () => { cancelled = true; };
     }, [plugin.authors]);
 
     function handleResetClick() {
-        openWarningModal(plugin, onRestartNeeded);
+        openWarningModal(plugin, onRestartNeeded, true, undefined, () => {
+            settingChanges.cancel();
+            setSettingsVersion(version => version + 1);
+        });
     }
 
     function renderSettings() {
@@ -124,22 +142,13 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
 
             if (isSettingHidden(settings, setting)) return null;
 
-            function onChange(newValue: any) {
-                const option = plugin.settings!.def[key];
-                if (!option || option.type === OptionType.CUSTOM) return;
-
-                pluginSettings[key] = newValue;
-
-                if (option.restartNeeded) onRestartNeeded(key);
-            }
-
             const Component = OptionComponentMap[setting.type];
             return (
-                <ErrorBoundary noop key={key}>
+                <ErrorBoundary noop key={`${settingsVersion}:${key}`}>
                     <Component
                         id={key}
                         setting={setting}
-                        onChange={debounce(onChange)}
+                        onChange={newValue => settingChanges.schedule(key, newValue)}
                         pluginSettings={pluginSettings}
                         definedSettings={settings}
                         closePluginSettings={onClose}
@@ -303,12 +312,22 @@ function resetSettings(plugin: Plugin, onRestartNeeded?: (pluginName: string) =>
         if (key === "enabled") continue;
 
         const setting = defaultSettings[key];
-        setting.type = setting.type ?? OptionType.STRING;
+        const defaultValue = "default" in setting ? setting.default : undefined;
+        if ((setting.type ?? OptionType.STRING) === OptionType.STRING) {
+            newSettings[key] = defaultValue !== undefined ? defaultValue : "";
+        } else if (defaultValue !== undefined) {
+            newSettings[key] = defaultValue;
+        } else if (setting.type === OptionType.SELECT) {
+            const selected = setting.options.find(option => option.default);
+            if (selected) newSettings[key] = selected.value;
+        }
 
-        if (setting.type === OptionType.STRING) {
-            newSettings[key] = setting.default !== undefined && setting.default !== "" ? setting.default : "";
-        } else if ("default" in setting && setting.default !== undefined) {
-            newSettings[key] = setting.default;
+        if (newSettings[key] !== null && typeof newSettings[key] === "object") {
+            try {
+                newSettings[key] = structuredClone(newSettings[key]);
+            } catch {
+                // Preserve legacy non-data defaults, matching the settings store.
+            }
         }
 
         if (setting?.restartNeeded) {
@@ -345,6 +364,7 @@ export function openWarningModal(plugin?: Plugin | null, onRestartNeeded?: (plug
             cancelText="Cancel"
             onConfirm={() => {
                 if (isPlugin && plugin) {
+                    reset?.();
                     resetSettings(plugin, onRestartNeeded);
                 } else {
                     reset?.();

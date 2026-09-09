@@ -22,9 +22,13 @@ export function getCachedApplicationAsset(applicationId: string, key: string): P
     if (applicationAssetCache.size >= MAX_APPLICATION_ASSET_CACHE_SIZE) pruneOldestAsset();
 
     const assetPromise = ApplicationAssetUtils.fetchAssetIds(applicationId, [key])
-        .then(assetIds => assetIds[0]!)
+        .then(assetIds => {
+            const asset = assetIds[0];
+            if (!asset) throw new Error("Application asset is unavailable");
+            return asset;
+        })
         .catch(error => {
-            applicationAssetCache.delete(cacheKey);
+            if (applicationAssetCache.get(cacheKey) === assetPromise) applicationAssetCache.delete(cacheKey);
             throw error;
         });
 

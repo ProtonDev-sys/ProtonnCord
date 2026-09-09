@@ -5,7 +5,7 @@
  */
 
 import { RenderModalProps } from "@vencord/discord-types";
-import { Modal, React, useEffect, useRef, useState } from "@webpack/common";
+import { Modal, React, SelectedChannelStore, useEffect, useRef, useState } from "@webpack/common";
 
 import { sendRemix } from ".";
 import { exportImg } from "./editor/components/Canvas";
@@ -37,13 +37,14 @@ export default function RemixModal({ modalProps, close, url }: Props) {
     async function send() {
         if (pending.current) return;
         const owner = generation.current;
+        const channelId = SelectedChannelStore.getChannelId();
         pending.current = true;
         setBusy(true);
         setError(null);
         try {
             const blob = await exportImg();
             if (owner !== generation.current) return;
-            await sendRemix(blob);
+            await sendRemix(blob, channelId);
             if (owner === generation.current) dismiss();
         } catch {
             if (owner === generation.current) setError("Could not prepare the image. Check the image and crop, then try again.");

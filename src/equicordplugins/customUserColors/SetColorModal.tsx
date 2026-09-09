@@ -4,22 +4,23 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { set } from "@api/DataStore";
 import { HeadingSecondary } from "@components/Heading";
 import { classNameFactory } from "@utils/css";
 import { Margins } from "@utils/margins";
 import { RenderModalProps } from "@vencord/discord-types";
-import { ColorPicker, Modal, React, useState } from "@webpack/common";
+import { ColorPicker, Modal, React, showToast, useState } from "@webpack/common";
 
-import { colors, DATASTORE_KEY } from "./index";
+import { colors, updateCustomColor } from "./index";
 
 const cl = classNameFactory("vc-customColors-");
 
 export function SetColorModal({ id, modalProps }: { id: string, modalProps: RenderModalProps; }) {
-    const initialColor = parseInt(colors[id], 16) || 372735;
+    const storedColor = parseInt(colors[id], 16);
+    const initialColor = Number.isNaN(storedColor) ? 372735 : storedColor;
     // color picker default to current color set for user (if null it's 0x05afff :3 )
 
     const [colorPickerColor, setColorPickerColor] = useState(initialColor);
+    const saving = React.useRef(false);
     // hex color code as an int (NOT rgb 0-255)
 
     function setUserColor(color: number) {
@@ -31,16 +32,22 @@ export function SetColorModal({ id, modalProps }: { id: string, modalProps: Rend
             saveUserColor();
     }
 
-    async function saveUserColor() {
-        colors[id] = colorPickerColor.toString(16).padStart(6, "0");
-        await set(DATASTORE_KEY, colors);
-        modalProps.onClose();
+    async function persistColor(color?: string) {
+        if (saving.current) return;
+        saving.current = true;
+        try {
+            await updateCustomColor(id, color);
+            modalProps.onClose();
+        } catch (error) {
+            console.error("Failed to save custom color:", error);
+            showToast("Could not save custom color. Please try again.");
+        } finally {
+            saving.current = false;
+        }
     }
 
-    async function deleteUserColor() {
-        delete colors[id];
-        await set(DATASTORE_KEY, colors);
-        modalProps.onClose();
+    function saveUserColor() {
+        return persistColor(colorPickerColor.toString(16).padStart(6, "0"));
     }
 
     return (
@@ -57,7 +64,7 @@ export function SetColorModal({ id, modalProps }: { id: string, modalProps: Rend
                 {
                     text: "Delete Entry",
                     variant: "dangerPrimary",
-                    onClick: deleteUserColor
+                    onClick: () => persistColor()
                 }
             ]}
         >

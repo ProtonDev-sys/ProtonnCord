@@ -2,7 +2,8 @@
 .vc-h2,
 .vc-h3,
 .vc-h4,
-.vc-h5 {
+.vc-h5,
+.vc-h6 {
     color: var(--text-strong);
     font-family: var(--font-display);
 }
@@ -37,6 +38,12 @@
     line-height: 1.25;
 }
 
+.vc-h6 {
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.2857;
+}
+
 .vc-h1-defaultMargin,
 .vc-h2-defaultMargin {
     margin-bottom: 20px
@@ -49,6 +56,7 @@
 }
 
 .vc-h3-defaultMargin,
-.vc-h5-defaultMargin {
+.vc-h5-defaultMargin,
+.vc-h6-defaultMargin {
     margin-bottom: 8px
 }

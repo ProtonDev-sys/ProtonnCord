@@ -10,6 +10,7 @@ import definePlugin, { OptionType } from "@utils/types";
 
 const MIDDLE_CLICK = 1;
 let lastMiddleClickUp = 0;
+let running = false;
 
 function updateListeners(refresh: boolean = true) {
     document.removeEventListener("mouseup", handleMouseUp, true);
@@ -26,7 +27,7 @@ function handleAuxClick(event: MouseEvent) {
 
     const { openScope } = settings.store;
 
-    const target = event.target as HTMLElement | null;
+    const target = event.target instanceof Element ? event.target : null;
     const anchor = target?.closest("a[href]") as HTMLAnchorElement | null;
     const media = target?.closest("a[href][data-role='img'], a[href][data-role='video']") as HTMLAnchorElement | null;
     const role = anchor?.dataset.role ?? "";
@@ -57,7 +58,6 @@ const settings = definePluginSettings({
             { label: "Links & Media", value: "both" },
             { label: "None", value: "none", default: true },
         ],
-        onChange(newValue) { updateListeners(newValue !== "none"); }
     },
     pasteScope: {
         type: OptionType.SELECT,
@@ -85,6 +85,7 @@ export default definePlugin({
     searchTerms: ["LimitMiddleClickPaste"],
 
     isPastingDisabled(isInput: boolean) {
+        if (!running) return false;
         const pasteBlocked = Date.now() - lastMiddleClickUp < Math.max(settings.store.pasteThreshold, 1);
         const { pasteScope } = settings.store;
 
@@ -95,8 +96,8 @@ export default definePlugin({
         return false;
     },
 
-    start() { updateListeners(); },
-    stop() { updateListeners(false); },
+    start() { running = true; updateListeners(); },
+    stop() { running = false; lastMiddleClickUp = 0; updateListeners(false); },
 
     patches: [
         {

@@ -17,6 +17,7 @@
 */
 
 import { Settings } from "@api/Settings";
+import { Logger } from "@utils/Logger";
 import { Queue } from "@utils/Queue";
 import { createRoot, WindowStore } from "@webpack/common";
 import type { ReactNode } from "react";
@@ -26,6 +27,7 @@ import NotificationComponent from "./NotificationComponent";
 import { openNotificationLogModal, persistNotification } from "./notificationLog";
 
 const NotificationQueue = new Queue();
+const logger = new Logger("Notifications");
 
 let reactRoot: Root;
 let id = 42;
@@ -80,8 +82,11 @@ export interface NotificationData {
 function _showNotification(notification: NotificationData, id: number) {
     const root = getRoot();
     return new Promise<void>(resolve => {
+        let closed = false;
         root.render(
             <NotificationComponent key={id} {...notification} onClose={() => {
+                if (closed) return;
+                closed = true;
                 root.render(null);
                 resolve();
                 notification.onClose?.();
@@ -100,6 +105,7 @@ function shouldBeNative() {
 }
 
 export async function requestPermission() {
+    if (typeof Notification === "undefined") return false;
     return (
         Notification.permission === "granted" ||
         (Notification.permission !== "denied" && (await Notification.requestPermission()) === "granted")
@@ -107,29 +113,37 @@ export async function requestPermission() {
 }
 
 export async function showNotification(data: NotificationData) {
-    persistNotification(data);
+    persistNotification(data).catch(error => logger.error("Failed to save notification", error));
 
-    if (shouldBeNative() && await requestPermission()) {
-        const { title, body, icon, image, onClick = null, onClose = null } = data;
-        const n = new Notification(title, {
-            body,
-            icon,
-            // @ts-expect-error ts is drunk
-            image
-        });
-        n.onclick = onClick;
-        n.onclose = onClose;
+    try {
+        if (shouldBeNative() && await requestPermission()) {
+            const { title, body, icon, image, onClick = null, onClose = null } = data;
+            const n = new Notification(title, {
+                body,
+                icon,
+                // @ts-expect-error image is supported by some desktop notification implementations
+                image
+            });
+            n.onclick = onClick;
+            n.onclose = onClose;
 
-        if (!WindowStore.isFocused()) missedCount++;
-    } else {
-        NotificationQueue.push(() =>
-            _showNotification({
-                ...data,
-                onClose: () => {
+            if (!WindowStore.isFocused()) missedCount++;
+            return;
+        }
+    } catch (error) {
+        logger.error("Native notification failed; showing in-app notification", error);
+    }
+
+    NotificationQueue.push(() =>
+        _showNotification({
+            ...data,
+            onClose: () => {
+                try {
                     data.onClose?.();
+                } finally {
                     if (!WindowStore.isFocused()) missedCount++;
                 }
-            }, id++)
-        );
-    }
+            }
+        }, id++)
+    );
 }

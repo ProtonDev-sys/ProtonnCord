@@ -7,13 +7,13 @@
 import "./styles.css";
 
 import { NavContextMenuPatchCallback } from "@api/ContextMenu";
-import { get } from "@api/DataStore";
+import { get, set } from "@api/DataStore";
 import { definePluginSettings, Settings } from "@api/Settings";
 import { EquicordDevs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { Channel, User } from "@vencord/discord-types";
 import { extractAndLoadChunksLazy } from "@webpack";
-import { ChannelStore, Menu, openModal,SelectedChannelStore } from "@webpack/common";
+import { ChannelStore, Menu, openModal, SelectedChannelStore, showToast } from "@webpack/common";
 
 import { SetColorModal } from "./SetColorModal";
 
@@ -22,6 +22,7 @@ export let colors: Record<string, string> = {};
 let colorsLoaded = false;
 let colorsLoad: Promise<void> | null = null;
 let colorsGeneration = 0;
+let colorsMutation = Promise.resolve();
 
 function isColorMap(value: unknown): value is Record<string, string> {
     return value != null && typeof value === "object" && !Array.isArray(value);
@@ -43,6 +44,32 @@ export async function loadCustomColors() {
         });
 
     await colorsLoad;
+}
+
+export function updateCustomColor(id: string, color?: string) {
+    const generation = colorsGeneration;
+    const mutation = colorsMutation.then(async () => {
+        await loadCustomColors();
+        if (generation !== colorsGeneration) throw new Error("Custom colors were disabled while saving.");
+        const next = { ...colors };
+        if (color === undefined) delete next[id];
+        else next[id] = color;
+        await set(DATASTORE_KEY, next);
+        if (generation === colorsGeneration) colors = next;
+    });
+    colorsMutation = mutation.catch(() => void 0);
+    return mutation;
+}
+
+async function openColorModal(id: string) {
+    const generation = colorsGeneration;
+    try {
+        await Promise.all([requireSettingsMenu(), loadCustomColors()]);
+        if (generation === colorsGeneration) openModal(modalProps => <SetColorModal id={id} modalProps={modalProps} />);
+    } catch (error) {
+        console.error("Failed to open custom colors:", error);
+        showToast("Could not load custom colors.");
+    }
 }
 
 // needed for color picker to be available without opening settings (ty pindms!!)
@@ -69,10 +96,7 @@ const userContextMenuPatch: NavContextMenuPatchCallback = (children, { user }: {
             label="Set Color"
             id="set-color"
             icon={ColorIcon}
-            action={async () => {
-                await Promise.all([requireSettingsMenu(), loadCustomColors()]);
-                openModal(modalProps => <SetColorModal id={user.id} modalProps={modalProps} />);
-            }}
+            action={() => openColorModal(user.id)}
         />
     );
 
@@ -87,10 +111,7 @@ const channelContextMenuPatch: NavContextMenuPatchCallback = (children, { channe
             label="Set Color"
             id="set-color"
             icon={ColorIcon}
-            action={async () => {
-                await Promise.all([requireSettingsMenu(), loadCustomColors()]);
-                openModal(modalProps => <SetColorModal id={channel.id} modalProps={modalProps} />);
-            }}
+            action={() => openColorModal(channel.id)}
         />
     );
 
@@ -99,7 +120,7 @@ const channelContextMenuPatch: NavContextMenuPatchCallback = (children, { channe
 
 export function getCustomColorString(id: string | undefined, withHash?: boolean): string | undefined {
     if (!id) return;
-    if (!colors[id] || !Settings.plugins.CustomUserColors.enabled) return;
+    if (typeof colors[id] !== "string" || !/^[\da-f]{6}$/i.test(colors[id]) || !Settings.plugins.CustomUserColors.enabled) return;
     if (withHash) return `#${colors[id]}`;
     return colors[id];
 }
@@ -189,9 +210,10 @@ export default definePlugin({
 
     wrapMessageColorProps(colorProps: { colorString: string, colorStrings?: Record<"primaryColor" | "secondaryColor" | "tertiaryColor", string>; }, context: any) {
         try {
+            if (!getCustomColorString(context?.message?.author?.id)) return colorProps;
             const channelId = SelectedChannelStore.getChannelId();
-            const channel = ChannelStore.getChannel(channelId);
-            const isDM = channel.isDM() || channel.isMultiUserDM();
+            const channel = context?.channel ?? ChannelStore.getChannel(channelId);
+            const isDM = channel?.isDM() || channel?.isMultiUserDM();
             const colorString = this.colorIfServer(context);
             if (colorString === colorProps.colorString) return colorProps;
             if (!settings.store.colorInServers && !isDM) return colorProps;
@@ -231,7 +253,6 @@ export default definePlugin({
     },
 
     colorInReplyingTo(a: any) {
-        const { id } = a.reply.message.author;
-        return getCustomColorString(id, true);
+        return getCustomColorString(a?.reply?.message?.author?.id, true);
     },
 });

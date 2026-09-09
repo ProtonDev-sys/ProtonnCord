@@ -23,6 +23,19 @@ interface SettingsStoreOptions {
 
 type ChangeListener = (value: any, path: string) => void;
 
+function dispatchListeners<F extends (...args: any[]) => void>(listeners: Set<F> | undefined, ...args: Parameters<F>) {
+    const report = (error: unknown) => console.error("Settings listener failed", error);
+    for (const listener of listeners ?? []) {
+        try {
+            const result: unknown = listener(...args);
+            if (result != null && typeof (result as PromiseLike<unknown>).then === "function")
+                void Promise.resolve(result).catch(report);
+        } catch (error) {
+            report(error);
+        }
+    }
+}
+
 function unwrap<V>(value: V): V {
     return value && typeof value === "object" && value[SYM_IS_PROXY] ? value[SYM_GET_RAW_TARGET] : value;
 }
@@ -112,10 +125,10 @@ export class SettingsStore<T extends object> implements SettingsStoreOptions {
     private notifyPrefixes(path: string, value: unknown) {
         let end = path.indexOf(".");
         while (end !== -1) {
-            this.prefixListeners.get(path.slice(0, end))?.forEach(listener => listener(value, path));
+            dispatchListeners(this.prefixListeners.get(path.slice(0, end)), value, path);
             end = path.indexOf(".", end + 1);
         }
-        this.prefixListeners.get(path)?.forEach(listener => listener(value, path));
+        dispatchListeners(this.prefixListeners.get(path), value, path);
     }
 
     private notify(path: string, value: unknown) {
@@ -123,12 +136,12 @@ export class SettingsStore<T extends object> implements SettingsStoreOptions {
         if (keys[0] === "plugins" && keys.length > 3) {
             const settingPath = keys.slice(0, 3).join(".");
             const settingValue = atPath(this.plain, keys.slice(0, 3));
-            this.globalListeners.forEach(listener => listener(this.plain, settingPath));
-            this.pathListeners.get(settingPath)?.forEach(listener => listener(settingValue, settingPath));
+            dispatchListeners(this.globalListeners, this.plain, settingPath);
+            dispatchListeners(this.pathListeners.get(settingPath), settingValue, settingPath);
         } else {
-            this.globalListeners.forEach(listener => listener(this.plain, path));
+            dispatchListeners(this.globalListeners, this.plain, path);
         }
-        this.pathListeners.get(path)?.forEach(listener => listener(value, path));
+        dispatchListeners(this.pathListeners.get(path), value, path);
         this.notifyPrefixes(path, value);
     }
 
@@ -149,7 +162,7 @@ export class SettingsStore<T extends object> implements SettingsStoreOptions {
                 }
                 current = current[key];
             }
-            this.pathListeners.get(path)?.forEach(listener => listener(current, path));
+            dispatchListeners(this.pathListeners.get(path), current, path);
             this.notifyPrefixes(path, current);
         }
         this.markAsChanged();
@@ -190,6 +203,6 @@ export class SettingsStore<T extends object> implements SettingsStoreOptions {
     }
 
     public markAsChanged() {
-        this.globalListeners.forEach(listener => listener(this.plain, ""));
+        dispatchListeners(this.globalListeners, this.plain, "");
     }
 }

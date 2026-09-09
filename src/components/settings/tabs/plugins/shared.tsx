@@ -12,12 +12,13 @@ import { React } from "@webpack/common";
 export const cl = classNameFactory("vc-plugins-");
 export const logger = new Logger("PluginSettings", "#a6d189");
 
-export const ExcludedReasons: Record<"web" | "discordDesktop" | "vesktop" | "equibop" | "desktop" | "dev", string> = {
+export const ExcludedReasons: Record<"web" | "browser" | "discordDesktop" | "vesktop" | "equibop" | "desktop" | "dev", string> = {
     desktop: "Discord Desktop app or Vesktop/Equibop",
     discordDesktop: "Discord Desktop app",
     vesktop: "Vesktop/Equibop apps",
     equibop: "Vesktop/Equibop apps",
     web: "Vesktop/Equibop apps & Discord web",
+    browser: "Discord web browser client",
     dev: "Developer version of Protonn Cord"
 };
 

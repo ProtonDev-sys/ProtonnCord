@@ -104,7 +104,7 @@ function BookmarkIcon({ bookmark }: { bookmark: Bookmark | BookmarkFolder; }) {
         if (channel.recipients.length === 1) return (
             <Avatar
                 size="SIZE_16"
-                src={UserStore.getUser(channel.recipients[0]).getAvatarURL(undefined, 128)}
+                src={UserStore.getUser(channel.recipients[0])?.getAvatarURL(undefined, 128)}
             />
         );
         else return (
@@ -180,7 +180,7 @@ function FolderBookmarkItem({ bookmark, bookmarks, folderIndex, bookmarkIndex, m
             }
 
             const folder = bookmarks[folderIndex];
-            if (!isBookmarkFolder(folder)) return;
+            if (!isBookmarkFolder(folder) || !folder.bookmarks[dragIndex]) return;
 
             const newBookmarks = [...folder.bookmarks];
             const moved = newBookmarks.splice(dragIndex, 1)[0];
@@ -373,10 +373,13 @@ function Bookmark(props: BookmarkProps & { isExpanded?: boolean; onToggleFolder?
                 const sourceBookmark = item.bookmark || bookmarks[item.index];
 
                 // skip if source is a folder
-                if (isBookmarkFolder(sourceBookmark)) return;
+                if (!sourceBookmark || isBookmarkFolder(sourceBookmark)) return;
 
                 // skip if already in this folder
                 if (item.isFromFolder && item.folderIndex === index) return;
+
+                // Add before removing: deleting a root item can shift this folder's index.
+                methods.addBookmark(sourceBookmark, index);
 
                 // remove from original location
                 if (item.isFromFolder) {
@@ -386,9 +389,6 @@ function Bookmark(props: BookmarkProps & { isExpanded?: boolean; onToggleFolder?
                     // coming from bar level
                     methods.deleteBookmark(item.index);
                 }
-
-                // add to this folder
-                methods.addBookmark(sourceBookmark, index);
             }
         },
         collect: monitor => ({

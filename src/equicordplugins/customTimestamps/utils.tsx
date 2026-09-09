@@ -100,12 +100,13 @@ const DemoMessage = (props: { msgId, compact, message, date: Date | undefined, i
             />
         </div>
     ) : <div className="vc-cmt-demo-message">
-        <Paragraph>
-            {/* @ts-ignore */}
-            <b>Preview:</b> {customTimestamps.renderTimestamp(date, "cozy")}
-        </Paragraph>
+        <TimestampFallback date={props.date ?? new Date()} />
     </div>;
 };
+
+function TimestampFallback({ date }: { date: Date; }) {
+    return <Paragraph><b>Preview:</b> {customTimestamps.renderTimestamp(date, "cozy")}</Paragraph>;
+}
 
 export const DemoMessageContainer = ErrorBoundary.wrap(() => {
     const [isCompact, setIsCompact] = useState(false);

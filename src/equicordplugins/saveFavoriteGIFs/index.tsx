@@ -30,9 +30,10 @@ async function saveContentToFile(content: string, filename: string) {
 
         showNotification({
             title: "Save Favorite GIFs",
-            body: `Saved GIFs successfully as ${filename}`,
+            body: `GIF export requested as ${filename}`,
             color: "var(--text-positive)",
         });
+        return true;
     } catch (error) {
         logger.error("Failed to save GIFs", error);
         showNotification({
@@ -40,6 +41,7 @@ async function saveContentToFile(content: string, filename: string) {
             body: "Failed to save GIFs",
             color: "var(--text-danger)",
         });
+        return false;
     }
 }
 
@@ -126,11 +128,9 @@ async function saveWorkingGifs() {
     const filename = `working-gifs-${new Date().toISOString().split("T")[0]}.txt`;
     const content = workingUrls.join("\n");
 
-    await saveContentToFile(content, filename);
-
-    showNotification({
+    if (await saveContentToFile(content, filename)) showNotification({
         title: "Save Favorite GIFs",
-        body: `Filtered ${gifUrls.length - workingUrls.length} possibly broken GIFs. Saved ${workingUrls.length} working GIFs.`,
+        body: `Filtered ${gifUrls.length - workingUrls.length} possibly broken GIFs. Export requested for ${workingUrls.length} working GIFs.`,
         color: "var(--text-positive)",
     });
 }

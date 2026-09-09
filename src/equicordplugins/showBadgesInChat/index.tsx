@@ -125,6 +125,7 @@ function CheckBadge({ badge, author }: { badge: string; author: User; }): JSX.El
 }
 
 function ChatBadges({ author }: { author: User; }) {
+    settings.use();
 
     return (
         <span className="vc-sbic-badge-row" style={{ margin: "2px" }}>

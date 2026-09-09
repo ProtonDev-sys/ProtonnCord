@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import * as DataStore from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
 import { HeadingSecondary } from "@components/Heading";
 import { OpenExternalIcon } from "@components/Icons";
@@ -14,7 +13,7 @@ import { classNameFactory } from "@utils/css";
 import { OptionType } from "@utils/types";
 import { Button, Toasts } from "@webpack/common";
 
-import { authorizeUser, deauthorizeUser } from "./auth";
+import { authorizeUser, deauthorizeUser, getThemeLibraryToken } from "./auth";
 
 const cl = classNameFactory("vce-");
 
@@ -30,7 +29,7 @@ export const settings = definePluginSettings({
         description: "ThemeLibrary Buttons",
         component: () => {
             const handleClick = async () => {
-                const token = await DataStore.get("ThemeLibrary_uniqueToken");
+                const token = await getThemeLibraryToken();
 
                 if (!token) return Toasts.show({
                     message: "No token to copy, try authorizing first!",

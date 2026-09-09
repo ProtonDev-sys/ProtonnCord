@@ -49,17 +49,13 @@ export function buildPluginMenuEntries(includeEmpty = false) {
         []
     );
 
-    const candidates = useMemo(() =>
-        sortedPlugins
-            .filter(p => {
-                if (!isPluginEnabled(p.name)) return false;
-                if (p.name.endsWith("API")) return false;
+    const candidates = sortedPlugins.filter(p => {
+        if (!isPluginEnabled(p.name)) return false;
+        if (p.name.endsWith("API")) return false;
 
-                const name = p.name.toLowerCase();
-                return name.includes(lowerSearch);
-            }),
-        [lowerSearch]
-    );
+        const name = p.name.toLowerCase();
+        return name.includes(lowerSearch);
+    });
 
     return (
         <>
@@ -132,7 +128,7 @@ export function buildPluginMenuEntries(includeEmpty = false) {
                                 break;
                             case OptionType.SLIDER:
                                 // The menu slider doesn't support these options. Skip to avoid confusion
-                                if (option.stickToMarkers || option.componentProps) continue;
+                                if (option.stickToMarkers || option.componentProps || !option.markers.length) continue;
 
                                 options.push(
                                     <Menu.MenuControlItem
@@ -144,7 +140,10 @@ export function buildPluginMenuEntries(includeEmpty = false) {
                                                 minValue={option.markers[0]}
                                                 maxValue={option.markers.at(-1)!}
                                                 value={s[key]}
-                                                onChange={v => s[key] = v}
+                                                onChange={v => {
+                                                    s[key] = v;
+                                                    if (option.restartNeeded) showToast("Restart to apply the change");
+                                                }}
                                             />
                                         )}
                                     />
@@ -210,7 +209,7 @@ export function buildThemeMenuEntries() {
                 checked={useQuickCss}
                 label={"Enable QuickCSS"}
                 action={() => {
-                    Settings.useQuickCss = !useQuickCss;
+                    Settings.useQuickCss = !Settings.useQuickCss;
                 }}
             />
             <Menu.MenuItem
@@ -232,10 +231,11 @@ export function buildThemeMenuEntries() {
                             label={theme.fileName}
                             checked={enabledThemes.includes(theme.fileName)}
                             action={() => {
-                                if (enabledThemes.includes(theme.fileName)) {
-                                    Settings.enabledThemes = enabledThemes.filter(t => t !== theme.fileName);
+                                const currentThemes = Settings.enabledThemes;
+                                if (currentThemes.includes(theme.fileName)) {
+                                    Settings.enabledThemes = currentThemes.filter(t => t !== theme.fileName);
                                 } else {
-                                    Settings.enabledThemes = [...enabledThemes, theme.fileName];
+                                    Settings.enabledThemes = [...currentThemes, theme.fileName];
                                 }
                             }}
                         />

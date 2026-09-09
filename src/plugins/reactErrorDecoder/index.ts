@@ -21,6 +21,7 @@ import definePlugin from "@utils/types";
 import { React } from "@webpack/common";
 
 let ERROR_CODES: Record<string, string> | undefined;
+let generation = 0;
 
 export default definePlugin({
     name: "ReactErrorDecoder",
@@ -38,14 +39,18 @@ export default definePlugin({
     ],
 
     async start() {
+        const requestGeneration = ++generation;
         const CODES_URL = `https://raw.githubusercontent.com/facebook/react/v${React.version}/scripts/error-codes/codes.json`;
 
-        ERROR_CODES = await fetch(CODES_URL)
-            .then(res => res.json())
+        const codes = await fetch(CODES_URL, { signal: AbortSignal.timeout(10000) })
+            .then(res => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)))
             .catch(e => console.error("[ReactErrorDecoder] Failed to fetch React error codes\n", e));
+        if (requestGeneration === generation && codes && typeof codes === "object" && !Array.isArray(codes))
+            ERROR_CODES = Object.fromEntries(Object.entries(codes).filter(([, value]) => typeof value === "string")) as Record<string, string>;
     },
 
     stop() {
+        generation++;
         ERROR_CODES = undefined;
     },
 

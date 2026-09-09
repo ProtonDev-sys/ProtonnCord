@@ -9,10 +9,10 @@ import { Flex } from "@components/Flex";
 import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import type { RenderModalProps } from "@vencord/discord-types";
-import { Checkbox, Modal, openModal, showToast, Toasts, useEffect, useState } from "@webpack/common";
+import { Checkbox, Modal, openModal, showToast, Toasts, useEffect, useRef, useState } from "@webpack/common";
 
 import { ApplicationField, BooleanField, DateTimeField, getDateTimeLocalValue, ParticipantField, TextField } from "./fields";
-import { abortActiveClipUploads, type ClipMetadata, getClipCreatedAt, getClipTitleFromName, getDefaultClipTitle, getDefaultFileName, getErrorMessage, getParticipantIds, getString, isValidDate, pickClipFile, uploadClipFile } from "./upload";
+import { type ClipMetadata, getClipCreatedAt, getClipTitleFromName, getDefaultClipTitle, getDefaultFileName, getErrorMessage, getParticipantIds, getString, isValidDate, pickClipFile, uploadClipFile } from "./upload";
 
 export function openUploadClipFileModal(channelId: string, clip?: ClipMetadata | null) {
     openModal(modalProps => (
@@ -38,13 +38,14 @@ function UploadClipFileModal({ modalProps, channelId, clip }: { modalProps: Rend
     const [applicationId, setApplicationId] = useState(getString(clip?.applicationId) ?? "");
     const [uploading, setUploading] = useState(false);
     const [parseMetadata, setParseMetadata] = useState(false);
+    const uploadController = useRef<AbortController | null>(null);
 
     const canUpload = Boolean(file && fileName.trim() && title.trim() && isValidDate(createdAt)) && !uploading;
     const notice = createdAt && !isValidDate(createdAt)
         ? { message: "Created at must be a valid date.", type: "critical" as const }
         : undefined;
 
-    useEffect(() => abortActiveClipUploads, []);
+    useEffect(() => () => uploadController.current?.abort(), []);
 
     async function chooseClipFile() {
         let result;
@@ -72,8 +73,10 @@ function UploadClipFileModal({ modalProps, channelId, clip }: { modalProps: Rend
     }
 
     async function submit() {
-        if (!file || !canUpload) return;
+        if (!file || !canUpload || uploadController.current) return;
 
+        const controller = new AbortController();
+        uploadController.current = controller;
         setUploading(true);
 
         const success = await uploadClipFile(file, {
@@ -89,7 +92,9 @@ function UploadClipFileModal({ modalProps, channelId, clip }: { modalProps: Rend
             applicationId: applicationId.trim() || undefined,
             remoteClipId: getString(clip?.remoteClipId),
             eventsTimeline: clip?.eventsTimeline
-        });
+        }, controller.signal);
+        uploadController.current = null;
+        if (controller.signal.aborted) return;
 
         if (success) {
             modalProps.onClose();

@@ -75,9 +75,13 @@ function equalSecret(candidate: unknown): boolean {
 
 async function atomicWrite(path: string, value: string): Promise<void> {
     const temporaryPath = `${path}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, value, { encoding: "utf8", mode: 0o600 });
-    await rename(temporaryPath, path);
-    try { await chmod(path, 0o600); } catch { }
+    try {
+        await writeFile(temporaryPath, value, { encoding: "utf8", mode: 0o600 });
+        await rename(temporaryPath, path);
+        try { await chmod(path, 0o600); } catch { }
+    } finally {
+        await rm(temporaryPath, { force: true }).catch(() => { });
+    }
 }
 
 async function readOrCreateConfig(): Promise<BridgeConfig> {
@@ -108,7 +112,7 @@ async function loadSentLedger(): Promise<void> {
 }
 
 function persistSentLedger(): Promise<void> {
-    ledgerWrite = ledgerWrite.then(() =>
+    ledgerWrite = ledgerWrite.catch(() => { }).then(() =>
         atomicWrite(SENT_LEDGER_PATH, `${JSON.stringify([...sentMessages], null, 2)}\n`)
     );
     return ledgerWrite;
@@ -137,7 +141,10 @@ async function ensureInitialized(): Promise<void> {
             ]);
             bridgeSecret = (await readOrCreateConfig()).secret;
             await Promise.all([loadSentLedger(), cleanupStaleQueueFiles()]);
-        })();
+        })().catch(error => {
+            initialization = null;
+            throw error;
+        });
     }
     return initialization;
 }
@@ -253,6 +260,7 @@ function validateAttachmentUrl(url: string): URL {
     const parsed = new URL(url);
     if (
         parsed.protocol !== "https:" ||
+        parsed.username || parsed.password || parsed.port ||
         !["cdn.discordapp.com", "media.discordapp.net"].includes(parsed.hostname) ||
         !parsed.pathname.startsWith("/attachments/")
     ) throw new Error("Blocked an untrusted attachment URL");
@@ -260,11 +268,13 @@ function validateAttachmentUrl(url: string): URL {
 }
 
 async function fetchAttachmentData(url: string): Promise<AttachmentData> {
-    const response = await fetch(validateAttachmentUrl(url));
+    const response = await fetch(validateAttachmentUrl(url), { redirect: "error", signal: AbortSignal.timeout(30_000) });
     if (!response.ok || !response.body) throw new Error(`Attachment download failed with HTTP ${response.status}`);
     const declaredSize = Number(response.headers.get("content-length"));
-    if (Number.isFinite(declaredSize) && declaredSize > MAX_ATTACHMENT_SIZE)
+    if (Number.isFinite(declaredSize) && declaredSize > MAX_ATTACHMENT_SIZE) {
+        await response.body.cancel();
         throw new Error("Attachment exceeds the 25 MB Discord MCP limit");
+    }
 
     const chunks: Uint8Array[] = [];
     let size = 0;
@@ -282,7 +292,7 @@ async function fetchAttachmentData(url: string): Promise<AttachmentData> {
 
     return {
         contentType: response.headers.get("content-type")?.split(";", 1)[0] ?? "application/octet-stream",
-        data: Buffer.concat(chunks.map(chunk => Buffer.from(chunk))),
+        data: Buffer.concat(chunks),
     };
 }
 

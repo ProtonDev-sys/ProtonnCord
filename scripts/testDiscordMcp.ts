@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 import {
@@ -49,6 +49,7 @@ assert.equal(canDeleteRecordedMessage(sent, "895063026686885909", "9999999999999
 
 async function main() {
 const bridgeDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-test-"));
+assert.equal(dirname(resolve(bridgeDirectory)), resolve(tmpdir()), "cleanup must stay in the test temporary directory");
 const requestsDirectory = join(bridgeDirectory, "requests");
 const responsesDirectory = join(bridgeDirectory, "responses");
 const fakeImagePath = join(bridgeDirectory, "test-image.png");
@@ -66,6 +67,13 @@ const child = spawn(process.execPath, [resolve("tools/discord-mcp/server.mjs")],
 
 let nextRpcId = 1;
 const pending = new Map<number, { resolve(value: any): void; reject(error: Error): void; }>();
+const childClosed = new Promise<void>(resolvePromise => child.once("close", () => resolvePromise()));
+const rejectPending = (error: Error) => {
+    for (const waiter of pending.values()) waiter.reject(error);
+    pending.clear();
+};
+child.on("error", rejectPending);
+child.on("exit", code => rejectPending(new Error(`Fixture server exited with code ${code}`)));
 const stdout = createInterface({ input: child.stdout, crlfDelay: Infinity });
 stdout.on("line", line => {
     const message = JSON.parse(line);
@@ -78,9 +86,16 @@ stdout.on("line", line => {
 
 function rpc(method: string, params?: unknown): Promise<any> {
     const id = nextRpcId++;
-    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     return new Promise((resolvePromise, rejectPromise) => {
-        pending.set(id, { resolve: resolvePromise, reject: rejectPromise });
+        const timeout = setTimeout(() => {
+            pending.delete(id);
+            rejectPromise(new Error(`Fixture request timed out: ${method}`));
+        }, 10_000);
+        pending.set(id, {
+            resolve(value) { clearTimeout(timeout); resolvePromise(value); },
+            reject(error) { clearTimeout(timeout); rejectPromise(error); },
+        });
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     });
 }
 
@@ -160,6 +175,8 @@ try {
 } finally {
     workerRunning = false;
     child.kill();
+    await childClosed;
+    stdout.close();
     await fakeWorker;
     await rm(bridgeDirectory, { force: true, recursive: true });
 }

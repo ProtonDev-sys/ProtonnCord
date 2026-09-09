@@ -18,12 +18,10 @@ import { findComponentByCodeLazy } from "@webpack";
 import {
     Clickable,
     ContextMenuApi,
-    createRoot,
     FluxDispatcher,
     Menu,
     Modal,
     openModal,
-    ReactDOM,
     useCallback,
     useEffect,
     useMemo,
@@ -48,6 +46,7 @@ function useColorNavigation(initialColor: number) {
     const [color, setColor] = useState(initialColor);
 
     const onKeyDown = useCallback((e: KeyboardEvent) => {
+        if (e.target instanceof HTMLElement && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) return;
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
             e.preventDefault();
             setColor(c => {
@@ -114,30 +113,27 @@ function ColorContextMenu({ colorKeys }: { colorKeys: string[]; }) {
     );
 }
 
-function convertToHtml(component: React.ReactElement): string {
-    const container = document.createElement("div");
-    const root = createRoot(container);
-    ReactDOM.flushSync(() => root.render(component));
-    const content = container.innerHTML;
-    root.unmount();
-    return content;
-}
-
-function saveIcon(iconName: string, icon: Element | string, color: number, size: number, type: string) {
+function saveIcon(iconName: string, original: Element, color: number, size: number, type: string) {
     const colorName = cssColors[color]?.name ?? "unknown";
-    const ext = FORMAT_EXTENSIONS[type] ?? "png";
+    const ext = Object.hasOwn(FORMAT_EXTENSIONS, type) ? FORMAT_EXTENSIONS[type] : "png";
     const filename = `${iconName}-${colorName}-${size}px.${ext}`;
 
-    if (typeof icon === "string") {
-        saveFile(new File([icon], filename, { type: "text/plain" }));
-        return;
-    }
-
-    for (const el of icon.children) {
-        const fill = el.getAttribute("fill");
-        if (fill?.startsWith("var(")) {
-            el.setAttribute("fill", getComputedStyle(icon).getPropertyValue(fill.slice(4, -1)));
+    const icon = original.cloneNode(true) as Element;
+    icon.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const style = getComputedStyle(original);
+    for (const el of [icon, ...icon.querySelectorAll("*")]) {
+        for (const attribute of ["fill", "stroke"]) {
+            const value = el.getAttribute(attribute);
+            if (value?.startsWith("var(")) {
+                el.setAttribute(attribute, style.getPropertyValue(value.slice(4, -1)).trim());
+            } else if (value === "currentColor") {
+                el.setAttribute(attribute, style.color);
+            }
         }
+    }
+    if (type === "image/svg+xml") {
+        saveFile(new File([icon.outerHTML], filename, { type }));
+        return;
     }
 
     const canvas = document.createElement("canvas");
@@ -148,23 +144,26 @@ function saveIcon(iconName: string, icon: Element | string, color: number, size:
 
     const img = new Image();
     img.onload = () => {
-        ctx.drawImage(img, 0, 0, size, size);
-        const link = document.createElement("a");
-        link.download = filename;
-        link.href = canvas.toDataURL(type);
-        link.click();
+        try {
+            ctx.drawImage(img, 0, 0, size, size);
+            const link = document.createElement("a");
+            link.href = canvas.toDataURL(type);
+            const actualType = link.href.match(/^data:([^;,]+)/)?.[1] ?? type;
+            const actualExt = Object.hasOwn(FORMAT_EXTENSIONS, actualType) ? FORMAT_EXTENSIONS[actualType] : ext;
+            link.download = `${iconName}-${colorName}-${size}px.${actualExt}`;
+            link.click();
+        } catch (error) {
+            logger.error("Could not save icon", error);
+        }
     };
-    img.src = `data:image/svg+xml;base64,${btoa(icon.outerHTML)}`;
+    img.onerror = () => logger.error("Could not render icon for export");
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(icon.outerHTML)}`;
 }
 
 function OtherContextMenu({ iconName, Icon, color }: { iconName: string; Icon: Icon; color: number; }) {
-    const colorData = cssColors[color];
-
     const handleSave = (type: string) => {
         const size = iconSizesInPx.lg;
-        const iconEl = type === "image/svg+xml"
-            ? convertToHtml(<Icon className="vc-ic-save-icon" color={colorData?.css} />)
-            : document.querySelector(".vc-ic-icon-preview .vc-ic-icon-large") as Element | null;
+        const iconEl = document.querySelector(".vc-ic-icon-preview .vc-ic-icon-large");
 
         if (iconEl) saveIcon(iconName, iconEl, color, size, type);
     };

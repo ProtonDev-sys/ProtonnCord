@@ -399,7 +399,9 @@ test("Apple Music native metadata preserves an empty album field without shiftin
         util: { promisify: (fn: unknown) => fn }
     }, {
         URL,
+        AbortSignal,
         fetch: async () => ({
+            ok: true,
             json: async () => ({ resultCount: 1, results: [{ collectionName: "", trackViewUrl: "https://music.apple.com/album/fixture?i=42", artistViewUrl: "https://music.apple.com/artist/fixture", artworkUrl100: "https://fixture.invalid/100x100.png" }] }),
             text: async () => '<meta property="og:image" content="https://fixture.invalid/100x100.png">'
         })

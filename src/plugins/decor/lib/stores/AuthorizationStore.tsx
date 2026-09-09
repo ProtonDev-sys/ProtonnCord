@@ -164,7 +164,10 @@ export const useAuthorizationStore: AuthorizationStore = proxyLazy(() => zustand
                                         || url.username || url.password || url.hash || !url.searchParams.get("code") || url.searchParams.has("error"))
                                         throw new Error("Invalid Decor authorization response.");
                                     url.searchParams.set("client", "vencord");
-                                    const responseToken = await fetch(url, { signal: controller.signal, redirect: "error" });
+                                    const responseToken = await fetch(url, {
+                                        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]),
+                                        redirect: "error"
+                                    });
                                     if (!responseToken.ok) throw new Error("Decor authorization failed.");
                                     const token = (await responseToken.text()).trim();
                                     if (!isToken(token)) throw new Error("Decor returned an invalid authorization token.");

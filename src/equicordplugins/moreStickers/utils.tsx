@@ -20,7 +20,14 @@ function corsUrl(url: string | URL) {
 }
 
 export function corsFetch(url: string | URL, init?: RequestInit | undefined) {
-    return fetch(corsUrl(url), init);
+    // Custom authorization headers must stay with the configured origin.
+    const hasHeaders = new Headers(init?.headers).keys().next().done === false;
+    return fetch(hasHeaders ? url : corsUrl(url), {
+        ...init,
+        credentials: "omit",
+        redirect: "error",
+        signal: init?.signal ?? AbortSignal.timeout(60_000)
+    });
 }
 
 export let FFmpegStateContext: React.Context<FFmpegState | undefined> | undefined;

@@ -422,6 +422,7 @@ function useScreenCaptureProtectionStatus(): ScreenCaptureProtectionStatus {
     const [status, setStatus] = useState(screenCaptureProtectionStatus);
     useEffect(() => {
         screenCaptureProtectionListeners.add(setStatus);
+        setStatus(screenCaptureProtectionStatus);
         return () => { screenCaptureProtectionListeners.delete(setStatus); };
     }, []);
     return status;
@@ -754,8 +755,9 @@ function reviewKeyAnnouncementInBackground(message: Message | undefined): void {
                 keyReviewGate.fail(localUserId, peerUserId, attemptId);
         })
         .finally(() => {
+            if (generation !== announcementReviewGeneration) return;
             backgroundAnnouncementReviews.delete(attemptId);
-            if (generation === announcementReviewGeneration) keyReviewGate.finish(localUserId, peerUserId, attemptId);
+            keyReviewGate.finish(localUserId, peerUserId, attemptId);
         });
 }
 
@@ -1546,6 +1548,9 @@ async function encryptEditedMessage(
         throw new Error(decrypted.status === "replay_detected"
             ? "The original encrypted message conflicts with its authenticated history."
             : "The original encrypted message could not be authenticated for editing.");
+    // Mobile reserves this counter range; desktop edits must not cross into it.
+    if (decrypted.counter >= 2 ** 52)
+        throw new Error("Messages sent from ProtonnCord Mobile cannot be edited on desktop. Send a new encrypted message instead.");
     if (decrypted.detachedTextIndex !== null)
         throw new Error("Large encrypted messages cannot be edited because Discord cannot replace their encrypted text attachment.");
     if ((decrypted.attachmentBundle?.count ?? 0) !== original.attachments.length)
@@ -1564,6 +1569,8 @@ async function encryptEditedMessage(
             : conversationStatusMessage(encrypted.conversation);
         throw new Error(reason);
     }
+    if (encrypted.counter <= decrypted.counter)
+        throw new Error("This message cannot be edited safely from this installation. Send a new encrypted message instead.");
     void prefetchEncryptedMessageEmbeds(plaintext);
     return encrypted.content;
 }
@@ -2057,6 +2064,7 @@ function SecureChatGate({ channel }: { channel: Channel; }) {
 const SecureChatGateScreen = ErrorBoundary.wrap(SecureChatGate);
 
 async function sendKeyAnnouncement(channelId: string, localUserId: string): Promise<void> {
+    if (UserStore.getCurrentUser()?.id !== localUserId) return;
     const announcement = await Native.createAnnouncement(localUserId);
     if (UserStore.getCurrentUser()?.id !== localUserId) {
         revokePreparedSecureOperations();
@@ -2145,11 +2153,12 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
     const captureProtection = useScreenCaptureProtectionStatus();
 
     const load = useCallback(async () => {
-        if (!context) return;
+        if (!context || UserStore.getCurrentUser()?.id !== context.localUserId) return;
         setBusy(true);
         setError(null);
         try {
             const nextSecurityKey = await Native.getSecurityKeyVaultState();
+            if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
             setSecurityKey(nextSecurityKey);
             if (isNativeFailure(nextSecurityKey)) {
                 setIdentity(null);
@@ -2172,6 +2181,7 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                 Native.getIdentity(context.localUserId),
                 Native.getConversation(context.localUserId, context.snapshot),
             ]);
+            if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
             setIdentity(nextIdentity);
             setConversation(nextConversation);
             updateMessageLengthBypass(context, nextConversation);
@@ -2247,6 +2257,10 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
     };
 
     const save = async () => {
+        if (UserStore.getCurrentUser()?.id !== context.localUserId) {
+            modalProps.onClose();
+            return;
+        }
         if (enableEncryption && selectedRecipientIds.length === 0) {
             setError("Select at least one verified recipient before enabling encryption.");
             return;
@@ -2259,6 +2273,7 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                 selectedRecipientIds,
                 snapshot: context.snapshot,
             });
+            if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
             revokePreparedSecureOperations();
             setConversation(result);
             updateMessageLengthBypass(context, result);
@@ -2276,11 +2291,16 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
     };
 
     const rotate = async () => {
+        if (UserStore.getCurrentUser()?.id !== context.localUserId) {
+            modalProps.onClose();
+            return;
+        }
         if (!readyIdentity || !confirmRotation) return;
         setBusy(true);
         setError(null);
         try {
             const result = await Native.rotateIdentity(context.localUserId, readyIdentity.fingerprint);
+            if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
             if (result.status === "rotated") {
                 revokePreparedSecureOperations();
                 invalidateSecureRenderCaches();
@@ -2390,6 +2410,7 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                                         )}
                                         {keyState.profile.provider === "onekey" && (
                                             <Button size="small" disabled={busy} onClick={async () => {
+                                                if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
                                                 setBusy(true);
                                                 setError(null);
                                                 try {
@@ -2397,7 +2418,7 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                                                     if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
                                                     if (isNativeFailure(result)) setError(failureMessage(result));
                                                     else {
-                                                        copyToClipboard(result.token);
+                                                        await copyToClipboard(result.token);
                                                         showToast("OneKey-encrypted phone pairing copied. Import it in the mobile Secure Messaging settings.", Toasts.Type.SUCCESS);
                                                     }
                                                 } catch {
@@ -2767,6 +2788,10 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
         : null;
 
     const trust = async () => {
+        if (UserStore.getCurrentUser()?.id !== localUserId) {
+            modalProps.onClose();
+            return;
+        }
         if (!confirmed || !identity) return;
         setBusy(true);
         setError(null);
@@ -2774,6 +2799,7 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
             let reviewed = review;
             if (reviewed.status === "key_changed") {
                 const forgotten = await Native.forgetPeer(localUserId, peerUserId);
+                if (UserStore.getCurrentUser()?.id !== localUserId) return;
                 if (forgotten.status !== "forgotten" && forgotten.status !== "not_found") {
                     setError(failureMessage(forgotten));
                     return;
@@ -2789,6 +2815,7 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
                     discordMessageId,
                     discordEditedTimestamp,
                 );
+                if (UserStore.getCurrentUser()?.id !== localUserId) return;
                 setReview(reviewed);
             }
             if (reviewed.status !== "trust_required") {
@@ -2802,6 +2829,7 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
                 reviewed.reviewToken,
                 identity.fingerprint,
             );
+            if (UserStore.getCurrentUser()?.id !== localUserId) return;
             if (trusted.status === "trusted" || trusted.status === "already_trusted") {
                 resetAnnouncementReviewState();
                 invalidateSecureRenderCaches();

@@ -12,7 +12,12 @@ export function normalizeUrl(url: string) {
 }
 
 export function looksLikeUrl(value: string) {
-    return value.startsWith("http://") || value.startsWith("https://") || value.startsWith("//");
+    try {
+        const url = new URL(normalizeUrl(value));
+        return url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+        return false;
+    }
 }
 
 export function collectCandidateUrls(source: unknown, depth = 0, out = new Set<string>()) {
@@ -63,7 +68,8 @@ export function scoreUrl(url: string) {
 }
 
 export function orderCandidateUrls(preferred: string | null, candidates: Set<string>) {
-    const all = Array.from(candidates);
+    const all = Array.from(candidates).filter(looksLikeUrl);
+    if (preferred && !looksLikeUrl(preferred)) preferred = null;
     if (!all.length) return [];
 
     const rest = preferred ? all.filter(url => url !== preferred) : all;

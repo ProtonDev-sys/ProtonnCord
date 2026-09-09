@@ -30,18 +30,28 @@ let saveIntervalId: ReturnType<typeof setInterval> | null = null;
 let totalsDirty = false;
 let pluginStarted = false;
 let startGeneration = 0;
+let saveTail = Promise.resolve();
 
-async function loadStoredTotals() {
+async function loadStoredTotals(generation: number) {
+    await saveTail;
     const saved = await get<Record<string, number>>(storageKey);
-    if (!saved) return;
-    for (const [userId, value] of Object.entries(saved)) totalsByUser.set(userId, value);
+    if (!saved || generation !== startGeneration) return;
+    for (const [userId, value] of Object.entries(saved)) {
+        if (Number.isSafeInteger(value) && value >= 0)
+            totalsByUser.set(userId, Math.max(value, totalsByUser.get(userId) ?? 0));
+    }
 }
 
 async function persistTotals() {
     if (!totalsDirty) return;
 
     totalsDirty = false;
-    await set(storageKey, Object.fromEntries(totalsByUser));
+    const snapshot = Object.fromEntries(totalsByUser);
+    saveTail = saveTail.then(() => set(storageKey, snapshot)).catch(error => {
+        totalsDirty = true;
+        console.error("VoiceStats could not save totals", error);
+    });
+    await saveTail;
 }
 
 function flushActiveSessions() {
@@ -167,6 +177,12 @@ export default definePlugin({
         priority: 0,
     },
     flux: {
+        CONNECTION_OPEN() {
+            stopTrackingChannel();
+            const myId = UserStore.getCurrentUser()?.id;
+            const channelId = SelectedChannelStore.getVoiceChannelId?.();
+            if (pluginStarted && myId && channelId) startTrackingChannel(channelId, myId);
+        },
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
             if (!pluginStarted) return;
 
@@ -210,11 +226,13 @@ export default definePlugin({
     },
 
     async start() {
-        pluginStarted = true;
+        pluginStarted = false;
         const generation = ++startGeneration;
 
-        await loadStoredTotals();
-        if (!pluginStarted || generation !== startGeneration) return;
+        try { await loadStoredTotals(generation); }
+        catch (error) { console.error("VoiceStats could not load totals", error); }
+        if (generation !== startGeneration) return;
+        pluginStarted = true;
 
         const myId = UserStore.getCurrentUser()?.id;
         if (!myId) return;

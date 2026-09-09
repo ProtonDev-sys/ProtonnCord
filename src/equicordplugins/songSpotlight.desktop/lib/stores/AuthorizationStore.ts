@@ -17,9 +17,9 @@ export interface Token {
 
 interface AuthorizationState {
     tokens: Record<string, Token>;
-    getToken(): Token | undefined;
-    setToken(access: string, refresh: string): void;
-    deleteTokens(): void;
+    getToken(userId?: string): Token | undefined;
+    setToken(access: string, refresh: string, userId?: string): void;
+    deleteTokens(userId?: string): void;
     isAuthorized(): boolean;
 }
 
@@ -28,11 +28,11 @@ export const useAuthorizationStore: PersistedZustandStore<AuthorizationState> = 
         zustandPersist(
             ((set, get) => ({
                 tokens: {},
-                getToken() {
-                    return get().tokens[UserStore.getCurrentUser()?.id];
+                getToken(userId = UserStore.getCurrentUser()?.id) {
+                    const token = get().tokens?.[userId];
+                    return token && typeof token.access === "string" && typeof token.refresh === "string" ? token : undefined;
                 },
-                setToken(access, refresh) {
-                    const userId = UserStore.getCurrentUser()?.id;
+                setToken(access, refresh, userId = UserStore.getCurrentUser()?.id) {
                     if (userId) {
                         set({
                             tokens: {
@@ -42,8 +42,11 @@ export const useAuthorizationStore: PersistedZustandStore<AuthorizationState> = 
                         });
                     }
                 },
-                deleteTokens() {
-                    set({ tokens: {} });
+                deleteTokens(userId) {
+                    if (userId) {
+                        const { [userId]: _, ...tokens } = get().tokens ?? {};
+                        set({ tokens });
+                    } else set({ tokens: {} });
                 },
                 isAuthorized() {
                     return !!get().getToken();
@@ -53,7 +56,7 @@ export const useAuthorizationStore: PersistedZustandStore<AuthorizationState> = 
                 name: "songspotlight-auth",
                 version: 1,
                 migrate(persisted: any, version: number) {
-                    if (version === 0) {
+                    if (version === 0 && persisted?.tokens && typeof persisted.tokens === "object") {
                         persisted.tokens = Object.fromEntries(
                             Object.entries(persisted.tokens).map(([userId, access]) => [userId, {
                                 access,

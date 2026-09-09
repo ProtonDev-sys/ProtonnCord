@@ -6,9 +6,9 @@
 
 import { NativeSettings } from "@main/settings";
 import { exec, spawn } from "child_process";
-import { BrowserWindow, dialog, shell, WebContentsView } from "electron";
+import { BrowserWindow, dialog, shell } from "electron";
 import { readdirSync, readFileSync } from "fs";
-import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm } from "fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, rename, rm } from "fs/promises";
 import { basename, join, resolve } from "path";
 import yaml from "yaml-js";
 
@@ -33,6 +33,10 @@ const PLUGIN_META_REGEX = /export default definePlugin\((?:\s|\/(?:\/|\*).*)*{\s
 const vencordPath = ["desktop", "equibop"].includes(basename(__dirname)) ? join(__dirname, "../") : __dirname;
 const userpluginsRoot = resolve(vencordPath, "../src/userplugins");
 
+function gitExecutable() {
+    return NativeSettings.store.plugins.UserpluginInstaller?.gitPath?.trim() || "git";
+}
+
 function getUserpluginPath(name: string): string {
     return resolveUserpluginDirectory(userpluginsRoot, name);
 }
@@ -54,138 +58,130 @@ export async function ensurePluginsDirectory(_: any) {
 }
 
 export async function rmPlugin(_, name: string): Promise<string> {
-    // eslint-disable-next-line
-    return new Promise(async (resolve, reject) => {
-        const ups = await getUserplugins();
-        const pl = ups.find(p => p.directory! === name);
-        if (!pl) return;
+    const ups = await getUserplugins();
+    const pl = ups.find(p => p.directory! === name);
+    if (!pl) throw new Error("Plugin is not installed");
 
-        const deleteReqDialog = await dialog.showMessageBox({
-            title: "Uninstall plugin",
-            message: `Uninstall ${pl.name}`,
-            type: "error",
-            detail: `The uninstall of the userplugin ${pl.name} has been requested. Would you like to do so?\n\nIf you did not initiate this, press No.`,
-            buttons: ["No", "Yes"]
-        });
-
-        if (deleteReqDialog.response !== 1) return reject("User rejected");
-        await removeUserpluginDirectory(getUserpluginPath(name));
-
-        await build();
-        resolve("Done");
+    const deleteReqDialog = await dialog.showMessageBox({
+        title: "Uninstall plugin",
+        message: `Uninstall ${pl.name}`,
+        type: "error",
+        detail: `The uninstall of the userplugin ${pl.name} has been requested. Would you like to do so?\n\nIf you did not initiate this, press No.`,
+        buttons: ["No", "Yes"]
     });
+
+    if (deleteReqDialog.response !== 1) throw new Error("User rejected");
+    await removeUserpluginDirectory(getUserpluginPath(name));
+
+    await build();
+    return "Done";
 }
 
 export async function isUpdateAvailableForPlugin(_, name: string): Promise<boolean> {
     try {
         const pluginDir = await assertSafeUserpluginDirectory(getUserpluginPath(name));
-        return await new Promise(resolve => {
-        const otherProc = exec("git fetch", {
-            cwd: pluginDir
+        await new Promise<void>((resolveFetch, rejectFetch) => {
+            const proc = spawn(gitExecutable(), ["fetch"], { cwd: pluginDir, timeout: 120_000, stdio: "ignore", windowsHide: true });
+            proc.once("error", rejectFetch);
+            proc.once("close", code => code === 0 ? resolveFetch() : rejectFetch(new Error("Git fetch failed")));
         });
-        otherProc.once("close", () => {
-            async function doStuff() {
-                try {
-                    const head = (await readFile(join(pluginDir, ".git/HEAD"), "utf8")).match(/^ref: (.+)/)![1];
-                    const remoteHead = (await readFile(join(pluginDir, ".git/refs/remotes/origin/HEAD"), "utf8")).match(/^ref: (.+)/)![1];
-                    const localCommit = await readFile(join(pluginDir, ".git", head), "utf8");
-                    const remoteCommit = await readFile(join(pluginDir, ".git", remoteHead), "utf8");
-
-                    resolve(localCommit !== remoteCommit);
-                }
-                catch (e) {
-                    resolve(false);
-                }
-            }
-            doStuff();
-        });
-        });
+        const plan = await getUpdateReviewPlan(pluginDir);
+        return plan.localRevision !== plan.targetRevision;
     } catch {
         return false;
     }
 }
 
-export function initPluginInstall(_, link: string): Promise<string> {
-    // eslint-disable-next-line
-    return new Promise(async (resolve, reject) => {
-        const repository = parseUserpluginRepositoryUrl(link);
-        if (!repository) return reject("Invalid link");
-        const { href: repositoryUrl, owner, repo, source } = repository;
-        const pluginPath = getUserpluginPath(repo);
+export async function initPluginInstall(_, link: string): Promise<string> {
+    const repository = parseUserpluginRepositoryUrl(link);
+    if (!repository) throw new Error("Invalid link");
+    const { href: repositoryUrl, owner, repo, source } = repository;
+    const pluginPath = getUserpluginPath(repo);
 
-        // Ask for clone
-        const cloneDialog = await dialog.showMessageBox({
-            title: "Clone userplugin",
-            message: `You are about to clone a userplugin from ${source}.`,
-            type: "question",
-            detail: `The repository name is "${repo}" and it is owned by "${owner}".\nThe repository URL is ${link}\n\n(If you did not request this intentionally, choose Cancel)`,
-            buttons: ["Cancel", "Clone repository and continue install", "Open repository in browser"]
-        });
-        switch (cloneDialog.response) {
-            case 0: {
-                return reject("Rejected by user");
-            }
-            case 1: {
-                await cloneRepo(repositoryUrl, repo);
-                break;
-            }
-            case 2: {
-                await shell.openExternal(repositoryUrl);
-                return reject("silentStop");
-            }
+    // Ask for clone
+    const cloneDialog = await dialog.showMessageBox({
+        title: "Clone userplugin",
+        message: `You are about to clone a userplugin from ${source}.`,
+        type: "question",
+        detail: `The repository name is "${repo}" and it is owned by "${owner}".\nThe repository URL is ${link}\n\n(If you did not request this intentionally, choose Cancel)`,
+        buttons: ["Cancel", "Clone repository and continue install", "Open repository in browser"]
+    });
+    switch (cloneDialog.response) {
+        case 0: {
+            throw new Error("Rejected by user");
         }
+        case 1: {
+            await cloneRepo(repositoryUrl, repo);
+            break;
+        }
+        case 2: {
+            await shell.openExternal(repositoryUrl);
+            throw new Error("silentStop");
+        }
+        default: throw new Error("Rejected by user");
+    }
 
-        // Get plugin meta
-        const meta = await getPluginMeta(pluginPath);
+    // Get plugin meta
+    const meta = await getPluginMeta(pluginPath).catch(async error => {
+        await removeUserpluginDirectory(pluginPath);
+        throw error;
+    });
 
-        // Review plugin
-        const win = new BrowserWindow({
-            maximizable: false,
-            minimizable: false,
-            width: 560,
-            height: meta.usesNative || meta.usesPreSend ? 650 : 360,
-            resizable: false,
-            webPreferences: {
-                devTools: true
-            },
-            title: "Review userplugin",
-            modal: true,
-            parent: BrowserWindow.getAllWindows()[0],
-            show: false,
-            autoHideMenuBar: true
+    // Review plugin
+    const win = new BrowserWindow({
+        maximizable: false,
+        minimizable: false,
+        width: 560,
+        height: meta.usesNative || meta.usesPreSend ? 650 : 360,
+        resizable: false,
+        webPreferences: {
+            devTools: true, nodeIntegration: false, contextIsolation: true, sandbox: true
+        },
+        title: "Review userplugin",
+        modal: true,
+        parent: BrowserWindow.getAllWindows()[0],
+        show: false,
+        autoHideMenuBar: true
+    });
+    return new Promise<string>((resolveInstall, rejectInstall) => {
+        let actionStarted = false;
+        win.once("closed", () => {
+            if (actionStarted) return;
+            actionStarted = true;
+            removeUserpluginDirectory(pluginPath).then(
+                () => rejectInstall(new Error("Rejected by user")), rejectInstall
+            );
         });
-        const reView /* haha got it */ = new WebContentsView({
-            webPreferences: {
-                devTools: true,
-                nodeIntegration: true
-            }
-        });
-        win.contentView.addChildView(reView);
-        win.loadURL(generateReviewPluginContent(meta));
-        win.on("page-title-updated", async e => {
-            switch (win.webContents.getTitle() as "abortInstall" | "reviewCode" | "install") {
-                case "abortInstall": {
-                    win.close();
-                    await removeUserpluginDirectory(pluginPath);
-                    return reject("Rejected by user");
-                }
-                case "install": {
-                    win.close();
-                    try {
+        win.on("page-title-updated", () => {
+            if (actionStarted) return;
+            const title = win.webContents.getTitle();
+            if (title !== "abortInstall" && title !== "install") return;
+            actionStarted = true;
+            void (async () => {
+                switch (title) {
+                    case "abortInstall": {
+                        win.close();
+                        await removeUserpluginDirectory(pluginPath);
+                        throw new Error("Rejected by user");
+                    }
+                    case "install": {
+                        win.close();
                         await build();
+                        resolveInstall(JSON.stringify({
+                            name: meta.name,
+                            native: meta.usesNative
+                        }));
+                        break;
                     }
-                    catch (e) {
-                        reject((e as Error).toString());
-                    }
-                    resolve(JSON.stringify({
-                        name: meta.name,
-                        native: meta.usesNative
-                    }));
-                    break;
                 }
-            }
+            })().catch(rejectInstall);
         });
-        win.show();
+        win.loadURL(generateReviewPluginContent(meta)).then(() => { if (!win.isDestroyed()) win.show(); }).catch(async error => {
+            actionStarted = true;
+            win.close();
+            await removeUserpluginDirectory(pluginPath).catch(() => undefined);
+            rejectInstall(error);
+        });
     });
 }
 
@@ -195,6 +191,7 @@ async function build(): Promise<any> {
             cwd: join(vencordPath, ".."),
             shell: process.env.SHELL || process.env.ComSpec || "/bin/sh"
         });
+        proc.once("error", reject);
         proc.once("close", () => {
             if (proc.exitCode !== 0) {
                 reject("Failed to build Vencord, try building from console");
@@ -222,7 +219,7 @@ async function getPluginMeta(path: string, extra: object = {}): Promise<{
             if (f === "index.js") fileToRead = "index.js";
             if (f === "index.jsx") fileToRead = "index.jsx";
         });
-        if (!fileToRead) reject("Invalid plugin");
+        if (!fileToRead) return reject("Invalid plugin");
 
         const file = readFileSync(`${path}/${fileToRead}`, "utf8");
         let remoteURL;
@@ -245,6 +242,7 @@ async function getPluginMeta(path: string, extra: object = {}): Promise<{
         }
 
         const rawMeta = file.match(PLUGIN_META_REGEX);
+        if (!rawMeta) return reject("Invalid plugin metadata");
         resolve({
             name: rawMeta![1],
             description: rawMeta![2],
@@ -280,7 +278,7 @@ async function cloneRepo(link: string, repo: string): Promise<void> {
     const stagingDirectory = await mkdtemp(join(userpluginsRoot, ".clone-"));
     try {
         await new Promise<void>((resolveClone, rejectClone) => {
-            const proc = spawn("git", ["clone", "--", link, stagingDirectory], { cwd: userpluginsRoot });
+            const proc = spawn(gitExecutable(), ["clone", "--", link, stagingDirectory], { cwd: userpluginsRoot, timeout: 120_000, stdio: "ignore", windowsHide: true });
             proc.once("error", rejectClone);
             proc.once("close", exitCode => exitCode === 0 ? resolveClone() : rejectClone(new Error("Failed to clone")));
         });
@@ -306,14 +304,15 @@ function generateReviewPluginContent(meta: {
     usesPreSend: boolean;
     usesNative: boolean;
 }): string {
-    const template = pluginValidateContent.replace("%PLUGINNAME%", meta.name.replaceAll("<", "&lt;")).replace("%PLUGINDESC%", meta.description.replaceAll("<", "&lt;")).replace("%WARNINGHIDER%", !meta.usesNative && !meta.usesPreSend ? "[data-useless=\"warning\"] { display: none !important; }" : "").replace("%NATIVETSHIDER%", meta.usesNative ? "" : "#native-ts-warning { display: none !important; }").replace("%PRESENDHIDER%", meta.usesPreSend ? "" : "#pre-send-warning { display: none !important; }");
+    const escape = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    const template = pluginValidateContent.replace("%PLUGINNAME%", () => escape(meta.name)).replace("%PLUGINDESC%", () => escape(meta.description)).replace("%WARNINGHIDER%", !meta.usesNative && !meta.usesPreSend ? "[data-useless=\"warning\"] { display: none !important; }" : "").replace("%NATIVETSHIDER%", meta.usesNative ? "" : "#native-ts-warning { display: none !important; }").replace("%PRESENDHIDER%", meta.usesPreSend ? "" : "#pre-send-warning { display: none !important; }");
     const buf = Buffer.from(template).toString("base64");
     return `data:text/html;base64,${buf}`;
 }
 
 function getGitRevision(pluginDir: string, revision: string): Promise<string> {
     return new Promise((resolve, reject) => {
-        const revisionProc = spawn("git", ["rev-parse", "--verify", `${revision}^{commit}`], { cwd: pluginDir });
+        const revisionProc = spawn(gitExecutable(), ["rev-parse", "--verify", `${revision}^{commit}`], { cwd: pluginDir, timeout: 15_000, windowsHide: true });
         let stdout = "";
         let stderr = "";
         let settled = false;
@@ -352,13 +351,13 @@ function getUpdateCommits(pluginDir: string, logRange: string): Promise<UpdateCo
             settled = true;
             callback();
         };
-        const commitProc = spawn("git", [
+        const commitProc = spawn(gitExecutable(), [
             "log",
             "-z",
             `--max-count=${MAX_DISPLAYED_UPDATE_COMMITS + 1}`,
             "--format=%an%x00%h%x00%H%x00%s",
             logRange
-        ], { cwd: pluginDir });
+        ], { cwd: pluginDir, timeout: 15_000, windowsHide: true });
         let rawOutput = "";
         let outputBytes = 0;
         let outputTooLarge = false;
@@ -478,7 +477,7 @@ export async function updatePlugin(_, directory: string) {
                 }
 
                 await new Promise<void>((resolveRebase, rejectRebase) => {
-                    const rebaseProc = spawn("git", ["rebase", reviewPlan.targetRevision], { cwd: pluginDir });
+                    const rebaseProc = spawn(gitExecutable(), ["rebase", reviewPlan.targetRevision], { cwd: pluginDir, timeout: 120_000, windowsHide: true });
                     let stderr = "";
                     let settled = false;
                     const settle = (callback: () => void) => {
@@ -520,7 +519,7 @@ export async function openGitPathModal(_: any) {
         height: 400,
         resizable: false,
         webPreferences: {
-            devTools: true
+            devTools: true, nodeIntegration: false, contextIsolation: true, sandbox: true
         },
         title: "Set Git path",
         modal: true,
@@ -528,14 +527,6 @@ export async function openGitPathModal(_: any) {
         show: false,
         autoHideMenuBar: true
     });
-    const reView = new WebContentsView({
-        webPreferences: {
-            devTools: true,
-            nodeIntegration: true
-        }
-    });
-    win.contentView.addChildView(reView);
-    win.loadURL(`data:text/html;base64,${Buffer.from(setGitPathContent).toString("base64")}`);
     win.on("page-title-updated", async _ => {
         const t = win.webContents.getTitle();
         if (t === "abort") win.close();
@@ -555,10 +546,10 @@ export async function openGitPathModal(_: any) {
         }
         if (t.startsWith("check")) {
             try {
-                const gitProc = spawn(t === "check-" ? "git" : t.split("-").toSpliced(0, 1).join("-"), ["--version"]);
+                const gitProc = spawn(t === "check-" ? "git" : t.split("-").toSpliced(0, 1).join("-"), ["--version"], { timeout: 15_000, windowsHide: true });
                 let rawOutput = "";
                 gitProc.stdout?.on("data", d => {
-                    rawOutput += String(d);
+                    rawOutput += String(d).slice(0, Math.max(0, 8192 - rawOutput.length));
                 });
                 gitProc.on("error", e => {
                     dialog.showMessageBox({
@@ -591,6 +582,7 @@ export async function openGitPathModal(_: any) {
             }
         }
     });
+    await win.loadURL(`data:text/html;base64,${Buffer.from(setGitPathContent).toString("base64")}`);
     win.show();
     if (gitPathSet) {
         win.webContents.executeJavaScript(`document.querySelector("input").value = ${JSON.stringify(gitPathSet)};`);

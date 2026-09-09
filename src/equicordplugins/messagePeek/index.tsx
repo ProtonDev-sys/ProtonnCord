@@ -35,6 +35,16 @@ const STARTUP_FETCH_BATCH_SIZE = 5;
 const STARTUP_FETCH_DELAY_MS = 3000;
 
 let startupFetchGeneration = 0;
+let startupDelay: { timer: ReturnType<typeof setTimeout>; resolve(): void; } | undefined;
+
+function cancelStartupFetch() {
+    startupFetchGeneration++;
+    if (startupDelay) {
+        clearTimeout(startupDelay.timer);
+        startupDelay.resolve();
+        startupDelay = undefined;
+    }
+}
 
 const settings = definePluginSettings({
     hideMuted: {
@@ -156,15 +166,13 @@ function getMessageContent(message: Message): MessageContent | null {
 
 function MessagePreviewContent({ channel, user }: { channel: Channel; user: User | null | undefined; }) {
     const lastMessage = useStateFromStores(
-        [MessageStore],
+        [MessageStore, UserStore, RelationshipStore],
         () => MessageStore.getLastMessage(channel.id) as Message | undefined
     );
 
     if (channel.isSystemDM()) {
         return <>Official Discord Message</>;
     }
-
-    const smynName = isPluginEnabled(showMeYourName.name) ? showMeYourName.getTypingMemberListProfilesReactionsVoiceNameText({ user: user ?? lastMessage?.author, type: "membersList" }) : null;
 
     if (!lastMessage) {
         if (channel.isMultiUserDM()) return <>{channel.recipients.length + 1} Members</>;
@@ -176,6 +184,9 @@ function MessagePreviewContent({ channel, user }: { channel: Channel; user: User
 
     const currentUserId = UserStore.getCurrentUser()?.id;
     const isOwnMessage = lastMessage.author.id === currentUserId;
+    const smynName = !isOwnMessage && isPluginEnabled(showMeYourName.name)
+        ? showMeYourName.getTypingMemberListProfilesReactionsVoiceNameText({ user: lastMessage.author, type: "membersList" })
+        : null;
     const authorName = isOwnMessage ? "You" : (smynName || RelationshipStore.getNickname(lastMessage.author.id) || lastMessage.author.globalName || lastMessage.author.username);
     const Icon = content.icon ? Icons[content.icon] : null;
 
@@ -224,13 +235,20 @@ function SubText({ channel, user, activities, applicationStream, voiceChannel, s
 }
 
 function Timestamp({ channel }: { channel: Channel; }) {
-    const lastMessage = useStateFromStores([MessageStore], () => MessageStore.getLastMessage(channel.id) as Message | undefined);
+    const { hideMuted } = settings.use(["hideMuted"]);
+    const [lastMessage, isChannelPinned, isFavoritesEnabled, isMuted] = useStateFromStores(
+        [MessageStore, UserGuildSettingsStore, ExperimentStore],
+        () => [
+            MessageStore.getLastMessage(channel.id) as Message | undefined,
+            UserGuildSettingsStore.isMessagesFavorite(channel.id),
+            ExperimentStore.getUserExperimentBucket("2026-01-favorites-server") > 0,
+            UserGuildSettingsStore.isChannelMuted(null!, channel.id)
+        ] as const
+    );
 
-    if (!lastMessage) return null;
+    if (!lastMessage || hideMuted && isMuted) return null;
 
     const timestamp = SnowflakeUtils.extractTimestamp(lastMessage.id);
-    const isChannelPinned = UserGuildSettingsStore.isMessagesFavorite(channel?.id);
-    const isFavoritesEnabled = ExperimentStore.getUserExperimentBucket("2026-01-favorites-server") > 0;
     const className = isFavoritesEnabled || isChannelPinned ? cl("timestamp-favorites") : cl("timestamp");
     return <span className={className}>{formatRelativeTime(timestamp)}</span>;
 }
@@ -241,6 +259,20 @@ function shouldShowActivity(lastMessage: Message | undefined, hasActivity: boole
 
     const messageTimestamp = SnowflakeUtils.extractTimestamp(lastMessage.id);
     return Date.now() - messageTimestamp > ONE_HOUR_MS;
+}
+
+function PrivateChannelSubText(props: PrivateChannelProps) {
+    const { channel, user, activities, status, applicationStream, voiceChannel } = props;
+    const { hideMuted } = settings.use(["hideMuted"]);
+    const [lastMessage, isMuted] = useStateFromStores([MessageStore, UserGuildSettingsStore], () => [
+        MessageStore.getLastMessage(channel.id) as Message | undefined,
+        UserGuildSettingsStore.isChannelMuted(null!, channel.id)
+    ] as const);
+    const hasActivity = hasRelevantActivity({ activities, status, applicationStream, voiceChannel });
+    if (hideMuted && isMuted) return hasActivity
+        ? <ActivityText user={user} activities={activities} voiceChannel={voiceChannel} applicationStream={applicationStream} />
+        : null;
+    return <SubText {...props} showActivity={shouldShowActivity(lastMessage, hasActivity)} />;
 }
 
 export default definePlugin({
@@ -261,73 +293,50 @@ export default definePlugin({
     ],
 
     async start() {
-        const generation = ++startupFetchGeneration;
+        cancelStartupFetch();
+        const generation = startupFetchGeneration;
+        const accountId = UserStore.getCurrentUser()?.id;
+        if (!accountId) return;
+        const isCurrent = () => generation === startupFetchGeneration && UserStore.getCurrentUser()?.id === accountId;
         const channels = ChannelStore.getSortedPrivateChannels()
             .slice(0, 25)
             .filter(c => !MessageStore.getLastMessage(c.id));
 
-        for (let i = 0; i < channels.length && generation === startupFetchGeneration; i += STARTUP_FETCH_BATCH_SIZE) {
+        for (let i = 0; i < channels.length && isCurrent(); i += STARTUP_FETCH_BATCH_SIZE) {
             const batch = channels.slice(i, i + STARTUP_FETCH_BATCH_SIZE);
 
             await Promise.allSettled(
-                batch.map(channel =>
-                    MessageActions.fetchMessages({
+                batch.map(channel => Promise.resolve().then(() =>
+                    isCurrent() && MessageActions.fetchMessages({
                         channelId: channel.id,
                         limit: 1
                     })
-                )
+                ))
             );
 
-            if (generation !== startupFetchGeneration) break;
+            if (!isCurrent()) break;
 
             if (i + STARTUP_FETCH_BATCH_SIZE < channels.length) {
-                await new Promise(r => setTimeout(r, STARTUP_FETCH_DELAY_MS));
+                await new Promise<void>(resolve => {
+                    startupDelay = { resolve, timer: setTimeout(() => {
+                        startupDelay = undefined;
+                        resolve();
+                    }, STARTUP_FETCH_DELAY_MS) };
+                });
             }
         }
     },
 
     stop() {
-        startupFetchGeneration++;
+        cancelStartupFetch();
     },
 
     renderMemberListDecorator({ channel }: DecoratorProps) {
         if (!channel) return null;
-        if (settings.store.hideMuted && UserGuildSettingsStore.isChannelMuted(null!, channel.id)) return null;
         return <Timestamp channel={channel} />;
     },
 
     getSubText(props: PrivateChannelProps) {
-        const { channel, user, activities, status, applicationStream, voiceChannel } = props;
-
-        if (settings.store.hideMuted && UserGuildSettingsStore.isChannelMuted(null!, channel.id)) {
-            const hasActivity = hasRelevantActivity({ activities, status, applicationStream, voiceChannel });
-            if (hasActivity) {
-                return (
-                    <ActivityText
-                        user={user}
-                        activities={activities}
-                        voiceChannel={voiceChannel}
-                        applicationStream={applicationStream}
-                    />
-                );
-            }
-            return null;
-        }
-
-        const lastMessage = MessageStore.getLastMessage(channel.id) as Message | undefined;
-        const hasActivity = hasRelevantActivity({ activities, status, applicationStream, voiceChannel });
-        const showActivity = shouldShowActivity(lastMessage, hasActivity);
-
-        return (
-            <SubText
-                channel={channel}
-                user={user}
-                activities={activities}
-                status={status}
-                applicationStream={applicationStream}
-                voiceChannel={voiceChannel}
-                showActivity={showActivity}
-            />
-        );
+        return <PrivateChannelSubText {...props} />;
     }
 });

@@ -6,9 +6,10 @@
 
 import { definePluginSettings } from "@api/Settings";
 import { EquicordDevs } from "@utils/constants";
+import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { Channel, Message } from "@vencord/discord-types";
-import { ChannelStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
+import { ChannelStore, MessageActions, MessageStore, showToast, Toasts, UserStore } from "@webpack/common";
 
 function shouldEdit(channel: Channel | undefined, message: Message | undefined, timePeriod: number, shouldMergeWithAttachment: boolean) {
     let should = true;
@@ -39,7 +40,8 @@ function shouldEdit(channel: Channel | undefined, message: Message | undefined, 
     const timestamp = new Date(message.timestamp);
     const now = new Date();
 
-    if ((now.getTime() - timestamp.getTime()) > (timePeriod * 1000)) {
+    const age = now.getTime() - timestamp.getTime();
+    if (!Number.isFinite(age) || age < 0 || !Number.isFinite(timePeriod) || timePeriod < 0 || age > timePeriod * 1000) {
         should = false;
     }
 
@@ -74,8 +76,8 @@ export default definePlugin({
     tags: ["Chat"],
     authors: [EquicordDevs.port22exposed],
     settings,
-    onBeforeMessageSend(channelId, message) {
-        if (!message.content) return;
+    async onBeforeMessageSend(channelId, message, options, props) {
+        if (!message.content || options.messageReference || props.hasAttachments || props.hasStickers) return;
         const lastMessage = MessageStore.getMessages(channelId)?.last?.() as Message | undefined;
         const channel = ChannelStore.getChannel(channelId);
 
@@ -85,11 +87,16 @@ export default definePlugin({
             const separator = settings.store.useSpace ? " " : "\n";
             const newContent = content + separator + message.content;
 
-            MessageActions.editMessage(channelId, lastMessage.id, {
-                content: newContent,
-            });
-
-            message.content = "";
+            try {
+                await MessageActions.editMessage(channelId, lastMessage.id, {
+                    content: newContent,
+                });
+                message.content = "";
+            } catch (error) {
+                new Logger("MessageBurst").error("Failed to merge message", error);
+                showToast("Could not merge the message. Your composed text has been kept.", Toasts.Type.FAILURE);
+                return { cancel: true };
+            }
         }
     },
 });

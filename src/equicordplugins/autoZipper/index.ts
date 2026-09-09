@@ -80,48 +80,34 @@ async function readFileEntry(entry: FileSystemFileEntry): Promise<File> {
 }
 
 async function readDirectoryEntry(entry: FileSystemDirectoryEntry): Promise<Record<string, Uint8Array>> {
-    const files: Record<string, Uint8Array> = {};
+    const files: Record<string, Uint8Array> = Object.create(null);
     let fileCount = 0;
     let totalBytes = 0;
 
     async function readEntries(dirEntry: FileSystemDirectoryEntry, path = ""): Promise<void> {
         const reader = dirEntry.createReader();
 
-        const readBatch = async (): Promise<void> => {
-            return new Promise((resolve, reject) => {
-                reader.readEntries(async entries => {
-                    if (entries.length === 0) {
-                        resolve();
-                        return;
-                    }
-
-                    for (const childEntry of entries) {
-                        const entryPath = path ? `${path}/${childEntry.name}` : childEntry.name;
-
-                        if (childEntry.isFile) {
-                            const file = await readFileEntry(childEntry as FileSystemFileEntry);
-                            fileCount++;
-                            if (fileCount > MAX_FOLDER_FILE_COUNT) {
-                                throw new Error(`${entry.name} contains more than ${MAX_FOLDER_FILE_COUNT} files.`);
-                            }
-
-                            totalBytes += file.size;
-                            assertZipInputSize(entry.name, totalBytes);
-
-                            const arrayBuffer = await file.arrayBuffer();
-                            files[entryPath] = new Uint8Array(arrayBuffer);
-                        } else if (childEntry.isDirectory) {
-                            await readEntries(childEntry as FileSystemDirectoryEntry, entryPath);
-                        }
-                    }
-
-                    await readBatch();
-                    resolve();
-                }, reject);
+        while (true) {
+            const entries = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+                reader.readEntries(resolve, reject);
             });
-        };
+            if (entries.length === 0) return;
 
-        await readBatch();
+            for (const childEntry of entries) {
+                const entryPath = path ? `${path}/${childEntry.name}` : childEntry.name;
+                if (childEntry.isFile) {
+                    const file = await readFileEntry(childEntry as FileSystemFileEntry);
+                    if (++fileCount > MAX_FOLDER_FILE_COUNT) {
+                        throw new Error(`${entry.name} contains more than ${MAX_FOLDER_FILE_COUNT} files.`);
+                    }
+                    totalBytes += file.size;
+                    assertZipInputSize(entry.name, totalBytes);
+                    files[entryPath] = new Uint8Array(await file.arrayBuffer());
+                } else if (childEntry.isDirectory) {
+                    await readEntries(childEntry as FileSystemDirectoryEntry, entryPath);
+                }
+            }
+        }
     }
 
     await readEntries(entry);
@@ -154,6 +140,15 @@ async function processFiles(files: File[]): Promise<File[]> {
 }
 
 let interceptingEvents = false;
+let generation = 0;
+
+function queueUpload(files: File[], channelId: string, eventGeneration: number) {
+    setTimeout(() => {
+        if (!interceptingEvents || eventGeneration !== generation || channelId !== SelectedChannelStore.getChannelId()) return;
+        const channel = ChannelStore.getChannel(channelId);
+        if (channel && files.length) UploadHandler.promptToUpload(files, channel, DraftType.ChannelMessage);
+    }, 10);
+}
 
 function handleDrop(event: DragEvent) {
     if (!event.dataTransfer) return;
@@ -170,6 +165,9 @@ function handleDrop(event: DragEvent) {
     });
 
     if (!hasTargetedItem) return;
+    const channelId = SelectedChannelStore.getChannelId();
+    if (!channelId) return;
+    const eventGeneration = generation;
 
     event.preventDefault();
     event.stopPropagation();
@@ -188,7 +186,7 @@ function handleDrop(event: DragEvent) {
                     return null;
                 });
             processPromises.push(folderPromise);
-        } else if (entry?.isFile) {
+        } else if (item.kind === "file") {
             const file = item.getAsFile();
             if (file) {
                 if (shouldZipFile(file)) {
@@ -208,11 +206,7 @@ function handleDrop(event: DragEvent) {
 
     Promise.all(processPromises).then(processedFiles => {
         const validFiles = processedFiles.filter((file): file is File => file !== null);
-        const channelId = SelectedChannelStore.getChannelId();
-        const channel = ChannelStore.getChannel(channelId);
-        if (channel && validFiles.length > 0) {
-            setTimeout(() => UploadHandler.promptToUpload(validFiles, channel, DraftType.ChannelMessage), 10);
-        }
+        queueUpload(validFiles, channelId, eventGeneration);
     });
 }
 
@@ -222,16 +216,15 @@ function handlePaste(event: ClipboardEvent) {
 
     const hasTargetedFile = files.some(shouldZipFile);
     if (!hasTargetedFile) return;
+    const channelId = SelectedChannelStore.getChannelId();
+    if (!channelId) return;
+    const eventGeneration = generation;
 
     event.preventDefault();
     event.stopPropagation();
 
     processFiles(files).then(processedFiles => {
-        const channelId = SelectedChannelStore.getChannelId();
-        const channel = ChannelStore.getChannel(channelId);
-        if (channel && processedFiles.length > 0) {
-            setTimeout(() => UploadHandler.promptToUpload(processedFiles, channel, DraftType.ChannelMessage), 10);
-        }
+        queueUpload(processedFiles, channelId, eventGeneration);
     });
 }
 
@@ -256,5 +249,6 @@ export default definePlugin({
         document.removeEventListener("drop", handleDrop, true);
         document.removeEventListener("paste", handlePaste, true);
         interceptingEvents = false;
+        generation++;
     }
 });

@@ -204,6 +204,7 @@ function validateBundle(bundle: AttachmentBundleDescriptor): void {
 					(typeof entry.name !== 'string' ||
 						!entry.name.length ||
 						entry.name.length > 255 ||
+						// biome-ignore lint/suspicious/noControlCharactersInRegex: Untrusted attachment names must reject ASCII control characters.
 						/[\0-\x1f\\/]/u.test(entry.name)))
 			)
 				throw new Error('Attachment manifest entry is invalid')

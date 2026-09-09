@@ -6,7 +6,7 @@
 
 import { PinOrder, settings } from "@plugins/pinDms";
 import { useForceUpdater } from "@utils/react";
-import { PrivateChannelSortStore, UserStore } from "@webpack/common";
+import { PrivateChannelSortStore, useEffect, UserStore } from "@webpack/common";
 
 export interface Category {
     id: string;
@@ -21,7 +21,15 @@ let lastPrivateChannelIds: string[] | null = null;
 const lastSortOrder = new Map<string, number>();
 export let currentUserCategories: Category[] = [];
 
+export function reset() {
+    currentUserCategories = [];
+    lastPrivateChannelIds = null;
+    lastSortOrder.clear();
+    forceUpdateDms?.();
+}
+
 export async function init() {
+    reset();
     const userId = UserStore.getCurrentUser()?.id;
     if (userId == null) return;
 
@@ -30,7 +38,11 @@ export async function init() {
 }
 
 export function usePinnedDms() {
-    forceUpdateDms = useForceUpdater();
+    const update = useForceUpdater();
+    forceUpdateDms = update;
+    useEffect(() => () => {
+        if (forceUpdateDms === update) forceUpdateDms = undefined;
+    }, [update]);
     settings.use(["pinOrder", "canCollapseDmSection", "dmSectionCollapsed", "userBasedCategoryList"]);
 }
 
@@ -50,7 +62,7 @@ export function addChannelToCategory(channelId: string, categoryId: string) {
     const category = currentUserCategories.find(c => c.id === categoryId);
     if (category == null) return;
 
-    if (category.channels.includes(channelId)) return;
+    if (isPinned(channelId)) return;
 
     category.channels.push(channelId);
 }

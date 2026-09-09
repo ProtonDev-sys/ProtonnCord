@@ -62,6 +62,46 @@ test("extension metadata waits for a complete message from its own window", asyn
     for (const [key, value] of Object.entries(meta)) assert.equal(metadata[key], value);
 });
 
+test("userscript cancellation aborts native requests and releases signal listeners after any completion", async () => {
+    let options: any;
+    let requests = 0;
+    let aborts = 0;
+    const listeners = new Set<() => void>();
+    const signal = {
+        aborted: false, reason: new Error("Fixture cancelled"),
+        addEventListener(_type: string, listener: () => void) { listeners.add(listener); },
+        removeEventListener(_type: string, listener: () => void) { listeners.delete(listener); },
+    };
+    const { fetch } = load("browser/GMPolyfill.js", {
+        Headers, DOMException,
+        GM_xmlhttpRequest(request: any) {
+            requests++;
+            options = request;
+            return { abort() { aborts++; options.onabort(); } };
+        },
+    });
+    const pending = fetch("https://example.invalid/fixture", { signal });
+    const rejected = assert.rejects(pending, error => error === signal.reason);
+    assert.equal(options.signal, undefined);
+    signal.aborted = true;
+    for (const listener of [...listeners]) listener();
+    await rejected;
+    assert.equal(aborts, 1);
+    assert.equal(listeners.size, 0);
+    await assert.rejects(fetch("https://example.invalid/fixture", { signal }), error => error === signal.reason);
+    assert.equal(requests, 1, "already-cancelled requests never start");
+
+    signal.aborted = false;
+    const successful = fetch("https://example.invalid/fixture", { signal });
+    options.onload({ response: new Blob(["fixture"]), status: 200 });
+    await successful;
+    assert.equal(listeners.size, 0);
+    const failed = fetch("https://example.invalid/fixture", { signal });
+    options.onerror();
+    await assert.rejects(failed, error => error === "fetch error");
+    assert.equal(listeners.size, 0);
+});
+
 test("extension commands tolerate an absent tab or content script", async () => {
     let command: (name: string) => Promise<void> = async () => assert.fail("listener not registered");
     let tabs: { id: number; }[] = [];

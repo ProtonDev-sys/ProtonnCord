@@ -32,6 +32,7 @@ for (const rawQuote of presetQuotesText.split("\n")) {
 }
 
 const noQuotesQuote = "Did you really disable all loading quotes? What a buffoon you are...";
+const originalQuotes = new WeakMap<string[], string[]>();
 
 const settings = definePluginSettings({
     replaceEvents: {
@@ -91,21 +92,28 @@ export default definePlugin({
         try {
             const { enableDiscordPresetQuotes, additionalQuotes, additionalQuotesDelimiter, enablePluginPresetQuotes } = settings.store;
 
-            if (!enableDiscordPresetQuotes)
-                quotes.length = 0;
+            let original = originalQuotes.get(quotes);
+            if (!original) {
+                original = quotes.slice();
+                originalQuotes.set(quotes, original);
+            }
+            const nextQuotes = enableDiscordPresetQuotes ? original.slice() : [];
 
             if (enablePluginPresetQuotes) {
                 for (const quote of presetQuotes) {
-                    quotes.push(quote);
+                    nextQuotes.push(quote);
                 }
             }
 
             for (const quote of additionalQuotes.split(additionalQuotesDelimiter)) {
-                if (quote) quotes.push(quote);
+                if (quote) nextQuotes.push(quote);
             }
 
-            if (!quotes.length)
-                quotes.push(noQuotesQuote);
+            if (!nextQuotes.length)
+                nextQuotes.push(noQuotesQuote);
+
+            quotes.length = 0;
+            for (const quote of nextQuotes) quotes.push(quote);
         } catch (e) {
             new Logger("LoadingQuotes").error("Failed to mutate quotes", e);
         }

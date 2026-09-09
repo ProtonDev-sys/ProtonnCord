@@ -60,10 +60,12 @@ export default function ReplyNavigator({ replies }: { replies: Message[]; }) {
     );
 
     function processPageChange(page: number) {
+        const reply = Number.isInteger(page) ? replies[page - 1] : undefined;
+        if (!reply) return;
         setPage(page);
         jumper.jumpToMessage({
-            channelId: replies[page - 1].channel_id,
-            messageId: replies[page - 1].id,
+            channelId: reply.channel_id,
+            messageId: reply.id,
             flash: true,
             jumpType: "INSTANT"
         });

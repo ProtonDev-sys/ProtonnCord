@@ -6,8 +6,7 @@
 
 import "./styles.css";
 
-import * as DataStore from "@api/DataStore";
-import { Settings } from "@api/Settings";
+import { Settings, useSettings } from "@api/Settings";
 import { ErrorCard } from "@components/ErrorCard";
 import { HeadingPrimary, HeadingTertiary } from "@components/Heading";
 import { OpenExternalIcon } from "@components/Icons";
@@ -20,6 +19,7 @@ import { classes } from "@utils/misc";
 import { findCssClassesLazy } from "@webpack";
 import { Button, React, SearchableSelect, TextInput, useEffect, useState } from "@webpack/common";
 
+import { getThemeLibraryToken } from "../utils/auth";
 import { ThemeCard } from "./ThemeCard";
 
 const InputStyles = findCssClassesLazy("inputWrapper", "editable", "error");
@@ -29,8 +29,14 @@ export const logger = new Logger("ThemeLibrary", "#e5c890");
 
 export async function fetchAllThemes(): Promise<Theme[]> {
     const response = await themeRequest("/themes");
+    if (!response.ok) throw new Error(`Theme list request failed (${response.status})`);
     const data = await response.json();
-    const themes: Theme[] = Object.values(data);
+    if (!data || typeof data !== "object") throw new Error("Invalid theme list");
+    const themes: Theme[] = Object.values(data).filter((theme: any) => theme &&
+        (typeof theme.id === "string" || typeof theme.id === "number") && typeof theme.name === "string" && typeof theme.description === "string" &&
+        typeof theme.content === "string" && Array.isArray(theme.tags) && theme.tags.every(tag => typeof tag === "string") &&
+        (Array.isArray(theme.author) ? theme.author : [theme.author]).every(author => author && typeof author.discord_name === "string"))
+        .map(theme => ({ ...theme as Theme, id: String((theme as Theme).id) }));
     themes.forEach(theme => {
         if (!theme.source) {
             theme.source = `${apiUrl}/${theme.id}`;
@@ -42,9 +48,9 @@ export async function fetchAllThemes(): Promise<Theme[]> {
 export async function themeRequest(path: string, options: RequestInit = {}) {
     return fetch(apiUrl + path, {
         ...options,
-        headers: {
-            ...options.headers,
-        }
+        headers: new Headers(options.headers),
+        signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
+        redirect: "error"
     });
 }
 
@@ -59,10 +65,12 @@ const SearchTags = {
 function ThemeTab() {
     const [themes, setThemes] = useState<Theme[]>([]);
     const [filteredThemes, setFilteredThemes] = useState<Theme[]>([]);
-    const [themeLinks, setThemeLinks] = useState(Settings.themeLinks);
+    const currentSettings = useSettings(["themeLinks", "plugins.ThemeLibrary.hideWarningCard"]);
+    const { themeLinks } = currentSettings;
+    const setThemeLinks = (links: string[]) => { Settings.themeLinks = links; };
     const [likedThemes, setLikedThemes] = useState<ThemeLikeProps>();
     const [searchValue, setSearchValue] = useState({ value: "", status: SearchStatus.ALL });
-    const [hideWarningCard, setHideWarningCard] = useState(Settings.plugins.ThemeLibrary.hideWarningCard);
+    const { hideWarningCard } = currentSettings.plugins.ThemeLibrary;
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
 
@@ -94,53 +102,53 @@ function ThemeTab() {
 
     const fetchLikes = async () => {
         try {
-            const token = await DataStore.get("ThemeLibrary_uniqueToken");
+            const token = await getThemeLibraryToken();
             const response = await themeRequest("/likes/get", {
                 headers: {
-                    "Authorization": `Bearer ${token}`,
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
             });
+            if (!response.ok) return;
             const data = await response.json();
-            return data;
+            return data && Array.isArray(data.likes) ? data : undefined;
         } catch (err) {
             logger.error(err);
         }
     };
 
     useEffect(() => {
+        let active = true;
         const fetchData = async () => {
             try {
                 const [themes, likes] = await Promise.all([fetchAllThemes(), fetchLikes()]);
+                if (!active) return;
                 setThemes(themes);
                 setLikedThemes(likes);
                 setFilteredThemes(themes);
             } catch (err) {
                 logger.error(err);
-                setError(true);
+                if (active) setError(true);
             } finally {
-                setLoading(false);
+                if (active) setLoading(false);
             }
         };
-        fetchData();
-    }, []);
-
-    useEffect(() => {
-        setThemeLinks(Settings.themeLinks);
+        void fetchData();
+        return () => { active = false; };
     }, []);
 
     useEffect(() => {
         // likes only update after 12_000 due to cache
         if (searchValue.status === SearchStatus.LIKED) {
-            const likedThemes = themes.sort((a, b) => b.likes - a.likes);
+            const likedThemes = [...themes].sort((a, b) => b.likes - a.likes);
             // replacement of themeFilter which wont work with SearchStatus.LIKED
-            const filteredLikedThemes = likedThemes.filter(x => x.name.includes(searchValue.value));
+            const filteredLikedThemes = likedThemes.filter(x => x.name.toLowerCase().includes(searchValue.value.toLowerCase()));
             setFilteredThemes(filteredLikedThemes);
         } else {
-            const sortedThemes = themes.sort((a, b) => new Date(b.release_date).getTime() - new Date(a.release_date).getTime());
+            const sortedThemes = [...themes].sort((a, b) => new Date(b.release_date).getTime() - new Date(a.release_date).getTime());
             const filteredThemes = sortedThemes.filter(themeFilter);
             setFilteredThemes(filteredThemes);
         }
-    }, [searchValue, themes]);
+    }, [searchValue, themes, themeLinks]);
 
     return (
         <div>
@@ -179,7 +187,6 @@ function ThemeTab() {
                                 <Button
                                     onClick={() => {
                                         Settings.plugins.ThemeLibrary.hideWarningCard = true;
-                                        setHideWarningCard(true);
                                     }}
                                     size={Button.Sizes.SMALL}
                                     color={Button.Colors.RED}
@@ -197,7 +204,7 @@ function ThemeTab() {
                                 {searchValue.status === SearchStatus.LIKED ? "Most Liked" : "Newest Additions"}
                             </HeadingPrimary>
 
-                            {themes.slice(0, 2).map((theme: Theme) => (
+                            {(searchValue.status === SearchStatus.LIKED ? [...themes].sort((a, b) => b.likes - a.likes) : themes).slice(0, 2).map((theme: Theme) => (
                                 <ThemeCard
                                     key={theme.id}
                                     theme={theme}

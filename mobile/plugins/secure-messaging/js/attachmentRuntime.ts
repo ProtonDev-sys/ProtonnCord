@@ -104,8 +104,43 @@ const cache = new Map<string, CacheState>()
 const files = new Set<string>()
 const renderedMessages = new Map<string, MessageLike>()
 const downloads = new Set<AbortController>()
+const removals = new Map<string, Promise<void>>()
 let cacheGeneration = 0
+let cacheReady = false
 let patchAttachments: PatchAttachments | undefined
+
+function removeCachedFile(path: string): Promise<void> {
+	const pending = removals.get(path)
+	if (pending) return pending
+	const removal = Promise.resolve()
+		.then(async () => {
+			const result: unknown = await FileModule.removeFile('cache', path)
+			if (result === false) throw new Error('Cache cleanup failed')
+			files.delete(path)
+		})
+		.catch(() => {
+			// Keep the owned path for the next cleanup attempt; do not log private names.
+			console.warn(
+				'Secure Messaging could not remove a cached attachment; cleanup will be retried',
+			)
+		})
+		.finally(() => {
+			removals.delete(path)
+		})
+	removals.set(path, removal)
+	return removal
+}
+
+export async function cleanupStoredAttachments(): Promise<void> {
+	cacheReady = false
+	const cleaned = await callNativeMethod(
+		'uk.co.protonn.secure-messaging.attachment.cleanup',
+		[],
+	)
+	if (cleaned !== true)
+		throw new Error('Previous attachment cache could not be cleaned')
+	cacheReady = true
+}
 
 export function setAttachmentPatcher(patcher: PatchAttachments): void {
 	patchAttachments = patcher
@@ -135,12 +170,84 @@ function optionalDuration(value: unknown): number | null {
 		: null
 }
 
+async function readUploadSources(uploads: DiscordUpload[]) {
+	const sources: Array<{ data: Uint8Array; metadata: AttachmentMetadata }> = []
+	try {
+		let total = 0
+		for (const upload of uploads) {
+			const declaredSize = upload.preCompressionSize ?? upload.currentSize
+			if (
+				!Number.isSafeInteger(declaredSize) ||
+				declaredSize < 1 ||
+				declaredSize > MAX_FILE_BYTES ||
+				total + declaredSize > MAX_TOTAL_BYTES
+			)
+				throw new Error('Attachments exceed the mobile safety limit')
+			if (
+				upload.status !== 'NOT_STARTED' ||
+				upload.isThumbnail ||
+				typeof upload.item?.uri !== 'string' ||
+				!['content:', 'file:'].includes(new URL(upload.item.uri).protocol)
+			)
+				throw new Error(
+					'Secure Messaging can only encrypt pending local attachments',
+				)
+			const encoded = await callNativeMethod(
+				'uk.co.protonn.secure-messaging.attachment.read',
+				[upload.item.uri],
+			)
+			if (
+				typeof encoded !== 'string' ||
+				encoded.length >
+					Math.ceil(Math.min(MAX_FILE_BYTES, MAX_TOTAL_BYTES - total) / 3) * 4
+			)
+				throw new Error('Attachment reader returned invalid data')
+			const data = base64.decode(encoded)
+			if (
+				data.length < 1 ||
+				data.length > MAX_FILE_BYTES ||
+				total + data.length > MAX_TOTAL_BYTES
+			) {
+				data.fill(0)
+				throw new Error('Attachments exceed the mobile safety limit')
+			}
+			total += data.length
+			const width = optionalPositiveInteger(upload.item.width)
+			const height = optionalPositiveInteger(upload.item.height)
+			sources.push({
+				data,
+				metadata: {
+					name: upload.filename || upload.item.filename,
+					mimeType:
+						upload.mimeType ||
+						upload.item.mimeType ||
+						'application/octet-stream',
+					size: data.length,
+					spoiler: upload.spoiler === true,
+					description:
+						typeof upload.description === 'string' ? upload.description : null,
+					width: width !== null && height !== null ? width : null,
+					height: width !== null && height !== null ? height : null,
+					duration: optionalDuration(upload.durationSecs),
+					waveform:
+						typeof upload.waveform === 'string' ? upload.waveform : null,
+				},
+			})
+		}
+		return sources
+	} catch (error) {
+		for (const source of sources) source.data.fill(0)
+		throw error
+	}
+}
+
 export async function prepareEncryptedUploads(
 	uploads: DiscordUpload[],
 	text: string,
 	channelId: string,
 	senderUserId: string,
 ): Promise<PreparedEncryptedUploads> {
+	const generation = cacheGeneration
 	if (uploads.length < 1 || uploads.length > MAX_ATTACHMENT_COUNT)
 		throw new Error(
 			`Secure Messaging supports 1 to ${MAX_ATTACHMENT_COUNT} attachments`,
@@ -148,54 +255,8 @@ export async function prepareEncryptedUploads(
 	requireSnowflake(channelId, 'attachment channel')
 	requireSnowflake(senderUserId, 'attachment sender')
 
-	const sources: Array<{ data: Uint8Array; metadata: AttachmentMetadata }> = []
-	for (const upload of uploads) {
-		if (
-			upload.status !== 'NOT_STARTED' ||
-			upload.isThumbnail ||
-			typeof upload.item?.uri !== 'string' ||
-			!['content:', 'file:'].includes(new URL(upload.item.uri).protocol)
-		)
-			throw new Error(
-				'Secure Messaging can only encrypt pending local attachments',
-			)
-		const encoded = await callNativeMethod(
-			'uk.co.protonn.secure-messaging.attachment.read',
-			[upload.item.uri],
-		)
-		if (typeof encoded !== 'string')
-			throw new Error('Attachment reader returned invalid data')
-		const data = base64.decode(encoded)
-		if (data.length < 1 || data.length > MAX_FILE_BYTES)
-			throw new Error('Attachment exceeds the mobile safety limit')
-		const width = optionalPositiveInteger(upload.item.width)
-		const height = optionalPositiveInteger(upload.item.height)
-		sources.push({
-			data,
-			metadata: {
-				name: upload.filename || upload.item.filename,
-				mimeType:
-					upload.mimeType || upload.item.mimeType || 'application/octet-stream',
-				size: data.length,
-				spoiler: upload.spoiler === true,
-				description:
-					typeof upload.description === 'string' ? upload.description : null,
-				width: width !== null && height !== null ? width : null,
-				height: width !== null && height !== null ? height : null,
-				duration: optionalDuration(upload.durationSecs),
-				waveform: typeof upload.waveform === 'string' ? upload.waveform : null,
-			},
-		})
-	}
-	if (
-		sources.reduce((sum, source) => sum + source.data.length, 0) >
-		MAX_TOTAL_BYTES
-	)
-		throw new Error('Attachments exceed the mobile safety limit')
-
-	const { descriptor, keyBytes } = generateAttachmentBundleMaterial(
-		uploads.length,
-	)
+	const sources = await readUploadSources(uploads)
+	let keyBytes: Uint8Array | undefined
 	const ciphertexts: Uint8Array[] = []
 	const replacements: Array<{
 		filename: string
@@ -205,6 +266,11 @@ export async function prepareEncryptedUploads(
 		uri: string
 	}> = []
 	try {
+		if (generation !== cacheGeneration)
+			throw new Error('Secure Messaging was locked')
+		const material = generateAttachmentBundleMaterial(uploads.length)
+		const { descriptor } = material
+		keyBytes = material.keyBytes
 		for (let index = 0; index < uploads.length; index++) {
 			const source = sources[index]!
 			const ciphertext = encryptAttachmentBytes({
@@ -218,6 +284,8 @@ export async function prepareEncryptedUploads(
 				senderUserId,
 			})
 			ciphertexts.push(ciphertext)
+			if (ciphertext.length > MAX_FILE_BYTES)
+				throw new Error('Encrypted attachment exceeds the mobile safety limit')
 			const filename = encryptedAttachmentFilename(descriptor.id, index)
 			const relativePath = `protonn-cord/uploads/${filename}`
 			const path = await FileModule.writeFile(
@@ -227,6 +295,10 @@ export async function prepareEncryptedUploads(
 				'base64',
 			)
 			files.add(relativePath)
+			if (generation !== cacheGeneration) {
+				await removeCachedFile(relativePath)
+				throw new Error('Secure Messaging was locked')
+			}
 			const uri = path.startsWith('file:') ? path : `file://${path}`
 			replacements.push({
 				filename,
@@ -240,6 +312,8 @@ export async function prepareEncryptedUploads(
 		return {
 			plaintext: serializeSecurePlaintext(text, { ...descriptor, root }),
 			apply() {
+				if (generation !== cacheGeneration)
+					throw new Error('Secure Messaging was locked')
 				for (const replacement of replacements) {
 					const { upload } = replacement
 					Object.assign(upload.item, {
@@ -252,11 +326,13 @@ export async function prepareEncryptedUploads(
 						height: undefined,
 					})
 					upload.id = replacement.id
+					upload.spoiler = false
 					upload.setFilename(replacement.filename)
 					upload.mimeType = 'application/octet-stream'
 					upload.allowOptimization = false
 					upload.isImage = false
 					upload.isVideo = false
+					upload.description = undefined
 					upload.durationSecs = undefined
 					upload.waveform = undefined
 					upload.currentSize = replacement.size
@@ -267,7 +343,7 @@ export async function prepareEncryptedUploads(
 			},
 		}
 	} finally {
-		keyBytes.fill(0)
+		keyBytes?.fill(0)
 		for (const source of sources) source.data.fill(0)
 		for (const ciphertext of ciphertexts) ciphertext.fill(0)
 	}
@@ -353,10 +429,7 @@ async function download(
 				throw new Error(
 					`Discord attachment download failed (${response.status})`,
 				)
-			const bytes = new Uint8Array(await response.arrayBuffer())
-			if (bytes.length !== attachment.size)
-				throw new Error('Encrypted attachment download length is invalid')
-			return bytes
+			return await readAttachmentResponse(response, attachment.size)
 		} catch (error) {
 			if (controller.signal.aborted)
 				throw new Error('Secure Messaging was locked')
@@ -368,6 +441,75 @@ async function download(
 	throw lastError instanceof Error
 		? lastError
 		: new Error('Discord attachment download failed')
+}
+
+async function readAttachmentResponse(
+	response: Response,
+	expected: number,
+): Promise<Uint8Array> {
+	if (
+		!Number.isSafeInteger(expected) ||
+		expected < 21 ||
+		expected > MAX_FILE_BYTES
+	)
+		throw new Error('Encrypted attachment download size is invalid')
+	const rawLength = response.headers.get('content-length')
+	const declared = rawLength === null ? null : Number(rawLength)
+	if (
+		declared !== null &&
+		(!Number.isSafeInteger(declared) ||
+			declared !== expected ||
+			declared > MAX_FILE_BYTES)
+	) {
+		await response.body?.cancel().catch(() => {})
+		throw new Error('Encrypted attachment download length is invalid')
+	}
+	const reader = response.body?.getReader?.()
+	if (!reader) {
+		// React Native may expose only arrayBuffer. Require its transport length
+		// before that allocation; streaming-capable runtimes enforce the limit below.
+		if (declared === null)
+			throw new Error(
+				'This runtime cannot verify a safe attachment download size',
+			)
+		const bytes = new Uint8Array(await response.arrayBuffer())
+		if (bytes.length !== expected) {
+			bytes.fill(0)
+			throw new Error('Encrypted attachment download length is invalid')
+		}
+		return bytes
+	}
+	const chunks: Uint8Array[] = []
+	let total = 0
+	try {
+		while (true) {
+			const { done, value } = await reader.read()
+			if (done) break
+			total += value.byteLength
+			if (total > expected || total > MAX_FILE_BYTES) {
+				value.fill(0)
+				throw new Error(
+					'Encrypted attachment download exceeds its expected size',
+				)
+			}
+			chunks.push(value)
+		}
+		if (total !== expected)
+			throw new Error('Encrypted attachment download length is invalid')
+		const bytes = new Uint8Array(total)
+		let offset = 0
+		for (const chunk of chunks) {
+			bytes.set(chunk, offset)
+			offset += chunk.byteLength
+		}
+		return bytes
+	} catch (error) {
+		await reader.cancel().catch(() => {})
+		throw error
+	} finally {
+		for (const chunk of chunks) chunk.fill(0)
+		reader.releaseLock()
+	}
 }
 
 function localAttachment(
@@ -459,18 +601,18 @@ async function decryptAttachments(
 		for (let index = 0; index < decrypted.length; index++) {
 			if (index === secure.detachedTextIndex) continue
 			const item = decrypted[index]!
-			const relativePath = `share-media/protonn-cord/${message.id}-${index}-${item.metadata.name}`
+			const relativePath = `share-media/protonn-cord/${message.id}-${index}-${generation}-${item.metadata.name}`
 			const path = await FileModule.writeFile(
 				'cache',
 				relativePath,
 				base64.encode(item.data),
 				'base64',
 			)
+			files.add(relativePath)
 			if (generation !== cacheGeneration) {
-				await FileModule.removeFile('cache', relativePath)
+				await removeCachedFile(relativePath)
 				throw new Error('Secure Messaging was locked')
 			}
-			files.add(relativePath)
 			const uri = await callNativeMethod(
 				'uk.co.protonn.secure-messaging.attachment.share',
 				[path],
@@ -527,7 +669,7 @@ export function renderAttachments(
 	if (!message.id) throw new Error('Encrypted attachment message has no ID')
 	const key = cacheKey(message)
 	const state = cache.get(key)
-	if (!state && patchAttachments) start(message, secure)
+	if (!state && patchAttachments && cacheReady) start(message, secure)
 	if (state?.status === 'ready')
 		return {
 			attachments: state.attachments,
@@ -552,8 +694,7 @@ export function clearAttachmentCache(): void {
 	for (const controller of downloads) controller.abort()
 	downloads.clear()
 	cache.clear()
-	for (const path of files) void FileModule.removeFile('cache', path)
-	files.clear()
+	for (const path of files) void removeCachedFile(path)
 	const messages = [...renderedMessages.values()]
 	renderedMessages.clear()
 	for (const message of messages)

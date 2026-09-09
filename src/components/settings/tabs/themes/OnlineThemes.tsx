@@ -71,7 +71,7 @@ export function OnlineThemesSection({
             </Paragraph>
             <FormSwitch
                 title="Enable Online Themes"
-                description="Toggle online theme loading. When disabled, all online themes will be turned off and you won't be able to add new ones."
+                description="Pause online theme loading. Your selected themes are kept and will resume when this is enabled again."
                 value={enableOnlineThemes}
                 onChange={setEnableOnlineThemes}
             />
@@ -94,7 +94,7 @@ export function OnlineThemesSection({
                     Add
                 </Button>
             </div>
-            {currentThemeLink && (
+            {currentThemeLink && enableOnlineThemes && (
                 <div className={Margins.top8}>
                     <Validator link={currentThemeLink} onValidate={setThemeLinkValid} />
                 </div>

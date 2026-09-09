@@ -17,18 +17,9 @@ import { cl, NoteSvg, useLyrics } from "./util";
 
 function LyricsDisplay({ scroll = true }: { scroll?: boolean; }) {
     const { showMusicNoteOnNoLyrics } = settings.use(["showMusicNoteOnNoLyrics"]);
-    const { lyrics, lyricRefs } = useLyrics({ scroll });
+    const { lyrics, lyricRefs, currLrcIndex } = useLyrics({ scroll });
     const currentLyrics = lyrics || null;
     const NoteElement = NoteSvg(cl("music-note"));
-    const position = useStateFromStores([TidalStore], () => TidalStore.mPosition / 1000);
-
-    const currLrcIndex = currentLyrics
-        ? currentLyrics.findIndex((line, i) => {
-            const nextLineTime = currentLyrics[i + 1]?.time ?? Infinity;
-            return position >= line.time && position < nextLineTime;
-        })
-        : null;
-
     const makeClassName = (index: number) => {
         if (currLrcIndex === null) return "";
         const diff = index - currLrcIndex;
@@ -65,7 +56,10 @@ function LyricsDisplay({ scroll = true }: { scroll?: boolean; }) {
 }
 
 export function TidalLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
-    TidalLrcStore.init();
+    useEffect(() => {
+        TidalLrcStore.init();
+        return () => TidalLrcStore.destroy();
+    }, []);
     const track = useStateFromStores(
         [TidalStore],
         () => TidalStore.track,

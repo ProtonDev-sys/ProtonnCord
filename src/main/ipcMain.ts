@@ -187,20 +187,29 @@ ipcMain.handle(IpcEvents.OPEN_MONACO_EDITOR, async () => {
     await monacoWin.loadURL(`data:text/html;base64,${monacoHtml}`);
 });
 
+let quitPromptPending = false;
+
 app.on("before-quit", async event => {
     if (monacoWin && !monacoWin.isDestroyed() && !monacoWin.isVisible()) {
         event.preventDefault();
-        const result = await dialog.showMessageBox({
-            type: "question",
-            buttons: ["Cancel", "Close Anyway"],
-            defaultId: 0,
-            title: "QuickCSS Editor Open",
-            message: "QuickCSS editor is still open in the background.",
-            detail: "Do you want to close Discord anyway? This will also close the QuickCSS editor."
-        });
+        if (quitPromptPending) return;
+        quitPromptPending = true;
+        try {
+            const result = await dialog.showMessageBox({
+                type: "question",
+                buttons: ["Cancel", "Close Anyway"],
+                defaultId: 0,
+                cancelId: 0,
+                title: "QuickCSS Editor Open",
+                message: "QuickCSS editor is still open in the background.",
+                detail: "Do you want to close Discord anyway? This will also close the QuickCSS editor."
+            });
 
-        if (result.response === 1) {
-            app.exit();
+            if (result.response === 1) app.exit();
+        } catch (error) {
+            console.error("[Protonn Cord] Failed to confirm closing the QuickCSS editor", error);
+        } finally {
+            quitPromptPending = false;
         }
     }
 });

@@ -46,9 +46,9 @@ export default definePlugin({
             useSongStore.getState().$refresh();
         },
     },
-    start() {
+    async start() {
         useSongStore.getState().$refresh();
-        useAuthorizationStore.persist.rehydrate();
+        await useAuthorizationStore.persist.rehydrate();
     },
 
     renderProfileCollection: {

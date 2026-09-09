@@ -63,7 +63,9 @@ function clearRuntimeTimeouts() {
 function throttledOnMessage(data: string, generation: number) {
     if (!shouldReconnect || generation !== connectionGeneration || inMessageThrottle) return;
 
-    void onMessage(data, generation);
+    void onMessage(data, generation).catch(() => {
+        if (shouldReconnect && generation === connectionGeneration) clearActivity();
+    });
     inMessageThrottle = true;
 
     messageThrottleTimeout = setTimeout(() => {

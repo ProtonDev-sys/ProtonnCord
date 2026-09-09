@@ -22,7 +22,7 @@ import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { saveFile } from "@utils/web";
 import { filters, mapMangledModuleLazy } from "@webpack";
-import { ComponentDispatch } from "@webpack/common";
+import { ComponentDispatch, SelectedChannelStore, showToast, Toasts } from "@webpack/common";
 
 const ctxMenuCallbacks = mapMangledModuleLazy('closest("[contenteditable=true]")', {
     contextMenuCallbackWeb: filters.byCode('"[contenteditable=true]"'),
@@ -30,14 +30,15 @@ const ctxMenuCallbacks = mapMangledModuleLazy('closest("[contenteditable=true]")
 });
 
 async function fetchImage(url: string) {
-    const res = await fetch(url);
-    if (res.status !== 200) return;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error("Image download failed");
 
     return await res.blob();
 }
 
 let requiredByPlatform = false;
 let hideSetting = false;
+let generation = 0;
 
 if (IS_VESKTOP || IS_EQUIBOP) {
     requiredByPlatform = true;
@@ -104,9 +105,11 @@ export default definePlugin({
     },
 
     stop() {
+        generation++;
         if (this.changedListeners) {
             window.removeEventListener("contextmenu", ctxMenuCallbacks.contextMenuCallbackNative);
             window.addEventListener("contextmenu", ctxMenuCallbacks.contextMenuCallbackWeb);
+            this.changedListeners = false;
         }
     },
 
@@ -262,80 +265,120 @@ export default definePlugin({
     ],
 
     async copyImage(url: string) {
-        url = fixImageUrl(url);
+        const currentGeneration = generation;
+        try {
+            url = fixImageUrl(url);
 
-        let imageData = await fetch(url).then(r => r.blob());
-        if (imageData.type !== "image/png") {
-            const bitmap = await createImageBitmap(imageData);
+            let imageData = await fetchImage(url);
+            if (imageData.type !== "image/png") {
+                const bitmap = await createImageBitmap(imageData);
+                try {
+                    const canvas = document.createElement("canvas");
+                    canvas.width = bitmap.width;
+                    canvas.height = bitmap.height;
+                    canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
 
-            const canvas = document.createElement("canvas");
-            canvas.width = bitmap.width;
-            canvas.height = bitmap.height;
-            canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
+                    imageData = await new Promise<Blob>((resolve, reject) => {
+                        canvas.toBlob(data => {
+                            if (data) resolve(data);
+                            else reject(new Error("Image conversion failed"));
+                        }, "image/png");
+                    });
+                } finally {
+                    bitmap.close();
+                }
+            }
 
-            await new Promise<void>(done => {
-                canvas.toBlob(data => {
-                    imageData = data!;
-                    done();
-                }, "image/png");
-            });
-        }
-
-        if (IS_VESKTOP && VesktopNative.clipboard || IS_EQUIBOP && VesktopNative.clipboard) {
-            VesktopNative.clipboard.copyImage(await imageData.arrayBuffer(), url);
-            return;
-        } else {
-            navigator.clipboard.write([
-                new ClipboardItem({
-                    "image/png": imageData
-                })
-            ]);
+            if (currentGeneration !== generation) return;
+            if (IS_VESKTOP && VesktopNative.clipboard || IS_EQUIBOP && VesktopNative.clipboard) {
+                const bytes = await imageData.arrayBuffer();
+                if (currentGeneration !== generation) return;
+                await VesktopNative.clipboard.copyImage(bytes, url);
+                return;
+            } else {
+                await navigator.clipboard.write([
+                    new ClipboardItem({
+                        "image/png": imageData
+                    })
+                ]);
+            }
+        } catch {
+            showToast("Failed to copy image", Toasts.Type.FAILURE);
         }
     },
 
     async saveImage(url: string) {
-        url = fixImageUrl(url);
+        const currentGeneration = generation;
+        try {
+            url = fixImageUrl(url);
 
-        const data = await fetchImage(url);
-        if (!data) return;
+            const data = await fetchImage(url);
+            if (currentGeneration !== generation) return;
 
-        const name = new URL(url).pathname.split("/").pop()!;
-        const file = new File([data], name, { type: data.type });
+            const name = new URL(url).pathname.split("/").pop()!;
+            const file = new File([data], name, { type: data.type });
 
-        saveFile(file);
+            await saveFile(file);
+        } catch {
+            showToast("Failed to save image", Toasts.Type.FAILURE);
+        }
     },
 
-    copy() {
+    async copy() {
         const selection = document.getSelection();
-        if (!selection) return;
+        if (!selection) return false;
 
-        copyToClipboard(selection.toString());
+        try {
+            await copyToClipboard(selection.toString());
+            return true;
+        } catch {
+            showToast("Failed to copy text", Toasts.Type.FAILURE);
+            return false;
+        }
     },
 
-    cut() {
-        this.copy();
+    async cut() {
+        const selection = document.getSelection();
+        if (!selection || selection.isCollapsed) return;
+        const { anchorNode, anchorOffset, focusNode, focusOffset } = selection;
+        const { activeElement } = document;
+        const channelId = SelectedChannelStore.getChannelId();
+        const currentGeneration = generation;
+        if (!await this.copy()) return;
+        const currentSelection = document.getSelection();
+        if (currentGeneration !== generation || document.activeElement !== activeElement || SelectedChannelStore.getChannelId() !== channelId
+            || currentSelection?.anchorNode !== anchorNode || currentSelection.anchorOffset !== anchorOffset
+            || currentSelection.focusNode !== focusNode || currentSelection.focusOffset !== focusOffset) return;
         ComponentDispatch.dispatch("INSERT_TEXT", { rawText: "" });
     },
 
     async paste() {
-        const clip = (await navigator.clipboard.read())[0];
-        if (!clip) return;
+        const { activeElement } = document;
+        const channelId = SelectedChannelStore.getChannelId();
+        const currentGeneration = generation;
+        try {
+            const clip = (await navigator.clipboard.read())[0];
+            if (!clip) return;
 
-        const data = new DataTransfer();
-        for (const type of clip.types) {
-            if (type === "image/png") {
-                const file = new File([await clip.getType(type)], "unknown.png", { type });
-                data.items.add(file);
-            } else if (type === "text/plain") {
-                const blob = await clip.getType(type);
-                data.setData(type, await blob.text());
+            const data = new DataTransfer();
+            for (const type of clip.types) {
+                if (type === "image/png") {
+                    const file = new File([await clip.getType(type)], "unknown.png", { type });
+                    data.items.add(file);
+                } else if (type === "text/plain") {
+                    const blob = await clip.getType(type);
+                    data.setData(type, await blob.text());
+                }
             }
-        }
 
-        document.dispatchEvent(
-            new ClipboardEvent("paste", {
-                clipboardData: data
-            })
-        );
+            if (currentGeneration !== generation || document.activeElement !== activeElement || SelectedChannelStore.getChannelId() !== channelId) return;
+            document.dispatchEvent(
+                new ClipboardEvent("paste", {
+                    clipboardData: data
+                })
+            );
+        } catch {
+            showToast("Failed to paste from clipboard", Toasts.Type.FAILURE);
+        }
     }
 });

@@ -36,7 +36,14 @@ const PackageJSON = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.me
 
 export const VERSION = PackageJSON.version;
 // https://reproducible-builds.org/docs/source-date-epoch/
-export const BUILD_TIMESTAMP = Number(process.env.SOURCE_DATE_EPOCH) * 1000 || Date.now();
+export function getBuildTimestamp(epoch = process.env.SOURCE_DATE_EPOCH) {
+    if (epoch === undefined) return Date.now();
+    const seconds = Number(epoch);
+    if (!/^\d+$/.test(epoch) || !Number.isSafeInteger(seconds * 1000))
+        throw new Error("SOURCE_DATE_EPOCH must be a non-negative integer timestamp in seconds.");
+    return seconds * 1000;
+}
+export const BUILD_TIMESTAMP = getBuildTimestamp();
 
 export const watch = process.argv.includes("--watch");
 export const IS_DEV = watch || process.argv.includes("--dev");
@@ -76,9 +83,20 @@ export function stringifyValues(obj) {
  */
 export async function buildOrWatchAll(buildConfigs) {
     if (watch) {
-        await Promise.all(buildConfigs.map(cfg =>
-            context(cfg).then(ctx => ctx.watch())
-        ));
+        const contexts = [];
+        try {
+            for (const cfg of buildConfigs) {
+                const ctx = await context(cfg);
+                contexts.push(ctx);
+                await ctx.watch();
+                // watch() schedules an initial build but does not wait for it.
+                // Join that build before dependent outputs are read or packaged.
+                await ctx.rebuild();
+            }
+        } catch (error) {
+            await Promise.allSettled(contexts.map(ctx => ctx.dispose()));
+            throw error;
+        }
     } else {
         for (const cfg of buildConfigs) {
             await build(cfg).catch(error => {
@@ -226,7 +244,7 @@ export const gitHashPlugin = {
             namespace: "git-hash", path: args.path
         }));
         build.onLoad({ filter, namespace: "git-hash" }, () => ({
-            contents: `export default "${gitHash}"`
+            contents: `export default ${JSON.stringify(gitHash)}`
         }));
     }
 };
@@ -307,7 +325,8 @@ export const fileUrlPlugin = {
             }
 
             return {
-                contents: `export default ${JSON.stringify(content)}`
+                contents: `export default ${JSON.stringify(content)}`,
+                watchFiles: [path],
             };
         });
     }
@@ -343,9 +362,9 @@ export const stylePlugin = {
 
             return {
                 loader: "js",
-                contents: styleModule
-                    .replaceAll("STYLE_SOURCE", JSON.stringify(css))
-                    .replaceAll("STYLE_NAME", JSON.stringify(name))
+                contents: styleModule.replaceAll(/\bSTYLE_(?:SOURCE|NAME)\b/g, token =>
+                    JSON.stringify(token === "STYLE_SOURCE" ? css : name)),
+                watchFiles: [resolve(path)],
             };
         });
     }

@@ -1,12 +1,8 @@
 # Fix Images Quality
 
-Improves quality of images by loading them at their original resolution
+Loads images at their original resolution. By default:
 
-### The default behaviour is the following
+- Chat uses optimized, full-resolution images.
+- The image modal uses the original image.
 
-- In chat, optimised but full resolution images will be loaded.
-- In the image modal, the original image will be loaded.
-
-You can also enable original image in chat via the plugin settings, but this may cause performance issues!
-
-This plugin does not change how others see your images!
+You can enable original images in chat through the plugin settings, at a possible performance cost. This affects only your view; other users see no change.

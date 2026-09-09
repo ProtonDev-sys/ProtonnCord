@@ -8,13 +8,15 @@ import { BaseText } from "@components/BaseText";
 import { fetchOrgRepos, fetchReposByUserId, fetchReposByUsername, fetchUserInfo, fetchUserOrgs } from "@equicordplugins/githubRepos/githubApi";
 import { GitHubRepo, RepoGroup, RepoSortMode } from "@equicordplugins/githubRepos/types";
 import { buildRepoGroups, PERSONAL_GROUP_KEY, sortGroups } from "@equicordplugins/githubRepos/utils";
-import { React, useEffect, UserProfileStore, useState } from "@webpack/common";
+import { React, useEffect, UserProfileStore, useState, useStateFromStores } from "@webpack/common";
 
 import { cl, settings } from "..";
 import { RepoCard } from "./RepoCard";
 import { RepoSubTabs } from "./RepoSubTabs";
 
 export function ProfileTabComponent({ id }: { id: string, theme: string; }) {
+    const githubConnection = useStateFromStores([UserProfileStore], () => UserProfileStore.getUserProfile(id)?.connectedAccounts?.find(conn => conn.type === "github"), [id]);
+    const { showStars, showLanguage } = settings.use(["showStars", "showLanguage"]);
     const [groups, setGroups] = useState<RepoGroup[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -25,21 +27,12 @@ export function ProfileTabComponent({ id }: { id: string, theme: string; }) {
     const activeGroup = sortedGroups.find(g => g.key === activeKey) ?? sortedGroups[0];
 
     useEffect(() => {
+        let active = true;
+        setLoading(true);
+        setError(null);
+        setGroups([]);
         const fetchData = async () => {
             try {
-                const profile = UserProfileStore.getUserProfile(id);
-                if (!profile) {
-                    setLoading(false);
-                    return;
-                }
-
-                const connections = profile.connectedAccounts;
-                if (!connections?.length) {
-                    setLoading(false);
-                    return;
-                }
-
-                const githubConnection = connections.find(conn => conn.type === "github");
                 if (!githubConnection) {
                     setLoading(false);
                     return;
@@ -47,14 +40,19 @@ export function ProfileTabComponent({ id }: { id: string, theme: string; }) {
 
                 const username = githubConnection.name;
                 const userInfoData = await fetchUserInfo(username);
+                if (!active) return;
                 const githubId = githubConnection.id;
 
                 // Try to fetch by ID first, fall back to username
                 let personalRepos: GitHubRepo[] | null = await fetchReposByUserId(githubId);
+                if (!active) return;
                 if (!personalRepos) personalRepos = await fetchReposByUsername(username);
+                if (!active) return;
 
                 const orgs = await fetchUserOrgs(username);
+                if (!active) return;
                 const orgReposEntries = await Promise.all(orgs.map(async org => [org.login, await fetchOrgRepos(org.login)]));
+                if (!active) return;
                 const orgRepos = Object.fromEntries(orgReposEntries);
 
                 const builtGroups = buildRepoGroups(userInfoData?.username ?? username, personalRepos ?? [], orgs, orgRepos, userInfoData?.avatarUrl);
@@ -62,6 +60,7 @@ export function ProfileTabComponent({ id }: { id: string, theme: string; }) {
                 setActiveKey(builtGroups[0]?.key ?? PERSONAL_GROUP_KEY);
                 setLoading(false);
             } catch (error) {
+                if (!active) return;
                 const errorMessage = error instanceof Error ? error.message : "Failed to fetch repositories";
                 setError(errorMessage);
                 setLoading(false);
@@ -69,15 +68,14 @@ export function ProfileTabComponent({ id }: { id: string, theme: string; }) {
         };
 
         fetchData();
-    }, [id]);
+        return () => { active = false; };
+    }, [id, githubConnection?.id, githubConnection?.name]);
 
-    if (loading) return;
-    <BaseText size="xs" weight="semibold" className={cl("loading")} >
+    if (loading) return <BaseText size="xs" weight="semibold" className={cl("loading")} >
         Loading repositories...
     </BaseText>;
 
-    if (error) return;
-    <BaseText size="xs" weight="semibold" className={cl("error")}>
+    if (error) return <BaseText size="xs" weight="semibold" className={cl("error")}>
         Error: {error}
     </BaseText>;
 
@@ -98,8 +96,8 @@ export function ProfileTabComponent({ id }: { id: string, theme: string; }) {
                     <RepoCard
                         key={repo.id}
                         repo={repo}
-                        showStars={settings.store.showStars}
-                        showLanguage={settings.store.showLanguage}
+                        showStars={showStars}
+                        showLanguage={showLanguage}
                     />))
                 }
             </div>

@@ -61,7 +61,8 @@ function response(value: unknown, status = 200) {
 test("badge registration preserves caller objects and dynamic component identity", () => {
     const api = loadSource("src/api/Badges.ts", {
         "@components/ErrorBoundary": boundary,
-        "@equicordplugins/globalBadges": { __esModule: true, default: { name: "GlobalBadges" } },
+        "~plugins": { default: {} },
+        "@utils/Logger": { Logger: class { error() { } } },
         "@plugins/_api/badges": { __esModule: true, default: { getDonorBadges() {}, getEquicordDonorBadges() {} } },
         "./PluginManager": { isPluginEnabled: () => false }
     });

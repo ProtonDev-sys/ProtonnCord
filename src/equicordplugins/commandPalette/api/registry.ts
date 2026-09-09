@@ -4,13 +4,22 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { Logger } from "@utils/Logger";
+
 import type { PaletteCommand } from "./types";
 
 const owners = new Map<string, PaletteCommand[]>();
 const listeners = new Set<() => void>();
+const logger = new Logger("CommandPalette");
 
 export function notifyPaletteChange() {
-    for (const listener of listeners) listener();
+    for (const listener of [...listeners]) {
+        try {
+            listener();
+        } catch (error) {
+            logger.error("Palette listener failed", error);
+        }
+    }
 }
 
 export function subscribePalette(listener: () => void) {
@@ -37,7 +46,12 @@ export function getVisibleCommands(): PaletteCommand[] {
     const result: PaletteCommand[] = [];
     for (const commands of owners.values()) {
         for (const command of commands) {
-            if (command.predicate && !command.predicate()) continue;
+            try {
+                if (command.predicate && !command.predicate()) continue;
+            } catch (error) {
+                logger.error(`Command ${command.id} predicate failed`, error);
+                continue;
+            }
             result.push(command);
         }
     }

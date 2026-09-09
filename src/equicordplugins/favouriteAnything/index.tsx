@@ -10,7 +10,7 @@ import definePlugin from "@utils/types";
 import { ComponentType, ReactNode } from "react";
 
 import { AttachmentAccessory, AttachmentContextProvider, EmbedAccessory, EmbedContext, EmbedMosaicContext, FilePicker } from "./components";
-import { SignedUrlsStore } from "./stores";
+import { clearSignedUrlsStore, SignedUrlsStore } from "./stores";
 import managedStyle from "./style.css?managed";
 import { AttachmentContextProviderProps, EmbedComponent, ExpressionPickerTabProps, ExpressionPickerView, FavouriteItem, FavouriteItemFormat } from "./types";
 import { getThumbnailUrl } from "./utils";
@@ -22,6 +22,7 @@ export default definePlugin({
     authors: [Devs.nin0dev, EquicordDevs.davri],
     searchTerms: ["favorite"],
     managedStyle,
+    stop: clearSignedUrlsStore,
     patches: [
         // EMBEDS
         {

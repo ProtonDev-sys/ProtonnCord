@@ -10,7 +10,7 @@ import { categoryLen, createCategory, getCategory } from "@plugins/pinDms/data";
 import { classNameFactory } from "@utils/css";
 import { RenderModalProps } from "@vencord/discord-types";
 import { extractAndLoadChunksLazy, findComponentByCodeLazy } from "@webpack";
-import { ColorPicker, Modal, openModalLazy, TextInput, Toasts, useMemo, useState } from "@webpack/common";
+import { ColorPicker, Modal, openModalLazy, TextInput, Toasts, useMemo, useRef, UserStore, useState } from "@webpack/common";
 
 interface ColorPickerWithSwatchesProps {
     className?: string;
@@ -54,13 +54,19 @@ function useCategory(categoryId: string | null, initalChannelId: string | null) 
 }
 
 export function NewCategoryModal({ categoryId, modalProps, initialChannelId }: Props) {
+    const accountId = useRef(UserStore.getCurrentUser()?.id);
     const category = useCategory(categoryId, initialChannelId);
+
+    const [name, setName] = useState(category?.name ?? "");
+    const [color, setColor] = useState(category?.color ?? DEFAULT_COLOR);
     if (!category) return null;
 
-    const [name, setName] = useState(category.name);
-    const [color, setColor] = useState(category.color);
-
     const onSave = () => {
+        if (!name.trim()) return;
+        if (accountId.current !== UserStore.getCurrentUser()?.id) {
+            modalProps.onClose();
+            return;
+        }
         category.name = name;
         category.color = color;
 
@@ -79,7 +85,7 @@ export function NewCategoryModal({ categoryId, modalProps, initialChannelId }: P
                 text: categoryId ? "Save" : "Create",
                 variant: "primary",
                 onClick: onSave,
-                disabled: !name
+                disabled: !name.trim()
             }]}
         >
             <form
@@ -103,13 +109,13 @@ export function NewCategoryModal({ categoryId, modalProps, initialChannelId }: P
                         key={category.id}
                         defaultColor={DEFAULT_COLOR}
                         colors={SWATCHES}
-                        onChange={c => setColor(c!)}
+                        onChange={c => setColor(c ?? DEFAULT_COLOR)}
                         value={color}
                         renderDefaultButton={() => null}
                         renderCustomButton={() => (
                             <ColorPicker
                                 color={color}
-                                onChange={c => setColor(c!)}
+                                onChange={c => setColor(c ?? DEFAULT_COLOR)}
                                 key={category.id}
                                 showEyeDropper={false}
                             />

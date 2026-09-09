@@ -8,26 +8,26 @@ import assert from 'node:assert/strict'
 import { createHash, hkdfSync, randomBytes } from 'node:crypto'
 import test from 'node:test'
 import {
-	deriveOneKeyBindingPublicKey,
-	deriveOneKeyPrivateIdentity,
-	oneKeyDeterministicProfileInput,
-} from '../../src/equicordplugins/secureMessaging.desktop/oneKeyVault'
-import {
 	decryptMessage as desktopDecrypt,
 	encryptMessage as desktopEncrypt,
 	publicIdentity as desktopPublic,
 } from '../../src/equicordplugins/secureMessaging.desktop/crypto'
 import {
-	deriveOneKeyIdentity,
-	deriveOneKeyRoot,
-	oneKeyProfileInput,
-} from '../plugins/secure-messaging/js/oneKey'
+	deriveOneKeyBindingPublicKey,
+	deriveOneKeyPrivateIdentity,
+	oneKeyDeterministicProfileInput,
+} from '../../src/equicordplugins/secureMessaging.desktop/oneKeyVault'
 import {
 	decryptMessage,
 	encryptMessage,
 	publicIdentity,
 	setRandomSource,
 } from '../plugins/secure-messaging/js/crypto'
+import {
+	deriveOneKeyIdentity,
+	deriveOneKeyRoot,
+	oneKeyProfileInput,
+} from '../plugins/secure-messaging/js/oneKey'
 
 setRandomSource(size => Uint8Array.from(randomBytes(size)))
 const USER = '100000000000000001'

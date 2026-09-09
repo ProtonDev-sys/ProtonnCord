@@ -29,7 +29,7 @@ export default class TarFile {
             [100, ""], // name of linked file (??)
             [255, ""], // padding
         ]));
-        this.buffers.push(data.buffer as ArrayBuffer);
+        this.buffers.push(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer);
         this.buffers.push(new ArrayBuffer(-data.length & 0x1FF));
     }
 
@@ -63,7 +63,7 @@ export default class TarFile {
 
     save(filename: string) {
         const a = document.createElement("a");
-        a.href = URL.createObjectURL(new Blob(this.buffers, { "type": "application/x-tar" }));
+        a.href = URL.createObjectURL(new Blob([...this.buffers, new ArrayBuffer(1024)], { "type": "application/x-tar" }));
         a.download = filename;
         a.style.display = "none";
         document.body.appendChild(a);
