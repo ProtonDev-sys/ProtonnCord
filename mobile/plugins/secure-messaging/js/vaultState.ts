@@ -11,6 +11,8 @@ import {
 	publicIdentity,
 	secureRandomBytes,
 } from './crypto'
+import { parseIdentity, parsePublicIdentity } from './identityBackup'
+import { openMobilePairing } from './mobilePairing'
 import { deriveOneKeyIdentity, deriveOneKeyRoot } from './oneKey'
 import {
 	decode64,
@@ -19,11 +21,9 @@ import {
 	requireSnowflake,
 	utf8Bytes,
 } from './protocol'
+import type { HistoricalIdentity } from './mobilePairing'
 import type { PrivateIdentity, PublicIdentity } from './protocol'
 import type { ReplayRecord } from './replay'
-import { openMobilePairing } from './mobilePairing'
-import type { HistoricalIdentity } from './mobilePairing'
-import { parseIdentity, parsePublicIdentity } from './identityBackup'
 
 export interface Conversation {
 	members: string[]
@@ -202,6 +202,9 @@ export class MobileVault {
 	private root: Uint8Array | null = null
 	private rootFingerprint: string | null = null
 	private queue: Promise<void> = Promise.resolve()
+	private saveFailed = false
+	private saveFailureVersion = 0
+	private savedProtectedChannels: Record<string, string[]> = {}
 	private readonly listeners = new Set<() => void>()
 	constructor(private readonly storage: VaultStorage) {}
 	get locked(): boolean {
@@ -211,10 +214,18 @@ export class MobileVault {
 		return this.envelope !== null || this.root !== null
 	}
 	get ready(): boolean {
-		return this.value !== null
+		return this.value !== null && !this.saveFailed
 	}
 	private notify(): void {
 		for (const listener of this.listeners) listener()
+	}
+	private protectedChannels(): Record<string, string[]> {
+		return Object.fromEntries(
+			Object.entries(this.value?.accounts ?? {}).map(([id, value]) => [
+				id,
+				Object.keys(value.conversations).sort(),
+			]),
+		)
 	}
 	subscribe(listener: () => void): () => void {
 		this.listeners.add(listener)
@@ -239,11 +250,18 @@ export class MobileVault {
 				this.value = null
 			} else this.value = readVault(raw)
 		}
+		this.savedProtectedChannels =
+			this.envelope?.protectedChannels ?? this.protectedChannels()
+		this.saveFailed = false
 		this.notify()
 	}
 
 	account(userId: string): Account {
 		requireSnowflake(userId, 'Discord account')
+		if (this.saveFailed)
+			throw new Error(
+				'The vault could not be saved. Reload Secure Messaging before continuing',
+			)
 		if (!this.value)
 			throw new Error(
 				this.locked
@@ -267,49 +285,71 @@ export class MobileVault {
 	}
 
 	protectedChannel(userId: string, channelId: string): boolean {
+		if (this.saveFailed)
+			throw new Error(
+				'The vault could not be saved. Reload Secure Messaging before sending',
+			)
 		if (this.value)
-			return !!this.value.accounts[userId]?.conversations[channelId]
+			return (
+				!!this.value.accounts[userId]?.conversations[channelId] ||
+				!!this.savedProtectedChannels[userId]?.includes(channelId)
+			)
 		if (this.envelope)
-			return !!this.envelope.protectedChannels[userId]?.includes(channelId)
+			return (
+				!!this.envelope.protectedChannels[userId]?.includes(channelId) ||
+				!!this.savedProtectedChannels[userId]?.includes(channelId)
+			)
 		throw new Error('Secure Messaging vault is unavailable')
 	}
 
 	async save(): Promise<void> {
-		if (!this.value) throw new Error('Unlock Secure Messaging before saving')
-		let snapshot = JSON.stringify(this.value)
-		if (this.root && this.rootFingerprint) {
-			const protectedChannels = Object.fromEntries(
-				Object.entries(this.value.accounts).map(([id, value]) => [
-					id,
-					Object.keys(value.conversations).sort(),
-				]),
-			)
-			const nonce = secureRandomBytes(12)
-			const envelope: OneKeyEnvelope = {
-				version: 2,
-				protection: 'onekey',
-				fingerprint: this.rootFingerprint,
-				protectedChannels,
-				nonce: encode64(nonce),
-				ciphertext: '',
+		const failureVersion = this.saveFailureVersion
+		try {
+			if (!this.value) throw new Error('Unlock Secure Messaging before saving')
+			const protectedChannels = this.protectedChannels()
+			let snapshot = JSON.stringify(this.value)
+			if (this.root && this.rootFingerprint) {
+				const nonce = secureRandomBytes(12)
+				const envelope: OneKeyEnvelope = {
+					version: 2,
+					protection: 'onekey',
+					fingerprint: this.rootFingerprint,
+					protectedChannels,
+					nonce: encode64(nonce),
+					ciphertext: '',
+				}
+				const bytes = utf8Bytes(snapshot)
+				try {
+					envelope.ciphertext = encode64(
+						gcm(this.root, nonce, aad(envelope)).encrypt(bytes),
+					)
+				} finally {
+					bytes.fill(0)
+				}
+				this.envelope = envelope
+				snapshot = JSON.stringify(envelope)
 			}
-			const bytes = utf8Bytes(snapshot)
-			try {
-				envelope.ciphertext = encode64(
-					gcm(this.root, nonce, aad(envelope)).encrypt(bytes),
-				)
-			} finally {
-				bytes.fill(0)
-			}
-			this.envelope = envelope
-			snapshot = JSON.stringify(envelope)
+			const write = this.queue
+				.catch(() => {})
+				.then(() => this.storage.write(snapshot))
+			this.queue = write
+			await write
+			this.savedProtectedChannels = protectedChannels
+		} catch (error) {
+			// Callers may already have changed live conversation state. Never let a
+			// rejected save make a durably protected channel fall through to plaintext.
+			this.saveFailed = true
+			this.saveFailureVersion++
+			this.notify()
+			throw error
 		}
-		const write = this.queue
-			.catch(() => {})
-			.then(() => this.storage.write(snapshot))
-		this.queue = write
-		await write
+		// A save queued before a failure is not an explicit retry of that failure.
+		if (failureVersion === this.saveFailureVersion) this.saveFailed = false
 		this.notify()
+		if (this.saveFailed)
+			throw new Error(
+				'An earlier vault save failed. Reload Secure Messaging before continuing',
+			)
 	}
 
 	async useOneKey(secret: Uint8Array, userId: string): Promise<void> {
@@ -413,8 +453,27 @@ export class MobileVault {
 				'This phone pairing is older than the one already imported',
 			)
 		const next: Account = JSON.parse(JSON.stringify(current))
-		next.trusted = pairing.trusted
-		next.conversations = { ...next.conversations, ...pairing.conversations }
+		const replacedPeers = new Map<string, PublicIdentity>()
+		// Import is the local replacement event; older recorded cutoffs still win.
+		const importedAt = Date.now()
+		for (const [id, identity] of Object.entries(pairing.trusted)) {
+			const previous = next.trusted[id]
+			if (previous && previous.fingerprint !== identity.fingerprint)
+				replacedPeers.set(id, previous)
+			next.trusted[id] = identity
+		}
+		if (Object.keys(next.trusted).length > 2000)
+			throw new Error('Phone pairing would exceed the verified contact limit')
+		for (const [id, conversation] of Object.entries(pairing.conversations)) {
+			next.conversations[id] = {
+				...conversation,
+				...(next.conversations[id]?.needsReview ? { needsReview: true } : {}),
+			}
+		}
+		if (Object.keys(next.conversations).length > 2000)
+			throw new Error(
+				'Phone pairing would exceed the protected conversation limit',
+			)
 		for (const [id, candidate] of Object.entries(next.pending)) {
 			if (next.trusted[id]?.fingerprint === candidate.fingerprint)
 				delete next.pending[id]
@@ -422,7 +481,7 @@ export class MobileVault {
 		for (const conversation of Object.values(next.conversations)) {
 			if (
 				conversation.recipients.some(
-					id => !next.trusted[id] || next.pending[id],
+					id => !next.trusted[id] || next.pending[id] || replacedPeers.has(id),
 				)
 			)
 				conversation.needsReview = true
@@ -440,7 +499,31 @@ export class MobileVault {
 		next.identityHistory = [...history.values()]
 			.sort((left, right) => right.retiredAt - left.retiredAt)
 			.slice(0, 4)
-		next.peerIdentityHistory = pairing.peerIdentityHistory
+		const peerHistories = { ...next.peerIdentityHistory }
+		const historyPeers = new Set([
+			...Object.keys(pairing.peerIdentityHistory),
+			...replacedPeers.keys(),
+		])
+		for (const id of historyPeers) {
+			const displaced = replacedPeers.get(id)
+			const merged = new Map<string, HistoricalIdentity<PublicIdentity>>()
+			for (const item of [
+				...(peerHistories[id] ?? []),
+				...(pairing.peerIdentityHistory[id] ?? []),
+				...(displaced ? [{ identity: displaced, retiredAt: importedAt }] : []),
+			]) {
+				const fingerprint = item.identity.fingerprint
+				const previous = merged.get(fingerprint)
+				if (!previous || item.retiredAt < previous.retiredAt)
+					merged.set(fingerprint, item)
+			}
+			peerHistories[id] = [...merged.values()]
+				.sort((left, right) => right.retiredAt - left.retiredAt)
+				.slice(0, 4)
+		}
+		if (Object.keys(peerHistories).length > 2000)
+			throw new Error('Phone pairing would exceed the contact history limit')
+		next.peerIdentityHistory = peerHistories
 		next.pairingImportedAt = pairing.createdAt
 		const previousEnvelope = this.envelope
 		this.value!.accounts[userId] = next

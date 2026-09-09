@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 import { decryptMessage, publicIdentity } from './crypto'
+import { historicalMessageAllowed } from './history'
 import { parseEnvelope } from './protocol'
 import { acceptEnvelope } from './replay'
-import { historicalMessageAllowed } from './history'
-import type { Account } from './vaultState'
 import type { Envelope } from './protocol'
+import type { Account } from './vaultState'
 
 interface Message {
 	id: string

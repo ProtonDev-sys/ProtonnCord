@@ -3,19 +3,19 @@ import { randomBytes } from 'node:crypto'
 import test from 'node:test'
 import { sealMobilePairing } from '../../src/equicordplugins/secureMessaging.desktop/mobilePairing'
 import {
+	encryptMessage,
 	generateIdentity,
 	publicIdentity,
 	setRandomSource,
-	encryptMessage,
 } from '../plugins/secure-messaging/js/crypto'
+import { observeAnnouncement } from '../plugins/secure-messaging/js/history'
+import { openMobilePairing } from '../plugins/secure-messaging/js/mobilePairing'
 import {
 	deriveOneKeyIdentity,
 	deriveOneKeyRoot,
 } from '../plugins/secure-messaging/js/oneKey'
-import { openMobilePairing } from '../plugins/secure-messaging/js/mobilePairing'
-import { MobileVault } from '../plugins/secure-messaging/js/vaultState'
 import { MessageReceiver } from '../plugins/secure-messaging/js/receive'
-import { observeAnnouncement } from '../plugins/secure-messaging/js/history'
+import { MobileVault } from '../plugins/secure-messaging/js/vaultState'
 import type { Account } from '../plugins/secure-messaging/js/vaultState'
 
 setRandomSource(size => Uint8Array.from(randomBytes(size)))
@@ -113,6 +113,14 @@ test('phone pairing survives a locked restart, preserves the mobile counter and 
 		() => restarted.importPairing(token, USER),
 		/disk failure/,
 	)
+	assert.equal(restarted.ready, false)
+	assert.throws(() => restarted.account(USER), /could not be saved/)
+	assert.throws(
+		() => restarted.protectedChannel(USER, CHANNEL),
+		/could not be saved/,
+	)
+	fail = false
+	await restarted.save()
 	assert.equal(restarted.account(USER), oldState)
 })
 
@@ -190,4 +198,87 @@ test('announcement order is based on Discord publication metadata and key change
 	)
 	assert.equal(state.pending[PEER].fingerprint, replacement.fingerprint)
 	assert.equal(state.peerIdentityHistory?.[PEER][0].retiredAt, NOW)
+})
+
+test('pairing keeps phone-only contacts and retired keys readable after a changed PC peer and restart', async () => {
+	const phoneOnlyId = '100000000000000004'
+	const phoneOnlyChannel = '100000000000000005'
+	let saved: string | null = null
+	const backing = {
+		read: async () => saved,
+		write: async (value: string) => {
+			saved = value
+		},
+	}
+	const vault = new MobileVault(backing)
+	await vault.load()
+	await vault.useOneKey(secret, USER)
+	const previousPeer = generateIdentity()
+	const previousPublic = publicIdentity(previousPeer, PEER)
+	const phoneOnly = publicIdentity(generateIdentity(), phoneOnlyId)
+	const before = vault.account(USER)
+	before.trusted[PEER] = previousPublic
+	before.trusted[phoneOnlyId] = phoneOnly
+	before.conversations[CHANNEL] = { members: [PEER], recipients: [PEER] }
+	before.conversations[phoneOnlyChannel] = {
+		members: [phoneOnlyId],
+		recipients: [phoneOnlyId],
+	}
+	await vault.save()
+	const counter = before.counter
+	const oldTime = Date.now() - 1000
+	const oldMessage = {
+		id: messageIdAt(oldTime),
+		channelId: CHANNEL,
+		authorId: PEER,
+		content: encryptMessage({
+			channelId: CHANNEL,
+			identity: previousPeer,
+			plaintext: 'phone history remains readable',
+			recipients: [publicIdentity(before.identity, USER)],
+			senderUserId: PEER,
+			counter: 71,
+			now: oldTime,
+		}),
+	}
+	await vault.importPairing(token, USER)
+	const paired = vault.account(USER)
+	assert.deepEqual(paired.trusted[phoneOnlyId], phoneOnly)
+	assert.deepEqual(paired.trusted[PEER], payload.trusted[PEER])
+	assert.equal(paired.conversations[CHANNEL].needsReview, true)
+	assert.equal(
+		Boolean(paired.conversations[phoneOnlyChannel].needsReview),
+		false,
+	)
+	assert.equal(paired.counter, counter)
+	const retired = paired.peerIdentityHistory![PEER]!.find(
+		item => item.identity.fingerprint === previousPublic.fingerprint,
+	)
+	assert.ok(retired && retired.retiredAt > oldTime)
+	await vault.importPairing(token, USER)
+	assert.equal(vault.account(USER).peerIdentityHistory![PEER]!.length, 1)
+	assert.equal(
+		vault.account(USER).peerIdentityHistory![PEER]![0]!.retiredAt,
+		retired.retiredAt,
+	)
+	vault.lock()
+	const restarted = new MobileVault(backing)
+	await restarted.load()
+	await restarted.useOneKey(secret, USER)
+	const state = restarted.account(USER)
+	assert.deepEqual(state.trusted[phoneOnlyId], phoneOnly)
+	assert.equal(state.conversations[CHANNEL].needsReview, true)
+	const receiver = new MessageReceiver(
+		() => restarted.save(),
+		account => restarted.ready && restarted.account(USER) === account,
+	)
+	assert.equal(
+		receiver.render(oldMessage, state, USER, () => {}),
+		undefined,
+	)
+	await new Promise(resolve => setImmediate(resolve))
+	assert.equal(
+		receiver.render(oldMessage, state, USER, () => {}),
+		'phone history remains readable',
+	)
 })

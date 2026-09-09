@@ -13,12 +13,12 @@ import {
 	DhkemX25519HkdfSha256,
 	HkdfSha256,
 } from '@hpke/core'
+import { decryptMessage as desktopDecrypt } from '../../src/equicordplugins/secureMessaging.desktop/crypto'
 import {
 	canonicalEncryptedEnvelope,
 	envelopeHeader,
 	serializeEncryptedEnvelope,
 } from '../../src/equicordplugins/secureMessaging.desktop/protocol'
-import { decryptMessage as desktopDecrypt } from '../../src/equicordplugins/secureMessaging.desktop/crypto'
 import {
 	decryptMessage,
 	encryptMessage,

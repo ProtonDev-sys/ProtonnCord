@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 import { readFileSync, writeFileSync } from 'node:fs'
+
 const version = process.argv[2]
 if (!/^0\.2\.\d+\.\d+-nightly$/.test(version ?? ''))
 	throw new Error('Expected a nightly build version')

@@ -1548,6 +1548,9 @@ async function encryptEditedMessage(
         throw new Error(decrypted.status === "replay_detected"
             ? "The original encrypted message conflicts with its authenticated history."
             : "The original encrypted message could not be authenticated for editing.");
+    // Mobile reserves this counter range; desktop edits must not cross into it.
+    if (decrypted.counter >= 2 ** 52)
+        throw new Error("Messages sent from ProtonnCord Mobile cannot be edited on desktop. Send a new encrypted message instead.");
     if (decrypted.detachedTextIndex !== null)
         throw new Error("Large encrypted messages cannot be edited because Discord cannot replace their encrypted text attachment.");
     if ((decrypted.attachmentBundle?.count ?? 0) !== original.attachments.length)
@@ -1566,6 +1569,8 @@ async function encryptEditedMessage(
             : conversationStatusMessage(encrypted.conversation);
         throw new Error(reason);
     }
+    if (encrypted.counter <= decrypted.counter)
+        throw new Error("This message cannot be edited safely from this installation. Send a new encrypted message instead.");
     void prefetchEncryptedMessageEmbeds(plaintext);
     return encrypted.content;
 }
@@ -2405,6 +2410,7 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                                         )}
                                         {keyState.profile.provider === "onekey" && (
                                             <Button size="small" disabled={busy} onClick={async () => {
+                                                if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
                                                 setBusy(true);
                                                 setError(null);
                                                 try {
@@ -2412,7 +2418,7 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                                                     if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
                                                     if (isNativeFailure(result)) setError(failureMessage(result));
                                                     else {
-                                                        copyToClipboard(result.token);
+                                                        await copyToClipboard(result.token);
                                                         showToast("OneKey-encrypted phone pairing copied. Import it in the mobile Secure Messaging settings.", Toasts.Type.SUCCESS);
                                                     }
                                                 } catch {

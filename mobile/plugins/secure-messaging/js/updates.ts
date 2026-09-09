@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+
+import { callNativeMethod } from '@revenge-mod/modules/native'
 import {
 	exists,
 	getConstants,
 	readFile,
 	writeFile,
 } from '@revenge-mod/modules/native/fs'
-import { callNativeMethod } from '@revenge-mod/modules/native'
 
 interface Repo {
 	url: string

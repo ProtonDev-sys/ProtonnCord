@@ -2,22 +2,22 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
 	attachmentBundleRoot as desktopBundleRoot,
+	createAttachmentManifest as desktopCreateManifest,
 	decryptAttachmentBytes as desktopDecryptAttachment,
 	encryptAttachmentBytes as desktopEncryptAttachment,
 	parseSecurePlaintext as desktopParsePlaintext,
 	serializeSecurePlaintext as desktopSerializePlaintext,
-	createAttachmentManifest as desktopCreateManifest,
 } from '../../src/equicordplugins/secureMessaging.desktop/attachments'
 import {
 	attachmentBundleRoot,
+	authenticateAttachmentBundle,
+	createAttachmentManifest,
 	decryptAttachmentBytes,
 	encryptAttachmentBytes,
 	encryptedAttachmentFilename,
 	generateAttachmentBundleMaterial,
 	parseSecurePlaintext,
 	serializeSecurePlaintext,
-	authenticateAttachmentBundle,
-	createAttachmentManifest,
 } from '../plugins/secure-messaging/js/attachments'
 import { setRandomSource } from '../plugins/secure-messaging/js/crypto'
 import { encode64 } from '../plugins/secure-messaging/js/protocol'
