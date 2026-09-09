@@ -1,6 +1,6 @@
 # Complete source audit
 
-The review is complete. See [results, validation and remaining limits](RESULTS.md).
+The original review is complete. See the [initial results](RESULTS.md) and [combined nightly PR validation](PR-VALIDATION.md), including outstanding live/hardware acceptance.
 
 This audit starts at `441b6a60c1e2e8242e54478d00247e2a6384661d` and covers every one of its 1,746 tracked files. Installed dependencies, Git internals, downloaded artifacts, and build outputs are outside the source inventory. Newly added implementation and test files also require a review record.
 

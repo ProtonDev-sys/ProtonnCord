@@ -1,5 +1,7 @@
 # Complete source audit — 9 September 2026
 
+This is the initial audit snapshot. See [nightly PR validation](PR-VALIDATION.md) for the subsequently integrated mobile changes, expanded checks and current acceptance limits.
+
 The every-file review is complete. All **1,746 original tracked files** and **61 added implementation, test and tooling files** have a review record tied to their current SHA-256. The final coverage checker reports no missing files, duplicate reviews, invalid records or stale hashes. The original inventory paths also match Git commit `441b6a60c1e2e8242e54478d00247e2a6384661d`.
 
 This work continues the earlier runtime rewrite with a complete repository review and targeted implementation changes. **616 original files changed**; 1,130 were retained after code, asset or generated-data review. Existing license notices and compatibility exports remain available.
