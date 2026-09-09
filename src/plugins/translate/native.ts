@@ -18,7 +18,8 @@ export async function makeDeeplTranslateRequest(_: IpcMainInvokeEvent, pro: bool
                 "Content-Type": "application/json",
                 "Authorization": `DeepL-Auth-Key ${apiKey}`
             },
-            body: payload
+            body: payload,
+            signal: AbortSignal.timeout(10_000)
         });
 
         const data = await res.text();
@@ -44,6 +45,7 @@ export async function makeKagiTranslateRequest(_: IpcMainInvokeEvent, token: str
                 to: targetLang,
                 model: "standard"
             }),
+            signal: AbortSignal.timeout(10_000)
         });
 
         const data = await res.json();

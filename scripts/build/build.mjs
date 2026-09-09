@@ -106,7 +106,7 @@ const buildConfigs = ([
         sourcemap,
         plugins: [
             globPlugins("discordDesktop"),
-            ...commonOpts.plugins
+            ...commonRendererPlugins
         ],
         define: {
             ...defines,

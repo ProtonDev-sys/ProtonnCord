@@ -203,12 +203,14 @@ export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton
             disabled={disabled}
             infoButton={
                 (IS_WEB || showDeleteButton || onPin) && (
-                    <div
+                    <button
+                        type="button"
+                        aria-label={`Manage ${name}`}
                         className={cl("menu-button")}
                         onClick={openThemeMenu}
                     >
                         <CogWheel />
-                    </div>
+                    </button>
                 )
             }
             footer={

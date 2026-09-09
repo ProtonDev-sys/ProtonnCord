@@ -24,6 +24,25 @@ let currentChannelId: string | null = null;
 const channelTimings: Map<string, { time: number; timestamp: Date; }> = new Map();
 const MAX_CHANNEL_TIMINGS = 50;
 const MAX_FETCH_DURATION_MS = 60_000;
+const timingListeners = new Set<() => void>();
+let timingVersion = 0;
+
+function notifyTimings() {
+    timingVersion++;
+    for (const listener of timingListeners) listener();
+}
+
+function subscribeTimings(listener: () => void) {
+    timingListeners.add(listener);
+    return () => { timingListeners.delete(listener); };
+}
+
+function clearTimings() {
+    currentFetch = null;
+    channelTimings.clear();
+    currentChannelId = null;
+    notifyTimings();
+}
 
 const settings = definePluginSettings({
     showIcon: {
@@ -44,6 +63,7 @@ const settings = definePluginSettings({
 });
 
 const FetchTimeButton: ChatBarButtonFactory = ({ isMainChat }) => {
+    React.useSyncExternalStore(subscribeTimings, () => timingVersion);
     const { showIcon, showMs, iconColor } = settings.use(["showIcon", "showMs", "iconColor"]);
 
     if (!isMainChat || !showIcon || !currentChannelId) {
@@ -125,6 +145,7 @@ function handleChannelSelect(data: any) {
     if (!channelId) {
         currentChannelId = null;
         currentFetch = null;
+        notifyTimings();
         return;
     }
 
@@ -135,6 +156,7 @@ function handleChannelSelect(data: any) {
         channelId,
         startTime: performance.now()
     };
+    notifyTimings();
 }
 
 function handleMessageLoad(data: any) {
@@ -146,14 +168,9 @@ function handleMessageLoad(data: any) {
         return;
     }
 
-    const existing = channelTimings.get(currentFetch.channelId);
-    if (existing) {
-        currentFetch = null;
-        return;
-    }
-
     const duration = endTime - currentFetch.startTime;
 
+    channelTimings.delete(currentFetch.channelId);
     channelTimings.set(currentFetch.channelId, {
         time: duration,
         timestamp: new Date()
@@ -164,6 +181,7 @@ function handleMessageLoad(data: any) {
     }
 
     currentFetch = null;
+    notifyTimings();
 }
 
 export default definePlugin({
@@ -179,10 +197,14 @@ export default definePlugin({
         render: FetchTimeButton
     },
 
+    flux: {
+        CONNECTION_OPEN: clearTimings,
+        LOGOUT: clearTimings,
+    },
+
     start() {
         FluxDispatcher.subscribe("CHANNEL_SELECT", handleChannelSelect);
         FluxDispatcher.subscribe("LOAD_MESSAGES_SUCCESS", handleMessageLoad);
-        FluxDispatcher.subscribe("MESSAGE_CREATE", handleMessageLoad);
 
         const currentChannel = getCurrentChannel();
         if (currentChannel) {
@@ -193,10 +215,6 @@ export default definePlugin({
     stop() {
         FluxDispatcher.unsubscribe("CHANNEL_SELECT", handleChannelSelect);
         FluxDispatcher.unsubscribe("LOAD_MESSAGES_SUCCESS", handleMessageLoad);
-        FluxDispatcher.unsubscribe("MESSAGE_CREATE", handleMessageLoad);
-
-        currentFetch = null;
-        channelTimings.clear();
-        currentChannelId = null;
+        clearTimings();
     }
 });

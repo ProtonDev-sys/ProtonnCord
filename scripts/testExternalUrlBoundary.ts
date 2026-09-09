@@ -223,6 +223,7 @@ const browserStubRuntime: Plugin = {
 
 async function testRealBrowserNativeStub(): Promise<void> {
     const root = await mkdtemp(path.join(tmpdir(), "protonncord-external-url-"));
+    assert.equal(path.dirname(path.resolve(root)), path.resolve(tmpdir()), "cleanup must stay in the test temporary directory");
     const bundlePath = path.join(root, "browser-native-stub.mjs");
     const calls: OpenCall[] = [];
     const openedWindows: Array<{ opener: unknown; }> = [];

@@ -31,9 +31,13 @@ export default function WidgetSongs({ user }: WidgetSongsProps) {
     const { users } = useSongStore();
 
     const data = users[user.id]?.data;
+    const authorized = isAuthorized();
     useEffect(() => {
-        if (isAuthorized() && !data) listData(user.id).catch(() => setFailed(true));
-    }, [isAuthorized()]);
+        let active = true;
+        setFailed(false);
+        if (authorized && !data) void listData(user.id).catch(() => { if (active) setFailed(true); });
+        return () => { active = false; };
+    }, [authorized, user.id, data]);
 
     const owned = UserStore.getCurrentUser()?.id === user.id;
 

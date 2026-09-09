@@ -117,8 +117,9 @@ async function readApprovalFile(): Promise<ApprovalProfile[]> {
             offset += bytesRead;
         }
         const parsed = JSON.parse(content.toString("utf8"));
-        if (!Array.isArray(parsed)) throw new Error("Invalid FileUpload approval store");
-        return parsed.filter(isProfile).slice(-MAX_APPROVAL_RECORDS);
+        if (!Array.isArray(parsed) || parsed.length > MAX_APPROVAL_RECORDS || !parsed.every(isProfile))
+            throw new Error("Invalid FileUpload approval store; original data was retained");
+        return parsed;
     } finally {
         await handle.close();
     }
@@ -128,7 +129,8 @@ async function loadApprovals(): Promise<ApprovalProfile[]> {
     if (approvalCache) return approvalCache;
     try {
         approvalCache = await readApprovalFile();
-    } catch {
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         approvalCache = [];
     }
     return approvalCache;

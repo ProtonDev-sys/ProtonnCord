@@ -64,6 +64,7 @@ for (const [name, content, expected] of [
 }
 
 interface Pointer {
+    button?: number;
     clientX: number;
     clientY: number;
 }
@@ -239,10 +240,10 @@ test("Remix input preserves pointer state and removes listeners from its origina
     for (const [name, down] of [["mousemove", false], ["mousedown", true], ["mousemove", true], ["mouseleave", false]] as const) {
         const listener = canvas.listeners.get(name);
         assert.ok(listener);
-        listener({ clientX: 20, clientY: 30 });
+        listener({ button: 0, clientX: 20, clientY: 30 });
         assert.equal(input.Mouse.down, down);
     }
-    assert.deepEqual(seen, ["move", "move", "up"]);
+    assert.deepEqual(seen, ["move", "move", "move", "up"], "mouse down refreshes the pointer position before starting the stroke");
     assert.equal(input.Mouse.x, 20);
     assert.equal(input.Mouse.y, 20);
     assert.equal(input.Mouse.prevX, 20);

@@ -25,7 +25,7 @@ export default definePlugin({
         return <ThreeDots className={cl("dots")} dotRadius={3} themed={true} />;
     },
     isTyping() {
-        return useStateFromStores([TypingStore], () => {
+        return useStateFromStores([TypingStore, PrivateChannelSortStore, UserStore], () => {
             const currentUserId = UserStore.getCurrentUser()?.id;
             if (!currentUserId) return false;
 

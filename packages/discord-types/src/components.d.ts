@@ -106,7 +106,7 @@ export type Card = ComponentType<PropsWithChildren<HTMLProps<HTMLDivElement> & {
     Types: Record<"BRAND" | "CUSTOM" | "DANGER" | "PRIMARY" | "SUCCESS" | "WARNING", string>;
 };
 
-export type ComboboxPopout = ComponentType<PropsWithChildren<{
+export type ComboboxPopout = ComponentType<{
     value: Set<any>;
     placeholder: string;
     children(query: string): ReactNode[];
@@ -123,7 +123,7 @@ export type ComboboxPopout = ComponentType<PropsWithChildren<{
     maxVisibleItems?: number;
     showScrollbar?: boolean;
 
-}>>;
+}>;
 
 export type CheckboxAligns = {
     CENTER: "center";

@@ -19,7 +19,8 @@ const cl = classNameFactory("vc-i-remember-you-");
 
 function tooltipText(user: IStorageUser) {
     const { updatedAt } = user.extra || {};
-    const updatedAtContent = updatedAt ? new Intl.DateTimeFormat().format(updatedAt) : null;
+    const updatedAtContent = typeof updatedAt === "number" && Number.isFinite(new Date(updatedAt).getTime())
+        ? new Intl.DateTimeFormat().format(updatedAt) : "unknown";
     return `${user.username ?? user.tag}, updated at ${updatedAtContent}`;
 }
 
@@ -33,10 +34,10 @@ function UsersCollectionRows({ usersCollection }: { usersCollection: Data["users
     return (
         <>
             {Object.entries(usersCollection)
-                .map(([_key, { users, name }]) => ({ name, users: Object.values(users) }))
+                .map(([key, { users, name }]) => ({ key, name, users: Object.values(users) }))
                 .sort((a, b) => b.users.length - a.users.length)
-                .map(({ name, users }) => (
-                    <aside key={name}>
+                .map(({ key, name, users }) => (
+                    <aside key={key}>
                         <div className={cl("header-container")}>
                             <HeadingPrimary className={cl("header-name")}>{name}</HeadingPrimary>
                             <div className={cl("header-btns")}>

@@ -33,6 +33,9 @@ interface RequestRecord {
 
 interface Runtime {
     afterUpdate?: (key: string, value: unknown) => Promise<void>;
+    beforeQuickCssRead?: () => Promise<void>;
+    beforeSettingsImport?: () => Promise<void>;
+    afterSettingsImport?: () => Promise<void>;
     bodyCancellations: number;
     dataStore: Map<string, unknown>;
     dataStoreEntriesCalls: number;
@@ -194,7 +197,10 @@ function installGlobals(): void {
     (globalThis as any).location ??= { reload() {} };
     (globalThis as any).VencordNative = {
         quickCss: {
-            async get() { return currentRuntime().quickCss; },
+            async get() {
+                await currentRuntime().beforeQuickCssRead?.();
+                return currentRuntime().quickCss;
+            },
             async set(value: string) {
                 currentRuntime().quickCss = value;
                 currentRuntime().quickCssWrites++;
@@ -279,10 +285,13 @@ const runtimeStubs: Plugin = {
                             } else target[key] = value;
                         }
                     }
-                    export const importSettings = async data => {
+                    export const importSettings = async (data, _type, options = {}) => {
+                        await globalThis.__cloudPrivacyHarness.beforeSettingsImport?.();
+                        if (options.canApply?.() === false) throw new Error("Import context changed");
                         const parsed = JSON.parse(data);
                         globalThis.__cloudPrivacyHarness.importedDocuments.push(parsed);
                         if (parsed.settings) merge(globalThis.__cloudPrivacyHarness.settings, parsed.settings);
+                        await globalThis.__cloudPrivacyHarness.afterSettingsImport?.();
                     };
                 `,
                 plugins: `
@@ -573,6 +582,113 @@ function bytesFromBody(body: BodyInit | null | undefined): Uint8Array {
     if (body instanceof ArrayBuffer) return new Uint8Array(body);
     if (ArrayBuffer.isView(body)) return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
     throw new Error(`Expected a byte request body, received ${Object.prototype.toString.call(body)}`);
+}
+
+function testSyncDirectionDefault(sync: CloudSyncModule) {
+    useRuntime(makeRuntime());
+    assert.equal(sync.getCloudSyncDirection(), "both");
+    assert.equal(sync.shouldCloudSync("push"), true);
+    assert.equal(sync.shouldCloudSync("pull"), true);
+    for (const direction of ["push", "pull", "both", "manual"] as const) {
+        sync.setCloudSyncDirection(direction);
+        assert.equal(sync.shouldCloudSync("push"), direction === "push" || direction === "both");
+        assert.equal(sync.shouldCloudSync("pull"), direction === "pull" || direction === "both");
+    }
+}
+
+async function testDownloadsPreserveEditsDuringRequest(sync: CloudSyncModule) {
+    for (const version of ["v1", "v2"] as const) {
+        for (const force of [false, true]) {
+            const runtime = makeRuntime();
+            runtime.dataStore.set(API_VERSION_STORE_KEY, { [ORIGIN_A]: version });
+            useRuntime(runtime);
+            const started = deferred<void>();
+            const response = deferred<Response>();
+            runtime.fetchHandler = async () => { started.resolve(); return response.promise; };
+            const remote = { settings: { plugins: { SafePlugin: { safeNumber: 9 } } }, quickCss: ".download {}" };
+            const downloads = [
+                await downloadEntry("settings", JSON.stringify(remote.settings)),
+                await downloadEntry("quickCss", remote.quickCss)
+            ];
+            const pending = sync.getCloudSettings(true, force);
+            await started.promise;
+            runtime.settings.plugins.SafePlugin.safeNumber = 42;
+            runtime.quickCss = ".new-local-edit {}";
+            sync.markLocalSettingsDirty();
+            response.resolve(version === "v1"
+                ? new Response(deflateSync(new TextEncoder().encode(JSON.stringify(remote))), { headers: { ETag: "1" } })
+                : jsonResponse({
+                    downloads, errors: [], uploaded: [],
+                    server_manifest: downloads.map(({ checksum, key, version }) => ({ checksum, key, version }))
+                }));
+            assert.equal(await pending, false);
+            assert.equal(runtime.settings.plugins.SafePlugin.safeNumber, 42);
+            assert.equal(runtime.quickCss, ".new-local-edit {}");
+            assert.equal(runtime.importedDocuments.length, 0);
+            assert.equal(runtime.quickCssWrites, 0);
+            assert.equal(runtime.dataStore.has(MANIFEST_STORE_KEY), false);
+            assert.equal(runtime.dataStore.has(V1_VERSION_STORE_KEY), false);
+            assert.equal(runtime.localStorage.Vencord_settingsDirty, "true");
+            assert.ok(runtime.notifications.some(notification => String(notification.body).includes("changed during the download")));
+        }
+    }
+}
+
+async function testDownloadsPreserveEditsDuringCommit(sync: CloudSyncModule) {
+    for (const version of ["v1", "v2"] as const) {
+        for (const phase of ["beforeQuickCssRead", "beforeSettingsImport", "afterSettingsImport"] as const) {
+            const runtime = makeRuntime();
+            runtime.dataStore.set(API_VERSION_STORE_KEY, { [ORIGIN_A]: version });
+            useRuntime(runtime);
+            const remote = { settings: { plugins: { SafePlugin: { safeNumber: 9 } } }, quickCss: ".download {}" };
+            const downloads = [await downloadEntry("settings", JSON.stringify(remote.settings)), await downloadEntry("quickCss", remote.quickCss)];
+            runtime.fetchHandler = async () => version === "v1"
+                ? new Response(deflateSync(new TextEncoder().encode(JSON.stringify(remote))), { headers: { ETag: "1" } })
+                : jsonResponse({ downloads, errors: [], uploaded: [], server_manifest: downloads.map(({ checksum, key, version }) => ({ checksum, key, version })) });
+            const reached = deferred<void>();
+            const release = deferred<void>();
+            runtime[phase] = async () => { reached.resolve(); await release.promise; };
+            const pending = sync.getCloudSettings(true, true);
+            await reached.promise;
+            runtime.settings.plugins.SafePlugin.safeNumber = 42;
+            runtime.quickCss = ".newer-local-css {}";
+            sync.markLocalSettingsDirty();
+            release.resolve();
+            assert.equal(await pending, false, version + " " + phase + " must reject a stale commit");
+            assert.equal(runtime.settings.plugins.SafePlugin.safeNumber, 42);
+            assert.equal(runtime.quickCss, ".newer-local-css {}");
+            assert.equal(runtime.quickCssWrites, 0);
+            assert.equal(runtime.dataStore.has(MANIFEST_STORE_KEY), false);
+            assert.equal(runtime.dataStore.has(V1_VERSION_STORE_KEY), false);
+            assert.equal(runtime.localStorage.Vencord_settingsDirty, "true");
+        }
+    }
+
+    const runtime = makeRuntime();
+    useRuntime(runtime);
+    const downloads = [await downloadEntry("settings", JSON.stringify({ plugins: { SafePlugin: { safeNumber: 9 } } }))];
+    runtime.fetchHandler = async () => jsonResponse({ downloads, errors: [], uploaded: [], server_manifest: downloads.map(({ checksum, key, version }) => ({ checksum, key, version })) });
+    const reached = deferred<void>();
+    const release = deferred<void>();
+    const originalDigest = crypto.subtle.digest;
+    crypto.subtle.digest = async function (...args: Parameters<SubtleCrypto["digest"]>) {
+        reached.resolve();
+        await release.promise;
+        return originalDigest.apply(this, args);
+    };
+    try {
+        const pending = sync.getCloudSettings(true, true);
+        await reached.promise;
+        runtime.settings.plugins.SafePlugin.safeNumber = 42;
+        sync.markLocalSettingsDirty();
+        release.resolve();
+        assert.equal(await pending, false, "a delayed payload checksum must not bypass the revision guard");
+        assert.equal(runtime.importedDocuments.length, 0);
+        assert.equal(runtime.settings.plugins.SafePlugin.safeNumber, 42);
+        assert.equal(runtime.dataStore.has(MANIFEST_STORE_KEY), false);
+    } finally {
+        crypto.subtle.digest = originalDigest;
+    }
 }
 
 async function testOutboundV2(sync: CloudSyncModule): Promise<void> {
@@ -1754,10 +1870,14 @@ async function main(): Promise<void> {
     installGlobals();
     useRuntime(makeRuntime());
 
-    const root = await mkdtemp(path.join(tmpdir(), "protonn-cord-cloud-privacy-"));
+    const temporaryParent = path.resolve(tmpdir());
+    const root = await mkdtemp(path.join(temporaryParent, "protonn-cord-cloud-privacy-"));
     const restoreFetch = captureFetch();
     try {
         const { setup, sync } = await bundleModules(root);
+        testSyncDirectionDefault(sync);
+        await testDownloadsPreserveEditsDuringRequest(sync);
+        await testDownloadsPreserveEditsDuringCommit(sync);
         await testOutboundV2(sync);
         await testOutboundV1(sync);
         await testInboundV2AndOfficialZeroUploadPull(sync);
@@ -1784,6 +1904,8 @@ async function main(): Promise<void> {
         await testInFlightMetadataDirtyEventsStayDirty(sync);
     } finally {
         restoreFetch();
+        assert.equal(path.dirname(path.resolve(root)), temporaryParent);
+        assert.ok(path.basename(root).startsWith("protonn-cord-cloud-privacy-"));
         await rm(root, { force: true, recursive: true });
     }
 

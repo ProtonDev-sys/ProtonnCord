@@ -9,17 +9,21 @@ import { EquicordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { RelationshipType } from "@vencord/discord-types/enums";
 import { findByPropsLazy } from "@webpack";
-import { Menu, RelationshipStore } from "@webpack/common";
+import { Menu, RelationshipStore, showToast, Toasts } from "@webpack/common";
 
 const RelationshipActions = findByPropsLazy("cancelFriendRequest", "addRelationship");
 
 function isOutgoingFriendRequest(userId: string) {
-    return RelationshipStore.getRelationshipType(userId) === RelationshipType.OUTGOING_REQUEST;
+    return !!userId && RelationshipStore.getRelationshipType(userId) === RelationshipType.OUTGOING_REQUEST;
 }
 
-function cancelOutgoingFriendRequest(userId: string) {
+async function cancelOutgoingFriendRequest(userId: string) {
     if (!isOutgoingFriendRequest(userId)) return;
-    return RelationshipActions.cancelFriendRequest(userId);
+    try {
+        await RelationshipActions.cancelFriendRequest(userId);
+    } catch {
+        showToast("Could not cancel the friend request. Try again.", Toasts.Type.FAILURE);
+    }
 }
 
 const userContextPatch: NavContextMenuPatchCallback = (children, { user }) => {

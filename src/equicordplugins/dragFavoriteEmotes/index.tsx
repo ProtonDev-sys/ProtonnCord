@@ -93,7 +93,7 @@ export default definePlugin({
             }),
             [e?.descriptor],);
     },
-    drop({ emoji, category }: EmojiDescriptor) {
+    drop({ emoji, category }: Partial<EmojiDescriptor> = {}) {
         return useDrop(() => ({
             accept: "emoji",
             canDrop() {
@@ -106,12 +106,14 @@ export default definePlugin({
             drop(item: { id: string; }) {
                 const source = item.id;
                 const target = emoji?.uniqueName ?? emoji?.id;
+                if (!source || !target) return;
                 function update(this: { source: string; target: string; }, e: { emojis: string[]; }) {
                     if (this.source === this.target) {
                         return false;
                     }
                     const sourceIndex = e.emojis.findIndex(emoji => emoji === this.source);
                     const targetIndex = e.emojis.findIndex(emoji => emoji === this.target);
+                    if (sourceIndex < 0 || targetIndex < 0) return false;
                     // Adjust final index to account for removal of source emoji
                     const finalIndex = targetIndex < sourceIndex ? targetIndex : targetIndex - 1;
                     if (sourceIndex === finalIndex) {
@@ -122,7 +124,7 @@ export default definePlugin({
                 }
                 UserSettingsActionCreators.FrecencyUserSettingsActionCreators.updateAsync("favoriteEmojis", update.bind({ source, target }), UserSettingsDelay.INFREQUENT_USER_ACTION);
             }
-        }), [emoji]);
+        }), [emoji, category]);
     },
     dragItem() {
         return (

@@ -422,7 +422,7 @@ function modalFixture() {
     let closeCount = 0;
     let uploadFailure = false;
     const module = load<{ default(props: { modalProps: object; close(): void; }): Element; }>("RemixModal.tsx", {
-        "@webpack/common": { ...h.api, React, Modal: "modal" },
+        "@webpack/common": { ...h.api, React, Modal: "modal", SelectedChannelStore: { getChannelId: () => "channel" } },
         ".": { sendRemix(blob: Blob) { if (uploadFailure) return Promise.reject(new Error("upload")); uploads.push(blob); } },
         "./editor/components/Canvas": { exportImg() { const work = deferred<Blob>(); exports.push(work); return work.promise; } },
         "./editor/Editor": { Editor: "editor" }, "./icons/SendIcon": { SendIcon: "send-icon" },

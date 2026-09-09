@@ -85,11 +85,14 @@ export default definePlugin({
     },
 
     start() {
+        savedStatus = null;
         lastStatus = StatusSettings.getSetting();
         UserSettingsProtoStore.addChangeListener(handleUserSettingsChange);
     },
 
     stop() {
         UserSettingsProtoStore.removeChangeListener(handleUserSettingsChange);
+        savedStatus = null;
+        lastStatus = null;
     }
 });

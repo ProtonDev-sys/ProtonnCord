@@ -76,7 +76,7 @@ export function Newer(props: CommonProps) {
     return (
         <>
             <Paragraph>
-                Your local copy has more recent commits than the remote repository. This usually happens when you've made local changes. Please stash or reset them before updating.
+                Your local branch contains commits that are not on the selected remote branch. Review these differences before updating.
             </Paragraph>
             <Changes {...props} updates={changes} />
         </>
@@ -117,7 +117,9 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                 <Button
                     disabled={disabled}
                     onClick={runWithDispatch(setIsChecking, async () => {
+                        const branch = settings.updateBranch;
                         const outdated = await checkForUpdates();
+                        if (settings.updateBranch !== branch) return;
                         setHasChecked(true);
 
                         if (outdated || isNewer) {
@@ -144,10 +146,14 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                         variant="primary"
                         disabled={disabled}
                         onClick={runWithDispatch(setIsUpdating, async () => {
-                            if (await update()) {
+                            const branch = settings.updateBranch;
+                            const updated = await update();
+                            if (settings.updateBranch !== branch) return;
+                            if (updated) {
                                 setUpdates([]);
 
                                 await new Promise<void>((r, reject) => {
+                                    let confirmed = false;
                                     openModal(props => (
                                         <ConfirmModal
                                             {...props}
@@ -156,10 +162,19 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                                             confirmText="Restart"
                                             cancelText="Not now!"
                                             variant="primary"
-                                            onConfirm={() => relaunch().then(r, reject)}
+                                            onConfirm={() => {
+                                                confirmed = true;
+                                                return relaunch().then(r, reject);
+                                            }}
                                             onCancel={r}
                                         />
-                                    ));
+                                    ), { onCloseCallback: () => { if (!confirmed) r(); } });
+                                });
+                            } else {
+                                Toasts.show({
+                                    message: "The update could not be installed. Check for updates and try again.",
+                                    id: Toasts.genId(),
+                                    type: Toasts.Type.FAILURE
                                 });
                             }
                         })}

@@ -13,7 +13,7 @@ import { FluxDispatcher, React } from "@webpack/common";
 import { addCollectionContextMenuPatch, getGifPickerContextMenuItems, RemoveItemContextMenuItems } from "./components/contextMenus";
 import { settings, SortingOptions } from "./settings";
 import { Category, Collection, Gif, GifPickerInstance } from "./types";
-import { cache_collections, refreshCacheCollection, updateGif } from "./utils/collectionManager";
+import { cache_collections, refreshCacheCollection, updateGifs } from "./utils/collectionManager";
 import { getFormat } from "./utils/getFormat";
 import { logger, stripPrefix } from "./utils/misc";
 import { batchRefreshAttachmentUrls, isCdnUrlExpired } from "./utils/refreshUrl";
@@ -22,6 +22,7 @@ let GIF_COLLECTION_PREFIX: string;
 let GIF_ITEM_PREFIX: string;
 let refreshingUrls = false;
 let oldTrendingCat: Category[] | null = null;
+let activeQuery: string | undefined;
 
 export default definePlugin({
     name: "GifCollections",
@@ -31,6 +32,11 @@ export default definePlugin({
     settings,
     contextMenus: {
         "message": addCollectionContextMenuPatch,
+    },
+    flux: {
+        GIF_PICKER_QUERY({ query }: { query: string; }) {
+            activeQuery = query;
+        }
     },
 
     patches: [
@@ -63,10 +69,15 @@ export default definePlugin({
         },
     ],
 
-    start() {
-        refreshCacheCollection();
+    async start() {
         GIF_COLLECTION_PREFIX = settings.store.collectionPrefix;
         GIF_ITEM_PREFIX = settings.store.itemPrefix;
+        await refreshCacheCollection();
+    },
+
+    stop() {
+        activeQuery = undefined;
+        oldTrendingCat = null;
     },
 
     sortedCollections(): Collection[] {
@@ -114,7 +125,7 @@ export default definePlugin({
 
         const allUrls = [...urlSet];
 
-        if (!refreshingUrls) this.refreshExpiredUrls(allUrls, expiredGifs, instance.props.query);
+        if (!refreshingUrls) void this.refreshExpiredUrls(allUrls, expiredGifs, instance.props.query).catch(error => logger.error("Failed to refresh collection URLs", error));
     },
 
     async refreshExpiredUrls(urls: string[], expiredGifs: Gif[], query: string) {
@@ -128,17 +139,18 @@ export default definePlugin({
 
             if (!Object.keys(fullMap).length) return;
 
-            let anyUpdated = false;
+            const updates = new Map<string, Gif>();
             for (const gif of expiredGifs) {
                 const newSrc = fullMap[gif.src] ?? gif.src;
                 const newUrl = fullMap[gif.url] ?? gif.url;
                 if (newSrc !== gif.src || newUrl !== gif.url) {
-                    await updateGif(gif.id, { ...gif, src: newSrc, url: newUrl });
-                    anyUpdated = true;
+                    updates.set(gif.id, { ...gif, src: newSrc, url: newUrl });
                 }
             }
 
-            if (!anyUpdated) return;
+            if (!updates.size) return;
+            await updateGifs(updates);
+            if (activeQuery !== query) return;
 
             FluxDispatcher.dispatch({ type: "GIF_PICKER_QUERY", query: "" });
             FluxDispatcher.dispatch({ type: "GIF_PICKER_QUERY", query });

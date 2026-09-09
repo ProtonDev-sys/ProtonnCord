@@ -31,22 +31,51 @@ export interface StreaksState {
     clear: () => void;
 }
 
+let active = false;
+let generation = 0;
+const migrations = new Map<string, Promise<void>>();
+
+export function setStreaksActive(value: boolean) {
+    active = value;
+    useStreaksStore.getState().clear();
+}
+
+function captureAccount() {
+    const userId = UserStore.getCurrentUser()?.id;
+    const token = useAuthorizationStore.getState().tokens?.[userId];
+    return active && userId && typeof token === "string" && token ? { userId, token, generation } : null;
+}
+
+function accountIsCurrent(account: NonNullable<ReturnType<typeof captureAccount>>) {
+    return active && account.generation === generation && UserStore.getCurrentUser()?.id === account.userId &&
+        useAuthorizationStore.getState().tokens?.[account.userId] === account.token;
+}
+
+function validStreak(value: any, userId: string): value is RemoteStreak {
+    return value && typeof value.user_a_id === "string" && typeof value.user_b_id === "string" &&
+        (value.user_a_id === userId || value.user_b_id === userId) &&
+        Number.isSafeInteger(value.count) && value.count >= 0;
+}
+
 export const useStreaksStore = proxyLazy(() => zustandCreate((set: any, get: any) => ({
     streaks: {},
-    clear: () => set({ streaks: {} }),
+    clear: () => { generation++; set({ streaks: {} }); },
     async fetch() {
-        const { token } = useAuthorizationStore.getState();
-        if (!token) return;
+        const account = captureAccount();
+        if (!account) return;
 
         try {
             const res = await fetch(`${API_URL}/streaks`, {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${account.token}` },
+                signal: AbortSignal.timeout(15_000), redirect: "error"
             });
             if (res.ok) {
                 const data: RemoteStreak[] = await res.json();
-                const myId = UserStore.getCurrentUser()?.id;
+                if (!Array.isArray(data) || !accountIsCurrent(account)) return;
+                const myId = account.userId;
                 const streaksMap: Record<string, RemoteStreak> = {};
                 for (const s of data) {
+                    if (!validStreak(s, myId)) continue;
                     const otherId = s.user_a_id === myId ? s.user_b_id : s.user_a_id;
                     streaksMap[otherId] = s;
                 }
@@ -57,16 +86,19 @@ export const useStreaksStore = proxyLazy(() => zustandCreate((set: any, get: any
         }
     },
     async update(recipientId: string) {
-        const { token } = useAuthorizationStore.getState();
-        if (!token) return;
+        const account = captureAccount();
+        if (!account || !/^\d{17,20}$/u.test(recipientId)) return;
 
         try {
             const res = await fetch(`${API_URL}/streaks/${recipientId}`, {
                 method: "POST",
-                headers: { Authorization: `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${account.token}` },
+                signal: AbortSignal.timeout(15_000), redirect: "error"
             });
             if (res.ok) {
                 const streak: RemoteStreak = await res.json();
+                if (!accountIsCurrent(account) || !validStreak(streak, account.userId) ||
+                    ![streak.user_a_id, streak.user_b_id].includes(recipientId)) return;
                 set({ streaks: { ...get().streaks, [recipientId]: streak } });
             }
         } catch (e) {
@@ -74,15 +106,18 @@ export const useStreaksStore = proxyLazy(() => zustandCreate((set: any, get: any
         }
     },
     async refresh(recipientId: string) {
-        const { token } = useAuthorizationStore.getState();
-        if (!token) return;
+        const account = captureAccount();
+        if (!account || !/^\d{17,20}$/u.test(recipientId)) return;
 
         try {
             const res = await fetch(`${API_URL}/streaks/${recipientId}`, {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${account.token}` },
+                signal: AbortSignal.timeout(15_000), redirect: "error"
             });
             if (res.ok) {
                 const streak: RemoteStreak = await res.json();
+                if (!accountIsCurrent(account) || !validStreak(streak, account.userId) ||
+                    ![streak.user_a_id, streak.user_b_id].includes(recipientId)) return;
                 set({ streaks: { ...get().streaks, [recipientId]: streak } });
             }
         } catch (e) {
@@ -90,28 +125,38 @@ export const useStreaksStore = proxyLazy(() => zustandCreate((set: any, get: any
         }
     },
     async migrate() {
-        const { token } = useAuthorizationStore.getState();
-        if (!token) return;
+        const account = captureAccount();
+        if (!account) return;
+        const key = `${account.userId}\0${account.token}`;
+        const existing = migrations.get(key);
+        if (existing) return existing;
+        const pending = (async () => {
+            try {
+                const legacyData = await DataStore.get("vc-streaks-data");
+                if (!legacyData || Object.keys(legacyData).length === 0 || !accountIsCurrent(account)) return;
+                const serialized = JSON.stringify(legacyData);
+                const res = await fetch(`${API_URL}/streaks/migrate`, {
+                    method: "POST",
+                    signal: AbortSignal.timeout(15_000), redirect: "error",
+                    headers: {
+                        Authorization: `Bearer ${account.token}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: serialized
+                });
 
-        const legacyData = await DataStore.get("vc-streaks-data");
-        if (!legacyData || Object.keys(legacyData).length === 0) return;
-
-        try {
-            const res = await fetch(`${API_URL}/streaks/migrate`, {
-                method: "POST",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify(legacyData)
-            });
-
-            if (res.ok) {
-                await DataStore.del("vc-streaks-data");
-                console.log("Successfully migrated local streaks to API");
+                if (res.ok && accountIsCurrent(account)) {
+                    const currentData = await DataStore.get("vc-streaks-data");
+                    if (accountIsCurrent(account) && JSON.stringify(currentData) === serialized) {
+                        await DataStore.del("vc-streaks-data");
+                        console.log("Successfully migrated local streaks to API");
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to migrate streaks", e);
             }
-        } catch (e) {
-            console.error("Failed to migrate streaks", e);
-        }
+        })().finally(() => { if (migrations.get(key) === pending) migrations.delete(key); });
+        migrations.set(key, pending);
+        return pending;
     }
 } as StreaksState)));

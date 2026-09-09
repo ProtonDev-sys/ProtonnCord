@@ -8,8 +8,8 @@ import {
 	setRandomSource,
 } from '../plugins/secure-messaging/js/crypto'
 import { parseEnvelope } from '../plugins/secure-messaging/js/protocol'
-import { acceptEnvelope } from '../plugins/secure-messaging/js/replay'
 import { MessageReceiver } from '../plugins/secure-messaging/js/receive'
+import { acceptEnvelope } from '../plugins/secure-messaging/js/replay'
 import type { Account } from '../plugins/secure-messaging/js/vaultState'
 
 setRandomSource(size => Uint8Array.from(randomBytes(size)))

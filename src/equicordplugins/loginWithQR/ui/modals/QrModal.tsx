@@ -36,6 +36,7 @@ interface Preview {
 }
 
 interface QrModalProps {
+    isActive: () => boolean;
     exit: (err: string | null) => void;
     setPreview: (
         media: HTMLImageElement | HTMLVideoElement | null,
@@ -59,6 +60,7 @@ const verifyUrl = async (
     token: string,
     { current: modalProps }: QrModalPropsRef
 ) => {
+    if (!modalProps.isActive()) return;
     // yay
     let handshake: string | null = null;
     try {
@@ -69,29 +71,42 @@ const verifyUrl = async (
         if (res.ok && res.status === 200) handshake = res.body?.handshake_token;
     } catch { }
 
-    modalProps.setPreview(null);
+    if (!modalProps.isActive()) {
+        if (handshake) await RestAPI.post({
+            url: "/users/@me/remote-auth/cancel",
+            body: { handshake_token: handshake },
+        }).catch(() => undefined);
+        return;
+    }
+
+    void modalProps.setPreview(null);
     openVerifyModal(
         handshake,
         () => {
             modalProps.exit(null);
-            RestAPI.post({
+            if (!handshake) return;
+            void RestAPI.post({
                 url: "/users/@me/remote-auth/cancel",
                 body: { handshake_token: handshake },
-            });
+            }).catch(() => undefined);
         },
     );
 };
 
 const handleProcessImage = (file: File, modalPropsRef: QrModalPropsRef) => {
     const { current: modalProps } = modalPropsRef;
+    if (!modalProps.isActive()) return;
 
     const reader = new FileReader();
     reader.addEventListener("load", () => {
-        if (!reader.result) return;
+        if (!modalProps.isActive()) return;
+        if (!reader.result) return modalProps.exit("Could not read the image.");
 
         const img = new Image();
         img.addEventListener("load", () => {
-            modalProps.setPreview(img);
+            if (!modalProps.isActive()) return;
+            if (!img.width || !img.height) return modalProps.exit("The image has no readable dimensions.");
+            void modalProps.setPreview(img);
             const { w, h } = limitSize(img.width, img.height);
             img.width = w;
             img.height = h;
@@ -100,7 +115,9 @@ const handleProcessImage = (file: File, modalPropsRef: QrModalPropsRef) => {
             canvas.width = img.width;
             canvas.height = img.height;
 
-            const ctx = canvas.getContext("2d")!;
+            try {
+            const ctx = canvas.getContext("2d");
+            if (!ctx) throw new Error("Could not read the image.");
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
             const { data, width, height } = ctx.getImageData(
@@ -116,16 +133,19 @@ const handleProcessImage = (file: File, modalPropsRef: QrModalPropsRef) => {
                 modalProps
                     .setPreview(img, code.location)
                     .then(() =>
-                        verifyUrl(token, modalPropsRef).catch(e =>
-                            modalProps.exit(e?.message)
-                        )
-                    );
+                        verifyUrl(token, modalPropsRef)
+                    ).catch(e => modalProps.exit(e?.message ?? "Could not read the QR code."));
             else modalProps.exit(null);
-
+            } catch {
+                modalProps.exit("Could not read the QR code.");
+            } finally {
             canvas.remove();
+            }
         });
+        img.addEventListener("error", () => modalProps.exit("Could not decode the image."));
         img.src = reader.result as string;
     });
+    reader.addEventListener("error", () => modalProps.exit("Could not read the image."));
     reader.readAsDataURL(file);
 };
 
@@ -133,17 +153,21 @@ function QrModal() {
     const [state, setState] = useState(LoginStateType.Idle);
     const [preview, setPreview] = useState<Preview | null>(null);
     const error = useRef<string | null>(null);
+    const mounted = useRef(true);
 
     const inputRef = useRef<HTMLInputElement>(null);
 
     const modalProps = useRef<QrModalProps>({
+        isActive: () => mounted.current && loginWithQR.qrModalOpen,
         exit: err => {
+            if (!mounted.current) return;
             error.current = err;
             setState(LoginStateType.Idle);
             setPreview(null);
         },
         setPreview: (media, location) =>
             new Promise(res => {
+                if (!mounted.current) return res();
                 if (!media) return res(setPreview(null));
 
                 const size = {} as Preview["size"];
@@ -234,8 +258,12 @@ function QrModal() {
     });
 
     useEffect(() => {
+        mounted.current = true;
         loginWithQR.qrModalOpen = true;
-        return () => void (loginWithQR.qrModalOpen = false);
+        return () => {
+            mounted.current = false;
+            loginWithQR.qrModalOpen = false;
+        };
     }, []);
 
     useEffect(() => {
@@ -250,6 +278,7 @@ function QrModal() {
                     break;
                 } else if (item.kind === "string" && item.type === "text/plain") {
                     item.getAsString(text => {
+                        if (!modalProps.current.isActive()) return;
                         setState(LoginStateType.Loading);
 
                         const token = text.match(tokenRegex)?.[1];
@@ -283,6 +312,7 @@ function QrModal() {
                 onDragEnter={e =>
                     e.currentTarget.classList.add(cl("modal-filepaste-drop"))
                 }
+                onDragOver={e => e.preventDefault()}
                 onDragLeave={e =>
                     e.currentTarget.classList.remove(cl("modal-filepaste-drop"))
                 }
@@ -333,9 +363,9 @@ function QrModal() {
                         className={cl(preview?.crosses && "preview-crosses")}
                     >
                         {preview.source}
-                        {preview.crosses?.map(({ x, y, rot, size }) => (
+                        {preview.crosses?.map(({ x, y, rot, size }, index) => (
                             <span
-                                key={cl("preview-cross")}
+                                key={index}
                                 className={cl("preview-cross")}
                                 style={{
                                     left: `${x}%`,

@@ -15,6 +15,8 @@ import { ChannelType } from "@vencord/discord-types/enums";
 import { ChannelActions, ChannelStore, Menu, PermissionsBits, PermissionStore, VoiceStateStore } from "@webpack/common";
 
 let waitingChannelId: string | null = null;
+let active = false;
+let generation = 0;
 
 const NOTIFICATION_AUDIO_URL = "https://raw.githubusercontent.com/Equicord/Equibored/main/sounds/waitForSlot/notification.mp3";
 
@@ -67,11 +69,13 @@ const ChannelContext: NavContextMenuPatchCallback = (children, { channel }) => {
 };
 
 function promptVoiceChannel(channel: Channel | null | undefined): boolean {
-    if (!shouldWaitForSlot(channel)) return false;
+    if (!active || !shouldWaitForSlot(channel)) return false;
     if (waitingChannelId === channel.id) return true;
 
+    const currentGeneration = generation;
     showNotice(`Voice channel ${channel.name} is full. Wait for a slot?`, "Wait", () => {
         popNotice();
+        if (!active || generation !== currentGeneration) return;
         waitingChannelId = channel.id;
     });
 
@@ -84,6 +88,7 @@ export default definePlugin({
     tags: ["Servers", "Utility", "Voice"],
     authors: [EquicordDevs.omaw, Devs.prism],
     settings,
+    start() { active = true; generation++; },
     patches: [
         {
             find: "VoiceChannel, transitionTo: Channel does not have a guildId",
@@ -100,6 +105,7 @@ export default definePlugin({
     promptVoiceChannel,
 
     flux: {
+        CONNECTION_OPEN() { generation++; waitingChannelId = null; },
         VOICE_STATE_UPDATES() {
             if (!waitingChannelId) return;
 
@@ -116,8 +122,10 @@ export default definePlugin({
                 if (settings.store.autoJoin) {
                     ChannelActions.selectVoiceChannel(channelId);
                 } else {
+                    const currentGeneration = generation;
                     showNotice(`Hey, someone just left #${channel.name} and there's a spot for you now!`, "Join", () => {
                         popNotice();
+                        if (!active || generation !== currentGeneration) return;
                         ChannelActions.selectVoiceChannel(channelId);
                     });
                 }
@@ -126,6 +134,8 @@ export default definePlugin({
     },
 
     stop() {
+        active = false;
+        generation++;
         waitingChannelId = null;
     },
 });

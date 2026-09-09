@@ -23,6 +23,13 @@ const logger = new Logger("SettingsSync:Offline", "#39b7e0");
 const forbiddenKeys = new Set(["__proto__", "constructor", "prototype"]);
 let importing = false;
 
+class ImportConflictError extends Error { }
+
+interface ImportOptions {
+    /** Rechecked immediately before persistence and before publishing imported settings. */
+    canApply?: () => boolean;
+}
+
 const toast = (type: string, message: string) =>
     Toasts.show({ type, message, id: Toasts.genId() });
 
@@ -70,7 +77,7 @@ function deepMerge(target: object, source: Record<string, unknown>) {
     }
 }
 
-export async function importSettings(data: string, type: BackupType = "all") {
+export async function importSettings(data: string, type: BackupType = "all", options: ImportOptions = {}) {
     if (importing) throw new Error("Wait for the current import to finish.");
     let parsed: unknown;
     try {
@@ -106,21 +113,37 @@ export async function importSettings(data: string, type: BackupType = "all") {
     const completed: string[] = [];
     try {
         if (isRecord(settings)) {
+            const original = JSON.stringify(PlainSettings);
             const next = structuredClone(PlainSettings);
             deepMerge(next, settings);
+            const canApply = () => JSON.stringify(PlainSettings) === original && options.canApply?.() !== false;
+            if (!canApply()) throw new ImportConflictError("Your settings changed during the import. The backup was not applied.");
             await VencordNative.settings.set(next);
+            if (!canApply()) {
+                // The persistence queue may have coalesced this snapshot with a newer edit.
+                // Keep the live settings authoritative and await their durable restoration.
+                try {
+                    await VencordNative.settings.set(PlainSettings);
+                } catch (cause) {
+                    throw new ImportConflictError("The import conflicted with newer settings, and saving those newer settings failed. Save your settings again before restarting.", { cause });
+                }
+                throw new ImportConflictError("Your settings changed during the import. The backup was not applied.");
+            }
             deepMerge(PlainSettings, settings);
             completed.push("settings");
         }
         if (typeof quickCss === "string") {
+            if (options.canApply?.() === false) throw new ImportConflictError("Your settings changed during the import. QuickCSS was not applied.");
             await VencordNative.quickCss.set(quickCss);
             completed.push("QuickCSS");
         }
         if (entries) {
+            if (options.canApply?.() === false) throw new ImportConflictError("Your settings changed during the import. DataStore was not applied.");
             await DataStore.setMany(typeof quickCss === "string" ? entries.filter(([key]) => key !== "VencordQuickCss") : entries);
             completed.push("DataStore");
         }
     } catch (cause) {
+        if (cause instanceof ImportConflictError) throw cause;
         throw new Error(completed.length
             ? `Import stopped after saving ${completed.join(" and ")}. Those changes remain applied.`
             : "The import could not be saved.", { cause });

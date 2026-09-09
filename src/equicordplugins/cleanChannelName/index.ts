@@ -65,13 +65,21 @@ export default definePlugin({
         if (c[ORIGINAL_NAME] !== undefined) return channel;
 
         c[ORIGINAL_NAME] = channel.name;
+        let cachedName: string | undefined;
+        let cachedType: number | undefined;
+        let cleanedName: string;
 
         Object.defineProperty(channel, "name", {
             configurable: true,
             enumerable: true,
             get() {
                 if (editingChannelId === channel.id) return c[ORIGINAL_NAME];
-                return computeClean(c[ORIGINAL_NAME], channel.type);
+                if (cachedName !== c[ORIGINAL_NAME] || cachedType !== channel.type) {
+                    cachedName = c[ORIGINAL_NAME];
+                    cachedType = channel.type;
+                    cleanedName = computeClean(cachedName!, cachedType);
+                }
+                return cleanedName;
             },
             set(value: string) {
                 c[ORIGINAL_NAME] = value;

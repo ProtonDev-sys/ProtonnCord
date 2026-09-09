@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
     ensureCachedArtifact,
@@ -67,6 +67,21 @@ function testReleasePin() {
     assert.equal(assetIds.size, Object.keys(EQUILOTL_ARTIFACTS).length);
     assert.deepEqual(getInstallerArgs(["node", "runInstaller.mjs", "--", "--repair"]), ["--repair"]);
     assert.deepEqual(getInstallerArgs(["node", "runInstaller.mjs"]), []);
+}
+
+async function testStandaloneLinuxPin() {
+    const source = await readFile(new URL("../misc/install.sh", import.meta.url), "utf8");
+    const pin = name => {
+        const value = new RegExp(`^${name}='([^']+)'$`, "mu").exec(source)?.[1];
+        assert.ok(value, `Missing standalone installer pin: ${name}`);
+        return value;
+    };
+    const { linux } = EQUILOTL_ARTIFACTS;
+    assert.equal(pin("INSTALLER_RELEASE"), EQUILOTL_RELEASE.tag);
+    assert.equal(pin("INSTALLER_ASSET_ID"), String(linux.assetId));
+    assert.equal(pin("INSTALLER_SIZE"), String(linux.size));
+    assert.equal(pin("INSTALLER_SHA256"), linux.sha256);
+    assert.equal(pin("INSTALLER_NAME"), linux.filename);
 }
 
 async function testVerifiedCache(root) {
@@ -324,7 +339,9 @@ async function testExecutionGateAndCleanup() {
 
 async function main() {
     testReleasePin();
+    await testStandaloneLinuxPin();
     const root = await mkdtemp(join(tmpdir(), "protonn-cord-installer-security-"));
+    assert.equal(dirname(resolve(root)), resolve(tmpdir()), "cleanup must stay in the test temporary directory");
     try {
         await testVerifiedCache(root);
         await testVerifiedReplacement(root);

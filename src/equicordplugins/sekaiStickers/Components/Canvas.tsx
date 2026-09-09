@@ -9,15 +9,13 @@ import { useEffect, useRef } from "@webpack/common";
 const Canvas = props => {
 
     const { draw, ...rest } = props;
-    const canvasRef = useRef(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
 
     useEffect(() => {
 
         const canvas = canvasRef.current;
-        // @ts-ignore
-        const context = canvas.getContext("2d");
-
-        draw(context);
+        const context = canvas?.getContext("2d");
+        if (context) draw(context);
 
     }, [draw]);
 

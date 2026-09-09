@@ -18,8 +18,9 @@ import ChannelsTabsContainer from "./components/ChannelTabsContainer";
 import * as ChannelTabsUtils from "./util";
 import { BasicChannelTabsProps, createTab, handleChannelSwitch, settings } from "./util";
 
-const contextMenuPatch: NavContextMenuPatchCallback = (children, props: { channel: Channel, messageId?: string; }) => {
+const contextMenuPatch: NavContextMenuPatchCallback = (children, props: { channel?: Channel, messageId?: string; }) => {
     const { channel, messageId } = props;
+    if (!channel) return;
 
     const menuItem = (
         <Menu.MenuItem

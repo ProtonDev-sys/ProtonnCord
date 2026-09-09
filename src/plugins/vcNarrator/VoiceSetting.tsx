@@ -6,7 +6,7 @@
 
 import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
-import { SearchableSelect, useMemo, useState } from "@webpack/common";
+import { SearchableSelect, useEffect, useMemo, useState } from "@webpack/common";
 
 import { getCurrentVoice, settings } from "./settings";
 
@@ -18,7 +18,7 @@ function groupBy<T extends object, K extends PropertyKey>(arr: T[], fn: (obj: T)
         acc[value] ??= [];
         acc[value].push(obj);
         return acc;
-    }, {} as Record<K, T[]>);
+    }, Object.create(null) as Record<K, T[]>);
 }
 
 interface PickerProps {
@@ -59,13 +59,16 @@ function ComplexPicker({ voice, voices }: PickerProps) {
                 if (friendlyName) {
                     list.push({ name, friendlyName });
                 }
-            } catch { }
+            } catch {
+                list.push({ name, friendlyName: name || "Unknown language" });
+            }
         }
 
         return list;
     }, [groupedVoices]);
 
-    const [selectedLanguage, setSelectedLanguage] = useState(() => getCurrentVoice()?.lang ?? languageNameMapping[0].name);
+    const [selectedLanguage, setSelectedLanguage] = useState(() => getCurrentVoice()?.lang ?? languageNameMapping[0]?.name);
+    const displayedLanguage = selectedLanguage && groupedVoices[selectedLanguage] ? selectedLanguage : languageNameMapping[0]?.name;
 
     if (languageNameMapping.length === 1) {
         return (
@@ -76,7 +79,7 @@ function ComplexPicker({ voice, voices }: PickerProps) {
         );
     }
 
-    const voicesForLanguage = groupedVoices[selectedLanguage];
+    const voicesForLanguage = displayedLanguage ? groupedVoices[displayedLanguage] : [];
 
     const languageOptions = languageNameMapping.map(l => ({
         label: l.friendlyName,
@@ -89,7 +92,7 @@ function ComplexPicker({ voice, voices }: PickerProps) {
             <SearchableSelect
                 placeholder="Select a language"
                 options={languageOptions}
-                value={languageOptions.find(l => l.value === selectedLanguage)?.value}
+                value={languageOptions.find(l => l.value === displayedLanguage)?.value}
                 onChange={v => setSelectedLanguage(v)}
                 maxVisibleItems={5}
                 closeOnSelect
@@ -104,7 +107,14 @@ function ComplexPicker({ voice, voices }: PickerProps) {
 }
 
 function VoiceSetting() {
-    const voices = useMemo(() => window.speechSynthesis?.getVoices() ?? [], []);
+    const [voices, setVoices] = useState(() => window.speechSynthesis?.getVoices() ?? []);
+    useEffect(() => {
+        const synthesis = window.speechSynthesis;
+        const updateVoices = () => setVoices(synthesis?.getVoices() ?? []);
+        synthesis?.addEventListener("voiceschanged", updateVoices);
+        updateVoices();
+        return () => synthesis?.removeEventListener("voiceschanged", updateVoices);
+    }, []);
     const { voice } = settings.use(["voice"]);
 
     if (!voices.length)

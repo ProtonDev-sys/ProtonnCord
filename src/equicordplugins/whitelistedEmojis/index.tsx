@@ -24,8 +24,22 @@ let cache_allowedList: ContextMenuEmoji[] = [];
 const allowedEmojiNames = new Set<string>();
 const cacheListeners = new Set<() => void>();
 let writeChain: Promise<unknown> = Promise.resolve();
+let generation = 0;
 
-const getAllowedList = async (): Promise<ContextMenuEmoji[]> => (await DataStore.get<ContextMenuEmoji[]>(DATA_COLLECTION_NAME)) ?? [];
+function isEmojiList(value: unknown): value is SavedEmoji[] {
+    return Array.isArray(value) && value.every(emoji => emoji && typeof emoji.name === "string" && emoji.name.length > 0
+        && (typeof emoji.id === "string" || typeof emoji.surrogates === "string")
+        && (emoji.guildId === undefined || typeof emoji.guildId === "string")
+        && (emoji.surrogates === undefined || typeof emoji.surrogates === "string")
+        && (emoji.animated === undefined || typeof emoji.animated === "boolean"));
+}
+
+const getAllowedList = async (): Promise<ContextMenuEmoji[]> => {
+    const value = await DataStore.get<ContextMenuEmoji[]>(DATA_COLLECTION_NAME);
+    if (value == null) return [];
+    if (!isEmojiList(value)) throw new Error("Saved emoji list is invalid");
+    return value;
+};
 
 function setCachedAllowedList(list: ContextMenuEmoji[]) {
     cache_allowedList = list;
@@ -92,8 +106,12 @@ function showToast(message: string, type = Toasts.Type.SUCCESS) {
 function addBulkToAllowedList(items: ContextMenuEmoji[]) {
     return withWriteLock(async () => {
         const validItemsToAdd: SavedEmoji[] = [];
+        const names = new Set(allowedEmojiNames);
         for (const item of items) {
-            if (!itemAlreadyInList(item)) validItemsToAdd.push(buildSaveData(item));
+            if (!names.has(item.name)) {
+                names.add(item.name);
+                validItemsToAdd.push(buildSaveData(item));
+            }
         }
 
         await setAllowedList([...cache_allowedList, ...validItemsToAdd]);
@@ -144,7 +162,7 @@ function removeFromAllowedList(item: ContextMenuEmoji) {
 }
 
 const expressionPickerPatch: NavContextMenuPatchCallback = (children, { target }: { target: Target; }) => {
-    const { dataset } = target;
+    const dataset = target?.dataset;
 
     if (!dataset) return;
     if (dataset.type !== "emoji") return;
@@ -213,6 +231,7 @@ function useWhitelistedEmojis(): SavedEmoji[] {
     useEffect(() => {
         const listener = () => forceUpdate(v => v + 1);
         cacheListeners.add(listener);
+        listener();
         return () => void cacheListeners.delete(listener);
     }, []);
     return cache_allowedList as SavedEmoji[];
@@ -243,7 +262,7 @@ const WhiteListedEmojisComponent = (): JSX.Element => {
         }
         groups[groupKey].push(emoji);
         return groups;
-    }, {} as Record<string, SavedEmoji[]>);
+    }, Object.create(null) as Record<string, SavedEmoji[]>);
 
     return (
         <div className="emoji-container">
@@ -337,7 +356,7 @@ const uploadEmojis = async () => {
 const importEmojis = (data: string) => withWriteLock(async () => {
     try {
         const parsed = JSON.parse(data);
-        if (parsed && typeof parsed === "object" && Array.isArray(parsed.emojis)) {
+        if (parsed && typeof parsed === "object" && isEmojiList(parsed.emojis)) {
             await setAllowedList(parsed.emojis);
             showToast("Successfully imported emojis");
         } else {
@@ -433,12 +452,18 @@ export default definePlugin({
     ],
     settings: settings,
     async start() {
-        setCachedAllowedList(await getAllowedList());
+        const currentGeneration = ++generation;
+        await withWriteLock(async () => {
+            const saved = await getAllowedList();
+            if (currentGeneration === generation) setCachedAllowedList(saved);
+        });
+        if (currentGeneration !== generation) return;
         notifyCacheChange();
         addContextMenuPatch("expression-picker", expressionPickerPatch);
         addContextMenuPatch("guild-context", guildContextPatch);
     },
     stop() {
+        generation++;
         removeContextMenuPatch("expression-picker", expressionPickerPatch);
         removeContextMenuPatch("guild-context", guildContextPatch);
         setCachedAllowedList([]);

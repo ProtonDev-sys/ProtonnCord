@@ -30,6 +30,7 @@ const cl = classNameFactory("vc-new-plugins-");
 const logger = new Logger("NewPluginsManager");
 
 let hasSeen = false;
+let opening: Promise<void> | undefined;
 
 interface ModalComponentProps {
     modalProps: RenderModalProps;
@@ -169,10 +170,9 @@ function NewPluginsModal({ modalProps, newPlugins, newSettings }: ModalComponent
     );
 }
 
-export async function openNewPluginsModal() {
+async function showNewPluginsModal() {
     const { newPlugins, newSettings } = await getNewPluginChanges();
     if ((newPlugins.size || newSettings.size) && !hasSeen) {
-        hasSeen = true;
         await writeKnownSettings();
         const modalKey = openModal(modalProps => (
             <ErrorBoundary noop onError={() => closeModal(modalKey)}>
@@ -183,5 +183,10 @@ export async function openNewPluginsModal() {
                 />
             </ErrorBoundary>
         ));
+        hasSeen = true;
     }
+}
+
+export function openNewPluginsModal() {
+    return opening ??= showNewPluginsModal().finally(() => { opening = undefined; });
 }

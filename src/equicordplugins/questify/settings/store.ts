@@ -21,13 +21,13 @@ const CURRENT_SETTINGS = PlainSettings.plugins.Questify;
 if (CURRENT_SETTINGS) {
     let migrationVersion = CURRENT_SETTINGS.migrationVersion ?? 0;
 
-    // 0 -> 1: Reset Settings
+    // 0 -> 1: Keep saved preferences and unknown keys; defaults fill missing fields.
     if (migrationVersion === 0) {
-        PlainSettings.plugins.Questify = { enabled: CURRENT_SETTINGS.enabled, migrationVersion: 1 };
         migrationVersion = 1;
     }
 
     if (migrationVersion !== CURRENT_SETTINGS.migrationVersion) {
+        CURRENT_SETTINGS.migrationVersion = migrationVersion;
         SettingsStore.markAsChanged();
     }
 }

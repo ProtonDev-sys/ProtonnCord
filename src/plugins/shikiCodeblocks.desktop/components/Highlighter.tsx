@@ -21,7 +21,6 @@ import { resolveLang } from "@plugins/shikiCodeblocks.desktop/api/languages";
 import { shiki } from "@plugins/shikiCodeblocks.desktop/api/shiki";
 import { useShikiSettings } from "@plugins/shikiCodeblocks.desktop/hooks/useShikiSettings";
 import { useTheme } from "@plugins/shikiCodeblocks.desktop/hooks/useTheme";
-import { hex2Rgb } from "@plugins/shikiCodeblocks.desktop/utils/color";
 import { cl, hljs, requireHljs, shouldUseHljs } from "@plugins/shikiCodeblocks.desktop/utils/misc";
 import { useAwaiter, useIntersection } from "@utils/react";
 import { React, useEffect } from "@webpack/common";
@@ -84,7 +83,7 @@ export const Highlighter = ({
         return await shiki.tokenizeCode(content, lang!);
     }, {
         fallbackValue: null,
-        deps: [lang, content, currentThemeId, isIntersecting],
+        deps: [lang, content, currentThemeId, isIntersecting, useHljs],
     });
 
     const themeBase: ThemeBase = {
@@ -98,6 +97,7 @@ export const Highlighter = ({
 
     let langName;
     if (lang) langName = useHljs ? hljs?.getLanguage?.(lang)?.name : shikiLang?.name;
+    const opacity = Number.isFinite(bgOpacity) && bgOpacity >= 0 && bgOpacity <= 100 ? bgOpacity : 100;
 
     return (
         <div
@@ -106,9 +106,7 @@ export const Highlighter = ({
             style={{
                 backgroundColor: useHljs
                     ? themeBase.backgroundColor
-                    : `rgba(${hex2Rgb(themeBase.backgroundColor)
-                        .concat(bgOpacity / 100)
-                        .join(", ")})`,
+                    : `color-mix(in srgb, ${themeBase.backgroundColor} ${opacity}%, transparent)`,
                 color: themeBase.plainColor,
             }}
         >

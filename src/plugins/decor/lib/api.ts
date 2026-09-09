@@ -32,6 +32,11 @@ export interface NewDecoration {
     alt: string;
 }
 
+function withDeadline(signal?: AbortSignal | null) {
+    const deadline = AbortSignal.timeout(30_000);
+    return signal ? AbortSignal.any([signal, deadline]) : deadline;
+}
+
 async function fetchApi(path: string, authorization: Authorization, options?: RequestInit) {
     if (options?.signal?.aborted) throw new Error("The decoration request was cancelled.");
     useAuthorizationStore.getState().requireAuthorization(authorization);
@@ -39,6 +44,7 @@ async function fetchApi(path: string, authorization: Authorization, options?: Re
     headers.set("Authorization", `Bearer ${authorization.token}`);
     const res = await fetch(authorization.apiUrl + path, {
         ...options,
+        signal: withDeadline(options?.signal),
         headers,
         redirect: "error"
     });
@@ -72,7 +78,7 @@ export const getUsersDecorations = async (ids: string[], signal?: AbortSignal): 
     const url = new URL(API_URL + "/users");
     url.searchParams.set("ids", JSON.stringify(ids));
 
-    const response = await fetch(url, { signal });
+    const response = await fetch(url, { signal: withDeadline(signal) });
     if (!response.ok) throw new Error("Could not load decorations.");
     const data: unknown = await response.json();
     if (!isObject(data)) throw new Error("Invalid decoration response.");
@@ -114,7 +120,7 @@ export const deleteDecoration = async (hash: string, authorization: Authorizatio
 };
 
 export const getPresets = async (signal?: AbortSignal): Promise<Preset[]> => {
-    const response = await fetch(API_URL + "/decorations/presets", { signal });
+    const response = await fetch(API_URL + "/decorations/presets", { signal: withDeadline(signal) });
     if (!response.ok) throw new Error("Could not load decoration presets.");
     const value: unknown = await response.json();
     if (!Array.isArray(value)) throw new Error("Invalid decoration presets.");

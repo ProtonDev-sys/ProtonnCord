@@ -104,12 +104,12 @@
 
 <body>
     <header class="header">
-        <img src="https://raw.githubusercontent.com/ProtonDev-sys/ProtonnCord/refs/heads/main/browser/icon.png" alt="Protonn Cord" />
+        <img src="{{ICON}}" alt="Protonn Cord" />
         <div class="header-text">
             <div class="header-top">
                 <h1>Protonn Cord</h1>
                 <span class="version">
-                    <a href="https://github.com/ProtonDev-sys/ProtonnCord/releases/tag/v{{VERSION}}">
+                    <a href="https://github.com/ProtonDev-sys/ProtonnCord/releases">
                         v{{VERSION}}
                     </a>
                     (<a href="https://github.com/ProtonDev-sys/ProtonnCord/commit/{{GIT_HASH}}">{{GIT_HASH}}</a>)
@@ -163,28 +163,3 @@
         </ul>
     </section>
 </body>
-<script>
-    const data = new URLSearchParams(location.search);
-
-    // replace all {{FOO}} placeholders in the document with the values from the URL
-
-    /** @param {Node} [node] */
-    function walk(node) {
-        if (node.nodeType === Node.TEXT_NODE) {
-            node.textContent = node.textContent.replace(/{{(\w+)}}/g, (match, key) => data.get(key) || match);
-            return;
-        }
-
-        if (node.nodeType === Node.ELEMENT_NODE && node.nodeName !== "SCRIPT") {
-            for (const child of node.childNodes) {
-                walk(child);
-            }
-        }
-    }
-
-    walk(document.body);
-    for (const link of document.querySelectorAll("a[href]")) {
-        link.setAttribute("href", link.getAttribute("href").replace(/{{(\w+)}}/g,
-            (match, key) => data.has(key) ? encodeURIComponent(data.get(key)) : match));
-    }
-</script>

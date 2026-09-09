@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { parseSyncedLyrics } from "@equicordplugins/musicControls/parseSyncedLyrics";
 import { Track } from "@equicordplugins/musicControls/tidal/TidalStore";
 
 import { EnhancedLyric } from "./types";
@@ -14,7 +15,7 @@ export async function getLyrics(track: Track | null, retries = 3): Promise<Enhan
     const fetchUrl = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track.name)}&artist_name=${encodeURIComponent(track.artist)}`;
 
     try {
-        const res = await fetch(fetchUrl);
+        const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(15_000) });
         if (!res.ok) {
             if (retries > 1) return getLyrics(track, retries - 1);
             console.error("Failed to fetch lyrics:", res.status, res.statusText);
@@ -23,23 +24,12 @@ export async function getLyrics(track: Track | null, retries = 3): Promise<Enhan
 
         const data = await res.json();
         const synced = data?.syncedLyrics;
-        if (!synced) {
-            console.error("Invalid lyrics data", data);
+        if (typeof synced !== "string") {
+            console.error("Invalid lyrics data");
             return null;
         }
 
-        const parsed: EnhancedLyric[] = synced
-            .split("\n")
-            .map(line => {
-                const match = line.match(/^\[(\d+):(\d+\.\d+)\]\s*(.*)/);
-                if (!match) return null;
-                const [, min, sec, text] = match;
-                return {
-                    time: parseInt(min) * 60 + parseFloat(sec),
-                    text: text
-                } as EnhancedLyric;
-            })
-            .filter(Boolean) as EnhancedLyric[];
+        const parsed: EnhancedLyric[] = parseSyncedLyrics(synced).map(line => ({ ...line, text: line.text ?? "" }));
 
         return parsed.length ? parsed : null;
     } catch (err) {

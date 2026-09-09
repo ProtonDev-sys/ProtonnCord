@@ -13,25 +13,36 @@ const logger = new Logger("ClipUpload");
 let ffmpeg: FFmpeg | null = null;
 let ffmpegLoading: Promise<FFmpeg> | null = null;
 let conversionCounter = 0;
+let generation = 0;
+
+export function disposeFFmpeg() {
+    generation++;
+    ffmpeg?.terminate();
+    ffmpeg = null;
+    ffmpegLoading = null;
+}
 
 async function getFFmpeg() {
     if (ffmpeg?.loaded) return ffmpeg;
     if (ffmpegLoading) return ffmpegLoading;
 
+    const loadGeneration = generation;
     ffmpegLoading = (async () => {
         const instance = new FFmpeg();
+        ffmpeg = instance;
         try {
             await loadFFmpeg(instance);
+            if (generation !== loadGeneration) throw new Error("Clip conversion canceled.");
 
             ffmpeg = instance;
             logger.info("FFmpeg loaded.");
             return instance;
         } catch (error) {
             instance.terminate();
-            ffmpeg = null;
+            if (ffmpeg === instance) ffmpeg = null;
             throw error;
         } finally {
-            ffmpegLoading = null;
+            if (generation === loadGeneration) ffmpegLoading = null;
         }
     })();
 

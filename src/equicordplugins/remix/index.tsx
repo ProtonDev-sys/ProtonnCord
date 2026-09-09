@@ -53,9 +53,9 @@ const MessageContextMenuPatch: NavContextMenuPatchCallback = (children, props) =
     />);
 };
 
-export function sendRemix(blob: Blob) {
-    const currentChannelId = SelectedChannelStore.getChannelId();
-    const channel = ChannelStore.getChannel(currentChannelId);
+export function sendRemix(blob: Blob, channelId = SelectedChannelStore.getChannelId()) {
+    const channel = ChannelStore.getChannel(channelId);
+    if (!channel) throw new Error("Select a channel before sending the image.");
 
     const file = new File([blob], "remix.png", { type: "image/png" });
     return UploadHandler.promptToUpload([file], channel, DraftType.ChannelMessage);

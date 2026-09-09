@@ -23,46 +23,66 @@ import { updateMessage } from "@api/MessageUpdater";
 import { migratePluginSettings } from "@api/Settings";
 import { ImageInvisible, ImageVisible } from "@components/Icons";
 import { Devs } from "@utils/constants";
+import { Logger } from "@utils/Logger";
 import { classes } from "@utils/misc";
 import definePlugin from "@utils/types";
 import { Message } from "@vencord/discord-types";
-import { ChannelStore } from "@webpack/common";
+import { ChannelStore, Toasts } from "@webpack/common";
 
 const KEY = "HideMedia_HiddenIds";
 
 let hiddenMessages = new Set<string>();
 let hiddenMessagesLoaded = false;
 let hiddenMessagesLoad: Promise<Set<string>> | null = null;
+let hiddenMessagesWrite = Promise.resolve();
+let lifecycleGeneration = 0;
 
 async function getHiddenMessages() {
     if (hiddenMessagesLoaded) return hiddenMessages;
 
-    hiddenMessagesLoad ??= get(KEY)
+    if (hiddenMessagesLoad) return hiddenMessagesLoad;
+
+    const generation = lifecycleGeneration;
+    const pending = get(KEY)
         .then(stored => {
-            hiddenMessages = new Set(Array.isArray(stored) ? stored : []);
-            hiddenMessagesLoaded = true;
-            return hiddenMessages;
+            const loaded = new Set<string>(Array.isArray(stored) ? stored.filter(id => typeof id === "string") : []);
+            if (generation === lifecycleGeneration) {
+                hiddenMessages = loaded;
+                hiddenMessagesLoaded = true;
+            }
+            return loaded;
         })
         .finally(() => {
-            hiddenMessagesLoad = null;
+            if (hiddenMessagesLoad === pending) hiddenMessagesLoad = null;
         });
 
-    return hiddenMessagesLoad;
+    return hiddenMessagesLoad = pending;
 }
 
 const saveHiddenMessages = (ids: Set<string>) => set(KEY, [...ids]);
 
 migratePluginSettings("HideMedia", "HideAttachments");
 
-const hasMedia = (msg: Message) => msg.attachments.length > 0 || msg.embeds.length > 0 || msg.stickerItems.length > 0 || msg.components.length > 0;
+const hasMedia = (msg: Message) => !!(msg.attachments?.length || msg.embeds?.length || msg.stickerItems?.length || msg.components?.length);
 
-async function toggleHide(channelId: string, messageId: string) {
-    const ids = await getHiddenMessages();
-    if (!ids.delete(messageId))
-        ids.add(messageId);
+function toggleHide(channelId: string, messageId: string) {
+    const generation = lifecycleGeneration;
+    hiddenMessagesWrite = hiddenMessagesWrite.then(async () => {
+        if (generation !== lifecycleGeneration) return;
+        const ids = new Set(await getHiddenMessages());
+        if (generation !== lifecycleGeneration) return;
+        if (!ids.delete(messageId)) ids.add(messageId);
 
-    await saveHiddenMessages(ids);
-    updateMessage(channelId, messageId);
+        await saveHiddenMessages(ids);
+        if (generation !== lifecycleGeneration) return;
+        hiddenMessages = ids;
+        updateMessage(channelId, messageId);
+    }).catch(error => {
+        new Logger("HideMedia").error("Failed to save hidden media", error);
+        if (generation !== lifecycleGeneration) return;
+        Toasts.show({ id: Toasts.genId(), message: "Could not save media visibility. Please try again.", type: Toasts.Type.FAILURE });
+    });
+    return hiddenMessagesWrite;
 }
 
 export default definePlugin({
@@ -83,7 +103,7 @@ export default definePlugin({
     messagePopoverButton: {
         icon: ImageInvisible,
         render(msg) {
-            if (!hasMedia(msg) && !msg.messageSnapshots.some(s => hasMedia(s.message))) return null;
+            if (!hasMedia(msg) && !msg.messageSnapshots?.some(s => hasMedia(s.message))) return null;
 
             const isHidden = hiddenMessages.has(msg.id);
 
@@ -108,11 +128,15 @@ export default definePlugin({
     },
 
     async start() {
+        const generation = lifecycleGeneration;
+        await hiddenMessagesWrite;
+        if (generation !== lifecycleGeneration) return;
         await getHiddenMessages();
     },
 
     stop() {
-        hiddenMessages.clear();
+        lifecycleGeneration++;
+        hiddenMessages = new Set();
         hiddenMessagesLoaded = false;
         hiddenMessagesLoad = null;
     },

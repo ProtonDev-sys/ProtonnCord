@@ -13,12 +13,13 @@ import { before, instead } from '@revenge-mod/patcher'
 import { useEffect, useState } from 'react'
 import { Alert, ScrollView } from 'react-native'
 import {
+	cleanupStoredAttachments,
 	clearAttachmentCache,
 	prepareEncryptedUploads,
-	renderAttachments,
 	refreshEncryptedMessage,
-	trackEncryptedMessage,
+	renderAttachments,
 	setAttachmentPatcher,
+	trackEncryptedMessage,
 } from './attachmentRuntime'
 import { parseSecurePlaintext } from './attachments'
 import {
@@ -28,19 +29,19 @@ import {
 	setRandomSource,
 	verifyAnnouncement,
 } from './crypto'
+import { observeAnnouncement } from './history'
 import { openIdentityBackup } from './identityBackup'
 import { withMessageContent } from './message'
-import { observeAnnouncement } from './history'
-import { MessageReceiver } from './receive'
-import { captureSendPolicy } from './sendPolicy'
-import { installNightlyUpdates } from './updates'
 import {
 	decode64,
 	KEY_PREFIX,
+	LEGACY_MESSAGE_PREFIX,
 	MESSAGE_PREFIX,
 	PREVIOUS_MESSAGE_PREFIX,
-	LEGACY_MESSAGE_PREFIX,
 } from './protocol'
+import { MessageReceiver } from './receive'
+import { captureSendPolicy } from './sendPolicy'
+import { installNightlyUpdates } from './updates'
 import {
 	account,
 	loadVault,
@@ -658,6 +659,7 @@ export default plugin({
 			),
 		)
 		try {
+			await cleanupStoredAttachments()
 			await loadVault()
 			const userId = currentUserId()
 			if (userId && mobileVault.ready) {

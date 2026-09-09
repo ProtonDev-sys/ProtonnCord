@@ -30,6 +30,16 @@ function fixture() {
         del(key: string) { return transaction(() => { values.delete(key); }); },
         update(key: string, update: (value: unknown) => unknown) {
             return transaction(() => { values.set(key, structuredClone(update(structuredClone(values.get(key))))); });
+        },
+        updateMany(keys: string[], updater: (records: unknown[]) => { set?: Array<[string, unknown]>; delete?: string[]; }) {
+            return transaction(() => {
+                const staged = structuredClone(values);
+                const changes = updater(keys.map(key => structuredClone(staged.get(key))));
+                for (const [key, value] of changes.set ?? []) staged.set(key, structuredClone(value));
+                for (const key of changes.delete ?? []) staged.delete(key);
+                values.clear();
+                for (const [key, value] of staged) values.set(key, value);
+            });
         }
     };
     const recent = evaluate(recentCode, { DataStore }) as Pick<typeof import("../src/equicordplugins/moreStickers/components/misc"), typeof recentNames[number]>;

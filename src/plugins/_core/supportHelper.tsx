@@ -75,7 +75,7 @@ async function forceUpdate() {
     const outdated = await checkForUpdates();
     if (outdated) {
         await update();
-        relaunch();
+        await relaunch();
     }
 
     return outdated;
@@ -275,6 +275,7 @@ function generatePluginList() {
 }
 
 const checkForUpdatesOnce = onlyOnce(checkForUpdates);
+let channelSelection = 0;
 
 const settings = definePluginSettings({}).withPrivateSettings<{
     dismissedDevBuildWarning?: boolean;
@@ -361,6 +362,7 @@ export default definePlugin({
 
     flux: {
         async CHANNEL_SELECT({ channelId }) {
+            const selection = ++channelSelection;
             const isSupportChannel = SUPPORT_CHANNEL_IDS.includes(channelId);
             if (!isSupportChannel) return;
 
@@ -369,6 +371,10 @@ export default definePlugin({
 
             if (!IS_UPDATER_DISABLED) {
                 await checkForUpdatesOnce().catch(() => { });
+
+                if (selection !== channelSelection
+                    || SelectedChannelStore.getChannelId() !== channelId
+                    || UserStore.getCurrentUser()?.id !== selfId) return;
 
                 if (isOutdated) {
                     openModal(props => (

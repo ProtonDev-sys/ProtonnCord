@@ -1,28 +1,20 @@
-# Discord Types
+# Discord types
 
-This package provides TypeScript types for the Webpack modules of Discord's web app.
+`@equicord/discord-types` provides TypeScript declarations for Discord's webpack modules and const enums. It is used by Protonn Cord and can be used by other clients.
 
-While it was primarily created for Protonn Cord based on Vencord and its respective packages, other client mods could also benefit from this, so it is published as a standalone package!
-
-## Installation
-
-```bash
-npm install -D @equicord/discord-types
-yarn add -D @equicord/discord-types
+```sh
 pnpm add -D @equicord/discord-types
 ```
 
-## Example Usage
+The package supplies types; your client must provide the runtime module lookup:
 
 ```ts
 import type { UserStore } from "@equicord/discord-types";
 
-const userStore: UserStore = findStore("UserStore"); // findStore is up to you to implement, this library only provides types and no runtime code
+const userStore: UserStore = findStore("UserStore");
 ```
 
-## Enums
-
-This library also exports some const enums that you can use from Typescript code:
+Import enums from the `/enums` entry point:
 
 ```ts
 import { ApplicationCommandType } from "@equicord/discord-types/enums";
@@ -30,14 +22,6 @@ import { ApplicationCommandType } from "@equicord/discord-types/enums";
 console.log(ApplicationCommandType.CHAT_INPUT); // 1
 ```
 
-### License
+When contributing declarations, check them against current Discord behavior. [Discord Unofficial Documentation](https://docs.discord.food) is a useful API reference.
 
-This package is licensed under the [LGPL-3.0](./LICENSE) (or later) license.
-
-A very short summary of the license is that you can use this package as a library in both open source and closed source projects,
-similar to an MIT-licensed project.
-However, if you modify the code of this package, you must release source code of your modified version under the same license.
-
-### Credit
-
-This package was inspired by Swishilicous' [discord-types](https://www.npmjs.com/package/discord-types) package.
+Licensed under [LGPL-3.0-or-later](./LICENSE). Inspired by Swishilicous' [discord-types](https://www.npmjs.com/package/discord-types).

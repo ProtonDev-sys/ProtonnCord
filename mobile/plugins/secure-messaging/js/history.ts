@@ -16,10 +16,10 @@ export function historicalMessageAllowed(
 ): boolean {
 	return (
 		Number.isSafeInteger(retiredAt) &&
-		envelopeTime <= retiredAt &&
-		discordMessageTime(messageId) <= retiredAt &&
+		envelopeTime < retiredAt &&
+		discordMessageTime(messageId) < retiredAt &&
 		(editedAt === undefined ||
-			(Number.isFinite(editedAt) && editedAt <= retiredAt))
+			(Number.isFinite(editedAt) && editedAt < retiredAt))
 	)
 }
 

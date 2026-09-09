@@ -104,7 +104,7 @@ export function createPluginCatalogView(source: CatalogSource) {
             if (!enabled.has(name)) continue;
             enabledPlugins.push(name);
             if (userPlugin) enabledUserPlugins++;
-            else enabledStockPlugins++;
+            else if (!plugin.hidden) enabledStockPlugins++;
         }
 
         const search = filter.value.toLowerCase();

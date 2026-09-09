@@ -7,7 +7,7 @@
 import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
-import { Constants, PermissionsBits, PermissionStore, React, RestAPI, useEffect, useState } from "@webpack/common";
+import { Constants, PermissionsBits, PermissionStore, React, RestAPI, showToast, Toasts, useEffect, useState } from "@webpack/common";
 
 const validKeycodes = new Set([
     "Backspace", "Tab", "Enter", "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight", "Pause", "CapsLock",
@@ -105,10 +105,12 @@ export default definePlugin({
     start() {
         window.addEventListener("keydown", handleKeyDown);
         window.addEventListener("keyup", handleKeyUp);
+        window.addEventListener("blur", resetTrashVisibility);
     },
     stop() {
         window.removeEventListener("keydown", handleKeyDown);
         window.removeEventListener("keyup", handleKeyUp);
+        window.removeEventListener("blur", resetTrashVisibility);
         resetTrashVisibility();
         trashVisibilitySubscribers.clear();
     },
@@ -138,7 +140,14 @@ export default definePlugin({
 
         return (
             <span
-                onClick={() => RestAPI.del({ url: Constants.Endpoints.CHANNEL(channel.id) })}
+                onClick={event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (!shouldShowTrash || !PermissionStore.can(PermissionsBits.MANAGE_CHANNELS, channel)) return;
+                    void RestAPI.del({ url: Constants.Endpoints.CHANNEL(channel.id) }).catch(() => {
+                        showToast("Failed to delete that channel.", Toasts.Type.FAILURE);
+                    });
+                }}
             >
                 <svg
                     width="16"

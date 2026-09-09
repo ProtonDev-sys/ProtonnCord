@@ -11,9 +11,10 @@ import { promisify } from "util";
 import type { TrackData } from ".";
 
 const exec = promisify(execFile);
+const TIMEOUT_MS = 10_000;
 
 async function applescript(cmds: string[]) {
-    const { stdout } = await exec("osascript", cmds.map(c => ["-e", c]).flat());
+    const { stdout } = await exec("osascript", cmds.map(c => ["-e", c]).flat(), { timeout: TIMEOUT_MS });
     return stdout;
 }
 
@@ -40,10 +41,14 @@ async function fetchRemoteData({ id, name, artist, album }: { id: string, name: 
         dataUrl.searchParams.set("entity", "song");
 
         const fetchData = () => fetch(dataUrl, {
+            signal: AbortSignal.timeout(TIMEOUT_MS),
             headers: {
                 "user-agent": VENCORD_USER_AGENT,
             },
-        }).then(r => r.json());
+        }).then(r => {
+            if (!r.ok) throw new Error(`Track lookup failed with status ${r.status}`);
+            return r.json();
+        });
 
         let data = await fetchData();
 
@@ -54,8 +59,11 @@ async function fetchRemoteData({ id, name, artist, album }: { id: string, name: 
 
         const songData = data.results.find(song => song.collectionName === album) || data.results[0];
 
-        const artistArtworkURL = await fetch(songData.artistViewUrl)
-            .then(r => r.text())
+        const artistArtworkURL = await fetch(songData.artistViewUrl, { signal: AbortSignal.timeout(TIMEOUT_MS) })
+            .then(r => {
+                if (!r.ok) throw new Error(`Artist artwork lookup failed with status ${r.status}`);
+                return r.text();
+            })
             .then(data => {
                 const match = data.match(/<meta property="og:image" content="(.+?)">/);
                 return match ? match[1].replace(/[0-9]+x.+/, "220x220bb-60.png") : undefined;
@@ -86,7 +94,7 @@ async function fetchRemoteData({ id, name, artist, album }: { id: string, name: 
 
 export async function fetchTrackData(): Promise<TrackData | null> {
     try {
-        await exec("pgrep", ["^Music$"]);
+        await exec("pgrep", ["^Music$"], { timeout: TIMEOUT_MS });
     } catch (error) {
         return null;
     }

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
@@ -87,7 +87,11 @@ test("eager metadata forwards custom getters and later definition changes at the
 
 test("analyzer preserves migrations, transitive effects, cycles and unknown factory bindings", async t => {
     const root = mkdtempSync(join(tmpdir(), "protonn-plugin-manifest-"));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => {
+        assert.equal(dirname(resolve(root)), resolve(tmpdir()));
+        assert.ok(basename(root).startsWith("protonn-plugin-manifest-"));
+        rmSync(root, { recursive: true, force: true });
+    });
     function write(path: string, source: string) {
         const file = join(root, path);
         mkdirSync(dirname(file), { recursive: true });

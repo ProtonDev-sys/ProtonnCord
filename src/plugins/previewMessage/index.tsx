@@ -21,10 +21,19 @@ import { generateId, sendBotMessage } from "@api/Commands";
 import { Devs } from "@utils/constants";
 import definePlugin, { IconComponent, StartAt } from "@utils/types";
 import { CloudUpload, MessageAttachment } from "@vencord/discord-types";
-import { DraftStore, DraftType, UploadAttachmentStore, UserStore, useStateFromStores } from "@webpack/common";
+import { DraftStore, DraftType, showToast, Toasts, UploadAttachmentStore, UserStore, useStateFromStores } from "@webpack/common";
 
 const PREVIEW_ATTACHMENT_URL_TTL_MS = 5 * 60 * 1000;
 const objectURLMap = new Map<string, { timeoutId: number; urls: string[]; }>();
+const pendingAttachmentCleanups = new Set<() => void>();
+let active = false;
+let generation = 0;
+
+function cleanupAllPreviews() {
+    generation++;
+    for (const cleanup of pendingAttachmentCleanups) cleanup();
+    for (const messageId of objectURLMap.keys()) cleanupPreviewMessage(messageId);
+}
 
 function cleanupPreviewMessage(messageId: string) {
     const tracked = objectURLMap.get(messageId);
@@ -40,11 +49,19 @@ const getDraft = (channelId: string) => DraftStore.getDraft(channelId, DraftType
 const getImageBox = (url: string): Promise<{ width: number, height: number; } | null> =>
     new Promise(res => {
         const img = new Image();
-        img.onload = () =>
-            res({ width: img.width, height: img.height });
+        const timeout = window.setTimeout(() => {
+            finish(null);
+            img.src = "";
+        }, 10000);
+        const finish = (box: { width: number; height: number; } | null) => {
+            window.clearTimeout(timeout);
+            img.onload = null;
+            img.onerror = null;
+            res(box);
+        };
+        img.onload = () => finish({ width: img.width, height: img.height });
 
-        img.onerror = () =>
-            res(null);
+        img.onerror = () => finish(null);
 
         img.src = url;
     });
@@ -74,6 +91,7 @@ function createPreviewAttachmentUrlTracker() {
 
 const getAttachments = async (channelId: string) => {
     const urls = createPreviewAttachmentUrlTracker();
+    pendingAttachmentCleanups.add(urls.cleanup);
 
     try {
         const attachments = await Promise.all(
@@ -109,6 +127,8 @@ const getAttachments = async (channelId: string) => {
     } catch (error) {
         urls.cleanup();
         throw error;
+    } finally {
+        pendingAttachmentCleanups.delete(urls.cleanup);
     }
 };
 
@@ -142,14 +162,23 @@ const PreviewButton: ChatBarButtonFactory = ({ isAnyChat, isEmpty, type: { attac
         <ChatBarButton
             tooltip="Preview Message"
             onClick={async () => {
-                const previewAttachments = hasAttachments ? await getAttachments(channelId) : undefined;
+                if (!active) return;
+                const requestGeneration = generation;
+                const author = UserStore.getCurrentUser();
+                const content = getDraft(channelId);
+                let previewAttachments: Awaited<ReturnType<typeof getAttachments>> | undefined;
 
                 try {
+                    previewAttachments = hasAttachments ? await getAttachments(channelId) : undefined;
+                    if (!active || requestGeneration !== generation || author?.id !== UserStore.getCurrentUser()?.id) {
+                        previewAttachments?.cleanup();
+                        return;
+                    }
                     const message = sendBotMessage(
                         channelId,
                         {
-                            content: getDraft(channelId),
-                            author: UserStore.getCurrentUser(),
+                            content,
+                            author,
                             attachments: previewAttachments?.attachments,
                         }
                     );
@@ -162,7 +191,8 @@ const PreviewButton: ChatBarButtonFactory = ({ isAnyChat, isEmpty, type: { attac
                     }
                 } catch (error) {
                     previewAttachments?.cleanup();
-                    throw error;
+                    console.error("[PreviewMessage] Could not create preview", error);
+                    showToast("Could not create the message preview", Toasts.Type.FAILURE);
                 }
             }}
             buttonProps={{
@@ -192,13 +222,20 @@ export default definePlugin({
         render: PreviewButton
     },
 
+    start() {
+        active = true;
+        generation++;
+    },
+
     flux: {
+        LOGOUT: cleanupAllPreviews,
         MESSAGE_DELETE({ id: messageId }) {
             cleanupPreviewMessage(messageId);
         }
     },
 
     stop() {
-        for (const messageId of objectURLMap.keys()) cleanupPreviewMessage(messageId);
+        active = false;
+        cleanupAllPreviews();
     },
 });

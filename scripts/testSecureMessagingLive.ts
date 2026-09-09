@@ -898,11 +898,9 @@ async function sendThroughActualComposer(page: Page, plaintext: string): Promise
             visible: true,
         });
         if (!composer) throw new Error("Discord's real chat composer is unavailable");
+        if (await composer.evaluate(element => (element.textContent ?? "").length > 0))
+            throw new Error("Refusing to replace an existing message draft in the authorized DM");
         await composer.click();
-        await page.keyboard.down("Control");
-        await page.keyboard.press("A");
-        await page.keyboard.up("Control");
-        await page.keyboard.press("Backspace");
         await page.keyboard.type(plaintext);
         await page.keyboard.press("Enter");
         await page.waitForFunction(
@@ -1716,7 +1714,7 @@ async function verifyEncryptedImageModal(
         .some(image => (image.currentSrc || image.src) === source && image.getBoundingClientRect().width > 0),
     clickPoint.source);
     const newDownloads = (await readdir(downloadsDirectory))
-        .filter(candidate => !beforeDownloads.has(candidate));
+        .filter(candidate => !beforeDownloads.has(candidate) && isDownloadFilenameVariant(candidate, PROOF_PNG_FILENAME));
     for (const candidate of newDownloads) downloadedProofPaths.add(join(downloadsDirectory, candidate));
     await page.keyboard.press("Escape");
     await page.waitForFunction(source => ![...document.querySelectorAll<HTMLImageElement>("[role='dialog'] img")]
@@ -2102,7 +2100,7 @@ async function deleteOwnTestMessages(page: Page, messageIds: string[]): Promise<
                 query: { limit: 100 },
             });
             const remainingIds = new Set((response.body ?? []).map((message: any) => String(message.id)));
-            remainingTestIds = remainingTestIds.filter(messageId => remainingIds.has(messageId));
+            remainingTestIds = remainingTestIds.filter(messageId => deletionErrors.has(messageId) || remainingIds.has(messageId));
             if (remainingTestIds.length > 0) await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
         }
         global[registryName] = remainingTestIds;

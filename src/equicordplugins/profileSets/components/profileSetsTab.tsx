@@ -20,11 +20,11 @@ function ProfileSetsTab() {
         () => SelectedGuildStore.getLastSelectedGuildId() ?? SelectedGuildStore.getGuildId()
     );
 
-    const guildOptions = React.useMemo(
+    const guildOptions = useStateFromStores(
+        [GuildStore],
         () => GuildStore.getGuildsArray()
             .map(guild => ({ label: guild.name, value: guild.id }))
             .sort((a, b) => a.label.localeCompare(b.label)),
-        []
     );
 
     const [guildId, setGuildId] = React.useState<string | undefined>(lastSelectedGuildId ?? guildOptions[0]?.value);
@@ -66,7 +66,7 @@ function ProfileSetsTab() {
             {section === "server" && !guildId ? (
                 <p className={cl("empty-state")}>You are not in any servers yet.</p>
             ) : (
-                <PresetManager section={section} guildId={section === "server" ? guildId : undefined} />
+                <PresetManager key={`${section}:${guildId ?? ""}`} section={section} guildId={section === "server" ? guildId : undefined} />
             )}
         </SettingsTab>
     );

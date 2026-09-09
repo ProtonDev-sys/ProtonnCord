@@ -42,7 +42,7 @@ function compileTriggerWords() {
 
 function saveTriggerWords() {
     compileTriggerWords();
-    void DataStore.set(WORDS_KEY, triggerWords);
+    void DataStore.set(WORDS_KEY, triggerWords).catch(console.error);
 }
 
 function hasTriggerWord(content: string) {
@@ -53,7 +53,7 @@ function TriggerContainer({ child }) {
     const [visible, setVisible] = useState(false);
     const { onClick } = settings.store;
 
-    const className = onClick ? cl("container") : "";
+    const className = cl("container");
 
     if (visible) {
         return child;
@@ -185,14 +185,16 @@ export default definePlugin({
 
     modify(message, child) {
         if (hasTriggerWord(message.content)) {
-            return <TriggerContainer child={child} />;
+            return <TriggerContainer key={message.id} child={child} />;
         } else {
             return child;
         }
     },
 
     async start() {
-        triggerWords = await DataStore.get(WORDS_KEY) ?? [""];
+        const saved = await DataStore.get(WORDS_KEY);
+        triggerWords = Array.isArray(saved) ? saved.filter((word): word is string => typeof word === "string") : [];
+        if (triggerWords.at(-1) !== "") triggerWords.push("");
         compileTriggerWords();
     }
 });

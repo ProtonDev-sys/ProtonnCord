@@ -16,9 +16,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import globalBadges from "@equicordplugins/globalBadges";
+import type GlobalBadgesPlugin from "@equicordplugins/globalBadges";
 import BadgeAPIPlugin from "@plugins/_api/badges";
+import { Logger } from "@utils/Logger";
 import { ComponentType, HTMLProps } from "react";
+
+import Plugins from "~plugins";
 
 import { isPluginEnabled } from "./PluginManager";
 
@@ -60,6 +63,7 @@ export interface ProfileBadge {
 }
 
 const Badges = new Set<ProfileBadge>();
+const logger = new Logger("Badges");
 
 /**
  * Register a new badge with the Badges API
@@ -84,24 +88,28 @@ export function removeProfileBadge(badge: ProfileBadge) {
 export function _getBadges(args: BadgeUserArgs) {
     const badges = [] as ProfileBadge[];
     for (const badge of Badges) {
-        if (badge.shouldShow && !badge.shouldShow(args)) {
-            continue;
-        }
+        try {
+            if (badge.shouldShow && !badge.shouldShow(args)) continue;
 
-        const b = badge.getBadges
-            ? badge.getBadges(args).map(badge => ({ ...args, ...badge }))
-            : [{ ...args, ...badge }];
+            const b = badge.getBadges
+                ? badge.getBadges(args).map(badge => ({ ...args, ...badge }))
+                : [{ ...args, ...badge }];
 
-        if (badge.position === BadgePosition.START) {
-            badges.unshift(...b);
-        } else {
-            badges.push(...b);
+            if (badge.position === BadgePosition.START) {
+                badges.unshift(...b);
+            } else {
+                badges.push(...b);
+            }
+        } catch (error) {
+            logger.error(`Failed to render badge ${badge.id}`, error);
         }
     }
 
     const donorBadges = BadgeAPIPlugin.getDonorBadges(args.userId);
     const equicordDonorBadges = BadgeAPIPlugin.getEquicordDonorBadges(args.userId);
-    const GlobalBadges = isPluginEnabled(globalBadges.name) ? globalBadges.getGlobalBadges(args.userId) : false;
+    const GlobalBadges = isPluginEnabled("GlobalBadges")
+        ? (Plugins.GlobalBadges as typeof GlobalBadgesPlugin).getGlobalBadges(args.userId)
+        : false;
 
     // do globalbadges first so it shows before the contrib badges but after donor badges
     if (GlobalBadges) {

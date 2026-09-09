@@ -185,9 +185,18 @@ export const SettingsStore = new SettingsStoreClass(settings, {
                 const setting = plugins[plugin].settings?.def[key];
                 if (!setting) return v;
 
-                if ("default" in setting)
-                    // normal setting with a default value
-                    return (target[key] = setting.default);
+                if ("default" in setting) {
+                    // Editing a stored array/object must not change the definition used by Reset.
+                    let value = setting.default;
+                    if (value !== null && typeof value === "object") {
+                        try {
+                            value = structuredClone(value);
+                        } catch {
+                            // Preserve legacy behavior for non-data plugin defaults.
+                        }
+                    }
+                    return (target[key] = value);
+                }
 
                 if (setting.type === OptionType.SELECT) {
                     const def = setting.options.find(o => o.default);

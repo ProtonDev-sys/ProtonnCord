@@ -16,8 +16,9 @@ export const images = {
     },
 } as const;
 
-export let unload: () => void;
+export let unload = () => { };
 export function preload() {
+    unload();
     const elements = new Array<HTMLElement>();
 
     // Normally, we'd use link:preload (or link:prefetch), but

@@ -218,8 +218,8 @@ class CopleSnow {
             if (snowflake.classList.contains("snowflake")) {
                 if (snowflake.parentNode === this.$snowfield) {
                     this.$snowfield.removeChild(snowflake);
+                    this.queue.push(snowflake);
                 }
-                this.queue.push(snowflake);
             }
         };
         this.$snowfield.addEventListener(CopleSnow.transitionEndEvent, this.transitionEndHandler);

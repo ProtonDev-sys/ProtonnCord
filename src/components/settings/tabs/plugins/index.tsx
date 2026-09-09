@@ -18,8 +18,9 @@
 
 import "./styles.css";
 
-import { hasAnyVisibleSettings, isPluginEnabled, stopPlugin } from "@api/PluginManager";
+import { hasAnyVisibleSettings, isPluginEnabled, pluginRequiresRestart, stopPlugin } from "@api/PluginManager";
 import { PlainSettings, useSettings } from "@api/Settings";
+import { BaseText } from "@components/BaseText";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
 import { Divider } from "@components/Divider";
@@ -129,7 +130,7 @@ function ExcludedPluginsList({ search }: { search: string; }) {
         : [];
 
     return (
-        <Paragraph className={Margins.top16}>
+        <BaseText className={Margins.top16}>
             {matchingExcludedPlugins.length
                 ? <>
                     <Paragraph>Are you looking for:</Paragraph>
@@ -143,7 +144,7 @@ function ExcludedPluginsList({ search }: { search: string; }) {
                 </>
                 : "No plugins meet the search criteria."
             }
-        </Paragraph>
+        </BaseText>
     );
 }
 
@@ -205,7 +206,10 @@ export default function PluginSettings() {
     const { enabledPlugins, matchingPlugins, counts: { totalStockPlugins, totalUserPlugins, enabledStockPlugins, enabledUserPlugins } } = view;
     const search = searchValue.value.toLowerCase();
     const onSearch = (query: string) => setSearchValue(prev => ({ ...prev, value: query }));
-    const handleRestartNeeded = useCallback((name: string, key: string) => changes.handleChange(`${name}:${key}`), [changes]);
+    const handleRestartNeeded = useCallback((name: string, key: string) => {
+        if (key === "enabled") changes.handleChange(`${name}:${key}`);
+        else changes.add(`${name}:${key}`);
+    }, [changes]);
     const plugins = useMemo(() => view.cards.map(card => <CatalogPluginCard key={card.plugin.name} card={card} onRestartNeeded={handleRestartNeeded} />), [view.cards, handleRestartNeeded]);
     const requiredPlugins = useMemo(() => view.requiredCards.map(card => <CatalogPluginCard key={card.plugin.name} card={card} onRestartNeeded={handleRestartNeeded} />), [view.requiredCards, handleRestartNeeded]);
 
@@ -214,15 +218,16 @@ export default function PluginSettings() {
 
         for (const plugin of enabledPlugins) {
             const pluginSettings = settings.plugins[plugin];
+            const definition = Plugins[plugin];
 
-            if (Plugins[plugin].patches?.length) {
+            if (pluginRequiresRestart(definition)) {
                 pluginSettings.enabled = false;
-                changes.handleChange(plugin);
+                handleRestartNeeded(plugin, "enabled");
                 restartNeeded = true;
                 continue;
             }
 
-            const result = stopPlugin(Plugins[plugin]);
+            const result = !definition.started || stopPlugin(definition);
 
             if (!result) {
                 logger.error(`Error while stopping plugin ${plugin}`);

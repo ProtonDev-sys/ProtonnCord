@@ -7,6 +7,8 @@
 import { DataStore } from "@api/index";
 import { ChannelUnreadState, reconcileUnreadFallbackCache } from "@equicordplugins/channelTabs/util/unreadState";
 
+import { logger } from "./constants";
+
 export interface PersistedUnreadFallbacks {
     [userId: string]: Record<string, number>;
 }
@@ -30,15 +32,22 @@ export async function ensureUnreadFallbackCountsLoaded(userId: string) {
                 ...(fallbacks?.[userId] ?? {}),
                 ...(unreadFallbacks[userId] ?? {})
             };
-            unreadFallbackLoads.delete(userId);
             return unreadFallbacks[userId];
-        });
+        })
+        .finally(() => unreadFallbackLoads.delete(userId));
 
     unreadFallbackLoads.set(userId, loadPromise);
     return loadPromise;
 }
 
 export function updateUnreadFallbackCounts(userId: string, channelStates: ChannelUnreadState[]) {
+    if (!unreadFallbacks[userId]) {
+        ensureUnreadFallbackCountsLoaded(userId)
+            .then(() => updateUnreadFallbackCounts(userId, channelStates))
+            .catch(error => logger.error("Failed to load unread counts before saving", error));
+        return;
+    }
+
     const currentFallbacks = unreadFallbacks[userId] ?? {};
     const nextFallbacks = reconcileUnreadFallbackCache(currentFallbacks, channelStates);
     if (JSON.stringify(nextFallbacks) === JSON.stringify(currentFallbacks)) return;
@@ -51,7 +60,8 @@ export function updateUnreadFallbackCounts(userId: string, channelStates: Channe
         .then(() => DataStore.update<PersistedUnreadFallbacks>(DATASTORE_KEY, old => ({
             ...(old ?? {}),
             [userId]: unreadFallbacks[userId]
-        })));
+        })))
+        .catch(error => logger.error("Failed to save unread counts", error));
 
     unreadFallbackSaves.set(userId, nextSave);
 }

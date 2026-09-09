@@ -7,15 +7,12 @@
 import { PickerContent, PickerContentHeader, PickerContentRow, PickerContentRowGrid, PickerHeaderProps, SidebarProps, Sticker, StickerCategoryType, StickerPack } from "@equicordplugins/moreStickers/types";
 import { sendSticker } from "@equicordplugins/moreStickers/upload";
 import { clPicker, FFmpegStateContext } from "@equicordplugins/moreStickers/utils";
-import { debounce } from "@shared/debounce";
-import { Modal,openModal, React, TextInput } from "@webpack/common";
+import { Modal, openModal, React, showToast, TextInput, Toasts } from "@webpack/common";
 import { JSX } from "react";
 
 import { CategoryImage, CategoryScroller, CategoryWrapper, StickerCategory } from "./categories";
 import { CancelIcon, CogIcon, IconContainer, RecentlyUsedIcon, SearchIcon } from "./icons";
 import { addRecentSticker, getRecentStickers, Header, Packs, RECENT_STICKERS_ID, RECENT_STICKERS_TITLE } from "./misc";
-
-const debounceQueryChange = debounce((cb: Function, ...args: any) => cb(...args), 150);
 
 export const RecentPack = {
     id: RECENT_STICKERS_ID,
@@ -100,6 +97,20 @@ function PickerContentRowGrid({
     }
 
     const ffmpegState = React.useContext(FFmpegStateContext);
+    const busy = React.useRef(false);
+    const send = async (event: { ctrlKey: boolean; shiftKey: boolean; }) => {
+        if (!channelId || busy.current) return;
+        busy.current = true;
+        try {
+            if (!await sendSticker({ channelId, sticker, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, ffmpegState })) return;
+            await addRecentSticker(sticker).catch(() => showToast("Could not save recent sticker", Toasts.Type.FAILURE));
+            onSend(sticker, event.ctrlKey);
+        } catch {
+            showToast("Failed to send sticker", Toasts.Type.FAILURE);
+        } finally {
+            busy.current = false;
+        }
+    };
 
     return (
         <div
@@ -108,12 +119,13 @@ function PickerContentRowGrid({
             aria-colindex={colIndex}
             id={clPicker(`content-row-grid-${rowIndex}-${colIndex}`)}
             onMouseEnter={() => onHover(sticker)}
-            onClick={e => {
-                if (!channelId) return;
-
-                sendSticker({ channelId, sticker, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, ffmpegState });
-                addRecentSticker(sticker);
-                onSend(sticker, e.ctrlKey);
+            tabIndex={0}
+            onClick={send}
+            onKeyDown={event => {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    void send(event);
+                }
             }}
         >
             <div
@@ -210,6 +222,12 @@ export function PickerContentHeader({
                     onClick={() => {
                         setIsExpand(e => !e);
                     }}
+                    onKeyDown={event => {
+                        if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setIsExpand(value => !value);
+                        }
+                    }}
                 >
                     <div className={clPicker("content-header-header-icon")}>
                         <div>
@@ -265,13 +283,11 @@ export function PickerContent({ stickerPacks, selectedStickerPackId, setSelected
         return stickers.filter(sticker => sticker.title.toLowerCase().includes(query.toLowerCase()));
     }
 
-    async function fetchRecentStickers() {
-        const recentStickers = await getRecentStickers();
-        setRecentStickers(recentStickers);
-    }
-
     React.useEffect(() => {
-        fetchRecentStickers();
+        let cancelled = false;
+        getRecentStickers().then(stickers => { if (!cancelled) setRecentStickers(stickers); })
+            .catch(() => { if (!cancelled) showToast("Could not load recent stickers", Toasts.Type.FAILURE); });
+        return () => { cancelled = true; };
     }, []);
 
     React.useEffect(() => {
@@ -428,11 +444,14 @@ export function PickerContent({ stickerPacks, selectedStickerPackId, setSelected
 
 export const PickerHeader = ({ onQueryChange }: PickerHeaderProps) => {
     const [query, setQuery] = React.useState<string | undefined>();
+    const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    React.useEffect(() => () => clearTimeout(timer.current), []);
 
     const setQueryDebounced = (value: string, immediate = false) => {
         setQuery(value);
+        clearTimeout(timer.current);
         if (immediate) onQueryChange(value);
-        else debounceQueryChange(onQueryChange, value);
+        else timer.current = setTimeout(() => onQueryChange(value), 150);
     };
 
     return (

@@ -23,14 +23,15 @@ import { OpenExternalIcon } from "@components/Icons";
 import { Paragraph } from "@components/Paragraph";
 import { Span } from "@components/Span";
 import { Devs } from "@utils/constants";
+import { Logger } from "@utils/Logger";
 import { classes } from "@utils/misc";
 import { useAwaiter } from "@utils/react";
 import definePlugin from "@utils/types";
 import { Guild, User } from "@vencord/discord-types";
 import { findCssClassesLazy } from "@webpack";
-import { Clickable, ConfirmModal, IconUtils, Menu, openModal, Parser } from "@webpack/common";
+import { Clickable, ConfirmModal, IconUtils, Menu, openModal, Parser, UserStore } from "@webpack/common";
 
-import { Auth, initAuth, updateAuth } from "./auth";
+import { Auth, clearAuth, initAuth, updateAuth } from "./auth";
 import { openReviewsModal } from "./components/ReviewModal";
 import { NotificationType, ReviewType } from "./entities";
 import { getCurrentUserInfo, getReviews, readNotification } from "./reviewDbApi";
@@ -66,58 +67,61 @@ const userContextPatch: NavContextMenuPatchCallback = (children, { user }: { use
     );
 };
 
-export default definePlugin({
-    name: "ReviewDB",
-    description: "Review other users (Adds a new settings to profiles)",
-    dependencies: ["ProfileCollectionsAPI"],
-    tags: ["Friends", "Servers"],
-    authors: [Devs.mantikafasi, Devs.Ven],
-    isModified: true,
+let active = false;
+let generation = 0;
+let notificationTimer: ReturnType<typeof setTimeout> | undefined;
 
-    settings,
-    contextMenus: {
-        "guild-header-popout": guildPopoutPatch,
-        "guild-context": guildPopoutPatch,
-        "user-context": userContextPatch,
-        "user-profile-actions": userContextPatch,
-        "user-profile-overflow-menu": userContextPatch
-    },
+function stopNotifications() {
+    generation++;
+    if (notificationTimer) clearTimeout(notificationTimer);
+    notificationTimer = undefined;
+    clearAuth();
+}
 
-    flux: {
-        CONNECTION_OPEN: initAuth,
-    },
+async function loadNotifications() {
+    if (!active) return;
+    const s = settings.store;
+    const accountId = UserStore.getCurrentUser()?.id;
+    const currentGeneration = ++generation;
+    if (notificationTimer) clearTimeout(notificationTimer);
+    notificationTimer = undefined;
+    const isCurrent = () => active && currentGeneration === generation && accountId === UserStore.getCurrentUser()?.id;
 
-    async start() {
-        const s = settings.store;
-        const { lastReviewId, notifyReviews } = s;
+    await initAuth();
 
-        await initAuth();
-
-        setTimeout(async () => {
-            if (!Auth.token) return;
+    if (!isCurrent()) return;
+    notificationTimer = setTimeout(() => {
+        notificationTimer = undefined;
+        void (async () => {
+            if (!isCurrent() || !Auth.token) return;
 
             const user = await getCurrentUserInfo();
-            if (user) {
-                updateAuth({ user });
+            if (user && isCurrent()) {
+                await updateAuth({ user }, accountId);
+                if (!isCurrent()) return;
+                const { lastReviewId, lastReviewAccountId, notifyReviews } = s;
+                const sameAccount = !lastReviewAccountId || lastReviewAccountId === accountId;
 
                 if (notifyReviews) {
-                    if (lastReviewId && lastReviewId < user.lastReviewID) {
-                        s.lastReviewId = user.lastReviewID;
+                    if (sameAccount && lastReviewId && lastReviewId < user.lastReviewID) {
                         if (user.lastReviewID !== 0)
                             showToast("You have new reviews on your profile!");
                     }
                 }
 
+                s.lastReviewId = user.lastReviewID;
+                s.lastReviewAccountId = accountId;
                 const { notification } = user;
+                const { token } = Auth;
                 if (notification) {
                     const props = notification.type === NotificationType.Ban ? {
                         cancelText: "Appeal",
                         confirmText: "Ok",
-                        onCancel: async () =>
+                        onCancel: async () => isCurrent() && token &&
                             VencordNative.native.openExternal(
                                 "https://reviewdb.mantikafasi.dev/api/redirect?"
                                 + new URLSearchParams({
-                                    token: Auth.token!,
+                                    token,
                                     page: "dashboard/appeal"
                                 })
                             )
@@ -139,10 +143,43 @@ export default definePlugin({
                         </ConfirmModal>
                     ));
 
-                    readNotification(notification.id);
+                    await readNotification(notification.id);
                 }
             }
-        }, 4000);
+        })().catch(error => new Logger("ReviewDB").error("Failed to load notifications", error));
+    }, 4000);
+}
+
+export default definePlugin({
+    name: "ReviewDB",
+    description: "Review other users (Adds a new settings to profiles)",
+    dependencies: ["ProfileCollectionsAPI"],
+    tags: ["Friends", "Servers"],
+    authors: [Devs.mantikafasi, Devs.Ven],
+    isModified: true,
+
+    settings,
+    contextMenus: {
+        "guild-header-popout": guildPopoutPatch,
+        "guild-context": guildPopoutPatch,
+        "user-context": userContextPatch,
+        "user-profile-actions": userContextPatch,
+        "user-profile-overflow-menu": userContextPatch
+    },
+
+    flux: {
+        CONNECTION_OPEN: loadNotifications,
+        LOGOUT: stopNotifications,
+    },
+
+    start() {
+        active = true;
+        return loadNotifications();
+    },
+
+    stop() {
+        active = false;
+        stopNotifications();
     },
 
     renderProfileCollection: {

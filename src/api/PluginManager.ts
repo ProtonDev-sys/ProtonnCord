@@ -238,7 +238,7 @@ export function subscribeAllPluginsFluxEvents(fluxDispatcher: typeof FluxDispatc
     enabledPluginsSubscribedFlux = true;
 
     for (const name in PluginManifest) {
-        if (!isPluginEnabled(name)) continue;
+        if (!isPluginEnabled(name) || failedPluginNames.has(name)) continue;
         try {
             subscribePluginFluxEvents(Plugins[name], fluxDispatcher);
         } catch (error) {

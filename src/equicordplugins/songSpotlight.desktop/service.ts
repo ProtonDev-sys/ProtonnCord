@@ -15,11 +15,13 @@ export function useRender(song: Song) {
     const [render, setRender] = useState<RenderSongInfo | null>(null);
 
     useEffect(() => {
+        let active = true;
         setFailed(false);
         setRender(null);
         Native.renderSong(song)
             .catch(() => null)
-            .then(info => info ? setRender(info) : setFailed(true));
+            .then(info => { if (active) info ? setRender(info) : setFailed(true); });
+        return () => { active = false; };
     }, [sid(song)]);
 
     return { failed, render };

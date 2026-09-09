@@ -21,6 +21,13 @@ export type { KnownPluginSettingsMap } from "./knownSettingsData";
 
 export const KNOWN_PLUGINS_LEGACY_DATA_KEY = "NewPluginsManager_KnownPlugins";
 export const KNOWN_SETTINGS_DATA_KEY = "NewPluginsManager_KnownSettings";
+let mutationQueue: Promise<unknown> = Promise.resolve();
+
+function enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = mutationQueue.then(operation, operation);
+    mutationQueue = result.catch(() => undefined);
+    return result;
+}
 
 function getSettingsSetForPlugin(plugin: string): Set<string> {
     return new Set((plugins[plugin]?.settingsKeys ?? []).filter(setting => setting !== "enabled"));
@@ -37,7 +44,7 @@ async function persistKnownSettings(settings: KnownPluginSettingsMap): Promise<v
     await DataStore.set(KNOWN_SETTINGS_DATA_KEY, serializeKnownSettings(settings));
 }
 
-export async function getKnownSettings(): Promise<KnownPluginSettingsMap> {
+async function readKnownSettings(): Promise<KnownPluginSettingsMap> {
     const raw = await DataStore.get<unknown>(KNOWN_SETTINGS_DATA_KEY);
 
     if (raw == null) {
@@ -53,6 +60,10 @@ export async function getKnownSettings(): Promise<KnownPluginSettingsMap> {
     const settings = normalizeKnownSettings(raw);
     if (!isSerializedKnownSettings(raw)) await persistKnownSettings(settings);
     return settings;
+}
+
+export function getKnownSettings(): Promise<KnownPluginSettingsMap> {
+    return enqueue(readKnownSettings);
 }
 
 export async function getNewPluginChanges(): Promise<{
@@ -86,16 +97,24 @@ export async function getNewPlugins(): Promise<Set<string>> {
 }
 
 export async function writeKnownSettings(): Promise<void> {
-    await persistKnownSettings(getCurrentSettings(Object.keys(plugins)));
+    await enqueue(async () => {
+        const known = await readKnownSettings();
+        for (const [plugin, current] of getCurrentSettings(Object.keys(plugins))) {
+            known.set(plugin, new Set([...(known.get(plugin) ?? []), ...current]));
+        }
+        await persistKnownSettings(known);
+    });
 }
 
 export async function editRawData(
     patcher: (data: KnownPluginSettingsMap) => Promise<void> | void,
 ): Promise<void> {
-    const settings = await getKnownSettings();
-    const patchedSettings = new Map(
-        Array.from(settings, ([plugin, pluginSettings]) => [plugin, new Set(pluginSettings)]),
-    );
-    await patcher(patchedSettings);
-    await persistKnownSettings(patchedSettings);
+    await enqueue(async () => {
+        const settings = await readKnownSettings();
+        const patchedSettings = new Map(
+            Array.from(settings, ([plugin, pluginSettings]) => [plugin, new Set(pluginSettings)]),
+        );
+        await patcher(patchedSettings);
+        await persistKnownSettings(patchedSettings);
+    });
 }

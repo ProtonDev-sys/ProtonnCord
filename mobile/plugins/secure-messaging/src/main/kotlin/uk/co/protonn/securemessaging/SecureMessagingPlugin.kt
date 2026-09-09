@@ -81,6 +81,26 @@ val secureMessagingPlugin = plugin {
 
 		withAppContext { context ->
 			val oneKey = OneKeyUsb(context)
+			registerNativeAsyncMethod("uk.co.protonn.secure-messaging.attachment.cleanup") {
+				val cacheRoot = context.cacheDir.canonicalFile
+				val owned = listOf(
+					"share-media/protonn-cord" to Regex("^[0-9]{17,20}-[0-9]-.+$"),
+					"protonn-cord/uploads" to Regex("^pc-[A-Za-z0-9_-]{22}-[0-9]\\.pcaf$"),
+				)
+				var cleaned = true
+				for ((path, pattern) in owned) {
+					val directory = File(cacheRoot, path).absoluteFile
+					require(directory.canonicalFile == directory) { "Invalid attachment cache directory" }
+					if (!directory.exists()) continue
+					require(directory.isDirectory) { "Invalid attachment cache directory" }
+					val entries = directory.listFiles() ?: error("Attachment cache could not be read")
+					for (file in entries) {
+						if (!pattern.matches(file.name)) continue
+						if (file.canonicalFile != file.absoluteFile || !file.isFile || !file.delete()) cleaned = false
+					}
+				}
+				cleaned
+			}
 			registerNativeMethod("uk.co.protonn.secure-messaging.onekey.status") { oneKey.status() }
 			registerNativeMethod("uk.co.protonn.secure-messaging.onekey.cancel") { oneKey.cancel(); true }
 			registerNativeAsyncMethod("uk.co.protonn.secure-messaging.onekey.unlock") {
@@ -152,7 +172,8 @@ val secureMessagingPlugin = plugin {
             true
         }
         registerNativeAsyncMethod("uk.co.protonn.secure-messaging.vault.reset") {
-            vault.delete()
+            AtomicFile(vault).delete()
+            !vault.exists() && !File(vault.path + ".bak").exists() && !File(vault.path + ".new").exists()
         }
     }
 }

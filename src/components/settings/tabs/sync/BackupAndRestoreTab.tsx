@@ -25,7 +25,7 @@ import { Notice } from "@components/Notice";
 import { Paragraph } from "@components/Paragraph";
 import { SettingsTab, wrapTab } from "@components/settings/tabs/BaseTab";
 import { Margins } from "@utils/margins";
-import { useState } from "@webpack/common";
+import { useRef, useState } from "@webpack/common";
 
 const backupTypes = [
     ["all", "All Settings"],
@@ -36,12 +36,15 @@ const backupTypes = [
 
 function BackupAndRestoreTab() {
     const [busy, setBusy] = useState(false);
+    const pending = useRef(false);
     async function run(action: () => Promise<void>) {
-        if (busy) return;
+        if (pending.current) return;
+        pending.current = true;
         setBusy(true);
         try {
             await action();
         } finally {
+            pending.current = false;
             setBusy(false);
         }
     }
