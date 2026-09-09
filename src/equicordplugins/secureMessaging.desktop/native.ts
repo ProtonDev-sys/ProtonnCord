@@ -59,6 +59,7 @@ import {
 import {
     activatePreparedSecurityKeyVault,
     clearSecurityKeyVaultSession,
+    createActiveOneKeyMobilePairing,
     deriveActiveOneKeyPrivateIdentity,
     isOneKeySecurityKeyVaultActive,
     parseSecurityKeyVaultEnvelope,
@@ -96,6 +97,7 @@ export interface IdentitySummary {
 }
 
 export type IdentityResult = { status: "ready"; identity: IdentitySummary; } | NativeFailure;
+export type MobilePairingResult = { status: "ready"; token: string; } | NativeFailure;
 export type SecurityKeyVaultResult = SecurityKeyVaultState | NativeFailure;
 export type RotateIdentityResult =
     | { status: "rotated"; identity: IdentitySummary; disabledConversationCount: number; }
@@ -2140,6 +2142,43 @@ export async function getIdentity(event: IpcMainInvokeEvent, localUserId: string
         } catch {
             return cryptoFailure();
         }
+    });
+}
+
+export async function exportMobilePairing(event: IpcMainInvokeEvent, localUserId: string): Promise<MobilePairingResult> {
+    const callerFailure = validateIpcCaller(event);
+    if (callerFailure) return callerFailure;
+    const user = validateLocalUserId(localUserId);
+    if (!user.ok) return invalidInput(user.error);
+    return runSerialized(async (): Promise<MobilePairingResult> => {
+        if (!isOneKeySecurityKeyVaultActive()) return { status: "unavailable", reason: "security_key_locked" };
+        const context = await loadAccount(user.value);
+        if (context.created) await saveVault(context.vault);
+        const { account } = context;
+        const trusted = Object.fromEntries(Object.entries(account.trustedPeers)
+            .filter(([, peer]) => !peer.keyChanged).map(([id, peer]) => [id, peer.identity]));
+        const conversations = Object.fromEntries(Object.entries(account.conversations)
+            .filter(([, conversation]) => conversation.enabled && conversation.reviewRequired === null &&
+                conversation.selectedRecipients.every(recipient => trusted[recipient.userId]?.fingerprint === recipient.fingerprint))
+            .map(([id, conversation]) => [id, {
+                members: [...conversation.participantUserIds].sort(),
+                recipients: conversation.selectedRecipients.map(recipient => recipient.userId).sort(),
+            }]));
+        return {
+            status: "ready",
+            token: createActiveOneKeyMobilePairing(user.value, {
+                version: 1,
+                userId: user.value,
+                createdAt: Date.now(),
+                currentFingerprint: (await publicIdentity(account.identity, user.value)).fingerprint,
+                trusted,
+                conversations,
+                identityHistory: Object.values(account.identityHistory).map(record => ({ identity: record.identity, retiredAt: record.retiredAt })),
+                peerIdentityHistory: Object.fromEntries(Object.entries(account.peerIdentityHistory).map(([id, records]) => [id,
+                    Object.values(records).map(record => ({ identity: record.identity, retiredAt: record.retiredAt })),
+                ])),
+            }),
+        };
     });
 }
 
