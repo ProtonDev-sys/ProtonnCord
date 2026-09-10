@@ -32,6 +32,7 @@ export interface SwitchProps {
     // checkmark/x icon in thumb
     hasIcon?: boolean;
     innerRef?: Ref<HTMLInputElement>;
+    "aria-label"?: string;
     "aria-describedby"?: string;
     "aria-labelledby"?: string;
 }
@@ -50,7 +51,7 @@ export function Switch({ checked, onChange, disabled, id, hasIcon = false, inner
     };
 
     return (
-        <label className={switchCls("container", { checked, disabled, focusVisible })}>
+        <div className={switchCls("container", { checked, disabled, focusVisible })}>
             <div
                 className={switchCls("indicator")}
                 data-mana-component="switch"
@@ -102,6 +103,6 @@ export function Switch({ checked, onChange, disabled, id, hasIcon = false, inner
                 onBlur={handleFocusChange}
                 {...ariaProps}
             />
-        </label>
+        </div>
     );
 }

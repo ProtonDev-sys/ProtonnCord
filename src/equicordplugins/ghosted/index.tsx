@@ -67,6 +67,7 @@ export const settings = definePluginSettings({
 });
 
 function BooIndicator() {
+    const { showIndicator } = settings.use(["showIndicator"]);
     const [count, setCount] = useState(getBooCount());
 
     useEffect(() => {
@@ -79,7 +80,7 @@ function BooIndicator() {
         };
     }, []);
 
-    if (!settings.store.showIndicator) return null;
+    if (!showIndicator) return null;
 
     const handleClick = () => {
         const ghostedChannels = getGhostedChannels();
@@ -109,12 +110,11 @@ function BooIndicator() {
 
     return (
         <>
-            {settings.store.showIndicator && getGhostedChannels().length > 0 && (
+            {getGhostedChannels().length > 0 && (
                 <div id={cl("container")}>
                     <Tooltip text={getTooltipText()} position="right">
                         {({ onMouseEnter, onMouseLeave }) => (
                             <div
-                                id={cl("container")}
                                 className={cl("clickable")}
                                 onMouseEnter={onMouseEnter}
                                 onMouseLeave={onMouseLeave}
@@ -131,6 +131,7 @@ function BooIndicator() {
 }
 
 function makeContextItem(props) {
+    if (!props.channel?.id) return null;
     return <Menu.MenuItem
         id="ec-ghosted-clear"
         key="ec-ghosted-clear"

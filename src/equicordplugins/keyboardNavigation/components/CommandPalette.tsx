@@ -10,16 +10,17 @@ import { actions } from "@equicordplugins/keyboardNavigation/commands";
 import { classNameFactory } from "@utils/css";
 import { Logger } from "@utils/Logger";
 import { RenderModalProps } from "@vencord/discord-types";
-import { closeAllModals, Modal,openModal, React, TextInput, useEffect, useState } from "@webpack/common";
+import { closeModal, Modal, openModal, React, showToast, TextInput, Toasts, useEffect, useRef, useState } from "@webpack/common";
 
 import { settings } from "..";
 
 const logger = new Logger("CommandPalette", "#e5c890");
 
 export function CommandPalette({ modalProps }: { modalProps: RenderModalProps; }) {
-    const cl = classNameFactory("vc-command-palette-");
+    const cl = classNameFactory("vc-keyboard-navigation-");
     const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
     const [startIndex, setStartIndex] = useState(0);
+    const executing = useRef(false);
 
     const allowMouse = settings.store.allowMouseControl;
 
@@ -45,17 +46,19 @@ export function CommandPalette({ modalProps }: { modalProps: RenderModalProps; }
         }
     };
 
-    const handleButtonClick = (actionId: string, index: number) => {
+    const handleButtonClick = async (actionId: string, index: number) => {
+        if (executing.current) return;
         const selectedAction = filteredActions.find(action => action.id === actionId);
-
-        if (selectedAction) {
-            logger.log(`${selectedAction.id}'s action was triggered.`);
-        }
-
-        closeAllModals();
-
-        selectedAction?.callback?.();
+        if (!selectedAction) return;
+        executing.current = true;
         setFocusedIndex(index);
+        modalProps.onClose();
+        try {
+            await selectedAction.callback?.();
+        } catch (error) {
+            logger.error("Command failed", error);
+            showToast("Could not complete the command.", Toasts.Type.FAILURE);
+        }
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -103,6 +106,7 @@ export function CommandPalette({ modalProps }: { modalProps: RenderModalProps; }
         <Modal {...modalProps} size="md" title="Command Palette">
             <div className={cl("root")} onKeyDown={handleKeyDown} onWheel={handleWheel}>
                 <TextInput
+                    autoFocus
                     value={queryEh}
                     onChange={e => setQuery(e)}
                     style={{ width: "100%", borderBottomLeftRadius: "0", borderBottomRightRadius: "0", paddingLeft: "0.9rem" }}
@@ -127,4 +131,15 @@ export function CommandPalette({ modalProps }: { modalProps: RenderModalProps; }
     );
 }
 
-export const openCommandPalette = () => openModal(modalProps => <CommandPalette modalProps={modalProps} />);
+let paletteKey: string | null = null;
+
+export function closeCommandPalette() {
+    if (paletteKey) closeModal(paletteKey);
+    paletteKey = null;
+}
+
+export function openCommandPalette() {
+    if (paletteKey) return paletteKey;
+    paletteKey = openModal(modalProps => <CommandPalette modalProps={modalProps} />, { onCloseCallback: () => { paletteKey = null; } });
+    return paletteKey;
+}

@@ -81,7 +81,7 @@ export const settings = definePluginSettings({
 
 const imageContextMenuPatch: NavContextMenuPatchCallback = (children, props) => {
     // Discord re-uses the image context menu for links to for the copy and open buttons
-    if ("href" in props) return;
+    if (!props || "href" in props) return;
     // emojis in user statuses
     if (props.target?.classList?.contains("emoji")) return;
 
@@ -199,7 +199,7 @@ export default definePlugin({
 
                 {
                     match: /componentWillUnmount\(\){/,
-                    replace: "$&$self.unMountMagnifier();"
+                    replace: "$&$self.unMountMagnifier(this);"
                 },
 
                 {
@@ -221,7 +221,9 @@ export default definePlugin({
 
     Magnifier,
     root: null as Root | null,
+    currentInstance: null as any,
     makeProps(instance) {
+        if (instance.props.id !== ELEMENT_ID) return {};
         return {
             onMouseOver: () => this.onMouseOver(instance),
             onMouseOut: () => this.onMouseOut(instance),
@@ -233,12 +235,13 @@ export default definePlugin({
 
     renderMagnifier(instance) {
         try {
-            if (instance.props.id === ELEMENT_ID) {
+            if (instance.props.id === ELEMENT_ID && this.element) {
                 if (!this.root) {
                     this.root = createRoot(this.element!);
                 }
 
                 this.currentMagnifierElement = <Magnifier size={settings.store.size} zoom={settings.store.zoom} instance={instance} />;
+                this.currentInstance = instance;
                 this.root.render(this.currentMagnifierElement);
             }
         } catch (error) {
@@ -250,9 +253,11 @@ export default definePlugin({
         this.renderMagnifier(instance);
     },
 
-    unMountMagnifier() {
+    unMountMagnifier(instance?: any) {
+        if (instance && instance !== this.currentInstance) return;
         this.root?.unmount();
         this.currentMagnifierElement = null;
+        this.currentInstance = null;
         this.root = null;
     },
 
@@ -271,14 +276,15 @@ export default definePlugin({
     },
 
     start() {
+        if (this.element) return;
         this.element = document.createElement("div");
         this.element.classList.add("MagnifierContainer");
         document.body.appendChild(this.element);
     },
 
     stop() {
-        // so componenetWillUnMount gets called if Magnifier component is still alive
-        this.root && this.root.unmount();
+        this.unMountMagnifier();
         this.element?.remove();
+        this.element = null;
     }
 });

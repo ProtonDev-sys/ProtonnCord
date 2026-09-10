@@ -25,6 +25,7 @@ import {
     session,
 } from "electron";
 
+import { sealMobilePairing } from "./mobilePairing";
 import {
     createOneKeyCipherScript,
     deriveOneKeyBindingPublicKey,
@@ -558,6 +559,11 @@ export function isOneKeySecurityKeyVaultActive(): boolean {
     return activeKey !== null && activeProfile?.provider === "onekey";
 }
 
+export function createActiveOneKeyMobilePairing(localUserId: string, state: unknown): string {
+    if (!activeKey || activeProfile?.provider !== "onekey") throw new SecurityKeyVaultError("locked");
+    return sealMobilePairing(activeKey, activeProfile.rootFingerprint, localUserId, state);
+}
+
 export function wrapSecurityKeyVaultValue(
     value: unknown,
     protectedChannelIdsByUser: SecurityKeyVaultProtectedChannelIndex,
@@ -737,6 +743,7 @@ async function runCeremony<T>(
     window.webContents.on("will-navigate", stopNavigation);
     window.webContents.on("will-redirect", stopNavigation);
 
+    const timeoutController = new AbortController();
     try {
         await window.loadURL(url);
         await closeServer(server);
@@ -745,7 +752,7 @@ async function runCeremony<T>(
         const closed = new Promise<never>((_resolve, reject) => {
             window.once("closed", () => reject(new SecurityKeyVaultError("cancelled")));
         });
-        const timeout = delay(CEREMONY_TIMEOUT_MS).then(() => {
+        const timeout = delay(CEREMONY_TIMEOUT_MS, undefined, { signal: timeoutController.signal }).then(() => {
             throw new SecurityKeyVaultError("cancelled");
         });
         const result = await Promise.race([
@@ -772,6 +779,7 @@ async function runCeremony<T>(
         if (error instanceof SecurityKeyVaultError) throw error;
         throw new SecurityKeyVaultError("unsupported");
     } finally {
+        timeoutController.abort();
         await closeServer(server).catch(() => undefined);
         isolatedSession.off("select-usb-device", selectOneKey);
         isolatedSession.setPermissionRequestHandler(null);

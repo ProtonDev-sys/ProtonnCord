@@ -24,7 +24,7 @@ import { classes } from "@utils/misc";
 import definePlugin, { OptionType } from "@utils/types";
 import { DiscordPlatform, User } from "@vencord/discord-types";
 import { filters, mapMangledModuleLazy } from "@webpack";
-import { AuthenticationStore, PresenceStore, SessionsStore, Tooltip, UserStore, useStateFromStores } from "@webpack/common";
+import { AuthenticationStore, PresenceStore, SessionsStore, Tooltip, useMemo, UserStore, useStateFromStores } from "@webpack/common";
 
 const { useStatusFillColor } = mapMangledModuleLazy([".5625*", "translate"], {
     useStatusFillColor: filters.byCode(".hex")
@@ -87,29 +87,28 @@ const PlatformIcon = ({ platform, status, small }) => {
     return <Icon color={useStatusFillColor(status)} tooltip={tooltip} small={small} />;
 };
 
-function useEnsureOwnStatus(user: User) {
-    if (user.id !== AuthenticationStore.getId()) return;
+function useClientStatus(user: User | null | undefined) {
+    const sessions = useStateFromStores([SessionsStore, AuthenticationStore], () =>
+        user?.id === AuthenticationStore.getId() ? SessionsStore.getSessions() : null);
+    const status = useStateFromStores([PresenceStore], () => user ? PresenceStore.getClientStatus(user.id) : null);
 
-    const sessions = useStateFromStores([SessionsStore], () => SessionsStore.getSessions());
-    if (typeof sessions !== "object") return null;
-
-    const sortedSessions = Object.values(sessions).sort(({ status: a }, { status: b }) => {
+    return useMemo(() => {
+        if (!sessions || typeof sessions !== "object") return status;
+        const sortedSessions = Object.values(sessions).sort(({ status: a }, { status: b }) => {
         if (a === b) return 0;
         if (a === "online") return 1;
         if (b === "online") return -1;
         if (a === "idle") return 1;
         if (b === "idle") return -1;
         return 0;
-    });
+        });
 
-    const ownStatus = Object.values(sortedSessions).reduce((acc, curr) => {
-        if (curr.clientInfo.client !== "unknown")
-            acc[curr.clientInfo.client] = curr.status;
-        return acc;
-    }, {});
-
-    const { clientStatuses } = PresenceStore.getState();
-    clientStatuses[UserStore.getCurrentUser().id] = ownStatus;
+        return sortedSessions.reduce((acc, curr) => {
+            if (curr.clientInfo.client !== "unknown")
+                acc[curr.clientInfo.client] = curr.status;
+            return acc;
+        }, {});
+    }, [sessions, status]);
 }
 
 interface PlatformIndicatorProps {
@@ -120,10 +119,9 @@ interface PlatformIndicatorProps {
 }
 
 const PlatformIndicator = ({ user, isProfile, isMessage, isMemberList }: PlatformIndicatorProps) => {
-    if (user == null || (user.bot && !settings.store.showBots)) return null;
-    useEnsureOwnStatus(user);
-
-    const status = useStateFromStores([PresenceStore], () => PresenceStore.getClientStatus(user.id));
+    const { showBots } = settings.use(["showBots"]);
+    const status = useClientStatus(user);
+    if (user == null || (user.bot && !showBots)) return null;
     if (!status) return null;
 
     const icons = Array.from(Object.entries(status), ([platform, status]) => (

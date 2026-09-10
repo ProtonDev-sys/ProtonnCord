@@ -127,6 +127,12 @@ function secureMessagingRuntimeReady(): boolean {
     return plugin?.started === true && plugin.getScreenCaptureProtectionStatus?.() === "ready";
 }
 
+function assertForwardStillActive(expectedGeneration: number, localUserId: string | undefined): void {
+    if (expectedGeneration !== generation || !localUserId || UserStore.getCurrentUser()?.id !== localUserId
+        || !secureMessagingRuntimeReady())
+        throw new Error("Secure forwarding was cancelled because the account or Secure Messaging state changed.");
+}
+
 function conversationProtection(result: ConversationResult): ForwardProtection {
     if (isNativeFailure(result)) return { protected: true, ready: false, reason: failureReason(result) };
     if (result.status === "enabled") {
@@ -498,6 +504,9 @@ function selectedEmbedCount(embeds: readonly ForwardEmbed[], selection: number[]
 }
 
 async function secureForward(message: Message, destinationChannelId: string, options: ForwardOptions = {}): Promise<void> {
+    const expectedGeneration = generation;
+    const localUserId = UserStore.getCurrentUser()?.id;
+    assertForwardStillActive(expectedGeneration, localUserId);
     const rawAttachmentSelection = normalizeAttachmentSelection(options.onlyAttachmentIds);
     const rawEmbedSelection = normalizeEmbedSelection(options.onlyEmbedIndices);
     const selective = options.onlyAttachmentIds !== undefined || options.onlyEmbedIndices !== undefined;
@@ -508,6 +517,11 @@ async function secureForward(message: Message, destinationChannelId: string, opt
     const prepared = isEncryptedMessage(message.content)
         ? await prepareEncryptedSource(message, attachmentSelection, selective)
         : await preparePlainSource(message, attachmentSelection, selective);
+    assertForwardStillActive(expectedGeneration, localUserId);
+    const destination = await inspectProtection(destinationChannelId);
+    assertForwardStillActive(expectedGeneration, localUserId);
+    if (!destination.protected || !destination.ready)
+        throw new Error("The destination is no longer ready for an encrypted forward.");
     if (selective && prepared.uploads.length === 0 && embedCount === 0)
         throw new Error("The selected forwarded content is no longer available.");
 
@@ -541,10 +555,14 @@ async function routeForward(
     if (expectedGeneration !== generation || secureMessagingPlugin()?.started !== true)
         return original.call(actions, message, destinationChannelId, options);
 
+    const localUserId = UserStore.getCurrentUser()?.id;
+
     const [source, destination] = await Promise.all([
         inspectProtection(message.channel_id, isEncryptedMessage(message.content)),
         inspectProtection(destinationChannelId),
     ]);
+    if (expectedGeneration !== generation || !localUserId || UserStore.getCurrentUser()?.id !== localUserId)
+        throw new Error("Forwarding was cancelled because the account or plugin state changed.");
     const route = secureForwardRoute(source, destination);
     if (route === "native") return original.call(actions, message, destinationChannelId, options);
     if (route === "blocked") {
@@ -578,6 +596,7 @@ function installForwardGuard(actions: ForwardActions, expectedGeneration: number
             );
         }
     };
+    const sendOne = guardedSendForward;
     guardedSendForwards = async function (message, destinationChannelIds, options) {
         if (expectedGeneration !== generation || secureMessagingPlugin()?.started !== true)
             return originalMany.call(actions, message, destinationChannelIds, options);
@@ -586,8 +605,11 @@ function installForwardGuard(actions: ForwardActions, expectedGeneration: number
             showToast("Discord supplied invalid forwarding destinations.", Toasts.Type.FAILURE);
             return;
         }
-        for (const destinationChannelId of new Set(destinationChannelIds))
-            await guardedSendForward!.call(actions, message, destinationChannelId, options);
+        const localUserId = UserStore.getCurrentUser()?.id;
+        for (const destinationChannelId of new Set(destinationChannelIds)) {
+            if (expectedGeneration !== generation || UserStore.getCurrentUser()?.id !== localUserId) return;
+            await sendOne.call(actions, message, destinationChannelId, options);
+        }
     };
     actions.sendForward = guardedSendForward;
     actions.sendForwards = guardedSendForwards;

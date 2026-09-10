@@ -262,6 +262,9 @@ export async function prepareDarwinInstaller(archivePath, options = {}) {
     const clearQuarantine = options.clearQuarantine ?? clearDarwinQuarantine;
     await mkdir(cacheDirectory, { recursive: true });
     const extractionDirectory = await mkdtemp(join(cacheDirectory, ".equilotl-extract-"));
+    if (dirname(resolve(extractionDirectory)) !== resolve(cacheDirectory)) {
+        throw new Error("The temporary installer directory is outside its cache.");
+    }
 
     try {
         await extractArchive(archivePath, extractionDirectory);

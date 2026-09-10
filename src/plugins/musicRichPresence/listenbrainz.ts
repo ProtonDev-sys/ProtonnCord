@@ -15,12 +15,14 @@ const logger = new Logger("AudioScrobblerRichPresence/ListenBrainz");
 // 15 minutes
 const coverArtCache = new TTLMap<string, string>(15 * 60 * 1000);
 const metadataCache = new TTLMap<string, Partial<TrackData> | null>(15 * 60 * 1000);
+let cacheGeneration = 0;
 
 const isCustomInstance = () => settings.store.scrobblerBackend === "listenbrainz-compatible";
 const url = (path: string) => `${isCustomInstance() ? settings.store.instanceBaseURL : "https://listenbrainz.org"}${path}`;
 const apiUrl = (path: string) => `${isCustomInstance() ? settings.store.instanceAPIBaseUrl : "https://api.listenbrainz.org"}${path}`;
 
 export function invalidateListenBrainzCache() {
+    cacheGeneration++;
     coverArtCache.clear();
     metadataCache.clear();
 }
@@ -41,12 +43,13 @@ async function fetchCoverArt(releaseGroupMBID: string, originUrl?: string): Prom
         return coverArtCache.get(releaseGroupMBID);
     }
 
-    const res = await fetch(`https://coverartarchive.org/release-group/${releaseGroupMBID}`);
+    const requestGeneration = cacheGeneration;
+    const res = await fetch(`https://coverartarchive.org/release-group/${releaseGroupMBID}`, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) return fallbackToYoutubeThumbnail(originUrl);
 
     const url = await res.json()
-        .then(json => json.images[0].thumbnails.large ?? fallbackToYoutubeThumbnail(originUrl));
-    coverArtCache.set(releaseGroupMBID, url);
+        .then(json => json.images?.[0]?.thumbnails?.large ?? fallbackToYoutubeThumbnail(originUrl));
+    if (url && requestGeneration === cacheGeneration) coverArtCache.set(releaseGroupMBID, url);
 
     return url;
 }
@@ -65,7 +68,7 @@ async function getUrls(additionalInfo: Record<string, string> | undefined, track
                 : release_mbid
                     ? url(`/release/${release_mbid}`)
                     : undefined,
-            artistURL: artist_mbids?.length ? url(`/artist/${artist_mbids[0]}`) : undefined,
+            artistURL: Array.isArray(artist_mbids) && typeof artist_mbids[0] === "string" ? url(`/artist/${artist_mbids[0]}`) : undefined,
         };
     }
 
@@ -85,7 +88,9 @@ async function getUrls(additionalInfo: Record<string, string> | undefined, track
         limit: "1"
     });
 
+    const requestGeneration = cacheGeneration;
     const metadata = await fetch("https://musicbrainz.org/ws/2/recording/?" + params + "&query=" + query, {
+        signal: AbortSignal.timeout(10000),
         headers: { "User-Agent": VENCORD_USER_AGENT }
     })
         .then(res => res.ok ? res.json() : Promise.reject(new Error(`${res.status} ${res.statusText}`)))
@@ -93,7 +98,7 @@ async function getUrls(additionalInfo: Record<string, string> | undefined, track
 
     if (!metadata) {
         const data = additionalInfo?.origin_url ? { imageURL: fallbackToYoutubeThumbnail(additionalInfo.origin_url) } : {};
-        metadataCache.set(query, data);
+        if (requestGeneration === cacheGeneration) metadataCache.set(query, data);
         return data;
     }
 
@@ -106,7 +111,7 @@ async function getUrls(additionalInfo: Record<string, string> | undefined, track
         albumURL: release?.id ? url(`/release/${release.id}/`) : release?.["release-group"]?.id ? url(`/release-group/${release["release-group"].id}/`) : undefined,
         artistURL: artist?.id ? url(`/artist/${artist.id}/`) : undefined,
     };
-    metadataCache.set(query, data);
+    if (requestGeneration === cacheGeneration) metadataCache.set(query, data);
 
     return data;
 }
@@ -117,7 +122,7 @@ export const ListenBrainzScrobbler: ScrobblerBackend = {
 
     async fetchTrackData(): Promise<TrackData | null> {
         try {
-            const res = await fetch(apiUrl(`/1/user/${settings.store.username}/playing-now`));
+            const res = await fetch(apiUrl(`/1/user/${encodeURIComponent(settings.store.username ?? "")}/playing-now`), { signal: AbortSignal.timeout(10000) });
             if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
 
             const data = await res.json().then(json => json.payload?.listens[0]);
@@ -143,6 +148,6 @@ export const ListenBrainzScrobbler: ScrobblerBackend = {
     },
 
     getUserURL(username: string): string {
-        return url(`/user/${username}`);
+        return url(`/user/${encodeURIComponent(username)}`);
     }
 };

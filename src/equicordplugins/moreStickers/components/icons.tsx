@@ -30,7 +30,13 @@ export function SearchIcon({ width, height, color }: { width: number, height: nu
 
 export function CancelIcon({ width, height, className, onClick }: { width: number, height: number, className: string, onClick: () => void; }) {
     return (
-        <svg role="img" width={width} height={height} viewBox="0 0 24 24" className={className} onClick={onClick}>
+        <svg role="button" aria-label="Clear search" tabIndex={0} width={width} height={height} viewBox="0 0 24 24" className={className} onClick={onClick}
+            onKeyDown={event => {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onClick();
+                }
+            }}>
             <path fill="currentColor" d="M18.4 4L12 10.4L5.6 4L4 5.6L10.4 12L4 18.4L5.6 20L12 13.6L18.4 20L20 18.4L13.6 12L20 5.6L18.4 4Z"></path>
         </svg>
     );

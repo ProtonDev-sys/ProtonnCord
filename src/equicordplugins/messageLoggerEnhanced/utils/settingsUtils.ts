@@ -21,8 +21,8 @@ import { chooseFile as chooseFileWeb } from "@utils/web";
 import { Toasts } from "@webpack/common";
 import { showSaveFilePicker } from "native-file-system-adapter";
 
-import { clearLogs,Native } from "..";
-import { addMessagesBulkIDB, iterateAllMessagesIDB } from "../db";
+import { Native } from "..";
+import { addMessagesBulkIDB, hasMessageIDB, iterateAllMessagesIDB } from "../db";
 import { LoggedMessageJSON } from "../types";
 
 export async function importLogs() {
@@ -30,26 +30,24 @@ export async function importLogs() {
         let count = 0;
         const batchSize = 50;
         let batch: LoggedMessageJSON[] = [];
-        let cleared = false;
+        const pendingIds = new Set<string>();
 
         for await (const logItems of iterateLogItems()) {
-            if (!cleared) {
-                await clearLogs(false);
-                cleared = true;
-            }
-
-            const items = logItems.flat();
+            const items = Array.isArray(logItems) ? logItems.flat() : [logItems];
 
             for (const item of items) {
-                const { message } = item;
+                const message = item?.message;
                 if (!message || !message.id || !message.channel_id || !message.timestamp) continue;
+                if (pendingIds.has(message.id) || await hasMessageIDB(message.id)) continue;
 
                 batch.push(message);
+                pendingIds.add(message.id);
 
                 if (batch.length >= batchSize) {
                     await addMessagesBulkIDB(batch);
                     count += batch.length;
                     batch = [];
+                    pendingIds.clear();
                 }
             }
         }
@@ -74,7 +72,7 @@ export async function importLogs() {
             type: Toasts.Type.SUCCESS
         });
     } catch (e) {
-        console.error(e);
+        console.error("Message Logger log import failed");
 
         Toasts.show({
             id: Toasts.genId(),
@@ -90,21 +88,21 @@ export async function exportLogs() {
     try {
         if (!IS_WEB) {
             const streamId = await Native.startNativeLogExport(filename);
-
-            await Native.writeNativeLogChunk(streamId, '{\n  "messages": [\n');
-
-            let first = true;
-            for await (const record of iterateAllMessagesIDB()) {
-                const prefix = first ? "" : ",\n";
-                first = false;
-
-                const chunk = prefix + "    " + JSON.stringify(record);
-
-                await Native.writeNativeLogChunk(streamId, chunk);
+            let finished = false;
+            try {
+                await writeNativeChunk(streamId, '{\n  "messages": [\n');
+                let first = true;
+                for await (const record of iterateAllMessagesIDB()) {
+                    const prefix = first ? "" : ",\n";
+                    first = false;
+                    await writeNativeChunk(streamId, prefix + "    " + JSON.stringify(record));
+                }
+                await writeNativeChunk(streamId, "\n  ]\n}");
+                await Native.finishNativeLogExport(streamId);
+                finished = true;
+            } finally {
+                if (!finished) await Native.finishNativeLogExport(streamId).catch(() => undefined);
             }
-
-            await Native.writeNativeLogChunk(streamId, "\n  ]\n}");
-            await Native.finishNativeLogExport(streamId);
 
             Toasts.show({
                 id: Toasts.genId(),
@@ -127,21 +125,25 @@ export async function exportLogs() {
             const writable = await handle.createWritable();
             const writer = writable.getWriter();
             const encoder = new TextEncoder();
-
-            await writer.write(encoder.encode('{\n  "messages": [\n'));
-
-            let first = true;
             let count = 0;
-            for await (const records of iterateAllMessagesIDB()) {
-                const prefix = first ? "" : ",\n";
-                first = false;
-                const chunk = prefix + "    " + JSON.stringify(records);
-                await writer.write(encoder.encode(chunk));
-                count++;
+            try {
+                await writer.write(encoder.encode('{\n  "messages": [\n'));
+                let first = true;
+                for await (const records of iterateAllMessagesIDB()) {
+                    const prefix = first ? "" : ",\n";
+                    first = false;
+                    const chunk = prefix + "    " + JSON.stringify(records);
+                    await writer.write(encoder.encode(chunk));
+                    count += records.length;
+                }
+                await writer.write(encoder.encode("\n  ]\n}"));
+                await writer.close();
+            } catch (error) {
+                await writer.abort().catch(() => undefined);
+                throw error;
+            } finally {
+                writer.releaseLock();
             }
-
-            await writer.write(encoder.encode("\n  ]\n}"));
-            await writer.close();
 
             Toasts.show({
                 id: Toasts.genId(),
@@ -150,13 +152,23 @@ export async function exportLogs() {
             });
         }
     } catch (e) {
-        console.error(e);
+        console.error("Message Logger log export failed");
 
         Toasts.show({
             id: Toasts.genId(),
             message: "Error exporting logs. Check the console for more information",
             type: Toasts.Type.FAILURE
         });
+    }
+}
+
+async function writeNativeChunk(streamId: string, content: string) {
+    for (let offset = 0; offset < content.length;) {
+        let end = Math.min(content.length, offset + 64 * 1024);
+        // Keep a surrogate pair together so separately encoded chunks round-trip.
+        if (end < content.length && /[\uD800-\uDBFF]/.test(content[end - 1])) end--;
+        await Native.writeNativeLogChunk(streamId, content.slice(offset, end));
+        offset = end;
     }
 }
 
@@ -215,11 +227,16 @@ async function* iterateLogItems(): AsyncGenerator<any> {
         const reader = stream.getReader();
         const decoder = new TextDecoder();
 
-        yield* parseJsonStream(async () => {
-            const { done, value } = await reader.read();
-            if (done) return null;
-            return decoder.decode(value, { stream: true });
-        });
+        try {
+            yield* parseJsonStream(async () => {
+                const { done, value } = await reader.read();
+                if (done) return decoder.decode() || null;
+                return decoder.decode(value, { stream: true });
+            });
+        } finally {
+            await reader.cancel().catch(() => undefined);
+            reader.releaseLock();
+        }
     } else {
         const settings = await Native.getSettingsNative();
         const fileId = await Native.startNativeLogImport(settings.logsDir);

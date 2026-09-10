@@ -5,6 +5,7 @@
  */
 
 import * as DataStore from "@api/DataStore";
+import { Logger } from "@utils/Logger";
 import { Guild } from "@vencord/discord-types";
 import { proxyLazyWebpack } from "@webpack";
 import { Flux, FluxDispatcher, GuildStore, SortedGuildStore } from "@webpack/common";
@@ -19,11 +20,14 @@ export const HiddenServersStore = proxyLazyWebpack(() => {
         public _hiddenGuilds: Set<string> = new Set();
         private loadGeneration = 0;
         private saveTimeout: ReturnType<typeof setTimeout> | undefined;
+        private dirty = false;
+        private saveQueue: Promise<unknown> = Promise.resolve();
 
         public get hiddenGuilds() { return this._hiddenGuilds; }
 
         public async load() {
             const generation = ++this.loadGeneration;
+            await this.saveQueue;
             const data = await DataStore.get<Set<string> | string[]>(DB_KEY);
             if (generation !== this.loadGeneration) return;
 
@@ -42,9 +46,11 @@ export const HiddenServersStore = proxyLazyWebpack(() => {
             this.loadGeneration++;
             this.flushSave();
             this._hiddenGuilds = new Set();
+            this.emitChange();
         }
 
         public save() {
+            this.dirty = true;
             if (this.saveTimeout) clearTimeout(this.saveTimeout);
             this.saveTimeout = setTimeout(() => this.flushSave(), SAVE_DEBOUNCE_MS);
         }
@@ -55,7 +61,11 @@ export const HiddenServersStore = proxyLazyWebpack(() => {
                 this.saveTimeout = undefined;
             }
 
-            void DataStore.set(DB_KEY, Array.from(this._hiddenGuilds));
+            if (!this.dirty) return;
+            this.dirty = false;
+            const snapshot = Array.from(this._hiddenGuilds);
+            this.saveQueue = this.saveQueue.then(() => DataStore.set(DB_KEY, snapshot))
+                .catch(error => new Logger("HideServers").error("Failed to save hidden servers", error));
         }
 
         private replaceHiddenGuilds(next: Set<string>) {
@@ -95,13 +105,16 @@ export const HiddenServersStore = proxyLazyWebpack(() => {
         }
 
         public clearHidden() {
+            this.loadGeneration++;
+            this.dirty = false;
             if (this.saveTimeout) {
                 clearTimeout(this.saveTimeout);
                 this.saveTimeout = undefined;
             }
 
             this._hiddenGuilds = new Set();
-            void DataStore.del(DB_KEY);
+            this.saveQueue = this.saveQueue.then(() => DataStore.del(DB_KEY))
+                .catch(error => new Logger("HideServers").error("Failed to clear hidden servers", error));
             this.emitChange();
         }
 

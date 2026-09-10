@@ -30,13 +30,13 @@ export const wordsFromTitle = (text: string) => text.toLowerCase().split(" ");
 
 // Words to case style
 export const wordsToCamel = (words: string[]) =>
-    words.map((w, i) => (i ? w[0].toUpperCase() + w.slice(1) : w)).join("");
+    words.map((w, i) => (i ? w.charAt(0).toUpperCase() + w.slice(1) : w)).join("");
 export const wordsToSnake = (words: string[]) => words.join("_").toUpperCase();
 export const wordsToKebab = (words: string[]) => words.join("-").toLowerCase();
 export const wordsToPascal = (words: string[]) =>
-    words.map(w => w[0].toUpperCase() + w.slice(1)).join("");
+    words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join("");
 export const wordsToTitle = (words: string[]) =>
-    words.map(w => w[0].toUpperCase() + w.slice(1)).join(" ");
+    words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 
 const units = ["years", "months", "weeks", "days", "hours", "minutes", "seconds"] as const;
 type Units = typeof units[number];

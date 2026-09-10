@@ -15,7 +15,7 @@ import { removeFromArray } from "@utils/misc";
 import definePlugin, { OptionType } from "@utils/types";
 import { SettingsRouter } from "@webpack/common";
 
-import { loadPresets } from "./utils/storage";
+import { cancelPendingPresetLoad } from "./utils/profile";
 
 export const cl = classNameFactory("vc-profile-presets-");
 export const settings = definePluginSettings({
@@ -41,7 +41,6 @@ export default definePlugin({
     },
 
     start() {
-        loadPresets("main");
         SettingsPlugin.customEntries.push({
             key: "equicord_profile_sets",
             title: "Profile Sets",
@@ -51,6 +50,7 @@ export default definePlugin({
     },
 
     stop() {
+        cancelPendingPresetLoad();
         removeFromArray(SettingsPlugin.customEntries, e => e.key === "equicord_profile_sets");
     },
 });

@@ -8,10 +8,40 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 
+import { debounce } from "../src/shared/debounce";
 import { Logger } from "../src/utils/Logger";
+import { classNameToSelector } from "../src/utils/css";
 import { mergeDefaults } from "../src/utils/mergeDefaults";
 import { Queue } from "../src/utils/Queue";
 import { TTLMap } from "../src/utils/TTLMap";
+import { wordsFromSnake, wordsToCamel, wordsToPascal, wordsToTitle } from "../src/utils/text";
+
+test("debounce retains the latest receiver and arguments across repeated calls", t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const seen: [string, number][] = [];
+    const callback = debounce(function (this: { name: string; }, value: number) { seen.push([this.name, value]); }, 100);
+    callback.call({ name: "first" }, 1);
+    t.mock.timers.tick(50);
+    callback.call({ name: "last" }, 2);
+    t.mock.timers.tick(99);
+    assert.deepEqual(seen, []);
+    t.mock.timers.tick(1);
+    assert.deepEqual(seen, [["last", 2]]);
+});
+
+test("case conversion tolerates empty words from repeated or leading separators", () => {
+    const words = wordsFromSnake("_hello__world_");
+    assert.equal(wordsToCamel(words), "HelloWorld");
+    assert.equal(wordsToPascal(words), "HelloWorld");
+    assert.equal(wordsToTitle(words), " Hello  World ");
+    assert.equal(wordsToPascal([]), "");
+});
+
+test("class selectors ignore empty whitespace tokens and preserve class prefixes", () => {
+    assert.equal(classNameToSelector("  first\tsecond\nthird "), ".first.second.third");
+    assert.equal(classNameToSelector("first second", "fixture-"), ".fixture-first.fixture-second");
+    assert.equal(classNameToSelector(" \t\n"), "");
+});
 
 test("mergeDefaults preserves null defaults and existing scalar values", () => {
     interface Values {

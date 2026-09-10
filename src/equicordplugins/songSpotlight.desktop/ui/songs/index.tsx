@@ -137,10 +137,13 @@ function SongInfo({ owned, song, render, big }: SongInfoProps) {
     const [playing, setPlaying] = useState<number | undefined>(undefined);
     const [loaded, setLoaded] = useState(new Set<number>());
     const setLoadedAudio = useCallback((index: number, state: boolean) => {
-        if (state) loaded.add(index);
-        else loaded.delete(index);
-        setLoaded(new Set(loaded));
-    }, [loaded]);
+        setLoaded(previous => {
+            const next = new Set(previous);
+            if (state) next.add(index);
+            else next.delete(index);
+            return next;
+        });
+    }, []);
 
     const audios = useMemo(() => render.form === "single" ? [render.single] : render.list, [render]);
     const audioRef = useRef<HTMLAudioElement>(undefined);
@@ -152,7 +155,7 @@ function SongInfo({ owned, song, render, big }: SongInfoProps) {
             render.form === "single" ?
                 render.single.audio?.duration :
                 playing !== undefined ?
-                    render.list[playing].audio?.duration :
+                    render.list[playing]?.audio?.duration :
                     undefined,
         [playing, render],
     );
@@ -294,7 +297,7 @@ function SongInfo({ owned, song, render, big }: SongInfoProps) {
                             onClick={() => {
                                 if (playing !== undefined) return setPlaying(undefined);
 
-                                const loadedIndex = loaded.values().toArray().sort()[0];
+                                const loadedIndex = [...loaded].sort((a, b) => a - b)[0];
                                 if (loadedIndex !== undefined) setPlaying(loadedIndex);
                             }}
                         />
@@ -353,7 +356,7 @@ export default function Song({ owned, song, index, big }: SongInfoContainerProps
                 ["--index" as any]: index.toString(),
             }}
         >
-            {render && <SongInfo owned={owned} song={song} render={render} big={big} />}
+            {render && <SongInfo owned={owned} song={song} render={render} big={big} key={sid(song)} />}
         </div>
     );
 }

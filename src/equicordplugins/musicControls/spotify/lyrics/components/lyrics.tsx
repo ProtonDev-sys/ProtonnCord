@@ -59,7 +59,10 @@ function LyricsDisplay({ scroll = true }: { scroll?: boolean; }) {
 }
 
 export function SpotifyLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
-    SpotifyLrcStore.init();
+    useEffect(() => {
+        SpotifyLrcStore.init();
+        return () => SpotifyLrcStore.destroy();
+    }, []);
     const track = useStateFromStores(
         [SpotifyStore],
         () => SpotifyStore.track,
@@ -71,7 +74,7 @@ export function SpotifyLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
         [SpotifyStore],
         () => SpotifyStore.device,
         null,
-        (prev, next) => prev?.id === next?.id
+        (prev, next) => prev?.id === next?.id && prev?.is_active === next?.is_active
     );
 
     const isPlaying = useStateFromStores([SpotifyStore], () => SpotifyStore.isPlaying);

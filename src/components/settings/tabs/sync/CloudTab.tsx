@@ -61,7 +61,7 @@ function validateUrl(url: string) {
 }
 
 const cloudBackendOptions = [
-    { label: "Protonn Cord Cloud", value: "https://cloud.equicord.org/" },
+    { label: "Equicord Cloud", value: "https://cloud.equicord.org/" },
     { label: "Vencord Cloud", value: "https://api.vencord.dev/" }
 ];
 
@@ -116,11 +116,10 @@ function CloudTab() {
 
             cloud.url = canonicalUrl;
             cloud.authenticated = false;
+            setPendingUrl(canonicalUrl);
+            setInputKey(prev => prev + 1);
             if (reauthorize && getCloudUserId() === initiatingUserId && new URL(cloud.url).href === canonicalUrl)
                 await authorizeCloud(signal);
-
-            setPendingUrl(canonicalUrl);
-            if (reauthorize) setInputKey(prev => prev + 1);
         });
     }
 
@@ -160,7 +159,7 @@ function CloudTab() {
 
             <Heading className={Margins.top20}>Cloud Backend</Heading>
             <Paragraph className={Margins.bottom16}>
-                Choose which cloud backend to use for storing your settings. You can switch between Protonn Cord's and Vencord's cloud services, or use a self-hosted instance.
+                Choose which cloud backend to use for storing your settings. You can use Equicord Cloud, Vencord Cloud, or a compatible self-hosted instance.
             </Paragraph>
 
             <div className={Margins.bottom8}>

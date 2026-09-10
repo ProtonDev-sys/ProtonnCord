@@ -24,12 +24,16 @@ export default definePlugin({
     tags: ["Notifications", "Voice"],
     authors: [Devs.philipbry],
     settings,
+    get notificationVolume() {
+        const value = settings.store.notificationVolume;
+        return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 100;
+    },
     patches: [
         {
             find: "ensureAudio(){",
             replacement: {
                 match: /(?=Math\.min\(\i\.\i\.getOutputVolume\(\)\/100)/g,
-                replace: "$self.settings.store.notificationVolume/100*"
+                replace: "$self.notificationVolume/100*"
             },
         },
     ],

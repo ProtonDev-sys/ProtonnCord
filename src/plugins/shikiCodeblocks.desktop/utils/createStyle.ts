@@ -19,6 +19,7 @@
 const styles = new Map<string, HTMLStyleElement>();
 
 export function setStyle(css: string, id: string) {
+    removeStyle(id);
     const style = document.createElement("style");
     style.innerText = css;
     document.head.appendChild(style);

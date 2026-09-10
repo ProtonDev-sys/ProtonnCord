@@ -14,19 +14,19 @@ import { Paragraph } from "@components/Paragraph";
 import { convert as convertLineEP, getIdFromUrl as getLineEmojiPackIdFromUrl, getStickerPackById as getLineEmojiPackById, isLineEmojiPackHtml, parseHtml as getLineEPFromHtml } from "@equicordplugins/moreStickers/lineEmojis";
 import { convert as convertLineSP, getIdFromUrl as getLineStickerPackIdFromUrl, getStickerPackById as getLineStickerPackById, isLineStickerPackHtml, parseHtml as getLineSPFromHtml } from "@equicordplugins/moreStickers/lineStickers";
 import { isV1, migrate } from "@equicordplugins/moreStickers/migrate-v1";
-import { deleteStickerPack, getStickerPack, getStickerPackMetas, saveStickerPack } from "@equicordplugins/moreStickers/stickers";
+import { deleteStickerPack, getStickerPack, getStickerPackMetas, saveStickerPack, saveStickerPacks } from "@equicordplugins/moreStickers/stickers";
 import { SettingsTabsKey, Sticker, StickerPack, StickerPackMeta } from "@equicordplugins/moreStickers/types";
-import { cl, clPicker, Mutex } from "@equicordplugins/moreStickers/utils";
+import { cl, clPicker } from "@equicordplugins/moreStickers/utils";
+import { saveFile } from "@utils/web";
 import { Button, React, TabBar, TextArea, Toasts } from "@webpack/common";
 import { JSX } from "react";
-
-const mutex = new Mutex();
 
 // The ID of recent sticker and recent sticker pack
 export const RECENT_STICKERS_ID = "recent";
 export const RECENT_STICKERS_TITLE = "Recently Used";
 
 const KEY = "MoreStickers:RecentStickers";
+const showFailure = () => Toasts.show({ message: "Could not update sticker packs", type: Toasts.Type.FAILURE, id: Toasts.genId() });
 
 const noDrag = {
     onMouseDown: e => { e.preventDefault(); return false; },
@@ -97,15 +97,17 @@ export const Packs = () => {
     const [tab, setTab] = React.useState<SettingsTabsKey>(SettingsTabsKey.ADD_STICKER_PACK_URL);
     const [hoveredStickerPackId, setHoveredStickerPackId] = React.useState<string | null>(null);
     const [_isV1, setV1] = React.useState<boolean>(false);
+    const mounted = React.useRef(true);
 
     async function refreshStickerPackMetas() {
-        setstickerPackMetas(await getStickerPackMetas());
+        const metas = await getStickerPackMetas();
+        if (mounted.current) setstickerPackMetas(metas);
     }
     React.useEffect(() => {
-        refreshStickerPackMetas();
-    }, []);
-    React.useEffect(() => {
-        isV1().then(setV1);
+        mounted.current = true;
+        refreshStickerPackMetas().catch(showFailure);
+        isV1().then(value => { if (mounted.current) setV1(value); }).catch(showFailure);
+        return () => { mounted.current = false; };
     }, []);
 
     return (
@@ -133,7 +135,7 @@ export const Packs = () => {
                         <p>
                             Currently LINE stickers/emojis supported only. <br />
 
-                            Get Telegram stickers with <a href="#" onClick={() => VencordNative.native.openExternal("https://github.com/lekoOwO/MoreStickersConverter")}> MoreStickersConverter</a>.
+                            Get Telegram stickers with <a href="https://github.com/lekoOwO/MoreStickersConverter" target="_blank" rel="noreferrer"> MoreStickersConverter</a>.
                         </p>
                     </Paragraph>
                     <Flex flexDirection="row" style={{
@@ -177,7 +179,7 @@ export const Packs = () => {
                                     type = "LineEmojiPack";
                                 } catch (e: any) { }
 
-                                let errorMessage = "";
+                                let errorMessage = type ? "" : "Invalid URL";
                                 switch (type) {
                                     case "LineStickerPack": {
                                         try {
@@ -206,8 +208,10 @@ export const Packs = () => {
                                     }
                                 }
 
-                                setAddStickerUrl("");
-                                refreshStickerPackMetas();
+                                if (!errorMessage) {
+                                    setAddStickerUrl("");
+                                    await refreshStickerPackMetas().catch(showFailure);
+                                }
 
                                 if (errorMessage) {
                                     Toasts.show({
@@ -282,10 +286,14 @@ export const Packs = () => {
                                         console.error(e);
                                         errorMessage = e.message;
                                     }
+                                } else {
+                                    errorMessage = "Invalid sticker pack HTML";
                                 }
 
-                                setAddStickerHtml("");
-                                refreshStickerPackMetas();
+                                if (!errorMessage) {
+                                    setAddStickerHtml("");
+                                    await refreshStickerPackMetas().catch(showFailure);
+                                }
 
                                 if (errorMessage) {
                                     Toasts.show({
@@ -336,9 +344,8 @@ export const Packs = () => {
                                         stickerPacks = [fileJson];
                                     }
 
-                                    for (const stickerPack of stickerPacks) {
-                                        await saveStickerPack(stickerPack);
-                                    }
+                                    await saveStickerPacks(stickerPacks);
+                                    await refreshStickerPackMetas();
 
                                     Toasts.show({
                                         message: "Sticker Packs added",
@@ -379,6 +386,7 @@ export const Packs = () => {
                         <Button
                             size={Button.Sizes.SMALL}
                             onClick={async e => {
+                                try {
                                 const result: StickerPack[] = [];
                                 const stickerPacks = await getStickerPackMetas();
                                 for (const stickerPack of stickerPacks) {
@@ -388,12 +396,7 @@ export const Packs = () => {
                                     }
                                 }
 
-                                const a = document.createElement("a");
-                                const url = URL.createObjectURL(new Blob([JSON.stringify(result)], { type: "application/json" }));
-                                a.href = url;
-                                a.download = "MoreStickers.stickerpacks";
-                                a.click();
-                                setTimeout(() => URL.revokeObjectURL(url), 0);
+                                saveFile(new File([JSON.stringify(result)], "MoreStickers.stickerpacks", { type: "application/json" }));
 
                                 Toasts.show({
                                     message: "Sticker Packs exported",
@@ -403,12 +406,17 @@ export const Packs = () => {
                                         duration: 1000
                                     }
                                 });
+                                } catch { showFailure(); }
                             }}
                         >Export Sticker Packs</Button>
                         <Button
                             size={Button.Sizes.SMALL}
                             onClick={async e => {
-                                await migrate();
+                                try {
+                                    await migrate();
+                                    await refreshStickerPackMetas();
+                                    if (mounted.current) setV1(await isV1());
+                                } catch { showFailure(); }
                             }}
                             style={{
                                 display: _isV1 ? "unset" : "none"
@@ -469,32 +477,20 @@ export function Wrapper(props: { children: JSX.Element | JSX.Element[]; }) {
 }
 
 export async function getRecentStickers(key: string = KEY): Promise<Sticker[]> {
-    return (await DataStore.get(key)) ?? [];
+    const stickers = (await DataStore.get(key)) ?? [];
+    if (!Array.isArray(stickers)) throw new Error("Stored recent stickers are invalid and have been preserved");
+    return stickers;
 }
 
 export async function setRecentStickers(stickers: Sticker[], key: string = KEY): Promise<void> {
-    const unlock = await mutex.lock();
-    try {
-        await DataStore.set(key, stickers);
-    } finally {
-        unlock();
-    }
+    await DataStore.set(key, stickers);
 }
 
 export async function addRecentSticker(sticker: Sticker): Promise<void> {
-    const stickers = await getRecentStickers();
-    const index = stickers.findIndex(s => s.id === sticker.id);
-    if (index !== -1) {
-        stickers.splice(index, 1);
-    }
-    stickers.unshift(sticker);
-    while (stickers.length > 16) {
-        stickers.pop();
-    }
-    await setRecentStickers(stickers);
+    await DataStore.update<Sticker[]>(KEY, stickers =>
+        [sticker, ...(stickers ?? []).filter(s => s.id !== sticker.id)].slice(0, 16));
 }
 
 export async function removeRecentStickerByPackId(packId: string): Promise<void> {
-    const stickers = await getRecentStickers();
-    await setRecentStickers(stickers.filter(s => s.stickerPackId !== packId));
+    await DataStore.update<Sticker[]>(KEY, stickers => stickers?.filter(s => s.stickerPackId !== packId) ?? []);
 }

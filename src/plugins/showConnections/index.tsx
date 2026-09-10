@@ -29,7 +29,7 @@ import { copyWithToast } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
 import { ConnectedAccount, User } from "@vencord/discord-types";
 import { findByCodeLazy, findByPropsLazy } from "@webpack";
-import { Tooltip, useEffect, UserProfileStore, useState } from "@webpack/common";
+import { Tooltip, useEffect, UserProfileStore, useState, useStateFromStores } from "@webpack/common";
 
 import { VerifiedIcon } from "./VerifiedIcon";
 
@@ -57,7 +57,8 @@ const settings = definePluginSettings({
     iconSize: {
         type: OptionType.NUMBER,
         description: "Icon size (px)",
-        default: 32
+        default: 32,
+        isValid: value => typeof value === "number" && Number.isFinite(value) && value >= 0
     },
     iconSpacing: {
         type: OptionType.SELECT,
@@ -81,11 +82,12 @@ const settings = definePluginSettings({
     }
 });
 
-async function fetchGithubOrgs(username: string): Promise<GithubOrg[]> {
+async function fetchGithubOrgs(username: string, signal: AbortSignal): Promise<GithubOrg[]> {
     try {
-        const res = await fetch(`https://api.github.com/users/${encodeURIComponent(username)}/orgs`);
+        const res = await fetch(`https://api.github.com/users/${encodeURIComponent(username)}/orgs`, { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) });
         if (!res.ok) return [];
-        return await res.json();
+        const orgs = await res.json();
+        return Array.isArray(orgs) ? orgs.filter(org => typeof org?.login === "string") : [];
     } catch {
         return [];
     }
@@ -96,10 +98,12 @@ function GithubOrgIcons({ username, size, iconSrc }: { username: string, size: n
 
     useEffect(() => {
         let cancelled = false;
-        fetchGithubOrgs(username).then(data => {
+        const controller = new AbortController();
+        setOrgs([]);
+        fetchGithubOrgs(username, controller.signal).then(data => {
             if (!cancelled) setOrgs(data);
         });
-        return () => { cancelled = true; };
+        return () => { cancelled = true; controller.abort(); };
     }, [username]);
 
     if (!orgs.length) return null;
@@ -112,7 +116,7 @@ function GithubOrgIcons({ username, size, iconSrc }: { username: string, size: n
                         <a
                             {...tooltipProps}
                             className="vc-user-connection"
-                            href={`https://github.com/${org.login}`}
+                            href={`https://github.com/${encodeURIComponent(org.login)}`}
                             target="_blank"
                             rel="noreferrer"
                         >
@@ -141,7 +145,7 @@ const profilePopoutComponent = ErrorBoundary.wrap(
 );
 
 function ConnectionsComponent({ id, theme }: { id: string, theme: string; }) {
-    const profile = UserProfileStore.getUserProfile(id);
+    const profile = useStateFromStores([UserProfileStore], () => UserProfileStore.getUserProfile(id), [id]);
     if (!profile)
         return null;
 
@@ -158,15 +162,17 @@ function ConnectionsComponent({ id, theme }: { id: string, theme: string; }) {
 
 function CompactConnectionComponent({ connection, theme }: { connection: ConnectedAccount, theme: string; }) {
     const platform = platforms.get(useLegacyPlatformType(connection.type));
+    if (!platform?.icon) return null;
     const url = platform.getPlatformUserUrl?.(connection);
+    const size = Number.isFinite(settings.store.iconSize) && settings.store.iconSize >= 0 ? settings.store.iconSize : 32;
 
     const img = (
         <img
-            aria-label={connection.name}
+            alt={connection.name}
             src={theme === "light" ? platform.icon.lightSVG : platform.icon.darkSVG}
             style={{
-                width: settings.store.iconSize,
-                height: settings.store.iconSize
+                width: size,
+                height: size
             }}
         />
     );
@@ -220,7 +226,7 @@ function CompactConnectionComponent({ connection, theme }: { connection: Connect
             {connection.type === "github" && settings.store.showGithubOrgs && (
                 <GithubOrgIcons
                     username={connection.name}
-                    size={settings.store.iconSize}
+                    size={size}
                     iconSrc={theme === "light" ? platform.icon.lightSVG : platform.icon.darkSVG}
                 />
             )}

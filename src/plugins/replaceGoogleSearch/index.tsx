@@ -36,6 +36,15 @@ interface SearchEngineEntry {
     iconUrl: string | null;
 }
 
+function isSearchUrl(value: string) {
+    try {
+        const url = new URL(value);
+        return (url.protocol === "https:" || url.protocol === "http:") && !url.username && !url.password;
+    } catch {
+        return false;
+    }
+}
+
 function getEngineIconUrl(url: string) {
     try {
         return `https://icons.duckduckgo.com/ip3/${new URL(url).hostname}.ico`;
@@ -65,7 +74,8 @@ const settings = definePluginSettings({
         displayName: "Custom Engine URL",
         description: "The URL of your Engine",
         type: OptionType.STRING,
-        placeholder: "https://google.com/search?q="
+        placeholder: "https://google.com/search?q=",
+        isValid: value => !value || (typeof value === "string" && isSearchUrl(value)) || "Enter an HTTP or HTTPS search URL without credentials"
     },
     replacementEngine: {
         description: "Replace with a specific search engine instead of adding a menu",
@@ -79,7 +89,8 @@ const settings = definePluginSettings({
 });
 
 function search(src: string, engine: string) {
-    open(engine + encodeURIComponent(src.trim()), "_blank");
+    if (!isSearchUrl(engine)) return;
+    open(engine + encodeURIComponent(src.trim()), "_blank", "noopener,noreferrer");
 }
 
 function makeSearchItem(src: string) {
@@ -87,7 +98,7 @@ function makeSearchItem(src: string) {
 
     const customName = customEngineName?.trim();
     const customUrl = customEngineURL?.trim();
-    const customEngine = customName && customUrl ? makeEngineEntry(customName, customUrl) : null;
+    const customEngine = customName && customUrl && isSearchUrl(customUrl) ? makeEngineEntry(customName, customUrl) : null;
     const engineEntries = customEngine
         ? defaultEngineEntries.some(({ name }) => name === customEngine.name)
             ? defaultEngineEntries.map(entry => entry.name === customEngine.name ? customEngine : entry)

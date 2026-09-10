@@ -18,7 +18,7 @@ import type { RenderModalProps } from "@vencord/discord-types";
 import { Menu, Modal, openModal, React, Select, Slider, TextInput, UploadHandler, useEffect, useRef, useState } from "@webpack/common";
 
 import { CAPTIONS } from "./captions";
-import { fetchAllGoogleFonts, getFontFamilyCss, loadGoogleFont } from "./fonts";
+import { clearFontResources, fetchAllGoogleFonts, getFontFamilyCss, loadGoogleFont } from "./fonts";
 import css from "./styles.css?managed";
 import { DEFAULT_OPTIONS, type GifMakerOptions, type GoogleFontMetadata } from "./types";
 import { clamp, getInitialSize, getMediaInfo } from "./utils/contextMenu";
@@ -147,11 +147,16 @@ function SelectedFontLabel({ options }: { options: SelectOption[]; }) {
 function FontSelector({ initialFont, onSelect }: { initialFont: string; onSelect: (font: GoogleFontMetadata) => void; }) {
     const [fonts, setFonts] = React.useState<GoogleFontMetadata[]>([]);
     const [selectedFont, setSelectedFont] = React.useState<string | null>(initialFont !== "Arial" ? initialFont : null);
+    const [loading, setLoading] = React.useState(true);
 
     React.useEffect(() => {
+        let active = true;
         void fetchAllGoogleFonts().then(fetchedFonts => {
+            if (!active) return;
             setFonts(fetchedFonts);
+            setLoading(false);
         });
+        return () => { active = false; };
     }, []);
 
     const options = fonts.map<SelectOption>(font => ({
@@ -171,7 +176,7 @@ function FontSelector({ initialFont, onSelect }: { initialFont: string; onSelect
     };
 
     if (!fonts.length) {
-        return <div>Loading fonts...</div>;
+        return <div>{loading ? "Loading fonts..." : "No fonts available. Your saved font is unchanged."}</div>;
     }
 
     return (
@@ -212,11 +217,12 @@ function GifMakerModal({ url, isVideo, sourceWidth, sourceHeight, ...props }: Re
     const previewRef = useRef<HTMLImageElement>(null);
     const optionsRef = useRef(options);
     const generationRef = useRef(0);
+    const previewUrlRef = useRef<string | null>(null);
     optionsRef.current = options;
 
     const patch = (partial: Partial<GifMakerOptions>) => {
-        setOptions(prev => {
-            const next = { ...prev, ...partial };
+            const next = { ...optionsRef.current, ...partial };
+            optionsRef.current = next;
             settings.store.lastWidth = next.width;
             settings.store.lastHeight = next.height;
             settings.store.lastCaptionMode = next.captionMode;
@@ -224,11 +230,17 @@ function GifMakerModal({ url, isVideo, sourceWidth, sourceHeight, ...props }: Re
             settings.store.lastCaptionSize = next.captionSize;
             settings.store.lastFontFamily = next.fontFamily;
             settings.store.lastBubbleTipBase = next.bubbleTipBase;
-            return next;
-        });
+            setOptions(next);
     };
 
+    useEffect(() => () => {
+        generationRef.current++;
+        if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+    }, []);
+
     useEffect(() => {
+        let active = true;
         if (sourceWidth && sourceHeight) {
             const [w, h] = resolveInitialSize(sourceWidth, sourceHeight);
             setOptions(prev => ({ ...prev, width: w, height: h }));
@@ -237,36 +249,33 @@ function GifMakerModal({ url, isVideo, sourceWidth, sourceHeight, ...props }: Re
         if (isVideo) {
             loadVideo(url).then(v => {
                 const [w, h] = resolveInitialSize(v.videoWidth, v.videoHeight);
-                setOptions(prev => ({ ...prev, width: w, height: h }));
+                if (active) setOptions(prev => ({ ...prev, width: w, height: h }));
                 cleanupBlobUrl(v);
                 v.remove();
             }).catch(err => logger.error("auto-detect video failed", err));
-            return;
+            return () => { active = false; };
         }
         loadImage(url).then(img => {
             const [w, h] = resolveInitialSize(img.naturalWidth, img.naturalHeight);
-            setOptions(prev => ({ ...prev, width: w, height: h }));
+            if (active) setOptions(prev => ({ ...prev, width: w, height: h }));
             cleanupBlobUrl(img);
         }).catch(err => logger.error("auto-detect image failed", err));
-    }, [sourceWidth, sourceHeight]);
+        return () => { active = false; };
+    }, [sourceWidth, sourceHeight, url, isVideo]);
 
     useEffect(() => {
+        const gen = ++generationRef.current;
+        setGenerating(true);
         const timer = setTimeout(() => {
-            const gen = ++generationRef.current;
-            setGenerating(true);
 
             const { current } = optionsRef;
             createGif(url, isVideo, current).then(blob => {
-                if (gen !== generationRef.current) {
-                    URL.revokeObjectURL(URL.createObjectURL(blob));
-                    return;
-                }
+                if (gen !== generationRef.current) return;
                 setError(null);
                 setGifBlob(blob);
-                setPreviewUrl(prev => {
-                    if (prev) URL.revokeObjectURL(prev);
-                    return URL.createObjectURL(blob);
-                });
+                if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+                previewUrlRef.current = URL.createObjectURL(blob);
+                setPreviewUrl(previewUrlRef.current);
                 setGenerating(false);
             }).catch((err: unknown) => {
                 if (gen !== generationRef.current) return;
@@ -276,8 +285,11 @@ function GifMakerModal({ url, isVideo, sourceWidth, sourceHeight, ...props }: Re
             });
         }, 300);
 
-        return () => clearTimeout(timer);
-    }, [JSON.stringify(options.captionMode), options.captionText, options.captionSize, options.fontFamily, options.bubbleTipX, options.bubbleTipY, options.bubbleTipBase, options.width, options.height]);
+        return () => {
+            clearTimeout(timer);
+            generationRef.current++;
+        };
+    }, [url, isVideo, options.captionMode, options.captionText, options.captionSize, options.fontFamily, options.bubbleTipX, options.bubbleTipY, options.bubbleTipBase, options.width, options.height]);
 
     const handlePreviewClick = (e: React.MouseEvent<HTMLImageElement>) => {
         if (options.captionMode !== "speechbubble") return;
@@ -291,12 +303,12 @@ function GifMakerModal({ url, isVideo, sourceWidth, sourceHeight, ...props }: Re
     };
 
     const handleExport = () => {
-        if (!gifBlob) return;
+        if (!gifBlob || generating || error) return;
         saveFile(new File([gifBlob], "export.gif", { type: "image/gif" }));
     };
 
     const handleSend = () => {
-        if (!gifBlob) return;
+        if (!gifBlob || generating || error) return;
 
         const channel = getCurrentChannel();
         if (!channel) return;
@@ -490,6 +502,10 @@ export default definePlugin({
 
     start() {
         void fetchAllGoogleFonts();
+    },
+
+    stop() {
+        clearFontResources();
     },
 
     gifPickerContextMenu(instance, _e: React.MouseEvent) {

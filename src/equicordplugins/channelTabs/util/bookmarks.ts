@@ -11,8 +11,8 @@ import { ChannelStore, useCallback, UserStore, useState } from "@webpack/common"
 import { bookmarkFolderColors, logger } from "./constants";
 import { Bookmark, BookmarkFolder, Bookmarks, UseBookmark, UseBookmarkMethods } from "./types";
 
-export function isBookmarkFolder(bookmark: Bookmark | BookmarkFolder): bookmark is BookmarkFolder {
-    return "bookmarks" in bookmark;
+export function isBookmarkFolder(bookmark: Bookmark | BookmarkFolder | null | undefined): bookmark is BookmarkFolder {
+    return bookmark != null && "bookmarks" in bookmark;
 }
 
 export function bookmarkPlaceholderName(bookmark: Omit<Bookmark | BookmarkFolder, "name">) {
@@ -53,25 +53,21 @@ export function useBookmarks(userId: string): UseBookmark {
         DataStore.update("ChannelTabs_bookmarks", old => ({
             ...old,
             [userId]: bookmarks[userId]
-        }));
+        })).catch(error => logger.error("Failed to save bookmarks", error));
     }, [userId]);
 
     useAwaiter(() => DataStore.get("ChannelTabs_bookmarks"), {
         fallbackValue: undefined,
+        deps: [userId],
         onSuccess(bookmarks: { [k: string]: Bookmarks; }) {
-            if (!bookmarks) {
-                bookmarks = { [userId]: [] };
-                DataStore.set("ChannelTabs_bookmarks", { [userId]: [] });
-            }
-            if (!bookmarks[userId]) bookmarks[userId] = [];
-
-            setBookmarks(bookmarks);
+            _setBookmarks({ ...bookmarks, [userId]: bookmarks?.[userId] ?? [] });
         },
+        onError: error => logger.error("Failed to load bookmarks", error)
     });
 
     const methods = {
         addBookmark: (bookmark, folderIndex) => {
-            if (!bookmarks) return;
+            if (!bookmarks[userId]) return;
 
             if (typeof folderIndex === "number" && !(isBookmarkFolder(bookmarks[userId][folderIndex])))
                 return logger.error("Attempted to add bookmark to non-folder " + folderIndex, bookmarks);
@@ -86,7 +82,7 @@ export function useBookmarks(userId: string): UseBookmark {
             });
         },
         addFolder(name, iconColor, iconName) {
-            if (!bookmarks) return;
+            if (!bookmarks[userId]) return -1;
             const length = bookmarks[userId].push({
                 name: name?.trim() || "Folder",
                 iconColor: iconColor ?? bookmarkFolderColors.Black,
@@ -100,7 +96,7 @@ export function useBookmarks(userId: string): UseBookmark {
             return length - 1;
         },
         editBookmark(index, newBookmark) {
-            if (!bookmarks) return;
+            if (!Number.isInteger(index) || !bookmarks[userId]?.[index]) return;
             Object.entries(newBookmark).forEach(([k, v]) => {
                 bookmarks[userId][index][k] = v;
             });
@@ -109,7 +105,7 @@ export function useBookmarks(userId: string): UseBookmark {
             });
         },
         deleteBookmark(index, folderIndex) {
-            if (!bookmarks) return;
+            if (!bookmarks[userId] || !Number.isInteger(index)) return;
 
             if (typeof folderIndex === "number") {
                 const folder = bookmarks[userId][folderIndex];
@@ -132,7 +128,10 @@ export function useBookmarks(userId: string): UseBookmark {
             });
         },
         moveDraggedBookmarks(index1, index2) {
-            if (index1 < 0 || index2 > bookmarks[userId].length)
+            if (!bookmarks[userId]) return;
+            if (!Number.isInteger(index1) || !Number.isInteger(index2)
+                || index1 < 0 || index1 >= bookmarks[userId].length
+                || index2 < 0 || index2 >= bookmarks[userId].length)
                 return logger.error(`Out of bounds drag (swap between indexes ${index1} and ${index2})`, bookmarks);
 
             const firstItem = bookmarks[userId].splice(index1, 1)[0];

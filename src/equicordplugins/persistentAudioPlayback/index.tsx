@@ -90,6 +90,7 @@ const waveformBarsCache = new Map<string, readonly number[]>();
 let widgetContainer: HTMLDivElement | null = null;
 let widgetRoot: ReturnType<typeof createRoot> | null = null;
 let NativeVoiceMessage: React.ComponentType<VoiceMessageProps> | null = null;
+let active = false;
 
 const settings = definePluginSettings({
     keepVoiceMessages: {
@@ -115,9 +116,9 @@ const settings = definePluginSettings({
 });
 
 function shouldTrack(kind: AudioKeeperProps["kind"]) {
-    return kind === "voice"
+    return active && (kind === "voice"
         ? settings.store.keepVoiceMessages
-        : settings.store.keepAudioAttachments;
+        : settings.store.keepAudioAttachments);
 }
 
 function sameAudio(audio: HTMLAudioElement, src: string) {
@@ -193,7 +194,7 @@ function getTitle(kind: AudioKeeperProps["kind"], src: string) {
 }
 
 function continueDetached(kind: AudioKeeperProps["kind"], snapshot: AudioSnapshot, renderNativePlayer?: () => React.ReactNode, waveform?: string) {
-    if (!snapshot.src || Number.isFinite(snapshot.duration) && snapshot.currentTime >= snapshot.duration - 0.25) return;
+    if (!shouldTrack(kind) || !snapshot.src || Number.isFinite(snapshot.duration) && snapshot.currentTime >= snapshot.duration - 0.25) return;
 
     if (settings.store.showWidget && renderNativePlayer) {
         continueNativeDetached(kind, snapshot, renderNativePlayer, waveform);
@@ -235,7 +236,9 @@ function continueCustomDetached(kind: AudioKeeperProps["kind"], snapshot: AudioS
     audio.playbackRate = snapshot.playbackRate;
 
     const updateWidget = () => notifyWidget();
-    const cleanup = () => stopDetached(snapshot.src);
+    const cleanup = () => {
+        if (detachedPlayers.get(snapshot.src)?.audio === audio) stopDetached(snapshot.src);
+    };
     const removeListeners = () => {
         audio.removeEventListener("play", updateWidget);
         audio.removeEventListener("pause", updateWidget);
@@ -272,7 +275,7 @@ function continueCustomDetached(kind: AudioKeeperProps["kind"], snapshot: AudioS
     notifyWidget();
 
     audio.play().then(() => {
-        if (settings.store.showToast) {
+        if (detachedPlayers.get(snapshot.src)?.audio === audio && settings.store.showToast) {
             showToast("Continuing audio playback in the background.", Toasts.Type.MESSAGE);
         }
     }).catch(cleanup);
@@ -326,7 +329,7 @@ function formatDuration(seconds: number) {
 
 function seek(player: CustomDetachedPlayer, delta: number) {
     const { audio } = player;
-    const duration = Number.isFinite(audio.duration) ? audio.duration : audio.currentTime + delta;
+    const duration = Number.isFinite(audio.duration) ? Math.max(0, audio.duration) : Infinity;
     audio.currentTime = Math.min(Math.max(audio.currentTime + delta, 0), duration);
     notifyWidget();
 }
@@ -359,7 +362,9 @@ function setVolume(player: CustomDetachedPlayer, value: string) {
 
 function togglePlayback(player: CustomDetachedPlayer) {
     if (player.audio.paused) {
-        void player.audio.play().catch(() => stopDetached(player.src));
+        void player.audio.play().catch(() => {
+            if (detachedPlayers.get(player.src) === player) stopDetached(player.src);
+        });
         return;
     }
 
@@ -421,7 +426,11 @@ function DetachedAudioWidget() {
         if (!widget) return;
 
         const rect = widget.getBoundingClientRect();
-        setPosition(current => current ? clampWidgetPosition(current, rect.width, rect.height) : current);
+        setPosition(current => {
+            if (!current) return current;
+            const next = clampWidgetPosition(current, rect.width, rect.height);
+            return next.left === current.left && next.top === current.top ? current : next;
+        });
     }, []);
 
     React.useEffect(() => {
@@ -446,10 +455,14 @@ function DetachedAudioWidget() {
 
         document.addEventListener("pointermove", onPointerMove);
         document.addEventListener("pointerup", onPointerUp);
+        document.addEventListener("pointercancel", onPointerUp);
+        window.addEventListener("blur", onPointerUp);
 
         return () => {
             document.removeEventListener("pointermove", onPointerMove);
             document.removeEventListener("pointerup", onPointerUp);
+            document.removeEventListener("pointercancel", onPointerUp);
+            window.removeEventListener("blur", onPointerUp);
         };
     }, []);
 
@@ -520,10 +533,13 @@ function NativeDetachedPlayerControls({ player }: { player: NativeDetachedPlayer
         let attachAttempts = 0;
 
         const updateWidget = () => {
+            if (detachedPlayers.get(player.src) !== player) return;
             if (audio) player.snapshot = capture(audio);
             notifyWidget();
         };
-        const cleanup = () => stopDetached(player.src);
+        const cleanup = () => {
+            if (detachedPlayers.get(player.src) === player) stopDetached(player.src);
+        };
         const removeListeners = () => {
             if (!audio) return;
 
@@ -538,11 +554,12 @@ function NativeDetachedPlayerControls({ player }: { player: NativeDetachedPlayer
         };
 
         const attach = () => {
+            if (detachedPlayers.get(player.src) !== player) return;
             audio = nativeUiRef.current?.querySelector<HTMLAudioElement>("audio") ?? null;
 
             if (!audio) {
                 if (++attachAttempts > maxAudioAttachFrames) {
-                    stopDetached(player.src);
+                    cleanup();
                     return;
                 }
 
@@ -868,7 +885,12 @@ export default definePlugin({
         },
     ],
 
+    start() {
+        active = true;
+    },
+
     stop() {
+        active = false;
         stopAllDetached();
         unmountWidgetRoot();
         widgetSubscribers.clear();
@@ -883,7 +905,7 @@ export default definePlugin({
         const voiceProps = typeof props === "string" ? { src: props } : props;
         const NativeVoiceMessageComponent = NativeVoiceMessage;
 
-        if (!voiceProps?.src || voiceProps.__vcPersistentAudioDetached) return null;
+        if (!active || !voiceProps?.src || voiceProps.__vcPersistentAudioDetached) return null;
 
         return (
             <AudioKeeper
@@ -896,7 +918,7 @@ export default definePlugin({
     },
 
     renderAudioKeeper(player: AudioPlayerInstance) {
-        if (player.props.type !== "AUDIO") return null;
+        if (!active || player.props.type !== "AUDIO") return null;
         return (
             <AudioKeeper
                 kind="audio"

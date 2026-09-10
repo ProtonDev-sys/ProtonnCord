@@ -11,12 +11,12 @@ import { decompressFrames, parseGIF } from "gifuct-js";
 
 import { CAPTIONS } from "../captions";
 import { measureTextLines } from "../captions/caption";
+import { loadGoogleFont } from "../fonts";
 import type { GifMakerOptions } from "../types";
 
 const MAX_FRAMES = 200;
 const INTERNAL_FPS = 30;
 const PALETTE_COLORS = 255;
-const MAX_GIF_SCAN_BYTES = 524288; // 512KB
 
 const ALLOWED_MEDIA_HOSTS = new Set([
     "cdn.discordapp.com",
@@ -62,6 +62,7 @@ async function getMediaBlobUrl(url: string): Promise<string> {
         if (data) return URL.createObjectURL(new Blob([data], { type }));
     }
     const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
     const blob = await res.blob();
     return URL.createObjectURL(blob);
 }
@@ -90,7 +91,10 @@ export function loadImage(url: string): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error(`Failed to load image: ${url}`));
+        img.onerror = () => {
+            cleanupBlobUrl(img);
+            reject(new Error("Failed to load image"));
+        };
         img.crossOrigin = "anonymous";
 
         const resolved = resolveMediaUrl(url);
@@ -137,6 +141,9 @@ export function loadVideo(url: string): Promise<HTMLVideoElement> {
             createVideoElement(blobUrl).then(video => {
                 blobUrlMap.set(video, blobUrl);
                 return video;
+            }, error => {
+                URL.revokeObjectURL(blobUrl);
+                throw error;
             })
         );
     }
@@ -171,7 +178,7 @@ async function encodeFrames(
 ): Promise<Blob> {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return new Blob();
+    if (!ctx) throw new Error("Failed to get canvas context for GIF encoding.");
     const captionHeight = getCaptionHeight(ctx, width, options);
     const gifHeight = height + captionHeight;
     canvas.width = width;
@@ -238,7 +245,7 @@ async function createGifFromVideo(url: string, options: GifMakerOptions): Promis
     try {
         const { duration } = video;
         const frameCount = Math.min(
-            Math.floor(duration * INTERNAL_FPS),
+            Math.max(1, Math.floor(duration * INTERNAL_FPS)),
             MAX_FRAMES
         );
 
@@ -256,13 +263,6 @@ async function createGifFromVideo(url: string, options: GifMakerOptions): Promis
     }
 }
 
-export interface SourceFrameInfo {
-    fps?: number;
-    frameCount?: number;
-    frameWidth: number;
-    frameHeight: number;
-}
-
 function hasExt(url: string, ext: string): boolean {
     try {
         const normalized = url.startsWith("//") ? `https:${url}` : url;
@@ -276,14 +276,11 @@ function hasExt(url: string, ext: string): boolean {
     }
 }
 
-export async function getSourceFrameInfo(url: string, isVideo: boolean): Promise<SourceFrameInfo | null> {
-    if (isVideo) return getVideoSourceInfo(url);
-    if (hasExt(url, ".gif")) return getGifInfo(url);
-    if (hasExt(url, ".webp")) return getWebpInfo(url);
-    return null;
-}
-
 export async function createGif(url: string, isVideo: boolean, options: GifMakerOptions): Promise<Blob> {
+    if (![options.width, options.height].every(value => Number.isSafeInteger(value) && value > 0 && value <= 8192)) {
+        throw new Error("GIF dimensions must be whole numbers between 1 and 8192.");
+    }
+    if (options.captionMode === "caption") await loadGoogleFont(options.fontFamily);
     if (isVideo) return createGifFromVideo(url, options);
     if (hasExt(url, ".gif")) {
         try {
@@ -295,178 +292,6 @@ export async function createGif(url: string, isVideo: boolean, options: GifMaker
         }
     }
     return createGifFromImage(url, options);
-}
-
-export function parseGifBytes(bytes: Uint8Array): SourceFrameInfo | null {
-    if (bytes[0] !== 0x47 || bytes[1] !== 0x49 || bytes[2] !== 0x46) return null;
-
-    const frameWidth = bytes[6] | (bytes[7] << 8);
-    const frameHeight = bytes[8] | (bytes[9] << 8);
-
-    let frameCount = 0;
-    let totalDelay = 0;
-    let delayCount = 0;
-
-    const scanLimit = Math.min(bytes.length, MAX_GIF_SCAN_BYTES);
-    for (let i = 0; i < scanLimit - 8; i++) {
-        if (bytes[i] === 0x2C) {
-            frameCount++;
-            if (frameCount > MAX_FRAMES) break;
-        }
-        if (bytes[i] === 0x21 && bytes[i + 1] === 0xF9 && bytes[i + 2] === 0x04) {
-            const delay = bytes[i + 4] | (bytes[i + 5] << 8);
-            if (delay > 0) {
-                totalDelay += delay;
-                delayCount++;
-            }
-        }
-    }
-
-    if (frameCount > 1 && delayCount > 0) {
-        const avgFps = Math.round(100 / (totalDelay / delayCount));
-        return { fps: Math.max(1, Math.min(60, avgFps)), frameCount, frameWidth, frameHeight };
-    }
-    return null;
-}
-
-export async function getGifInfo(url: string): Promise<SourceFrameInfo | null> {
-    try {
-        const resolved = resolveMediaUrl(url);
-
-        let bytes: Uint8Array;
-
-        if (MediaNative) {
-            const { data } = await MediaNative.fetchMedia(resolved);
-            bytes = new Uint8Array(data);
-        } else {
-            bytes = await fetchGifBytes(resolved);
-        }
-
-        return parseGifBytes(bytes);
-    } catch {
-        return null;
-    }
-}
-
-async function fetchGifBytes(url: string): Promise<Uint8Array> {
-    const res = await fetch(url, {
-        headers: { Range: `bytes=0-${MAX_GIF_SCAN_BYTES}` }
-    });
-    if (res.ok) {
-        return new Uint8Array(await res.arrayBuffer());
-    }
-
-    const full = await fetch(url);
-    if (!full.ok) throw new Error(`fetch failed: ${full.status}`);
-    const reader = full.body?.getReader();
-    if (!reader) return new Uint8Array(await full.arrayBuffer()).slice(0, MAX_GIF_SCAN_BYTES);
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    while (total < MAX_GIF_SCAN_BYTES) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        total += value.length;
-    }
-    reader.cancel();
-    const combined = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-        combined.set(chunk, offset);
-        offset += chunk.length;
-    }
-    return combined;
-}
-
-async function getWebpInfo(url: string): Promise<SourceFrameInfo | null> {
-    if (!MediaNative) return null;
-    try {
-        const resolved = resolveMediaUrl(url);
-        const { data } = await MediaNative.fetchMedia(resolved);
-        const bytes = new Uint8Array(data);
-
-        if (bytes[0] !== 0x52 || bytes[1] !== 0x49 || bytes[2] !== 0x46 || bytes[3] !== 0x46 ||
-            bytes[8] !== 0x57 || bytes[9] !== 0x45 || bytes[10] !== 0x42 || bytes[11] !== 0x50) {
-            return null;
-        }
-
-        let hasAnimation = false;
-        let canvasWidth = 0;
-        let canvasHeight = 0;
-        let frameCount = 0;
-        let totalDelay = 0;
-        let delayCount = 0;
-
-        let offset = 12;
-        while (offset + 8 <= bytes.length) {
-            const chunkSize = bytes[offset + 4] | (bytes[offset + 5] << 8) | (bytes[offset + 6] << 16) | (bytes[offset + 7] << 24);
-            const fourCC = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
-
-            if (fourCC === "VP8X" && offset + 18 <= bytes.length) {
-                hasAnimation = !!(bytes[offset + 8] & 0x02);
-                canvasWidth = ((bytes[offset + 12] | (bytes[offset + 13] << 8) | (bytes[offset + 14] << 16)) & 0xFFFFFF) + 1;
-                canvasHeight = ((bytes[offset + 15] | (bytes[offset + 16] << 8) | (bytes[offset + 17] << 16)) & 0xFFFFFF) + 1;
-            } else if (fourCC === "ANMF" && offset + 23 <= bytes.length) {
-                frameCount++;
-                const delayMs = bytes[offset + 20] | (bytes[offset + 21] << 8) | (bytes[offset + 22] << 16);
-                if (delayMs > 0) {
-                    totalDelay += delayMs;
-                    delayCount++;
-                }
-            }
-
-            offset += 8 + chunkSize;
-            if (chunkSize % 2 === 1) offset++;
-        }
-
-        if (hasAnimation && frameCount > 1 && delayCount > 0) {
-            const avgFps = Math.round(1000 / (totalDelay / delayCount));
-            return { fps: Math.max(1, Math.min(60, avgFps)), frameCount, frameWidth: canvasWidth, frameHeight: canvasHeight };
-        }
-        return null;
-    } catch {
-        return null;
-    }
-}
-
-async function getVideoSourceInfo(url: string): Promise<SourceFrameInfo | null> {
-    try {
-        const resolved = resolveMediaUrl(url);
-        let src: string;
-        let needsCleanup = false;
-
-        if (isDiscordCdnUrl(resolved)) {
-            src = await getMediaBlobUrl(resolved);
-            needsCleanup = true;
-        } else {
-            src = resolved;
-        }
-
-        return new Promise(resolve => {
-            const v = document.createElement("video");
-            v.preload = "metadata";
-            v.muted = true;
-            v.crossOrigin = "anonymous";
-
-            v.addEventListener("loadedmetadata", () => {
-                const info: SourceFrameInfo = { frameWidth: v.videoWidth, frameHeight: v.videoHeight };
-                if (needsCleanup) URL.revokeObjectURL(src);
-                v.remove();
-                resolve(info);
-            }, { once: true });
-
-            v.addEventListener("error", () => {
-                if (needsCleanup) URL.revokeObjectURL(src);
-                v.remove();
-                resolve(null);
-            }, { once: true });
-
-            v.src = src;
-            v.load();
-        });
-    } catch {
-        return null;
-    }
 }
 
 async function createGifFromAnimatedImage(url: string, options: GifMakerOptions): Promise<Blob> {

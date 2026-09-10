@@ -7,12 +7,14 @@
 import { generateId } from "@api/Commands";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { classNameFactory } from "@utils/css";
+import { Logger } from "@utils/Logger";
 import { LazyComponent } from "@utils/react";
 import type { Message, MessageAttachment } from "@vencord/discord-types";
 import { find, findByCodeLazy } from "@webpack";
-import { moment, SelectedChannelStore, useEffect, useMemo, useRef, UserStore, useState } from "@webpack/common";
+import { moment, SelectedChannelStore, useEffect, useMemo, UserStore, useState } from "@webpack/common";
 
 const cl = classNameFactory("vc-cmdpal-");
+const logger = new Logger("CommandPalette");
 
 const createBotMessage = findByCodeLazy('username:"Clyde"');
 const populateMessagePrototype = findByCodeLazy("isProbablyAValidSnowflake", "messageReference:");
@@ -26,18 +28,30 @@ const MessagePreview = LazyComponent<{
     hideSimpleEmbedContent: boolean;
 }>(() => find(m => m?.type?.toString().includes("previewLinkTarget:") && !m?.type?.toString().includes("HAS_THREAD")));
 
-function getImageBox(url: string): Promise<{ width: number; height: number; } | null> {
+function getImageBox(url: string, signal: AbortSignal): Promise<{ width: number; height: number; } | null> {
     return new Promise(resolve => {
         const img = new Image();
-        img.onload = () => resolve({ width: img.width, height: img.height });
-        img.onerror = () => resolve(null);
+        const finish = (box: { width: number; height: number; } | null) => {
+            img.onload = img.onerror = null;
+            signal.removeEventListener("abort", cancel);
+            resolve(box);
+        };
+        const cancel = () => {
+            finish(null);
+            img.removeAttribute("src");
+        };
+        if (signal.aborted) return cancel();
+        signal.addEventListener("abort", cancel, { once: true });
+        img.onload = () => finish({ width: img.width, height: img.height });
+        img.onerror = () => finish(null);
         img.src = url;
     });
 }
 
-async function buildAttachments(files: File[]): Promise<MessageAttachment[]> {
+async function buildAttachments(files: File[], urls: Set<string>, signal: AbortSignal): Promise<MessageAttachment[]> {
     return Promise.all(files.map(async file => {
         const url = URL.createObjectURL(file);
+        urls.add(url);
         const attachment: MessageAttachment = {
             id: generateId(),
             filename: file.name,
@@ -49,7 +63,7 @@ async function buildAttachments(files: File[]): Promise<MessageAttachment[]> {
         };
 
         if (file.type.startsWith("image/")) {
-            const box = await getImageBox(url);
+            const box = await getImageBox(url, signal);
             if (box) {
                 attachment.width = box.width;
                 attachment.height = box.height;
@@ -68,41 +82,28 @@ export function MessageMarkdownPreview({ content, channelId, files }: {
     files?: File[];
 }) {
     const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
-    const attachmentsRef = useRef(attachments);
-    attachmentsRef.current = attachments;
 
     useEffect(() => {
-        if (!files?.length) {
-            setAttachments(prev => {
-                for (const attachment of prev) {
-                    URL.revokeObjectURL(attachment.url.replace(/#$/, ""));
-                }
-                return [];
-            });
-            return;
-        }
-
+        setAttachments([]);
+        if (!files?.length) return;
         let cancelled = false;
-        void buildAttachments(files).then(next => {
-            if (cancelled) {
-                for (const attachment of next) {
-                    URL.revokeObjectURL(attachment.url.replace(/#$/, ""));
-                }
-                return;
-            }
-            setAttachments(prev => {
-                for (const attachment of prev) {
-                    URL.revokeObjectURL(attachment.url.replace(/#$/, ""));
-                }
-                return next;
-            });
+        const controller = new AbortController();
+        const urls = new Set<string>();
+        const release = () => {
+            controller.abort();
+            for (const url of urls) URL.revokeObjectURL(url);
+            urls.clear();
+        };
+        buildAttachments(files, urls, controller.signal).then(next => {
+            if (!cancelled) setAttachments(next);
+        }).catch(error => {
+            release();
+            if (!cancelled) logger.error("Failed to build attachment previews", error);
         });
 
         return () => {
             cancelled = true;
-            for (const attachment of attachmentsRef.current) {
-                URL.revokeObjectURL(attachment.url.replace(/#$/, ""));
-            }
+            release();
         };
     }, [files]);
 
@@ -123,6 +124,7 @@ export function MessageMarkdownPreview({ content, channelId, files }: {
     if (!message && attachments.length === 0) return null;
 
     const user = UserStore.getCurrentUser();
+    if (!user) return null;
     const author = { ...user, nick: user.globalName || user.username };
 
     return (

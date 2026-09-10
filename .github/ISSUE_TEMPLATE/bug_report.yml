@@ -1,5 +1,5 @@
 name: Bug/Crash Report
-description: Create a bug or crash report for Equicord.
+description: Create a bug or crash report for Protonn Cord.
 labels: [bug]
 title: "[Bug] <title>"
 
@@ -7,16 +7,17 @@ body:
     - type: markdown
       attributes:
           value: |
-              GitHub Issues are for development, not support!
+              Report Protonn Cord issues here, including broken plugins. Search existing issues first.
+              Include the plugin name and the steps needed to reproduce the problem.
+              Remove tokens, private message content, and other personal data from any logs you share.
 
-              Some plugins may sometimes break, but we have automatic tracking for that. So please **do not report broken plugins**, it is useless.
-              However, if a plugin works fine, but has a bug in its functionality, then you can report that here.
-
-              If you are experiencing any of the following issues, go to our [Discord server](https://equicord.org/discord) for support:
-              - Equicord doesn't work or crashes
-              - A plugin doesn't work anymore
-              - You are having issues installing Equicord
-              - You want to ask a question about Equicord or one of its plugins
+    - type: textarea
+      id: build-details
+      attributes:
+          label: Build and environment
+          description: Include your Protonn Cord version/commit and update branch, Discord version/channel, operating system, and installation method.
+      validations:
+          required: true
 
     - type: textarea
       id: bug-description
@@ -32,7 +33,7 @@ body:
       attributes:
           label: What is the expected behaviour?
           description: Simply detail what the expected behaviour is.
-          placeholder: I expect Equicord/Discord to open the ... page instead of ..., it prevents me from doing ...
+          placeholder: I expect Protonn Cord/Discord to open the ... page instead of ..., it prevents me from doing ...
       validations:
           required: true
 
@@ -65,10 +66,9 @@ body:
       id: agreement-check
       attributes:
           label: Request Agreement
-          description: We only accept reports for bugs that happen on Discord Stable. Canary and PTB are Development branches and may be unstable
+          description: State which Discord channel is affected and whether you could also reproduce it on Stable.
           options:
               - label: I've searched existing issues and this hasn't been reported before
               - label: I am using Discord Stable or tried on Stable and this bug happens there as well
-              - label: I installed Equicord via an official method (download from equicord.org or from source), not via something like AUR or Nix packages
-              - label: This is not a support request
+              - label: I have included my Protonn Cord build and installation details
               - label: I am willing to submit a fix for this myself

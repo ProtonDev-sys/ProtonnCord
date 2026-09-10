@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { Dirent, readdirSync, readFileSync, writeFileSync } from "fs";
+import { Dirent, readFileSync } from "fs";
 import { access, readFile } from "fs/promises";
 import { join, sep } from "path";
 import { normalize as posixNormalize, sep as posixSep } from "path/posix";
@@ -204,7 +204,10 @@ export async function parseFile(fileName: string) {
                     if (!isArrayLiteralExpression(value)) throw fail("authors is not an array literal");
                     data.authors = value.elements.map(e => {
                         if (!isPropertyAccessExpression(e)) throw fail("authors array contains non-property access expressions");
-                        const d = devs[getName(e)!] || equicordDevs[getName(e)!];
+                        const catalog = isIdentifier(e.expression) && e.expression.text === "Devs" ? devs
+                            : isIdentifier(e.expression) && e.expression.text === "EquicordDevs" ? equicordDevs
+                                : undefined;
+                        const d = catalog?.[getName(e)!];
                         if (!d) throw fail(`couldn't look up author ${getName(e)}`);
                         return d;
                     });

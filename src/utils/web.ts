@@ -22,15 +22,19 @@
  */
 export function saveFile(file: File) {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(file);
-    a.download = file.name;
+    const url = URL.createObjectURL(file);
+    try {
+        a.href = url;
+        a.download = file.name;
 
-    document.body.appendChild(a);
-    a.click();
-    setImmediate(() => {
-        URL.revokeObjectURL(a.href);
-        document.body.removeChild(a);
-    });
+        document.body.appendChild(a);
+        a.click();
+    } finally {
+        setImmediate(() => {
+            URL.revokeObjectURL(url);
+            a.remove();
+        });
+    }
 }
 
 /**
@@ -44,14 +48,18 @@ export function chooseFile(mimeTypes: string) {
         input.type = "file";
         input.style.display = "none";
         input.accept = mimeTypes;
-        input.oncancel = () => resolve(null);
-        input.onchange = () => {
+        input.onchange = input.oncancel = () => {
             resolve(input.files?.[0] ?? null);
+            input.remove();
         };
 
-        document.body.appendChild(input);
-        input.click();
-        setImmediate(() => document.body.removeChild(input));
+        try {
+            document.body.appendChild(input);
+            input.click();
+        } catch (error) {
+            input.remove();
+            throw error;
+        }
     });
 }
 

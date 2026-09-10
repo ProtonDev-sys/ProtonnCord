@@ -16,25 +16,26 @@ import { NameFormat, ServiceTab } from "./types";
 type SettingsKey = keyof SettingsStore;
 
 function SwitchSetting({ name, description, settingsKey }: { name: string; description: string; settingsKey: SettingsKey; }) {
-    const [value, setValue] = useState(settings.store[settingsKey] ?? false);
+    const value = settings.use([settingsKey])[settingsKey] ?? false;
     return (
         <SettingsSection tag="label" inlineSetting id={name} name={name} description={description}>
             <Switch
                 checked={Boolean(value)}
-                onChange={v => { setValue(v); (settings.store[settingsKey] as boolean) = v; }}
+                onChange={v => { (settings.store[settingsKey] as boolean) = v; }}
             />
         </SettingsSection>
     );
 }
 
 function TextSetting({ name, description, settingsKey, placeholder }: { name: string; description: string; settingsKey: SettingsKey; placeholder?: string; }) {
-    const [value, setValue] = useState(settings.store[settingsKey] ?? "");
+    const value = settings.use([settingsKey])[settingsKey] ?? "";
+    const secret = ["abs_password", "jf_apiKey", "nd_password", "nd_lastfmApiKey"].includes(settingsKey);
     return (
         <SettingsSection id={name} name={name} description={description}>
             <TextInput
-                type="text"
+                type={secret ? "password" : "text"}
                 value={String(value)}
-                onChange={v => { setValue(v); (settings.store[settingsKey] as string) = v; }}
+                onChange={v => { (settings.store[settingsKey] as string) = v; }}
                 placeholder={placeholder ?? "Enter a value"}
             />
         </SettingsSection>
@@ -42,13 +43,13 @@ function TextSetting({ name, description, settingsKey, placeholder }: { name: st
 }
 
 function SelectSetting({ name, description, settingsKey, options }: { name: string; description: string; settingsKey: SettingsKey; options: { label: string; value: string | number; }[]; }) {
-    const [value, setValue] = useState(settings.store[settingsKey] ?? options[0]?.value);
+    const value = settings.use([settingsKey])[settingsKey] ?? options[0]?.value;
     return (
         <SettingsSection id={name} name={name} description={description}>
             <Select
                 options={options}
                 isSelected={v => v === value}
-                select={v => { setValue(v); (settings.store[settingsKey] as string) = v; }}
+                select={v => { (settings.store[settingsKey] as string | number) = v; }}
                 serialize={String}
                 closeOnSelect
                 maxVisibleItems={5}

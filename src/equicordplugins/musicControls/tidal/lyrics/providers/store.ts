@@ -27,23 +27,33 @@ export const TidalLrcStore = proxyLazyWebpack(() => {
     let lyrics: EnhancedLyric[] | null = null;
     let lastTrackId: string | null = null;
     let fetchGeneration = 0;
+    let active = false;
 
     class TidalLrcStore extends Flux.Store {
-        init() { }
+        init() {
+            if (active) return;
+            active = true;
+            TidalStore.init();
+            TidalStore.addChangeListener(handleTidalStoreChange);
+            handleTidalStoreChange();
+        }
         get lyrics() {
             return lyrics;
         }
 
         destroy() {
+            active = false;
             fetchGeneration++;
             lastTrackId = null;
             lyrics = null;
             TidalStore.removeChangeListener(handleTidalStoreChange);
+            this.emitChange();
         }
     }
 
     const store = new TidalLrcStore(FluxDispatcher);
     function handleTidalStoreChange() {
+        if (!active) return;
         const { track } = TidalStore;
         if (!track?.id) {
             fetchGeneration++;
@@ -72,8 +82,6 @@ export const TidalLrcStore = proxyLazyWebpack(() => {
                 store.emitChange();
             });
     }
-
-    TidalStore.addChangeListener(handleTidalStoreChange);
 
     return store;
 });

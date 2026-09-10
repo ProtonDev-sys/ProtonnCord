@@ -28,20 +28,20 @@ export default definePlugin({
 
     async start() {
         const generation = ++this.startGeneration;
+        const data = (this.dataManager = new Data().withStart());
+
+        await data.initializeUsersCollection();
+        if (generation !== this.startGeneration) {
+            await data.stop();
+            return;
+        }
+
         SettingsPlugin.customEntries.push({
             key: "equicord_i_remember_you",
             title: "I Remember You",
             Component: () => <DataUI usersCollection={data.usersCollection} />,
             Icon: EyeIcon
         });
-
-        const data = (this.dataManager = await new Data().withStart());
-
-        await data.initializeUsersCollection();
-        if (generation !== this.startGeneration) {
-            data.stop();
-            return;
-        }
 
         data.writeGuildsOwnersToCollection();
         data.writeMembersFromUserGuildsToCollection();
@@ -61,7 +61,7 @@ export default definePlugin({
         if (dataManager._onMessagePreSend_preSend) {
             removeMessagePreSendListener(dataManager._onMessagePreSend_preSend);
         }
-        dataManager.stop();
         this.dataManager = undefined;
+        return dataManager.stop();
     },
 });

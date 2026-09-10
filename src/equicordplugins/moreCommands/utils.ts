@@ -7,7 +7,7 @@
 import { definePluginSettings } from "@api/Settings";
 import { OptionType } from "@utils/types";
 import { CommandArgument, CommandContext } from "@vencord/discord-types";
-import { DraftType, UploadAttachmentStore, UploadManager, UserSettingsActionCreators } from "@webpack/common";
+import { DraftType, UploadAttachmentStore, UserSettingsActionCreators } from "@webpack/common";
 
 export const settings = definePluginSettings({
     addFreakyEnding: {
@@ -35,14 +35,17 @@ export function rand(min, max) {
 
 export async function getCuteAnimeBoys(sub: string) {
     const res = await fetch(`https://www.reddit.com/r/${sub}/top.json?limit=100&t=all`);
-    const { children } = (await res.json()).data;
+    if (!res.ok) throw new Error("Could not load an image");
+    const children = (await res.json()).data?.children;
+    if (!Array.isArray(children) || children.length === 0) throw new Error("No images are available");
     const r = rand(0, children.length - 1);
     return children[r].data.url ?? "";
 }
 
 export async function getCuteNeko(): Promise<string> {
     const res = await fetch("https://nekos.best/api/v2/neko");
-    const url = (await res.json()).results[0].url as string | null;
+    if (!res.ok) throw new Error("Could not load an image");
+    const url = (await res.json()).results?.[0]?.url as string | null;
     return url ?? "";
 }
 
@@ -201,7 +204,7 @@ export function uwuify(message: string): string {
     if (words === null) return "";
 
     for (let i = 0; i < words.length; i++) {
-        if (isOneCharacterString(words[i]) || words[i].startsWith("https://")) {
+        if (isOneCharacterString(words[i]) || /^https?:\/\//i.test(words[i])) {
             answer += words[i];
             continue;
         }
@@ -235,10 +238,10 @@ export function uwuifyArray(arr) {
 
 export function getFavoriteGif(opts: CommandArgument[], other: CommandContext) {
     const frecencyStore = UserSettingsActionCreators.FrecencyUserSettingsActionCreators.getCurrentValue();
-    const gifsArray = Object.keys(frecencyStore.favoriteGifs.gifs);
+    const gifsArray = Object.keys(frecencyStore?.favoriteGifs?.gifs ?? {});
     const chosenGifUrl = gifsArray[Math.floor(Math.random() * gifsArray.length)];
 
-    return `${chosenGifUrl}`;
+    return chosenGifUrl ?? "";
 }
 
 export function calculateAffinityScore(affinity): number {
@@ -359,7 +362,7 @@ export function calculateCanvasSize(userCount: number, avatarSize: number): { wi
     const itemHeight = avatarSize + textSpace + padding;
     const aspectRatio = 16 / 9;
     const cols = Math.ceil(Math.sqrt(userCount * aspectRatio));
-    const rows = Math.ceil(userCount / cols);
+    const rows = cols > 0 ? Math.ceil(userCount / cols) : 0;
 
     return {
         width: Math.max(1000, cols * itemWidth + padding),
@@ -392,10 +395,11 @@ export function loadImage(source: File | string) {
     });
 }
 
-export async function resolveImage(options: CommandArgument[], ctx: CommandContext): Promise<{ image: File | null; width: number | null; height: number | null; }> {
+export async function resolveImage(options: CommandArgument[], ctx: CommandContext): Promise<{ image: File | null; width: number | null; height: number | null; clearInput(): void; }> {
     let image: File | null = null;
     let width: number | null = null;
     let height: number | null = null;
+    let clearInput = () => { };
 
     for (const opt of options) {
         switch (opt.name) {
@@ -403,10 +407,13 @@ export async function resolveImage(options: CommandArgument[], ctx: CommandConte
                 const upload = UploadAttachmentStore.getUpload(ctx.channel.id, opt.name, DraftType.SlashCommand);
                 if (upload) {
                     if (!upload.isImage) {
-                        UploadManager.clearAll(ctx.channel.id, DraftType.SlashCommand);
                         throw "Upload is not an image";
                     }
                     image = upload.item.file;
+                    clearInput = () => {
+                        if (UploadAttachmentStore.getUpload(ctx.channel.id, opt.name, DraftType.SlashCommand) === upload)
+                            upload.removeFromMsgDraft();
+                    };
                 }
                 break;
             case "width":
@@ -418,6 +425,5 @@ export async function resolveImage(options: CommandArgument[], ctx: CommandConte
         }
     }
 
-    UploadManager.clearAll(ctx.channel.id, DraftType.SlashCommand);
-    return { image, width, height };
+    return { image, width, height, clearInput };
 }

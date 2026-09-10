@@ -11,7 +11,7 @@ export function createAndAppendStyle(id: string, target: HTMLElement) {
     return style;
 }
 
-export const classNameToSelector = (name: string, prefix = "") => name.split(" ").map(n => `.${prefix}${n}`).join("");
+export const classNameToSelector = (name: string, prefix = "") => name.trim().split(/\s+/).filter(Boolean).map(n => `.${prefix}${n}`).join("");
 
 export type ClassNameFactoryArg = string | string[] | Record<string, unknown> | false | null | undefined | 0 | "";
 

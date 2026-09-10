@@ -469,8 +469,11 @@ async function testNativeHandler(root: string) {
     for (const [name, handler] of Object.entries(native)) {
         assert.equal(typeof handler, "function", `native export ${name} must be an IPC handler function`);
     }
-    assert.equal((await native.getSettingsNative(DISCORD_EVENT)).attachmentFileExtensions, "png,jpg,jpeg,gif,webp,mp4,webm,mp3,ogg,wav",
-        "oversized persisted settings must be rejected and replaced with bounded defaults");
+    await assert.rejects(native.getSettingsNative(DISCORD_EVENT), /safe size/iu,
+        "oversized persisted settings must be rejected without replacing the original file");
+    assert.deepEqual(readFileSync(path.join(loggerDataDir, "mlSettings.json")), Buffer.alloc(64 * 1024 + 1, 0x20));
+    await writeFile(path.join(loggerDataDir, "mlSettings.json"), "{}");
+    assert.equal((await native.getSettingsNative(DISCORD_EVENT)).attachmentFileExtensions, "png,jpg,jpeg,gif,webp,mp4,webm,mp3,ogg,wav");
     await native.updateAttachmentSizeLimit(DISCORD_EVENT, 1);
     await native.updateAllowedExtensions(DISCORD_EVENT, "png,jpg");
     await native.init(DISCORD_EVENT);

@@ -63,10 +63,10 @@ function releaseHash(name: unknown): string {
     return hash;
 }
 
-function parseRelease(value: unknown, currentHash: string, asarFile: string): ReleaseState {
+function parseRelease(value: unknown, currentHash: string, asarFile: string, force = false): ReleaseState {
     const release = record(value);
     const hash = releaseHash(release?.name);
-    if (hash.toLowerCase() === currentHash.toLowerCase()) return { hash, pending: null };
+    if (!force && hash.toLowerCase() === currentHash.toLowerCase()) return { hash, pending: null };
 
     if (!Array.isArray(release?.assets))
         throw new Error(`The latest Protonn Cord release is missing ${asarFile}`);
@@ -134,8 +134,9 @@ export async function findHttpUpdate(
     currentHash: string,
     asarFile: string,
     branch: UpdaterBranch = "main",
+    force = false,
 ): Promise<PendingHttpUpdate | null> {
-    return parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile).pending;
+    return parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile, force).pending;
 }
 
 export async function requestBytes(

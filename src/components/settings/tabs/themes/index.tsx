@@ -17,8 +17,8 @@ import { classNameFactory } from "@utils/css";
 import { copyWithToast } from "@utils/discord";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
-import { getStylusWebStoreUrl } from "@utils/web";
-import { React, Select, showToast, TextInput, Toasts, useEffect, useMemo, useRef, useState } from "@webpack/common";
+import { getStylusWebStoreUrl, saveFile } from "@utils/web";
+import { React, Select, showToast, TextInput, Toasts, useEffect, useRef, useState } from "@webpack/common";
 import { SyntheticEvent } from "react";
 
 import { OnlineThemesSection } from "./OnlineThemes";
@@ -79,30 +79,45 @@ interface UnifiedTheme {
 }
 
 function ThemesTab() {
-    const settings = useSettings(["themeLinks", "enabledThemeLinks", "enabledThemes", "enableOnlineThemes", "pinnedThemes", "themeActivationModes.*"]);
+    const settings = useSettings(["themeLinks", "enabledThemeLinks", "enabledThemes", "enableOnlineThemes", "pinnedThemes", "themeActivationModes.*", "themeNames.*"]);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [currentThemeLink, setCurrentThemeLink] = useState("");
     const [themeLinkValid, setThemeLinkValid] = useState(false);
     const [userThemes, setUserThemes] = useState<UserThemeHeader[] | null>(null);
     const [onlineThemes, setOnlineThemes] = useState<(UserThemeHeader & { link: string; })[] | null>(null);
-    const [themeNames, setThemeNames] = useState<Record<string, string>>(() => {
-        return settings.themeNames ?? {};
-    });
     const [searchQuery, setSearchQuery] = useState("");
     const [filter, setFilter] = useState(ThemeFilter.All);
+    const reads = useRef({ mounted: false, local: 0, online: 0, controller: undefined as AbortController | undefined });
+    const singleRefreshes = useRef(new Map<string, symbol>());
 
     useEffect(() => {
-        void updateThemes();
+        reads.current.mounted = true;
+        void refreshLocalThemes();
+        return () => {
+            reads.current.mounted = false;
+            reads.current.local++;
+            reads.current.online++;
+            reads.current.controller?.abort();
+            singleRefreshes.current.clear();
+        };
     }, []);
 
-    async function updateThemes() {
-        await Promise.allSettled([refreshLocalThemes(), refreshOnlineThemes()]);
-    }
+    useEffect(() => {
+        void refreshOnlineThemes();
+    }, [settings.themeLinks, settings.enableOnlineThemes]);
 
     async function refreshLocalThemes() {
-        const themes = await VencordNative.themes.getThemesList();
-        setUserThemes(themes);
+        const revision = ++reads.current.local;
+        try {
+            const themes = await VencordNative.themes.getThemesList();
+            if (reads.current.mounted && revision === reads.current.local) setUserThemes(themes);
+        } catch {
+            if (reads.current.mounted && revision === reads.current.local) {
+                setUserThemes(previous => previous ?? []);
+                showToast("Could not load local themes.", Toasts.Type.FAILURE);
+            }
+        }
     }
 
     function onLocalThemeChange(fileName: string, value: boolean) {
@@ -115,23 +130,12 @@ function ThemesTab() {
     }
 
     async function doUploadThemes(files: ArrayLike<File>) {
-        const uploads = Array.from(files, file => {
-            const { name } = file;
-            if (!name.endsWith(".css")) return;
-
-            return new Promise<void>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => {
-                    VencordNative.themes.uploadTheme(name, reader.result as string)
-                        .then(resolve)
-                        .catch(reject);
-                };
-                reader.readAsText(file);
-            });
-        });
-
-        await Promise.all(uploads);
-        refreshLocalThemes();
+        const uploads = await Promise.allSettled(Array.from(files)
+            .filter(file => file.name.endsWith(".css"))
+            .map(async file => VencordNative.themes.uploadTheme(file.name, await file.text())));
+        await refreshLocalThemes();
+        if (uploads.some(upload => upload.status === "rejected"))
+            showToast("Some themes could not be uploaded", Toasts.Type.FAILURE);
     }
 
     async function onFileUpload(e: SyntheticEvent<HTMLInputElement>) {
@@ -139,10 +143,12 @@ function ThemesTab() {
         e.preventDefault();
 
         if (!e.currentTarget?.files?.length) return;
-        await doUploadThemes(e.currentTarget.files);
+        const files = Array.from(e.currentTarget.files);
+        e.currentTarget.value = "";
+        await doUploadThemes(files);
     }
 
-    function useDropFile(refreshThemes: Function) {
+    function useDropFile() {
         useEffect(() => {
             const onDragOver = (e: DragEvent) => {
                 if (!e.dataTransfer?.items.length) return;
@@ -154,15 +160,11 @@ function ThemesTab() {
             };
 
             const onDrop = async (e: DragEvent) => {
-                e.preventDefault();
-
                 if (!e.dataTransfer?.files.length) return;
-
-                await doUploadThemes(
-                    Array.from(e.dataTransfer.files).filter(file => file.name.endsWith(".css"))
-                );
-
-                refreshThemes();
+                const files = Array.from(e.dataTransfer.files).filter(file => file.name.endsWith(".css"));
+                if (!files.length) return;
+                e.preventDefault();
+                await doUploadThemes(files);
             };
 
             window.addEventListener("dragover", onDragOver);
@@ -181,28 +183,34 @@ function ThemesTab() {
 
         settings.themeLinks = [...settings.themeLinks, link];
         setCurrentThemeLink("");
-        refreshOnlineThemes();
+        setThemeLinkValid(false);
     }
 
     // This condition is compile time so conditional hook is okay
-    if (IS_WEB) useDropFile(refreshLocalThemes);
+    if (IS_WEB) useDropFile();
 
     async function refreshOnlineThemes() {
+        const revision = ++reads.current.online;
+        reads.current.controller?.abort();
+        const controller = reads.current.controller = new AbortController();
         const themes = await Promise.all(
             settings.themeLinks.map(async link => {
+                const fallback = { ...getThemeInfo("", link), link };
+                if (settings.enableOnlineThemes === false) return fallback;
                 try {
-                    const res = await fetch(link);
+                    const res = await fetch(link, { signal: controller.signal });
                     if (!res.ok) throw new Error(`Failed to fetch ${link}`);
                     const css = await res.text();
-                    inferAndStoreThemeActivationMode(link, css);
+                    if (reads.current.mounted && revision === reads.current.online && settings.themeLinks.includes(link))
+                        inferAndStoreThemeActivationMode(link, css);
 
                     return { ...getThemeInfo(css, link), link };
                 } catch {
-                    return null;
+                    return { ...fallback, description: "Could not load theme metadata. You can refresh or remove this theme." };
                 }
             })
         );
-        setOnlineThemes(themes.filter(theme => theme !== null));
+        if (reads.current.mounted && revision === reads.current.online) setOnlineThemes(themes);
     }
 
     function onThemeLinkEnabledChange(link: string, enabled: boolean) {
@@ -228,19 +236,10 @@ function ThemesTab() {
     function deleteThemeLink(link: string) {
         settings.themeLinks = settings.themeLinks.filter(f => f !== link);
         clearThemeState(link);
-        refreshOnlineThemes();
     }
 
     function setThemeActivationMode(themeId: string, mode: ThemeActivationMode) {
-        const themeActivationModes = { ...(settings.themeActivationModes ?? {}) };
-
-        if (mode === "always") {
-            delete themeActivationModes[themeId];
-        } else {
-            themeActivationModes[themeId] = mode;
-        }
-
-        settings.themeActivationModes = themeActivationModes;
+        settings.themeActivationModes = { ...settings.themeActivationModes, [themeId]: mode };
     }
 
     function togglePinTheme(themeId: string) {
@@ -252,10 +251,17 @@ function ThemesTab() {
     }
 
     async function refreshOnlineTheme(link: string) {
+        if (settings.enableOnlineThemes === false) return;
+        const ticket = Symbol();
+        singleRefreshes.current.set(link, ticket);
+        const revision = reads.current.online;
+        const isCurrent = () => reads.current.mounted && revision === reads.current.online
+            && singleRefreshes.current.get(link) === ticket && settings.themeLinks.includes(link);
         try {
-            const res = await fetch(link);
+            const res = await fetch(link, { signal: reads.current.controller?.signal });
             if (!res.ok) throw new Error(`Failed to fetch ${link}`);
             const css = await res.text();
+            if (!isCurrent()) return;
             inferAndStoreThemeActivationMode(link, css);
 
             const updatedTheme = { ...getThemeInfo(css, link), link };
@@ -265,7 +271,9 @@ function ThemesTab() {
             );
             showToast("Theme refreshed!", Toasts.Type.SUCCESS);
         } catch {
-            showToast("Failed to refresh theme", Toasts.Type.FAILURE);
+            if (isCurrent()) showToast("Failed to refresh theme", Toasts.Type.FAILURE);
+        } finally {
+            if (singleRefreshes.current.get(link) === ticket) singleRefreshes.current.delete(link);
         }
     }
 
@@ -277,91 +285,77 @@ function ThemesTab() {
             const fileName = name.replace(/[^a-z0-9]/gi, "-") + ".css";
 
             if (IS_DISCORD_DESKTOP) {
-                DiscordNative.fileManager.saveWithDialog(new TextEncoder().encode(css), fileName);
+                await DiscordNative.fileManager.saveWithDialog(new TextEncoder().encode(css), fileName);
             } else {
-                const blob = new Blob([css], { type: "text/css" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = fileName;
-                a.click();
-                URL.revokeObjectURL(url);
+                saveFile(new File([css], fileName, { type: "text/css" }));
             }
         } catch {
             showToast("Failed to download theme", Toasts.Type.FAILURE);
         }
     }
 
-    const allThemes = useMemo((): UnifiedTheme[] => {
-        const themes: UnifiedTheme[] = [];
+    const allThemes: UnifiedTheme[] = [];
 
-        for (const theme of onlineThemes ?? []) {
-            const customName = themeNames[theme.link] ?? null;
-            themes.push({
-                type: "online",
-                name: customName ?? theme.name ?? theme.fileName,
-                enabled: settings.enabledThemeLinks.includes(theme.link),
-                header: { ...theme, customName },
-                link: theme.link,
-                activationMode: settings.themeActivationModes?.[theme.link] ?? "always",
-            });
-        }
-
-        for (const header of userThemes ?? []) {
-            const name = header.name ?? header.fileName;
-
-            themes.push({
-                type: "local",
-                name,
-                enabled: settings.enabledThemes.includes(header.fileName),
-                header,
-                activationMode: settings.themeActivationModes?.[header.fileName] ?? "always",
-            });
-        }
-
-        return themes;
-    }, [onlineThemes, userThemes, themeNames, settings.enabledThemeLinks, settings.enabledThemes, settings.themeActivationModes]);
-
-    const filteredThemes = useMemo(() => {
-        let themes = allThemes;
-
-        if (searchQuery.trim()) {
-            const query = searchQuery.toLowerCase();
-            themes = themes.filter(t => t.name.toLowerCase().includes(query));
-        }
-
-        switch (filter) {
-            case ThemeFilter.Online:
-                themes = themes.filter(t => t.type === "online");
-                break;
-            case ThemeFilter.Local:
-                themes = themes.filter(t => t.type === "local");
-                break;
-            case ThemeFilter.Enabled:
-                themes = themes.filter(t => t.enabled);
-                break;
-            case ThemeFilter.Disabled:
-                themes = themes.filter(t => !t.enabled);
-                break;
-        }
-
-        const getThemeId = (t: UnifiedTheme) => t.type === "online" ? t.link! : t.header.fileName;
-        themes.sort((a, b) => {
-            const aId = getThemeId(a);
-            const bId = getThemeId(b);
-            const aPinIndex = settings.pinnedThemes.indexOf(aId);
-            const bPinIndex = settings.pinnedThemes.indexOf(bId);
-            const aIsPinned = aPinIndex !== -1;
-            const bIsPinned = bPinIndex !== -1;
-
-            if (aIsPinned && !bIsPinned) return -1;
-            if (!aIsPinned && bIsPinned) return 1;
-            if (aIsPinned && bIsPinned) return aPinIndex - bPinIndex;
-            return 0;
+    for (const theme of onlineThemes ?? []) {
+        const customName = settings.themeNames[theme.link] ?? null;
+        allThemes.push({
+            type: "online",
+            name: customName ?? theme.name ?? theme.fileName,
+            enabled: settings.enabledThemeLinks.includes(theme.link),
+            header: { ...theme, customName },
+            link: theme.link,
+            activationMode: settings.themeActivationModes?.[theme.link] ?? "always",
         });
+    }
 
-        return themes;
-    }, [allThemes, searchQuery, filter, settings.pinnedThemes]);
+    for (const header of userThemes ?? []) {
+        const name = header.name ?? header.fileName;
+
+        allThemes.push({
+            type: "local",
+            name,
+            enabled: settings.enabledThemes.includes(header.fileName),
+            header,
+            activationMode: settings.themeActivationModes?.[header.fileName] ?? "always",
+        });
+    }
+
+    let filteredThemes = allThemes;
+
+    if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        filteredThemes = filteredThemes.filter(t => t.name.toLowerCase().includes(query));
+    }
+
+    switch (filter) {
+        case ThemeFilter.Online:
+            filteredThemes = filteredThemes.filter(t => t.type === "online");
+            break;
+        case ThemeFilter.Local:
+            filteredThemes = filteredThemes.filter(t => t.type === "local");
+            break;
+        case ThemeFilter.Enabled:
+            filteredThemes = filteredThemes.filter(t => t.enabled);
+            break;
+        case ThemeFilter.Disabled:
+            filteredThemes = filteredThemes.filter(t => !t.enabled);
+            break;
+    }
+
+    const getThemeId = (t: UnifiedTheme) => t.type === "online" ? t.link! : t.header.fileName;
+    filteredThemes.sort((a, b) => {
+        const aId = getThemeId(a);
+        const bId = getThemeId(b);
+        const aPinIndex = settings.pinnedThemes.indexOf(aId);
+        const bPinIndex = settings.pinnedThemes.indexOf(bId);
+        const aIsPinned = aPinIndex !== -1;
+        const bIsPinned = bPinIndex !== -1;
+
+        if (aIsPinned && !bIsPinned) return -1;
+        if (!aIsPinned && bIsPinned) return 1;
+        if (aIsPinned && bIsPinned) return aPinIndex - bPinIndex;
+        return 0;
+    });
 
     const localCount = allThemes.filter(t => t.type === "local").length;
     const onlineCount = allThemes.filter(t => t.type === "online").length;
@@ -391,9 +385,6 @@ function ThemesTab() {
                 enableOnlineThemes={settings.enableOnlineThemes ?? true}
                 setEnableOnlineThemes={value => {
                     settings.enableOnlineThemes = value;
-                    if (!value) {
-                        settings.enabledThemeLinks = [];
-                    }
                 }}
                 currentThemeLink={currentThemeLink}
                 setCurrentThemeLink={setCurrentThemeLink}
@@ -449,10 +440,7 @@ function ThemesTab() {
                                     theme={onlineTheme}
                                     enabled={theme.enabled}
                                     onChange={enabled => onThemeLinkEnabledChange(onlineTheme.link, enabled)}
-                                    onDelete={() => {
-                                        onThemeLinkEnabledChange(onlineTheme.link, false);
-                                        deleteThemeLink(onlineTheme.link);
-                                    }}
+                                    onDelete={() => deleteThemeLink(onlineTheme.link)}
                                     showDeleteButton
                                     disabled={onlineThemesDisabled}
                                     onPin={() => togglePinTheme(onlineTheme.link)}
@@ -465,8 +453,6 @@ function ThemesTab() {
                                     activationMode={theme.activationMode}
                                     onActivationModeChange={mode => setThemeActivationMode(onlineTheme.link, mode)}
                                     onEditName={newName => {
-                                        const updatedNames = { ...themeNames, [onlineTheme.link]: newName };
-                                        setThemeNames(updatedNames);
                                         settings.themeNames = {
                                             ...settings.themeNames,
                                             [onlineTheme.link]: newName,
@@ -483,10 +469,13 @@ function ThemesTab() {
                                 enabled={theme.enabled}
                                 onChange={enabled => onLocalThemeChange(localTheme.fileName, enabled)}
                                 onDelete={async () => {
-                                    onLocalThemeChange(localTheme.fileName, false);
-                                    clearThemeState(localTheme.fileName);
-                                    await VencordNative.themes.deleteTheme(localTheme.fileName);
-                                    refreshLocalThemes();
+                                    try {
+                                        await VencordNative.themes.deleteTheme(localTheme.fileName);
+                                        clearThemeState(localTheme.fileName);
+                                        await refreshLocalThemes();
+                                    } catch {
+                                        showToast("Could not delete the theme. Your theme settings have been kept.", Toasts.Type.FAILURE);
+                                    }
                                 }}
                                 showDeleteButton
                                 onPin={() => togglePinTheme(localTheme.fileName)}

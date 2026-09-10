@@ -44,9 +44,8 @@ export function SetTimezoneModal({ userId, modalProps, database }: { userId: str
             onClick: async () => {
                 if (database) {
                     const success = await setTimezone(currentValue!);
-                    if (success) {
-                        await setUserDatabaseTimezone(userId, currentValue);
-                    }
+                    if (!success) return;
+                    await setUserDatabaseTimezone(userId, currentValue);
                 } else {
                     await setUserTimezone(userId, currentValue);
                 }

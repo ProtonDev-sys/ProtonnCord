@@ -423,6 +423,8 @@ async function main(): Promise<void> {
         const key = randomBytes(32);
         const firstPreparedKey = Buffer.from(key);
         module.activatePreparedSecurityKeyVault({ key: firstPreparedKey, profile: prfProfile });
+        assert.throws(() => module.createActiveOneKeyMobilePairing(localUserId, plaintextVault), /locked/u,
+            "phone pairing requires the OneKey provider, not a different unlocked security-key mode");
         assert.equal(firstPreparedKey.every(byte => byte === 0), true,
             "the transferred prepared key must be wiped after activation");
         const wrapped = module.wrapSecurityKeyVaultValue(plaintextVault, protectedChannelIdsByUser);
@@ -500,6 +502,13 @@ async function main(): Promise<void> {
         module.clearSecurityKeyVaultSession();
         assert.deepEqual(module.wrapSecurityKeyVaultValue(plaintextVault, {}), plaintextVault,
             "unconfigured vaults remain backwards compatible with OS-only storage");
+        assert.throws(() => module.createActiveOneKeyMobilePairing(localUserId, plaintextVault), /locked/u);
+        module.activatePreparedSecurityKeyVault({ key: Buffer.from(key), profile: oneKeyProfile });
+        const phonePairing = module.createActiveOneKeyMobilePairing(localUserId, plaintextVault);
+        assert.ok(phonePairing.startsWith(`PCMP1:${localUserId}.${oneKeyProfile.rootFingerprint}.`));
+        assert.equal(phonePairing.includes("private material must be wrapped"), false);
+        module.clearSecurityKeyVaultSession();
+        assert.throws(() => module.createActiveOneKeyMobilePairing(localUserId, plaintextVault), /locked/u);
         key.fill(0);
     } finally {
         await rm(directory, { force: true, recursive: true });
@@ -676,8 +685,10 @@ async function main(): Promise<void> {
         "the guide must retain backup guidance for non-deterministic vault state");
     assert.match(documentation, /safeStorage[\s\S]*copying `vault\.bin` alone is not a portable backup or export/u,
         "the guide must explain that the outer OS-bound vault wrapper is not portable");
-    assert.match(documentation, /clean OneKey restore seeds its send counter from the current system clock[\s\S]*one active sending installation/u,
+    assert.match(documentation, /clean OneKey restore seeds its send counter from the current system clock[\s\S]*one active sending desktop installation/u,
         "the guide must document the monotonic-counter portability caveat");
+    assert.match(documentation, /Messages originally sent from the phone cannot be edited on desktop/u,
+        "the guide must explain the cross-device edit restriction");
     assert.match(documentation, /state backup preserves the exact send counters and replay records/u);
     assert.match(documentation, /profile-copy control is intentionally hidden/u);
     assert.match(documentation, /deterministic identity rotation is hidden; remove protection first/u);

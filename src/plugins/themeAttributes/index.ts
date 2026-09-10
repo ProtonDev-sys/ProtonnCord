@@ -58,13 +58,20 @@ export default definePlugin({
     ],
 
     getAvatarStyles(src: string | null) {
-        if (typeof src !== "string" || src.startsWith("data:")) return {};
+        if (typeof src !== "string" || !src) return {};
+        let url: URL;
+        try {
+            url = new URL(src, document.baseURI);
+        } catch {
+            return {};
+        }
+        if (url.protocol !== "https:" && url.protocol !== "http:") return {};
 
         return Object.fromEntries(
-            [128, 256, 512, 1024, 2048, 4096].map(size => [
-                `--avatar-url-${size}`,
-                `url(${src.replace(/\d+$/, String(size))})`
-            ])
+            [128, 256, 512, 1024, 2048, 4096].map(size => {
+                url.searchParams.set("size", String(size));
+                return [`--avatar-url-${size}`, `url(${JSON.stringify(url.toString())})`];
+            })
         );
     },
 

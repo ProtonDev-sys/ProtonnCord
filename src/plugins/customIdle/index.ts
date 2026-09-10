@@ -16,6 +16,7 @@ const settings = definePluginSettings({
         type: OptionType.SLIDER,
         markers: makeRange(0, 60, 5),
         default: 10,
+        isValid: value => typeof value === "number" && Number.isFinite(value) && value >= 0,
         stickToMarkers: false,
         restartNeeded: true // Because of the setInterval patch
     },
@@ -78,7 +79,10 @@ export default definePlugin({
 
     getIdleTimeout() {
         // milliseconds, default is 6e5
-        const { idleTimeout } = settings.store;
+        const configuredTimeout = settings.store.idleTimeout;
+        const idleTimeout = settings.def.idleTimeout.isValid.call(settings, configuredTimeout)
+            ? configuredTimeout
+            : settings.def.idleTimeout.default;
         return idleTimeout === 0 ? Infinity : idleTimeout * 60000;
     }
 });

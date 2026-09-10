@@ -71,8 +71,13 @@ export const sendDmCommand: PaletteCommand = {
                 return null;
             },
             async submit(values, ctx, extras) {
+                const senderId = UserStore.getCurrentUser()?.id;
+                if (!senderId) throw new Error("Sign in before sending a DM.");
+                const user = UserStore.getUser(values.recipient);
+                const recipientName = user?.globalName || user?.username || "recipient";
                 const channelId = await resolveDmChannel(values.recipient);
                 if (!channelId) throw new Error("Unable to open a DM with that user.");
+                if (UserStore.getCurrentUser()?.id !== senderId) throw new Error("The account changed before the message could be sent.");
 
                 const files = extras?.files?.message ?? [];
                 const uploads = files.map(file => new CloudUploader({ file, platform: CloudUploadPlatform.WEB }, channelId));
@@ -81,8 +86,7 @@ export const sendDmCommand: PaletteCommand = {
                     attachmentsToUpload: uploads,
                 });
 
-                const user = UserStore.getUser(values.recipient);
-                showToast(`Message sent to ${user.globalName || user.username}.`, Toasts.Type.SUCCESS);
+                showToast(`Message sent to ${recipientName}.`, Toasts.Type.SUCCESS);
                 ctx.close();
             }
         }

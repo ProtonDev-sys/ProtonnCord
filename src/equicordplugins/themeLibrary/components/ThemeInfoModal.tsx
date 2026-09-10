@@ -36,7 +36,10 @@ async function downloadTheme(theme: Theme) {
 export const ThemeInfoModal: React.FC<ThemeInfoModalProps> = ({ author, theme, ...props }) => {
     const { name, type, content, likes, guild, tags, last_updated, requiresThemeAttributes } = theme;
 
-    const themeContent = window.atob(content);
+    const themeContent = React.useMemo(() => {
+        try { return new TextDecoder().decode(Uint8Array.from(window.atob(content), char => char.charCodeAt(0))); }
+        catch { return ""; }
+    }, [content]);
     const metadata = themeContent.match(/\/\*\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+\//g)?.[0] || "";
     const donate = getThemeMetadataHttpsUrl(themeContent, "donate");
     const version = metadata.match(/@version\s+(.+)/)?.[1] || "";
@@ -213,8 +216,8 @@ export const ThemeInfoModal: React.FC<ThemeInfoModalProps> = ({ author, theme, .
                         <>
                             <Heading style={{ marginTop: "10px" }}>Tags</Heading>
                             <Paragraph>
-                                {tags.map(tag => (
-                                    <span className="vce-theme-info-tag" key={"vce-theme-info-tag"}>
+                                {tags.map((tag, index) => (
+                                    <span className="vce-theme-info-tag" key={`${index}:${tag}`}>
                                         {tag}
                                     </span>
                                 ))}
@@ -226,7 +229,7 @@ export const ThemeInfoModal: React.FC<ThemeInfoModalProps> = ({ author, theme, .
                             <WarningIcon /> This theme requires the <b>ThemeAttributes</b> plugin!
                         </Paragraph>
                     )}
-                    {last_updated && (
+                    {last_updated && Number.isFinite(lastUpdated) && (
                         <Paragraph style={{ marginTop: "10px" }}>
                             <ClockIcon /> This theme was last updated {Parser.parse("<t:" + lastUpdated + ":F>")} ({Parser.parse("<t:" + lastUpdated + ":R>")})
                         </Paragraph>

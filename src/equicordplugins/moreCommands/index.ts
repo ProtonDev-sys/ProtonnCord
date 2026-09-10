@@ -22,7 +22,7 @@ import { migratePluginSettings } from "@api/Settings";
 import { Devs, EquicordDevs, GUILD_IDS } from "@utils/constants";
 import { sendMessage } from "@utils/discord";
 import definePlugin from "@utils/types";
-import { DraftType, UploadHandler, UploadManager, UserAffinitiesStore, UserStore } from "@webpack/common";
+import { DraftType, SelectedChannelStore, UploadHandler, UserAffinitiesStore, UserStore } from "@webpack/common";
 import { applyPalette, GIFEncoder, quantize } from "gifenc";
 
 import {
@@ -47,6 +47,23 @@ import {
 } from "./utils";
 
 migratePluginSettings("MoreCommands", "FriendCloud", "GifRoulette", "ImgToGif", "MoreKaomoji");
+
+let commandGeneration = 0;
+const commandTimers = new Map<ReturnType<typeof setTimeout>, () => void>();
+
+function commandIsCurrent(channelId: string) {
+    const generation = commandGeneration;
+    const accountId = UserStore.getCurrentUser()?.id;
+    return () => !!accountId && generation === commandGeneration && UserStore.getCurrentUser()?.id === accountId
+        && SelectedChannelStore.getChannelId() === channelId;
+}
+
+function commandDelay(duration: number) {
+    return new Promise<void>(resolve => {
+        const timer = setTimeout(() => { commandTimers.delete(timer); resolve(); }, duration);
+        commandTimers.set(timer, resolve);
+    });
+}
 
 export default definePlugin({
     name: "MoreCommands",
@@ -104,16 +121,16 @@ export default definePlugin({
         },
         {
             name: "getuptime",
-            description: "Returns the system uptime",
+            description: "Returns the client uptime",
             execute: async () => {
                 const uptime = performance.now() / 1000;
-                const uptimeInfo = `> **System Uptime**: ${Math.floor(uptime / 60)} minutes`;
+                const uptimeInfo = `> **Client Uptime**: ${Math.floor(uptime / 60)} minutes`;
                 return { content: uptimeInfo };
             },
         },
         {
             name: "gettime",
-            description: "Returns the current server time",
+            description: "Returns the current local time",
             execute: async () => {
                 const currentTime = new Date().toLocaleString();
                 return { content: `> **Current Time**: ${currentTime}` };
@@ -131,7 +148,8 @@ export default definePlugin({
                 }
             ],
             execute: opts => {
-                const choices = findOption(opts, "choices", "").split(",").map(c => c.trim());
+                const choices = findOption(opts, "choices", "").split(",").map(c => c.trim()).filter(Boolean);
+                if (!choices.length) throw new Error("Provide at least one choice");
                 const choice = choices[Math.floor(Math.random() * choices.length)];
                 return {
                     content: `I choose: ${choice}`
@@ -143,7 +161,8 @@ export default definePlugin({
             description: "Roll a die with the specified number of sides",
             options: [RequiredMessageOption],
             execute: opts => {
-                const sides = parseInt(findOption(opts, "message", "6"));
+                const sides = Number(findOption(opts, "message", "6"));
+                if (!Number.isSafeInteger(sides) || sides < 1) throw new Error("Die sides must be a positive whole number");
                 const roll = Math.floor(Math.random() * sides) + 1;
                 return {
                     content: `You rolled a ${roll}!`
@@ -233,6 +252,8 @@ export default definePlugin({
             execute: opts => {
                 const min = parseInt(findOption(opts, "min", "0"));
                 const max = parseInt(findOption(opts, "max", "100"));
+                if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min > max || !Number.isSafeInteger(max - min + 1))
+                    throw new Error("Provide a valid minimum and maximum");
                 const number = Math.floor(Math.random() * (max - min + 1)) + min;
                 return {
                     content: `Random number between ${min} and ${max}: ${number}`
@@ -293,13 +314,15 @@ export default definePlugin({
                 const repeat = findOption(opts, "repeat") as number | undefined ?? 1;
                 const normalize = findOption(opts, "normalize") as string | undefined;
                 const reverse = findOption(opts, "reverse") as boolean | undefined;
+                if (!Number.isSafeInteger(repeat) || repeat < 0 || text.length * repeat > 1_000_000)
+                    throw new Error("The repeat count must produce at most 1,000,000 characters");
 
-                if (transform !== "same") {
+                if (["toLowerCase", "toUpperCase", "toLocaleLowerCase", "toLocaleUpperCase"].includes(transform)) {
                     text = (text as any)[transform]?.call(text) ?? text;
                 }
 
                 if (normalize) text = text.normalize(normalize);
-                if (reverse) text = text.split("").reverse().join("");
+                if (reverse) text = Array.from(text).reverse().join("");
 
                 return { content: text.repeat(repeat) };
             },
@@ -311,7 +334,7 @@ export default definePlugin({
             inputType: ApplicationCommandInputType.BOT,
             execute: (opts, ctx) => {
                 const message = findOption(opts, "message", "");
-                const wordCount = message.trim().split(/\s+/).length;
+                const wordCount = message.trim() ? message.trim().split(/\s+/).length : 0;
                 sendBotMessage(ctx.channel.id, {
                     content: `The message contains ${wordCount} words.`
                 });
@@ -330,6 +353,7 @@ export default definePlugin({
             ],
             inputType: ApplicationCommandInputType.BOT,
             execute: async (opts, ctx) => {
+                const isCurrent = commandIsCurrent(ctx.channel.id);
                 const number = Math.min(parseInt(findOption(opts, "number", "5")), 10);
                 if (isNaN(number) || number < 1) {
                     sendBotMessage(ctx.channel.id, {
@@ -341,7 +365,8 @@ export default definePlugin({
                     content: `Starting countdown from ${number}...`
                 });
                 for (let i = number; i >= 0; i--) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await commandDelay(1000);
+                    if (!isCurrent()) return;
                     sendBotMessage(ctx.channel.id, {
                         content: i === 0 ? "🎉 Go! 🎉" : `${i}...`
                     });
@@ -438,8 +463,8 @@ export default definePlugin({
                 type: ApplicationCommandOptionType.STRING,
                 required: true
             }],
-            execute: (opts, ctx) => {
-                sendMessage(ctx.channel.id, { content: makeFreaky(findOption(opts, "message", "")) });
+            execute: async (opts, ctx) => {
+                await sendMessage(ctx.channel.id, { content: makeFreaky(findOption(opts, "message", "")) });
             }
         },
         {
@@ -478,9 +503,9 @@ export default definePlugin({
                     content: "This command is restricted in this server."
                 });
 
-                return {
-                    content: getFavoriteGif(opts, other)
-                };
+                const content = getFavoriteGif(opts, other);
+                if (!content) return sendBotMessage(other.channel.id, { content: "You do not have any favorite GIFs yet." });
+                return { content };
             }
         },
         {
@@ -496,9 +521,11 @@ export default definePlugin({
                 }
             ],
             execute: async (opts, cmdCtx) => {
+                const isCurrent = commandIsCurrent(cmdCtx.channel.id);
                 const count = findOption(opts, "count", 25);
 
-                if (!count) return sendBotMessage(cmdCtx.channel.id, { content: "The count must be 1 or higher!" });
+                if (!Number.isSafeInteger(count) || count < 1 || count > 100)
+                    return sendBotMessage(cmdCtx.channel.id, { content: "The count must be a whole number from 1 to 100." });
 
                 try {
                     const affinities = UserAffinitiesStore.getUserAffinities();
@@ -555,16 +582,14 @@ export default definePlugin({
                         return { ...user, x: pos.x, y: pos.y, size };
                     });
 
-                    let loadedImages = 0;
-                    const totalImages = userPositions.length;
-
                     const drawImage = async user => {
                         try {
                             const avatarUrl = user.member?.avatar
                                 ? `https://cdn.discordapp.com/avatars/${user.member.id}/${user.member?.avatar}.webp?size=256`
-                                : `https://cdn.discordapp.com/embed/avatars/${user.member.id as any as number % 5}.png`;
+                                : user.member.getAvatarURL(undefined, 256, false);
 
                             const img = await loadFriendImage(avatarUrl);
+                            if (!isCurrent()) return;
                             const centerX = user.x + user.size / 2;
                             const centerY = user.y + user.size / 2;
 
@@ -582,22 +607,16 @@ export default definePlugin({
                             ctx.stroke();
                         } catch {
                             // we ignore
-                        } finally {
-                            loadedImages++;
-                            if (loadedImages === totalImages) {
-                                canvas.toBlob(blob => {
-                                    if (!blob) {
-                                        sendBotMessage(cmdCtx.channel.id, { content: "Couldn't generate the image :c" });
-                                        return;
-                                    }
-                                    const file = new File([blob], "affinities-cloud.png", { type: "image/png" });
-                                    UploadHandler.promptToUpload([file], cmdCtx.channel, DraftType.ChannelMessage);
-                                }, "image/png");
-                            }
                         }
                     };
 
-                    userPositions.forEach(drawImage);
+                    await Promise.all(userPositions.map(drawImage));
+                    if (!isCurrent()) return;
+                    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/png"));
+                    if (!isCurrent()) return;
+                    if (!blob) throw new Error("Could not generate the image");
+                    const file = new File([blob], "affinities-cloud.png", { type: "image/png" });
+                    UploadHandler.promptToUpload([file], cmdCtx.channel, DraftType.ChannelMessage);
                 } catch (e: unknown) {
                     if (e instanceof Error) sendBotMessage(cmdCtx.channel.id, { content: e.message });
                 }
@@ -625,11 +644,13 @@ export default definePlugin({
                 }
             ],
             execute: async (opts, cmdCtx) => {
+                const isCurrent = commandIsCurrent(cmdCtx.channel.id);
                 try {
-                    const { image, width, height } = await resolveImage(opts, cmdCtx);
+                    const { image, width, height, clearInput } = await resolveImage(opts, cmdCtx);
                     if (!image) throw "No Image specified!";
 
                     const avatar = await loadImage(image);
+                    if (!isCurrent()) return;
 
                     let gifWidth: number;
                     let gifHeight: number;
@@ -647,14 +668,15 @@ export default definePlugin({
                         gifWidth = avatar.width;
                         gifHeight = avatar.height;
                     }
+                    if (![gifWidth, gifHeight].every(value => Number.isSafeInteger(value) && value >= 1 && value <= 8192)
+                        || gifWidth * gifHeight > 16_777_216)
+                        throw new Error("GIF dimensions must be 1–8192 pixels with at most 16 megapixels");
 
                     const gif = GIFEncoder();
                     const canvas = document.createElement("canvas");
                     canvas.width = gifWidth;
                     canvas.height = gifHeight;
                     const ctx = canvas.getContext("2d")!;
-
-                    UploadManager.clearAll(cmdCtx.channel.id, DraftType.SlashCommand);
 
                     for (let i = 0; i < FRAMES; i++) {
                         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -673,10 +695,11 @@ export default definePlugin({
                     gif.finish();
                     const originalName = image.name ? image.name.replace(/\.[^/.]+$/, "") : "converted";
                     const file = new File([new Uint8Array(gif.bytesView())], `${originalName}.gif`, { type: "image/gif" });
-                    setTimeout(() => UploadHandler.promptToUpload([file], cmdCtx.channel, DraftType.ChannelMessage), 10);
+                    if (!isCurrent()) return;
+                    UploadHandler.promptToUpload([file], cmdCtx.channel, DraftType.ChannelMessage);
+                    clearInput();
                 } catch (err) {
-                    UploadManager.clearAll(cmdCtx.channel.id, DraftType.SlashCommand);
-                    sendBotMessage(cmdCtx.channel.id, { content: String(err) });
+                    if (isCurrent()) sendBotMessage(cmdCtx.channel.id, { content: String(err) });
                 }
             },
         },
@@ -880,9 +903,9 @@ export default definePlugin({
         }
     ],
     uwuifyProps(props: any) {
-        if (!props.children) return props;
-        if (typeof props.children === "string") props.children = uwuify(props.children);
-        else if (Array.isArray(props.children)) props.children = uwuifyArray(props.children);
+        if (!props?.children) return props;
+        if (typeof props.children === "string") return { ...props, children: uwuify(props.children) };
+        if (Array.isArray(props.children)) return { ...props, children: uwuifyArray(props.children) };
         return props;
     },
 
@@ -894,6 +917,7 @@ export default definePlugin({
     },
 
     start() {
+        if (this.preSend) return;
         this.preSend = addMessagePreSendListener((_, msg) => this.onSend(msg));
         this.preEdit = addMessagePreEditListener((_cid, _mid, msg) =>
             this.onSend(msg)
@@ -901,7 +925,11 @@ export default definePlugin({
     },
 
     stop() {
+        commandGeneration++;
+        for (const [timer, resolve] of commandTimers) { clearTimeout(timer); resolve(); }
+        commandTimers.clear();
         removeMessagePreSendListener(this.preSend);
         removeMessagePreEditListener(this.preEdit);
+        this.preSend = this.preEdit = undefined;
     },
 });
