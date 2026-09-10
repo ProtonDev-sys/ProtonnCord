@@ -26,7 +26,10 @@ import gitRemote from "~git-remote";
 import { serializeErrors } from "./ipc";
 
 if (!IS_UPDATER_DISABLED) {
-    require(IS_STANDALONE ? "./http" : "./git");
+    // Standalone builds also produce unpacked folders. Only a running archive can
+    // be replaced atomically by the HTTP updater; source directories use Git.
+    const { statSync } = require("original-fs") as typeof import("original-fs");
+    require(statSync(__dirname).isFile() ? "./http" : "./git");
 } else {
     ipcMain.handle(IpcEvents.GET_REPO, serializeErrors(() => `https://github.com/${gitRemote}`));
     ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors((branch: unknown) => {

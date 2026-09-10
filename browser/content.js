@@ -21,7 +21,7 @@ document.addEventListener(
         window.addEventListener('message', function(event) {
             if (event.source !== window) return;
 
-            if (event.data.type === 'OPEN_SHORTCUTS') {
+            if (event.data?.type === 'OPEN_SHORTCUTS') {
             chrome.runtime.sendMessage({ action: "openShortcuts" });
             }
         }, false);

@@ -99,6 +99,9 @@ let entrySources = new WeakMap<ZipEntry, { archive: InspectedZipArchive; entry: 
 let pendingEntryLoads = new WeakMap<ZipEntry, Promise<Uint8Array>>();
 let activeEntryLoads = 0;
 const entryLoadQueue: QueuedEntryLoad[] = [];
+let generation = 0;
+let activeZipLoads = 0;
+const zipControllers = new Set<AbortController>();
 
 export function isZipFile(fileName?: string): boolean {
     return typeof fileName === "string" && /\.zip$/i.test(fileName);
@@ -120,13 +123,20 @@ export function getCachedZip(url: string): ZipPreviewCacheState {
         return cached;
     }
 
-    const promise = loadZip(url)
+    if (activeZipLoads >= MAX_CACHE_ENTRIES) return { status: "rejected", message: "Too many ZIP previews are loading. Try again after one finishes." };
+    const currentGeneration = generation;
+    const controller = new AbortController();
+    zipControllers.add(controller);
+    activeZipLoads++;
+    const promise = loadZip(url, currentGeneration, controller.signal)
         .then(result => {
-            zipCache.set(url, { status: "resolved", result });
+            if (currentGeneration !== generation) throw new Error(CANCELLED_PREVIEW_MESSAGE);
+            if (zipCache.get(url) === pending) zipCache.set(url, { status: "resolved", result });
             trimZipCache();
             return result;
         })
         .catch(error => {
+            if (currentGeneration !== generation || zipCache.get(url) !== pending) throw error;
             const message = error instanceof Error ? error.message : "Failed to preview ZIP.";
             if (message === CANCELLED_PREVIEW_MESSAGE || message === NATIVE_UNAVAILABLE_MESSAGE) zipCache.delete(url);
             else {
@@ -134,7 +144,7 @@ export function getCachedZip(url: string): ZipPreviewCacheState {
                 trimZipCache();
             }
             throw error;
-        });
+        }).finally(() => { activeZipLoads--; zipControllers.delete(controller); });
 
     const pending = { status: "pending" as const, promise };
     zipCache.set(url, pending);
@@ -143,6 +153,9 @@ export function getCachedZip(url: string): ZipPreviewCacheState {
 }
 
 export function clearZipPreviewCache() {
+    generation++;
+    for (const controller of zipControllers) controller.abort();
+    zipControllers.clear();
     zipCache.clear();
     entrySources = new WeakMap();
     pendingEntryLoads = new WeakMap();
@@ -188,11 +201,12 @@ export function getCodeLanguage(entry: ZipEntry): string {
     return languageMap[entry.extension] ?? entry.extension;
 }
 
-async function loadZip(url: string): Promise<ZipPreviewResult> {
+async function loadZip(url: string, currentGeneration: number, signal: AbortSignal): Promise<ZipPreviewResult> {
     const attachmentPath = getDiscordAttachmentPath(url);
 
     if (attachmentPath) {
         const nativeResult = await fetchNativeDiscordAttachment(attachmentPath);
+        if (currentGeneration !== generation) throw new Error(CANCELLED_PREVIEW_MESSAGE);
         if (nativeResult.success && nativeResult.data) {
             if (nativeResult.data.byteLength > MAX_ZIP_BYTES) throw new Error("ZIP is too large to preview.");
             return parseZipBuffer(nativeResult.data);
@@ -205,7 +219,7 @@ async function loadZip(url: string): Promise<ZipPreviewResult> {
         cache: "no-store",
         credentials: "omit",
         redirect: "error",
-        signal: AbortSignal.timeout(30_000)
+        signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)])
     });
     if (!response.ok) {
         void response.body?.cancel();
@@ -219,6 +233,7 @@ async function loadZip(url: string): Promise<ZipPreviewResult> {
     }
 
     const buffer = await readLimitedResponse(response);
+    if (currentGeneration !== generation) throw new Error(CANCELLED_PREVIEW_MESSAGE);
 
     return parseZipBuffer(buffer);
 }
@@ -244,6 +259,8 @@ async function readLimitedResponse(response: Response): Promise<ArrayBuffer> {
     } catch (error) {
         await reader.cancel().catch(() => { });
         throw error;
+    } finally {
+        reader.releaseLock();
     }
 
     const result = new Uint8Array(totalBytes);
@@ -311,6 +328,7 @@ export function parseZipBuffer(buffer: ArrayBuffer): ZipPreviewResult {
 }
 
 export async function loadZipEntry(entry: ZipEntry): Promise<LoadedZipEntry> {
+    const currentGeneration = generation;
     const source = entrySources.get(entry);
     if (!source) throw new Error("ZIP entry is no longer available.");
     if (entry.kind === "unsupported") throw new Error("ZIP entry cannot be previewed.");
@@ -325,7 +343,9 @@ export async function loadZipEntry(entry: ZipEntry): Promise<LoadedZipEntry> {
         );
     }
 
-    return { ...entry, data: await pending };
+    const data = await pending;
+    if (currentGeneration !== generation) throw new Error("ZIP preview was closed.");
+    return { ...entry, data };
 }
 
 function runBoundedEntryLoad(operation: () => Promise<Uint8Array>): Promise<Uint8Array> {

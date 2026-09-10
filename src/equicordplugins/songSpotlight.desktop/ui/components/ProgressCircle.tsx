@@ -27,17 +27,22 @@ export default function ProgressCircle({ border, audioRef, playingRef, ...props 
         };
     }, [border]);
     const [progress, setProgress] = useState(0);
+    const playingAudio = playingRef.current?.audio;
 
     useEffect(() => {
+        if (!playingAudio) {
+            setProgress(0);
+            return;
+        }
         let handle = requestAnimationFrame(function update() {
             const audio = audioRef.current, playing = playingRef.current?.audio;
-            if (audio && playing && !Number.isNaN(audio.duration) && !audio.paused) {
+            if (audio && playing && Number.isFinite(audio.duration) && audio.duration > 0 && !audio.paused) {
                 let start = 0, slice = audio.duration;
                 if (playing.previewStart !== undefined && playing.previewSlice) {
                     start = playing.previewStart / 1000;
                     slice = playing.previewSlice / 1000;
                 }
-                setProgress(Math.min(Math.max((audio.currentTime - start) / slice, 0), 1));
+                setProgress(slice > 0 ? Math.min(Math.max((audio.currentTime - start) / slice, 0), 1) : 0);
             } else {
                 setProgress(0);
             }
@@ -46,7 +51,7 @@ export default function ProgressCircle({ border, audioRef, playingRef, ...props 
         });
 
         return () => cancelAnimationFrame(handle);
-    }, [audioRef]);
+    }, [audioRef, playingAudio]);
 
     return (
         <svg

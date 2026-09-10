@@ -123,8 +123,8 @@ export const settings = definePluginSettings({
                 color={Button.Colors.RED}
                 onClick={async () => {
                     try {
-                        await setUserDatabaseTimezone(UserStore.getCurrentUser().id, null);
-                        await deleteTimezone();
+                        const userId = UserStore.getCurrentUser()?.id;
+                        if (userId && await deleteTimezone()) await setUserDatabaseTimezone(userId, null);
                     } catch (error) {
                         console.error("Error resetting database timezone:", error);
                         showToast("Failed to reset database timezone", Toasts.Type.FAILURE);

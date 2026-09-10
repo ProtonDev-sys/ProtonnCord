@@ -39,7 +39,7 @@ function InstallInstructions() {
 }
 
 function LyricsProviderSettings() {
-    const { store } = settings;
+    const store = settings.use(["lyricsProvider", "spotifyLyricsApiUrl"]);
 
     return (
         <>
@@ -67,8 +67,6 @@ function LyricsProviderSettings() {
                         value={store.spotifyLyricsApiUrl}
                         onChange={v => {
                             store.spotifyLyricsApiUrl = v;
-                            void clearLyricsCache();
-                            showToast("Lyrics cache purged", Toasts.Type.SUCCESS);
                         }}
                         placeholder="https://spotify-lyrics-api-pi.vercel.app"
                         maxLength={null}
@@ -77,6 +75,15 @@ function LyricsProviderSettings() {
             )}
         </>
     );
+}
+
+async function changeLyricsCache(action: () => Promise<void>, success: string) {
+    try {
+        await action();
+        showToast(success, Toasts.Type.SUCCESS);
+    } catch {
+        showToast("Could not update the lyrics cache. Try again.", Toasts.Type.FAILURE);
+    }
 }
 
 export const settings = definePluginSettings({
@@ -113,10 +120,7 @@ export const settings = definePluginSettings({
         description: "Spotify lyrics API base URL.",
         hidden: true,
         default: "https://spotify-lyrics-api-pi.vercel.app",
-        onChange: async () => {
-            await clearLyricsCache();
-            showToast("Lyrics cache purged", Toasts.Type.SUCCESS);
-        }
+        onChange: () => changeLyricsCache(clearLyricsCache, "Lyrics cache purged")
     },
     lyricsProviderSettings: {
         type: OptionType.COMPONENT,
@@ -126,10 +130,7 @@ export const settings = definePluginSettings({
         description: "Translate lyrics to - Changing this will clear existing translations",
         type: OptionType.SELECT,
         options: languages,
-        onChange: async () => {
-            await removeTranslations();
-            showToast("Translations cleared", Toasts.Type.SUCCESS);
-        }
+        onChange: () => changeLyricsCache(removeTranslations, "Translations cleared")
     },
     lyricsConversion: {
         description: "Automatically translate or romanize lyrics",
@@ -162,10 +163,7 @@ export const settings = definePluginSettings({
         component: () => (
             <ButtonCompat
                 color={ButtonCompat.Colors.RED}
-                onClick={() => {
-                    clearLyricsCache();
-                    showToast("Lyrics cache purged", Toasts.Type.SUCCESS);
-                }}
+                onClick={() => changeLyricsCache(clearLyricsCache, "Lyrics cache purged")}
             >
                 Purge Cache
             </ButtonCompat>

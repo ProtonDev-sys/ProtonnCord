@@ -24,7 +24,7 @@ function LinkIcon({ text, href, Icon }: Props & { Icon: React.ComponentType; }) 
     return (
         <Tooltip text={text}>
             {props =>
-                <MaskedLink {...props} href={href} className={cl("link-button", getThemeClass())}>
+                <MaskedLink {...props} aria-label={text} href={href} className={cl("link-button", getThemeClass())}>
                     <Icon />
                 </MaskedLink>
             }
@@ -44,7 +44,7 @@ export function FavoriteButton({ isFavorite, onClick }: { isFavorite: boolean; o
     return (
         <Tooltip text={isFavorite ? "Unfavorite plugin" : "Favorite plugin - pins it to the top of the plugin list"}>
             {props =>
-                <Clickable {...props} onClick={onClick} className={cl("favorite-button", isFavorite && "favorite-button-active", getThemeClass())}>
+                <Clickable {...props} aria-label={isFavorite ? "Unfavorite plugin" : "Favorite plugin"} aria-pressed={isFavorite} onClick={onClick} className={cl("favorite-button", isFavorite && "favorite-button-active", getThemeClass())}>
                     <Icon aria-hidden className={cl("link-icon", "favorite-icon")} />
                 </Clickable>
             }

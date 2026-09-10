@@ -114,13 +114,24 @@ export function insertTextIntoChatInputBox(text: string) {
     });
 }
 
-export async function copyWithToast(text: string, toastMessage = "Copied to clipboard!") {
-    await copyToClipboard(text);
-    Toasts.show({
-        message: toastMessage,
-        id: Toasts.genId(),
-        type: Toasts.Type.SUCCESS
+/** Reports clipboard failures even when a menu discards the promise; awaiters still receive the rejection. */
+export function copyWithToast(text: string, toastMessage = "Copied to clipboard!"): Promise<void> {
+    const copied = (async () => {
+        await copyToClipboard(text);
+        Toasts.show({
+            message: toastMessage,
+            id: Toasts.genId(),
+            type: Toasts.Type.SUCCESS
+        });
+    })();
+    void copied.catch(() => {
+        try {
+            Toasts.show({ message: "Could not copy to clipboard.", id: Toasts.genId(), type: Toasts.Type.FAILURE });
+        } catch (error) {
+            IntlManagerLogger.error("Failed to show clipboard error", error);
+        }
     });
+    return copied;
 }
 
 export interface MessageOptions {

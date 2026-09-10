@@ -22,6 +22,7 @@ export function Link({
     target,
     className,
     children,
+    onClick,
     ...restProps
 }: PropsWithChildren<LinkProps>) {
     const isInternal = href && /^(?:discord:\/)?\/[a-zA-Z0-9_-]/.test(href);
@@ -30,7 +31,7 @@ export function Link({
     return (
         <a
             role="link"
-            href={href}
+            href={disabled ? undefined : href}
             target={target ?? (needsSafeAttrs ? "_blank" : undefined)}
             rel={rel ?? (needsSafeAttrs ? "noreferrer noopener" : undefined)}
             className={classes(
@@ -41,6 +42,7 @@ export function Link({
             )}
             aria-disabled={disabled}
             {...restProps}
+            onClick={disabled ? e => e.preventDefault() : onClick}
         >
             {children}
         </a>

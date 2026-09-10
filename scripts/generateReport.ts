@@ -21,9 +21,9 @@
 
 import { createHmac } from "crypto";
 import { readFileSync, writeFileSync } from "fs";
-import { join } from "path";
 import pup, { JSHandle } from "puppeteer-core";
 
+const CANARY = process.env.USE_CANARY === "true";
 const logStderr = (...data: any[]) => console.error(`${CANARY ? "CANARY" : "STABLE"} ---`, ...data);
 
 for (const variable of ["CHROMIUM_BIN"]) {
@@ -33,7 +33,6 @@ for (const variable of ["CHROMIUM_BIN"]) {
     }
 }
 
-const CANARY = process.env.USE_CANARY === "true";
 let metaData = {
     buildNumber: "Unknown Build Number",
     buildHash: "Unknown Build Hash"

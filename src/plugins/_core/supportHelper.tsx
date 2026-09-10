@@ -16,7 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { sendBotMessage } from "@api/Commands";
 import { isPluginEnabled } from "@api/PluginManager";
 import { definePluginSettings } from "@api/Settings";
 import { getUserSettingLazy } from "@api/UserSettings";
@@ -34,7 +33,7 @@ import { CONTRIB_ROLE_ID, Devs, DONOR_ROLE_ID, EQUICORD_TEAM, GUILD_ID, SUPPORT_
 import { sendMessage } from "@utils/discord";
 import { Logger } from "@utils/Logger";
 import { Margins } from "@utils/margins";
-import { isAnyPluginDev, isEquicordGuild, isEquicordSupport, isKnownIssuesCategory, isSupportChannel, tryOrElse } from "@utils/misc";
+import { isAnyPluginDev, isEquicordGuild, isEquicordSupport, isSupportChannel, tryOrElse } from "@utils/misc";
 import { relaunch } from "@utils/native";
 import { onlyOnce } from "@utils/onlyOnce";
 import { makeCodeblock } from "@utils/text";
@@ -49,8 +48,6 @@ import plugins, { PluginMeta } from "~plugins";
 
 import SettingsPlugin from "./settings";
 
-const CodeBlockRe = /```snippet\n(.+?)```/s;
-
 const TrustedRolesIds = [
     VC_CONTRIB_ROLE_ID, // Vencord Contributor
     VC_REGULAR_ROLE_ID, // Vencord Regular
@@ -60,8 +57,6 @@ const TrustedRolesIds = [
     CONTRIB_ROLE_ID, // Equicord Contributor
     VENCORD_CONTRIB_ROLE_ID, // Vencord Contributor
 ];
-
-const AsyncFunction = async function () { }.constructor;
 
 const ShowCurrentGame = getUserSettingLazy<boolean>("status", "showCurrentGame")!;
 const ShowEmbeds = getUserSettingLazy<boolean>("textAndImages", "renderEmbeds")!;
@@ -80,7 +75,7 @@ async function forceUpdate() {
     const outdated = await checkForUpdates();
     if (outdated) {
         await update();
-        relaunch();
+        await relaunch();
     }
 
     return outdated;
@@ -280,6 +275,7 @@ function generatePluginList() {
 }
 
 const checkForUpdatesOnce = onlyOnce(checkForUpdates);
+let channelSelection = 0;
 
 const settings = definePluginSettings({}).withPrivateSettings<{
     dismissedDevBuildWarning?: boolean;
@@ -366,6 +362,7 @@ export default definePlugin({
 
     flux: {
         async CHANNEL_SELECT({ channelId }) {
+            const selection = ++channelSelection;
             const isSupportChannel = SUPPORT_CHANNEL_IDS.includes(channelId);
             if (!isSupportChannel) return;
 
@@ -374,6 +371,10 @@ export default definePlugin({
 
             if (!IS_UPDATER_DISABLED) {
                 await checkForUpdatesOnce().catch(() => { });
+
+                if (selection !== channelSelection
+                    || SelectedChannelStore.getChannelId() !== channelId
+                    || UserStore.getCurrentUser()?.id !== selfId) return;
 
                 if (isOutdated) {
                     openModal(props => (
@@ -492,35 +493,6 @@ export default definePlugin({
                         }}
                     >
                         Run /equicord-plugins
-                    </Button>
-                );
-            }
-        }
-
-        if (equicordSupport || (isSupportChannel(props.channel.id) || isKnownIssuesCategory(props.channel.parent_id))) {
-            const match = CodeBlockRe.exec(props.message.content || props.message.embeds[0]?.rawDescription || "");
-            if (match) {
-                buttons.push(
-                    <Button
-                        key="vc-run-snippet"
-                        onClick={async () => {
-                            try {
-                                const result = await AsyncFunction(match[1])();
-                                const stringed = String(result);
-                                if (stringed) {
-                                    await sendBotMessage(SelectedChannelStore.getChannelId(), {
-                                        content: stringed
-                                    });
-                                }
-
-                                showToast("Success!", Toasts.Type.SUCCESS);
-                            } catch (e) {
-                                new Logger(this.name).error("Error while running snippet:", e);
-                                showToast("Failed to run snippet :(", Toasts.Type.FAILURE);
-                            }
-                        }}
-                    >
-                        Run Snippet
                     </Button>
                 );
             }

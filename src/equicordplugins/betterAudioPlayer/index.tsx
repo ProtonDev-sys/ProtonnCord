@@ -184,7 +184,11 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
 
         const init = async () => {
             const blobUrl = await fetchAudioBlob(src).catch(() => null);
-            if (cancelled || !blobUrl) return;
+            if (!blobUrl) return;
+            if (cancelled) {
+                URL.revokeObjectURL(blobUrl);
+                return;
+            }
 
             blobUrlRef.current = blobUrl;
 

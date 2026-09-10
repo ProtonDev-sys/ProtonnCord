@@ -7,7 +7,7 @@
 import { strict as assert } from "assert";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "fs/promises";
 import { tmpdir } from "os";
-import { join, posix, win32 } from "path";
+import { dirname, join, posix, resolve, win32 } from "path";
 
 import {
     assertSafeExistingUserpluginDirectory,
@@ -54,6 +54,7 @@ async function main() {
     }
 
     const fixtureRoot = await mkdtemp(join(tmpdir(), "userplugin-path-safety-"));
+    assert.equal(dirname(resolve(fixtureRoot)), resolve(tmpdir()), "cleanup must stay in the test temporary directory");
     try {
         const pluginsRoot = join(fixtureRoot, "userplugins");
         const outside = join(fixtureRoot, "outside");

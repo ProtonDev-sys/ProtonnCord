@@ -22,7 +22,7 @@ import { GuildAvailabilityStore, UserUtils } from "@webpack/common";
 
 import settings from "./settings";
 import { ChannelDelete, GuildDelete, RelationshipRemove } from "./types";
-import { deleteGroup, deleteGuild, getGroup, getGuild, notify } from "./utils";
+import { deleteGroup, deleteGuild, getContext, getGroup, getGuild, isCurrentContext, notify } from "./utils";
 
 let manuallyRemovedFriend: string | undefined;
 let manuallyRemovedGuild: string | undefined;
@@ -32,15 +32,25 @@ export const removeFriend = (id: string) => manuallyRemovedFriend = id;
 export const removeGuild = (id: string) => manuallyRemovedGuild = id;
 export const removeGroup = (id: string) => manuallyRemovedGroup = id;
 
+export function resetManualRemovals() {
+    manuallyRemovedFriend = undefined;
+    manuallyRemovedGuild = undefined;
+    manuallyRemovedGroup = undefined;
+}
+
 export async function onRelationshipRemove({ relationship: { type, id } }: RelationshipRemove) {
+    const context = getContext();
+    if (!isCurrentContext(context)) return;
     if (manuallyRemovedFriend === id) {
         manuallyRemovedFriend = undefined;
         return;
     }
 
-    const user = await UserUtils.getUser(id)
+    if (!(type === RelationshipType.FRIEND && settings.store.friends) && !(type === RelationshipType.INCOMING_REQUEST && settings.store.friendRequestCancels)) return;
+
+    const user = await Promise.resolve().then(() => UserUtils.getUser(id))
         .catch(() => null);
-    if (!user) return;
+    if (!user || !isCurrentContext(context)) return;
 
     switch (type) {
         case RelationshipType.FRIEND:

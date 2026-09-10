@@ -30,6 +30,7 @@ export default definePlugin({
     },
     settingsAboutComponent: SettingsAbout,
     start() {
+        if (SettingsPlugin.customEntries.some(entry => entry.key === "equicord_icon_viewer")) return;
         SettingsPlugin.customEntries.push({
             key: "equicord_icon_viewer",
             title: "Icon Finder",

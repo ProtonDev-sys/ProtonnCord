@@ -68,6 +68,7 @@ export default definePlugin({
         render: (props: { user: User; displayProfile?: any; }) => {
             return (
                 <ProfilePopoutComponent
+                    key={props.user.id}
                     {...props}
                     id={props.user.id}
                 />
@@ -78,6 +79,7 @@ export default definePlugin({
     renderProfileRepositoriesTab: ErrorBoundary.wrap((props: { user: User; displayProfile?: any; }) => {
         return (
             <ProfileTabComponent
+                key={props.user.id}
                 {...props}
                 id={props.user.id}
                 theme={getProfileThemeProps(props).theme}

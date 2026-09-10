@@ -18,13 +18,34 @@ import { getCurrentMedia, settings } from "./utils";
 let hasStreamed = false;
 let isStreaming = false;
 let streamKey: string | null = null;
+let active = false;
+let generation = 0;
+let pendingRequest: symbol | null = null;
+let accountId: string | undefined;
+
+function resetStreamState() {
+    generation++;
+    pendingRequest = null;
+    hasStreamed = false;
+    isStreaming = false;
+    streamKey = null;
+}
+
+function checkAccount() {
+    const currentId = UserStore.getCurrentUser()?.id;
+    if (currentId !== accountId) {
+        resetStreamState();
+        accountId = currentId;
+    }
+    return currentId;
+}
 const startStream = findByCodeLazy('type:"STREAM_START"');
 const stopStream = findByCodeLazy('type:"STREAM_STOP"');
 const StreamPreviewSettings = getUserSettingLazy("voiceAndVideo", "disableStreamPreviews")!;
 
 async function autoStartStream(instant = true) {
-    const currentUserId = UserStore.getCurrentUser()?.id;
-    if (!currentUserId) return;
+    const currentUserId = checkAccount();
+    if (!active || !currentUserId || pendingRequest) return false;
 
     if (!instant && !WindowStore.isFocused() && settings.store.focusDiscord) return;
     const selected = SelectedChannelStore.getVoiceChannelId();
@@ -37,24 +58,35 @@ async function autoStartStream(instant = true) {
 
     if (channel.type === 13 || isGuildChannel && !PermissionStore.can(PermissionsBits.STREAM, channel)) return;
 
-    if (settings.store.autoDeafen && !MediaEngineStore.isSelfDeaf() && instant) {
-        VoiceActions.toggleSelfDeaf();
-    } else if (settings.store.autoMute && !MediaEngineStore.isSelfMute() && instant) {
-        VoiceActions.toggleSelfMute();
-    }
+    const request = Symbol();
+    const requestGeneration = generation;
+    pendingRequest = request;
+    const isCurrent = () => active && generation === requestGeneration
+        && UserStore.getCurrentUser()?.id === currentUserId
+        && SelectedChannelStore.getVoiceChannelId() === selected;
+    try {
+        if (isStreaming && streamKey?.split(":").at(-1) === currentUserId) {
+            if (!instant) await stopStream(streamKey);
+            return true;
+        }
+        const streamMedia = await getCurrentMedia();
+        if (!streamMedia || !isCurrent()) return false;
+        if (!instant && !WindowStore.isFocused() && settings.store.focusDiscord) return false;
+        if (instant && (!settings.store.toolboxManagement || !settings.store.instantScreenshare)) return false;
+        if (isGuildChannel && !PermissionStore.can(PermissionsBits.STREAM, channel)) return false;
 
-    const streamMedia = await getCurrentMedia();
-    if (!streamMedia) return;
+        if (settings.store.autoDeafen && !MediaEngineStore.isSelfDeaf() && instant) {
+            VoiceActions.toggleSelfDeaf();
+        } else if (settings.store.autoMute && !MediaEngineStore.isSelfMute() && instant) {
+            VoiceActions.toggleSelfMute();
+        }
 
     const preview = StreamPreviewSettings.getSetting();
     const { soundshareEnabled } = ApplicationStreamingSettingsStore.getState();
     let sourceId = streamMedia.id;
     if (streamMedia.type === "video_device") sourceId = `camera:${streamMedia.id}`;
 
-    if (isStreaming && streamKey?.endsWith(currentUserId)) {
-        stopStream(streamKey);
-    } else {
-        startStream(channel.guild_id ?? null, selected, {
+        await startStream(channel.guild_id ?? null, selected, {
             "pid": null,
             "sourceId": sourceId,
             "sourceName": streamMedia.name,
@@ -62,6 +94,12 @@ async function autoStartStream(instant = true) {
             "sound": soundshareEnabled,
             "previewDisabled": preview
         });
+        return true;
+    } catch {
+        if (isCurrent()) showToast("Could not start screensharing. Check your selected source.", Toasts.Type.FAILURE);
+        return false;
+    } finally {
+        if (pendingRequest === request) pendingRequest = null;
     }
 }
 
@@ -74,6 +112,11 @@ export default definePlugin({
     searchTerms: ["ScreenshareKeybind"],
     autoStartStream,
     settings,
+    start() {
+        resetStreamState();
+        accountId = UserStore.getCurrentUser()?.id;
+        active = true;
+    },
 
     settingsAboutComponent: () => (
         <>
@@ -118,7 +161,7 @@ export default definePlugin({
     flux: {
         async VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
             if (!settings.store.toolboxManagement || !settings.store.instantScreenshare) return;
-            const myId = UserStore.getCurrentUser()?.id;
+            const myId = checkAccount();
             if (!myId) return;
 
             const myState = voiceStates.find(state => state.userId === myId);
@@ -126,18 +169,22 @@ export default definePlugin({
 
             if (myState.channelId && !hasStreamed) {
                 hasStreamed = true;
-                await autoStartStream();
+                const currentGeneration = generation;
+                if (!await autoStartStream() && currentGeneration === generation) hasStreamed = false;
             }
 
             if (!myState.channelId) {
-                hasStreamed = false;
+                resetStreamState();
             }
         },
-        STREAM_CREATE: (d: string) => {
-            streamKey = d;
+        STREAM_CREATE: ({ streamKey: key }: { streamKey: string; }) => {
+            const currentId = checkAccount();
+            if (!currentId || typeof key !== "string" || key.split(":").at(-1) !== currentId) return;
+            streamKey = key;
             isStreaming = true;
         },
-        STREAM_DELETE: () => {
+        STREAM_DELETE: ({ streamKey: key }: { streamKey: string; }) => {
+            if (key !== streamKey) return;
             streamKey = null;
             isStreaming = false;
         }
@@ -151,8 +198,7 @@ export default definePlugin({
     },
 
     stop() {
-        hasStreamed = false;
-        isStreaming = false;
-        streamKey = null;
+        active = false;
+        resetStreamState();
     }
 });

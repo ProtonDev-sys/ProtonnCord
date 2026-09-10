@@ -122,7 +122,7 @@ export async function cacheMessageImages(message: LoggedMessage | LoggedMessageJ
             const path = await downloadAttachment(attachment);
 
             if (!path) {
-                Flogger.error("Failed to cache attachment", attachment);
+                Flogger.error("Failed to cache attachment");
                 continue;
             }
 

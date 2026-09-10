@@ -8,21 +8,35 @@ import "./styles.css";
 
 import * as DataStore from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
+import ErrorBoundary from "@components/ErrorBoundary";
 import { EquicordDevs, IS_MAC } from "@utils/constants";
 import { classNameFactory } from "@utils/css";
+import { Logger } from "@utils/Logger";
+import { useForceUpdater } from "@utils/react";
 import definePlugin, { makeRange, OptionType } from "@utils/types";
-import { Button, ChannelRouter, ChannelStore, closeModal, IconUtils, openModal,React, RelationshipStore, SelectedChannelStore, Toasts, UserStore } from "@webpack/common";
+import type { RenderModalProps } from "@vencord/discord-types";
+import { Button, ChannelRouter, ChannelStore, closeModal, IconUtils, lodash, Modal, openModal, React, RelationshipStore, SelectedChannelStore, Toasts, UserStore, useStateFromStores } from "@webpack/common";
 
 const STORAGE_KEY = "RDMSwitch_history";
-const PERSIST_DELAY_MS = 1000;
+const logger = new Logger("RecentDMSwitcher");
 
-let rmdsDmChannelIds: string[] = [];
-let isCyclingSessionActive = false;
-let suppressRdmsWhileCycling = false;
-let cycleSnapshot: string[] = [];
-let cycleIndex = -1;
-let historyPersistTimeout: ReturnType<typeof setTimeout> | null = null;
-let historyDirty = false;
+interface History {
+    userId: string;
+    ids: string[];
+    saved: string[];
+    ready: boolean;
+}
+
+interface Cycle {
+    ids: string[];
+    index: number;
+    toastId: string;
+}
+
+let history: History | undefined;
+let cycle: Cycle | undefined;
+let overlay: { key?: string; } | undefined;
+let overlayRerender: (() => void) | undefined;
 
 const cl = classNameFactory("vc-rdms-");
 
@@ -40,13 +54,13 @@ const settings = definePluginSettings({
         type: OptionType.SELECT,
         description: "Overlay content",
         options: [
-            { label: "Row of recent", value: "row", default: true },
+            { label: "Recent conversations", value: "row", default: true },
             { label: "Current only", value: "current" }
         ]
     },
     amountOfUsers: {
         type: OptionType.SLIDER,
-        description: "Number of users to show in overlay",
+        description: "Number of recent conversations to remember.",
         markers: makeRange(10, 50, 10),
         stickToMarkers: true,
         default: 20,
@@ -71,288 +85,246 @@ const settings = definePluginSettings({
     clearRdms: {
         type: OptionType.COMPONENT,
         description: "Clear the saved recent DM history.",
-        component: () => (
-            <Button
-                color={Button.Colors.RED}
-                onClick={async () => {
-                    rmdsDmChannelIds = [];
-                    cycleSnapshot = [];
-                    cycleIndex = -1;
-                    historyDirty = true;
-                    await persistHistoryNow();
-                    Toasts.show({ id: Toasts.genId(), type: Toasts.Type.SUCCESS, message: "Cleared RDMS history" });
-                }}>
-                Clear RDMS History
-            </Button>
-        )
+        component: ClearHistory
     }
 });
 
-let activeToastId: string | null = null;
-let overlayModalKey: string | null = null;
-let overlayRerender: (() => void) | null = null;
+const OVERLAY_SETTINGS: ["visualStyle", "overlayMode", "overlayShowAvatars", "overlayRowLength"] =
+    ["visualStyle", "overlayMode", "overlayShowAvatars", "overlayRowLength"];
 
-function isDirectMessageChannel(channelId: string | null | undefined): boolean {
+function boundedSetting(value: number, minimum: number, maximum: number, fallback: number): number {
+    return Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, Math.trunc(value))) : fallback;
+}
+
+function historyLimit(): number {
+    return boundedSetting(settings.store.amountOfUsers, 10, 50, 20);
+}
+
+function isDirectMessageChannel(channelId: string | null | undefined): channelId is string {
     if (!channelId) return false;
     const channel = ChannelStore.getChannel(channelId);
-    if (!channel) return false;
+    // Include 1:1 DMs and Group DMs
+    return Boolean(channel && (channel.isDM() || channel.isGroupDM()));
+}
+
+function normalizeHistory(value: unknown): string[] {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) throw new Error("Recent DM history is not a list");
+    return [...new Set(value.filter((id): id is string => typeof id === "string" && /^\d{17,20}$/.test(id)))];
+}
+
+function isCurrent(owner: History): boolean {
+    return history === owner && owner.userId === UserStore.getCurrentUser()?.id;
+}
+
+async function saveHistory(owner: History): Promise<boolean> {
+    const snapshot = owner.ids;
     try {
-        // Include 1:1 DMs and Group DMs
-        return Boolean(channel.isDM() || channel.isGroupDM());
-    } catch {
+        await DataStore.set(`${STORAGE_KEY}_${owner.userId}`, snapshot);
+        if (owner.ids === snapshot) owner.saved = snapshot;
+        return true;
+    } catch (error) {
+        logger.error("Could not save recent DM history", error);
+        if (isCurrent(owner)) Toasts.show(Toasts.create("Could not save recent DMs. Your changes will be retried on the next selection.", Toasts.Type.FAILURE));
         return false;
     }
 }
 
-async function persistHistoryNow() {
-    if (historyPersistTimeout) {
-        clearTimeout(historyPersistTimeout);
-        historyPersistTimeout = null;
+function rememberChannel(channelId: string): void {
+    const owner = history;
+    if (!owner?.ready || !isCurrent(owner)) return;
+    const next = [channelId, ...owner.ids.filter(id => id !== channelId)].slice(0, historyLimit());
+    if (next.length !== owner.ids.length || next.some((id, i) => id !== owner.ids[i])) owner.ids = next;
+    if (owner.ids !== owner.saved) void saveHistory(owner);
+}
+
+function ClearHistory() {
+    const [busy, setBusy] = React.useState(false);
+    return (
+        <Button color={Button.Colors.RED} disabled={busy} onClick={async () => {
+            const owner = history;
+            if (!owner?.ready || !isCurrent(owner)) {
+                Toasts.show(Toasts.create("Recent DM history is not loaded. Enable the plugin while signed in and try again.", Toasts.Type.FAILURE));
+                return;
+            }
+            setBusy(true);
+            cancelCycle();
+            owner.ids = [];
+            try {
+                if (await saveHistory(owner) && isCurrent(owner)) Toasts.show(Toasts.create("Cleared recent DM history", Toasts.Type.SUCCESS));
+            } finally {
+                setBusy(false);
+            }
+        }}>
+            Clear recent DM history
+        </Button>
+    );
+}
+
+function closeOverlay(): void {
+    const previous = overlay;
+    overlay = undefined;
+    if (previous?.key) closeModal(previous.key);
+}
+
+function cancelCycle(): void {
+    cycle = undefined;
+    closeOverlay();
+}
+
+function finishCycle(): void {
+    const selected = cycle?.ids[cycle.index];
+    cancelCycle();
+    if (!history || !isCurrent(history) || !isDirectMessageChannel(selected)) return;
+    ChannelRouter.transitionToChannel(selected);
+    rememberChannel(selected);
+}
+
+function stopEvent(event: KeyboardEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+}
+
+function onKeyDown(event: KeyboardEvent): void {
+    if (!history?.ready || !isCurrent(history)) {
+        cancelCycle();
+        return;
     }
-
-    if (!historyDirty) return;
-    historyDirty = false;
-    await DataStore.set(STORAGE_KEY, rmdsDmChannelIds);
-}
-
-function scheduleHistoryPersist() {
-    historyDirty = true;
-    if (historyPersistTimeout) clearTimeout(historyPersistTimeout);
-
-    historyPersistTimeout = setTimeout(() => {
-        historyPersistTimeout = null;
-        void persistHistoryNow();
-    }, PERSIST_DELAY_MS);
-}
-
-function pushChannelToFront(channelId: string) {
-    const next = [channelId, ...rmdsDmChannelIds.filter(id => id !== channelId)];
-    if (next.length > settings.store.amountOfUsers) next.length = settings.store.amountOfUsers;
-    if (next.length === rmdsDmChannelIds.length && next.every((id, i) => id === rmdsDmChannelIds[i])) return;
-
-    rmdsDmChannelIds = next;
-    scheduleHistoryPersist();
-}
-
-function sanitizeHistory(ids: string[]): string[] {
-    const seen = new Set<string>();
-    const result: string[] = [];
-    for (const id of ids) {
-        if (!id || seen.has(id)) continue;
-        if (!ChannelStore.hasChannel(id)) continue;
-        if (!isDirectMessageChannel(id)) continue;
-        seen.add(id);
-        result.push(id);
-        if (result.length >= settings.store.amountOfUsers) break;
+    if (cycle && event.key === "Escape") {
+        stopEvent(event);
+        cancelCycle();
+        return;
     }
-    return result;
-}
-
-function beginCycleSession() {
-    if (isCyclingSessionActive) return;
-    isCyclingSessionActive = true;
-    suppressRdmsWhileCycling = true;
-
-    const currentId = SelectedChannelStore.getChannelId();
-    cycleSnapshot = sanitizeHistory([
-        ...(isDirectMessageChannel(currentId) ? [currentId!] : []),
-        ...rmdsDmChannelIds
-    ]);
-
-    cycleIndex = 0;
-}
-
-function stepCycle(direction: 1 | -1) {
-    if (!isCyclingSessionActive || cycleSnapshot.length === 0) return;
-    const total = cycleSnapshot.length;
-    if (total <= 1) return;
-
-    cycleIndex = (cycleIndex + direction + total) % total;
-    const targetId = cycleSnapshot[cycleIndex];
-    if (!targetId || !ChannelStore.hasChannel(targetId)) return;
-
-    const vis = (settings as any).store?.visualStyle;
-    if (vis === "overlay") renderOverlay();
-    else if (vis === "toast") showCycleToast();
-}
-
-function endCycleSession() {
-    if (!isCyclingSessionActive) return;
-    isCyclingSessionActive = false;
-    suppressRdmsWhileCycling = false;
-
-    if (cycleIndex >= 0 && cycleIndex < cycleSnapshot.length) {
-        const selected = cycleSnapshot[cycleIndex];
-        if (selected) {
-            ChannelRouter.transitionToChannel(selected);
-            pushChannelToFront(selected);
+    if (event.key !== "Tab" || event.altKey || !(event.ctrlKey || (IS_MAC && event.metaKey))) return;
+    if (!cycle) {
+        const current = SelectedChannelStore.getChannelId();
+        const ids = [...new Set([...(isDirectMessageChannel(current) ? [current] : []), ...history.ids])]
+            .filter(isDirectMessageChannel).slice(0, historyLimit());
+        if (!ids.length || (ids.length === 1 && ids[0] === current)) return;
+        cycle = { ids, index: ids[0] === current || event.shiftKey ? 0 : -1, toastId: Toasts.genId() };
+    }
+    stopEvent(event);
+    cycle.index = (cycle.index + (event.shiftKey ? -1 : 1) + cycle.ids.length) % cycle.ids.length;
+    if (settings.store.visualStyle === "overlay") {
+        if (!overlay) {
+            const opened: { key?: string; } = {};
+            overlay = opened;
+            opened.key = openModal(props => <OverlayContent {...props} />, {
+                onCloseCallback() {
+                    if (overlay !== opened) return;
+                    overlay = undefined;
+                    cancelCycle();
+                }
+            });
+        }
+        overlayRerender?.();
+    } else {
+        closeOverlay();
+        if (settings.store.visualStyle === "toast") {
+            const { name } = getDisplayForChannel(cycle.ids[cycle.index]);
+            Toasts.show({
+                id: cycle.toastId,
+                message: `Switching to: ${name}`,
+                type: Toasts.Type.MESSAGE,
+                options: { position: Toasts.Position.BOTTOM, duration: boundedSetting(settings.store.toastDurationMs, 300, 2000, 600) }
+            });
         }
     }
-
-    cycleSnapshot = [];
-    cycleIndex = -1;
-    activeToastId = null;
-
-    const visEnd = (settings as any).store?.visualStyle;
-    if (visEnd === "overlay") unmountOverlay();
 }
 
-function stopEvent(e: KeyboardEvent) {
-    try {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-    } catch { }
-}
-
-function onKeyDown(e: KeyboardEvent) {
-    const hasCtrl = e.ctrlKey || (IS_MAC && e.metaKey);
-    if (!hasCtrl) return;
-
-    if (e.key === "Tab") {
-        stopEvent(e);
-        if (!isCyclingSessionActive) beginCycleSession();
-        stepCycle(e.shiftKey ? -1 : 1);
-    }
-}
-
-function onKeyUp(e: KeyboardEvent) {
-    if (e.key === "Control" || (IS_MAC && e.key === "Meta")) {
-        stopEvent(e);
-        const stillHeld = (e as any).ctrlKey || (e as any).metaKey;
-        if (!stillHeld) endCycleSession();
-    }
+function onKeyUp(event: KeyboardEvent): void {
+    if (!cycle || (event.key !== "Control" && (!IS_MAC || event.key !== "Meta"))) return;
+    stopEvent(event);
+    if (!(event.ctrlKey || (IS_MAC && event.metaKey))) finishCycle();
 }
 
 function getDisplayForChannel(id: string) {
-    const ch = ChannelStore.getChannel(id);
-    if (!ch) return {
-        name: "Unknown",
-        avatar: ""
-    };
-
-    if (ch.isDM()) {
-        const uid = ch.recipients?.[0];
-        const user = uid ? UserStore.getUser(uid) : null;
-        const friendNick = user ? RelationshipStore.getNickname(user.id) : null;
-        return { name: friendNick ?? user?.globalName ?? user?.username ?? "DM", avatar: user ? IconUtils.getUserAvatarURL(user, true, 64) : "" };
+    const channel = ChannelStore.getChannel(id);
+    if (!channel) return { name: "Unknown", avatar: "" };
+    if (channel.isDM()) {
+        const userId = channel.recipients?.[0];
+        const user = userId ? UserStore.getUser(userId) : undefined;
+        const nickname = user ? RelationshipStore.getNickname(user.id) : undefined;
+        return { name: nickname ?? user?.globalName ?? user?.username ?? "DM", avatar: user ? IconUtils.getUserAvatarURL(user, true, 64) : "" };
     }
-
-    if (ch.isGroupDM()) {
-        return { name: ch.name ?? "Group DM", avatar: IconUtils.getChannelIconURL?.(ch) ?? "" } as any;
-    }
-
-    return { name: ch.name ?? "Channel", avatar: "" };
+    return { name: channel.name || "Group DM", avatar: IconUtils.getChannelIconURL(channel) ?? "" };
 }
 
-function openOverlayModal() {
-    if (overlayModalKey) return;
-    overlayModalKey = openModal(() => <OverlayContent />);
-}
-
-function renderOverlay() {
-    if (settings.store.visualStyle !== "overlay") return;
-    if (!isCyclingSessionActive) return;
-    openOverlayModal();
-    overlayRerender?.();
-}
-
-function unmountOverlay() {
-    if (!overlayModalKey) return;
-    closeModal(overlayModalKey);
-    overlayModalKey = null;
-}
-
-function OverlayContent(): any {
-    const [, setTick] = React.useState(0);
+const OverlayContent = ErrorBoundary.wrap((props: RenderModalProps) => {
+    const { visualStyle, overlayMode, overlayShowAvatars, overlayRowLength } = settings.use(OVERLAY_SETTINGS);
+    const forceUpdate = useForceUpdater();
     React.useEffect(() => {
-        overlayRerender = () => setTick(t => t + 1);
-        return () => { overlayRerender = null; };
-    }, []);
-
-    const mode = settings.store.overlayMode;
-    const showAvatars = settings.store.overlayShowAvatars;
-    const maxCount = Math.max(3, Math.min(7, settings.store.overlayRowLength));
-
-    const pageSize = mode === "current" ? 1 : maxCount;
-    const visibleList = mode === "current"
-        ? [cycleSnapshot[cycleIndex]]
-        : cycleSnapshot;
-
-    let pageCount = 1;
-    let currentPage = 0;
-    if (mode !== "current") {
-        pageCount = Math.ceil(visibleList.length / pageSize);
-        currentPage = Math.min(pageCount - 1, Math.floor((cycleIndex >= 0 ? cycleIndex : 0) / pageSize));
-    }
-
+        overlayRerender = forceUpdate;
+        return () => { if (overlayRerender === forceUpdate) overlayRerender = undefined; };
+    }, [forceUpdate]);
+    React.useEffect(() => { if (visualStyle !== "overlay") closeOverlay(); }, [visualStyle]);
+    const active = cycle;
+    const ids = active?.ids;
+    const displays = useStateFromStores([ChannelStore, UserStore, RelationshipStore],
+        () => ids?.map(getDisplayForChannel) ?? [], [ids], lodash.isEqual);
+    if (!active || visualStyle !== "overlay") return null;
+    const pageSize = overlayMode === "current" ? 1 : boundedSetting(overlayRowLength, 3, 7, 5);
+    const currentPage = Math.floor(active.index / pageSize);
     const start = currentPage * pageSize;
-    const end = Math.min(start + pageSize, visibleList.length);
-    const pageItems = visibleList.slice(start, end);
-
-    const cards = pageItems.map(id => {
-        const { name, avatar } = getDisplayForChannel(id!);
-        const isActive = id === cycleSnapshot[cycleIndex];
-
-        return (
-            <div
-                key={id}
-                className={cl("background")}
-                style={{
-                    boxShadow: isActive
-                        ? "0 0 0 2px var(--brand-500) inset, 0 4px 12px rgba(0,0,0,0.25)"
-                        : "0 2px 8px rgba(0,0,0,0.15)",
-                }}
-            >
-                {showAvatars && avatar && (
-                    <img alt="" src={avatar} className={cl("avatar")} />
-                )}
-                <div className={cl("name")}>{name}</div>
-            </div>
-        );
-    });
-
-    const dots =
-        pageCount > 1 ? (
-            <div className={cl("page-indicator-container")}>
-                {Array.from({ length: pageCount }).map((_, i) => (
-                    <div
-                        key={i}
-                        className={cl("page-indicator")}
-                        style={{
-                            background: i === currentPage ? "var(--brand-500)" : "var(--interactive-muted)",
-                            opacity: i === currentPage ? 1 : 0.6,
-                        }}
-                    />
-                ))}
-            </div>
-        ) : null;
-
+    const pageCount = Math.ceil(active.ids.length / pageSize);
     return (
-        <div className={cl("overlay-container")}>
-            <div className={cl("cards-container")}>
-                <div className={cl("cards")}>
-                    {cards}
-                </div>
-                {dots}
+        <Modal {...props} title="Recent direct messages" size="lg">
+            <div className={cl("cards")} role="list" aria-label="Recent direct messages">
+                {active.ids.slice(start, start + pageSize).map((id, i) => {
+                    const { name, avatar } = displays[start + i];
+                    return (
+                        <div key={id} className={cl("background")} role="listitem" aria-current={id === active.ids[active.index] ? "true" : undefined}>
+                            {overlayShowAvatars && avatar && <img alt="" src={avatar} className={cl("avatar")} />}
+                            <div className={cl("name")}>{name}</div>
+                        </div>
+                    );
+                })}
             </div>
-        </div>
+            <div className={cl("selection")} aria-live="polite">{displays[active.index].name}. Release Control{IS_MAC ? " or Command" : ""} to switch.</div>
+            {pageCount > 1 && <div className={cl("selection")}>Page {currentPage + 1} of {pageCount}</div>}
+        </Modal>
     );
+}, { noop: true });
 
+function stop(): void {
+    history = undefined;
+    cancelCycle();
+    document.removeEventListener("keydown", onKeyDown, true);
+    document.removeEventListener("keyup", onKeyUp, true);
+    window.removeEventListener("blur", cancelCycle);
 }
 
-function showCycleToast() {
-    if (settings.store.visualStyle !== "toast") return;
-    const id = cycleSnapshot[cycleIndex];
-    if (!id) return;
-    const { name } = getDisplayForChannel(id);
-    if (!activeToastId) activeToastId = Toasts.genId();
-    Toasts.show({
-        id: activeToastId,
-        message: `Switching to: ${name}`,
-        type: Toasts.Type.MESSAGE,
-        options: { position: Toasts.Position.BOTTOM, duration: settings.store.toastDurationMs }
-    });
+async function start(): Promise<void> {
+    const userId = UserStore.getCurrentUser()?.id;
+    if (history?.userId === userId) return;
+    stop();
+    if (!userId) return;
+    const owner: History = { userId, ids: [], saved: [], ready: false };
+    history = owner;
+    try {
+        let saved = await DataStore.get<unknown>(`${STORAGE_KEY}_${userId}`);
+        if (!isCurrent(owner)) return;
+        if (saved === undefined) {
+            const legacy = await DataStore.get<unknown>(STORAGE_KEY);
+            if (!isCurrent(owner)) return;
+            saved = normalizeHistory(legacy).filter(isDirectMessageChannel);
+        }
+        owner.ids = normalizeHistory(saved).slice(0, historyLimit());
+        owner.saved = owner.ids;
+        owner.ready = true;
+        const current = SelectedChannelStore.getChannelId();
+        if (isDirectMessageChannel(current)) rememberChannel(current);
+        document.addEventListener("keydown", onKeyDown, true);
+        document.addEventListener("keyup", onKeyUp, true);
+        window.addEventListener("blur", cancelCycle);
+    } catch (error) {
+        logger.error("Could not load recent DM history", error);
+        if (isCurrent(owner)) {
+            history = undefined;
+            Toasts.show(Toasts.create("Could not load recent DMs. Restart the plugin to try again.", Toasts.Type.FAILURE));
+        }
+    }
 }
 
 export default definePlugin({
@@ -361,45 +333,15 @@ export default definePlugin({
     tags: ["Chat", "Utility"],
     authors: [EquicordDevs.mmeta],
     settings,
-
     flux: {
-        GUILD_SELECT({ guildId }: { guildId: string | null; }) {
-            if (!isCyclingSessionActive) return;
-            if (guildId) {
-                const targetId = cycleSnapshot[cycleIndex];
-                if (targetId) ChannelRouter.transitionToChannel(targetId);
-            }
-        },
+        CONNECTION_OPEN: start,
+        LOGOUT: stop,
         CHANNEL_SELECT({ channelId }: { channelId: string | null; }) {
-            if (suppressRdmsWhileCycling) return;
-            if (!channelId) return;
+            cancelCycle();
             if (!isDirectMessageChannel(channelId)) return;
-            pushChannelToFront(channelId);
+            rememberChannel(channelId);
         }
     },
-
-    async start() {
-        const saved = await DataStore.get<string[]>(STORAGE_KEY);
-        rmdsDmChannelIds = Array.isArray(saved) ? sanitizeHistory(saved) : [];
-
-        const current = SelectedChannelStore.getChannelId();
-        if (isDirectMessageChannel(current)) pushChannelToFront(current!);
-
-        document.addEventListener("keydown", onKeyDown, true);
-        document.addEventListener("keyup", onKeyUp, true);
-    },
-
-    stop() {
-        document.removeEventListener("keydown", onKeyDown, true);
-        document.removeEventListener("keyup", onKeyUp, true);
-        isCyclingSessionActive = false;
-        suppressRdmsWhileCycling = false;
-        cycleSnapshot = [];
-        cycleIndex = -1;
-        activeToastId = null;
-        void persistHistoryNow();
-
-        const visEnd = (settings as any).store?.visualStyle;
-        if (visEnd === "overlay") unmountOverlay();
-    }
+    start,
+    stop
 });

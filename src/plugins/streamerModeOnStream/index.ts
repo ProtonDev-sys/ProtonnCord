@@ -18,15 +18,41 @@
 
 import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
-import { FluxDispatcher, UserStore } from "@webpack/common";
+import { FluxDispatcher, StreamerModeStore, UserStore } from "@webpack/common";
 
 interface StreamEvent {
     streamKey: string;
 }
 
+const streams = new Set<string>();
+let previousState: boolean | undefined;
+let accountId: string | undefined;
+
+function restoreStreamerMode() {
+    if (previousState !== undefined && accountId === UserStore.getCurrentUser()?.id && StreamerModeStore.enabled)
+        FluxDispatcher.dispatch({ type: "STREAMER_MODE_UPDATE", key: "enabled", value: previousState });
+    streams.clear();
+    previousState = undefined;
+    accountId = undefined;
+}
+
 function toggleStreamerMode({ streamKey }: StreamEvent, value: boolean) {
     const currentUserId = UserStore.getCurrentUser()?.id;
-    if (!currentUserId || !streamKey.endsWith(currentUserId)) return;
+    if (!currentUserId || typeof streamKey !== "string" || streamKey.split(":").at(-1) !== currentUserId) return;
+    if (!value) {
+        if (!streams.delete(streamKey)) return;
+        if (!streams.size) restoreStreamerMode();
+        return;
+    }
+    if (accountId !== currentUserId) {
+        streams.clear();
+        previousState = undefined;
+    }
+    if (!streams.size) {
+        previousState = StreamerModeStore.enabled;
+        accountId = currentUserId;
+    }
+    streams.add(streamKey);
 
     FluxDispatcher.dispatch({
         type: "STREAMER_MODE_UPDATE",
@@ -40,8 +66,14 @@ export default definePlugin({
     description: "Automatically enables streamer mode when you start streaming in Discord",
     tags: ["Privacy", "Utility"],
     authors: [Devs.IcedMarina],
+    stop: restoreStreamerMode,
     flux: {
         STREAM_CREATE: d => toggleStreamerMode(d, true),
-        STREAM_DELETE: d => toggleStreamerMode(d, false)
+        STREAM_DELETE: d => toggleStreamerMode(d, false),
+        LOGOUT() {
+            streams.clear();
+            previousState = undefined;
+            accountId = undefined;
+        }
     }
 });

@@ -14,7 +14,7 @@ import definePlugin from "@utils/types";
 import { Channel, Message, User } from "@vencord/discord-types";
 import { ChannelStore, GuildStore, PermissionsBits, SelectedChannelStore, UserStore } from "@webpack/common";
 
-import { computePermissions, Tag, tags } from "./consts";
+import { computePermissions, isWebhook, Tag, tags } from "./consts";
 import { settings } from "./settings";
 import { TagSettings } from "./types";
 
@@ -71,7 +71,7 @@ export default definePlugin({
         }
     ],
     start() {
-        const tagSettings = settings.store.tagSettings || {} as TagSettings;
+        const tagSettings = { ...settings.store.tagSettings } as TagSettings;
         for (const tag of Object.values(tags)) {
             tagSettings[tag.name] ??= {
                 showInChat: true,
@@ -103,7 +103,7 @@ export default definePlugin({
     renderMessageDecoration(props) {
         const tagId = this.getTag({
             message: props.message,
-            user: UserStore.getUser(props.message.author.id),
+            user: UserStore.getUser(props.message.author.id) ?? props.message.author,
             channelId: props.message.channel_id,
             isChat: true
         });
@@ -118,8 +118,8 @@ export default definePlugin({
     renderMemberListDecorator(props) {
         const tagId = this.getTag({
             user: props.user,
-            channel: getCurrentChannel(),
-            channelId: this.getChannelId(),
+            channel: props.channel ?? getCurrentChannel(),
+            channelId: props.channel?.id ?? this.getChannelId(),
             isChat: false
         });
 
@@ -150,7 +150,7 @@ export default definePlugin({
 
         if (!user) return null;
         if (isChat && user.id === "1") return null;
-        if (user.bot && settings.dontShowForBots) return null;
+        if (user.bot && settings.dontShowForBots && !isWebhook(message!, user)) return null;
 
         channel ??= ChannelStore.getChannel(channelId!) as any;
         if (!channel) return null;
@@ -158,9 +158,9 @@ export default definePlugin({
         const perms = this.getPermissions(user, channel);
 
         for (const tag of tags) {
-            if (isChat && !settings.tagSettings[tag.name]?.showInChat)
+            if (isChat && settings.tagSettings?.[tag.name]?.showInChat === false)
                 continue;
-            if (!isChat && !settings.tagSettings[tag.name]?.showInNotChat)
+            if (!isChat && settings.tagSettings?.[tag.name]?.showInNotChat === false)
                 continue;
 
             // If the owner tag is disabled, and the user is the owner of the guild,
@@ -170,11 +170,11 @@ export default definePlugin({
                     GuildStore.getGuild(channel?.guild_id)?.ownerId ===
                     user.id &&
                     isChat &&
-                    !settings.tagSettings.OWNER.showInChat) ||
+                    settings.tagSettings?.OWNER?.showInChat === false) ||
                 (GuildStore.getGuild(channel?.guild_id)?.ownerId ===
                     user.id &&
                     !isChat &&
-                    !settings.tagSettings.OWNER.showInNotChat)
+                    settings.tagSettings?.OWNER?.showInNotChat === false)
             )
                 continue;
 

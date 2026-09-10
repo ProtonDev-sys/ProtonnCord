@@ -15,16 +15,20 @@ import { ChannelStore, showToast, Toasts } from "@webpack/common";
 const logger = new Logger("DownloadAllAttachments");
 
 async function downloadAll(attachments: MessageAttachment[]) {
-    const usedNames = new Map<string, number>();
+    const usedNames = new Set<string>();
 
     function uniqueName(original: string): string {
-        const count = usedNames.get(original) ?? 0;
-        usedNames.set(original, count + 1);
-        if (count === 0) return original;
         const dot = original.lastIndexOf(".");
-        return dot === -1
-            ? `${original}_${count}`
-            : `${original.slice(0, dot)}_${count}${original.slice(dot)}`;
+        let name = original;
+        let count = 0;
+        while (usedNames.has(name.toLowerCase())) {
+            count++;
+            name = dot === -1
+                ? `${original}_${count}`
+                : `${original.slice(0, dot)}_${count}${original.slice(dot)}`;
+        }
+        usedNames.add(name.toLowerCase());
+        return name;
     }
 
     const results = await Promise.allSettled(attachments.map(async attachment => {
@@ -37,11 +41,14 @@ async function downloadAll(attachments: MessageAttachment[]) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
 
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
+        try {
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            a.click();
+        } finally {
+            URL.revokeObjectURL(url);
+        }
     }));
 
     const failed = results.filter(r => {

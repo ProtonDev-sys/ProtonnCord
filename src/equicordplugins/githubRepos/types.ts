@@ -8,9 +8,9 @@ export interface GitHubRepo {
     id: number;
     name: string;
     html_url: string;
-    description: string;
+    description: string | null;
     stargazers_count: number;
-    language: string;
+    language: string | null;
     fork: boolean;
     owner: {
         login: string;

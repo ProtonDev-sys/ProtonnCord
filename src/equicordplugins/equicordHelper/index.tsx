@@ -416,9 +416,7 @@ export default definePlugin({
         }
     },
     stop() {
-        if (settings.store.noBulletPoints) {
-            removeMessagePreSendListener(listener);
-        }
+        removeMessagePreSendListener(listener);
     },
     isChannelMuted(guildId: string, channelId: string) {
         const currentUserVoiceState = VoiceStateStore.getVoiceStateForUser(UserStore.getCurrentUser()?.id);

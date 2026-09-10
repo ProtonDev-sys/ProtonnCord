@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+import { getLoadedPluginDefinition } from "@shared/pluginDefinition";
 import { SettingsStore as SettingsStoreClass } from "@shared/SettingsStore";
 import type { UpdaterBranch } from "@shared/Updater";
 import { Logger } from "@utils/Logger";
@@ -23,7 +24,7 @@ import { mergeDefaults } from "@utils/mergeDefaults";
 import { DefinedSettings, OptionType, SettingsChecks, SettingsDefinition } from "@utils/types";
 import { React, useEffect } from "@webpack/common";
 
-import plugins from "~plugins";
+import plugins, { PluginManifest } from "~plugins";
 
 const logger = new Logger("Settings");
 
@@ -164,24 +165,38 @@ export const SettingsStore = new SettingsStoreClass(settings, {
         path
     }) {
         const v = target[key];
-        if (!plugins) return v; // plugins not initialised yet. this means this path was reached by being called on the top level
+        if (!PluginManifest) return v; // Circular plugin imports may read settings before catalog initialization.
 
-        if (path === "plugins" && key in plugins)
+        if (path === "plugins" && key in PluginManifest)
             return target[key] = {
-                enabled: IS_REPORTER || plugins[key].required || plugins[key].enabledByDefault || false
+                enabled: IS_REPORTER || PluginManifest[key].required || PluginManifest[key].enabledByDefault || false
             };
 
         // Since the property is not set, check if this is a plugin's setting and if so, try to resolve
         // the default value.
         if (path.startsWith("plugins.")) {
             const plugin = path.slice("plugins.".length);
+            const metadata = PluginManifest[plugin];
+            // Unknown fields (including JSON's toJSON probe) have no static default.
+            // Once loaded, the real definition may have added settings dynamically.
+            if (metadata?.eager === false && !metadata.settingsKeys.includes(key) && !getLoadedPluginDefinition(plugin))
+                return v;
             if (plugin in plugins) {
                 const setting = plugins[plugin].settings?.def[key];
                 if (!setting) return v;
 
-                if ("default" in setting)
-                    // normal setting with a default value
-                    return (target[key] = setting.default);
+                if ("default" in setting) {
+                    // Editing a stored array/object must not change the definition used by Reset.
+                    let value = setting.default;
+                    if (value !== null && typeof value === "object") {
+                        try {
+                            value = structuredClone(value);
+                        } catch {
+                            // Preserve legacy behavior for non-data plugin defaults.
+                        }
+                    }
+                    return (target[key] = value);
+                }
 
                 if (setting.type === OptionType.SELECT) {
                     const def = setting.options.find(o => o.default);
@@ -198,7 +213,7 @@ export const SettingsStore = new SettingsStoreClass(settings, {
 if (!IS_REPORTER) {
     SettingsStore.addGlobalChangeListener((_, path) => {
         SettingsStore.plain.cloud.settingsSyncVersion = Date.now();
-        VencordNative.settings.set(SettingsStore.plain, path);
+        VencordNative.settings.set(SettingsStore.plain, path).catch(error => logger.error("Failed to save settings", error));
     });
 }
 
@@ -228,10 +243,12 @@ export const Settings = SettingsStore.store;
 // TODO: Representing paths as essentially "string[].join('.')" wont allow dots in paths, change to "paths?: string[][]" later
 export function useSettings(paths?: UseSettings<Settings>[]) {
     const [, forceUpdate] = React.useReducer(() => ({}), {});
+    const subscriptionKey = JSON.stringify(paths);
 
     useEffect(() => {
-        if (paths) {
-            paths.forEach(p => {
+        const subscriptions: string[] | undefined = subscriptionKey === undefined ? undefined : JSON.parse(subscriptionKey);
+        if (subscriptions) {
+            subscriptions.forEach(p => {
                 if (p.endsWith(".*")) {
                     SettingsStore.addPrefixChangeListener(p.slice(0, -2), forceUpdate);
                 } else {
@@ -239,7 +256,7 @@ export function useSettings(paths?: UseSettings<Settings>[]) {
                 }
             });
 
-            return () => paths.forEach(p => {
+            return () => subscriptions.forEach(p => {
                 if (p.endsWith(".*")) {
                     SettingsStore.removePrefixChangeListener(p.slice(0, -2), forceUpdate);
                 } else {
@@ -250,7 +267,7 @@ export function useSettings(paths?: UseSettings<Settings>[]) {
             SettingsStore.addGlobalChangeListener(forceUpdate);
             return () => SettingsStore.removeGlobalChangeListener(forceUpdate);
         }
-    }, [paths]);
+    }, [subscriptionKey]);
 
     return SettingsStore.store;
 }
@@ -382,14 +399,8 @@ export function definePluginSettings<
     return definedSettings;
 }
 
-type UseSettings<T extends object> = ResolveUseSettings<T>[keyof T];
-
-type ResolveUseSettings<T extends object> = {
-    [Key in keyof T]:
-    Key extends string
-    ? T[Key] extends Record<string, unknown>
-    // @ts-expect-error "Type instantiation is excessively deep and possibly infinite"
-    ? `${Key}.*` | (ResolveUseSettings<T[Key]> extends Record<string, string> ? `${Key}.${ResolveUseSettings<T[Key]>[keyof T[Key]]}` : never)
-    : Key
-    : never;
-};
+type UseSettings<T extends object> = string extends keyof T ? string : {
+    [Key in keyof T & string]: T[Key] extends Record<string, unknown>
+        ? `${Key}.*` | `${Key}.${UseSettings<T[Key]>}`
+        : Key;
+}[keyof T & string];

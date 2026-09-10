@@ -19,13 +19,13 @@ import {
     wrapTab,
 } from "@components/settings/tabs/BaseTab";
 import { classes, isObjectEmpty } from "@utils/misc";
-import { relaunch } from "@utils/native";
-import { Alerts, closeAllModals,NavigationRouter, Toasts, useEffect, useState } from "@webpack/common";
+import { Alerts, closeAllModals, NavigationRouter, Toasts, useEffect, useState } from "@webpack/common";
 
 import userpluginInstaller, { Native } from "..";
 import {
     cl,
     CLONE_LINK_REGEX,
+    restartAfterPluginChange,
     showInstallFinishedAlert,
 } from "../misc/constants";
 
@@ -133,12 +133,12 @@ function UserPluginsTab() {
                         validate={t => {
                             const match = t.match(CLONE_LINK_REGEX);
                             if (match) {
-                                const idpl = match.includes("plugins.nin0.dev")
+                                const idpl = match[4] === "plugins.nin0.dev"
                                     ? 1
                                     : 0;
                                 const installed = plugins
                                     .map(p => p.directory)
-                                    .includes(match[[3, 6][idpl]]);
+                                    .includes(match[[3, 6][idpl]].replace(/\.git$/, ""));
                                 if (installed) {
                                     setValid(false);
                                     return "Plugin already installed, update below";
@@ -204,14 +204,16 @@ function UserPluginsTab() {
                                 const pl = Vencord.Plugins.plugins[
                                     plugin.name
                                 ];
+                                if (!pl) return <Card key={plugin.directory}><Paragraph>{plugin.name} is installed. Restart to load its controls.</Paragraph></Card>;
                                 return <AddonCard
                                     key={pl.name}
                                     name={pl.name}
                                     description={pl.description}
                                     enabled={rs.plugins[pl.name].enabled}
                                     infoButton={<button
-                                        role="switch"
+                                        aria-label={`Uninstall ${plugin.name}`}
                                         onClick={async () => {
+                                            try {
                                             await Native.rmPlugin(
                                                 plugin.directory!,
                                             );
@@ -223,12 +225,11 @@ function UserPluginsTab() {
                                                         ? "Restart"
                                                         : "Refresh",
                                                 cancelText: "Later",
-                                                onConfirm() {
-                                                    plugin.usesNative
-                                                        ? relaunch()
-                                                        : window.location.reload();
-                                                },
+                                                onConfirm: () => restartAfterPluginChange(plugin.usesNative),
                                             });
+                                            } catch (error) {
+                                                Alerts.show({ title: "Uninstall error", body: String(error) });
+                                            }
                                         }}
                                         className={cl("delete-button")}
                                     >
@@ -258,15 +259,7 @@ function UserPluginsTab() {
                                                                 await Native.updatePlugin(
                                                                     plugin.directory!,
                                                                 );
-                                                                const oldPWU =
-                                                                    userpluginInstaller.pluginsWithUpdates.value()
-                                                                        .plugins;
-                                                                oldPWU.splice(
-                                                                    oldPWU.indexOf(
-                                                                        plugin.directory!,
-                                                                    ),
-                                                                    1,
-                                                                );
+                                                                const oldPWU = userpluginInstaller.pluginsWithUpdates.value().plugins.filter(directory => directory !== plugin.directory);
                                                                 userpluginInstaller.pluginsWithUpdates.value(
                                                                     {
                                                                         finished: true,
@@ -281,11 +274,7 @@ function UserPluginsTab() {
                                                                             ? "Restart"
                                                                             : "Refresh",
                                                                     cancelText: "Later",
-                                                                    onConfirm() {
-                                                                        plugin.usesNative
-                                                                            ? relaunch()
-                                                                            : window.location.reload();
-                                                                    },
+                                                                    onConfirm: () => restartAfterPluginChange(plugin.usesNative),
                                                                 });
                                                             } catch (e: any) {
                                                                 if (

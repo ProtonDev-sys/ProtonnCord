@@ -63,18 +63,25 @@ async function readLimitedResponse(response: Response): Promise<ArrayBuffer> {
     const chunks: Uint8Array[] = [];
     let totalBytes = 0;
 
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!value) continue;
+    try {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (!value) continue;
 
-        totalBytes += value.byteLength;
-        if (totalBytes > MAX_ZIP_BYTES) {
-            await reader.cancel();
-            throw new Error("ZIP is too large to preview.");
+            totalBytes += value.byteLength;
+            if (totalBytes > MAX_ZIP_BYTES) {
+                await reader.cancel();
+                throw new Error("ZIP is too large to preview.");
+            }
+
+            chunks.push(value);
         }
-
-        chunks.push(value);
+    } catch (error) {
+        await reader.cancel().catch(() => undefined);
+        throw error;
+    } finally {
+        reader.releaseLock();
     }
 
     const result = new Uint8Array(totalBytes);

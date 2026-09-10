@@ -36,6 +36,10 @@ export interface MagnifierProps {
 
 const cl = classNameFactory("vc-imgzoom-");
 
+function lensValue(value: unknown, minimum: number, fallback: number) {
+    return typeof value === "number" && Number.isFinite(value) && value >= minimum ? value : fallback;
+}
+
 export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: initialSize, zoom: initalZoom }) => {
     const [ready, setReady] = useState(false);
 
@@ -45,8 +49,8 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
 
     const isShiftDown = useRef(false);
 
-    const zoom = useRef(initalZoom);
-    const size = useRef(initialSize);
+    const zoom = useRef(lensValue(initalZoom, 1, 2));
+    const size = useRef(lensValue(initialSize, 50, 100));
 
     const element = useRef<HTMLDivElement | null>(null);
     const currentVideoElementRef = useRef<HTMLVideoElement | null>(null);
@@ -55,6 +59,9 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
 
     // since we accessing document im gonna use useLayoutEffect
     useLayoutEffect(() => {
+        setReady(false);
+        let mediaElement: Element | null = null;
+        let originalDraggable: string | null = null;
         const onKeyDown = (e: KeyboardEvent) => {
             if (e.key === "Shift") {
                 isShiftDown.current = true;
@@ -75,10 +82,10 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
 
             if (instance.state.mouseOver && instance.state.mouseDown) {
                 const offset = size.current / 2;
-                const pos = { x: e.pageX, y: e.pageY };
+                const pos = { x: e.clientX, y: e.clientY };
                 const x = -((pos.x - element.current.getBoundingClientRect().left) * zoom.current - offset);
                 const y = -((pos.y - element.current.getBoundingClientRect().top) * zoom.current - offset);
-                setLensPosition({ x: e.x - offset, y: e.y - offset });
+                setLensPosition({ x: e.pageX - offset, y: e.pageY - offset });
                 setImagePosition({ x, y });
                 setOpacity(1);
             } else {
@@ -89,8 +96,8 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
 
         const onMouseDown = (e: MouseEvent) => {
             if (instance.state.mouseOver && e.button === 0 /* left click */) {
-                zoom.current = settings.store.zoom;
-                size.current = settings.store.size;
+                zoom.current = lensValue(settings.store.zoom, 1, 2);
+                size.current = lensValue(settings.store.size, 50, 100);
 
                 // close context menu if open
                 if (document.getElementById("image-context")) {
@@ -106,16 +113,17 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
             setOpacity(0);
         };
 
-        const onWheel = async (e: WheelEvent) => {
+        const onWheel = (e: WheelEvent) => {
+            const speed = lensValue(settings.store.zoomSpeed, 0.1, 0.5);
             if (instance.state.mouseOver && instance.state.mouseDown && !isShiftDown.current) {
-                const val = zoom.current + ((e.deltaY / 100) * (settings.store.invertScroll ? -1 : 1)) * settings.store.zoomSpeed;
-                zoom.current = val <= 1 ? 1 : val;
+                const val = zoom.current + ((e.deltaY / 100) * (settings.store.invertScroll ? -1 : 1)) * speed;
+                if (Number.isFinite(val)) zoom.current = Math.max(1, val);
                 if (settings.store.saveZoomValues) settings.store.zoom = zoom.current;
                 updateMousePosition(e);
             }
             if (instance.state.mouseOver && instance.state.mouseDown && isShiftDown.current) {
-                const val = size.current + (e.deltaY * (settings.store.invertScroll ? -1 : 1)) * settings.store.zoomSpeed;
-                size.current = val <= 50 ? 50 : val;
+                const val = size.current + (e.deltaY * (settings.store.invertScroll ? -1 : 1)) * speed;
+                if (Number.isFinite(val)) size.current = Math.max(50, val);
                 if (settings.store.saveZoomValues) settings.store.size = size.current;
                 updateMousePosition(e);
             }
@@ -126,7 +134,9 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
             if (!elem) return;
 
             element.current = elem;
-            elem.querySelector("img,video")?.setAttribute("draggable", "false");
+            mediaElement = elem.querySelector("img,video");
+            originalDraggable = mediaElement?.getAttribute("draggable") ?? null;
+            mediaElement?.setAttribute("draggable", "false");
             if (instance.props.animated) {
                 originalVideoElementRef.current = elem.querySelector("video");
                 originalVideoElementRef.current?.addEventListener("timeupdate", syncVideos);
@@ -151,14 +161,20 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
             document.removeEventListener("wheel", onWheel);
             cancelWaitForReady();
             originalVideoElementRef.current?.removeEventListener("timeupdate", syncVideos);
+            if (mediaElement?.getAttribute("draggable") === "false") {
+                if (originalDraggable === null) mediaElement.removeAttribute("draggable");
+                else mediaElement.setAttribute("draggable", originalDraggable);
+            }
             originalVideoElementRef.current = null;
             element.current = null;
         };
-    }, []);
+    }, [instance, instance.props.src, instance.props.animated]);
 
     const imageSrc = useMemo(() => {
         try {
             const imageUrl = new URL(instance.props.src);
+            if ((imageUrl.origin !== "https://media.discordapp.net" && imageUrl.origin !== "https://cdn.discordapp.com") || imageUrl.username || imageUrl.password)
+                return instance.props.src;
             if (imageUrl.pathname.startsWith("/attachments/"))
                 imageUrl.hostname = "cdn.discordapp.com";
 

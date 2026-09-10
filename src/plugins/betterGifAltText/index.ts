@@ -51,6 +51,8 @@ export default definePlugin({
         if (props.alt !== "GIF") return props.alt;
 
         let url: string = props.original || props.src;
+        if (typeof url !== "string" || !url) return props.alt;
+        url = url.split(/[?#]/, 1)[0];
         try {
             url = decodeURI(url);
         } catch { }
@@ -58,7 +60,7 @@ export default definePlugin({
         let name = url
             .slice(url.lastIndexOf("/") + 1)
             .replace(/\d/g, "") // strip numbers
-            .replace(/.gif$/, "") // strip extension
+            .replace(/\.gif$/i, "") // strip extension
             .split(/[,\-_ ]+/g)
             .slice(0, 20)
             .join(" ");

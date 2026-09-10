@@ -5,23 +5,22 @@
     "description": "",
     "types": "index.d.ts",
     "scripts": {
-        "prepublishOnly": "tsx ./prepare.ts",
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "prepublishOnly": "pnpm --dir ../.. generateTypes && pnpm test",
+        "test": "tsc --ignoreConfig --noEmit --strict --skipLibCheck false --esModuleInterop --moduleResolution bundler --module esnext --target esnext index.d.ts"
     },
     "keywords": [],
     "author": "Protonn Cord & Vencord Contributors",
     "license": "GPL-3.0-or-later",
     "devDependencies": {
         "@types/fs-extra": "^11.0.4",
-        "fs-extra": "^11.3.6",
-        "tsx": "^4.22.4"
+        "fs-extra": "^11.3.6"
     },
     "dependencies": {
         "@types/lodash": "4.17.19",
         "@types/node": "^26.0.1",
-        "@vencord/discord-types": "^1.0.1",
-        "highlight.js": "11.11.1",
+        "@vencord/discord-types": "workspace:@equicord/discord-types@*",
         "moment": "^2.22.2",
+        "standalone-electron-types": "^41.2.1",
         "ts-pattern": "^5.6.0",
         "type-fest": "^5.7.0"
     },

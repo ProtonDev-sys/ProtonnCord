@@ -14,6 +14,8 @@ import { OptionType, Plugin } from "@utils/types";
 import { Menu, showToast, useMemo, useState } from "@webpack/common";
 import type { ReactNode } from "react";
 
+import { PluginManifest } from "~plugins";
+
 import { settings } from ".";
 
 function buildPluginMenu() {
@@ -43,21 +45,17 @@ export function buildPluginMenuEntries(includeEmpty = false) {
     const lowerSearch = search.toLowerCase();
 
     const sortedPlugins = useMemo(() =>
-        Object.values(plugins).sort((a, b) => a.name.localeCompare(b.name)),
+        Object.values(PluginManifest).sort((a, b) => a.name.localeCompare(b.name)),
         []
     );
 
-    const candidates = useMemo(() =>
-        sortedPlugins
-            .filter(p => {
-                if (!isPluginEnabled(p.name)) return false;
-                if (p.name.endsWith("API")) return false;
+    const candidates = sortedPlugins.filter(p => {
+        if (!isPluginEnabled(p.name)) return false;
+        if (p.name.endsWith("API")) return false;
 
-                const name = p.name.toLowerCase();
-                return name.includes(lowerSearch);
-            }),
-        [lowerSearch]
-    );
+        const name = p.name.toLowerCase();
+        return name.includes(lowerSearch);
+    });
 
     return (
         <>
@@ -76,7 +74,8 @@ export function buildPluginMenuEntries(includeEmpty = false) {
             <Menu.MenuSeparator />
 
             {candidates
-                .map(p => {
+                .map(entry => {
+                    const p = plugins[entry.name];
                     const options = [] as ReactNode[];
 
                     let hasAnyOption = false;
@@ -129,7 +128,7 @@ export function buildPluginMenuEntries(includeEmpty = false) {
                                 break;
                             case OptionType.SLIDER:
                                 // The menu slider doesn't support these options. Skip to avoid confusion
-                                if (option.stickToMarkers || option.componentProps) continue;
+                                if (option.stickToMarkers || option.componentProps || !option.markers.length) continue;
 
                                 options.push(
                                     <Menu.MenuControlItem
@@ -141,7 +140,10 @@ export function buildPluginMenuEntries(includeEmpty = false) {
                                                 minValue={option.markers[0]}
                                                 maxValue={option.markers.at(-1)!}
                                                 value={s[key]}
-                                                onChange={v => s[key] = v}
+                                                onChange={v => {
+                                                    s[key] = v;
+                                                    if (option.restartNeeded) showToast("Restart to apply the change");
+                                                }}
                                             />
                                         )}
                                     />
@@ -207,7 +209,7 @@ export function buildThemeMenuEntries() {
                 checked={useQuickCss}
                 label={"Enable QuickCSS"}
                 action={() => {
-                    Settings.useQuickCss = !useQuickCss;
+                    Settings.useQuickCss = !Settings.useQuickCss;
                 }}
             />
             <Menu.MenuItem
@@ -229,10 +231,11 @@ export function buildThemeMenuEntries() {
                             label={theme.fileName}
                             checked={enabledThemes.includes(theme.fileName)}
                             action={() => {
-                                if (enabledThemes.includes(theme.fileName)) {
-                                    Settings.enabledThemes = enabledThemes.filter(t => t !== theme.fileName);
+                                const currentThemes = Settings.enabledThemes;
+                                if (currentThemes.includes(theme.fileName)) {
+                                    Settings.enabledThemes = currentThemes.filter(t => t !== theme.fileName);
                                 } else {
-                                    Settings.enabledThemes = [...enabledThemes, theme.fileName];
+                                    Settings.enabledThemes = [...currentThemes, theme.fileName];
                                 }
                             }}
                         />
@@ -246,8 +249,10 @@ export function buildThemeMenuEntries() {
 function buildCustomPluginEntries() {
     const pluginEntries = [] as { plugin: Plugin, node: ReactNode; }[];
 
-    for (const plugin of Object.values(plugins)) {
-        if (plugin.toolboxActions && isPluginEnabled(plugin.name)) {
+    for (const name in PluginManifest) {
+        if (!isPluginEnabled(name)) continue;
+        const plugin = plugins[name];
+        if (plugin.toolboxActions) {
             const entries = typeof plugin.toolboxActions === "function"
                 ? plugin.toolboxActions()
                 : Object.entries(plugin.toolboxActions).map(([text, action]) => {

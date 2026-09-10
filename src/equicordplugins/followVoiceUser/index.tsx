@@ -14,6 +14,7 @@ import { findByPropsLazy } from "@webpack";
 import { Menu, React, RelationshipStore, UserStore, VoiceStateStore } from "@webpack/common";
 
 type TFollowedUserInfo = {
+    accountId: string;
     lastChannelId: string | null;
     userId: string;
 } | null;
@@ -43,9 +44,8 @@ const settings = definePluginSettings({
 
 const UserContextMenuPatch: NavContextMenuPatchCallback = (children, { user }: UserContextProps) => {
     const currentUserId = UserStore.getCurrentUser()?.id;
-    if (!currentUserId || currentUserId === user.id || !RelationshipStore.isFriend(user.id)) return;
-
-    const [checked, setChecked] = React.useState(followedUserInfo?.userId === user.id);
+    const [checked, setChecked] = React.useState(followedUserInfo?.accountId === currentUserId && followedUserInfo?.userId === user?.id);
+    if (!currentUserId || !user || currentUserId === user.id || !RelationshipStore.isFriend(user.id)) return;
 
     children.push(
         <Menu.MenuSeparator />,
@@ -54,6 +54,7 @@ const UserContextMenuPatch: NavContextMenuPatchCallback = (children, { user }: U
             label="Follow User"
             checked={checked}
             action={() => {
+                if (UserStore.getCurrentUser()?.id !== currentUserId) return;
                 if (followedUserInfo?.userId === user.id) {
                     followedUserInfo = null;
                     setChecked(false);
@@ -63,6 +64,7 @@ const UserContextMenuPatch: NavContextMenuPatchCallback = (children, { user }: U
                 const currentVoiceState = VoiceStateStore.getVoiceStateForUser(currentUserId);
                 const targetChannelId = VoiceStateStore.getVoiceStateForUser(user.id)?.channelId ?? null;
                 followedUserInfo = {
+                    accountId: currentUserId,
                     lastChannelId: targetChannelId,
                     userId: user.id
                 };
@@ -91,7 +93,7 @@ export default definePlugin({
     flux: {
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
             if (!followedUserInfo) return;
-            if (!RelationshipStore.isFriend(followedUserInfo.userId)) {
+            if (UserStore.getCurrentUser()?.id !== followedUserInfo.accountId || !RelationshipStore.isFriend(followedUserInfo.userId)) {
                 followedUserInfo = null;
                 return;
             }

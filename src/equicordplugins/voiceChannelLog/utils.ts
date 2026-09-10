@@ -6,8 +6,10 @@
 
 import { playAudio } from "@api/AudioPlayer";
 import { classNameFactory } from "@utils/css";
+import { Logger } from "@utils/Logger";
 import { saveFile } from "@utils/web";
 import { findByPropsLazy } from "@webpack";
+import { showToast, Toasts } from "@webpack/common";
 
 import settings from "./settings";
 import { Emoji } from "./types";
@@ -26,13 +28,20 @@ export const playSound = (id: string) => {
 };
 
 export async function downloadSound(id: string): Promise<void> {
-    const filename = id + settings.store.soundboardFileType;
-    const original = await fetch(`https://cdn.discordapp.com/soundboard-sounds/${id}`).then(res => res.arrayBuffer());
+    try {
+        const filename = id + settings.store.soundboardFileType;
+        const response = await fetch(`https://cdn.discordapp.com/soundboard-sounds/${id}`);
+        if (!response.ok) throw new Error(`Sound download failed (${response.status})`);
+        const original = await response.arrayBuffer();
 
-    if (IS_DISCORD_DESKTOP) {
-        DiscordNative.fileManager.saveWithDialog(new Uint8Array(original), filename);
-    } else {
-        saveFile(new File([original], filename, { type: "audio/ogg" }));
+        if (IS_DISCORD_DESKTOP) {
+            await DiscordNative.fileManager.saveWithDialog(new Uint8Array(original), filename);
+        } else {
+            saveFile(new File([original], filename, { type: "audio/ogg" }));
+        }
+    } catch (error) {
+        new Logger("VoiceChannelLog").error("Could not save sound", error);
+        showToast("Could not save sound", Toasts.Type.FAILURE);
     }
 }
 

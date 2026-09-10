@@ -17,6 +17,7 @@ const { fetchApplication }: {
 } = findByPropsLazy("fetchApplication");
 
 const fetchedApplications = new Map<string, Application | null>();
+let fetchGeneration = 0;
 
 const xboxUrl = "https://discord.com/assets/9a15d086141be29d9fcd.png"; // TODO: replace with "renderXboxImage"?
 
@@ -25,6 +26,7 @@ export const ActivityView = findComponentByCodeLazy<ActivityViewProps>('location
 export const cl = classNameFactory("vc-bactivities-");
 
 export function clearFetchedApplications() {
+    fetchGeneration++;
     fetchedApplications.clear();
 }
 
@@ -95,8 +97,10 @@ export function getApplicationIcons(activities: Activity[], preferSmall = false)
                 if (fetchedApplications.has(application_id)) {
                     application = fetchedApplications.get(application_id)!;
                 } else {
+                    const generation = fetchGeneration;
                     fetchedApplications.set(application_id, null);
                     fetchApplication(application_id).then(app => {
+                        if (generation !== fetchGeneration) return;
                         fetchedApplications.set(application_id, app);
                     }).catch(console.error);
                 }

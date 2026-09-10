@@ -284,6 +284,7 @@ const createPopoutChatContextMenuItem = (id: string, label: string, action: () =
 };
 
 const UserContextPatch: NavContextMenuPatchCallback = (children, args: { user: User; }) => {
+    if (!args.user || !UserStore.getCurrentUser()) return;
     const checks = [
         args.user,
         args.user.id !== UserStore.getCurrentUser().id,
@@ -308,6 +309,7 @@ const UserContextPatch: NavContextMenuPatchCallback = (children, args: { user: U
 };
 
 const ChannelContextPatch: NavContextMenuPatchCallback = (children, args: { channel: Channel; }) => {
+    if (!args.channel) return;
     const checks = [
         args.channel,
         args.channel.type !== ChannelType.GUILD_CATEGORY,
@@ -429,8 +431,11 @@ export default definePlugin({
         useEffect(() => {
             if (!channel) return;
 
+            let active = true;
+
             if (channel.isForumLikeChannel()) {
                 requireForumView().then(() => {
+                    if (!active) return;
                     setViewComponent(
                         <ForumView
                             channel={channel}
@@ -438,7 +443,7 @@ export default definePlugin({
                             sidebarState={null}
                         />
                     );
-                });
+                }).catch(() => { if (active) setViewComponent(null); });
 
                 setViewComponent(
                     <div className={ChatClasses.loader}>
@@ -454,7 +459,8 @@ export default definePlugin({
                     />
                 );
             }
-        }, [channel]);
+            return () => { active = false; };
+        }, [channel, guild]);
 
         if (!channel || channelSidebar || guildSidebar) return null;
 

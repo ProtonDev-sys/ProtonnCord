@@ -33,11 +33,7 @@ const enum IndicatorType {
     BOTH = SERVER | FRIEND,
 }
 
-let onlineFriendsCount = 0;
-let guildCount = 0;
-
-function FriendsIndicator() {
-    onlineFriendsCount = useStateFromStores([RelationshipStore, PresenceStore], () => {
+function getOnlineFriendsCount() {
         let count = 0;
 
         const friendIds = RelationshipStore.getFriendIDs();
@@ -50,9 +46,10 @@ function FriendsIndicator() {
             count++;
         }
 
-        return count;
-    });
+    return count;
+}
 
+function FriendsIndicator({ count }: { count: number; }) {
     return (
         <div id="vc-friendcount">
             {!settings.store.useCompact &&
@@ -73,22 +70,22 @@ function FriendsIndicator() {
             }
             <BaseText
                 size="xs"
-                id="vc-friendcount-text">{onlineFriendsCount}
+                id="vc-friendcount-text">{count}
             </BaseText>
             {!!settings.store.useCompact && <BaseText size="xs" id="vc-friendcount-text-compact">Friends</BaseText>}
         </div>
     );
 }
 
-function ServersIndicator() {
-    guildCount = useStateFromStores([GuildStore, UserGuildJoinRequestStore], () => {
+function getGuildCount() {
         const guildJoinRequests: string[] = UserGuildJoinRequestStore.computeGuildIds();
         const guilds = GuildStore.getGuilds();
 
         // Filter only pending guild join requests
-        return GuildStore.getGuildCount() + guildJoinRequests.filter(id => guilds[id] == null).length;
-    });
+    return GuildStore.getGuildCount() + guildJoinRequests.filter(id => guilds[id] == null).length;
+}
 
+function ServersIndicator({ count }: { count: number; }) {
     return (
         <div id="vc-guildcount">
             {!settings.store.useCompact &&
@@ -109,7 +106,7 @@ function ServersIndicator() {
             }
             <BaseText
                 size="xs"
-                id="vc-guildcount-text">{guildCount}
+                id="vc-guildcount-text">{count}
             </BaseText>
             {!!settings.store.useCompact && <BaseText size="xs" id="vc-guildcount-text-compact">Servers</BaseText>}
         </div>
@@ -144,6 +141,8 @@ export default definePlugin({
     settings,
 
     renderIndicator: () => {
+        const onlineFriendsCount = useStateFromStores([RelationshipStore, PresenceStore], getOnlineFriendsCount);
+        const guildCount = useStateFromStores([GuildStore, UserGuildJoinRequestStore], getGuildCount);
         const { mode, useCompact } = settings.store;
         let text;
         // switch is simply better
@@ -169,8 +168,8 @@ export default definePlugin({
                             id={cl("indicator-items")}
                             onMouseEnter={onMouseEnter}
                             onMouseLeave={onMouseLeave}>
-                            {!!(mode & IndicatorType.FRIEND) && <FriendsIndicator />}
-                            {!!(mode & IndicatorType.SERVER) && <ServersIndicator />}
+                            {!!(mode & IndicatorType.FRIEND) && <FriendsIndicator count={onlineFriendsCount} />}
+                            {!!(mode & IndicatorType.SERVER) && <ServersIndicator count={guildCount} />}
                         </div>
                     )}
                 </Tooltip>

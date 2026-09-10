@@ -13,24 +13,14 @@ import { classNameFactory } from "@utils/css";
 import { Margins } from "@utils/margins";
 import { useForceUpdater } from "@utils/react";
 import { makeRange } from "@utils/types";
-import { findLazy } from "@webpack";
 import { React, Select, showToast, Slider } from "@webpack/common";
-import { ComponentType, Ref, SyntheticEvent } from "react";
 
 import { deleteAudio, getAllAudio, saveAudio, StoredAudioFile } from "./audioStore";
-import { ensureDataURICached } from "./index";
+import { ensureDataURICached, forgetDataURI } from "./index";
 import { SoundOverride, SoundType } from "./types";
-
-type FileInput = ComponentType<{
-    ref: Ref<HTMLInputElement>;
-    onChange: (e: SyntheticEvent<HTMLInputElement>) => void;
-    multiple?: boolean;
-    filters?: { name?: string; extensions: string[]; }[];
-}>;
 
 const AUDIO_EXTENSIONS = ["mp3", "wav", "ogg", "m4a", "aac", "flac", "webm", "wma", "mp4"];
 const cl = classNameFactory("vc-custom-sounds-");
-const FileInput: FileInput = findLazy(m => m.prototype?.activateUploadDialogue && m.prototype.setRef);
 
 const capitalizeWords = (str: string) =>
     str.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
@@ -43,10 +33,27 @@ export function SoundOverrideComponent({ type, override, onChange }: {
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const update = useForceUpdater();
     const sound = React.useRef<AudioPlayerInterface | null>(null);
+    const previewGeneration = React.useRef(0);
     const [files, setFiles] = React.useState<Record<string, StoredAudioFile>>({});
 
+    const stopPreview = () => {
+        previewGeneration.current++;
+        sound.current?.stop();
+        sound.current = null;
+    };
+
     React.useEffect(() => {
-        getAllAudio().then(setFiles);
+        let cancelled = false;
+        getAllAudio().then(files => {
+            if (!cancelled) setFiles(files);
+        }).catch(error => {
+            console.error("[CustomSounds] Error loading audio files:", error);
+            if (!cancelled) showToast("Error loading custom sound files.");
+        });
+        return () => {
+            cancelled = true;
+            stopPreview();
+        };
     }, []);
 
     const saveAndNotify = async () => {
@@ -55,7 +62,8 @@ export function SoundOverrideComponent({ type, override, onChange }: {
     };
 
     const previewSound = async () => {
-        sound.current?.stop();
+        stopPreview();
+        const generation = previewGeneration.current;
 
         if (!override.enabled) {
             sound.current = playAudio(type.id);
@@ -67,6 +75,7 @@ export function SoundOverrideComponent({ type, override, onChange }: {
         if (selectedSound === "custom" && override.selectedFileId) {
             try {
                 const dataUri = await ensureDataURICached(override.selectedFileId);
+                if (generation !== previewGeneration.current) return;
 
                 if (!dataUri || !dataUri.startsWith("data:audio/")) {
                     showToast("No custom sound file available for preview");
@@ -126,6 +135,8 @@ export function SoundOverrideComponent({ type, override, onChange }: {
     const deleteFile = async (id: string) => {
         try {
             await deleteAudio(id);
+            forgetDataURI(id);
+            stopPreview();
             const updated = await getAllAudio();
             setFiles(updated);
 
@@ -187,7 +198,7 @@ export function SoundOverrideComponent({ type, override, onChange }: {
                         </Button>
                         <Button
                             variant="dangerPrimary"
-                            onClick={() => sound.current?.stop()}
+                            onClick={stopPreview}
                         >
                             Stop
                         </Button>

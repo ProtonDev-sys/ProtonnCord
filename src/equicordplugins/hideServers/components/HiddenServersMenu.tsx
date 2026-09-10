@@ -12,13 +12,13 @@ import { getGuildAcronym } from "@utils/discord";
 import { classes } from "@utils/misc";
 import { Guild, RenderModalProps } from "@vencord/discord-types";
 import { findCssClassesLazy } from "@webpack";
-import { Button, closeModal, IconUtils, Modal, openModal, SortedGuildStore, useStateFromStores } from "@webpack/common";
+import { Button, closeModal, GuildStore, IconUtils, Modal, openModal, SortedGuildStore, useStateFromStores } from "@webpack/common";
 
 const cl = classNameFactory("vc-hideservers-");
 const IconClasses = findCssClassesLazy("icon", "acronym", "childWrapper");
 
 function HiddenServersModal({ modalProps, close }: { modalProps: RenderModalProps; close(): void; }) {
-    const guilds = useStateFromStores([HiddenServersStore], () => HiddenServersStore.hiddenGuildsDetail());
+    const guilds = useStateFromStores([HiddenServersStore, GuildStore, SortedGuildStore], () => HiddenServersStore.hiddenGuildsDetail());
     return (
         <Modal {...modalProps} size="lg" title="Hidden Servers">
             <HiddenServersMenu guilds={guilds} />
@@ -76,7 +76,7 @@ function GuildRow({ guild }) {
                 {guild.name}
             </Heading>
             <Button
-                className="row-button"
+                className={cl("row-button")}
                 color={Button.Colors.PRIMARY}
                 onClick={() => restoreGuild(guild, SortedGuildStore)}
             >

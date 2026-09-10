@@ -25,6 +25,7 @@ import { classNameFactory } from "@utils/css";
 import definePlugin, { OptionType } from "@utils/types";
 
 import { MemberCount } from "./MemberCount";
+import { OnlineMemberCountStore } from "./OnlineMemberCountStore";
 
 export const settings = definePluginSettings({
     toolTip: {
@@ -56,6 +57,14 @@ export default definePlugin({
     tags: ["Servers", "Utility"],
     authors: [Devs.Ven, Devs.Commandtechno, Devs.Apexo],
     settings,
+
+    start() {
+        OnlineMemberCountStore.start();
+    },
+
+    stop() {
+        OnlineMemberCountStore.stop();
+    },
 
     patches: [
         {

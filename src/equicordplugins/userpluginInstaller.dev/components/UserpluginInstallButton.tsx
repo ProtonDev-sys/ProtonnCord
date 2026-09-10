@@ -20,14 +20,16 @@ export default function UserpluginInstallButton({ props }: any) {
         setPlugins(plugins.value());
         const cid = plugins.registerCallback(value => setPlugins(plugins.value()));
         return () => plugins.deregisterCallback(cid);
-    });
+    }, []);
     const { message } = props;
-    if (![...WHITELISTED_SHARE_CHANNELS, ...(settings.store.allowlistedChannels || "").split(",")].includes(ChannelStore.getChannel(message.channel_id).parent_id) && !WHITELISTED_SHARE_CHANNELS.includes(message.channel_id))
+    const { allowlistedChannels } = settings.use(["allowlistedChannels"]);
+    const allowlisted = [...WHITELISTED_SHARE_CHANNELS, ...(allowlistedChannels || "").split(",").map(value => value.trim())];
+    if (!allowlisted.includes(ChannelStore.getChannel(message.channel_id)?.parent_id) && !allowlisted.includes(message.channel_id))
         return;
     const gitLink = (props.message.content as string).match(CLONE_LINK_REGEX);
     if (!gitLink) return;
-    const idpl = gitLink.includes("plugins.nin0.dev") ? 1 : 0;
-    const installed = plugins.map(p => p.directory).includes(gitLink[[3, 6][idpl]]);
+    const idpl = gitLink[4] === "plugins.nin0.dev" ? 1 : 0;
+    const installed = plugins.some(p => p.directory === gitLink[[3, 6][idpl]].replace(/\.git$/, ""));
     return <>
         <div style={{ display: "flex" }}>
             <Button style={{

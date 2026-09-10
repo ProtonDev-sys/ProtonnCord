@@ -6,7 +6,7 @@
 
 import "./styles.css";
 
-import { get } from "@api/DataStore";
+import { get, set } from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Flex } from "@components/Flex";
@@ -32,6 +32,30 @@ const USERPFP_IMG_URL = "https://raw.githubusercontent.com/UserPFP/img";
 export const requireSettingsModal = extractAndLoadChunksLazy(['type:"USER_SETTINGS_MODAL_OPEN"']);
 export const KEY_DATASTORE = "vencord-custom-avatars";
 export const data = { avatars: {} as Record<string, string> };
+let localAvatars: Record<string, string> = {};
+let remoteAvatars: Record<string, string> = {};
+let avatarMutation = Promise.resolve();
+let generation = 0;
+let revision = 0;
+
+function validAvatars(value: unknown): Record<string, string> {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([id, url]) => /^\d{17,20}$/.test(id) && typeof url === "string"));
+}
+
+export function saveAvatar(userId: string, url: string | null) {
+    const pending = avatarMutation.catch(() => undefined).then(async () => {
+        const next = { ...localAvatars };
+        if (url) next[userId] = url;
+        else delete next[userId];
+        await set(KEY_DATASTORE, next);
+        localAvatars = next;
+        revision++;
+        data.avatars = { ...remoteAvatars, ...localAvatars };
+    });
+    avatarMutation = pending;
+    return pending;
+}
 
 export function clearAvatarUrlCache(_userId?: string) {
     // This merged UserPFP variant resolves avatars directly, so there is no cache to clear.
@@ -178,11 +202,24 @@ export default definePlugin({
         return original(config);
     },
     async start() {
-        data.avatars = await get<Record<string, string>>(KEY_DATASTORE) || {};
+        const currentGeneration = ++generation;
+        const currentRevision = revision;
+        try {
+            await avatarMutation.catch(() => undefined);
+            const stored = await get<Record<string, string>>(KEY_DATASTORE);
+            if (currentGeneration !== generation) return;
+            if (currentRevision === revision) localAvatars = validAvatars(stored);
+            data.avatars = { ...remoteAvatars, ...localAvatars };
 
-        await fetch(settings.store.databaseSource)
-            .then(res => res.ok && res.json())
-            .then(remote => remote?.avatars && Object.assign(data.avatars, remote.avatars))
-            .catch(() => null);
-    }
+            const response = await fetch(settings.store.databaseSource, { signal: AbortSignal.timeout(15_000) });
+            if (!response.ok) return;
+            const remote = await response.json();
+            if (currentGeneration !== generation) return;
+            remoteAvatars = validAvatars(remote?.avatars);
+            data.avatars = { ...remoteAvatars, ...localAvatars };
+        } catch (error) {
+            console.error("UserPFP could not load avatars", error);
+        }
+    },
+    stop() { generation++; }
 });

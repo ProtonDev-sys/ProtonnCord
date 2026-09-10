@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
-import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -230,8 +230,10 @@ function sleep(ms) {
 }
 
 function candidateBridgeDirectories() {
+    if (process.env.PROTONN_CORD_DISCORD_MCP_DIR) {
+        return [dirname(join(process.env.PROTONN_CORD_DISCORD_MCP_DIR, "config.json"))];
+    }
     const candidates = [];
-    if (process.env.PROTONN_CORD_DISCORD_MCP_DIR) candidates.push(process.env.PROTONN_CORD_DISCORD_MCP_DIR);
     const appData = process.env.APPDATA;
     if (appData) {
         candidates.push(join(appData, "ProtonnCord", "discord-mcp"));
@@ -258,8 +260,17 @@ async function loadBridgeConfig() {
 
 async function writeAtomic(path, body) {
     const temporaryPath = `${path}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, body, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    await rename(temporaryPath, path);
+    const file = await open(temporaryPath, "wx", 0o600);
+    try {
+        try {
+            await file.writeFile(body, "utf8");
+        } finally {
+            await file.close();
+        }
+        await rename(temporaryPath, path);
+    } finally {
+        await rm(temporaryPath, { force: true });
+    }
 }
 
 export async function callBridge(tool, args = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {

@@ -194,6 +194,7 @@ test("manifest envelopes respect Discord's actual cap for one, two, and nine sel
     ]) {
         const uploads = Array.from({ length: scenario.descriptor.count }, () => ({ size: 1 }));
         const attempted: string[] = [];
+        const stages: string[] = [];
         const preparedPlaintext = serializeSecurePlaintext(scenario.caption, scenario.descriptor);
         if (scenario.caption.length > 1_000) assert.ok(preparedPlaintext.length > 2_000);
         const result = await runInNewContext(`${outputText}\nrun()`, {
@@ -203,6 +204,7 @@ test("manifest envelopes respect Discord's actual cap for one, two, and nine sel
             preparedAttachments: { plaintext: preparedPlaintext }, stickers: [], uploadLimitBytes: 100_000,
             secureOperationIsCurrent: () => true, encryptedMentionedUserIds: () => [],
             parseSecurePlaintext, serializeSecurePlaintext,
+            setAttachmentStatus: (stage: string) => stages.push(stage),
             Native: { encryptOutgoing: async (_userId: string, input: { plaintext: string; }) => {
                 assert.ok(input.plaintext.length <= 2_000, "oversized prepared text must not hit native invalid_input validation");
                 attempted.push(input.plaintext);
@@ -231,6 +233,7 @@ test("manifest envelopes respect Discord's actual cap for one, two, and nine sel
         }) as { encrypted: { status: string; content: string; }; detachedTextIndex: number | null; };
         assert.equal(result.encrypted.status, "encrypted");
         assert.equal(result.detachedTextIndex, scenario.detached);
+        assert.deepEqual(stages, scenario.detached === null ? [] : ["Encrypting attachments…"]);
         assert.ok(result.encrypted.content.length <= 2_000);
         const opened = await decryptMessage({
             channelId: "200000000000000001", content: result.encrypted.content, discordAuthorId: "100000000000000001",

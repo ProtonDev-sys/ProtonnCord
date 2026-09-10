@@ -502,7 +502,7 @@ export async function uploadToFilebin(
     let releaseUpload: (() => void) | undefined;
     try {
         [fileBuffer, filename, releaseUpload] = await admitFileInput(event, fileBuffer, filename);
-        const binId = `${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
+        const binId = randomUUID().replaceAll("-", "");
         const uploadUrl = `https://filebin.net/${binId}/${encodeURIComponent(filename)}`;
 
         const formData = new FormData();

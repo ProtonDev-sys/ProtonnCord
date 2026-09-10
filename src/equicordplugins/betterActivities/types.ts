@@ -71,10 +71,3 @@ export interface CarouselControlsProps {
     currentActivity: Activity;
     onActivityChange: (activity: Activity) => void;
 }
-
-export interface ActivityViewProps {
-    activity: Activity | null;
-    user: User;
-    application?: Application;
-    currentUser: User;
-}

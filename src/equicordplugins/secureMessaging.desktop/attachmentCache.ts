@@ -111,12 +111,8 @@ interface DownloadReference {
     message: Message;
 }
 
-interface AttachmentDecryptEntry {
-    promise: Promise<DecryptIncomingAttachmentsResult>;
-}
-
 const cache = new Map<string, AttachmentCacheEntry>();
-const attachmentDecryptions = new Map<string, AttachmentDecryptEntry>();
+const attachmentDecryptions = new Map<string, Promise<DecryptIncomingAttachmentsResult>>();
 const downloadReferences = new Map<string, DownloadReference>();
 let attachmentDecryptGeneration = 0;
 let cachedBytes = 0;
@@ -267,14 +263,10 @@ export function decryptIncomingAttachmentsCached(
 ): Promise<DecryptIncomingAttachmentsResult> {
     const key = `${selection}\0${attachmentDecryptKey(localUserId, message)}`;
     const existing = attachmentDecryptions.get(key);
-    if (existing) return existing.promise;
+    if (existing) return existing;
 
     const generation = attachmentDecryptGeneration;
-    const entry: AttachmentDecryptEntry = {
-        promise: Promise.resolve({ status: "failed", error: "cryptographic_operation_failed" }),
-    };
-    attachmentDecryptions.set(key, entry);
-    entry.promise = runAttachmentDecrypt(async (): Promise<DecryptIncomingAttachmentsResult> => {
+    const promise = runAttachmentDecrypt(async (): Promise<DecryptIncomingAttachmentsResult> => {
         if (generation !== attachmentDecryptGeneration || UserStore.getCurrentUser()?.id !== localUserId ||
             !message.author?.id) return { status: "failed", error: "cryptographic_operation_failed" };
         try {
@@ -286,9 +278,10 @@ export function decryptIncomingAttachmentsCached(
             return { status: "failed", error: "attachment_download_failed" };
         }
     }).finally(() => {
-        if (attachmentDecryptions.get(key) === entry) attachmentDecryptions.delete(key);
+        if (attachmentDecryptions.get(key) === promise) attachmentDecryptions.delete(key);
     });
-    return entry.promise;
+    attachmentDecryptions.set(key, promise);
+    return promise;
 }
 
 function safeInlineMimeType(value: string | null): string {

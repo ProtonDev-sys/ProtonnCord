@@ -14,7 +14,7 @@ import { Devs } from "@utils/constants";
 import { getCurrentChannel, getCurrentGuild } from "@utils/discord";
 import definePlugin from "@utils/types";
 import { GuildMember } from "@vencord/discord-types";
-import { GuildMemberStore, GuildRoleStore, Menu, Parser } from "@webpack/common";
+import { ChannelStore, GuildMemberStore, GuildRoleStore, Menu, Parser } from "@webpack/common";
 
 import { showInRoleModal } from "./RoleMembersModal";
 
@@ -24,7 +24,7 @@ function getMembersInRole(roleId: string, guildId: string) {
     const members = GuildMemberStore.getMembers(guildId);
     const membersInRole: GuildMember[] = [];
     members.forEach(member => {
-        if (member.roles.includes(roleId)) {
+        if (roleId === guildId || member.roles.includes(roleId)) {
             membersInRole.push(member);
         }
     });
@@ -39,7 +39,7 @@ export default definePlugin({
     dependencies: ["UserSettingsAPI", "CommandsAPI"],
     start() {
         // DeveloperMode needs to be enabled for the context menu to be shown
-        DeveloperMode.updateSetting(true);
+        return DeveloperMode.updateSetting(true);
     },
     settingsAboutComponent: () => {
         return (
@@ -99,29 +99,30 @@ export default definePlugin({
             );
         },
         "message"(children, { message }: { message: any; }) {
-            const guild = getCurrentGuild();
-            if (!guild) return;
-
-            const roleMentions = message.content.match(/<@&(\d+)>/g);
+            const roleMentions = message?.content?.match(/<@&(\d+)>/g);
             if (!roleMentions?.length) return;
 
-            const channel = getCurrentChannel();
-            if (!channel) return;
+            const channel = ChannelStore.getChannel(message.channel_id);
+            if (!channel?.guild_id) return;
 
-            const roleIds = roleMentions.map(mention => mention.match(/<@&(\d+)>/)![1]);
-
-            const role = GuildRoleStore.getRole(guild.id, roleIds);
-            if (!role) return;
+            const roleIds = new Set<string>(roleMentions.map(mention => mention.match(/<@&(\d+)>/)![1]));
+            const roles = [...roleIds].map(id => GuildRoleStore.getRole(channel.guild_id, id)).filter(role => role != null);
+            if (!roles.length) return;
 
             children.push(
                 <Menu.MenuItem
                     id="vc-view-inrole"
                     label="View Members in Role"
-                    action={() => {
-                        showInRoleModal(getMembersInRole(role.id, guild.id), role.id, channel.id);
-                    }}
+                    action={roles.length === 1 ? () => showInRoleModal(getMembersInRole(roles[0].id, channel.guild_id), roles[0].id, channel.id) : undefined}
                     icon={InfoIcon}
-                />
+                >
+                    {roles.length > 1 && roles.map(role => <Menu.MenuItem
+                        key={role.id}
+                        id={`vc-view-inrole-${role.id}`}
+                        label={role.name}
+                        action={() => showInRoleModal(getMembersInRole(role.id, channel.guild_id), role.id, channel.id)}
+                    />)}
+                </Menu.MenuItem>
             );
         }
     }
