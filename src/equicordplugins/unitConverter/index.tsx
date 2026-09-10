@@ -18,7 +18,7 @@
 
 import "./style.css";
 
-import { addMessageAccessory } from "@api/MessageAccessories";
+import { addMessageAccessory, removeMessageAccessory } from "@api/MessageAccessories";
 import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
@@ -48,7 +48,7 @@ export const settings = definePluginSettings({
 export default definePlugin({
     name: "UnitConverter",
     description: "Converts metric units to Imperial units and vice versa",
-    dependencies: ["MessagePopoverAPI"],
+    dependencies: ["MessageAccessoriesAPI", "MessagePopoverAPI"],
     tags: ["Utility"],
     authors: [Devs.sadan],
     messagePopoverButton: {
@@ -70,6 +70,10 @@ export default definePlugin({
     },
     start() {
         addMessageAccessory("vc-converter", props => <ConverterAccessory message={props.message} />);
+    },
+    stop() {
+        removeMessageAccessory("vc-converter");
+        conversions.clear();
     },
     settings,
 });

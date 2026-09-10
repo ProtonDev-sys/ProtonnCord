@@ -15,7 +15,9 @@
 }
 
 #eq-tdl-player:hover .eq-tdl-button-row,
-#vc-spotify-player:hover .vc-spotify-button-row {
+#vc-spotify-player:hover .vc-spotify-button-row,
+#eq-tdl-player:focus-within .eq-tdl-button-row,
+#vc-spotify-player:focus-within .vc-spotify-button-row {
     opacity: 1;
     height: 32px;
     pointer-events: auto;

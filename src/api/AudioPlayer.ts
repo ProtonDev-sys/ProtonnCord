@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { Logger } from "@utils/Logger";
 import { findByCodeLazy, findLazy } from "@webpack";
 
 let defaultSounds: null | string[] = null;
 const findDefaultSounds = findLazy(module => module.resolve && module.id && module.keys().some(key => key.endsWith(".mp3")), false);
 const AudioPlayerConstructor = findByCodeLazy("could not play audio");
+const logger = new Logger("AudioPlayer");
 
 export type AudioProcessor = (data: PreprocessAudioData) => void;
 export type AudioCallback = (() => void);
@@ -72,11 +74,14 @@ export interface AudioPlayerInterface {
     /** The duration of the audio in seconds, or null if not yet loaded. */
     readonly duration: Promise<number> | null;
     /** The current time of the audio in seconds, or null if not yet loaded. */
-    time: Promise<number> | null;
+    get time(): Promise<number> | null;
+    set time(value: number);
     /** The paused state of the audio, or null if not yet loaded. */
-    paused: Promise<boolean> | null;
+    get paused(): Promise<boolean> | null;
+    set paused(value: boolean);
     /** The muted state of the audio, or null if not yet loaded. */
-    muted: Promise<boolean> | null;
+    get muted(): Promise<boolean> | null;
+    set muted(value: boolean);
     /** The volume of the audio between 0 and 100. */
     volume: number;
     /** The playback speed of the audio between 0.0625 and 16. */
@@ -122,11 +127,35 @@ export interface AudioPlayerOptions {
     onError?: AudioErrorHandler;
 }
 
+/** Report fire-and-forget audio failures without creating another rejected promise. */
+export function handleAudioError(player: AudioPlayerInternal, error: unknown): void {
+    if (error && typeof error === "object" && "name" in error && error.name === "AbortError") return;
+    const cause = error instanceof Error ? error : new Error(String(error));
+    if (!player.onError) {
+        logger.error("Audio operation failed", cause);
+        return;
+    }
+    try {
+        player.onError(cause);
+    } catch (callbackError) {
+        logger.error("Audio error handler failed", callbackError);
+    }
+}
+
 // Wrap the player to allow reprocessing the audio when properties are changed and to alleviate
 // the confusion between the public API accepting 0-100 volume while the internal API uses 0-1 volume.
 class AudioPlayerWrapper implements AudioPlayerInterface {
     private internalPlayer: AudioPlayerInternal;
     constructor(internalPlayer: AudioPlayerInternal) { this.internalPlayer = internalPlayer; }
+
+    private async updateAudio(update?: (audio: HTMLAudioElement) => void): Promise<void> {
+        try {
+            const audio = await this.internalPlayer.ensureAudio();
+            update?.(audio);
+        } catch (error) {
+            handleAudioError(this.internalPlayer, error);
+        }
+    }
 
     get audio(): string { return this.internalPlayer.audio; }
     set audio(value: string) { this.internalPlayer.preprocessDataOriginal.audio = value; this.internalPlayer.processAudio(); }
@@ -138,16 +167,16 @@ class AudioPlayerWrapper implements AudioPlayerInterface {
     set speed(value: number) { this.internalPlayer.preprocessDataOriginal.speed = Math.max(0.0625, Math.min(16, value)); this.internalPlayer.processAudio(); }
 
     get time(): Promise<number> | null { return this.internalPlayer._audio?.then(audio => audio.currentTime) ?? null; }
-    set time(value: number) { this.internalPlayer.ensureAudio().then(audio => audio.currentTime = value); }
+    set time(value: number) { void this.updateAudio(audio => { audio.currentTime = value; }); }
 
     get persistent(): boolean { return this.internalPlayer.persistent; }
     set persistent(value: boolean) { this.internalPlayer.persistent = value; }
 
     get preload(): boolean { return this.internalPlayer.preload; }
-    set preload(value: boolean) { this.internalPlayer.preload = value; value && this.internalPlayer.ensureAudio(); }
+    set preload(value: boolean) { this.internalPlayer.preload = value; if (value) void this.updateAudio(); }
 
     get muted(): Promise<boolean> | null { return this.internalPlayer._audio?.then(audio => audio.muted) ?? null; }
-    set muted(value: boolean) { this.internalPlayer.ensureAudio().then(audio => audio.muted = value); }
+    set muted(value: boolean) { void this.updateAudio(audio => { audio.muted = value; }); }
 
     get paused(): Promise<boolean> | null { return this.internalPlayer._audio?.then(audio => audio.paused) ?? null; }
     set paused(value: boolean) { value ? this.internalPlayer.pause() : this.internalPlayer.play(); }
@@ -155,15 +184,15 @@ class AudioPlayerWrapper implements AudioPlayerInterface {
     get type(): AudioType { return this.internalPlayer.type; }
     get duration(): Promise<number> | null { return this.internalPlayer._audio?.then(audio => audio.duration) ?? null; }
 
-    load(): void { this.internalPlayer.ensureAudio(); }
+    load(): void { void this.updateAudio(); }
     loop(): void { this.internalPlayer.loop(); }
     play(): void { this.internalPlayer.play(); }
     pause(): void { this.internalPlayer.pause(); }
     stop(restart?: boolean): void { this.internalPlayer.stop(restart); }
     restart(): void { this.internalPlayer.stop(true); }
-    seek(time: number): void { this.internalPlayer.ensureAudio().then(audio => audio.currentTime = time); }
-    mute(): void { this.internalPlayer.ensureAudio().then(audio => audio.muted = true); }
-    unmute(): void { this.internalPlayer.ensureAudio().then(audio => audio.muted = false); }
+    seek(time: number): void { this.time = time; }
+    mute(): void { this.muted = true; }
+    unmute(): void { this.muted = false; }
     delete(): void { this.internalPlayer.destroyAudio(); }
 }
 

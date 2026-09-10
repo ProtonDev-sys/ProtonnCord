@@ -16,13 +16,19 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-export function relaunch() {
+export async function relaunch() {
+    await VencordNative.settings.flush();
     if (IS_DISCORD_DESKTOP)
         window.DiscordNative.app.relaunch();
     else if (IS_VESKTOP || IS_EQUIBOP)
         window.VesktopNative.app.relaunch();
     else
         location.reload();
+}
+
+export async function reload() {
+    await VencordNative.settings.flush();
+    location.reload();
 }
 
 export function showItemInFolder(path: string) {

@@ -5,7 +5,6 @@
 }
 
 .vc-sbic-image-container {
-    position: relative;
     transition: 0.15s;
 }
 
@@ -29,7 +28,6 @@
 
 .vc-sbic-settings-username {
     font-size: 22px;
-    color: white;
     margin-right: 5px;
 }
 

@@ -29,7 +29,7 @@ export const LastFMScrobbler: ScrobblerBackend = {
                 format: "json"
             });
 
-            const res = await fetch(`https://ws.audioscrobbler.com/2.0/?${params}`);
+            const res = await fetch(`https://ws.audioscrobbler.com/2.0/?${params}`, { signal: AbortSignal.timeout(10000) });
             if (!res.ok) throw `${res.status} ${res.statusText}`;
 
             const json = await res.json();
@@ -61,6 +61,6 @@ export const LastFMScrobbler: ScrobblerBackend = {
     },
 
     getUserURL(username: string): string {
-        return url(`/user/${username}`);
+        return url(`/user/${encodeURIComponent(username)}`);
     }
 };

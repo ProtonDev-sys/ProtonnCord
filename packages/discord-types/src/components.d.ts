@@ -106,7 +106,7 @@ export type Card = ComponentType<PropsWithChildren<HTMLProps<HTMLDivElement> & {
     Types: Record<"BRAND" | "CUSTOM" | "DANGER" | "PRIMARY" | "SUCCESS" | "WARNING", string>;
 };
 
-export type ComboboxPopout = ComponentType<PropsWithChildren<{
+export type ComboboxPopout = ComponentType<{
     value: Set<any>;
     placeholder: string;
     children(query: string): ReactNode[];
@@ -123,7 +123,7 @@ export type ComboboxPopout = ComponentType<PropsWithChildren<{
     maxVisibleItems?: number;
     showScrollbar?: boolean;
 
-}>>;
+}>;
 
 export type CheckboxAligns = {
     CENTER: "center";
@@ -240,8 +240,8 @@ export type Select = ComponentType<PropsWithChildren<{
     /** discord stupid this gets all options instead of one yeah */
     renderOptionValue?(option: SelectOption[]): ReactNode;
 
-    "aria-label"?: boolean;
-    "aria-labelledby"?: boolean;
+    "aria-label"?: string;
+    "aria-labelledby"?: string;
 }>>;
 
 export type SearchableSelect = ComponentType<PropsWithChildren<{
@@ -284,7 +284,7 @@ export type SearchableSelect = ComponentType<PropsWithChildren<{
     maxVisibleItems?: number;
     popoutWidth?: number;
 
-    "aria-labelledby"?: boolean;
+    "aria-labelledby"?: string;
 }>>;
 
 export type Slider = ComponentClass<PropsWithChildren<{

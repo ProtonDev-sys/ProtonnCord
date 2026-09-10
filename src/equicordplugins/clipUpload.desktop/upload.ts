@@ -83,9 +83,7 @@ export function getDefaultClipTitle(clip?: ClipMetadata | null) {
 export function getClipCreatedAt(clip?: ClipMetadata | null) {
     const { createdAt } = clip ?? {};
 
-    if (createdAt instanceof Date) return createdAt.toISOString();
-    if (typeof createdAt === "number") return new Date(createdAt).toISOString();
-    if (typeof createdAt === "string") {
+    if (createdAt instanceof Date || typeof createdAt === "number" || typeof createdAt === "string") {
         const date = new Date(createdAt);
         if (!Number.isNaN(date.getTime())) return date.toISOString();
     }
@@ -235,15 +233,11 @@ async function reserveClipUpload(options: ClipUploadOptions, file: File) {
     return parseAttachmentUploadResponse(response).attachments?.[0];
 }
 
-async function uploadReservedClip(attachment: NonNullable<Awaited<ReturnType<typeof reserveClipUpload>>>, uploadFile: File) {
-    const uploadAbortController = new AbortController();
-    uploadAbortControllers.add(uploadAbortController);
-
-    try {
+async function uploadReservedClip(attachment: NonNullable<Awaited<ReturnType<typeof reserveClipUpload>>>, uploadFile: File, signal: AbortSignal) {
         const uploadResponse = await fetch(attachment.upload_url, {
             method: "PUT",
             body: uploadFile,
-            signal: uploadAbortController.signal,
+            signal,
             referrer: "https://discord.com/",
             referrerPolicy: "strict-origin-when-cross-origin",
             mode: "cors",
@@ -251,16 +245,16 @@ async function uploadReservedClip(attachment: NonNullable<Awaited<ReturnType<typ
         });
 
         if (!uploadResponse.ok) throw new Error("Upload failed.");
-    } finally {
-        uploadAbortControllers.delete(uploadAbortController);
-    }
 }
 
-async function sendClipUpload(uploadFile: File, options: ClipUploadOptions) {
+async function sendClipUpload(uploadFile: File, options: ClipUploadOptions, signal: AbortSignal) {
+    signal.throwIfAborted();
     const attachment = await reserveClipUpload(options, uploadFile);
+    signal.throwIfAborted();
     if (!attachment) throw new Error("Discord did not return an upload slot.");
 
-    await uploadReservedClip(attachment, uploadFile);
+    await uploadReservedClip(attachment, uploadFile, signal);
+    signal.throwIfAborted();
 
     const messageResponse = await RestAPI.post({
         url: Constants.Endpoints.MESSAGES(options.channelId),
@@ -321,19 +315,29 @@ function shouldRetryWithFFmpeg(error: unknown) {
     return getRestErrorCode(error) === 50174 || errorText.includes("not a valid clip");
 }
 
-export async function uploadClipFile(file: File, options: ClipUploadOptions) {
+export async function uploadClipFile(file: File, options: ClipUploadOptions, signal?: AbortSignal) {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (signal?.aborted) abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    uploadAbortControllers.add(controller);
     try {
+        controller.signal.throwIfAborted();
         showToast("Checking clip file.", Toasts.Type.MESSAGE);
 
         const uploadFile = await prepareClipFile(file, options.fileName);
 
         try {
-            await sendClipUpload(uploadFile, options);
+            await sendClipUpload(uploadFile, options, controller.signal);
         } catch (error) {
+            controller.signal.throwIfAborted();
             if (!shouldRetryWithFFmpeg(error)) throw error;
 
             showToast("Converting clip file.", Toasts.Type.MESSAGE);
-            await sendClipUpload(await stampVideoFile(await convertClipToMp4(file, options.fileName), options.fileName), options);
+            const converted = await convertClipToMp4(file, options.fileName);
+            controller.signal.throwIfAborted();
+            const stamped = await stampVideoFile(converted, options.fileName);
+            await sendClipUpload(stamped, options, controller.signal);
         }
 
         showToast("Clip uploaded.", Toasts.Type.SUCCESS);
@@ -342,6 +346,9 @@ export async function uploadClipFile(file: File, options: ClipUploadOptions) {
         logger.error(error);
         showToast(getErrorMessage(error), Toasts.Type.FAILURE);
         return false;
+    } finally {
+        signal?.removeEventListener("abort", abort);
+        uploadAbortControllers.delete(controller);
     }
 }
 

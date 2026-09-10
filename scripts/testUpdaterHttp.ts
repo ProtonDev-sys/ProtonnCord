@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import {
     applyPendingHttpUpdate,
@@ -142,10 +142,15 @@ async function main(): Promise<void> {
         if (signal.aborted) rejectOnAbort();
         else signal.addEventListener("abort", rejectOnAbort, { once: true });
     });
-    await assert.rejects(
-        requestBytes(timeoutFetcher, "https://example.invalid/timeout", {}, 1, 100),
-        /timed out/iu,
-    );
+    const timeoutFixture = setTimeout(() => assert.fail("The request timeout did not settle"), 1_000);
+    try {
+        await assert.rejects(
+            requestBytes(timeoutFetcher, "https://example.invalid/timeout", {}, 1, 100),
+            /timed out/iu,
+        );
+    } finally {
+        clearTimeout(timeoutFixture);
+    }
 
     await assert.rejects(
         requestJson(
@@ -231,6 +236,8 @@ async function main(): Promise<void> {
         pending = await applyPendingHttpUpdate(pending, async () => validAsar, () => undefined);
         assert.equal(pending, null);
     } finally {
+        assert.equal(dirname(resolve(root)), resolve(tmpdir()));
+        assert.ok(basename(root).startsWith("protonn-cord-http-updater-"));
         await rm(root, { force: true, recursive: true });
     }
 

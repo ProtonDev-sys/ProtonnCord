@@ -1,9 +1,9 @@
-import { AvatarDecorationData, Channel, Guild, GuildMember, Message, User } from ".";
+import { ApplicationCommandOption, AvatarDecorationData, Channel, Guild, GuildMember, Message, User } from ".";
 import type { ReactNode } from "react";
 import { LiteralUnion } from "type-fest";
 
 import type { FluxEvents } from "./fluxEvents";
-import { ApplicationCommandOptionType, ChannelType, PremiumType } from "../enums";
+import { PremiumType } from "../enums";
 
 export { FluxEvents };
 
@@ -353,21 +353,7 @@ export interface DateUtils {
     diffAsUnits(start: Date, end: Date, stopAtOneSecond?: boolean): Record<"days" | "hours" | "minutes" | "seconds", number>;
 }
 
-export interface CommandOptions {
-    type: ApplicationCommandOptionType;
-    name: string;
-    description: string;
-    required?: boolean;
-    choices?: {
-        name: string;
-        values: string | number;
-    }[];
-    options?: CommandOptions[];
-    channel_types?: ChannelType[];
-    min_value?: number;
-    max_value?: number;
-    autocomplete?: boolean;
-}
+export interface CommandOptions extends ApplicationCommandOption { }
 
 export interface URLUtils {
     URL_REGEX: RegExp;

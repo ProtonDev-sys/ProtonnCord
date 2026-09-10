@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import settings from "@equicordplugins/musicControls";
+import { settings } from "@equicordplugins/musicControls/settings";
 import { Provider, SyncedLyric } from "@equicordplugins/musicControls/spotify/lyrics/providers/types";
 
 // stolen from src/plugins/translate/utils.ts
@@ -37,7 +37,7 @@ async function googleTranslate(text: string, targetLang: string, romanize: boole
         q: text
     });
 
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok)
         return null;
 
@@ -51,32 +51,32 @@ async function processLyrics(
 ): Promise<SyncedLyric[] | null> {
     if (!lyrics) return null;
 
-    const nonDuplicatedLyrics = lyrics.filter((lyric, index, self) =>
-        self.findIndex(l => l.text === lyric.text) === index
-    );
+    const texts = [...new Set(lyrics.map(lyric => lyric.text).filter((text): text is string => !!text))];
+    const processed = new Map<string, string>();
+    let index = 0;
+    await Promise.all(Array.from({ length: Math.min(4, texts.length) }, async () => {
+        while (index < texts.length) {
+            const text = texts[index++];
+            try {
+                const translation = await googleTranslate(text, targetLang, romanize);
+                if (!Array.isArray(translation?.sentences)) continue;
+                const result = translation.sentences.map(sentence => romanize ? sentence.src_translit : sentence.trans)
+                    .filter((value): value is string => typeof value === "string").join("");
+                if (result) processed.set(text, result);
+            } catch { /* Preserve the original line when a provider request fails. */ }
+        }
+    }));
 
-    const processedLyricsResp = await Promise.all(
-        nonDuplicatedLyrics.map(async lyric => {
-            if (!lyric.text) return [lyric.text, null];
-
-            const translation = await googleTranslate(lyric.text, targetLang, romanize);
-
-            if (!translation || !translation.sentences || translation.sentences.length === 0) return [lyric.text, null];
-
-            return [lyric.text, romanize ? translation.sentences[0].src_translit : translation.sentences[0].trans];
-        })
-    );
-
-    if (processedLyricsResp.every(mapping => mapping[1] === null)) return null;
+    if (!processed.size) return null;
 
     return lyrics.map(lyric => ({
         ...lyric,
-        text: processedLyricsResp.find(mapping => mapping[0] === lyric.text)?.[1] ?? lyric.text
+        text: lyric.text ? processed.get(lyric.text) ?? lyric.text : lyric.text
     }));
 }
 
 async function translateLyrics(lyrics: SyncedLyric[]) {
-    return await processLyrics(lyrics, settings.store.TranslateTo, false);
+    return await processLyrics(lyrics, settings.store.translateTo, false);
 }
 
 async function romanizeLyrics(lyrics: SyncedLyric[]) {

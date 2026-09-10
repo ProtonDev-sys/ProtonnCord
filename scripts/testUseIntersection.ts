@@ -49,6 +49,7 @@ function fixture() {
     };
     const mocks: Record<string, object> = {
         "@webpack/common": common,
+        "./Logger": { Logger: class { error() {} } },
         "./lazyReact": {},
         "./misc": { checkIntersecting: (target: Target) => { metrics.layoutReads++; return target.visible; } }
     };
@@ -121,4 +122,17 @@ test("one-shot intersection refs skip observation for already visible elements",
     assert.equal(render(target, true), true);
     unmount();
     assert.deepEqual(metrics, { observers: 0, disconnects: 0, layoutReads: 1 });
+});
+
+test("replacement visibility resets immediately and disconnected observers cannot update it", () => {
+    const { render, unmount, instances } = fixture();
+    const previous = { visible: true };
+    assert.equal(render(previous), true);
+    const replacement = { visible: false };
+    assert.equal(render(replacement), false);
+    instances[0].callback([{ target: previous, isIntersecting: true }]);
+    assert.equal(render(replacement), false);
+    unmount();
+    instances[1].callback([{ target: replacement, isIntersecting: true }]);
+    assert.equal(render(null), false);
 });

@@ -88,5 +88,6 @@ export const settings = definePluginSettings({
     }
 }).withPrivateSettings<{
     lastReviewId?: number;
+    lastReviewAccountId?: string;
     reviewsDropdownState?: boolean;
 }>();

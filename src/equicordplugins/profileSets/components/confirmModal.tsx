@@ -26,7 +26,13 @@ interface ImportProfilesModalProps extends RenderModalProps {
 }
 
 export function ConfirmModal({ title, message, confirmText, cancelText, onConfirm, onCancel, ...props }: ConfirmModalProps) {
+    const resolved = React.useRef(false);
+    React.useEffect(() => () => {
+        if (!resolved.current) onCancel();
+    }, []);
     const closeAfter = (action: () => void) => () => {
+        if (resolved.current) return;
+        resolved.current = true;
         action();
         props.onClose();
     };
@@ -55,7 +61,13 @@ export function ConfirmModal({ title, message, confirmText, cancelText, onConfir
 }
 
 export function ImportProfilesModal({ title, message, onOverride, onMerge, onCancel, ...props }: ImportProfilesModalProps) {
+    const resolved = React.useRef(false);
+    React.useEffect(() => () => {
+        if (!resolved.current) onCancel();
+    }, []);
     const closeAfter = (action: () => void) => () => {
+        if (resolved.current) return;
+        resolved.current = true;
         action();
         props.onClose();
     };

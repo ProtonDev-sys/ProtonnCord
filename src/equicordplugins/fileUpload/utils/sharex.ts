@@ -27,7 +27,7 @@ function getNestedValue(data: unknown, path: string): unknown {
     let current: unknown = data;
     for (const segment of normalizedPath.split(".")) {
         if (!segment) continue;
-        if (!current || typeof current !== "object" || !(segment in current)) {
+        if (!current || typeof current !== "object" || !Object.hasOwn(current, segment)) {
             return undefined;
         }
 
@@ -57,6 +57,17 @@ export function parseShareXConfig(configText: string): ShareXUploaderConfig {
         throw new Error("ShareX RequestURL is required");
     }
 
+    for (const key of ["Version", "Name", "DestinationType", "RequestMethod", "Body", "FileFormName", "URL", "ErrorMessage"] as const) {
+        if (config[key] !== undefined && typeof config[key] !== "string") throw new Error(`ShareX ${key} must be a string`);
+    }
+    for (const key of ["Headers", "Arguments"] as const) {
+        const values = config[key];
+        if (values !== undefined && (!values || typeof values !== "object" || Array.isArray(values)
+            || Object.values(values).some(value => !["string", "number", "boolean"].includes(typeof value)))) {
+            throw new Error(`ShareX ${key} must contain string, number or boolean values`);
+        }
+    }
+
     if (!isSupportedShareXDestination(config)) {
         throw new Error("ShareX DestinationType must include FileUploader or ImageUploader");
     }
@@ -84,7 +95,7 @@ export function resolveShareXTemplate(
     let output = template.trim();
     if (!output) return undefined;
 
-    output = output.replace(RESPONSE_TEMPLATE_REGEX, responseText);
+    output = output.replace(RESPONSE_TEMPLATE_REGEX, () => responseText);
     output = output.replace(JSON_TEMPLATE_REGEX, (_, pathA: string, pathB: string) => {
         const path = pathA || pathB;
         const value = getNestedValue(responseJson, path);

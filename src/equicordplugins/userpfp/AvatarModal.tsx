@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { set } from "@api/DataStore";
 import { Heading } from "@components/Heading";
 import { Margins } from "@components/margins";
 import { classNameFactory } from "@utils/css";
 import { RenderModalProps } from "@vencord/discord-types";
 import { IconUtils, Modal, React, TextInput, Toasts, UserStore, useState } from "@webpack/common";
 
-import { clearAvatarUrlCache, data, KEY_DATASTORE } from ".";
+import { data, saveAvatar } from ".";
 
 const cl = classNameFactory("vc-userpfp-");
 
@@ -27,18 +26,24 @@ function fileToDataUrl(file: File): Promise<string> {
 export function SetAvatarModal({ userId, modalProps }: { userId: string; modalProps: RenderModalProps; }) {
     const { avatars } = data;
     const user = UserStore.getUser(userId);
-    const originalAvatar = IconUtils.getUserAvatarURL(user, true, 128) || "";
+    const originalAvatar = user ? IconUtils.getUserAvatarURL(user, true, 128) || "" : "";
 
     const [url, setUrl] = useState(avatars[userId] || "");
     const [preview, setPreview] = useState<string>(avatars[userId] || "");
     const [isDragging, setIsDragging] = useState(false);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const busy = React.useRef(false);
+    const fileGeneration = React.useRef(0);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState("");
+    React.useEffect(() => () => { fileGeneration.current++; }, []);
 
     function handleKey(e: React.KeyboardEvent) {
         if (e.key === "Enter") saveUserAvatar();
     }
 
     function handleUrlChange(val: string) {
+        fileGeneration.current++;
         setUrl(val);
         setPreview(val.trim());
     }
@@ -55,33 +60,47 @@ export function SetAvatarModal({ userId, modalProps }: { userId: string; modalPr
             return;
         }
 
-        const dataUrl = await fileToDataUrl(file);
-        setUrl(dataUrl);
-        setPreview(dataUrl);
+        const currentGeneration = ++fileGeneration.current;
+        try {
+            const dataUrl = await fileToDataUrl(file);
+            if (currentGeneration !== fileGeneration.current) return;
+            setUrl(dataUrl);
+            setPreview(dataUrl);
+        } catch {
+            if (currentGeneration === fileGeneration.current) setError("Unable to read this image.");
+        }
     }
 
     async function saveUserAvatar() {
-        if (!url.trim()) {
-            await deleteUserAvatar();
-            return;
-        }
-        avatars[userId] = url.trim();
-        clearAvatarUrlCache(userId);
-        await set(KEY_DATASTORE, avatars);
-        modalProps.onClose();
+        await persistAvatar(url.trim() || null);
     }
 
     async function deleteUserAvatar() {
-        delete avatars[userId];
-        clearAvatarUrlCache(userId);
-        await set(KEY_DATASTORE, avatars);
-        modalProps.onClose();
+        await persistAvatar(null);
+    }
+
+    async function persistAvatar(value: string | null) {
+        if (busy.current) return;
+        busy.current = true;
+        fileGeneration.current++;
+        setSaving(true);
+        setError("");
+        try {
+            await saveAvatar(userId, value);
+            modalProps.onClose();
+        } catch {
+            setError("Unable to save this avatar. Please try again.");
+        } finally {
+            busy.current = false;
+            setSaving(false);
+        }
     }
 
     const actions = [
         {
             text: "Save",
             variant: "primary",
+            disabled: saving,
             onClick: saveUserAvatar
         }
     ];
@@ -90,6 +109,7 @@ export function SetAvatarModal({ userId, modalProps }: { userId: string; modalPr
         actions.unshift({
             text: "Delete",
             variant: "dangerPrimary",
+            disabled: saving,
             onClick: deleteUserAvatar
         });
     }
@@ -102,6 +122,7 @@ export function SetAvatarModal({ userId, modalProps }: { userId: string; modalPr
             actions={actions}
         >
             <div onKeyDown={handleKey}>
+                {error && <p role="alert">{error}</p>}
                 {/* Preview */}
                 <div className={cl("preview-row")}>
                     <div className={cl("preview-box")}>
@@ -126,6 +147,7 @@ export function SetAvatarModal({ userId, modalProps }: { userId: string; modalPr
                         placeholder="https://example.com/image.png"
                         value={url.startsWith("data:") ? "(uploaded file)" : url}
                         onChange={handleUrlChange}
+                        disabled={saving}
                         autoFocus
                     />
                 </section>

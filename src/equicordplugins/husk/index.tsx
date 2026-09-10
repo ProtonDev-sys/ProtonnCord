@@ -22,7 +22,7 @@ import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
 import { classes } from "@utils/misc";
 import definePlugin, { OptionType } from "@utils/types";
-import { ChannelStore, EmojiStore, RestAPI } from "@webpack/common";
+import { ChannelStore, EmojiStore, RestAPI, showToast, Toasts } from "@webpack/common";
 import type { SVGProps } from "react";
 // eslint-disable-next-line no-duplicate-imports
 import { PropsWithChildren } from "react";
@@ -88,7 +88,7 @@ const settings = definePluginSettings({
 function getEmojiIdThatShouldBeUsed(guildId: string) {
     if (!settings.store.findInServer || guildId === "") return settings.store.emojiID;
     let id = "";
-    EmojiStore.getGuildEmoji(guildId).forEach(emoji => {
+    (EmojiStore.getGuildEmoji(guildId) ?? []).forEach(emoji => {
         if (emoji.name === settings.store.emojiName) {
             id = emoji.id;
         }
@@ -111,12 +111,15 @@ export default definePlugin({
                 icon: Husk,
                 message: msg,
                 channel: ChannelStore.getChannel(msg.channel_id),
-                onClick: () => {
-                    const guildId = ChannelStore.getChannel(msg.channel_id).guild_id !== null ? ChannelStore.getChannel(msg.channel_id).guild_id : "";
-                    RestAPI.put({
-                        url: `/channels/${msg.channel_id}/messages/${msg.id}/reactions/${settings.store.emojiName}:${getEmojiIdThatShouldBeUsed(guildId)}/@me`
+                onClick: async () => {
+                    const channel = ChannelStore.getChannel(msg.channel_id);
+                    if (!channel) return;
+                    try {
+                        const emoji = `${settings.store.emojiName}:${getEmojiIdThatShouldBeUsed(channel.guild_id ?? "")}`;
+                        await RestAPI.put({ url: `/channels/${msg.channel_id}/messages/${msg.id}/reactions/${encodeURIComponent(emoji)}/@me` });
+                    } catch {
+                        showToast("Could not add the reaction.", Toasts.Type.FAILURE);
                     }
-                    );
                 }
             };
         },

@@ -71,6 +71,7 @@ export default definePlugin({
     },
 
     stop() {
+        this.qrModalOpen = false;
         removeFromArray(SettingsPlugin.customEntries, e => e.key === "equicord_login_with_qr");
         unload();
     },

@@ -22,38 +22,37 @@ import { React, TextInput, useState } from "@webpack/common";
 
 import { resolveError, SettingProps, SettingsSection } from "./Common";
 
-const MAX_SAFE_NUMBER = BigInt(Number.MAX_SAFE_INTEGER);
-
 export function NumberSetting({ setting, pluginSettings, definedSettings, id, onChange }: SettingProps<PluginSettingNumberDef | PluginSettingBigIntDef>) {
-    function serialize(value: any) {
-        if (setting.type === OptionType.BIGINT) return BigInt(value);
-        return Number(value);
-    }
-
-    const [state, setState] = useState<any>(`${pluginSettings[id] ?? setting.default ?? 0}`);
+    const [state, setState] = useState(`${pluginSettings[id] ?? setting.default ?? 0}`);
     const [error, setError] = useState<string | null>(null);
 
-    function handleChange(newValue: any) {
-        const isValid = setting.isValid?.call(definedSettings, newValue) ?? true;
+    function handleChange(newValue: string) {
+        setState(newValue);
+        if (!newValue.trim() || (setting.type === OptionType.BIGINT && !/^[+-]?\d+$/.test(newValue))) {
+            setError("Enter a valid number.");
+            return;
+        }
+
+        const value = setting.type === OptionType.BIGINT ? BigInt(newValue) : Number(newValue);
+        if (typeof value === "number" && !Number.isFinite(value)) {
+            setError("Enter a valid number.");
+            return;
+        }
+
+        const isValid = setting.isValid?.call(definedSettings, value) ?? true;
 
         setError(resolveError(isValid));
 
         if (isValid === true) {
-            onChange(serialize(newValue));
-        }
-
-        if (setting.type === OptionType.NUMBER && BigInt(newValue) >= MAX_SAFE_NUMBER) {
-            setState(`${Number.MAX_SAFE_INTEGER}`);
-        } else {
-            setState(newValue);
+            onChange(value);
         }
     }
 
     return (
         <SettingsSection name={setting.displayName} id={id} description={setting.description} error={error}>
             <TextInput
-                type="number"
-                pattern="-?[0-9]+"
+                type={setting.type === OptionType.BIGINT ? "text" : "number"}
+                inputMode={setting.type === OptionType.BIGINT ? "numeric" : "decimal"}
                 placeholder={setting.placeholder ?? "Enter a number"}
                 value={state}
                 onChange={handleChange}

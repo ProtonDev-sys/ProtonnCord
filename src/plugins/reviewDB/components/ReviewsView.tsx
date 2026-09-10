@@ -64,7 +64,7 @@ export default function ReviewsView({
 
     const [reviewData] = useAwaiter(() => getReviews(discordId, { offset: (page - 1) * REVIEWS_PER_PAGE, limit: REVIEWS_PER_PAGE, fetchVotes: true }), {
         fallbackValue: null,
-        deps: [refetchSignal, signal, page],
+        deps: [discordId, refetchSignal, signal, page],
         onSuccess: data => {
             if (settings.store.hideBlockedUsers) data!.reviews = data!.reviews?.filter(r => !RelationshipStore.isBlocked(r.sender.discordID));
             const systemReviews = data!.reviews.filter(r => r.type === ReviewType.System);
@@ -131,8 +131,7 @@ export function ReviewsInputComponent(
 ) {
     const { token } = Auth;
     const editorRef = useRef<any>(null);
-    const inputType = ChatInputTypes.USER_PROFILE_REPLY;
-    inputType.disableAutoFocus = true;
+    const inputType = React.useMemo(() => ({ ...ChatInputTypes.USER_PROFILE_REPLY, disableAutoFocus: true }), []);
 
     const channel = createChannelRecordFromServer({ id: "0", type: 1 });
 
@@ -173,7 +172,8 @@ export function ReviewsInputComponent(
                             if (response) {
                                 refetch();
 
-                                const slateEditor = editorRef.current.ref.current.getSlateEditor();
+                                const slateEditor = editorRef.current?.ref?.current?.getSlateEditor();
+                                if (!slateEditor) return { shouldClear: false, shouldRefocus: false };
 
                                 // clear editor
                                 Transforms.delete(slateEditor, {

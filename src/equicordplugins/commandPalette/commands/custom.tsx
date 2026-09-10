@@ -39,13 +39,13 @@ const KIND_ICONS: Record<CustomCommandKind, PaletteCommand["icon"]> = {
     message: TextIcon
 };
 
-function runCustomCommand(data: CustomCommandData) {
+async function runCustomCommand(data: CustomCommandData) {
     switch (data.kind) {
         case "url":
-            VencordNative.native.openExternal(data.value);
+            await VencordNative.native.openExternal(data.value);
             break;
         case "settings":
-            void openSettingsPage(data.value);
+            await openSettingsPage(data.value);
             break;
         case "message":
             insertTextIntoChatInputBox(data.value);

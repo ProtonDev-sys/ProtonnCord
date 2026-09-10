@@ -62,6 +62,7 @@ export default definePlugin({
     tags: ["Activity", "Utility"],
     authors: [Devs.thororen],
     settings,
+    dependencies: ["UserSettingsAPI"],
 
     flux: {
         async RUNNING_GAMES_CHANGE({ games }) {
@@ -84,11 +85,14 @@ export default definePlugin({
     },
 
     start() {
+        savedStatus = null;
         lastStatus = StatusSettings.getSetting();
         UserSettingsProtoStore.addChangeListener(handleUserSettingsChange);
     },
 
     stop() {
         UserSettingsProtoStore.removeChangeListener(handleUserSettingsChange);
+        savedStatus = null;
+        lastStatus = null;
     }
 });

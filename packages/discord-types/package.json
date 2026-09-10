@@ -13,6 +13,7 @@
         "directory": "packages/discord-types"
     },
     "dependencies": {
+        "@types/node": "^26.0.1",
         "moment": "2.22.2",
         "type-fest": "^5.7.0"
     },

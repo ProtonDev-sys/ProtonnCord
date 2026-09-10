@@ -18,17 +18,20 @@ import { React, TextInput } from "@webpack/common";
 const cl = classNameFactory("vc-settings-theme-");
 
 export function Validator({ link, onValidate }: { link: string; onValidate: (valid: boolean) => void; }) {
-    const [res, err, pending] = useAwaiter(() => fetch(link).then(res => {
-        if (res.status > 300) throw `${res.status} ${res.statusText}`;
+    const [, err, pending] = useAwaiter(() => fetch(link).then(res => {
+        if (!res.ok) throw `${res.status} ${res.statusText}`;
         const contentType = res.headers.get("Content-Type");
         if (!contentType?.startsWith("text/css") && !contentType?.startsWith("text/plain")) {
-            onValidate(false);
             throw "Not a CSS file. Remember to use the raw link!";
         }
 
-        onValidate(true);
-        return "Okay!";
-    }));
+        return true;
+    }), {
+        fallbackValue: false,
+        deps: [link],
+        onSuccess: onValidate,
+        onError: () => onValidate(false)
+    });
 
     const text = pending
         ? "Checking..."
@@ -68,7 +71,7 @@ export function OnlineThemesSection({
             </Paragraph>
             <FormSwitch
                 title="Enable Online Themes"
-                description="Toggle online theme loading. When disabled, all online themes will be turned off and you won't be able to add new ones."
+                description="Pause online theme loading. Your selected themes are kept and will resume when this is enabled again."
                 value={enableOnlineThemes}
                 onChange={setEnableOnlineThemes}
             />
@@ -81,14 +84,17 @@ export function OnlineThemesSection({
                 <TextInput
                     placeholder="https://example.com/theme.css"
                     value={currentThemeLink}
-                    onChange={setCurrentThemeLink}
+                    onChange={link => {
+                        setThemeLinkValid(false);
+                        setCurrentThemeLink(link);
+                    }}
                     disabled={!enableOnlineThemes}
                 />
                 <Button onClick={() => addThemeLink(currentThemeLink)} disabled={!themeLinkValid || !enableOnlineThemes}>
                     Add
                 </Button>
             </div>
-            {currentThemeLink && (
+            {currentThemeLink && enableOnlineThemes && (
                 <div className={Margins.top8}>
                     <Validator link={currentThemeLink} onValidate={setThemeLinkValid} />
                 </div>

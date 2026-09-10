@@ -5,7 +5,7 @@
  */
 
 import { BaseText } from "@components/BaseText";
-import { BasicChannelTabsProps, Bookmark, BookmarkFolder, BookmarkProps, getDiscordFolderIcon, isBookmarkFolder, isTabSelected, navigateToBookmark, openedTabs, settings, switchChannel, UseBookmarkMethods, useBookmarks } from "@equicordplugins/channelTabs/util";
+import { BasicChannelTabsProps, Bookmark, BookmarkFolder, BookmarkProps, getDiscordFolderIcon, isBookmarkFolder, isTabSelected, navigateToBookmark, openedTabs, settings, UseBookmarkMethods, useBookmarks } from "@equicordplugins/channelTabs/util";
 import { CircleQuestionIcon, DiscoveryIcon, EnvelopeIcon, FriendsIcon, NitroIcon, QuestIcon, ShopIcon } from "@equicordplugins/channelTabs/util/icons";
 import { classNameFactory } from "@utils/css";
 import { getGuildAcronym, getIntlMessage } from "@utils/discord";
@@ -104,7 +104,7 @@ function BookmarkIcon({ bookmark }: { bookmark: Bookmark | BookmarkFolder; }) {
         if (channel.recipients.length === 1) return (
             <Avatar
                 size="SIZE_16"
-                src={UserStore.getUser(channel.recipients[0]).getAvatarURL(undefined, 128)}
+                src={UserStore.getUser(channel.recipients[0])?.getAvatarURL(undefined, 128)}
             />
         );
         else return (
@@ -120,100 +120,6 @@ function BookmarkIcon({ bookmark }: { bookmark: Bookmark | BookmarkFolder; }) {
 
     return (
         <CircleQuestionIcon height={16} width={16} />
-    );
-}
-
-function BookmarkFolderOpenMenu(props: BookmarkProps) {
-    const { bookmarks, index, methods } = props;
-    const bookmark = bookmarks[index] as BookmarkFolder;
-    const { bookmarkNotificationDot } = settings.use(["bookmarkNotificationDot"]);
-
-    return (
-        <Menu.Menu
-            navId="bookmark-folder-menu"
-            onClose={() => FluxDispatcher.dispatch({ type: "CONTEXT_MENU_CLOSE" })}
-            aria-label="Bookmark Folder Menu"
-        >
-            {bookmark.bookmarks.map((b, i) => (
-                <Menu.MenuItem
-                    key={`bookmark-folder-entry-${b.channelId}`}
-                    id={`bookmark-folder-entry-${b.channelId}`}
-                    label={
-                        <div
-                            style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "0.25rem"
-                            }}>
-                            <span
-                                style={{
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis"
-                                }}>
-                                {b.name}
-                            </span>
-                            {bookmarkNotificationDot && <NotificationDot channelIds={[b.channelId]} />}
-                        </div>
-                    }
-                    icon={() => <BookmarkIcon bookmark={b} />}
-                    showIconFirst={true}
-                    action={() => switchChannel(b)}
-                >
-                    {bookmarkNotificationDot && (
-                        <Menu.MenuGroup>
-                            <Menu.MenuItem
-                                key="mark-as-read"
-                                id="mark-as-read"
-                                label={getIntlMessage("MARK_AS_READ")}
-                                disabled={!ReadStateStore.hasUnread(b.channelId)}
-                                action={() => ReadStateUtils.ackChannel(ChannelStore.getChannel(b.channelId))}
-                            />
-                        </Menu.MenuGroup>
-                    )}
-                    <Menu.MenuGroup key="bookmarks">
-                        <Menu.MenuItem
-                            key="edit-bookmark"
-                            id="edit-bookmark"
-                            label="Edit Bookmark"
-                            action={() => {
-                                const key = openModal(modalProps =>
-                                    <EditModal
-                                        modalProps={modalProps}
-                                        modalKey={key}
-                                        bookmark={b}
-                                        onSave={name => {
-                                            const newBookmarks = [...bookmark.bookmarks];
-                                            newBookmarks[i].name = name;
-                                            methods.editBookmark(index, { bookmarks: newBookmarks });
-                                            closeModal(key);
-                                        }}
-                                    />
-                                );
-                            }}
-                        />
-                        <Menu.MenuItem
-                            key="delete-bookmark"
-                            id="delete-bookmark"
-                            label="Delete Bookmark"
-                            action={() => {
-                                methods.deleteBookmark(i, index);
-                            }}
-                        />
-                        <Menu.MenuItem
-                            key="remove-bookmark-from-folder"
-                            id="remove-bookmark-from-folder"
-                            label="Remove Bookmark from Folder"
-                            action={() => {
-                                const newBookmarks = [...bookmark.bookmarks];
-                                newBookmarks.splice(i, 1);
-                                methods.addBookmark(b);
-                                methods.editBookmark(index, { bookmarks: newBookmarks });
-                            }}
-                        />
-                    </Menu.MenuGroup>
-                </Menu.MenuItem>
-            ))}
-        </Menu.Menu>
     );
 }
 
@@ -274,7 +180,7 @@ function FolderBookmarkItem({ bookmark, bookmarks, folderIndex, bookmarkIndex, m
             }
 
             const folder = bookmarks[folderIndex];
-            if (!isBookmarkFolder(folder)) return;
+            if (!isBookmarkFolder(folder) || !folder.bookmarks[dragIndex]) return;
 
             const newBookmarks = [...folder.bookmarks];
             const moved = newBookmarks.splice(dragIndex, 1)[0];
@@ -467,10 +373,13 @@ function Bookmark(props: BookmarkProps & { isExpanded?: boolean; onToggleFolder?
                 const sourceBookmark = item.bookmark || bookmarks[item.index];
 
                 // skip if source is a folder
-                if (isBookmarkFolder(sourceBookmark)) return;
+                if (!sourceBookmark || isBookmarkFolder(sourceBookmark)) return;
 
                 // skip if already in this folder
                 if (item.isFromFolder && item.folderIndex === index) return;
+
+                // Add before removing: deleting a root item can shift this folder's index.
+                methods.addBookmark(sourceBookmark, index);
 
                 // remove from original location
                 if (item.isFromFolder) {
@@ -480,9 +389,6 @@ function Bookmark(props: BookmarkProps & { isExpanded?: boolean; onToggleFolder?
                     // coming from bar level
                     methods.deleteBookmark(item.index);
                 }
-
-                // add to this folder
-                methods.addBookmark(sourceBookmark, index);
             }
         },
         collect: monitor => ({

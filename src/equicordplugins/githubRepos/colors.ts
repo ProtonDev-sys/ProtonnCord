@@ -62,6 +62,6 @@ const colors: Record<string, string> = {
     "Zig": "#ec915c"
 };
 
-export function getLanguageColor(language: string): string {
-    return colors[language] || "#858585";
+export function getLanguageColor(language: string | null): string {
+    return language && Object.hasOwn(colors, language) ? colors[language] : "#858585";
 }

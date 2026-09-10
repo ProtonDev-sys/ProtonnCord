@@ -1527,41 +1527,13 @@ export interface MediaEngine {
      */
     on(event: "Destroy" | "Silence" | "WatchdogTimeout" | "ClipsRecordingRestartNeeded" | "VoiceFiltersFailed", listener: () => void): this;
     /**
-     * Registers a one-time listener for device changes.
-     * @param event event name.
-     * @param listener callback receiving device lists.
+     * Registers a one-time listener.
      */
-    once(event: "DeviceChange", listener: (inputDevices: AudioDevice[], outputDevices: AudioDevice[], videoDevices: VideoDevice[]) => void): this;
+    once: this["on"];
     /**
-     * Registers a one-time listener for volume changes.
-     * @param event event name.
-     * @param listener callback receiving input and output volumes.
+     * Removes a listener.
      */
-    once(event: "VolumeChange", listener: (inputVolume: number, outputVolume: number) => void): this;
-    /**
-     * Registers a one-time listener for events without arguments.
-     * @param event event name.
-     * @param listener callback with no arguments.
-     */
-    once(event: "Destroy" | "Silence" | "WatchdogTimeout" | "ClipsRecordingRestartNeeded" | "VoiceFiltersFailed", listener: () => void): this;
-    /**
-     * Removes a listener for device changes.
-     * @param event event name.
-     * @param listener callback to remove.
-     */
-    off(event: "DeviceChange", listener: (inputDevices: AudioDevice[], outputDevices: AudioDevice[], videoDevices: VideoDevice[]) => void): this;
-    /**
-     * Removes a listener for volume changes.
-     * @param event event name.
-     * @param listener callback to remove.
-     */
-    off(event: "VolumeChange", listener: (inputVolume: number, outputVolume: number) => void): this;
-    /**
-     * Removes a listener for events without arguments.
-     * @param event event name.
-     * @param listener callback to remove.
-     */
-    off(event: "Destroy" | "Silence" | "WatchdogTimeout" | "ClipsRecordingRestartNeeded" | "VoiceFiltersFailed", listener: () => void): this;
+    off: this["on"];
     /**
      * Removes all listeners for an event.
      * @param event event name, or all if omitted.

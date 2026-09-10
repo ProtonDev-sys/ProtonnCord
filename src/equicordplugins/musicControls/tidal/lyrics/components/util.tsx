@@ -10,7 +10,7 @@ import { EnhancedLyric } from "@equicordplugins/musicControls/tidal/lyrics/types
 import { TidalStore } from "@equicordplugins/musicControls/tidal/TidalStore";
 import { classNameFactory } from "@utils/css";
 import { findCssClassesLazy } from "@webpack";
-import { React, useEffect, useState, useStateFromStores } from "@webpack/common";
+import { React, useEffect, useMemo, useState, useStateFromStores } from "@webpack/common";
 
 export const scrollClasses = findCssClassesLazy("auto", "customTheme");
 
@@ -65,42 +65,22 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
 
     const { lyricDelay } = settings.use(["lyricDelay"]);
 
-    const [currLrcIndex, setCurrLrcIndex] = useState<number | null>(null);
-    const [nextLyric, setNextLyric] = useState<number | null>(null);
     const [position, setPosition] = useState(storePosition);
-    const [lyricRefs, setLyricRefs] = useState<React.RefObject<HTMLDivElement | null>[]>([]);
 
     const currentLyrics = lyrics || null;
     const duration = track?.songDuration ? track.songDuration * 1000 : Number.POSITIVE_INFINITY;
 
-    useEffect(() => {
-        setLyricRefs(currentLyrics?.map(() => React.createRef()) ?? []);
-    }, [currentLyrics]);
+    const lyricRefs = useMemo(() => currentLyrics?.map(() => React.createRef<HTMLDivElement>()) ?? [], [currentLyrics]);
+    const [currLrcIndex, nextLyric] = useMemo(() => currentLyrics && position != null
+        ? calculateIndexes(currentLyrics, position, lyricDelay) : [null, null], [currentLyrics, position, lyricDelay]);
 
     useEffect(() => {
         setPosition(Math.min(storePosition, duration));
     }, [duration, storePosition]);
 
     useEffect(() => {
-        if (currentLyrics && position != null) {
-            const [currentIndex, nextLyric] = calculateIndexes(currentLyrics, position, lyricDelay);
-            setCurrLrcIndex(currentIndex);
-            setNextLyric(nextLyric);
-        } else {
-            setCurrLrcIndex(null);
-            setNextLyric(null);
-        }
-    }, [currentLyrics, position, lyricDelay]);
-
-    useEffect(() => {
-        if (scroll && currLrcIndex !== null) {
-            if (currLrcIndex >= 0) {
-                lyricRefs[currLrcIndex]?.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
-            if (currLrcIndex < 0 && nextLyric !== null) {
-                lyricRefs[nextLyric]?.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
-        }
+        const index = currLrcIndex ?? nextLyric;
+        if (scroll && index !== null) lyricRefs[index]?.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, [currLrcIndex, nextLyric, scroll, lyricRefs]);
 
     useEffect(() => {

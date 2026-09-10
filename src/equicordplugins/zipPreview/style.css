@@ -210,6 +210,13 @@
     color: var(--text-muted);
 }
 
+.vc-zip-preview-button:focus-visible,
+.vc-zip-preview-toggle:focus-visible,
+.vc-zip-preview-breadcrumb-segment:focus-visible {
+    outline: 2px solid var(--text-link);
+    outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .vc-zip-preview-content {
         transition: none;

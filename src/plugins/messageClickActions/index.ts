@@ -637,6 +637,9 @@ export default definePlugin({
 
         clearClickTimeouts();
         pendingDoubleClickAction = null;
+        pressedModifiers.clear();
+        doubleClickFired = false;
+        lastMouseDownTime = 0;
         resetClickState();
     },
 

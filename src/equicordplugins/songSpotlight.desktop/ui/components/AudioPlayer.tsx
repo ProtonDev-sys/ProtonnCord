@@ -53,9 +53,21 @@ export default function AudioPlayer({ audioRef, list, playing, setPlaying, setLo
     const audios = useMemo(() => list.map(x => x.audio), [list]);
     const nodes = useRef(new Map<number, HTMLAudioElement>());
     const loaded = useRef(new Set<number>());
+    const stoppedRef = useRef<(index: number, ended?: boolean) => void>(() => {});
+    const { previewVolume } = settings.use(["previewVolume"]);
 
     const nodeEvents = useRef(new Map<number, () => void>());
     const handleRef = useCallback((index: number, node: HTMLAudioElement | null) => {
+        const previous = nodes.current.get(index);
+        if (previous === node) return;
+        nodeEvents.current.get(index)?.();
+        nodeEvents.current.delete(index);
+        if (previous) {
+            loaded.current.delete(index);
+            previous.pause();
+            if (globalPlaying === previous) globalPlaying = undefined;
+            if (audioRef.current === previous) audioRef.current = undefined;
+        }
         if (node) {
             nodes.current.set(index, node);
 
@@ -66,7 +78,7 @@ export default function AudioPlayer({ audioRef, list, playing, setPlaying, setLo
             function timeUpdated() {
                 if (node && node.currentTime >= endTime) {
                     node.volume = 0;
-                    handleStopped(index, true);
+                    stoppedRef.current(index, true);
                 }
             }
 
@@ -74,8 +86,6 @@ export default function AudioPlayer({ audioRef, list, playing, setPlaying, setLo
             nodeEvents.current.set(index, () => node.removeEventListener("timeupdate", timeUpdated));
         } else {
             nodes.current.delete(index);
-            nodeEvents.current.get(index)?.();
-            nodeEvents.current.delete(index);
         }
     }, [audios]);
 
@@ -87,22 +97,25 @@ export default function AudioPlayer({ audioRef, list, playing, setPlaying, setLo
 
     const handleStopped = useCallback((index: number, ended?: boolean) => {
         if (ended) {
-            const nextIndex = loaded.current.values().toArray().sort().find(x => x > index);
-            setPlaying(nextIndex !== -1 ? nextIndex : undefined);
+            const nextIndex = [...loaded.current].sort((a, b) => a - b).find(x => x > index && nodes.current.has(x));
+            setPlaying(nextIndex);
         } else if (playing === index) {
             setPlaying(undefined);
         }
     }, [playing, setPlaying]);
+    stoppedRef.current = handleStopped;
 
     useEffect(() => {
+        let active = true;
         if (playing !== undefined) {
             const audio = audios[playing], node = nodes.current.get(playing);
             if (audio && node && loaded.current.has(playing)) {
-                if (globalPlaying) globalPlaying.pause();
+                if (globalPlaying && globalPlaying !== node) globalPlaying.pause();
 
                 node.currentTime = audio.previewStart ? audio.previewStart / 1000 : 0;
                 node.volume = BASE_VOLUME * (settings.store.previewVolume / 100);
                 node.play().catch(error => {
+                    if (!active || globalPlaying !== node) return;
                     showToast("Failed to play song preview!", Toasts.Type.FAILURE);
                     logger.error("Failed to play audio", error);
                     setPlaying(undefined);
@@ -124,14 +137,32 @@ export default function AudioPlayer({ audioRef, list, playing, setPlaying, setLo
                 audioRef.current = node;
             }
         }
+        return () => { active = false; };
     }, [playing, audios]);
+
+    useEffect(() => {
+        const volume = Number.isFinite(previewVolume) ? Math.min(100, Math.max(0, previewVolume)) : 100;
+        for (const node of nodes.current.values()) node.volume = BASE_VOLUME * volume / 100;
+    }, [previewVolume]);
+
+    useEffect(() => () => {
+        for (const cleanup of nodeEvents.current.values()) cleanup();
+        nodeEvents.current.clear();
+        for (const node of nodes.current.values()) {
+            node.pause();
+            if (globalPlaying === node) globalPlaying = undefined;
+        }
+        nodes.current.clear();
+        loaded.current.clear();
+        audioRef.current = undefined;
+    }, []);
 
     return (
         <div style={{ display: "none" }} aria-hidden="true">
             {audios.map((audio, index) =>
                 audio && (
                     <AudioItem
-                        key={audio.previewUrl}
+                        key={`${index}:${audio.previewUrl}`}
                         audio={audio}
                         index={index}
                         handleRef={handleRef}

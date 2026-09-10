@@ -56,13 +56,13 @@ interface Track {
 
 const Spotify = findByPropsLazy("getPlayerState");
 
-function makeCommand(name: string, formatUrl: (track: Track) => string): Command {
+function makeCommand(name: string, formatUrl: (track: Track) => string | undefined): Command {
     return {
         name,
         description: `Share your current Spotify ${name} in chat`,
         inputType: ApplicationCommandInputType.BUILT_IN,
         options: [OptionalMessageOption],
-        execute(options, { channel }) {
+        async execute(options, { channel }) {
             const track: Track | null = Spotify.getTrack();
             if (!track) {
                 return sendBotMessage(channel.id, {
@@ -78,18 +78,20 @@ function makeCommand(name: string, formatUrl: (track: Track) => string): Command
             }
 
             const data = formatUrl(track);
+            if (!data) return sendBotMessage(channel.id, { content: `The current Spotify ${name} is unavailable.` });
             const message = findOption(options, "message");
+            const reply = PendingReplyStore.getPendingReply(channel.id);
 
             // Note: Due to how Discord handles commands, we need to manually create and send the message
 
-            sendMessage(
+            await sendMessage(
                 channel.id,
                 { content: message ? `${message} ${data}` : data },
                 false,
-                MessageActions.getSendMessageOptionsForReply(PendingReplyStore.getPendingReply(channel.id))
-            ).then(() => {
+                MessageActions.getSendMessageOptionsForReply(reply)
+            );
+            if (PendingReplyStore.getPendingReply(channel.id) === reply)
                 FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId: channel.id });
-            });
 
         }
     };
@@ -103,7 +105,7 @@ export default definePlugin({
     authors: [Devs.katlyn],
     commands: [
         makeCommand("track", track => `https://open.spotify.com/track/${track.id}`),
-        makeCommand("album", track => `https://open.spotify.com/album/${track.album.id}`),
-        makeCommand("artist", track => track.artists[0].external_urls.spotify)
+        makeCommand("album", track => track.album?.id ? `https://open.spotify.com/album/${track.album.id}` : undefined),
+        makeCommand("artist", track => track.artists?.[0]?.external_urls?.spotify)
     ]
 });

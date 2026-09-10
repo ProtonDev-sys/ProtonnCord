@@ -8,6 +8,7 @@ import { Flex } from "@components/Flex";
 import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { BasicChannelTabsProps, ChannelTabsProps, clearStaleNavigationContext, closeTab, createTab, handleChannelSwitch, isNavigationFromSource, isTabSelected, moveToTab, openedTabs, openStartupTabs, saveTabs, settings, setUpdaterFunction, useGhostTabs } from "@equicordplugins/channelTabs/util";
+import { matchesKeybind } from "@equicordplugins/channelTabs/util/keybinds";
 import { classNameFactory } from "@utils/css";
 import { classes } from "@utils/misc";
 import { useForceUpdater } from "@utils/react";
@@ -96,7 +97,7 @@ export default function ChannelsTabsContainer(props: BasicChannelTabsProps) {
         "newTabButtonBehavior"
     ]);
     const GhostTabs = useGhostTabs();
-    const isFullscreen = useStateFromStores([], () => ChannelRTCStore.isFullscreenInContext() ?? false);
+    const isFullscreen = useStateFromStores([ChannelRTCStore], () => ChannelRTCStore.isFullscreenInContext() ?? false);
 
     const _update = useForceUpdater();
     const update = useCallback((save = true) => {
@@ -162,31 +163,6 @@ export default function ChannelsTabsContainer(props: BasicChannelTabsProps) {
     }, [openedTabs.length, newTabButtonBehavior]);
 
     useEffect(() => {
-        const matchesKeybind = (event: KeyboardEvent, keybindString: string): boolean => {
-            const parts = keybindString.split("+");
-            const hasCtrl = parts.includes("CTRL");
-            const hasShift = parts.includes("SHIFT");
-            const hasAlt = parts.includes("ALT");
-            const mainKey = parts[parts.length - 1].toLowerCase();
-
-            const ctrlPressed = event.ctrlKey || event.metaKey;
-            const shiftPressed = event.shiftKey;
-            const altPressed = event.altKey;
-            const keyPressed = event.key.toLowerCase();
-
-            // special handling for TAB key
-            if (mainKey === "tab") {
-                return hasCtrl === ctrlPressed && hasShift === shiftPressed && hasAlt === altPressed && keyPressed === "tab";
-            }
-
-            // special handling for SPACE
-            if (mainKey === "space") {
-                return hasCtrl === ctrlPressed && hasShift === shiftPressed && hasAlt === altPressed && keyPressed === " ";
-            }
-
-            return hasCtrl === ctrlPressed && hasShift === shiftPressed && hasAlt === altPressed && keyPressed === mainKey;
-        };
-
         const handleKeyDown = (event: KeyboardEvent) => {
             const target = event.target as HTMLElement;
 

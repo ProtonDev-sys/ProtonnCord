@@ -29,7 +29,7 @@ function makeSpotifyLyricsApiUrl(trackId: string, customBaseUrl?: string): strin
 }
 
 export async function getLyricsSpotify(trackId: string, customBaseUrl?: string): Promise<LyricsData | null> {
-    const resp = await fetch(makeSpotifyLyricsApiUrl(trackId, customBaseUrl));
+    const resp = await fetch(makeSpotifyLyricsApiUrl(trackId, customBaseUrl), { signal: AbortSignal.timeout(15_000) });
     if (!resp.ok) return null;
 
     let data: LyricsAPIResp;
@@ -39,7 +39,8 @@ export async function getLyricsSpotify(trackId: string, customBaseUrl?: string):
         return null;
     }
 
-    if (data.error || !Array.isArray(data.lines) || data.lines.length < 2) return null;
+    if (data?.error || !Array.isArray(data?.lines) || data.lines.length < 2
+        || !data.lines.every(line => line && typeof line.words === "string" && Number.isFinite(Number(line.startTimeMs)) && Number(line.startTimeMs) >= 0)) return null;
 
     const lyrics = data.lines;
     if (lyrics[0].startTimeMs === "0" && lyrics[lyrics.length - 1].startTimeMs === "0") return null;
@@ -53,7 +54,7 @@ export async function getLyricsSpotify(trackId: string, customBaseUrl?: string):
                     time: Number(line.startTimeMs) / 1000,
                     text: (trimmedText === "" || trimmedText === "♪") ? null : trimmedText
                 };
-            })
+            }).sort((a, b) => a.time - b.time)
         }
     };
 }

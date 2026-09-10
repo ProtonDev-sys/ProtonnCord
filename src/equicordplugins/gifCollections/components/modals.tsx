@@ -9,7 +9,7 @@ import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { classes } from "@utils/misc";
 import { RenderModalProps } from "@vencord/discord-types";
-import { Button, FluxDispatcher, Modal, openModal, TextInput, useCallback, useState } from "@webpack/common";
+import { Button, FluxDispatcher, Modal, openModal, TextInput, useCallback, useRef, useState } from "@webpack/common";
 
 import { settings } from "../settings";
 import { Collection, Gif } from "../types";
@@ -72,6 +72,9 @@ function InfoModal({ props, title, rows }: { props: RenderModalProps; title: str
 }
 
 function MoveToCollectionModal({ props, gifId }: { props: RenderModalProps; gifId: string; }) {
+    const [error, setError] = useState("");
+    const [busy, setBusy] = useState(false);
+    const submitting = useRef(false);
     return (
         <Modal
             {...props}
@@ -82,20 +85,33 @@ function MoveToCollectionModal({ props, gifId }: { props: RenderModalProps; gifI
             ]}
         >
             <Heading style={{ marginBottom: "10px" }}>Select a collection to move the item to</Heading>
+            {error && <Paragraph role="alert">{error}</Paragraph>}
             <div className={cl("buttons")}>
                 {cache_collections
                     .filter(col => col.name !== getItemCollectionNameFromId(gifId))
                     .map(col => (
                         <Button
                             key={col.name}
+                            disabled={busy}
                             className={cl("button")}
                             onClick={async () => {
+                                if (submitting.current) return;
                                 const fromCollection = getItemCollectionNameFromId(gifId);
                                 if (!fromCollection) return;
-                                await moveGifToCollection(gifId, fromCollection, col.name);
-                                FluxDispatcher.dispatch({ type: "GIF_PICKER_QUERY", query: "" });
-                                FluxDispatcher.dispatch({ type: "GIF_PICKER_QUERY", query: fromCollection });
-                                props.onClose();
+                                submitting.current = true;
+                                setBusy(true);
+                                setError("");
+                                try {
+                                    await moveGifToCollection(gifId, fromCollection, col.name);
+                                    FluxDispatcher.dispatch({ type: "GIF_PICKER_QUERY", query: "" });
+                                    FluxDispatcher.dispatch({ type: "GIF_PICKER_QUERY", query: fromCollection });
+                                    props.onClose();
+                                } catch (error) {
+                                    setError(error instanceof Error ? error.message : "Could not move this GIF. Please try again.");
+                                } finally {
+                                    submitting.current = false;
+                                    setBusy(false);
+                                }
                             }}
                         >
                             {stripPrefix(col.name)}
@@ -108,11 +124,24 @@ function MoveToCollectionModal({ props, gifId }: { props: RenderModalProps; gifI
 
 function CreateCollectionModal({ props, gif }: { props: RenderModalProps; gif: Gif; }) {
     const [name, setName] = useState("");
-    const onSubmit = useCallback((e?: React.FormEvent) => {
+    const [error, setError] = useState("");
+    const [busy, setBusy] = useState(false);
+    const submitting = useRef(false);
+    const onSubmit = useCallback(async (e?: React.FormEvent) => {
         e?.preventDefault();
-        if (!name.length) return;
-        createCollection(name, [gif]);
-        props.onClose();
+        if (!name.length || submitting.current) return;
+        submitting.current = true;
+        setBusy(true);
+        setError("");
+        try {
+            await createCollection(name, [gif]);
+            props.onClose();
+        } catch (error) {
+            setError(error instanceof Error ? error.message : "Could not save this collection. Please try again.");
+        } finally {
+            submitting.current = false;
+            setBusy(false);
+        }
     }, [name, gif, props]);
 
     return (
@@ -121,12 +150,13 @@ function CreateCollectionModal({ props, gif }: { props: RenderModalProps; gif: G
             size="sm"
             title="Create Collection"
             actions={[
-                { text: "Create", onClick: onSubmit, disabled: !name.length, variant: "primary" }
+                { text: "Create", onClick: onSubmit, disabled: !name.length || busy, variant: "primary" }
             ]}
         >
             <form onSubmit={onSubmit}>
                 <Heading className={cl("rename-text")}>Collection Name</Heading>
-                <TextInput onChange={setName} />
+                <TextInput value={name} onChange={setName} disabled={busy} />
+                {error && <Paragraph role="alert">{error}</Paragraph>}
             </form>
         </Modal>
     );
@@ -137,12 +167,25 @@ function RenameCollectionModal({ props, name }: { props: RenderModalProps; name:
     const strippedName = name.startsWith(prefix) ? name.slice(prefix.length) : name;
     const [newName, setNewName] = useState(strippedName);
     const tooLong = newName.length >= 25;
+    const [error, setError] = useState("");
+    const [busy, setBusy] = useState(false);
+    const submitting = useRef(false);
 
     const onSubmit = useCallback(async (e?: React.FormEvent) => {
         e?.preventDefault();
-        if (!newName.length || tooLong) return;
-        await renameCollection(name, newName);
-        props.onClose();
+        if (!newName.length || tooLong || submitting.current) return;
+        submitting.current = true;
+        setBusy(true);
+        setError("");
+        try {
+            await renameCollection(name, newName);
+            props.onClose();
+        } catch (error) {
+            setError(error instanceof Error ? error.message : "Could not rename this collection. Please try again.");
+        } finally {
+            submitting.current = false;
+            setBusy(false);
+        }
     }, [newName, name, tooLong, props]);
 
     return (
@@ -151,12 +194,13 @@ function RenameCollectionModal({ props, name }: { props: RenderModalProps; name:
             size="sm"
             title="Rename Collection"
             actions={[
-                { text: "Rename", onClick: onSubmit, disabled: !newName.length || tooLong, variant: "primary" }
+                { text: "Rename", onClick: onSubmit, disabled: !newName.length || tooLong || busy, variant: "primary" }
             ]}
         >
             <form onSubmit={onSubmit}>
                 <Paragraph className={cl("rename-text")}>New Collection Name</Paragraph>
-                <TextInput value={newName} className={classes(cl("rename-input"), tooLong ? cl("input-warning") : "")} onChange={setNewName} />
+                <TextInput value={newName} disabled={busy} className={classes(cl("rename-input"), tooLong ? cl("input-warning") : "")} onChange={setNewName} />
+                {error && <Paragraph role="alert">{error}</Paragraph>}
                 {tooLong && <Paragraph className={cl("warning-text")}>Name can't be longer than 24 characters</Paragraph>}
             </form>
         </Modal>

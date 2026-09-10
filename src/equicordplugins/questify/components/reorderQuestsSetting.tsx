@@ -70,7 +70,7 @@ const subsortTooltips = {
 function sanitizeQuestOrder(order: unknown): QuestOrderStatus[] {
     const validStatuses = new Set<QuestOrderStatus>(defaultQuestOrder);
     const sanitized = Array.isArray(order)
-        ? order.filter((status): status is QuestOrderStatus => validStatuses.has(status as QuestOrderStatus))
+        ? [...new Set(order.filter((status): status is QuestOrderStatus => validStatuses.has(status as QuestOrderStatus)))]
         : [];
 
     for (const status of defaultQuestOrder) {

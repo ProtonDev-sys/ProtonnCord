@@ -100,7 +100,12 @@ export const settings = definePluginSettings({
 }>();
 
 export function resetLanguageDefaults() {
-    if (IS_WEB || settings.store.service === "google" || settings.store.service === "kagi") {
+    if (!IS_WEB && settings.store.service === "kagi") {
+        settings.store.receivedInput = "auto";
+        settings.store.receivedOutput = "en_us";
+        settings.store.sentInput = "auto";
+        settings.store.sentOutput = "en_us";
+    } else if (IS_WEB || settings.store.service === "google") {
         settings.store.receivedInput = "auto";
         settings.store.receivedOutput = "en";
         settings.store.sentInput = "auto";

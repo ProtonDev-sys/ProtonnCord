@@ -17,47 +17,91 @@ export const shapeCanvas = document.createElement("canvas")!.getContext("2d")!;
 export const cropCanvas = document.createElement("canvas")!.getContext("2d")!;
 
 export let image: HTMLImageElement;
+let canvasGeneration = 0;
 
 export function exportImg(): Promise<Blob> {
-    return new Promise<Blob>(resolve => {
-        if (!canvas || !ctx) return;
-
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(image, 0, 0);
-        ctx.drawImage(brushCanvas.canvas, 0, 0);
-
-        if (bounds.right === -1) bounds.right = canvas.width;
-        if (bounds.bottom === -1) bounds.bottom = canvas.height;
-
+    return new Promise<Blob>((resolve, reject) => {
+        if (!canvas || !ctx) {
+            reject(new Error("Load an image before sending it."));
+            return;
+        }
+        const selection = {
+            ...bounds,
+            right: bounds.right === -1 ? canvas.width : bounds.right,
+            bottom: bounds.bottom === -1 ? canvas.height : bounds.bottom
+        };
+        const width = widthFromBounds(selection);
+        const height = heightFromBounds(selection);
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+            reject(new Error("Select a non-empty crop before sending it."));
+            return;
+        }
         const renderCanvas = document.createElement("canvas");
-        renderCanvas.width = widthFromBounds(bounds);
-        renderCanvas.height = heightFromBounds(bounds);
-
-        const renderCtx = renderCanvas.getContext("2d")!;
-        renderCtx.drawImage(canvas, -bounds.left, -bounds.top);
-        renderCanvas.toBlob(blob => resolve(blob!));
-
-        render();
+        renderCanvas.width = width;
+        renderCanvas.height = height;
+        const renderCtx = renderCanvas.getContext("2d");
+        if (!renderCtx) {
+            reject(new Error("Image export is unavailable."));
+            return;
+        }
+        renderCtx.drawImage(image, -selection.left, -selection.top);
+        renderCtx.drawImage(brushCanvas.canvas, -selection.left, -selection.top);
+        renderCanvas.toBlob(blob => {
+            if (blob) resolve(blob);
+            else reject(new Error("Could not export the image."));
+        });
     });
 }
 
-export const Canvas = ({ file }: { file: File; }) => {
+interface CanvasProps {
+    file: File;
+    onReady?(ready: boolean): void;
+    onError?(message: string): void;
+}
+
+export const Canvas = ({ file, onReady, onError }: CanvasProps) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
     useEffect(() => {
+        const targetCanvas = canvasRef.current;
+        if (!targetCanvas) return;
+
+        const generation = ++canvasGeneration;
+        canvas = null;
+        ctx = null;
+        onReady?.(false);
         const nextImage = new Image();
         const imageUrl = URL.createObjectURL(file);
         let cleanupInput: (() => void) | undefined;
-        let cancelled = false;
-
+        let active = true;
+        let released = false;
+        const isCurrent = () => active && generation === canvasGeneration;
+        function releaseImage() {
+            active = false;
+            nextImage.onload = null;
+            nextImage.onerror = null;
+            if (!released) {
+                released = true;
+                URL.revokeObjectURL(imageUrl);
+            }
+        }
+        function fail() {
+            if (!isCurrent()) return;
+            releaseImage();
+            onError?.("Could not load the image. Choose another file.");
+        }
+        nextImage.onerror = fail;
         nextImage.onload = () => {
-            if (cancelled) return;
-
+            if (!isCurrent()) return;
+            const nextContext = targetCanvas.getContext("2d");
+            if (!nextContext || nextImage.width <= 0 || nextImage.height <= 0) {
+                fail();
+                return;
+            }
+            releaseImage();
             image = nextImage;
-            canvas = canvasRef.current;
-
-            if (!canvas) return;
-
+            canvas = targetCanvas;
+            ctx = nextContext;
             canvas.width = image.width;
             canvas.height = image.height;
             brushCanvas.canvas.width = image.width;
@@ -66,26 +110,26 @@ export const Canvas = ({ file }: { file: File; }) => {
             shapeCanvas.canvas.height = image.height;
             cropCanvas.canvas.width = image.width;
             cropCanvas.canvas.height = image.height;
-
-            ctx = canvas.getContext("2d")!;
+            bounds.left = bounds.top = 0;
+            bounds.right = image.width;
+            bounds.bottom = image.height;
             ctx.drawImage(image, 0, 0);
-
             cleanupInput = initInput();
+            onReady?.(true);
         };
 
         nextImage.src = imageUrl;
 
         return () => {
-            cancelled = true;
             cleanupInput?.();
-            nextImage.onload = null;
-            URL.revokeObjectURL(imageUrl);
-            if (canvas === canvasRef.current) {
+            releaseImage();
+            nextImage.src = "";
+            if (generation === canvasGeneration && canvas === targetCanvas) {
                 canvas = null;
                 ctx = null;
             }
         };
-    }, [file]);
+    }, [file, onReady, onError]);
 
     return (<canvas ref={canvasRef} className="vc-remix-canvas"></canvas>);
 };

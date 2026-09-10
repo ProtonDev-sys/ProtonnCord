@@ -30,6 +30,7 @@ const SekaiStickerChatButton: ChatBarButtonFactory = () => {
 };
 
 let IS_FONTS_LOADED = false;
+let fontsLoading: Promise<void> | undefined;
 export default definePlugin({
     name: "SekaiStickers",
     description: "Sekai Stickers built in discord originally from github.com/TheOriginalAyaka",
@@ -44,13 +45,17 @@ export default definePlugin({
     async start() {
         const fonts = [{ name: "YurukaStd", url: "https://raw.githubusercontent.com/TheOriginalAyaka/sekai-stickers/47a2ca33b8cb35f59800e8faad48980e4ce5ea71/src/fonts/YurukaStd.woff2" }, { name: "SSFangTangTi", url: "https://raw.githubusercontent.com/TheOriginalAyaka/sekai-stickers/main/src/fonts/ShangShouFangTangTi.woff2" }];
         if (!IS_FONTS_LOADED) {
-            fonts.map(n => {
-                new FontFace(n.name, `url(${n.url})`).load().then(
-                    font => { document.fonts.add(font); },
-                    err => { console.log(err); }
-                );
-            });
-            IS_FONTS_LOADED = true;
+            fontsLoading ??= Promise.all(fonts.map(async n => {
+                const font = new FontFace(n.name, `url(${n.url})`);
+                document.fonts.add(font);
+                try {
+                    await font.load();
+                } catch (error) {
+                    document.fonts.delete(font);
+                    throw error;
+                }
+            })).then(() => { IS_FONTS_LOADED = true; }).finally(() => { fontsLoading = undefined; });
+            await fontsLoading;
         }
     },
 });

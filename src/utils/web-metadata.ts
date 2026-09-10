@@ -8,12 +8,15 @@ export let EXTENSION_VERSION: string;
 export let EXTENSION_BASE_URL: string;
 export let RENDERER_CSS_URL: string;
 
-let resolveMetaReady: Function;
+let resolveMetaReady: () => void;
 export const metaReady = new Promise<void>(res => resolveMetaReady = res);
 
 if (IS_EXTENSION) {
     const listener = (e: MessageEvent) => {
-        if (e.data?.type === "vencord:meta") {
+        if (e.source === window && e.data?.type === "vencord:meta"
+            && typeof e.data.meta?.EXTENSION_BASE_URL === "string"
+            && typeof e.data.meta?.EXTENSION_VERSION === "string"
+            && typeof e.data.meta?.RENDERER_CSS_URL === "string") {
             ({ EXTENSION_BASE_URL, EXTENSION_VERSION, RENDERER_CSS_URL } = e.data.meta);
             window.removeEventListener("message", listener);
             resolveMetaReady();

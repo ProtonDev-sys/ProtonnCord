@@ -16,20 +16,24 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { getCurrentChannel } from "@utils/discord";
-import { UserProfileStore, useStateFromStores } from "@webpack/common";
+import { ChannelStore, SelectedChannelStore, UserProfileStore, useStateFromStores } from "@webpack/common";
 
 import { PronounsFormat, settings } from "./settings";
 
-function useDiscordPronouns(id: string, useGlobalProfile: boolean = false): string | undefined {
-    const globalPronouns: string | undefined = useStateFromStores([UserProfileStore], () => UserProfileStore.getUserProfile(id)?.pronouns);
-    const guildPronouns: string | undefined = useStateFromStores([UserProfileStore], () => UserProfileStore.getGuildMemberProfile(id, getCurrentChannel()?.getGuildId())?.pronouns);
+function useDiscordPronouns(id: string, useGlobalProfile: boolean, channelId?: string): string | undefined {
+    const globalPronouns: string | undefined = useStateFromStores([UserProfileStore], () => UserProfileStore.getUserProfile(id)?.pronouns, [id]);
+    const guildPronouns: string | undefined = useStateFromStores([UserProfileStore, ChannelStore, SelectedChannelStore], () => {
+        const guildId = ChannelStore.getChannel(channelId ?? SelectedChannelStore.getChannelId())?.getGuildId();
+        return guildId ? UserProfileStore.getGuildMemberProfile(id, guildId)?.pronouns : undefined;
+    }, [id, channelId]);
 
     if (useGlobalProfile) return globalPronouns;
     return guildPronouns || globalPronouns;
 }
 
-export function useFormattedPronouns(id: string, useGlobalProfile: boolean = false) {
-    const pronouns = useDiscordPronouns(id, useGlobalProfile)?.trim().replace(/\n+/g, "");
-    return settings.store.pronounsFormat === PronounsFormat.Lowercase ? pronouns?.toLowerCase() : pronouns;
+export function useFormattedPronouns(id: string, useGlobalProfile: boolean = false, channelId?: string) {
+    const { pronounsFormat } = settings.use(["pronounsFormat"]);
+    const rawPronouns = useDiscordPronouns(id, useGlobalProfile, channelId);
+    const pronouns = typeof rawPronouns === "string" ? rawPronouns.trim().replace(/[\r\n]+/g, "") : undefined;
+    return pronounsFormat === PronounsFormat.Lowercase ? pronouns?.toLowerCase() : pronouns;
 }

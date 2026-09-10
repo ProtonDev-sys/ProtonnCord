@@ -1,9 +1,5 @@
 # Full User In Chatbox
 
-Adds the full user mention to the textbox
-
-Adds the avatar if you have mentioned avatars enabled
-
-Provides the full context menu to make it easy to access the users profile, and other common actions
+Shows full user mentions in the message input, with avatars when MentionAvatars is enabled. Right-click a mention to open the user context menu, including their profile.
 
 https://github.com/user-attachments/assets/cd9edb33-99c8-4c8d-b669-8cddd05f4b45

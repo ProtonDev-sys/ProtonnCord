@@ -24,6 +24,13 @@ export const data = {
 
 let startGeneration = 0;
 let storedIcons: Record<string, Blob> = {};
+let iconOperation = Promise.resolve();
+
+function queueIconOperation(operation: () => Promise<void>): Promise<void> {
+    const pending = iconOperation.then(operation);
+    iconOperation = pending.catch(() => { });
+    return pending;
+}
 
 function showToast(message: string, type: string) {
     Toasts.show({
@@ -57,29 +64,38 @@ function refreshGuildIcon(guildId: string) {
 }
 
 async function saveGuildIcon(guild: Guild, icon: Blob) {
-    const nextStoredIcons = { ...storedIcons, [guild.id]: icon };
-    await set(KEY_DATASTORE, nextStoredIcons);
-    storedIcons = nextStoredIcons;
-    replaceRuntimeIcon(guild.id, icon);
-    refreshGuildIcon(guild.id);
+    const generation = startGeneration;
+    await queueIconOperation(async () => {
+        if (generation !== startGeneration) return;
+        const nextStoredIcons = { ...storedIcons, [guild.id]: icon };
+        await set(KEY_DATASTORE, nextStoredIcons);
+        if (generation !== startGeneration) return;
+        storedIcons = nextStoredIcons;
+        replaceRuntimeIcon(guild.id, icon);
+        refreshGuildIcon(guild.id);
+    });
 }
 
 async function deleteGuildIcon(guild: Guild) {
-    if (!storedIcons[guild.id]) return;
+    const generation = startGeneration;
+    await queueIconOperation(async () => {
+        if (generation !== startGeneration || !storedIcons[guild.id]) return;
+        const nextStoredIcons = { ...storedIcons };
+        delete nextStoredIcons[guild.id];
+        await set(KEY_DATASTORE, nextStoredIcons);
+        if (generation !== startGeneration) return;
 
-    const nextStoredIcons = { ...storedIcons };
-    delete nextStoredIcons[guild.id];
-    await set(KEY_DATASTORE, nextStoredIcons);
-
-    storedIcons = nextStoredIcons;
-    URL.revokeObjectURL(data.icons[guild.id]);
-    delete data.icons[guild.id];
-    refreshGuildIcon(guild.id);
+        storedIcons = nextStoredIcons;
+        URL.revokeObjectURL(data.icons[guild.id]);
+        delete data.icons[guild.id];
+        refreshGuildIcon(guild.id);
+    });
 }
 
 async function changeGuildIcon(guild: Guild) {
+    const generation = startGeneration;
     const file = await chooseFile("image/*");
-    if (!file) return;
+    if (!file || generation !== startGeneration) return;
 
     if (!isImageFile(file)) {
         showToast("Please select an image file.", Toasts.Type.FAILURE);
@@ -144,8 +160,12 @@ export default definePlugin({
                             icon={ResetIcon}
                             color="danger"
                             action={async () => {
-                                await deleteGuildIcon(guild);
-                                showToast(`Reset local icon for ${guild.name}.`, Toasts.Type.SUCCESS);
+                                try {
+                                    await deleteGuildIcon(guild);
+                                    showToast(`Reset local icon for ${guild.name}.`, Toasts.Type.SUCCESS);
+                                } catch {
+                                    showToast("Failed to reset that local server icon.", Toasts.Type.FAILURE);
+                                }
                             }}
                         />
                     )}
@@ -165,19 +185,23 @@ export default definePlugin({
 
     async start() {
         const generation = ++startGeneration;
-        const storedData = await get<unknown>(KEY_DATASTORE);
-        const normalized = await normalizeStoredGuildIcons(storedData);
-        if (normalized.needsWrite) await set(KEY_DATASTORE, normalized.icons);
-        if (generation !== startGeneration) return;
+        await queueIconOperation(async () => {
+            const storedData = await get<unknown>(KEY_DATASTORE);
+            const normalized = await normalizeStoredGuildIcons(storedData);
+            if (generation !== startGeneration) return;
+            if (normalized.needsWrite) await set(KEY_DATASTORE, normalized.icons);
+            if (generation !== startGeneration) return;
 
-        storedIcons = normalized.icons;
-        data.icons = {};
-        for (const [guildId, icon] of Object.entries(storedIcons)) {
-            data.icons[guildId] = URL.createObjectURL(icon);
-        }
-        for (const guildId in data.icons) {
-            refreshGuildIcon(guildId);
-        }
+            storedIcons = normalized.icons;
+            revokeRuntimeIcons();
+            data.icons = {};
+            for (const [guildId, icon] of Object.entries(storedIcons)) {
+                data.icons[guildId] = URL.createObjectURL(icon);
+            }
+            for (const guildId in data.icons) {
+                refreshGuildIcon(guildId);
+            }
+        });
     },
 
     stop() {

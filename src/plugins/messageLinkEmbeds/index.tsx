@@ -27,6 +27,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import { Channel, Message } from "@vencord/discord-types";
 import { findComponentByCodeLazy, findComponentLazy, findCssClassesLazy } from "@webpack";
 import {
+    AuthenticationStore,
     Button,
     ChannelStore,
     Constants,
@@ -73,7 +74,14 @@ interface MessageEmbedProps {
     channel: Channel;
 }
 
-const messageFetchQueue = new Queue();
+let messageFetchQueue = new Queue(maxMessageCacheSize);
+let generation = 0;
+
+function clearMessageCache() {
+    generation++;
+    messageCache.clear();
+    messageFetchQueue = new Queue(maxMessageCacheSize);
+}
 
 const settings = definePluginSettings({
     messageBackgroundColor: {
@@ -127,7 +135,7 @@ const settings = definePluginSettings({
     clearMessageCache: {
         type: OptionType.COMPONENT,
         component: () => (
-            <Button onClick={() => messageCache.clear()}>
+            <Button onClick={clearMessageCache}>
                 Clear the linked message cache
             </Button>
         )
@@ -159,6 +167,8 @@ async function fetchMessage(channelID: string, messageID: string) {
     if (cached) return cached.message;
 
     setMessageCache(messageID, { fetched: false });
+    const requestGeneration = generation;
+    const accountId = AuthenticationStore.getId();
 
     const res = await RestAPI.get({
         url: Constants.Endpoints.MESSAGES(channelID),
@@ -169,8 +179,10 @@ async function fetchMessage(channelID: string, messageID: string) {
         retries: 2
     }).catch(() => null);
 
+    if (requestGeneration !== generation || accountId !== AuthenticationStore.getId()) return;
+
     const msg = res?.body?.[0];
-    if (!msg) return;
+    if (msg?.id !== messageID || msg?.channel_id !== channelID) return;
 
     const message = MessageStore.getMessages(msg.channel_id).receiveMessage(msg).get(msg.id);
     if (!message) return;
@@ -197,9 +209,9 @@ function getImages(message: Message): Attachment[] {
     }
 
     for (const { type, image, thumbnail, url } of message.embeds ?? []) {
-        if (type === "image")
+        if (type === "image" && (image ?? thumbnail))
             attachments.push({ ...(image ?? thumbnail!) });
-        else if (url && type === "gifv" && !tenorRegex.test(url))
+        else if (url && type === "gifv" && thumbnail && !tenorRegex.test(url))
             attachments.push({
                 height: thumbnail!.height,
                 width: thumbnail!.width,
@@ -218,9 +230,9 @@ function noContent(attachments: number, embeds: number) {
 }
 
 function requiresRichEmbed(message: Message) {
-    if (message.components.length) return true;
-    if (message.attachments.some(a => !a.content_type?.startsWith("image/"))) return true;
-    if (message.embeds.some(e => e.type !== "image" && (e.type !== "gifv" || tenorRegex.test(e.url!)))) return true;
+    if (message.components?.length) return true;
+    if (message.attachments?.some(a => !a.content_type?.startsWith("image/"))) return true;
+    if (message.embeds?.some(e => e.type !== "image" && (e.type !== "gifv" || tenorRegex.test(e.url!)))) return true;
 
     return false;
 }
@@ -229,13 +241,11 @@ function computeWidthAndHeight(width: number, height: number) {
     const maxWidth = 400;
     const maxHeight = 300;
 
-    if (width > height) {
-        const adjustedWidth = Math.min(width, maxWidth);
-        return { width: adjustedWidth, height: Math.round(height / (width / adjustedWidth)) };
-    }
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0)
+        return { width: maxWidth, height: maxHeight };
 
-    const adjustedHeight = Math.min(height, maxHeight);
-    return { width: Math.round(width / (height / adjustedHeight)), height: adjustedHeight };
+    const scale = Math.min(1, maxWidth / width, maxHeight / height);
+    return { width: Math.round(width * scale), height: Math.round(height * scale) };
 }
 
 function withEmbeddedBy(message: Message, embeddedBy: string[]) {
@@ -254,7 +264,7 @@ function MessageEmbedAccessory({ message }: { message: Message; }) {
 
     const accessories = [] as (JSX.Element | null)[];
 
-    for (const [_, channelID, messageID] of message.content!.matchAll(messageLinkRegex)) {
+    for (const [_, channelID, messageID] of (message.content ?? "").matchAll(messageLinkRegex)) {
         if (embeddedBy.includes(messageID) || embeddedBy.length > 2) {
             continue;
         }
@@ -278,9 +288,13 @@ function MessageEmbedAccessory({ message }: { message: Message; }) {
                 setMessageCache(messageID, { message: linkedMessage, fetched: true });
             } else {
 
-                messageFetchQueue.unshift(() => fetchMessage(channelID, messageID)
-                    .then(m => m && updateMessage(message.channel_id, message.id))
-                );
+                const queuedGeneration = generation;
+                messageFetchQueue.unshift(async () => {
+                    if (queuedGeneration !== generation) return;
+                    const linked = await fetchMessage(channelID, messageID);
+                    if (linked && queuedGeneration === generation)
+                        updateMessage(message.channel_id, message.id);
+                });
                 continue;
             }
         }
@@ -402,6 +416,11 @@ export default definePlugin({
 
     settings,
 
+    flux: {
+        LOGOUT: clearMessageCache,
+        CONNECTION_OPEN: clearMessageCache
+    },
+
     patches: [
         {
             find: "!1,withFooter:",
@@ -417,6 +436,7 @@ export default definePlugin({
     },
 
     start() {
+        clearMessageCache();
         listedIds = parseIdList(settings.store.idList);
 
         addMessageAccessory("MessageLinkEmbeds", props => {
@@ -435,7 +455,7 @@ export default definePlugin({
     },
     stop() {
         removeMessageAccessory("MessageLinkEmbeds");
-        messageCache.clear();
+        clearMessageCache();
         listedIds = new Set();
     }
 });

@@ -26,6 +26,8 @@ import definePlugin, { OptionType } from "@utils/types";
 
 const cl = classNameFactory("vc-usrbg-");
 const API_URL = "https://usrbg.is-hardly.online/users";
+let generation = 0;
+let requestController: AbortController | undefined;
 
 interface UsrbgApiReturn {
     endpoint: string;
@@ -98,10 +100,10 @@ export default definePlugin({
     ),
 
     getVoiceBackgroundStyles({ className, participantUserId }: any) {
-        if (className.includes("tile")) {
+        if (settings.store.voiceBackground && typeof className === "string" && className.includes("tile")) {
             if (this.userHasBackground(participantUserId)) {
                 return {
-                    backgroundImage: `url(${this.getImageUrl(participantUserId)})`,
+                    backgroundImage: `url(${JSON.stringify(this.getImageUrl(participantUserId))})`,
                     backgroundSize: "cover",
                     backgroundPosition: "center",
                     backgroundRepeat: "no-repeat"
@@ -116,7 +118,7 @@ export default definePlugin({
     },
 
     userHasBackground(userId: string) {
-        return !!this.data?.users[userId];
+        return !!this.data && Object.hasOwn(this.data.users, userId) && !!this.data.users[userId];
     },
 
     getImageUrl(userId: string): string | null {
@@ -128,9 +130,32 @@ export default definePlugin({
     },
 
     async start() {
-        const res = await fetch(API_URL);
-        if (res.ok) {
-            this.data = await res.json();
+        const currentGeneration = ++generation;
+        requestController?.abort();
+        const controller = requestController = new AbortController();
+        this.data = null;
+        try {
+            const res = await fetch(API_URL, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]) });
+            if (!res.ok) return;
+            const data = await res.json() as UsrbgApiReturn;
+            if (currentGeneration !== generation || controller.signal.aborted) return;
+            if (!data || typeof data.endpoint !== "string" || typeof data.bucket !== "string" || typeof data.prefix !== "string"
+                || !data.users || typeof data.users !== "object" || Array.isArray(data.users)
+                || Object.entries(data.users).some(([id, etag]) => !/^\d+$/.test(id) || typeof etag !== "string")) return;
+            const endpoint = new URL(data.endpoint);
+            if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) return;
+            this.data = data;
+        } catch {
+            // Keep Discord's existing banner when the optional catalog is unavailable.
+        } finally {
+            if (requestController === controller) requestController = undefined;
         }
+    },
+
+    stop() {
+        generation++;
+        requestController?.abort();
+        requestController = undefined;
+        this.data = null;
     }
 });

@@ -9,13 +9,22 @@ import { createSocket, Socket } from "dgram";
 let xsoSocket: Socket | null = null;
 
 export function sendToOverlay(_, data: any) {
-    data.messageType = data.type;
-    const json = JSON.stringify(data);
-    xsoSocket ??= createSocket("udp4");
-    xsoSocket.send(json, 42069, "127.0.0.1");
+    const json = JSON.stringify({ ...data, messageType: data.type });
+    if (!xsoSocket) {
+        const socket = xsoSocket = createSocket("udp4");
+        socket.on("error", error => {
+            console.error("XSOverlay UDP socket error", error);
+            if (xsoSocket === socket) xsoSocket = null;
+            try { socket.close(); } catch { }
+        });
+    }
+    return new Promise<void>((resolve, reject) => {
+        xsoSocket!.send(json, 42069, "127.0.0.1", error => error ? reject(error) : resolve());
+    });
 }
 
 export function closeSocket() {
-    xsoSocket?.close();
+    const socket = xsoSocket;
     xsoSocket = null;
+    try { socket?.close(); } catch { }
 }

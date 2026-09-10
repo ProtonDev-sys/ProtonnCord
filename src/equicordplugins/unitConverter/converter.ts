@@ -39,14 +39,14 @@ const regexes: regexes = {
             },
         },
         feetWord: {
-            regex: /(\d+(?:\.\d+)?) *(f(ee)?t)(?! *\d)/ig,
+            regex: /(\d+(?:\.\d+)?) *(f(?:ee|oo)?t)(?!\w| *\d)/ig,
             convert(...groups) {
                 const ft = (parseFloat(groups[1]) / 3.281).toFixed(2);
                 return `${ft}m`;
             },
         },
         inchesWord: {
-            regex: /(?<!\d+ *(?:f(?:ee|oo)?t) *)(\d+(?:\.\d+)?) *(in(?:ches?)?)/ig,
+            regex: /(?<!\d+ *(?:f(?:ee|oo)?t) *)(\d+(?:\.\d+)?) *(in(?:ches?)?)(?!\w)/ig,
             convert(...groups) {
                 const inches = (parseFloat(groups[1]) * 2.54).toFixed(2);
                 return `${inches}cm`;
@@ -112,9 +112,9 @@ const regexes: regexes = {
         meters: {
             regex: /(\d+(?:\.\d+)?) ?(m|meters?)(?!\w)/gi,
             convert(...groups) {
-                const totalInches = parseFloat(groups[1]) * 39.3701;
-                const feet = Math.floor(totalInches / 12);
-                const inches = totalInches % 12;
+                const hundredths = Math.round(parseFloat(groups[1]) * 39.3701 * 100);
+                const feet = Math.floor(hundredths / 1200);
+                const inches = (hundredths % 1200) / 100;
                 if (feet === 0) return `${inches.toFixed(2)}in`;
                 if (inches < 0.005) return `${feet}ft`;
                 return `${feet}ft ${inches.toFixed(2)}in`;
@@ -155,7 +155,8 @@ const regexes: regexes = {
 export function convert(message: string): string {
     let newMessage = message;
     if (settings.store.myUnits === "imperial") {
-        for (const unit in regexes.metric) {
+        const units = ["kilometersPerHour", ...Object.keys(regexes.metric).filter(unit => unit !== "kilometersPerHour")];
+        for (const unit of units) {
             newMessage = newMessage.replaceAll(regexes.metric[unit].regex, regexes.metric[unit].convert);
         }
     } else {

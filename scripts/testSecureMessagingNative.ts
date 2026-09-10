@@ -427,6 +427,9 @@ async function testInvalidInputs(native: NativeModule): Promise<void> {
         "capture-protection input must be boolean",
     );
     expectStatus(await native.getIdentity(hostileEvent, ALICE_ID), "invalid_input", "non-Discord IPC origin");
+    expectStatus(await native.exportMobilePairing(hostileEvent, ALICE_ID), "invalid_input", "non-Discord pairing IPC origin");
+    expectStatus(await native.exportMobilePairing(DISCORD_EVENT, "not-a-snowflake"), "invalid_input", "invalid pairing user");
+    expectStatus(await native.exportMobilePairing(DISCORD_EVENT, ALICE_ID), "unavailable", "pairing without an unlocked OneKey");
     expectStatus(await native.getIdentity(DISCORD_EVENT, "not-a-snowflake"), "invalid_input", "invalid local user");
     expectStatus(await native.getChatAccessState(hostileEvent, ALICE_ID), "invalid_input", "non-Discord chat-access origin");
     expectStatus(await native.getChatAccessState(DISCORD_EVENT, "not-a-snowflake"), "invalid_input", "invalid chat-access user");

@@ -7,11 +7,11 @@
 import { Button } from "@components/Button";
 import { Heading } from "@components/Heading";
 import { classes } from "@utils/misc";
-import { openModal, React, SelectedGuildStore, TextInput, useStateFromStores } from "@webpack/common";
+import { openModal, React, SelectedGuildStore, showToast, TextInput, Toasts, useStateFromStores } from "@webpack/common";
 
 import { cl, settings } from "../index";
 import { exportPresets, ImportDecision, importPresets, savePreset } from "../utils/actions";
-import { loadPresetAsPending } from "../utils/profile";
+import { cancelPendingPresetLoad, loadPresetAsPending } from "../utils/profile";
 import { loadPresets, presets, PresetSection, setCurrentPresetIndex } from "../utils/storage";
 import { ImportProfilesModal } from "./confirmModal";
 import { PresetList } from "./presetList";
@@ -27,6 +27,7 @@ export function PresetManager({ section, guildId }: PresetManagerProps) {
     const [presetName, setPresetName] = React.useState("");
     const [, forceUpdate] = React.useReducer(x => x + 1, 0);
     const [isSaving, setIsSaving] = React.useState(false);
+    const [isLoading, setIsLoading] = React.useState(true);
     const [currentPage, setCurrentPage] = React.useState(1);
     const [pageInput, setPageInput] = React.useState("1");
     const [selectedPreset, setSelectedPreset] = React.useState<number>(-1);
@@ -39,10 +40,11 @@ export function PresetManager({ section, guildId }: PresetManagerProps) {
         () => SelectedGuildStore.getLastSelectedGuildId() ?? SelectedGuildStore.getGuildId()
     );
     const resolvedGuildId = isServerSection ? (guildId ?? lastSelectedGuildId ?? undefined) : undefined;
-    const canUseGuild = !isServerSection || Boolean(resolvedGuildId);
+    const canUseGuild = !isLoading && (!isServerSection || Boolean(resolvedGuildId));
 
     React.useEffect(() => {
         let isActive = true;
+        setIsLoading(true);
         (async () => {
             await loadPresets(resolvedSection);
             if (!isActive) return;
@@ -50,9 +52,11 @@ export function PresetManager({ section, guildId }: PresetManagerProps) {
             setCurrentPage(1);
             setPageInput("1");
             forceUpdate();
+            setIsLoading(false);
         })();
         return () => {
             isActive = false;
+            cancelPendingPresetLoad();
         };
     }, [resolvedGuildId, resolvedSection]);
 
@@ -60,9 +64,16 @@ export function PresetManager({ section, guildId }: PresetManagerProps) {
         ? presets
         : presets.filter(preset => preset.name.toLowerCase().includes(presetName.toLowerCase()));
 
-    const totalPages = Math.ceil(filteredPresets.length / PRESETS_PER_PAGE);
+    const totalPages = Math.max(1, Math.ceil(filteredPresets.length / PRESETS_PER_PAGE));
     const startIndex = (currentPage - 1) * PRESETS_PER_PAGE;
     const currentPresets = filteredPresets.slice(startIndex, startIndex + PRESETS_PER_PAGE);
+
+    React.useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
+            setPageInput(String(totalPages));
+        }
+    }, [currentPage, totalPages]);
 
     const handlePageChange = (newPage: number) => {
         if (newPage >= 1 && newPage <= totalPages) {
@@ -72,24 +83,31 @@ export function PresetManager({ section, guildId }: PresetManagerProps) {
     };
 
     const handleSavePreset = async () => {
-        if (!canUseGuild) return;
+        if (!canUseGuild || isSaving) return;
         const trimmedName = presetName.trim();
         if (!trimmedName) return;
         setIsSaving(true);
-        await savePreset(trimmedName, resolvedSection, resolvedGuildId);
-        setPresetName("");
-        setIsSaving(false);
-        const newTotalPages = Math.ceil(presets.length / PRESETS_PER_PAGE);
-        handlePageChange(newTotalPages);
-        forceUpdate();
+        try {
+            if (!await savePreset(trimmedName, resolvedSection, resolvedGuildId)) return;
+            setPresetName("");
+            const newTotalPages = Math.max(1, Math.ceil(presets.length / PRESETS_PER_PAGE));
+            setCurrentPage(newTotalPages);
+            setPageInput(String(newTotalPages));
+            forceUpdate();
+        } catch {
+            showToast("Could not save the profile preset. Try again.", Toasts.Type.FAILURE);
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     const applyPreset = (index: number) => {
+        if (!presets[index]) return;
         setSelectedPreset(index);
         setCurrentPresetIndex(index);
-        loadPresetAsPending(presets[index], resolvedGuildId, {
+        void loadPresetAsPending(presets[index], resolvedGuildId, {
             isGuildProfile: resolvedSection === "server"
-        });
+        }).catch(() => showToast("Could not load the profile preset. Try again.", Toasts.Type.FAILURE));
         forceUpdate();
     };
 
@@ -136,7 +154,7 @@ export function PresetManager({ section, guildId }: PresetManagerProps) {
         });
     };
 
-    const { avatarSize } = settings.store;
+    const { avatarSize } = settings.use(["avatarSize"]);
     const hasPresets = presets.length > 0;
     const shouldShowPagination = filteredPresets.length > PRESETS_PER_PAGE;
 

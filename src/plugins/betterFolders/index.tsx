@@ -24,7 +24,7 @@ import { getIntlMessage } from "@utils/discord";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { findByPropsLazy } from "@webpack";
-import { ExpandedGuildFolderStore, FluxDispatcher, SortedGuildStore } from "@webpack/common";
+import { ExpandedGuildFolderStore, FluxDispatcher, React, SortedGuildStore } from "@webpack/common";
 import { ReactNode } from "react";
 
 import FolderSideBar from "./FolderSideBar";
@@ -37,44 +37,34 @@ enum FolderIconDisplay {
 
 const FolderUtils = findByPropsLazy("move", "toggleGuildFolderExpand");
 
-let lastGuildId = null as string | null;
-let dispatchingFoldersClose = false;
+let lastGuildId: string | null | undefined;
+let closeOthersTask: (() => void) | undefined;
+
+function resetFolderState() {
+    lastGuildId = undefined;
+    closeOthersTask = undefined;
+}
 
 function getGuildFolder(id: string) {
     return SortedGuildStore.getGuildFolders().find(folder => folder.guildIds.includes(id));
 }
 
 function closeFolders() {
-    for (const id of ExpandedGuildFolderStore.getExpandedFolders())
-        FolderUtils.toggleGuildFolderExpand(id);
+    for (const id of [...ExpandedGuildFolderStore.getExpandedFolders()])
+        if (ExpandedGuildFolderStore.isFolderExpanded(id)) FolderUtils.toggleGuildFolderExpand(id);
 }
 
-// Nuckyz: Unsure if this should be a general utility or not
-function filterTreeWithTargetNode(children: any, predicate: (node: any) => boolean) {
-    if (children == null) {
-        return false;
+function filterGuildListTree(node: ReactNode): ReactNode {
+    if (Array.isArray(node)) {
+        const children = node.map(filterGuildListTree).filter(child => child != null);
+        return children.length ? children : null;
     }
+    if (!React.isValidElement<{ children?: ReactNode; renderTreeNode?: unknown; }>(node)) return null;
+    if (node.props.renderTreeNode != null) return node;
 
-    if (!Array.isArray(children)) {
-        if (predicate(children)) {
-            return true;
-        }
-
-        return filterTreeWithTargetNode(children.props?.children, predicate);
-    }
-
-    let childIsTargetChild = false;
-    for (let i = 0; i < children.length; i++) {
-        const shouldKeep = filterTreeWithTargetNode(children[i], predicate);
-        if (shouldKeep) {
-            childIsTargetChild = true;
-            continue;
-        }
-
-        children.splice(i--, 1);
-    }
-
-    return childIsTargetChild;
+    const children = filterGuildListTree(node.props.children);
+    if (children == null) return null;
+    return React.cloneElement(node, undefined, children);
 }
 
 export const settings = definePluginSettings({
@@ -112,7 +102,7 @@ export const settings = definePluginSettings({
     },
     forceOpen: {
         type: OptionType.BOOLEAN,
-        description: "Force a folder to open when switching to a server of that folder",
+        description: "Open a server's folder when switching servers. Closing the selected folder takes priority.",
         default: false
     },
     keepIcons: {
@@ -144,6 +134,7 @@ export default definePlugin({
     isModified: true,
     tags: ["Organisation", "Servers", "Appearance"],
     settings,
+    stop: resetFolderState,
 
     patches: [
         {
@@ -184,7 +175,7 @@ export default definePlugin({
                 // If we are rendering the Better Folders sidebar, we filter out everything but the Guild List from the Sidebar children
                 {
                     match: /reverse:!0,.{0,150}?barClassName:.+?\}\)\]/,
-                    replace: "$&.filter($self.makeGuildsBarSidebarFilter(!!arguments[0]?.isBetterFolders))"
+                    replace: "$&.map($self.makeGuildsBarSidebarFilter(!!arguments[0]?.isBetterFolders))"
                 }
             ]
         },
@@ -287,11 +278,10 @@ export default definePlugin({
                 lastGuildId = data.guildId;
                 const guildFolder = getGuildFolder(data.guildId);
 
-                if (guildFolder?.folderId) {
-                    if (settings.store.forceOpen && !ExpandedGuildFolderStore.isFolderExpanded(guildFolder.folderId)) {
-                        FolderUtils.toggleGuildFolderExpand(guildFolder.folderId);
-                    }
-                    if (settings.store.closeServerFolder && ExpandedGuildFolderStore.isFolderExpanded(guildFolder.folderId)) {
+                if (guildFolder?.folderId != null) {
+                    const shouldExpand = settings.store.forceOpen && !settings.store.closeServerFolder;
+                    if ((settings.store.forceOpen || settings.store.closeServerFolder)
+                        && ExpandedGuildFolderStore.isFolderExpanded(guildFolder.folderId) !== shouldExpand) {
                         FolderUtils.toggleGuildFolderExpand(guildFolder.folderId);
                     }
                 } else if (settings.store.closeAllFolders) {
@@ -301,25 +291,27 @@ export default definePlugin({
         },
 
         TOGGLE_GUILD_FOLDER_EXPAND(data) {
-            if (settings.store.closeOthers && !dispatchingFoldersClose) {
-                dispatchingFoldersClose = true;
+            if (!settings.store.closeOthers || closeOthersTask) return;
 
-                FluxDispatcher.wait(() => {
-                    const expandedFolders = ExpandedGuildFolderStore.getExpandedFolders();
-
-                    if (expandedFolders.size > 1) {
-                        for (const id of expandedFolders) if (id !== data.folderId)
+            const task = () => {
+                if (closeOthersTask !== task) return;
+                try {
+                    if (!settings.store.closeOthers || !ExpandedGuildFolderStore.isFolderExpanded(data.folderId)) return;
+                    for (const id of [...ExpandedGuildFolderStore.getExpandedFolders()])
+                        if (id !== data.folderId && ExpandedGuildFolderStore.isFolderExpanded(id))
                             FolderUtils.toggleGuildFolderExpand(id);
-                    }
-
-                    dispatchingFoldersClose = false;
-                });
-            }
+                } catch (e) {
+                    new Logger("BetterFolders").error("Failed to close other folders", e);
+                } finally {
+                    if (closeOthersTask === task) closeOthersTask = undefined;
+                }
+            };
+            closeOthersTask = task;
+            FluxDispatcher.wait(task);
         },
 
-        LOGOUT() {
-            closeFolders();
-        }
+        LOGOUT: resetFolderState,
+        CONNECTION_OPEN: resetFolderState
     },
 
     FolderSideBar,
@@ -363,16 +355,16 @@ export default definePlugin({
     },
 
     makeGuildsBarSidebarFilter(isBetterFolders: boolean) {
-        return (child: any) => {
+        return (child: ReactNode) => {
             if (!isBetterFolders) {
-                return true;
+                return child;
             }
 
             try {
-                return filterTreeWithTargetNode(child, child => child?.props?.renderTreeNode != null);
+                return filterGuildListTree(child);
             } catch (e) {
-                console.error(e);
-                return true;
+                new Logger("BetterFolders").error("Failed to filter the folder sidebar", e);
+                return child;
             }
         };
     },

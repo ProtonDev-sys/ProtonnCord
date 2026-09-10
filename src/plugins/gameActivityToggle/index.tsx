@@ -22,9 +22,10 @@ import { UserAreaRenderProps } from "@api/UserArea";
 import { getUserSettingLazy } from "@api/UserSettings";
 import equicordToolbox from "@equicordplugins/equicordToolbox";
 import { Devs } from "@utils/constants";
+import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { findByPropsLazy, findComponentByCodeLazy } from "@webpack";
-import { ConnectedAccountsStore, Menu, Popout, useRef, useState, useStateFromStores } from "@webpack/common";
+import { ConnectedAccountsStore, Menu, Popout, Toasts, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
 
 const Button = findComponentByCodeLazy(".GREEN,positionKeyStemOverride:");
 const ConnectedAccountActions = findByPropsLazy("setShowActivity");
@@ -88,6 +89,15 @@ function GameActivityToggleButton(props: UserAreaRenderProps) {
     const spotifyAccounts = connectedAccounts.filter(account => account.type === "spotify" && !account.revoked);
     // The update is an API request which takes a bit to update the store, so we have to use our own state to reflect the change immediately
     const [shareSpotifyActivity, setShareSpotifyActivity] = useState(spotifyAccounts[0]?.showActivity ?? false);
+    const spotifyAccountId = spotifyAccounts[0]?.id;
+    const spotifyAccountSharing = spotifyAccounts[0]?.showActivity ?? false;
+    const currentSpotifyAccountId = useRef(spotifyAccountId);
+    currentSpotifyAccountId.current = spotifyAccountId;
+    const spotifyUpdatePending = useRef(false);
+
+    useEffect(() => {
+        setShareSpotifyActivity(spotifyAccountSharing);
+    }, [spotifyAccountId, spotifyAccountSharing]);
 
     const buttonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -97,7 +107,7 @@ function GameActivityToggleButton(props: UserAreaRenderProps) {
         tooltipText: showCurrentGame ? "Disable Game Activity" : "Enable Game Activity",
         icon: Icon,
         role: "switch",
-        ariaChecked: !showCurrentGame,
+        ariaChecked: showCurrentGame,
         redGlow: !showCurrentGame,
         plated: props?.nameplate != null,
         onClick: () => ShowCurrentGame.updateSetting(old => !old)
@@ -121,8 +131,19 @@ function GameActivityToggleButton(props: UserAreaRenderProps) {
                         label="Share Spotify Activity"
                         checked={shareSpotifyActivity}
                         action={async () => {
-                            ConnectedAccountActions.setShowActivity(spotifyAccount.type, spotifyAccount.id, !shareSpotifyActivity);
+                            if (spotifyUpdatePending.current) return;
+                            spotifyUpdatePending.current = true;
                             setShareSpotifyActivity(!shareSpotifyActivity);
+                            try {
+                                await ConnectedAccountActions.setShowActivity(spotifyAccount.type, spotifyAccount.id, !shareSpotifyActivity);
+                            } catch (error) {
+                                new Logger("GameActivityToggle").error("Failed to update Spotify activity", error);
+                                if (currentSpotifyAccountId.current === spotifyAccount.id)
+                                    setShareSpotifyActivity(shareSpotifyActivity);
+                                Toasts.show({ id: Toasts.genId(), message: "Could not update Spotify activity. Please try again.", type: Toasts.Type.FAILURE });
+                            } finally {
+                                spotifyUpdatePending.current = false;
+                            }
                         }}
                     />
                 </Menu.Menu>

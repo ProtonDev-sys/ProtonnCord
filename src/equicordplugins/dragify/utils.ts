@@ -135,7 +135,8 @@ export function serializeDragEntity(entity: DropEntity) {
 
 export function parseDragifyPayload(value: string): DropEntity | null {
     const parsed = tryParseJson<DragifyPayload>(value);
-    if (!parsed?.kind || !parsed.id) return null;
+    if (!parsed?.kind || typeof parsed.id !== "string" || !/^\d{17,20}$/.test(parsed.id)) return null;
+    if (parsed.guildId !== undefined && (typeof parsed.guildId !== "string" || !/^(@me|\d{17,20})$/.test(parsed.guildId))) return null;
 
     switch (parsed.kind) {
         case "user":
@@ -151,9 +152,12 @@ export function parseDragifyPayload(value: string): DropEntity | null {
 
 function parseJsonPayload(payload: DragifyPayload): DropEntity | null {
     const id = payload.id ?? payload.userId ?? payload.channelId ?? payload.guildId;
-    if (!id) return null;
+    if (typeof id !== "string" || !/^\d{17,20}$/.test(id)) return null;
+    if (payload.guildId !== undefined && (typeof payload.guildId !== "string" || !/^(@me|\d{17,20})$/.test(payload.guildId))) return null;
 
-    const type = (payload.type ?? payload.kind ?? payload.itemType ?? "").toLowerCase();
+    const rawType = payload.type ?? payload.kind ?? payload.itemType ?? "";
+    if (typeof rawType !== "string") return null;
+    const type = rawType.toLowerCase();
     if (type.includes("user")) return { kind: "user", id };
     if (type.includes("channel")) return { kind: "channel", id, guildId: payload.guildId };
     if (type.includes("guild") || type.includes("server")) return { kind: "guild", id };

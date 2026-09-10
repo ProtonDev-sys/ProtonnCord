@@ -19,7 +19,7 @@ export default definePlugin({
     enabledByDefault: true,
     flux: {
         async POST_CONNECTION_OPEN() {
-            openNewPluginsModal();
+            await openNewPluginsModal();
         }
     },
     openNewPluginsModal,

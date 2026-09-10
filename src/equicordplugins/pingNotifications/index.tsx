@@ -61,7 +61,7 @@ function checkIfMuted(channel) {
     if (!settings.store.ignoreMuted) return false;
     if (!channel) return false;
 
-    if (channel.isMuted()) return true;
+    if (channel.isMuted?.()) return true;
 
     const isDM = [1, 3].includes(channel.type);
     if (isDM) {

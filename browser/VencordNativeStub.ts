@@ -29,7 +29,7 @@ import { debounce } from "@shared/debounce";
 import type { UpdaterBranch } from "@shared/Updater";
 import { localStorage } from "@utils/localStorage";
 import { getStylusWebStoreUrl } from "@utils/web";
-import { EXTENSION_BASE_URL, metaReady, RENDERER_CSS_URL } from "@utils/web-metadata";
+import { metaReady, RENDERER_CSS_URL } from "@utils/web-metadata";
 
 import { openExternalInBrowser } from "./externalLinks";
 
@@ -38,7 +38,9 @@ const cssListeners = new Set<(css: string) => void>();
 const NOOP = () => { };
 const NOOP_ASYNC = async () => { };
 
-const setCssDebounced = debounce((css: string) => VencordNative.quickCss.set(css));
+const setCssDebounced = debounce((css: string) => {
+    VencordNative.quickCss.set(css).catch(error => console.error("Failed to save QuickCSS", error));
+});
 
 const themeStore = DataStore.createStore("VencordThemes", "VencordThemeData");
 
@@ -68,9 +70,12 @@ window.VencordNative = {
             await metaReady;
 
             return fetch(RENDERER_CSS_URL)
-                .then(res => res.text());
+                .then(res => {
+                    if (!res.ok) throw new Error(`Failed to load renderer CSS (${res.status})`);
+                    return res.text();
+                });
         },
-        onRendererCssUpdate: NOOP,
+        onRendererCssUpdate: () => NOOP,
     },
 
     updater: {
@@ -88,12 +93,20 @@ window.VencordNative = {
         get: () => DataStore.get("VencordQuickCss").then(s => s ?? ""),
         set: async (css: string) => {
             await DataStore.set("VencordQuickCss", css);
-            cssListeners.forEach(l => l(css));
+            for (const listener of cssListeners) {
+                try {
+                    Promise.resolve(listener(css)).catch(error => console.error("QuickCSS listener failed", error));
+                } catch (error) {
+                    console.error("QuickCSS listener failed", error);
+                }
+            }
         },
         addChangeListener(cb) {
-            cssListeners.add(cb);
+            const listener = (css: string) => cb(css);
+            cssListeners.add(listener);
+            return () => { cssListeners.delete(listener); };
         },
-        addThemeChangeListener: NOOP,
+        addThemeChangeListener: () => NOOP,
         openFile: NOOP_ASYNC,
         async openEditor() {
             if (IS_USERSCRIPT) {
@@ -111,7 +124,6 @@ window.VencordNative = {
                 return;
             }
 
-            win.baseUrl = EXTENSION_BASE_URL;
             win.setCss = setCssDebounced;
             win.getCurrentCss = () => VencordNative.quickCss.get();
             win.getTheme = this.getEditorTheme;
@@ -130,13 +142,17 @@ window.VencordNative = {
     settings: {
         get: () => {
             try {
-                return JSON.parse(localStorage.getItem("ProtonnCordSettings") || "{}");
+                const settings = JSON.parse(localStorage.getItem("ProtonnCordSettings") || "{}");
+                if (settings === null || typeof settings !== "object" || Array.isArray(settings))
+                    throw new Error("Settings must contain a JSON object");
+                return settings;
             } catch (e) {
                 console.error("Failed to parse settings from localStorage: ", e);
                 return {};
             }
         },
         set: async (s: Settings) => localStorage.setItem("ProtonnCordSettings", JSON.stringify(s)),
+        flush: async () => { },
         getSettingsDir: async () => "LocalStorage",
         openFolder: async () => Promise.reject("settings:openFolder is not supported on web"),
     },
@@ -145,7 +161,7 @@ window.VencordNative = {
     csp: {} as any,
     tray: {
         setUpdateState: NOOP,
-        onCheckUpdates: NOOP,
-        onRepair: NOOP,
+        onCheckUpdates: () => NOOP,
+        onRepair: () => NOOP,
     },
 };

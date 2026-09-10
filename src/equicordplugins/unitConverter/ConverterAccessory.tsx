@@ -67,11 +67,12 @@ export function ConverterAccessory({ message }: { message: Message; }) {
     const [conversion, setConversion] = useState<string>("");
 
     useEffect(() => {
+        setConversion("");
         conversions.set(message.id, setConversion);
         return () => {
-            conversions.delete(message.id);
+            if (conversions.get(message.id) === setConversion) conversions.delete(message.id);
         };
-    }, [message.id]);
+    }, [message.id, message.content]);
 
     if (!conversion) return null;
     return (

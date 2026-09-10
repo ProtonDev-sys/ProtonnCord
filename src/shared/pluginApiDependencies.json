@@ -1,0 +1,20 @@
+{
+    "commands": "CommandsAPI",
+    "onBeforeMessageEdit": "MessageEventsAPI",
+    "onBeforeMessageSend": "MessageEventsAPI",
+    "onMessageClick": "MessageEventsAPI",
+    "chatBarButton": "ChatInputButtonAPI",
+    "chatBarButtonWrapper": "ChatInputButtonAPI",
+    "renderMemberListDecorator": "MemberListDecoratorsAPI",
+    "renderMessageAccessory": "MessageAccessoriesAPI",
+    "renderMessageDecoration": "MessageDecorationsAPI",
+    "messagePopoverButton": "MessagePopoverAPI",
+    "userProfileBadges": "BadgeAPI",
+    "renderNicknameIcon": "NicknameIconsAPI",
+    "headerBarButton": "HeaderBarAPI",
+    "audioProcessor": "AudioPlayerAPI",
+    "userAreaButton": "UserAreaAPI",
+    "renderProfileCollection": "ProfileCollectionsAPI",
+    "renderProfileSection": "ProfileSectionsAPI",
+    "gifPickerContextMenu": "ExtraContextMenusAPI"
+}

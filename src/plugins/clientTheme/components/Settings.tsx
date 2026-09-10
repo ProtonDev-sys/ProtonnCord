@@ -7,8 +7,7 @@
 import { ErrorCard } from "@components/ErrorCard";
 import { HeadingPrimary, HeadingSecondary } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
-import { relativeLuminance } from "@plugins/clientTheme/utils/colorUtils";
-import { createOrUpdateThemeColorVars } from "@plugins/clientTheme/utils/styleUtils";
+import { DEFAULT_COLOR, normalizeHexColor, relativeLuminance } from "@plugins/clientTheme/utils/colorUtils";
 import { classNameFactory } from "@utils/css";
 import { Margins } from "@utils/margins";
 import { findByCodeLazy } from "@webpack";
@@ -19,6 +18,7 @@ import { settings } from "..";
 const saveClientTheme = findByCodeLazy('type:"UNSYNCED_USER_SETTINGS_UPDATE', '"system"===');
 
 const cl = classNameFactory("vc-clientTheme-");
+const COLOR_SETTINGS: ["color"] = ["color"];
 
 const colorPresets = [
     "#1E1514", "#172019", "#13171B", "#1C1C28", "#402D2D",
@@ -31,54 +31,37 @@ function onPickColor(color: number) {
     const hexColor = color.toString(16).padStart(6, "0");
 
     settings.store.color = hexColor;
-    createOrUpdateThemeColorVars(hexColor);
-}
-
-function setDiscordTheme(theme: string) {
-    saveClientTheme({ theme });
 }
 
 export function ThemeSettingsComponent() {
+    const color = normalizeHexColor(settings.use(COLOR_SETTINGS).color);
     const currentTheme = useStateFromStores([ThemeStore], () => ThemeStore.theme);
     const isLightTheme = currentTheme === "light";
     const oppositeTheme = isLightTheme ? "Dark" : "Light";
 
     const nitroThemeEnabled = useStateFromStores([ClientThemesBackgroundStore], () => ClientThemesBackgroundStore.gradientPreset != null);
 
-    const selectedLuminance = relativeLuminance(settings.store.color);
-
-    let contrastWarning = false;
-    let fixableContrast = true;
-
-    if ((isLightTheme && selectedLuminance < 0.26) || !isLightTheme && selectedLuminance > 0.12) {
-        contrastWarning = true;
-    }
-
-    if (selectedLuminance < 0.26 && selectedLuminance > 0.12) {
-        fixableContrast = false;
-    }
+    const selectedLuminance = relativeLuminance(color);
 
     // Light mode with values greater than 65 leads to background colors getting crushed together and poor text contrast for muted channels
-    if (isLightTheme && selectedLuminance > 0.65) {
-        contrastWarning = true;
-        fixableContrast = false;
-    }
+    const contrastWarning = isLightTheme ? selectedLuminance < 0.26 || selectedLuminance > 0.65 : selectedLuminance > 0.12;
+    const fixableContrast = !(selectedLuminance > 0.12 && selectedLuminance < 0.26) && !(isLightTheme && selectedLuminance > 0.65);
 
     return (
         <div className={cl("settings")}>
             <div className={cl("container")}>
-                <div className={cl("settings-labels")}>
+                <div className={cl("labels")}>
                     <HeadingSecondary>Theme Color</HeadingSecondary>
                     <Paragraph>Add a color to your Discord client theme</Paragraph>
                 </div>
                 <ColorPicker
-                    color={parseInt(settings.store.color, 16)}
+                    color={parseInt(color, 16)}
                     onChange={onPickColor}
                     showEyeDropper={false}
                     suggestedColors={colorPresets}
                 />
             </div>
-            {(contrastWarning || nitroThemeEnabled) && (<>
+            {(contrastWarning || nitroThemeEnabled) && (
                 <ErrorCard className={Margins.top8}>
                     <HeadingPrimary>Your theme won't look good!</HeadingPrimary>
 
@@ -86,18 +69,18 @@ export function ThemeSettingsComponent() {
                     {nitroThemeEnabled && <Paragraph>{">"} Nitro themes aren't supported</Paragraph>}
 
                     <div className={cl("buttons-container")}>
-                        {(contrastWarning && fixableContrast) && <Button onClick={() => setDiscordTheme(oppositeTheme)} color={Button.Colors.RED}>Switch to {oppositeTheme} mode</Button>}
-                        {(nitroThemeEnabled) && <Button onClick={() => setDiscordTheme(currentTheme)} color={Button.Colors.RED}>Disable Nitro Theme</Button>}
+                        {(contrastWarning && fixableContrast) && <Button onClick={() => saveClientTheme({ theme: isLightTheme ? "dark" : "light" })} color={Button.Colors.RED}>Switch to {oppositeTheme} mode</Button>}
+                        {(nitroThemeEnabled) && <Button onClick={() => saveClientTheme({ theme: currentTheme })} color={Button.Colors.RED}>Disable Nitro Theme</Button>}
                     </div>
                 </ErrorCard>
-            </>)}
+            )}
         </div>
     );
 }
 
 export function ResetThemeColorComponent() {
     return (
-        <Button onClick={() => onPickColor(0x313338)}>
+        <Button onClick={() => onPickColor(parseInt(DEFAULT_COLOR, 16))}>
             Reset Theme Color
         </Button>
     );

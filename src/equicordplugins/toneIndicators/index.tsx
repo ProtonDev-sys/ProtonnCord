@@ -41,11 +41,11 @@ function escapeRegExp(value: string) {
 }
 
 function parseCustomIndicators(raw: string): Record<string, string> {
-    const result: Record<string, string> = {};
+    const result: Record<string, string> = Object.create(null);
 
     raw.split(/;\s*/).forEach(entry => {
         const [key, ...rest] = entry.split("=");
-        if (key && rest.length > 0) {
+        if (key?.trim() && rest.join("=").trim()) {
             result[key.trim().toLowerCase()] = rest.join("=").trim();
         }
     });
@@ -148,6 +148,8 @@ function splitTextWithIndicators(text: string): ReactNode[] {
                     desc={desc}
                 />,
             );
+        } else {
+            nodes.push(fullMatch);
         }
 
         lastIndex = matchEnd;
@@ -168,14 +170,9 @@ function patchChildrenTree(children: any): any {
             return parts.length === 1 ? parts[0] : parts;
         }
 
-        if (node?.props?.children != null) {
+        if (React.isValidElement<{ children?: ReactNode; }>(node) && node.props.children != null) {
             const c = node.props.children;
-            if (Array.isArray(c)) {
-                node.props.children = c.map(transform).flat();
-            } else {
-                node.props.children = transform(c);
-            }
-            return node;
+            return React.cloneElement(node, undefined, Array.isArray(c) ? c.map(transform).flat() : transform(c));
         }
 
         return node;

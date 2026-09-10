@@ -11,15 +11,14 @@ import { JSX } from "react";
 export interface GridProps<ItemT> {
     renderItem: (item: ItemT) => JSX.Element;
     getItemKey: (item: ItemT) => string;
-    itemKeyPrefix?: string;
     items: Array<ItemT>;
 }
 
-export default function Grid<ItemT,>({ renderItem, getItemKey, itemKeyPrefix: ikp, items }: GridProps<ItemT>) {
+export default function Grid<ItemT,>({ renderItem, getItemKey, items }: GridProps<ItemT>) {
     return <div className={cl("sectioned-grid-list-grid")}>
         {items.map(item =>
             <React.Fragment
-                key={`${ikp ? `${ikp}-` : ""}${getItemKey(item)}`}
+                key={getItemKey(item)}
             >
                 {renderItem(item)}
             </React.Fragment>

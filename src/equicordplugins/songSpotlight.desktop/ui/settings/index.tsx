@@ -21,7 +21,7 @@ import { sid } from "@song-spotlight/api/util";
 import { readClipboard } from "@utils/clipboard";
 import { copyWithToast } from "@utils/discord";
 import { RenderModalProps } from "@vencord/discord-types";
-import { Alerts, Modal,openModal, Parser, showToast, Toasts, useCallback, useEffect, useMemo, useRef, useState } from "@webpack/common";
+import { Alerts, Modal,openModal, Parser, showToast, Toasts, useCallback, useEffect, useMemo, useRef, UserStore, useState, useStateFromStores } from "@webpack/common";
 
 interface ImportButtonProps {
     overwrite: boolean;
@@ -32,6 +32,7 @@ interface ImportButtonProps {
 
 function ImportButton({ overwrite, pending, setPending, onImport }: ImportButtonProps) {
     const checkClipboard = useCallback(async () => {
+        const userId = UserStore.getCurrentUser()?.id;
         setPending(true);
 
         let json: unknown;
@@ -49,6 +50,10 @@ function ImportButton({ overwrite, pending, setPending, onImport }: ImportButton
         }
 
         const validated = await Promise.allSettled(data.map(song => Native.validateSong(song)));
+        if (UserStore.getCurrentUser()?.id !== userId) {
+            setPending(false);
+            return;
+        }
         if (!validated.every(x => x.status === "fulfilled" && x.value)) {
             setPending(false);
             return showToast("One or more imported songs were invalid.", Toasts.Type.FAILURE);
@@ -57,7 +62,7 @@ function ImportButton({ overwrite, pending, setPending, onImport }: ImportButton
         onImport(data);
         setPending(false);
         showToast("Imported songs from clipboard!", Toasts.Type.SUCCESS);
-    }, [pending]);
+    }, [onImport, setPending]);
 
     return (
         <Button
@@ -85,6 +90,7 @@ interface SettingsProps {
 }
 
 export default function Settings({ templateData }: SettingsProps) {
+    const userId = useStateFromStores([UserStore], () => UserStore.getCurrentUser()?.id);
     const { isAuthorized, deleteTokens } = useAuthorizationStore();
     const { self } = useSongStore();
 
@@ -96,6 +102,7 @@ export default function Settings({ templateData }: SettingsProps) {
         else ticked.current = true;
     }, [self?.data]);
     const [pending, setPending] = useState(!localData);
+    const [loadFailed, setLoadFailed] = useState(false);
 
     const isSame = useMemo(() =>
         self?.data && localData
@@ -103,8 +110,16 @@ export default function Settings({ templateData }: SettingsProps) {
             : true, [self?.data, localData]);
 
     useEffect(() => {
-        if (isAuthorized() && !localData) getData().then(() => setPending(false));
-    }, [isAuthorized()]);
+        let active = true;
+        setLoadFailed(false);
+        if (isAuthorized() && !localData) {
+            setPending(true);
+            void getData()
+                .catch(() => { if (active) setLoadFailed(true); })
+                .finally(() => { if (active) setPending(false); });
+        }
+        return () => { active = false; };
+    }, [isAuthorized(), userId, !localData]);
 
     if (!isAuthorized()) return <Button onClick={() => presentOAuth2Modal()}>Sign in to Song Spotlight</Button>;
 
@@ -150,10 +165,13 @@ export default function Settings({ templateData }: SettingsProps) {
                             <Button
                                 variant="primary"
                                 onClick={async () => {
+                                    if (UserStore.getCurrentUser()?.id !== userId) return;
                                     setPending(true);
                                     try {
                                         await saveData(localData);
                                         showToast("Successfully saved songs!", Toasts.Type.SUCCESS);
+                                    } catch {
+                                        // The API reports the lookup or save failure.
                                     } finally {
                                         setPending(false);
                                     }
@@ -165,7 +183,10 @@ export default function Settings({ templateData }: SettingsProps) {
                         </Flex>
                     </Flex>
                 )
-                : <Spinner type={Spinner.Type.WANDERING_CUBES} />}
+                : loadFailed ? <Button onClick={() => {
+                    setPending(true);
+                    void getData().then(() => setLoadFailed(false)).catch(() => setLoadFailed(true)).finally(() => setPending(false));
+                }} disabled={pending}>Retry loading songs</Button> : <Spinner type={Spinner.Type.WANDERING_CUBES} />}
             <Flex flexDirection="column" gap="12px">
                 <BaseText size="lg" weight="semibold">Authorization</BaseText>
                 <div className={cl("twin-buttons")}>
@@ -186,12 +207,15 @@ export default function Settings({ templateData }: SettingsProps) {
                                 title: "Are you sure?",
                                 body: "This will permanently delete all of your songs.",
                                 onConfirm: async () => {
+                                    if (UserStore.getCurrentUser()?.id !== userId) return;
                                     setPending(true);
                                     try {
                                         await deleteData();
-                                        deleteTokens();
+                                        deleteTokens(userId);
 
                                         showToast("Successfully deleted songs!", Toasts.Type.SUCCESS);
+                                    } catch {
+                                        // The API reports the deletion failure.
                                     } finally {
                                         setPending(false);
                                     }

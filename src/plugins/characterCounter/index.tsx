@@ -84,9 +84,9 @@ export default definePlugin({
                         /
                     </>
                 )}
-                <span className={cl("count")}>{text.length}</span>
+                {text.length}
                 /
-                <span className={cl("max")}>{charMax}</span>
+                {charMax}
             </div>
         );
     }, { noop: true })

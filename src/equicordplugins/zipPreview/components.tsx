@@ -73,6 +73,10 @@ export function ZipPreviewInline(props: ZipPreviewAttachmentProps) {
 
     useEffect(() => {
         loadRequestIdRef.current++;
+        if (animationFrameRef.current != null) cancelAnimationFrame(animationFrameRef.current);
+        if (animationTimeoutRef.current != null) clearTimeout(animationTimeoutRef.current);
+        animationFrameRef.current = null;
+        animationTimeoutRef.current = null;
         setCacheState(null);
         setCurrentPath("");
         setIsExpanded(false);
@@ -94,8 +98,8 @@ export function ZipPreviewInline(props: ZipPreviewAttachmentProps) {
 
         if (state.status === "pending") {
             state.promise
-                .then(() => {
-                    if (loadRequestIdRef.current === loadRequestId) setCacheState(getCachedZip(url));
+                .then(result => {
+                    if (loadRequestIdRef.current === loadRequestId) setCacheState({ status: "resolved", result });
                 })
                 .catch(error => {
                     if (loadRequestIdRef.current !== loadRequestId) return;
@@ -331,7 +335,7 @@ function openTextEntryModal(entry: LoadedZipEntry) {
                 ]}
             >
                 <div className={cl("code-wrap")}>
-                    <CodeBlock content={content} lang={getCodeLanguage(entry)} />
+                    {content.length <= 100_000 ? <CodeBlock content={content} lang={getCodeLanguage(entry)} /> : <pre>{content}</pre>}
                 </div>
             </Modal>
         </ErrorBoundary>
@@ -360,11 +364,13 @@ function openImageEntryModal(entry: LoadedZipEntry) {
 }
 
 function ZipImagePreview({ entry }: { entry: LoadedZipEntry; }) {
-    const [url] = useState(() => createImageObjectUrl(entry));
+    const [url, setUrl] = useState<string>();
 
     useEffect(() => {
+        const url = createImageObjectUrl(entry);
+        setUrl(url);
         return () => URL.revokeObjectURL(url);
-    }, [url]);
+    }, [entry]);
 
     return (
         <div className={cl("image-wrap")}>

@@ -124,20 +124,27 @@ function withTooltip(Component, props, messageId, channelId) {
             </ErrorBoundary>
         }>
         {({ onMouseEnter, onMouseLeave }) => (
-            <Component {...props} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} />
+            <Component {...props} onMouseEnter={event => {
+                props.onMouseEnter?.(event);
+                onMouseEnter();
+            }} onMouseLeave={event => {
+                props.onMouseLeave?.(event);
+                onMouseLeave();
+            }} />
         )}
     </Tooltip>;
 }
 
 function MessagePreview({ channelId, messageId }) {
-    const channel = ChannelStore.getChannel(channelId);
-    const message = useMessage(channelId, messageId);
+    const channel = useStateFromStores([ChannelStore], () => ChannelStore.getChannel(channelId));
+    const { message, loading } = useMessage(channel?.id ?? "", messageId);
     const rawCompact = MessageDisplayCompact.useSetting();
+    const { display } = settings.use(["display"]);
 
-    const compact = settings.store.display === "compact" ? true : settings.store.display === "cozy" ? false : rawCompact;
+    const compact = display === "compact" ? true : display === "cozy" ? false : rawCompact;
 
-    if (!message) {
-        return <span>Loading...</span>;
+    if (!message || !channel) {
+        return <span>{loading && channel ? "Loading..." : "Message unavailable"}</span>;
     }
 
     return <ChannelMessage
@@ -149,15 +156,19 @@ function MessagePreview({ channelId, messageId }) {
     />;
 }
 
-function useMessage(channelId, messageId) {
+function useMessage(channelId: string, messageId: string) {
     const cachedMessage = useStateFromStores(
         [MessageStore],
         () => MessageStore.getMessage(channelId, messageId)
     );
-    const [message, setMessage] = useState<Message | undefined>(cachedMessage);
+    const key = `${channelId}:${messageId}`;
+    const [fetched, setFetched] = useState<{ key: string; message?: Message; }>();
     useEffect(() => {
-        if (message == null)
-            (async () => {
+        let active = true;
+        if (!cachedMessage && channelId && messageId && ChannelStore.getChannel(channelId)) {
+            void (async () => {
+                let message: Message | undefined;
+                try {
                 const res = await RestAPI.get({
                     url: Constants.Endpoints.MESSAGES(channelId),
                     query: {
@@ -166,12 +177,17 @@ function useMessage(channelId, messageId) {
                     },
                     retries: 2,
                 });
-                const rawMessage = res.body[0];
-                const message = MessageStore.getMessages(channelId)
+                if (!active) return;
+                const rawMessage = Array.isArray(res.body) ? res.body.find(raw => raw?.id === messageId && raw.channel_id === channelId) : undefined;
+                if (rawMessage) message = MessageStore.getMessages(channelId)
                     .receiveMessage(rawMessage)
                     .get(messageId);
-                setMessage(message);
+                } catch { /* Deleted or inaccessible messages have no preview. */ }
+                if (active) setFetched({ key, message });
             })();
-    });
-    return message;
+        }
+        return () => { active = false; };
+    }, [channelId, messageId, cachedMessage, key]);
+    const current = fetched?.key === key ? fetched : undefined;
+    return { message: cachedMessage ?? current?.message, loading: !cachedMessage && !current };
 }

@@ -220,17 +220,30 @@ test("failed message authentication cannot create file rows or request attachmen
     api.clearEncryptedAttachmentCache();
 });
 
-test("clearing an entry while inspecting its manifest cannot start a stale attachment load", async () => {
-    const gate = Promise.withResolvers<DecryptIncomingResult>();
-    const { api, message, metrics, blobs } = fixture({ inspect: () => gate.promise });
-    api.encryptedAttachmentStatus(message);
-    assert.equal(metrics.inspections, 1);
-    api.clearEncryptedAttachmentCache();
-    gate.resolve({ status: "untrusted_author" });
-    await setImmediate();
-    assert.equal(metrics.loads, 0);
-    assert.equal(blobs.size, 0);
-});
+for (const invalidation of ["cache clear", "account change"] as const) {
+    test(`${invalidation} while inspecting a valid manifest cannot start a stale attachment load`, async t => {
+        const gate = Promise.withResolvers<DecryptIncomingResult>();
+        const { api, message, metrics, blobs, switchAccount } = fixture({ inspect: () => gate.promise });
+        t.after(api.clearEncryptedAttachmentCache);
+        api.encryptedAttachmentStatus(message);
+        assert.equal(metrics.inspections, 1);
+        if (invalidation === "cache clear") api.clearEncryptedAttachmentCache();
+        else switchAccount();
+        gate.resolve({
+            status: "decrypted", plaintext: "", counter: 1, envelopeId: "fixture", detachedTextIndex: null, stickers: [],
+            attachmentBundle: {
+                id: "A".repeat(22), key: "A".repeat(43), root: "A".repeat(43), count: 2,
+                manifest: [
+                    { digest: "A".repeat(43), preview: false, spoiler: true, size: message.attachments[0].size - 100, name: "archive.zip" },
+                    { digest: "A".repeat(43), preview: true, spoiler: false, size: 4, name: "image.png" }
+                ]
+            }
+        });
+        await setImmediate();
+        assert.equal(metrics.loads, 0);
+        assert.equal(blobs.size, 0);
+    });
+}
 
 for (const legacy of [false, true]) {
     test(`${legacy ? "legacy" : "manifest"} file rows skip expired URL refreshes while another refresh is pending`, async t => {

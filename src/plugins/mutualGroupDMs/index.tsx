@@ -26,7 +26,7 @@ import { Logger } from "@utils/Logger";
 import definePlugin from "@utils/types";
 import { Channel, User } from "@vencord/discord-types";
 import { findByPropsLazy, findCssClassesLazy } from "@webpack";
-import { Avatar, ChannelStore, Clickable, IconUtils, RelationshipStore, ScrollerThin, useMemo, UserStore } from "@webpack/common";
+import { Avatar, ChannelStore, Clickable, IconUtils, RelationshipStore, ScrollerThin, UserStore, useStateFromStores } from "@webpack/common";
 import { ComponentType, JSX } from "react";
 
 const SelectedChannelActionCreators = findByPropsLazy("selectPrivateChannel");
@@ -179,7 +179,7 @@ export default definePlugin({
     },
 
     renderMutualGDMs: ErrorBoundary.wrap(({ user, onClose }: { user: User, onClose: () => void; }) => {
-        const mutualGDms = useMemo(() => getMutualGroupDms(user.id), [user.id]);
+        const mutualGDms = useStateFromStores([ChannelStore, UserStore, RelationshipStore], () => getMutualGroupDms(user.id), [user.id]);
         const entries = renderClickableGDMs(mutualGDms, onClose);
 
         return (
@@ -203,7 +203,7 @@ export default definePlugin({
     }),
 
     renderDMPageList: ErrorBoundary.wrap(({ user, hasDivider, Divider, listStyle }: { user: User, hasDivider: boolean, Divider: JSX.Element, listStyle: string; }) => {
-        const mutualGDms = getMutualGroupDms(user.id);
+        const mutualGDms = useStateFromStores([ChannelStore, UserStore, RelationshipStore], () => getMutualGroupDms(user.id), [user.id]);
         if (mutualGDms.length === 0) return null;
 
         return (

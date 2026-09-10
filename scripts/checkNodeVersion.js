@@ -16,5 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-if (Number(process.versions.node.split(".")[0]) < 18)
-    throw `Your node version (${process.version}) is too old, please update to v18 or higher https://nodejs.org/en/download/`;
+const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
+if (!(nodeMajor === 22 && nodeMinor >= 13 || nodeMajor >= 24))
+    throw new Error(`Node ${process.version} is unsupported. Use Node 22.13+ from the 22.x line, or Node 24+. See package.json for the build requirement.`);

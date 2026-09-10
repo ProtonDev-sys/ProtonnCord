@@ -18,7 +18,7 @@
 
 import "./shiki.css";
 
-import { enableStyle } from "@api/Styles";
+import { disableStyle, enableStyle } from "@api/Styles";
 import { Devs } from "@utils/constants";
 import definePlugin, { ReporterTestable } from "@utils/types";
 import previewExampleText from "file://previewExample.tsx";
@@ -62,6 +62,7 @@ export default definePlugin({
         await shiki.init(settings.store.customTheme || settings.store.theme);
     },
     stop: () => {
+        disableStyle(deviconStyle);
         shiki.destroy();
         clearStyles();
     },

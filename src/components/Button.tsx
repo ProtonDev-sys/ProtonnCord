@@ -33,7 +33,7 @@ export type LinkButtonProps = ComponentPropsWithRef<"a"> & {
 
 export function Button({ variant = "primary", size = "medium", children, className, ...restProps }: ButtonProps) {
     return (
-        <button data-mana-component="button" className={classes(btnCls("base", variant, size), className)} {...restProps}>
+        <button type="button" data-mana-component="button" className={classes(btnCls("base", variant, size), className)} {...restProps}>
             {children}
             {variant === "link" && <OpenExternalIcon className={btnCls("link-icon")} />}
         </button>
@@ -57,7 +57,7 @@ export type TextButtonProps = ComponentPropsWithRef<"button"> & {
 
 export function TextButton({ variant = "primary", className, ...restProps }: TextButtonProps) {
     return (
-        <button className={classes(textBtnCls("base", variant), className)} {...restProps} />
+        <button type="button" className={classes(textBtnCls("base", variant), className)} {...restProps} />
     );
 }
 

@@ -107,13 +107,7 @@ const tabStateCache = new Map<number, TabStateCache>();
 const MAX_CACHE_SIZE = 50;
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
-// horror
-const _ = {
-    get openedTabs() {
-        return openTabs;
-    }
-};
-export const { openedTabs } = _;
+export const openedTabs = openTabs;
 
 type UpdateFunction = (save?: boolean) => void;
 
@@ -157,9 +151,9 @@ export function createTab(props: BasicChannelTabsProps | ChannelTabsProps, switc
             currentTab.messageId = messageId;
             currentTab.compact = "compact" in props ? props.compact : settings.store.openNewTabsInCompactMode;
             if (switchToTab) {
-                update(save);
-            } else {
                 moveToTab(currentTab.id);
+            } else {
+                update(save);
             }
         }
         return;
@@ -191,7 +185,7 @@ export function closeTab(id: number) {
             while (!newTab) {
                 const maybeNewTabId = openTabHistory.at(-1);
                 openTabHistory.pop();
-                if (!maybeNewTabId) {
+                if (maybeNewTabId === undefined) {
                     // fallback: go to tab on the right, or leftmost if closing last tab
                     const fallbackIndex = i < openTabs.length ? i : 0;
                     moveToTab(openTabs[fallbackIndex].id);
@@ -382,10 +376,12 @@ function restoreTabState(tabId: number) {
 
     const cached = tabStateCache.get(tabId);
     if (!cached) return;
+    const generation = hydrationGeneration;
 
     // restore scroll pos after delay to make sure content loaded
     requestAnimationFrame(() => {
         setTimeout(() => {
+            if (currentlyOpenTab !== tabId || hydrationGeneration !== generation || isViewingViaBookmarkMode()) return;
             const scrollContainer = getScrollContainer();
             if (scrollContainer) {
                 scrollContainer.scrollTop = cached.scrollPosition;

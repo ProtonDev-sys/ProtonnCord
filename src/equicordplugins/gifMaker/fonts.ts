@@ -9,6 +9,19 @@ import type { GoogleFontMetadata } from "./types";
 const loadedFontFamilies = new Set<string>(["Arial"]);
 const loadingFontFamilies = new Map<string, Promise<void>>();
 const fontObjectUrls = new Set<string>();
+const loadedFontFaces = new Set<FontFace>();
+let fontGeneration = 0;
+
+export function clearFontResources() {
+    fontGeneration++;
+    for (const font of loadedFontFaces) document.fonts.delete(font);
+    for (const url of fontObjectUrls) URL.revokeObjectURL(url);
+    loadedFontFaces.clear();
+    fontObjectUrls.clear();
+    loadedFontFamilies.clear();
+    loadedFontFamilies.add("Arial");
+    loadingFontFamilies.clear();
+}
 
 export const createGoogleFontUrl = (family: string, options = "") =>
     `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, "+")}${options}&display=swap`;
@@ -50,23 +63,27 @@ function parseFontFaces(css: string) {
         .filter((face): face is NonNullable<typeof face> => face !== null);
 }
 
-async function loadFontFace(family: string, url: string, descriptors: FontFaceDescriptors) {
+async function loadFontFace(family: string, url: string, descriptors: FontFaceDescriptors, generation: number) {
     try {
         const response = await fetch(url);
         if (!response.ok) return false;
         const blob = await response.blob();
+        if (generation !== fontGeneration) return false;
         const objectUrl = URL.createObjectURL(blob);
         fontObjectUrls.add(objectUrl);
 
         try {
             const font = new FontFace(family, `url(${objectUrl})`, descriptors);
             await font.load();
+            if (generation !== fontGeneration) return false;
             document.fonts.add(font);
+            loadedFontFaces.add(font);
             return true;
         } catch {
+            return false;
+        } finally {
             URL.revokeObjectURL(objectUrl);
             fontObjectUrls.delete(objectUrl);
-            return false;
         }
     } catch {
         return false;
@@ -80,23 +97,27 @@ export function loadGoogleFont(fontFamily: string) {
     const loading = loadingFontFamilies.get(family);
     if (loading) return loading;
 
+    const generation = fontGeneration;
     const loadPromise = (async () => {
         try {
             const response = await fetch(createGoogleFontUrl(family));
             if (!response.ok) return;
             const css = await response.text();
-            if (!css) return;
+            if (!css || generation !== fontGeneration) return;
 
             const faces = parseFontFaces(css);
-            const results = await Promise.all(faces.map(face => loadFontFace(family, face.url, face.descriptors)));
+            const results = await Promise.all(faces.map(face => loadFontFace(family, face.url, face.descriptors, generation)));
             const loaded = results.some(Boolean);
-            if (loaded) loadedFontFamilies.add(family);
+            if (loaded && generation === fontGeneration) loadedFontFamilies.add(family);
         } catch {
             // font load failed silently
         }
     })();
 
     loadingFontFamilies.set(family, loadPromise);
+    void loadPromise.finally(() => {
+        if (loadingFontFamilies.get(family) === loadPromise) loadingFontFamilies.delete(family);
+    });
     return loadPromise;
 }
 
@@ -115,7 +136,10 @@ export async function fetchAllGoogleFonts(): Promise<GoogleFontMetadata[]> {
         },
         method: "POST"
     })
-        .then(response => response.ok ? response.json() : null)
+        .then(response => {
+            if (!response.ok) throw new Error("Font catalog unavailable");
+            return response.json();
+        })
         .then(data => {
             const rows = Array.isArray(data?.[1]) ? data[1] as unknown[] : [];
             const fonts: GoogleFontMetadata[] = [];
@@ -170,9 +194,9 @@ export async function fetchAllGoogleFonts(): Promise<GoogleFontMetadata[]> {
             cachedFonts = fonts;
             return fonts;
         })
-        .catch(() => {
-            cachedFonts = [];
-            return cachedFonts;
+        .catch(() => [])
+        .finally(() => {
+            fontsPromise = null;
         });
 
     return fontsPromise;

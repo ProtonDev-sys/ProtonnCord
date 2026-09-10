@@ -1226,11 +1226,11 @@
     background: linear-gradient(135deg, var(--main-color, var(--brand-experiment, var(--brand-500))) 0%, var(--brand-experiment-560) 100%);
     color: var(--white);
     border-color: var(--main-color, var(--brand-experiment, var(--brand-500)));
-    animation: keybind-pulse 1.5s ease-in-out infinite;
+    animation: vc-channeltabs-keybind-pulse 1.5s ease-in-out infinite;
     box-shadow: 0 0 12px var(--main-color, var(--brand-experiment, var(--brand-500)));
 }
 
-@keyframes keybind-pulse {
+@keyframes vc-channeltabs-keybind-pulse {
 
     /* stylelint-disable-next-line rule-empty-line-before */
     0%,
@@ -1250,10 +1250,10 @@
     font-size: 12px;
     font-weight: 500;
     margin-top: 2px;
-    animation: shake 0.3s ease;
+    animation: vc-channeltabs-keybind-shake 0.3s ease;
 }
 
-@keyframes shake {
+@keyframes vc-channeltabs-keybind-shake {
 
     /* stylelint-disable-next-line rule-empty-line-before */
     0%,

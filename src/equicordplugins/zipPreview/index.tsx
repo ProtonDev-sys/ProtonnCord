@@ -32,6 +32,7 @@ export default definePlugin({
     stop() {
         clearZipPreviewCache();
     },
+    flux: { CONNECTION_OPEN: clearZipPreviewCache },
 
     renderZipPreview(props: ZipPreviewAttachmentProps) {
         if (!isZipFile(getAttachmentFileName(props))) return null;

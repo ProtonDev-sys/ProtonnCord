@@ -11,13 +11,14 @@ import { isPluginEnabled } from "@api/PluginManager";
 import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { EyeIcon } from "@components/Icons";
-import pinDms from "@plugins/pinDms";
-import { isPinned } from "@plugins/pinDms/data";
+import type PinDMs from "@plugins/pinDms";
 import { EquicordDevs } from "@utils/constants";
 import { classNameFactory } from "@utils/css";
 import definePlugin, { OptionType } from "@utils/types";
 import { Channel, Message } from "@vencord/discord-types";
 import { ChannelStore, Clickable, FluxDispatcher, Menu, Tooltip } from "@webpack/common";
+
+import Plugins from "~plugins";
 
 interface UserContextProps {
     channel?: Channel;
@@ -31,6 +32,7 @@ const cl = classNameFactory("vc-hide-messages-");
 const hiddenDmIds = new Set<string>();
 let privateChannelsListInstance: PrivateChannelsListInstance | null = null;
 let showHiddenDms = false;
+const privateChannelLists = new WeakMap<PrivateChannelsListInstance, { source: string[]; filtered: string[]; }>();
 
 function notifyHiddenDmsUpdate() {
     privateChannelsListInstance?.forceUpdate();
@@ -72,7 +74,7 @@ const messageCtxPatch: NavContextMenuPatchCallback = (children, { message }: { m
 
 const userCtxPatch: NavContextMenuPatchCallback = (children, { channel }: UserContextProps) => {
     if (!channel?.isDM()) return;
-    if (isPluginEnabled(pinDms.name) && isPinned(channel.id)) return;
+    if (isPluginEnabled("PinDMs") && (Plugins.PinDMs as typeof PinDMs).isPinned(channel.id)) return;
 
     const group = findGroupChildrenByChildId("close-dm", children);
     if (!group) return;
@@ -139,7 +141,11 @@ export default definePlugin({
     },
     filterPrivateChannelIds(privateChannelIds: string[], instance?: PrivateChannelsListInstance) {
         privateChannelsListInstance = instance ?? privateChannelsListInstance;
-        return showHiddenDms ? privateChannelIds : privateChannelIds.filter(id => !hiddenDmIds.has(id));
+        const previous = instance && privateChannelLists.get(instance);
+        const source = previous?.filtered === privateChannelIds ? previous.source : privateChannelIds;
+        const filtered = showHiddenDms || hiddenDmIds.size === 0 ? source : source.filter(id => !hiddenDmIds.has(id));
+        if (instance) privateChannelLists.set(instance, { source, filtered });
+        return filtered;
     },
     renderHiddenMessagesToggle: ErrorBoundary.wrap(() => {
         const hasHiddenDms = hiddenDmIds.size > 0;

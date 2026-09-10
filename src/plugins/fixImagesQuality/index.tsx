@@ -43,19 +43,15 @@ export default definePlugin({
             <Card variant="primary">
                 <Flex flexDirection="column" gap="4px">
                     <Paragraph size="md" weight="semibold">The default behaviour is the following:</Paragraph>
-                    <Paragraph>
-                        <ul>
-                            <li>&mdash; In chat, optimised but full resolution images will be loaded.</li>
-                            <li>&mdash; In the image modal, the original image will be loaded.</li>
-                        </ul>
-                    </Paragraph>
+                    <ul>
+                        <li>In chat, optimised but full resolution images will be loaded.</li>
+                        <li>In the image modal, the original image will be loaded.</li>
+                    </ul>
                     <Paragraph size="md" weight="semibold" className={Margins.top8}>You can also enable original image in chat, but beware of the following caveats:</Paragraph>
-                    <Paragraph>
-                        <ul>
-                            <li>&mdash; Animated images (GIF, WebP, etc.) in chat will always animate, regardless of if the App is focused.</li>
-                            <li>&mdash; May cause lag.</li>
-                        </ul>
-                    </Paragraph>
+                    <ul>
+                        <li>Animated images (GIF, WebP, etc.) in chat will always animate, regardless of if the App is focused.</li>
+                        <li>May cause lag.</li>
+                    </ul>
                 </Flex>
             </Card>
         );
@@ -73,6 +69,8 @@ export default definePlugin({
             if (!isImage || src.startsWith("data:")) return;
 
             const url = new URL(src);
+            if ((url.origin !== "https://media.discordapp.net" && url.origin !== "https://cdn.discordapp.com")
+                || url.username || url.password) return;
             if (!url.pathname.startsWith("/attachments/")) return;
 
             url.searchParams.set("animated", String(!freeze));
@@ -86,14 +84,18 @@ export default definePlugin({
                 // make sure the image is not too large
                 const pixels = width * height;
                 const limit = 2000 * 1200;
+                if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 || !Number.isFinite(pixels)) return;
 
                 if (pixels <= limit)
                     return url.toString();
 
                 const scale = Math.sqrt(pixels / limit);
+                const scaledWidth = Math.round(width / scale);
+                const scaledHeight = Math.round(height / scale);
+                if (scaledWidth < 1 || scaledHeight < 1) return;
 
-                url.searchParams.set("width", Math.round(width / scale).toString());
-                url.searchParams.set("height", Math.round(height / scale).toString());
+                url.searchParams.set("width", scaledWidth.toString());
+                url.searchParams.set("height", scaledHeight.toString());
                 return url.toString();
             }
 

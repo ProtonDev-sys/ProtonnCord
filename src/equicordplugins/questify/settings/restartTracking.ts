@@ -5,6 +5,7 @@
  */
 
 import { SettingsStore } from "@api/Settings";
+import { reload } from "@utils/native";
 import type { DefinedSettings, SettingsDefinition } from "@utils/types";
 
 import { Alerts } from "../utils/ui";
@@ -83,7 +84,10 @@ export function promptToRestartIfDirty({ onDecline }: RestartPromptOptions = {})
         cancelText: "Later",
         onConfirm: () => {
             didConfirm = true;
-            location.reload();
+            void reload().catch(error => Alerts.show({
+                title: "Restart failed",
+                body: `Could not save settings before restarting: ${String(error)}`,
+            }));
         },
         onCancel: declineRestart,
         onCloseCallback: declineRestart,

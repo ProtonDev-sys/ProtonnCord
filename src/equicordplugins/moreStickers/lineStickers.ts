@@ -98,7 +98,9 @@ export function convert(sp: LineStickerPack): StickerPack {
 export function parseHtml(html: string): LineStickerPack {
     const doc = new DOMParser().parseFromString(html, "text/html");
     const mainImage = JSON.parse((doc.querySelector("[ref=mainImage]") as HTMLElement)?.dataset?.preview ?? "null") as LineSticker;
+    if (!mainImage || typeof mainImage.id !== "string") throw new Error("Could not find sticker pack metadata");
     const { id } = mainImage;
+    mainImage.stickerPackId = id;
 
     const stickers =
         [...doc.querySelectorAll('[data-test="sticker-item"]')]
@@ -132,6 +134,7 @@ export function isLineStickerPackHtml(html: string): boolean {
   */
 export async function getStickerPackById(id: string, region = "en"): Promise<LineStickerPack> {
     const res = await corsFetch(`https://store.line.me/stickershop/product/${id}/${region}`);
+    if (!res.ok) throw new Error("Could not load sticker pack");
     const html = await res.text();
 
     return parseHtml(html);

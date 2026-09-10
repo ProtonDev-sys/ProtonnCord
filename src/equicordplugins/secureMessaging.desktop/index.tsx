@@ -26,6 +26,7 @@ import { Span } from "@components/Span";
 import { copyToClipboard } from "@utils/clipboard";
 import { EquicordDevs } from "@utils/constants";
 import { sendMessage } from "@utils/discord";
+import { proxyLazy } from "@utils/lazy";
 import { classes } from "@utils/misc";
 import definePlugin, { PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/discord-types";
@@ -59,6 +60,7 @@ import {
     UserStore,
     useState,
     useStateFromStores,
+    zustandCreate,
 } from "@webpack/common";
 import type { ReactNode } from "react";
 
@@ -103,6 +105,7 @@ import {
     decryptCachedMessage,
     decryptCacheKey,
     getCachedDecryption,
+    prefetchCachedMessage,
 } from "./decryptCache";
 import {
     clearEncryptedEmbedCache,
@@ -159,6 +162,24 @@ import {
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const SECURE_LISTENER_PRIORITY = 1_000_000;
+interface PendingEncryptedSend {
+    id: symbol;
+    stage: "Encrypting attachments…" | "Uploading encrypted attachments…";
+}
+const useEncryptedSendStatus = proxyLazy(() => zustandCreate(() => ({ pending: [] as PendingEncryptedSend[] })));
+
+const EncryptedSendStatus = ErrorBoundary.wrap(function EncryptedSendStatus({ buttons }: { buttons: ReactNode; }) {
+    const status = useEncryptedSendStatus((state: { pending: PendingEncryptedSend[]; }) => {
+        return state.pending.length > 1
+            ? `Sending ${state.pending.length} encrypted messages…`
+            : state.pending[0]?.stage ?? null;
+    });
+    return <>
+        {status && <BaseText size="xs" className="vc-secure-messaging-send-status" role="status">{status}</BaseText>}
+        {buttons}
+    </>;
+}, { noop: true });
+
 const VOICE_MESSAGE_FLAG = 1 << 13;
 const UploadLimits = findByPropsLazy("getUserMaxFileSize") as {
     getUserMaxFileSize(user: unknown): unknown;
@@ -401,6 +422,7 @@ function useScreenCaptureProtectionStatus(): ScreenCaptureProtectionStatus {
     const [status, setStatus] = useState(screenCaptureProtectionStatus);
     useEffect(() => {
         screenCaptureProtectionListeners.add(setStatus);
+        setStatus(screenCaptureProtectionStatus);
         return () => { screenCaptureProtectionListeners.delete(setStatus); };
     }, []);
     return status;
@@ -733,8 +755,9 @@ function reviewKeyAnnouncementInBackground(message: Message | undefined): void {
                 keyReviewGate.fail(localUserId, peerUserId, attemptId);
         })
         .finally(() => {
+            if (generation !== announcementReviewGeneration) return;
             backgroundAnnouncementReviews.delete(attemptId);
-            if (generation === announcementReviewGeneration) keyReviewGate.finish(localUserId, peerUserId, attemptId);
+            keyReviewGate.finish(localUserId, peerUserId, attemptId);
         });
 }
 
@@ -748,13 +771,33 @@ function messageFromDispatch(event: Record<string, any>): Message | undefined {
         : undefined;
 }
 
+function prefetchReceivedEncryptedMessage(dispatched: Message | undefined): void {
+    const localUserId = UserStore.getCurrentUser()?.id;
+    if (!dispatched || !localUserId || localUserId !== secureRuntimeUserId || screenCaptureProtectionStatus !== "ready") return;
+    const channelId = dispatched.channel_id;
+    if (channelId !== SelectedChannelStore.getChannelId() || chatGateReason({ channelId }) !== null) return;
+    const channel = ChannelStore.getChannel(channelId);
+    if (!channel || channel.guild_id) return;
+    const message = MessageStore.getMessage(channelId, dispatched.id);
+    if (!message?.author?.id || message.state === "SENDING" || !isEncryptedMessage(message.content)) return;
+    const generation = secureOperationGeneration;
+    const key = decryptCacheKey(localUserId, message);
+    void prefetchCachedMessage(localUserId, message)?.then(() => {
+        if (secureOperationIsCurrent(generation, localUserId) && screenCaptureProtectionStatus === "ready" &&
+            key === decryptCacheKey(localUserId, message) && chatGateReason({ channelId }) === null)
+            notifySecureMessageGroupingChanged(channelId);
+    });
+}
+
 function handleKeyAnnouncementDispatch(event: Record<string, any>): void {
-    reviewKeyAnnouncementInBackground(messageFromDispatch(event));
+    const message = messageFromDispatch(event);
+    reviewKeyAnnouncementInBackground(message);
+    if (!event.optimistic) prefetchReceivedEncryptedMessage(message);
 }
 
 function handleLoadedKeyAnnouncements(event: Record<string, any>): void {
     if (!Array.isArray(event.messages)) return;
-    for (const message of event.messages) reviewKeyAnnouncementInBackground(message as Message);
+    for (const message of event.messages) handleKeyAnnouncementDispatch({ channelId: event.channelId, message });
 }
 
 function isNativeFailure(result: { status: string; }): result is NativeFailure {
@@ -1505,6 +1548,9 @@ async function encryptEditedMessage(
         throw new Error(decrypted.status === "replay_detected"
             ? "The original encrypted message conflicts with its authenticated history."
             : "The original encrypted message could not be authenticated for editing.");
+    // Mobile reserves this counter range; desktop edits must not cross into it.
+    if (decrypted.counter >= 2 ** 52)
+        throw new Error("Messages sent from ProtonnCord Mobile cannot be edited on desktop. Send a new encrypted message instead.");
     if (decrypted.detachedTextIndex !== null)
         throw new Error("Large encrypted messages cannot be edited because Discord cannot replace their encrypted text attachment.");
     if ((decrypted.attachmentBundle?.count ?? 0) !== original.attachments.length)
@@ -1523,6 +1569,8 @@ async function encryptEditedMessage(
             : conversationStatusMessage(encrypted.conversation);
         throw new Error(reason);
     }
+    if (encrypted.counter <= decrypted.counter)
+        throw new Error("This message cannot be edited safely from this installation. Send a new encrypted message instead.");
     void prefetchEncryptedMessageEmbeds(plaintext);
     return encrypted.content;
 }
@@ -1753,6 +1801,13 @@ function uninstallNetworkGuard(): void {
 
 const outgoingListener: MessageSendListener = async (channelId, message, options, props) => {
     const generation = secureOperationGeneration;
+    const sendId = Symbol();
+    const setAttachmentStatus = (stage: PendingEncryptedSend["stage"]) => {
+        if (generation !== secureOperationGeneration) return;
+        useEncryptedSendStatus.setState((state: { pending: PendingEncryptedSend[]; }) => ({
+            pending: [...state.pending.filter(send => send.id !== sendId), { id: sendId, stage }],
+        }));
+    };
     let generatedDetachedUpload: { upload: CloudUpload; uploads: CloudUpload[]; } | null = null;
     let generatedDetachedUploadCommitted = false;
     try {
@@ -1808,6 +1863,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             detachedTextIndex = appended;
             generatedDetachedUpload = { upload: uploads[appended], uploads };
         }
+        if (uploads.length > 0) setAttachmentStatus("Encrypting attachments…");
         let preparedAttachments: PreparedEncryptedAttachments | null = uploads.length > 0
             ? await prepareEncryptedAttachments(
                 uploads,
@@ -1849,6 +1905,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             }
             detachedTextIndex = appended;
             generatedDetachedUpload = { upload: uploads[appended], uploads };
+            setAttachmentStatus("Encrypting attachments…");
             preparedAttachments = await prepareEncryptedAttachments(
                 uploads,
                 "",
@@ -1900,6 +1957,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             authorizeScopedAttachmentUploadReservations(channelId, preparedAttachments.files, scope);
         for (const upload of uploads) approvedAttachmentUploads.set(upload, { file: upload.item.file, scope });
         if (preparedAttachments) {
+            setAttachmentStatus("Uploading encrypted attachments…");
             try {
                 await Promise.all(uploads.map(upload => upload.upload()));
             } catch (error) {
@@ -1920,6 +1978,9 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             : "Secure Messaging stopped the send because encryption or upload failed unexpectedly.", Toasts.Type.FAILURE);
         return { cancel: true };
     } finally {
+        useEncryptedSendStatus.setState((state: { pending: PendingEncryptedSend[]; }) => ({
+            pending: state.pending.filter(send => send.id !== sendId),
+        }));
         if (generatedDetachedUpload && !generatedDetachedUploadCommitted) {
             const index = generatedDetachedUpload.uploads.indexOf(generatedDetachedUpload.upload);
             if (index !== -1) generatedDetachedUpload.uploads.splice(index, 1);
@@ -2003,6 +2064,7 @@ function SecureChatGate({ channel }: { channel: Channel; }) {
 const SecureChatGateScreen = ErrorBoundary.wrap(SecureChatGate);
 
 async function sendKeyAnnouncement(channelId: string, localUserId: string): Promise<void> {
+    if (UserStore.getCurrentUser()?.id !== localUserId) return;
     const announcement = await Native.createAnnouncement(localUserId);
     if (UserStore.getCurrentUser()?.id !== localUserId) {
         revokePreparedSecureOperations();
@@ -2091,11 +2153,12 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
     const captureProtection = useScreenCaptureProtectionStatus();
 
     const load = useCallback(async () => {
-        if (!context) return;
+        if (!context || UserStore.getCurrentUser()?.id !== context.localUserId) return;
         setBusy(true);
         setError(null);
         try {
             const nextSecurityKey = await Native.getSecurityKeyVaultState();
+            if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
             setSecurityKey(nextSecurityKey);
             if (isNativeFailure(nextSecurityKey)) {
                 setIdentity(null);
@@ -2118,6 +2181,7 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                 Native.getIdentity(context.localUserId),
                 Native.getConversation(context.localUserId, context.snapshot),
             ]);
+            if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
             setIdentity(nextIdentity);
             setConversation(nextConversation);
             updateMessageLengthBypass(context, nextConversation);
@@ -2193,6 +2257,10 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
     };
 
     const save = async () => {
+        if (UserStore.getCurrentUser()?.id !== context.localUserId) {
+            modalProps.onClose();
+            return;
+        }
         if (enableEncryption && selectedRecipientIds.length === 0) {
             setError("Select at least one verified recipient before enabling encryption.");
             return;
@@ -2205,6 +2273,7 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                 selectedRecipientIds,
                 snapshot: context.snapshot,
             });
+            if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
             revokePreparedSecureOperations();
             setConversation(result);
             updateMessageLengthBypass(context, result);
@@ -2222,11 +2291,16 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
     };
 
     const rotate = async () => {
+        if (UserStore.getCurrentUser()?.id !== context.localUserId) {
+            modalProps.onClose();
+            return;
+        }
         if (!readyIdentity || !confirmRotation) return;
         setBusy(true);
         setError(null);
         try {
             const result = await Native.rotateIdentity(context.localUserId, readyIdentity.fingerprint);
+            if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
             if (result.status === "rotated") {
                 revokePreparedSecureOperations();
                 invalidateSecureRenderCaches();
@@ -2332,6 +2406,28 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                                                 showToast("Security-key profile copied.", Toasts.Type.SUCCESS);
                                             }}>
                                                 Copy profile
+                                            </Button>
+                                        )}
+                                        {keyState.profile.provider === "onekey" && (
+                                            <Button size="small" disabled={busy} onClick={async () => {
+                                                if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
+                                                setBusy(true);
+                                                setError(null);
+                                                try {
+                                                    const result = await Native.exportMobilePairing(context.localUserId);
+                                                    if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
+                                                    if (isNativeFailure(result)) setError(failureMessage(result));
+                                                    else {
+                                                        await copyToClipboard(result.token);
+                                                        showToast("OneKey-encrypted phone pairing copied. Import it in the mobile Secure Messaging settings.", Toasts.Type.SUCCESS);
+                                                    }
+                                                } catch {
+                                                    setError("Phone pairing could not be created. Unlock your OneKey vault and try again.");
+                                                } finally {
+                                                    setBusy(false);
+                                                }
+                                            }}>
+                                                Copy phone pairing
                                             </Button>
                                         )}
                                         <Button size="small" disabled={busy} onClick={() => void runKeyAction(() => Native.lockSecurityKeyVault())}>
@@ -2648,10 +2744,12 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         );
     }
 
-    if (!result && optimisticPlaintext !== undefined) {
+    if (result?.status === "decrypted" || !result && optimisticPlaintext !== undefined) {
         return (
             <div ref={cardRef} className={embedOnly ? embedOnlyClassName : cardClassName} hidden={embedOnly}>
-                {!embedOnly && optimisticPlaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
+                {!embedOnly && visiblePlaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
+                {!embedOnly && result?.status === "decrypted" &&
+                    <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />}
             </div>
         );
     }
@@ -2662,15 +2760,6 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
             </div>
         );
     }
-    if (result.status === "decrypted") {
-        return (
-            <div ref={cardRef} className={embedOnly ? embedOnlyClassName : cardClassName} hidden={embedOnly}>
-                {!embedOnly && result.plaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
-                {!embedOnly && <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />}
-            </div>
-        );
-    }
-
     return (
         <div ref={cardRef} className="pc-secure-card pc-secure-card-danger pc-secure-replaces-content">
             <div className="pc-secure-card-header"><LockIcon color="var(--status-danger)" /> Encrypted message blocked</div>
@@ -2699,6 +2788,10 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
         : null;
 
     const trust = async () => {
+        if (UserStore.getCurrentUser()?.id !== localUserId) {
+            modalProps.onClose();
+            return;
+        }
         if (!confirmed || !identity) return;
         setBusy(true);
         setError(null);
@@ -2706,6 +2799,7 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
             let reviewed = review;
             if (reviewed.status === "key_changed") {
                 const forgotten = await Native.forgetPeer(localUserId, peerUserId);
+                if (UserStore.getCurrentUser()?.id !== localUserId) return;
                 if (forgotten.status !== "forgotten" && forgotten.status !== "not_found") {
                     setError(failureMessage(forgotten));
                     return;
@@ -2721,6 +2815,7 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
                     discordMessageId,
                     discordEditedTimestamp,
                 );
+                if (UserStore.getCurrentUser()?.id !== localUserId) return;
                 setReview(reviewed);
             }
             if (reviewed.status !== "trust_required") {
@@ -2734,6 +2829,7 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
                 reviewed.reviewToken,
                 identity.fingerprint,
             );
+            if (UserStore.getCurrentUser()?.id !== localUserId) return;
             if (trusted.status === "trusted" || trusted.status === "already_trusted") {
                 resetAnnouncementReviewState();
                 invalidateSecureRenderCaches();
@@ -3019,6 +3115,11 @@ export default definePlugin({
         render: SecureMessagingButton,
     },
 
+    chatBarButtonWrapper: {
+        wrapper: buttons => <EncryptedSendStatus buttons={buttons} />,
+        priority: -100,
+    },
+
     toolboxActions: {
         async "Toggle encrypted screenshot hiding"() {
             const enabling = screenCaptureProtectionStatus === "ready";
@@ -3116,6 +3217,7 @@ export default definePlugin({
         secureOperationGeneration++;
         secureRuntimeUserId = null;
         chatAccessGateEnabled = false;
+        useEncryptedSendStatus.setState({ pending: [] });
         chatAccessGeneration++;
         chatAccessCache = { status: "pending", localUserId: null };
         cancelSuppressedChatLoads();
