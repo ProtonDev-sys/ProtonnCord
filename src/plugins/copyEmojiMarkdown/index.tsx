@@ -11,7 +11,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import { findByPropsLazy } from "@webpack";
 import { Menu } from "@webpack/common";
 
-const { convertNameToSurrogate } = findByPropsLazy("convertNameToSurrogate");
+const EmojiUtils = findByPropsLazy("convertNameToSurrogate");
 
 interface Emoji {
     type: string;
@@ -40,24 +40,12 @@ function getEmojiMarkdown(target: Target, copyUnicode: boolean): string {
 
     if (!emojiId) {
         return copyUnicode
-            ? convertNameToSurrogate(emojiName)
+            ? EmojiUtils.convertNameToSurrogate(emojiName)
             : `:${emojiName}:`;
     }
 
     const animated = isEmojiAnimated(target.firstChild?.src);
     return `<${animated ? "a" : ""}:${emojiName.replace(/~\d+$/, "")}:${emojiId}>`;
-}
-
-function getEmojiImageUrl(target: Target): string | null {
-    const src = target.firstChild?.src;
-    if (!src) return null;
-
-    try {
-        const url = new URL(src);
-        return url.toString();
-    } catch {
-        return src;
-    }
 }
 
 const settings = definePluginSettings({
@@ -79,7 +67,7 @@ export default definePlugin({
         "expression-picker"(children, { target }: { target: Target; }) {
             if (target.dataset.type !== "emoji") return;
 
-            const emojiImageUrl = getEmojiImageUrl(target);
+            const emojiImageUrl = target.firstChild?.src;
 
             children.push(
                 <Menu.MenuGroup>

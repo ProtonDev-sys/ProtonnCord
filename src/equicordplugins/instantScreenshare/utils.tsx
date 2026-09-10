@@ -12,7 +12,7 @@ import { IS_WINDOWS } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import { OptionType } from "@utils/types";
 import { findByCodeLazy, findByPropsLazy } from "@webpack";
-import { MediaEngineStore, SearchableSelect, useEffect, useState } from "@webpack/common";
+import { MediaEngineStore, SearchableSelect, showToast, Toasts, useEffect, useState } from "@webpack/common";
 
 interface PickerProps {
     streamMediaSelection: any[];
@@ -69,7 +69,9 @@ export const settings = definePluginSettings({
 
 export async function getCurrentMedia() {
     const media = MediaEngineStore.getMediaEngine();
-    const sources = await getDesktopSources(media, IS_WINDOWS, ["screen", "window"], null) ?? [];
+    const selectedSource = settings.store.streamMedia;
+    const sources = [...await getDesktopSources(media, IS_WINDOWS, ["screen", "window"], null) ?? []];
+    if (settings.store.streamMedia !== selectedSource) return null;
 
     if (settings.store.includeVideoDevices) {
         try {
@@ -85,19 +87,11 @@ export async function getCurrentMedia() {
         }
     }
 
-    const streamMedia = sources.find(screen => screen.id === settings.store.streamMedia);
+    const streamMedia = sources.find(screen => screen.id === selectedSource);
     if (streamMedia) return streamMedia;
 
-    const fallback = sources[0];
-    if (!fallback) {
-        log.error("No media sources found.");
-        return null;
-    }
-
-    log.error(`Stream Media "${settings.store.streamMedia}" not found. Resetting to default.`);
-
-    settings.store.streamMedia = fallback.id;
-    return fallback;
+    showToast("Select an available source in InstantScreenshare settings before sharing.", Toasts.Type.FAILURE);
+    return null;
 }
 
 function StreamSimplePicker({ streamMediaSelection, streamMedia }: PickerProps) {
@@ -129,7 +123,7 @@ function ScreenSetting() {
         let active = true;
         async function fetchMedia() {
             setLoading(true);
-            const sources = await getDesktopSources(media, IS_WINDOWS, ["screen", "window"], null) ?? [];
+            const sources = [...await getDesktopSources(media, IS_WINDOWS, ["screen", "window"], null) ?? []];
 
             if (includeVideoDevices) {
                 try {
@@ -150,7 +144,13 @@ function ScreenSetting() {
                 setLoading(false);
             }
         }
-        fetchMedia();
+        fetchMedia().catch(error => {
+            log.error("Could not load media sources", error);
+            if (active) {
+                setStreamMediaSelection([]);
+                setLoading(false);
+            }
+        });
         return () => { active = false; };
     }, [includeVideoDevices]);
 
@@ -164,7 +164,7 @@ function SettingSection() {
     return (
         <section>
             <Heading>Media source to stream</Heading>
-            <Paragraph className={Margins.bottom20}>Resets to main screen if not found</Paragraph>
+            <Paragraph className={Margins.bottom20}>Sharing starts only when your selected source is available.</Paragraph>
             <ScreenSetting />
         </section>
     );

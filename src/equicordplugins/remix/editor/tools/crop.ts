@@ -33,6 +33,8 @@ export const CropTool: ToolDefinition = {
     onMouseMove() {
         if (!canvas) return;
 
+        Mouse.x = Math.min(canvas.width, Math.max(0, Mouse.x));
+        Mouse.y = Math.min(canvas.height, Math.max(0, Mouse.y));
         if (this.dragging !== "") {
             if (this.dragging.includes("left")) bounds.left = Mouse.x;
             if (this.dragging.includes("right")) bounds.right = Mouse.x;
@@ -90,6 +92,7 @@ export const CropTool: ToolDefinition = {
 
         if (bounds.left > bounds.right) [bounds.left, bounds.right] = [bounds.right, bounds.left];
         if (bounds.top > bounds.bottom) [bounds.top, bounds.bottom] = [bounds.bottom, bounds.top];
+        this.update();
     },
 
     update() {
@@ -135,8 +138,13 @@ export const CropTool: ToolDefinition = {
         Mouse.event.on("up", this.onMouseUpCallback);
     },
     unselected() {
+        this.dragging = "";
+        Mouse.event.off("move", this.onMouseMoveCallback);
+        Mouse.event.off("up", this.onMouseUpCallback);
+
         if (!canvas) return;
 
+        canvas.style.cursor = "default";
         cropCanvas.clearRect(0, 0, canvas.width, canvas.height);
 
         cropCanvas.fillStyle = "rgba(0, 0, 0, 0.75)";
@@ -144,8 +152,5 @@ export const CropTool: ToolDefinition = {
         cropCanvas.clearRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
 
         render();
-
-        Mouse.event.off("move", this.onMouseMoveCallback);
-        Mouse.event.off("up", this.onMouseUpCallback);
     },
 };

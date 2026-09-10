@@ -24,12 +24,7 @@ export default definePlugin({
     ],
 
     isTidalEmbed(embed) {
-        return [
-            "https://tidal.com/album",
-            "https://tidal.com/track",
-            "https://tidal.com/browse/album",
-            "https://tidal.com/browse/track"
-        ].some(prefix => embed?.url?.startsWith?.(prefix));
+        return typeof embed?.url === "string" && /^https:\/\/tidal\.com\/(?:browse\/)?(?:album|track)\/\d+(?:[/?#]|$)/.test(embed.url);
     },
 
     renderMessageAccessory({ message }) {

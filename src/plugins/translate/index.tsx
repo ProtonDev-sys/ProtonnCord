@@ -22,12 +22,28 @@ import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/Co
 import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { Message } from "@vencord/discord-types";
-import { ChannelStore, Menu } from "@webpack/common";
+import { ChannelStore, Menu, UserStore } from "@webpack/common";
 
 import { settings } from "./settings";
 import { setShouldShowTranslateEnabledTooltip, TranslateChatBarIcon, TranslateIcon } from "./TranslateIcon";
 import { handleTranslate, TranslationAccessory } from "./TranslationAccessory";
 import { translate } from "./utils";
+
+let active = false;
+let generation = 0;
+
+async function translateMessage(message: Message, content: string) {
+    if (!active) return;
+    const currentGeneration = generation;
+    const accountId = UserStore.getCurrentUser()?.id;
+    try {
+        const trans = await translate("received", content);
+        if (active && generation === currentGeneration && accountId === UserStore.getCurrentUser()?.id)
+            handleTranslate(message.id, trans);
+    } catch {
+        // translate() already reports provider failures to the user.
+    }
+}
 
 const messageCtxPatch: NavContextMenuPatchCallback = (children, { message }: { message: Message; }) => {
     const content = getMessageContent(message);
@@ -41,10 +57,7 @@ const messageCtxPatch: NavContextMenuPatchCallback = (children, { message }: { m
             id="vc-trans"
             label="Translate"
             icon={TranslateIcon}
-            action={async () => {
-                const trans = await translate("received", content);
-                handleTranslate(message.id, trans);
-            }}
+            action={() => translateMessage(message, content)}
         />
     ));
 };
@@ -80,6 +93,11 @@ export default definePlugin({
     // not used, just here in case some other plugin wants it or w/e
     translate,
 
+    start() {
+        active = true;
+        generation++;
+    },
+
     renderMessageAccessory: props => <TranslationAccessory message={props.message} />,
 
     chatBarButton: {
@@ -98,17 +116,17 @@ export default definePlugin({
                 icon: TranslateIcon,
                 message,
                 channel: ChannelStore.getChannel(message.channel_id),
-                onClick: async () => {
-                    const trans = await translate("received", content);
-                    handleTranslate(message.id, trans);
-                }
+                onClick: () => translateMessage(message, content)
             };
         }
     },
 
     async onBeforeMessageSend(_, message) {
-        if (!settings.store.autoTranslate) return;
+        if (!active || !settings.store.autoTranslate) return;
         if (!message.content) return;
+        const currentGeneration = generation;
+        const accountId = UserStore.getCurrentUser()?.id;
+        const { content } = message;
 
         setShouldShowTranslateEnabledTooltip?.(true);
         clearTranslateTooltipTimeout();
@@ -117,11 +135,15 @@ export default definePlugin({
             setShouldShowTranslateEnabledTooltip?.(false);
         }, 2000);
 
-        const trans = await translate("sent", message.content);
+        const trans = await translate("sent", content);
+        if (!active || generation !== currentGeneration || accountId !== UserStore.getCurrentUser()?.id || message.content !== content)
+            return { cancel: true };
         message.content = trans.text;
     },
 
     stop() {
+        active = false;
+        generation++;
         clearTranslateTooltipTimeout();
         setShouldShowTranslateEnabledTooltip?.(false);
     }

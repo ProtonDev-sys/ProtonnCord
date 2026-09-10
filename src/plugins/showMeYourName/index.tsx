@@ -17,6 +17,7 @@ import ircColors from "@plugins/ircColors";
 import mentionAvatars from "@plugins/mentionAvatars";
 import { Devs, EquicordDevs } from "@utils/constants";
 import { classNameFactory } from "@utils/index";
+import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { GuildMember, Message, RenderModalProps, User } from "@vencord/discord-types";
 import { findByCodeLazy, findByPropsLazy, findComponentByCodeLazy } from "@webpack";
@@ -56,6 +57,37 @@ const templatePattern = /(?:\{(?:custom|friend|nick|display|user)(?:,\s*(?:custo
 
 type CustomNicknameData = Record<string, string>;
 let customNicknames: CustomNicknameData = {};
+let nicknameGeneration = 0;
+let nicknameWrites: Promise<unknown> = Promise.resolve();
+
+function normalizeNicknames(data: unknown): CustomNicknameData {
+    return data && typeof data === "object" && !Array.isArray(data)
+        ? Object.fromEntries(Object.entries(data).filter(([, name]) => typeof name === "string"))
+        : {};
+}
+
+function saveCustomNickname(id: string, name: string): Promise<boolean> {
+    const generation = nicknameGeneration;
+    const write = nicknameWrites.then(async () => {
+        let saved: CustomNicknameData = {};
+        await DataStore.update("SMYNCustomNicknames", data => {
+            saved = normalizeNicknames(data);
+            if (name) saved[id] = name;
+            else delete saved[id];
+            return saved;
+        });
+        if (generation === nicknameGeneration) {
+            customNicknames = saved;
+            triggerNameRerender();
+        }
+        return true;
+    }).catch(error => {
+        new Logger("ShowMeYourName").error("Failed to save nickname", error);
+        return false;
+    });
+    nicknameWrites = write;
+    return write;
+}
 
 let toCSSCache: Map<string, string | null> | null = null;
 let toCSSProbe: HTMLDivElement | null = null;
@@ -295,9 +327,6 @@ function getProcessedNames(
         if (userAuthor?.bot && !isNaN(userAuthor?.discriminator as any) && Number(userAuthor?.discriminator) !== 0) {
             discriminator = userAuthor.discriminator;
 
-            if (!!userAuthor) {
-                userAuthor.globalName = userAuthor.username;
-            }
         }
     }
 
@@ -306,10 +335,11 @@ function getProcessedNames(
             ? author.username[0] + "..."
             : author.username as string + (discriminator ? `#${discriminator}` : "");
 
-    const display: string | null = !author?.globalName ? null
-        : StreamerModeStore.enabled && (truncateAllNamesWithStreamerMode || author.globalName.toLowerCase() === author.username.toLowerCase())
-            ? author.globalName[0] + "..."
-            : author.globalName as string;
+    const globalName = discriminator ? author.username : author?.globalName;
+    const display: string | null = !globalName ? null
+        : StreamerModeStore.enabled && (truncateAllNamesWithStreamerMode || globalName.toLowerCase() === author.username.toLowerCase())
+            ? globalName[0] + "..."
+            : globalName as string;
 
     const nick: string | null = !author?.nick ? null
         : StreamerModeStore.enabled && (truncateAllNamesWithStreamerMode || author.nick.toLowerCase() === author.username.toLowerCase())
@@ -466,7 +496,7 @@ function getDisplayNameEffectDisplayType(isHovered: boolean, showStaticEffect = 
 }
 
 function shouldAnimateNameEffects(isHovered: boolean, isEffectVisible = true): boolean {
-    return isHovered || (isEffectVisible && settings.store.alwaysAnimateEffects);
+    return !AccessibilityStore.useReducedMotion && (isHovered || (isEffectVisible && settings.store.alwaysAnimateEffects));
 }
 
 function getDisplayNameEffectClassName(
@@ -566,7 +596,7 @@ function renderUsername(
     const isReaction = isReactionsTooltip || isReactionsPopout;
     const isVoice = type === "voiceChannel";
 
-    const config = hookless ? settings.store : settings.use(["messages", "replies", "mentions", "typingIndicator", "memberList", "styleDirectMessagesList", "styleDirectMessagesMessages", "styleFriendsList", "styleActiveNow", "profilePopout", "reactions", "friendNameOnlyInDirectMessages", "customNameOnlyInDirectMessages", "discriminators", "hideDefaultAtSign", "truncateAllNamesWithStreamerMode", "removeDuplicates", "ignoreEffects", "ignoreFonts", "animateEffects", "alwaysAnimateEffects", "gradientGlow", "includedNames", "customNameColor", "friendNameColor", "nicknameColor", "displayNameColor", "usernameColor", "nameSeparator", "triggerNameRerender"]);
+    const config = hookless ? settings.store : settings.use(["messages", "replies", "mentions", "typingIndicator", "memberList", "voiceChannels", "styleDirectMessagesList", "styleDirectMessagesMessages", "styleFriendsList", "styleActiveNow", "profilePopout", "reactions", "friendNameOnlyInDirectMessages", "customNameOnlyInDirectMessages", "discriminators", "hideDefaultAtSign", "truncateAllNamesWithStreamerMode", "removeDuplicates", "ignoreEffects", "ignoreFonts", "animateEffects", "alwaysAnimateEffects", "gradientGlow", "includedNames", "customNameColor", "friendNameColor", "nicknameColor", "displayNameColor", "usernameColor", "nameSeparator", "triggerNameRerender"]);
     const { messages, replies, mentions, typingIndicator, memberList, styleDirectMessagesMessages, profilePopout, reactions, friendNameOnlyInDirectMessages, customNameOnlyInDirectMessages, discriminators, truncateAllNamesWithStreamerMode, removeDuplicates, ignoreEffects, ignoreFonts, animateEffects, includedNames, customNameColor, friendNameColor, nicknameColor, displayNameColor, usernameColor, nameSeparator, triggerNameRerender } = config;
 
     const channel = channelId ? ChannelStore.getChannel(channelId) || null : null;
@@ -719,7 +749,7 @@ function renderUsername(
         return [null, null, null];
     } else if (isReaction && !reactions) {
         return [null, null, null];
-    } else if (isVoice && !reactions) {
+    } else if (isVoice && !config.voiceChannels) {
         return [null, null, null];
     } else if (!author || !username) {
         return [null, null, null];
@@ -980,15 +1010,7 @@ function CustomNicknameModal({ modalProps, user }: { modalProps: RenderModalProp
                     onClick: async () => {
                         const trimmed = value.trim().slice(0, 32).trim();
 
-                        if (trimmed) {
-                            customNicknames[user.id] = trimmed;
-                        } else {
-                            delete customNicknames[user.id];
-                        }
-
-                        await DataStore.set("SMYNCustomNicknames", customNicknames);
-                        triggerNameRerender();
-                        modalProps.onClose();
+                        if (await saveCustomNickname(user.id, trimmed)) modalProps.onClose();
                     }
                 },
                 {
@@ -1015,10 +1037,7 @@ function CustomNicknameModal({ modalProps, user }: { modalProps: RenderModalProp
             <TextButton
                 className="smyn-reset-button"
                 onClick={async () => {
-                    setValue("");
-                    delete customNicknames[user.id];
-                    await DataStore.set("SMYNCustomNicknames", customNicknames);
-                    triggerNameRerender();
+                    if (await saveCustomNickname(user.id, "")) setValue("");
                 }}
             >
                 Reset SMYN Nickname
@@ -1466,6 +1485,7 @@ export default definePlugin({
     ],
 
     async start() {
+        const generation = ++nicknameGeneration;
         toCSSCache = new Map();
         toCSSProbe = document.createElement("div");
         convertToRGBCanvas = document.createElement("canvas");
@@ -1473,11 +1493,15 @@ export default definePlugin({
         convertToRGBCtx = convertToRGBCanvas.getContext("2d", { willReadFrequently: true });
         convertToRGBCache = new Map();
 
+        await nicknameWrites;
         const data = await DataStore.get<CustomNicknameData>("SMYNCustomNicknames");
-        customNicknames = data ?? {};
+        if (generation === nicknameGeneration) customNicknames = normalizeNicknames(data);
     },
 
     stop() {
+        nicknameGeneration++;
+        hoveringMessageMap.clear();
+        hoveringRepliesMap.clear();
         toCSSCache?.clear();
         toCSSCache = null;
         toCSSProbe = null;

@@ -4,6 +4,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+export const DEFAULT_COLOR = "313338";
+
+export function normalizeHexColor(color: unknown): string {
+    return typeof color === "string" && /^[\da-f]{6}$/i.test(color) ? color : DEFAULT_COLOR;
+}
+
 // https://css-tricks.com/converting-color-spaces-in-javascript/
 export function hexToHSL(hexCode: string) {
     // Hex => RGB normalized to 0-1

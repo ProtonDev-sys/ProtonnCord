@@ -27,9 +27,15 @@ function colorToHex(color: string) {
 }
 
 let linkEl: HTMLLinkElement | undefined;
+let manifestGeneration = 0;
+let active = false;
 async function setManifest() {
+    const currentGeneration = ++manifestGeneration;
     // need to wait for CSS changes to flush
     await sleep(20);
+    if (!active || currentGeneration !== manifestGeneration) return;
+    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')?.href;
+    if (!icon) return;
 
     if (linkEl) {
         URL.revokeObjectURL(linkEl.href);
@@ -38,7 +44,6 @@ async function setManifest() {
 
     const endpoint = "https:" + window.GLOBAL_ENV.WEBAPP_ENDPOINT;
     const appUrl = endpoint + "/app"; // URL when PWA launches
-    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')!.href;
     const styles = getComputedStyle(document.body);
     const manifest = {
         id: appUrl,
@@ -71,7 +76,7 @@ async function setManifest() {
             { src: "https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/664723da94dd30e64e74357a_Discord_Website_Refresh_StatusHover.webp", sizes: "904x708", type: "image/webp", label: "Status", form_factor: "wide" },
             { src: "https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/664723da0a2e6be98fa5216b_Discord_Website_Refresh_Emojis%2BSoundboard-p-1080.webp", sizes: "1080x918", type: "image/webp", label: "Emojis", form_factor: "wide" },
             { src: "https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/6638bdbd1150b7c8509fb2be_Discord_Website_Refresh_SameRoom.webp", sizes: "796x593", type: "image/webp", label: "Rooms", form_factor: "wide" },
-            { src: "https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/68407334ccf9aeca71903bab_home-new.webp", sizes: "1716×1606", type: "image/webp", label: "Discord", form_factor: "wide" },
+            { src: "https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/68407334ccf9aeca71903bab_home-new.webp", sizes: "1716x1606", type: "image/webp", label: "Discord", form_factor: "wide" },
             { src: "https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/6638bcb99c2b8dc14e6f67fd_Discord_Website_Refresh_Platforms.webp", sizes: "760x580", type: "image/webp", label: "Platforms", form_factor: "wide" }
         ],
         icons: [
@@ -95,6 +100,10 @@ async function setManifest() {
     document.head.appendChild(linkEl);
 }
 
+function updateManifest() {
+    void setManifest().catch(error => console.error("Could not update the PWA manifest", error));
+}
+
 export default definePlugin({
     name: "WebPWA",
     description: "Makes Discord installable as an App (PWA). Enables notification badges, global key-binds and Discord's custom title bar.",
@@ -111,40 +120,46 @@ export default definePlugin({
 
     ctrl: new AbortController(),
     start() {
+        active = true;
 
         // installability
-        setManifest();
+        updateManifest();
         // user might change theme before installing the PWA
-        ThemeStore.addChangeListener(setManifest);
-        addThemeChangeListener(setManifest);
+        ThemeStore.addChangeListener(updateManifest);
+        addThemeChangeListener(updateManifest);
 
         // notifications
         NotificationSettingsStore.addChangeListener(this.setBadge);
         GuildReadStateStore.addChangeListener(this.setBadge);
         RelationshipStore.addChangeListener(this.setBadge);
+        this.setBadge();
 
         if (!IS_USERSCRIPT) {
             // keybinds
             this.ctrl.abort();
             this.ctrl = new AbortController();
-            window.addEventListener("message", ({ data }) => {
+            window.addEventListener("message", ({ data, origin, source }) => {
+                if (source !== window || origin !== window.location.origin) return;
                 if (data?.type === "vencord:keybinds" && _keybinds) {
                     const { meta } = data;
-                    if (meta in _keybinds) _keybinds[meta].onTrigger();
+                    if (typeof meta === "string" && Object.hasOwn(_keybinds, meta)) _keybinds[meta].onTrigger();
                 }
-            }, this.ctrl);
+            }, { signal: this.ctrl.signal });
         }
     },
     stop() {
-        navigator.setAppBadge(0);
+        active = false;
+        manifestGeneration++;
+        void navigator.setAppBadge?.(0)?.catch(() => { });
         this.ctrl.abort();
 
         if (linkEl) {
             URL.revokeObjectURL(linkEl.href);
             linkEl.remove();
+            linkEl = undefined;
         }
-        ThemeStore.removeChangeListener(setManifest);
-        removeThemeChangeListener(setManifest);
+        ThemeStore.removeChangeListener(updateManifest);
+        removeThemeChangeListener(updateManifest);
 
         NotificationSettingsStore.removeChangeListener(this.setBadge);
         GuildReadStateStore.removeChangeListener(this.setBadge);
@@ -181,12 +196,13 @@ export default definePlugin({
 
     renderKeybindsButton: () => (
         <div>
-            Custom global Push To X keybinds are supported. Navigate to <a onClick={() => { window.postMessage({ type: "OPEN_SHORTCUTS" }, "*"); }}>about://extensions/shortcuts</a> to change them. Hold To X keybinds are not supported.
+            Custom global Push To X keybinds are supported. Navigate to <a onClick={() => { window.postMessage({ type: "OPEN_SHORTCUTS" }, window.location.origin); }}>about://extensions/shortcuts</a> to change them. Hold To X keybinds are not supported.
         </div>
     ),
 
     // Vesktop/src/renderer/appBadge.ts
     setBadge: () => {
+        if (!active) return;
         try {
             const mentionCount = GuildReadStateStore.getTotalMentionCount();
             const pendingRequests = RelationshipStore.getPendingCount();
@@ -196,7 +212,7 @@ export default definePlugin({
             let totalCount = mentionCount + pendingRequests;
             if (!totalCount && hasUnread && !disableUnreadBadge) totalCount = -1;
 
-            navigator.setAppBadge(totalCount);
+            void navigator.setAppBadge?.(totalCount === -1 ? undefined : totalCount)?.catch(() => { });
         } catch (e) {
             console.error(e);
         }

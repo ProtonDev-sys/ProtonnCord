@@ -106,8 +106,8 @@
     width: 24px;
 }
 
-[class*="shuffle"] > svg,
-[class*="repeat"] > svg {
+.eq-tdl-button[class*="shuffle"] > svg,
+.eq-tdl-button[class*="repeat"] > svg {
     width: 22px;
     height: 22px;
 }

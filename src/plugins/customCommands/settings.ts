@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { unregisterCommand } from "@api/Commands";
 import { definePluginSettings } from "@api/Settings";
 import { OptionType } from "@utils/types";
 
@@ -28,22 +27,27 @@ export interface Tag {
     message: string;
 }
 
-export function getTags() {
-    return Object.values(settings.store.tagsList);
+export function getTags(tags: unknown = settings.store.tagsList): Tag[] {
+    if (!tags || typeof tags !== "object" || Array.isArray(tags)) return [];
+    return Object.entries(tags).flatMap(([name, tag]: [string, unknown]) => {
+        if (!tag || typeof tag !== "object" || !("name" in tag) || tag.name !== name || !("message" in tag) || typeof tag.message !== "string") return [];
+        return [{ name, message: tag.message }];
+    });
 }
 
 export function getTag(name: string) {
-    return settings.store.tagsList[name];
+    return getTags().find(tag => tag.name === name);
 }
 
-export function addTag(tag: Tag) {
-    unregisterCommand(tag.name);
-
-    settings.store.tagsList[tag.name] = tag;
+export function addTag(tag: Tag, previousName?: string) {
     registerTagCommand(tag);
+    const tags = { ...settings.store.tagsList, [tag.name]: tag };
+    if (previousName && previousName !== tag.name) delete tags[previousName];
+    settings.store.tagsList = tags;
 }
 
 export function removeTag(name: string) {
-    delete settings.store.tagsList[name];
-    unregisterCommand(name);
+    const tags = { ...settings.store.tagsList };
+    delete tags[name];
+    settings.store.tagsList = tags;
 }

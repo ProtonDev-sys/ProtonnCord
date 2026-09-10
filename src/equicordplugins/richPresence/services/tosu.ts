@@ -12,7 +12,6 @@ import { BanchoStatusEnum, GameState, Modes, TosuApi } from "../types/tosu";
 import { getCachedApplicationAsset } from "./assetCache";
 
 const OSU_APP_ID = "367827983903490050";
-const OSU_LARGE_IMAGE = "373344233077211136";
 const OSU_STARDARD_SMALL_IMAGE = "373370493127884800";
 const OSU_MANIA_SMALL_IMAGE = "373370588703621136";
 const OSU_TAIKO_SMALL_IMAGE = "373370519891738624";
@@ -64,7 +63,9 @@ function clearRuntimeTimeouts() {
 function throttledOnMessage(data: string, generation: number) {
     if (!shouldReconnect || generation !== connectionGeneration || inMessageThrottle) return;
 
-    void onMessage(data, generation);
+    void onMessage(data, generation).catch(() => {
+        if (shouldReconnect && generation === connectionGeneration) clearActivity();
+    });
     inMessageThrottle = true;
 
     messageThrottleTimeout = setTimeout(() => {

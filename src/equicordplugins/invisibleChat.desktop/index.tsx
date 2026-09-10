@@ -24,12 +24,13 @@ import { Devs } from "@utils/constants";
 import { getStegCloak } from "@utils/dependencies";
 import definePlugin, { OptionType, ReporterTestable } from "@utils/types";
 import { Message } from "@vencord/discord-types";
-import { ChannelStore, Constants, RestAPI, Tooltip } from "@webpack/common";
+import { ChannelStore, Constants, RestAPI, Tooltip, UserStore } from "@webpack/common";
 
 import { buildDecModal } from "./components/DecryptionModal";
 import { buildEncModal } from "./components/EncryptionModal";
 
 let steggo: any;
+let loadGeneration = 0;
 
 function PopOverIcon() {
     return (
@@ -55,7 +56,7 @@ function Indicator() {
                     src="https://github.com/SammCheese/invisible-chat/raw/NewReplugged/src/assets/lock.png"
                     width={20}
                     height={20}
-                    style={{ transform: "translateY(4p)", paddingInline: 4 }}
+                    style={{ transform: "translateY(4px)", paddingInline: 4 }}
                 />
             )}
         </Tooltip>
@@ -100,15 +101,19 @@ const settings = definePluginSettings({
         type: OptionType.STRING,
         default: "password, Password",
         description: "Saved Passwords (Seperated with a , )"
+    },
+    previewDecryptedLinks: {
+        type: OptionType.BOOLEAN,
+        default: false,
+        description: "Fetch link previews for decrypted URLs (sends those URLs to Discord)"
     }
 });
 
-const EMBED_API_URL = "https://embed.sammcheese.net";
 const INV_REGEX = new RegExp(/( \u200c|\u200d |[\u2060-\u2064])[^\u200b]/);
 const URL_REGEX = new RegExp(/(http(s)?:\/\/.)?(www\.)?[-a-zA-Z0-9@:%._+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_+.~#?&//=]*)/);
 function colorCodeFromNumber(color: number): string {
     return `#${[color >> 16, color >> 8, color]
-        .map(x => (x & 0xFF).toString(16))
+        .map(x => (x & 0xFF).toString(16).padStart(2, "0"))
         .join("")}`;
 }
 
@@ -120,14 +125,17 @@ async function getEmbed(url: URL): Promise<Object | {}> {
         }
     });
     // The endpoint returns the color as a number, but Discord expects a string
-    body.embeds[0].color = colorCodeFromNumber(body.embeds[0].color);
-    return await body.embeds[0];
+    const embed = body?.embeds?.[0];
+    if (!embed) return {};
+    return { ...embed, color: colorCodeFromNumber(embed.color) };
 }
 
 export async function buildEmbed(message: any, revealed: string): Promise<void> {
+    const generation = loadGeneration;
+    const accountId = UserStore.getCurrentUser()?.id;
     const urlCheck = revealed.match(URL_REGEX);
 
-    message.embeds.push({
+    const embeds = [...message.embeds ?? [], {
         type: "rich",
         rawTitle: "Decrypted Message",
         color: "#45f5f5",
@@ -135,15 +143,23 @@ export async function buildEmbed(message: any, revealed: string): Promise<void> 
         footer: {
             text: "Made with ❤️ by c0dine and Sammy!",
         },
-    });
+    }];
 
-    if (urlCheck?.length) {
-        const embed = await getEmbed(new URL(urlCheck[0]));
-        if (embed)
-            message.embeds.push(embed);
+    if (settings.store.previewDecryptedLinks && urlCheck?.length) {
+        try {
+            const parsed = URL.parse(urlCheck[0]);
+            if (parsed?.protocol === "https:" || parsed?.protocol === "http:") {
+                const embed = await getEmbed(parsed);
+                if (Object.keys(embed).length) embeds.push(embed as any);
+            }
+        } catch {
+            // Decrypted content remains local if the optional preview is unavailable.
+        }
     }
 
-    updateMessage(message.channel_id, message.id, { embeds: message.embeds });
+    if (generation === loadGeneration && accountId === UserStore.getCurrentUser()?.id) {
+        updateMessage(message.channel_id, message.id, { embeds });
+    }
 }
 
 export default definePlugin({
@@ -173,8 +189,13 @@ export default definePlugin({
     INV_REGEX,
 
     async start() {
+        const generation = ++loadGeneration;
         const { default: StegCloak } = await getStegCloak();
-        steggo = new StegCloak(true, false);
+        if (generation === loadGeneration) steggo = new StegCloak(true, false);
+    },
+    stop() {
+        loadGeneration++;
+        steggo = undefined;
     },
     messagePopoverButton: {
         icon: PopOverIcon,
@@ -186,12 +207,13 @@ export default definePlugin({
                     message: message,
                     channel: ChannelStore.getChannel(message.channel_id),
                     onClick: async () => {
-                        const res = await iteratePasswords(message);
-
-                        if (res)
-                            buildEmbed(message, res);
-                        else
+                        try {
+                            const res = await iteratePasswords(message);
+                            if (res) await buildEmbed(message, res);
+                            else buildDecModal({ message });
+                        } catch {
                             buildDecModal({ message });
+                        }
                     }
                 }
                 : null;

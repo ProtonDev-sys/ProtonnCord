@@ -46,20 +46,7 @@ export const Toolbar = () => {
     const [size, setSize] = useState(currentSize);
     const [fill, setFill] = useState(currentFill);
 
-    function changeTool(newTool: Tool) {
-        const oldTool = tool;
-
-        setTool(newTool);
-        onChangeTool(oldTool, newTool);
-    }
-
-    function onChangeTool(old: Tool, newTool: Tool) {
-        tools[old]?.unselected();
-        tools[newTool]?.selected();
-    }
-
     useEffect(() => {
-        currentTool = tool;
         currentColor = color;
         currentSize = size;
         currentFill = fill;
@@ -77,7 +64,14 @@ export const Toolbar = () => {
         brushCanvas.lineJoin = "round";
 
         setShapeFill(currentFill);
-    }, [tool, color, size, fill]);
+    }, [color, size, fill]);
+
+    useEffect(() => {
+        currentTool = tool;
+        const selectedTool = tools[tool];
+        selectedTool?.selected();
+        return () => selectedTool?.unselected();
+    }, [tool]);
 
     function clear() {
         if (!canvas) return;
@@ -92,10 +86,10 @@ export const Toolbar = () => {
     return (
         <div className="vc-remix-toolbar">
             <div className="vc-remix-tools">
-                <Button className={(tool === "brush" ? "tool-active" : "")} onClick={() => changeTool("brush")}>Brush</Button>
-                <Button className={(tool === "erase" ? "tool-active" : "")} onClick={() => changeTool("erase")}>Erase</Button>
-                <Button className={(tool === "crop" ? "tool-active" : "")} onClick={() => changeTool("crop")}>Crop</Button>
-                <Button className={(tool === "shape" ? "tool-active" : "")} onClick={() => changeTool("shape")}>Shape</Button>
+                <Button className={(tool === "brush" ? "tool-active" : "")} onClick={() => setTool("brush")}>Brush</Button>
+                <Button className={(tool === "erase" ? "tool-active" : "")} onClick={() => setTool("erase")}>Erase</Button>
+                <Button className={(tool === "crop" ? "tool-active" : "")} onClick={() => setTool("crop")}>Crop</Button>
+                <Button className={(tool === "shape" ? "tool-active" : "")} onClick={() => setTool("shape")}>Shape</Button>
             </div>
             <div className="vc-remix-settings">
                 <div className="vc-remix-setting-section">

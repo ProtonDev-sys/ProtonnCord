@@ -97,7 +97,12 @@ export function setMany(
     customStore = defaultGetStore(),
 ): Promise<void> {
     return customStore("readwrite", store => {
-        entries.forEach(entry => store.put(entry[1], entry[0]));
+        try {
+            entries.forEach(entry => store.put(entry[1], entry[0]));
+        } catch (err) {
+            store.transaction.abort();
+            throw err;
+        }
         return promisifyRequest(store.transaction);
     });
 }
@@ -121,7 +126,7 @@ export function getMany<T = any>(
  * Update a value. This lets you see the old value and update it as an atomic operation.
  *
  * @param key
- * @param updater A callback that takes the old value and returns a new value.
+ * @param updater A callback that takes the old value and returns the new value.
  * @param customStore Method to get a custom store. Use with caution (see the docs).
  */
 export function update<T = any>(
@@ -136,16 +141,71 @@ export function update<T = any>(
             // If I try to chain promises, the transaction closes in browsers
             // that use a promise polyfill (IE10/11).
             new Promise((resolve, reject) => {
+                promisifyRequest(store.transaction).then(resolve, reject);
                 store.get(key).onsuccess = function () {
                     try {
                         store.put(updater(this.result), key);
-                        resolve(promisifyRequest(store.transaction));
                     } catch (err) {
                         reject(err);
                     }
                 };
             }),
     );
+}
+
+export interface StoreChanges {
+    set?: Array<[IDBValidKey, unknown]>;
+    delete?: IDBValidKey[];
+}
+
+/** Atomically read and change multiple records. The updater must be synchronous. */
+export function updateMany(
+    keys: IDBValidKey[],
+    updater: (values: any[]) => StoreChanges,
+    customStore = defaultGetStore(),
+): Promise<void> {
+    return customStore("readwrite", store => new Promise<void>((resolve, reject) => {
+        promisifyRequest(store.transaction).then(() => resolve(), reject);
+        const fail = (error: unknown) => {
+            try { store.transaction.abort(); } catch { }
+            reject(error);
+        };
+        const values = new Array(keys.length);
+        let remaining = keys.length;
+        const apply = () => {
+            try {
+                const changes = updater(values);
+                if (changes && typeof (changes as any).then === "function") {
+                    void Promise.resolve(changes).catch(() => undefined);
+                    throw new TypeError("DataStore updateMany updater must be synchronous");
+                }
+                if (!changes || typeof changes !== "object" || Array.isArray(changes)
+                    || changes.set !== undefined && !Array.isArray(changes.set)
+                    || changes.delete !== undefined && !Array.isArray(changes.delete))
+                    throw new TypeError("Invalid DataStore updateMany changes");
+                for (const entry of changes.set ?? []) {
+                    if (!Array.isArray(entry) || entry.length !== 2) throw new TypeError("Invalid DataStore updateMany entry");
+                    store.put(entry[1], entry[0]);
+                }
+                for (const key of changes.delete ?? []) store.delete(key);
+            } catch (error) {
+                fail(error);
+            }
+        };
+        if (!remaining) return apply();
+        try {
+            keys.forEach((key, index) => {
+                const request = store.get(key);
+                request.onerror = () => fail(request.error);
+                request.onsuccess = () => {
+                    values[index] = request.result;
+                    if (--remaining === 0) apply();
+                };
+            });
+        } catch (error) {
+            fail(error);
+        }
+    }));
 }
 
 /**
@@ -174,8 +234,13 @@ export function delMany(
     keys: IDBValidKey[],
     customStore = defaultGetStore(),
 ): Promise<void> {
-    return customStore("readwrite", (store: IDBObjectStore) => {
-        keys.forEach((key: IDBValidKey) => store.delete(key));
+    return customStore("readwrite", store => {
+        try {
+            keys.forEach(key => store.delete(key));
+        } catch (err) {
+            store.transaction.abort();
+            throw err;
+        }
         return promisifyRequest(store.transaction);
     });
 }
@@ -270,10 +335,8 @@ export function entries<KeyType extends IDBValidKey, ValueType = any>(
 
         const items: [KeyType, ValueType][] = [];
 
-        return customStore("readonly", store =>
-            eachCursor(store, cursor =>
-                items.push([cursor.key as KeyType, cursor.value]),
-            ).then(() => items),
-        );
+        return eachCursor(store, cursor =>
+            items.push([cursor.key as KeyType, cursor.value]),
+        ).then(() => items);
     });
 }

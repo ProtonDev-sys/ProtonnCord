@@ -27,6 +27,14 @@ const DEFAULT_KEYBIND = IS_MAC ? ["Meta", "Shift", "R"] : ["Control", "Shift", "
 const MODIFIER_KEYS = new Set(["control", "ctrl", "shift", "alt", "option", "meta", "cmd", "command", "mod"]);
 
 let isRecordingKeybind = false;
+let joinGeneration = 0;
+const pendingJoins = new Set<ReturnType<typeof setInterval>>();
+
+function cancelPendingJoins() {
+    joinGeneration++;
+    for (const interval of pendingJoins) clearInterval(interval);
+    pendingJoins.clear();
+}
 const cl = classNameFactory("vc-random-voice-");
 
 type RandomVoiceOperation = "<" | ">" | "==" | string;
@@ -554,13 +562,14 @@ async function enableCamera() {
     });
 }
 
-async function startChannelStream(channel: Channel) {
+async function startChannelStream(channel: Channel, generation: number) {
     if (isStageChannel(channel) || !PermissionStore.can(PermissionsBits.STREAM, channel)) return;
 
     const selectedChannelId = SelectedChannelStore.getVoiceChannelId();
     if (!selectedChannelId) return;
 
     const sources = await getDesktopSources(MediaEngineStore.getMediaEngine(), ["screen"], null);
+    if (generation !== joinGeneration || getCurrentVoiceChannelId() !== channel.id) return;
     const source = sources?.[0];
     if (!source) return;
 
@@ -575,24 +584,40 @@ async function startChannelStream(channel: Channel) {
 }
 
 function runAfterVoiceJoin(channelId: string, callbacks: PostJoinAction[]) {
+    const generation = joinGeneration;
+    const userId = getCurrentUserId();
     let attempts = 0;
     const interval = setInterval(() => {
         attempts++;
 
+        if (generation !== joinGeneration || userId !== getCurrentUserId()) {
+            clearInterval(interval);
+            pendingJoins.delete(interval);
+            return;
+        }
+
         if (getCurrentVoiceChannelId() !== channelId) {
             if (attempts < 40) return;
             clearInterval(interval);
+            pendingJoins.delete(interval);
             return;
         }
 
         clearInterval(interval);
+        pendingJoins.delete(interval);
         for (const callback of callbacks) {
-            void callback();
+            if (generation !== joinGeneration || getCurrentVoiceChannelId() !== channelId) break;
+            void Promise.resolve().then(() => {
+                if (generation === joinGeneration && getCurrentVoiceChannelId() === channelId && userId === getCurrentUserId()) return callback();
+            }).catch(() => showToast("Could not apply a voice join setting.", Toasts.Type.FAILURE));
         }
     }, 100);
+    pendingJoins.add(interval);
 }
 
 async function joinRandomVoice() {
+    cancelPendingJoins();
+    const generation = joinGeneration;
     const channelId = pickRandomChannel();
     if (!channelId) {
         showToast("Failed to find a voice channel.", Toasts.Type.MESSAGE);
@@ -623,7 +648,7 @@ async function joinRandomVoice() {
         postJoinActions.push(enableCamera);
     }
     if (store.autoStream) {
-        postJoinActions.push(() => startChannelStream(channel));
+        postJoinActions.push(() => startChannelStream(channel, generation));
     }
 
     if (postJoinActions.length) {
@@ -869,10 +894,13 @@ export default definePlugin({
     },
 
     stop() {
+        cancelPendingJoins();
+        isRecordingKeybind = false;
         window.removeEventListener("keydown", this.onKeyDown, true);
     },
 
     onKeyDown(event: KeyboardEvent) {
+        if (event.repeat) return;
         if (isRecordingKeybind) return;
         if (!settings.store.keybindEnabled) return;
         if (shouldIgnoreKeybindTarget(event.target) && !keybindUsesModifier()) return;
@@ -884,6 +912,7 @@ export default definePlugin({
     },
 
     flux: {
+        LOGOUT: cancelPendingJoins,
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
             const currentUserId = getCurrentUserId();
             if (!currentUserId || !settings.store.leaveEmpty) return;

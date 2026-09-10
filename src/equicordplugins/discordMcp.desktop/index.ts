@@ -20,6 +20,8 @@ import {
     UserStore,
 } from "@webpack/common";
 
+import gitHash from "~git-hash";
+
 import { decodeAudio } from "../voiceMessageTranscriber.desktop/utils";
 import {
     DISCORD_MCP_TOOL_NAMES,
@@ -107,6 +109,7 @@ const LONG_POLL_MS = 10_000;
 const MAX_WAVEFORM_CACHE_ENTRIES = 25;
 const MAX_SUBSCRIPTIONS = 100;
 const MAX_SUBSCRIPTION_MESSAGES = 100;
+const MAX_IN_FLIGHT_REQUESTS = 128;
 const waveformCache = new Map<string, Promise<string>>();
 const subscriptions = new Map<string, MessageSubscription>();
 const inFlightRequests = new Set<Promise<void>>();
@@ -631,13 +634,14 @@ async function downloadAttachment(args: ToolArguments) {
     };
 }
 
-async function sendMessage(args: ToolArguments) {
+async function sendMessage(args: ToolArguments, generation: number) {
     const channelId = requireAccessibleChannel(args.channel_id);
     const content = normalizeMessageContent(args.content);
     const replyToMessageId = optionalSnowflake(args.reply_to_message_id, "reply_to_message_id");
     const channel = ChannelStore.getChannel(channelId);
     if (!channel) throw new Error("Channel is not available in the authenticated Discord client");
     if (replyToMessageId) await fetchMessage(channelId, replyToMessageId);
+    if (generation !== bridgeGeneration) throw new Error("Discord MCP stopped before sending the message");
 
     const response = await RestAPI.post({
         url: Constants.Endpoints.MESSAGES(channelId),
@@ -664,7 +668,7 @@ async function sendMessage(args: ToolArguments) {
     return serializeMessage(message);
 }
 
-async function deleteOwnMessage(args: ToolArguments) {
+async function deleteOwnMessage(args: ToolArguments, generation: number) {
     const channelId = requireAccessibleChannel(args.channel_id);
     const messageId = requireSnowflake(args.message_id, "message_id");
     if (!await Native.isSentMessage(channelId, messageId))
@@ -673,6 +677,7 @@ async function deleteOwnMessage(args: ToolArguments) {
     const message = await fetchMessage(channelId, messageId);
     if (String(message.author?.id) !== UserStore.getCurrentUser()?.id)
         throw new Error("Refusing to delete a message not authored by the authenticated account");
+    if (generation !== bridgeGeneration) throw new Error("Discord MCP stopped before deleting the message");
 
     await RestAPI.del({ url: Constants.Endpoints.MESSAGE(channelId, messageId) });
     await Native.forgetSentMessage(channelId, messageId);
@@ -680,12 +685,16 @@ async function deleteOwnMessage(args: ToolArguments) {
 }
 
 async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Promise<unknown> {
+    const generation = bridgeGeneration;
     const args = argsOf(rawArguments);
     switch (tool) {
         case "connection_status": return {
             connected: Boolean(UserStore.getCurrentUser()),
             currentUser: serializeUser(UserStore.getCurrentUser()),
             channelAccess: "all_accessible_channels",
+            build: { hash: gitHash, version: VERSION, builtAt: BUILD_TIMESTAMP, updaterDisabled: IS_UPDATER_DISABLED },
+            runtime: Vencord.Runtime.getRuntimeStatus(),
+            plugins: Vencord.Plugins.getPluginRuntimeStatus(),
             capabilities: {
                 allAccessibleChannels: true,
                 changesActiveView: false,
@@ -708,8 +717,8 @@ async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Pro
         case "search_messages": return searchMessages(args);
         case "get_message": return getMessage(args);
         case "download_attachment": return downloadAttachment(args);
-        case "send_message": return sendMessage(args);
-        case "delete_own_message": return deleteOwnMessage(args);
+        case "send_message": return sendMessage(args, generation);
+        case "delete_own_message": return deleteOwnMessage(args, generation);
         case "subscribe_channel": return subscribeChannel(args);
         case "wait_for_message": return waitForSubscription(args);
         case "list_subscriptions": return listSubscriptions();
@@ -743,7 +752,11 @@ async function bridgeLoop(generation: number): Promise<void> {
         if (generation !== bridgeGeneration) return;
 
         for (const request of requests) {
-            const task = handleBridgeRequest(request);
+            while (generation === bridgeGeneration && inFlightRequests.size >= MAX_IN_FLIGHT_REQUESTS) {
+                await Promise.race(inFlightRequests);
+            }
+            if (generation !== bridgeGeneration) return;
+            const task = handleBridgeRequest(request).catch(error => logger.error("Bridge response failed", error));
             inFlightRequests.add(task);
             void task.finally(() => inFlightRequests.delete(task));
         }
@@ -760,8 +773,9 @@ export default definePlugin({
     },
 
     async start() {
-        await Native.initializeBridge();
         const generation = ++bridgeGeneration;
+        await Native.initializeBridge();
+        if (generation !== bridgeGeneration) return;
         void bridgeLoop(generation);
     },
 

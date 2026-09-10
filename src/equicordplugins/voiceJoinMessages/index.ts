@@ -17,6 +17,8 @@ const USER_ID_REGEX = /^\d{17,20}$/;
 
 let allowedFriendIds = new Set<string>();
 let ignoredFriendIds = new Set<string>();
+let active = false;
+let generation = 0;
 
 const settings = definePluginSettings({
     friendDirectMessages: {
@@ -78,7 +80,9 @@ function getMessageFlags() {
 }
 
 function sendVoiceStatusMessage(channelId: string, content: string, userId: string): Message | null {
-    if (!channelId) return null;
+    if (!channelId || !active) return null;
+    const currentGeneration = generation;
+    const currentUserId = UserStore.getCurrentUser()?.id;
     const message: Message = createBotMessage({ channelId, content, embeds: [] });
     message.flags = getMessageFlags();
     message.author = UserStore.getUser(userId);
@@ -86,6 +90,7 @@ function sendVoiceStatusMessage(channelId: string, content: string, userId: stri
     // This might be messy but It Works:tm:
     const messagesLoaded: Promise<any> = MessageStore.hasPresent(channelId) ? new Promise<void>(r => r()) : MessageActions.fetchMessages({ channelId });
     messagesLoaded.then(() => {
+        if (!active || currentGeneration !== generation || UserStore.getCurrentUser()?.id !== currentUserId) return;
         FluxDispatcher.dispatch({
             type: "MESSAGE_CREATE",
             channelId,
@@ -94,7 +99,7 @@ function sendVoiceStatusMessage(channelId: string, content: string, userId: stri
             sendMessageOptions: {},
             isPushNotification: false
         });
-    });
+    }).catch(error => console.error("VoiceJoinMessages could not load the message channel", error));
     return message;
 }
 
@@ -128,6 +133,7 @@ export default definePlugin({
     authors: [Devs.Sqaaakoi, Devs.thororen],
     settings,
     flux: {
+        CONNECTION_OPEN() { generation++; clientOldChannelId = SelectedChannelStore.getVoiceChannelId?.(); },
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
             const clientUserId = UserStore.getCurrentUser()?.id;
             if (!clientUserId) return;
@@ -182,12 +188,16 @@ export default definePlugin({
     },
 
     start() {
+        active = true;
+        generation++;
         allowedFriendIds = parseUserIdSet(settings.store.allowedFriends);
         ignoredFriendIds = parseUserIdSet(settings.store.ignoredFriends);
         clientOldChannelId = SelectedChannelStore.getVoiceChannelId?.();
     },
 
     stop() {
+        active = false;
+        generation++;
         allowedFriendIds = new Set();
         ignoredFriendIds = new Set();
         clientOldChannelId = undefined;

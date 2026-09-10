@@ -73,12 +73,12 @@ interface TimingSectionProps {
 }
 
 function TimingSection({ title, logs, traceEnd }: TimingSectionProps) {
-    const startTime = logs.find(l => l.timestamp)?.timestamp ?? 0;
+    const startTime = logs.find(l => Number.isFinite(l.timestamp))?.timestamp ?? 0;
 
     let lastTimestamp = startTime;
     const timings = logs.map(log => {
         // Get last log entry with valid timestamp
-        const timestamp = log.timestamp ?? lastTimestamp;
+        const timestamp = Number.isFinite(log.timestamp) ? log.timestamp! : lastTimestamp;
 
         const sinceStart = (timestamp - startTime) / 1000;
         const sinceLast = (timestamp - lastTimestamp) / 1000;
@@ -102,7 +102,7 @@ function TimingSection({ title, logs, traceEnd }: TimingSectionProps) {
                     <span>Interval</span>
                     <span>Delta</span>
                     <span style={{ marginBottom: 5 }}>Event</span>
-                    {AppStartPerformance.logs.map((log, i) => (
+                    {logs.map((log, i) => (
                         <TimerItem key={i} {...log} instance={timings[i]} />
                     ))}
                 </div>
@@ -135,7 +135,7 @@ function ServerTrace({ trace }: ServerTraceProps) {
 function StartupTimingPage() {
     if (!AppStartPerformance?.logs) return <div>Loading...</div>;
 
-    const serverTrace = AppStartPerformance.logGroups.find(g => g.serverTrace)?.serverTrace;
+    const serverTrace = AppStartPerformance.logGroups?.find(g => g.serverTrace)?.serverTrace;
 
     return (
         <React.Fragment>

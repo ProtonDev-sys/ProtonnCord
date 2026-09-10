@@ -74,6 +74,7 @@ export default definePlugin({
     tags: ["Activity", "Customisation", "Voice"],
     authors: [EquicordDevs.smuki],
     settings,
+    dependencies: ["UserSettingsAPI"],
     flux: {
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
             const userId = UserStore.getCurrentUser()?.id;

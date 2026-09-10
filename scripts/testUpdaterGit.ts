@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import {
@@ -135,6 +135,8 @@ async function main(): Promise<void> {
 
         console.log("git updater repository-state matrix passed");
     } finally {
+        assert.equal(dirname(resolve(root)), resolve(tmpdir()));
+        assert.ok(basename(root).startsWith("protonn-cord-updater-"));
         await rm(root, { force: true, recursive: true });
     }
 }

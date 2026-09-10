@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import "styles.css?managed";
-
 import { NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { DataStore } from "@api/index";
 import { definePluginSettings } from "@api/Settings";
@@ -14,7 +12,9 @@ import { Divider } from "@components/Divider";
 import { Devs } from "@utils/constants";
 import { useForceUpdater } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
-import { Button, ChannelStore, Menu, RelationshipStore, TextInput, useEffect, UserStore, useState } from "@webpack/common";
+import { Button, ChannelStore, Menu, React, RelationshipStore, TextInput, useEffect, UserStore, useState } from "@webpack/common";
+
+import styles from "./styles.css?managed";
 
 interface UserTagData {
     tagName: string;
@@ -23,7 +23,15 @@ interface UserTagData {
 
 let SavedData: UserTagData[] = [];
 let savedDataSerialized = "[]";
+let pendingSave = Promise.resolve();
+let nextTagId = 0;
+const tagIds = new WeakMap<UserTagData, number>();
 const tagStoreName = "vc-friendtags-tags";
+
+function tagKey(tag: UserTagData) {
+    if (!tagIds.has(tag)) tagIds.set(tag, nextTagId++);
+    return tagIds.get(tag)!;
+}
 
 function parseUsertags(text: string): string[] {
     const matches = text.match(/&([^&]+)/g);
@@ -70,10 +78,12 @@ function queryFriendTags(query) {
 
 async function SetData() {
     const serialized = JSON.stringify(SavedData);
-    if (serialized === savedDataSerialized) return true;
-
-    savedDataSerialized = serialized;
-    await DataStore.set(tagStoreName, serialized);
+    pendingSave = pendingSave.then(async () => {
+        if (serialized === savedDataSerialized) return;
+        await DataStore.set(tagStoreName, serialized);
+        savedDataSerialized = serialized;
+    }).catch(error => console.error("[FriendTags] Failed to save tags:", error));
+    await pendingSave;
     return true;
 }
 
@@ -82,17 +92,18 @@ async function GetData() {
     if (!fetchData) {
         SavedData = [];
         savedDataSerialized = "[]";
-        void DataStore.set(tagStoreName, savedDataSerialized);
         return;
     }
 
     try {
-        SavedData = JSON.parse(fetchData);
+        const parsed = JSON.parse(fetchData);
+        SavedData = Array.isArray(parsed) ? parsed.filter(tag =>
+            tag && typeof tag.tagName === "string" && Array.isArray(tag.userIds)
+        ).map(tag => ({ ...tag, userIds: tag.userIds.filter((id): id is string => typeof id === "string") })) : [];
         savedDataSerialized = fetchData;
     } catch {
         SavedData = [];
         savedDataSerialized = "[]";
-        void DataStore.set(tagStoreName, savedDataSerialized);
     }
 }
 
@@ -100,24 +111,21 @@ function TagConfigCard(props) {
     const { tag } = props;
     const [tagName, setTagName] = useState(tag.tagName);
     const [userIds, setUserIDs] = useState(tag.userIds.join(", "));
-    const update = useForceUpdater();
 
     useEffect(() => {
-        const dataTag = SavedData.find(obj => obj.tagName === tag.tagName);
+        const dataTag = SavedData.find(obj => obj === tag);
         if (dataTag) {
             dataTag.tagName = tagName;
         }
         SetData();
-        update();
     }, [tagName]);
 
     useEffect(() => {
-        const dataTag = SavedData.find(obj => obj.userIds === tag.userIds);
+        const dataTag = SavedData.find(obj => obj === tag);
         if (dataTag) {
-            dataTag.userIds = userIds.split(", ");
+            dataTag.userIds = userIds.split(",").map(id => id.trim()).filter(Boolean);
         }
         SetData();
-        update();
     }, [userIds]);
 
     return (
@@ -130,13 +138,13 @@ function TagConfigCard(props) {
                 <BaseText>User List (Click A User To Remove)</BaseText>
                 <div className={"vc-friend-tags-user-header-btns"}>
                     {
-                        userIds.split(", ").map(user => {
+                        userIds.split(",").map(id => id.trim()).filter(Boolean).map(user => {
                             const userData: any = UserStore.getUser(user);
                             if (!userData) return null;
                             return (
                                 <div style={{ display: "flex" }} key={user}>
                                     <img src={userData.getAvatarURL()} style={{ height: "20px", borderRadius: "50%", marginRight: "5px" }}></img>
-                                    <BaseText style={{ cursor: "pointer" }} size="md" onClick={() => setUserIDs(userIds.replace(`, ${user}`, "").replace(user, ""))}>{userData.globalName || userData.username}</BaseText>
+                                    <BaseText style={{ cursor: "pointer" }} size="md" onClick={() => setUserIDs(userIds.split(",").map(id => id.trim()).filter(id => id && id !== user).join(", "))}>{userData.globalName || userData.username}</BaseText>
                                 </div>
                             );
                         })
@@ -145,9 +153,9 @@ function TagConfigCard(props) {
             </div>
             <Button
                 onClick={async () => {
-                    SavedData = SavedData.filter(data => (data.tagName !== tagName));
+                    SavedData = SavedData.filter(data => data !== tag);
                     await SetData();
-                    update();
+                    props.onRemove();
                 }}
                 color={Button.Colors.RED}
             >
@@ -165,10 +173,10 @@ function TagConfigurationComponent() {
             <Divider />
             {
                 SavedData?.map(e => (
-                    <>
-                        <TagConfigCard tag={e} />
+                    <React.Fragment key={tagKey(e)}>
+                        <TagConfigCard tag={e} onRemove={update} />
                         <Divider />
-                    </>
+                    </React.Fragment>
                 ))
             }
             <Button onClick={() => {
@@ -240,6 +248,7 @@ export default definePlugin({
     tags: ["Shortcuts"],
     authors: [Devs.Samwich],
     settings,
+    managedStyle: styles,
     contextMenus: {
         "user-context": userPatch
     },
@@ -253,7 +262,7 @@ export default definePlugin({
         }
     ],
     async start() {
-        GetData();
+        await GetData();
     },
     queryFriendTags,
 });

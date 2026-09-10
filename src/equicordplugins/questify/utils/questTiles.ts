@@ -197,7 +197,7 @@ function getValidQuestOrder(value: unknown): QuestOrderStatus[] {
     const configuredOrder = Array.isArray(value)
         ? value
         : defaultQuestOrder;
-    const order = configuredOrder.filter((status): status is QuestOrderStatus => validStatuses.has(status as QuestOrderStatus));
+    const order = [...new Set(configuredOrder.filter((status): status is QuestOrderStatus => validStatuses.has(status as QuestOrderStatus)))];
 
     for (const status of defaultQuestOrder) {
         if (!order.includes(status)) {

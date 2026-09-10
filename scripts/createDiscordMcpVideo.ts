@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -150,8 +150,7 @@ function renderSlide(slide: Slide, index: number): string {
 }
 
 async function renderSlides(): Promise<string[]> {
-    await rm(workDirectory, { force: true, recursive: true });
-    await mkdir(workDirectory, { recursive: true });
+    await mkdir(workDirectory);
     const browser = await puppeteer.launch({
         executablePath: chromePath,
         headless: true,

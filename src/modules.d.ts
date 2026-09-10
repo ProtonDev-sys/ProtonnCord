@@ -19,11 +19,12 @@
 declare module "~plugins" {
     const plugins: Record<string, import("./utils/types").Plugin>;
     export default plugins;
+    export const PluginManifest: Record<string, import("./shared/pluginDefinition").PluginManifestEntry>;
     export const PluginMeta: Record<string, {
         folderName: string;
         userPlugin: boolean;
     }>;
-    export const ExcludedPlugins: Record<string, "web" | "discordDesktop" | "vesktop" | "equibop" | "desktop" | "dev">;
+    export const ExcludedPlugins: Record<string, "web" | "browser" | "discordDesktop" | "vesktop" | "equibop" | "desktop" | "dev">;
 }
 
 declare module "~git-hash" {

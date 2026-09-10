@@ -5,7 +5,7 @@
  */
 
 import { proxyLazyWebpack } from "@webpack";
-import { Constants, Flux, FluxDispatcher, RestAPI } from "@webpack/common";
+import { Constants, Flux, FluxDispatcher, RestAPI, UserStore } from "@webpack/common";
 
 import { RefreshedUrlsResponse } from "./types";
 import { BatchedRequestQueue, isAllowedHost } from "./utils";
@@ -15,12 +15,20 @@ export interface SignedUrlsStoreType {
     addSigned(url: string): void;
 }
 
+let activeStore: { clear(): void; } | undefined;
+
+export function clearSignedUrlsStore() {
+    activeStore?.clear();
+}
+
 /** Used for storing and automatically refreshing signed CDN/Media proxy urls ({@link https://docs.discord.food/reference#signed-attachment-urls}). */
 export const SignedUrlsStore = proxyLazyWebpack(() => {
     class SignedUrlsStoreClass extends Flux.Store implements SignedUrlsStoreType {
         public static readonly _expirationThreshold = 60 * 60 * 1000;
 
         public _urls = new Map<string, string>();
+        private _generation = 0;
+        private _accountId: string | undefined;
         public _queue = new BatchedRequestQueue<string>(batch => this._handleBatch(batch), {
             maxCount: 50,
             timeout: 50
@@ -30,7 +38,23 @@ export const SignedUrlsStore = proxyLazyWebpack(() => {
             return { urls: this._urls, queue: this._queue };
         }
 
+        public clear() {
+            this._generation++;
+            this._queue.clear();
+            this._urls.clear();
+        }
+
+        private _syncAccount() {
+            const accountId = UserStore.getCurrentUser()?.id;
+            if (accountId !== this._accountId) {
+                this.clear();
+                this._accountId = accountId;
+            }
+            return accountId;
+        }
+
         public get(url: string): string | null {
+            this._syncAccount();
             const key = URL.parse(url);
             if (!this._isValid(key)) return null;
 
@@ -43,6 +67,7 @@ export const SignedUrlsStore = proxyLazyWebpack(() => {
         }
 
         public addSigned(url: string): void {
+            this._syncAccount();
             const parsed = URL.parse(url);
             if (!this._isValid(parsed)) return;
 
@@ -51,6 +76,7 @@ export const SignedUrlsStore = proxyLazyWebpack(() => {
         }
 
         public _refresh(url: URL): void {
+            if (!this._accountId) return;
             this._queue.add(`${this._clean(url)}`);
         }
 
@@ -62,7 +88,7 @@ export const SignedUrlsStore = proxyLazyWebpack(() => {
         }
 
         public _isValid(url: URL | null): url is URL {
-            return !!(url && isAllowedHost(url.hostname));
+            return !!(url && url.protocol === "https:" && !url.username && !url.password && !url.port && isAllowedHost(url.hostname));
         }
 
         public _willExpire(url: URL): boolean {
@@ -84,15 +110,25 @@ export const SignedUrlsStore = proxyLazyWebpack(() => {
         }
 
         public async _handleBatch(batch: string[]): Promise<void> {
+            const generation = this._generation;
+            if (!this._accountId || UserStore.getCurrentUser()?.id !== this._accountId) {
+                this._syncAccount();
+                return;
+            }
             await RestAPI.post({
                 url: Constants.Endpoints.ATTACHMENTS_REFRESH_URLS,
                 body: { attachment_urls: batch },
                 retries: 3
-            }).then(({ body }: { body: RefreshedUrlsResponse; }) =>
-                this._update(body.refreshed_urls.map(({ original, refreshed }) => [original, refreshed!]))
-            );
+            }).then(({ body }: { body: RefreshedUrlsResponse; }) => {
+                if (generation !== this._generation || UserStore.getCurrentUser()?.id !== this._accountId) return;
+                this._update(body.refreshed_urls
+                    .filter(({ original, refreshed }) => batch.includes(original) && refreshed && this._isValid(URL.parse(refreshed)))
+                    .map(({ original, refreshed }) => [original, refreshed!]));
+            });
         }
     }
 
-    return new SignedUrlsStoreClass(FluxDispatcher) as SignedUrlsStoreType;
+    const store = new SignedUrlsStoreClass(FluxDispatcher);
+    activeStore = store;
+    return store as SignedUrlsStoreType;
 });

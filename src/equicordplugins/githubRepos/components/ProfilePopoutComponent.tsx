@@ -11,7 +11,7 @@ import { GitHubRepo, RepoGroup } from "@equicordplugins/githubRepos/types";
 import { buildRepoGroups, getLanguageIconUrl, PERSONAL_GROUP_KEY } from "@equicordplugins/githubRepos/utils";
 import { classes } from "@utils/misc";
 import { findCssClassesLazy } from "@webpack";
-import { Clickable, openModal, React, useEffect, UserProfileStore, useState } from "@webpack/common";
+import { Clickable, openModal, React, useEffect, UserProfileStore, useState, useStateFromStores } from "@webpack/common";
 
 import { ReposModal } from "./ReposModal";
 
@@ -21,6 +21,7 @@ const ProfileCardContainerClasses = findCssClassesLazy("innerContainer", "icons"
 const ProfileCardOverlayClasses = findCssClassesLazy("overlay", "isPrivate", "outer");
 
 export function ProfilePopoutComponent({ id, isSideBar = false }: { id: string, isSideBar?: boolean; }) {
+    const githubConnection = useStateFromStores([UserProfileStore], () => UserProfileStore.getUserProfile(id)?.connectedAccounts?.find(conn => conn.type === "github"), [id]);
     const [repos, setRepos] = useState<GitHubRepo[]>([]);
     const [groups, setGroups] = useState<RepoGroup[]>([]);
     const [loading, setLoading] = useState(true);
@@ -41,42 +42,47 @@ export function ProfilePopoutComponent({ id, isSideBar = false }: { id: string, 
     };
 
     useEffect(() => {
+        let active = true;
+        setLoading(true);
+        setError(null);
+        setRepos([]);
+        setGroups([]);
+        setUserInfo(null);
         const fetchData = async () => {
             try {
-                const profile = UserProfileStore.getUserProfile(id);
-                if (!profile) { setLoading(false); return; }
-
-                const connections = profile.connectedAccounts;
-                if (!connections?.length) { setLoading(false); return; }
-
-                const githubConnection = connections.find(conn => conn.type === "github");
                 if (!githubConnection) { setLoading(false); return; }
 
                 const username = githubConnection.name;
                 const userInfoData = await fetchUserInfo(username);
+                if (!active) return;
                 if (userInfoData) setUserInfo(userInfoData);
 
                 const githubId = githubConnection.id;
 
                 let personalRepos = await fetchReposByUserId(githubId);
+                if (!active) return;
                 if (!personalRepos) personalRepos = await fetchReposByUsername(username);
+                if (!active) return;
 
                 setRepos(personalRepos);
                 setLoading(false);
 
                 const orgs = await fetchUserOrgs(username);
+                if (!active) return;
                 const orgReposEntries = await Promise.all(orgs.map(async org => [org.login, await fetchOrgRepos(org.login)]));
                 const orgRepos = Object.fromEntries(orgReposEntries);
 
-                setGroups(buildRepoGroups(userInfoData?.username ?? username, personalRepos, orgs, orgRepos, userInfoData?.avatarUrl));
+                if (active) setGroups(buildRepoGroups(userInfoData?.username ?? username, personalRepos, orgs, orgRepos, userInfoData?.avatarUrl));
             } catch (error) {
+                if (!active) return;
                 setError(error instanceof Error ? error.message : "Failed to fetch repositories");
                 setLoading(false);
             }
         };
 
         fetchData();
-    }, [id]);
+        return () => { active = false; };
+    }, [id, githubConnection?.id, githubConnection?.name]);
 
     if (loading || error || !repos.length) return null;
 

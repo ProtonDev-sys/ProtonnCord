@@ -6,6 +6,8 @@
 
 import * as DataStore from "@api/DataStore";
 import type { MessageObject, SendMessageOptions } from "@api/MessageEvents";
+import { Logger } from "@utils/Logger";
+import { isObject } from "@utils/misc";
 import { Guild, User } from "@vencord/discord-types";
 import { ChannelStore, GuildMemberStore, GuildStore, MessageStore, UserStore } from "@webpack/common";
 
@@ -29,8 +31,10 @@ export interface GroupData {
     inviteLink?: string;
 }
 
+let storageWrites: Promise<unknown> = Promise.resolve();
+
 export class Data {
-    declare usersCollection: Record<string, GroupData>;
+    usersCollection: Record<string, GroupData> = {};
     declare _storageAutoSaveProtocol_interval: ReturnType<typeof setInterval> | undefined;
     declare _onMessagePreSend_preSend;
     private storageDirty = false;
@@ -127,12 +131,27 @@ export class Data {
         if (!this.usersCollection) return;
         if (!force && !this.storageDirty) return;
 
-        await DataStore.set("irememberyou.data", this.usersCollection);
+        const snapshot = structuredClone(this.usersCollection);
         this.storageDirty = false;
+        const write = storageWrites.then(() => DataStore.set("irememberyou.data", snapshot));
+        storageWrites = write.catch(() => undefined);
+        try {
+            await write;
+        } catch (error) {
+            this.storageDirty = true;
+            throw error;
+        }
     }
 
     async initializeUsersCollection() {
-        const data = await DataStore.get("irememberyou.data");
+        await storageWrites;
+        const data = await DataStore.get<Record<string, GroupData>>("irememberyou.data");
+        if (data != null && (!isObject(data) || Array.isArray(data) || !Object.values(data).every(group =>
+            isObject(group) && typeof group.name === "string" && typeof group.id === "string"
+            && isObject(group.users) && !Array.isArray(group.users) && Object.values(group.users).every(user =>
+                isObject(user) && typeof user.id === "string" && typeof user.username === "string" && typeof user.tag === "string"
+            )
+        ))) throw new Error("Invalid saved IRememberYou collection");
         this.usersCollection = data ?? {};
     }
 
@@ -185,7 +204,9 @@ export class Data {
 
     storageAutoSaveProtocol() {
         this.stopStorageAutoSaveProtocol();
-        this._storageAutoSaveProtocol_interval = setInterval(() => void this.updateStorage(), 60_000 * 3);
+        this._storageAutoSaveProtocol_interval = setInterval(() => {
+            void this.updateStorage().catch(error => new Logger("IRememberYou").error("Failed to save collection", error));
+        }, 60_000 * 3);
     }
 
     stopStorageAutoSaveProtocol() {
@@ -197,6 +218,6 @@ export class Data {
 
     stop() {
         this.stopStorageAutoSaveProtocol();
-        void this.updateStorage(true);
+        return this.updateStorage();
     }
 }

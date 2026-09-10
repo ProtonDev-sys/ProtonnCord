@@ -47,15 +47,15 @@ interface VoiceStateChangeEvent {
 
 function speak(text: string) {
     // Don't narrate in the overlay window, otherwise everything is said twice
-    if (!text || window.__OVERLAY__) return;
+    if (!text || window.__OVERLAY__ || typeof speechSynthesis === "undefined" || typeof SpeechSynthesisUtterance === "undefined") return;
 
     const { volume, rate } = settings.store;
 
     const speech = new SpeechSynthesisUtterance(text);
     const voice = getCurrentVoice();
     speech.voice = voice!;
-    speech.volume = volume;
-    speech.rate = rate;
+    speech.volume = Number.isFinite(volume) && volume >= 0 && volume <= 1 ? volume : 1;
+    speech.rate = Number.isFinite(rate) && rate >= 0.1 && rate <= 10 ? rate : 1;
     speechSynthesis.speak(speech);
 }
 
@@ -71,6 +71,7 @@ function clean(str: string) {
 }
 
 function formatText(str: string, user: string, channel: string, displayName: string, nickname: string) {
+    if (typeof str !== "string") return "";
     return str
         .replaceAll("{{USER}}", clean(user) || (user ? "Someone" : ""))
         .replaceAll("{{CHANNEL}}", clean(channel) || "channel")
@@ -155,6 +156,9 @@ export default definePlugin({
     settings,
 
     flux: {
+        LOGOUT() {
+            myLastChannelId = undefined;
+        },
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceStateChangeEvent[]; }) {
             const myGuildId = SelectedGuildStore.getGuildId();
             const myChanId = SelectedChannelStore.getVoiceChannelId();
@@ -218,6 +222,7 @@ export default definePlugin({
     },
 
     start() {
+        myLastChannelId = SelectedChannelStore.getVoiceChannelId();
         if (typeof speechSynthesis === "undefined" || speechSynthesis.getVoices().length === 0) {
             new Logger("VcNarrator").warn(
                 "SpeechSynthesis not supported or no Narrator voices found. Thus, this plugin will not work. Check my Settings for more info"
@@ -233,7 +238,7 @@ export default definePlugin({
 
     settingsAboutComponent() {
         const [hasVoices, hasEnglishVoices] = useMemo(() => {
-            const voices = speechSynthesis.getVoices();
+            const voices = window.speechSynthesis?.getVoices() ?? [];
             return [voices.length !== 0, voices.some(v => v.lang.startsWith("en"))];
         }, []);
 

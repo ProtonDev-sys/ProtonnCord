@@ -36,8 +36,8 @@ jobs:
             - name: Get latest Git tag
               id: tag
               run: |
-                  latest_tag=$(git tag --list 'v*' --sort=-v:refname | head -n 1 || echo "v0.0.0")
-                  echo "latest=$latest_tag" >> "$GITHUB_OUTPUT"
+                  latest_tag=$(git tag --list 'v*' --sort=-v:refname | sed -n '1p')
+                  echo "latest=${latest_tag:-v0.0.0}" >> "$GITHUB_OUTPUT"
 
             - name: Check if package.json version is newer
               id: check
@@ -57,21 +57,6 @@ jobs:
             - name: Stop if not newer
               if: steps.check.outputs.release == 'false'
               run: echo "No new version to release (package.json ${{ steps.pkg.outputs.version }} <= latest tag ${{ steps.tag.outputs.latest }})"
-
-            - name: Create Tag
-              if: steps.check.outputs.release == 'true'
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  tag_sha=$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
-                    -f tag="${{ steps.pkg.outputs.version }}" \
-                    -f message="Version ${{ steps.pkg.outputs.version }}" \
-                    -f object="$GITHUB_SHA" \
-                    -f type=commit \
-                    --jq .sha)
-                  gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-                    -f ref="refs/tags/${{ steps.pkg.outputs.version }}" \
-                    -f sha="$tag_sha"
 
             - name: Setup PNPM
               if: steps.check.outputs.release == 'true'
@@ -107,6 +92,22 @@ jobs:
                       dist/extension-sources.zip
                   if-no-files-found: error
                   retention-days: 1
+
+            # A failed build/upload must remain retryable without deleting a tag.
+            - name: Create Tag
+              if: steps.check.outputs.release == 'true'
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  tag_sha=$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
+                    -f tag="${{ steps.pkg.outputs.version }}" \
+                    -f message="Version ${{ steps.pkg.outputs.version }}" \
+                    -f object="$GITHUB_SHA" \
+                    -f type=commit \
+                    --jq .sha)
+                  gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                    -f ref="refs/tags/${{ steps.pkg.outputs.version }}" \
+                    -f sha="$tag_sha"
 
     publish-chrome:
         needs: prepare

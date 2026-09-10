@@ -5,7 +5,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rmdir, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -927,6 +927,6 @@ export async function runOneKeyWindowsVaultCipher(profileInput: string): Promise
         return { error: "failure", ok: false };
     } finally {
         if (scriptPath) await unlink(scriptPath).catch(() => undefined);
-        if (temporaryDirectory) await rm(temporaryDirectory).catch(() => undefined);
+        if (temporaryDirectory) await rmdir(temporaryDirectory).catch(() => undefined);
     }
 }

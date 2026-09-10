@@ -43,7 +43,7 @@ function updatePatterns(patterns: PatternEntry[]) {
 }
 
 const PatternsComponent = ErrorBoundary.wrap(() => {
-    const { patterns } = settings.store;
+    const { patterns } = settings.use(["patterns"]);
 
     return (
         <section>
@@ -71,6 +71,7 @@ const PatternsComponent = ErrorBoundary.wrap(() => {
                         />
                     </div>
                     <Button
+                        aria-label="Remove URL pattern"
                         className={cl("remove-button")}
                         variant="secondary"
                         size="small"

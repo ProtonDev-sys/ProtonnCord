@@ -35,6 +35,7 @@ export const settingVariables = [
     "",
     "Protonn Cord Variables:",
     "{equicordIcon} - Protonn Cord icon",
+    "{equicordName} - Protonn Cord name",
     "{equicordVersion} - Version of Protonn Cord (e.g. 1.0.0)",
     "{equicordHash} - Protonn Cord build hash (e.g. 123456789)",
     "{equicordPlatform} - Platform Protonn Cord is running on (e.g. Dev Build)",

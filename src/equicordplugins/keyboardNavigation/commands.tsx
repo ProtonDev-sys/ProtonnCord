@@ -5,6 +5,7 @@
  */
 
 import { showNotification } from "@api/Notifications";
+import { pluginRequiresRestart, startDependenciesRecursive, startPlugin, stopPlugin } from "@api/PluginManager";
 import { Settings } from "@api/Settings";
 import { gitHashShort } from "@shared/vencordUserAgent";
 import { copyToClipboard } from "@utils/clipboard";
@@ -13,7 +14,7 @@ import { checkForUpdates, getRepo } from "@utils/updater";
 import { GuildStore, NavigationRouter, SettingsRouter, Toasts } from "@webpack/common";
 
 import gitRemote from "~git-remote";
-import Plugins from "~plugins";
+import Plugins, { PluginManifest } from "~plugins";
 
 import { openMultipleChoice } from "./components/MultipleChoice";
 import { openSimpleTextInput } from "./components/TextInput";
@@ -40,11 +41,12 @@ export const actions: ButtonAction[] = [
     {
         id: "openInBrowser", label: "Open in Browser", callback: async () => {
             const url = await openSimpleTextInput("Enter a URL");
-            const newUrl = url.replace(/(https?:\/\/)?([a-zA-Z0-9-]+)\.([a-zA-Z0-9-]+)/, "https://$2.$3");
+            if (url === null) return;
+            const newUrl = url.includes("://") ? url.trim() : `https://${url.trim()}`;
 
             try {
                 new URL(newUrl); // Throws if invalid
-                VencordNative.native.openExternal(newUrl);
+                await VencordNative.native.openExternal(newUrl);
             } catch {
                 Toasts.show({
                     message: "Invalid URL",
@@ -60,7 +62,7 @@ export const actions: ButtonAction[] = [
 
     {
         id: "togglePlugin", label: "Toggle Plugin", callback: async () => {
-            const plugins = Object.keys(Plugins);
+            const plugins = Object.keys(Plugins).filter(name => !PluginManifest[name]?.required);
             const options: ButtonAction[] = [];
 
             for (const plugin of plugins) {
@@ -71,6 +73,7 @@ export const actions: ButtonAction[] = [
             }
 
             const choice = await openMultipleChoice(options);
+            if (!choice) return;
 
             const enabled = await openMultipleChoice([
                 { id: "enable", label: "Enable" },
@@ -87,10 +90,11 @@ export const actions: ButtonAction[] = [
         id: "quickFetch", label: "Quick Fetch", callback: async () => {
             try {
                 const url = await openSimpleTextInput("Enter URL to fetch (GET only)");
-                const newUrl = url.replace(/(https?:\/\/)?([a-zA-Z0-9-]+)\.([a-zA-Z0-9-]+)/, "https://$2.$3");
+                if (url === null) return;
+                const newUrl = url.includes("://") ? url.trim() : `https://${url.trim()}`;
                 const res = (await fetch(newUrl));
                 const text = await res.text();
-                copyToClipboard(text);
+                await copyToClipboard(text);
 
                 Toasts.show({
                     message: "Copied response to clipboard!",
@@ -116,7 +120,7 @@ export const actions: ButtonAction[] = [
 
     {
         id: "copyGitInfo", label: "Copy Git Info", callback: async () => {
-            copyToClipboard(`gitHash: ${gitHashShort}\ngitRemote: ${gitRemote}`);
+            await copyToClipboard(`gitHash: ${gitHashShort}\ngitRemote: ${gitRemote}`);
 
             Toasts.show({
                 message: "Copied git info to clipboard!",
@@ -134,7 +138,7 @@ export const actions: ButtonAction[] = [
             const isOutdated = await checkForUpdates();
 
             if (isOutdated) {
-                setTimeout(() => showNotification({
+                showNotification({
                     title: "A Protonn Cord update is available!",
                     body: "Click here to view the update",
                     permanent: true,
@@ -142,7 +146,7 @@ export const actions: ButtonAction[] = [
                     onClick() {
                         SettingsRouter.openUserSettings("equicord_updater_panel");
                     }
-                }), 10_000);
+                });
             } else {
                 Toasts.show({
                     message: "No updates available",
@@ -178,11 +182,22 @@ export const actions: ButtonAction[] = [
 ];
 
 function togglePlugin(plugin: ButtonAction, enabled: boolean) {
-
+    const definition = Plugins[plugin.id];
+    if (!definition || definition.required || definition.isDependency) throw new Error("This plugin is required by the client or another plugin.");
+    if (Settings.plugins[plugin.id].enabled === enabled) return;
+    let restartNeeded = pluginRequiresRestart(definition);
+    if (enabled) {
+        const dependencies = startDependenciesRecursive(definition);
+        if (dependencies.failures.length) throw new Error("Could not start plugin dependencies.");
+        restartNeeded ||= dependencies.restartNeeded;
+    }
+    if (!restartNeeded && (enabled || definition.started) && !(enabled ? startPlugin(definition) : stopPlugin(definition))) {
+        throw new Error("Could not change plugin state.");
+    }
     Settings.plugins[plugin.id].enabled = enabled;
 
     Toasts.show({
-        message: `Successfully ${enabled ? "enabled" : "disabled"} ${plugin.id}`,
+        message: `${enabled ? "Enabled" : "Disabled"} ${plugin.id}${restartNeeded ? ". Restart the client to apply this change." : ""}`,
         type: Toasts.Type.SUCCESS,
         id: Toasts.genId(),
         options: {
@@ -192,5 +207,13 @@ function togglePlugin(plugin: ButtonAction, enabled: boolean) {
 }
 
 export function registerAction(action: ButtonAction) {
+    const existing = actions.findIndex(entry => entry.id === action.id);
+    const previous = existing < 0 ? undefined : actions.splice(existing, 1)[0];
     actions.push(action);
+    return () => {
+        const index = actions.indexOf(action);
+        if (index < 0) return;
+        actions.splice(index, 1);
+        if (previous) actions.splice(Math.min(existing, actions.length), 0, previous);
+    };
 }

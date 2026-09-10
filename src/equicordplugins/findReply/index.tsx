@@ -37,7 +37,18 @@ const FindReplyIcon = () => {
 };
 let root: Root | null = null;
 let element: HTMLDivElement | null = null;
-let madeComponent = false;
+
+function clearNavigator() {
+    const previousRoot = root;
+    const previousElement = element;
+    root = null;
+    element = null;
+    try {
+        previousRoot?.unmount();
+    } finally {
+        previousElement?.remove();
+    }
+}
 
 type CachedMessage = Message & { deleted?: boolean; };
 
@@ -153,8 +164,8 @@ export default definePlugin({
                                 return;
                             }
 
-                            if (!madeComponent) {
-                                madeComponent = true;
+                            if (!root || element?.parentElement !== container) {
+                                clearNavigator();
                                 element = document.createElement("div");
                                 container.appendChild(element);
                                 root = createRoot(element);
@@ -176,8 +187,10 @@ export default definePlugin({
         enableStyle(styles);
     },
     stop() {
-        root && root.unmount();
-        element?.remove();
-        disableStyle(styles);
+        try {
+            clearNavigator();
+        } finally {
+            disableStyle(styles);
+        }
     },
 });

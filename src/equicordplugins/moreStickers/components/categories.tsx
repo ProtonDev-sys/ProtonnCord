@@ -45,13 +45,13 @@ export function CategoryImage({ src, alt, isActive }: CategoryImageProps) {
 }
 
 export function CategoryScroller(props: { children: React.ReactNode, categoryLength: number; }) {
-    const children = Array.isArray(props.children) ? props.children : [props.children];
+    const children = React.Children.toArray(props.children);
 
     return (
         <div className={cl("category-scroller")}>
             <div>{
-                children.map(child => (
-                    <div role="listitem" key={cl("category-scroller")}>
+                children.map((child, index) => (
+                    <div role="listitem" key={React.isValidElement(child) ? child.key ?? index : index}>
                         {child}
                     </div>
                 ))
@@ -81,6 +81,13 @@ export function StickerCategory(props: StickerCategoryProps) {
             tabIndex={0}
             role="button"
             onClick={props.onClick}
+            aria-pressed={props.isActive}
+            onKeyDown={event => {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    props.onClick?.();
+                }
+            }}
         >
             {props.children}
         </div>

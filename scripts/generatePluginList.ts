@@ -48,11 +48,12 @@ import { getEntryPoint, isPluginFile, parseDevs, parseEquicordDevs, parseFile, P
                 .filter(isPluginFile)
                 .map(async dirent => {
                     const [data] = await parseFile(await getEntryPoint(dir, dirent));
-                    plugins.sort().push(data);
+                    plugins.push(data);
                 })
         )
     );
 
+    plugins.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     const data = JSON.stringify(plugins);
 
     if (outputPath) {

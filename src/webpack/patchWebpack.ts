@@ -13,6 +13,7 @@ import { interpolateIfDefined } from "@utils/misc";
 import { Patch, PatchReplacement } from "@utils/types";
 import { WebpackRequire } from "@vencord/discord-types/webpack";
 
+import { dispatchSubscriptions, type SubscriptionErrorHandler } from "./subscriptions";
 import { AnyModuleFactory, AnyWebpackRequire, MaybePatchedModuleFactory, PatchedModuleFactory } from "./types";
 import { _blacklistBadModules, _initWebpack, factoryListeners, findModuleFactory, moduleListeners, waitForSubscriptions, wreq } from "./webpack";
 
@@ -65,6 +66,15 @@ export function getFactoryPatchedBy(moduleId: PropertyKey, webpackRequire = wreq
 }
 
 const logger = new Logger("WebpackPatcher", "#8caaee");
+
+const reportSubscriptionError: SubscriptionErrorHandler = (error, filter, callback, value) => {
+    logger.error(
+        "Error while filtering or firing callback for Webpack waitFor subscription:\n", error,
+        "\n\nExport value:", value,
+        "\n\nFilter:", filter,
+        "\n\nCallback:", callback
+    );
+};
 
 /** Whether we tried to fallback to the WebpackRequire of the factory, or disabled patches */
 let wreqFallbackApplied = false;
@@ -447,50 +457,7 @@ function runFactoryWithWrap(patchedFactory: PatchedModuleFactory, thisArg: unkno
         }
     }
 
-    for (const [filter, callback] of waitForSubscriptions) {
-        try {
-            if (filter(exports)) {
-                waitForSubscriptions.delete(filter);
-                callback(exports, module.id);
-                continue;
-            }
-        } catch (err) {
-            logger.error(
-                "Error while filtering or firing callback for Webpack waitFor subscription:\n", err,
-                "\n\nModule exports:", exports,
-                "\n\nFilter:", filter,
-                "\n\nCallback:", callback
-            );
-        }
-
-        if (typeof exports !== "object") {
-            continue;
-        }
-
-        for (const exportKey in exports) {
-            try {
-                // Some exports might have not been initialized yet due to circular imports, so try catch it.
-                try {
-                    var exportValue = exports[exportKey];
-                } catch {
-                    continue;
-                }
-
-                if (exportValue != null && filter(exportValue)) {
-                    waitForSubscriptions.delete(filter);
-                    callback(exportValue, module.id);
-                    break;
-                }
-            } catch (err) {
-                logger.error(
-                    "Error while filtering or firing callback for Webpack waitFor subscription:\n", err,
-                    "\n\nExport value:", exports,
-                    "\n\nFilter:", filter,
-                    "\n\nCallback:", callback
-                );
-            }
-        }
-    }
+    dispatchSubscriptions(waitForSubscriptions, exports, module.id, reportSubscriptionError);
 
     return factoryReturn;
 }

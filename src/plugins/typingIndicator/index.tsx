@@ -37,7 +37,7 @@ const enum IndicatorMode {
 
 function getDisplayName(guildId: string, userId: string) {
     const user = UserStore.getUser(userId);
-    return GuildMemberStore.getNick(guildId, userId) ?? (user as any).globalName ?? user.username;
+    return GuildMemberStore.getNick(guildId, userId) ?? user?.globalName ?? user?.username ?? "Unknown User";
 }
 
 function areTypingUsersEqual(old: Record<string, number>, current: Record<string, number>) {

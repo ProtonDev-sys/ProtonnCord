@@ -6,6 +6,7 @@
 
 import { BaseText } from "@components/BaseText";
 import { Button, TextButton } from "@components/Button";
+import loginWithQR from "@equicordplugins/loginWithQR";
 import { images } from "@equicordplugins/loginWithQR/images";
 import { getIntlMessage } from "@utils/discord";
 import { RenderModalProps } from "@vencord/discord-types";
@@ -39,16 +40,28 @@ function VerifyModal({
     const [state, setState] = useState(
         !token ? VerifyState.NotFound : VerifyState.Verifying
     );
-    useEffect(() => () => void (state !== VerifyState.LoggedIn && onAbort()), []);
-
     const [inProgress, setInProgress] = useState(false);
     const buttonRef = useRef<HTMLButtonElement>(null);
-    const controllerRef = useRef(new Controller({ progress: "0%" })).current;
+    const [controllerRef] = useState(() => new Controller({ progress: "0%" }));
+    const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const mounted = useRef(true);
+    const finished = useRef(false);
+    const submitting = useRef(false);
+
+    useEffect(() => {
+        mounted.current = true;
+        return () => {
+            mounted.current = false;
+            clearTimeout(timeoutRef.current);
+            controllerRef.stop();
+            if (!finished.current) onAbort();
+        };
+    }, []);
 
     const holdDuration = 1000;
-    let timeout: any;
     const startInput = () => {
-        if (!buttonRef.current) return;
+        if (!buttonRef.current || !mounted.current || !loginWithQR.started || submitting.current || state !== VerifyState.Verifying) return;
+        clearTimeout(timeoutRef.current);
 
         controllerRef.start({
             progress: "100%",
@@ -58,9 +71,11 @@ function VerifyModal({
                 easing: (t: number) => -(Math.cos(Math.PI * t) - 1) / 2,
             },
         });
-        timeout = setTimeout(() => {
-            if (state !== VerifyState.Verifying) return;
+        timeoutRef.current = setTimeout(() => {
+            timeoutRef.current = undefined;
+            if (!mounted.current || !loginWithQR.started || submitting.current || state !== VerifyState.Verifying) return;
 
+            submitting.current = true;
             setInProgress(true);
             RestAPI.post({
                 url: "/users/@me/remote-auth/finish",
@@ -69,14 +84,21 @@ function VerifyModal({
                 },
             })
                 .then(() => {
+                    if (!mounted.current) return;
+                    finished.current = true;
                     setState(VerifyState.LoggedIn);
                 })
-                .catch(() => setState(VerifyState.NotFound))
-                .finally(() => setInProgress(false));
+                .catch(() => { if (mounted.current) setState(VerifyState.NotFound); })
+                .finally(() => {
+                    submitting.current = false;
+                    if (mounted.current) setInProgress(false);
+                });
         }, holdDuration + 250);
     };
 
     const endInput = () => {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = undefined;
         if (!buttonRef.current) return;
 
         controllerRef.start({
@@ -87,7 +109,6 @@ function VerifyModal({
                 easing: (t: number) => 1 - Math.pow(1 - t, 3),
             },
         });
-        clearTimeout(timeout);
     };
 
     useEffect(() => {
@@ -101,7 +122,7 @@ function VerifyModal({
             frame = requestAnimationFrame(update);
         };
 
-        if (state === VerifyState.Verifying) requestAnimationFrame(update);
+        if (state === VerifyState.Verifying) frame = requestAnimationFrame(update);
         return () => cancelAnimationFrame(frame);
     }, [state]);
 
@@ -189,6 +210,9 @@ function VerifyModal({
                             }}
                             onPointerDown={startInput}
                             onPointerUp={endInput}
+                            onPointerCancel={endInput}
+                            onPointerLeave={endInput}
+                            onBlur={endInput}
                             ref={buttonRef}
                             disabled={inProgress}
                         >

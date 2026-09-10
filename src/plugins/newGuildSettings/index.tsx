@@ -109,8 +109,9 @@ const makeContextMenuPatch: (shouldAddIcon: boolean) => NavContextMenuPatchCallb
         );
     }
 
-    if (folderId) {
+    if (folderId != null) {
         const folder = SortedGuildStore.getGuildFolderById(folderId);
+        if (!folder) return;
 
         children.push(
             <Menu.MenuItem
@@ -119,7 +120,7 @@ const makeContextMenuPatch: (shouldAddIcon: boolean) => NavContextMenuPatchCallb
                 icon={shouldAddIcon ? CogWheel : void 0}
                 action={async () => {
                     for (const guildId of folder.guildIds) {
-                        applyDefaultSettings(guildId);
+                        await applyDefaultSettings(guildId);
                         // you will be rate limited really fast so hopefully this avoids that
                         await sleep(250);
                     }
@@ -142,24 +143,22 @@ function applyVoiceNameHidingToGuild(guildId: string) {
     }
 }
 
-function applyDefaultSettings(guildId: string | null) {
+async function applyDefaultSettings(guildId: string | null) {
     if (guildId === "@me" || guildId === "null" || guildId == null) return;
 
-    updateGuildNotificationSettings(guildId,
-        {
+    try {
+        await updateGuildNotificationSettings(guildId, {
             muted: settings.store.guild,
             mobile_push: !settings.store.mobilePush,
             suppress_everyone: settings.store.everyone,
             suppress_roles: settings.store.role,
             mute_scheduled_events: settings.store.events,
-            notify_highlights: settings.store.highlights ? 1 : 0
+            notify_highlights: settings.store.highlights ? 1 : 0,
+            ...(settings.store.messages !== 3 && { message_notifications: settings.store.messages })
         });
-
-    if (settings.store.messages !== 3) {
-        updateGuildNotificationSettings(guildId,
-            {
-                message_notifications: settings.store.messages,
-            });
+    } catch (error) {
+        console.warn("[NewGuildSettings] Error applying notification settings:", error);
+        return;
     }
 
     if (settings.store.showAllChannels && isOptInEnabledForGuild(guildId)) {

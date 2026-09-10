@@ -82,7 +82,10 @@ export async function translateText(text: string, sourceLang: string, targetLang
         sourceLang = "";
 
     try {
-        return await translateImpl(text, sourceLang, targetLang);
+        const result = await translateImpl(text, sourceLang, targetLang);
+        if (typeof result?.text !== "string" || typeof result?.sourceLanguage !== "string")
+            throw new Error("The translation service returned an invalid response");
+        return result;
     } catch (e) {
         const userMessage = typeof e === "string"
             ? e
@@ -114,10 +117,10 @@ async function googleTranslate(text: string, sourceLang: string, targetLang: str
         "query.text": text,
     });
 
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok)
         throw new Error(
-            `Failed to translate "${text}" (${sourceLang} -> ${targetLang})`
+            `Translation request failed (${sourceLang} -> ${targetLang})`
             + `\n${res.status} ${res.statusText}`
         );
 
@@ -173,7 +176,7 @@ async function deeplTranslate(text: string, sourceLang: string, targetLang: stri
             showDeeplApiQuotaToast();
             return fallbackToGoogle(text, sourceLang, targetLang);
         default:
-            throw new Error(`Failed to translate "${text}" (${sourceLang} -> ${targetLang})\n${status} ${data}`);
+            throw new Error(`Translation request failed (${sourceLang} -> ${targetLang}): status ${status}`);
     }
 
     const { translations }: DeeplData = JSON.parse(data);
@@ -196,7 +199,7 @@ async function kagiTranslate(text: string, sourceLang: string, targetLang: strin
         case 401:
             throw "Invalid or expired Kagi session token";
         default:
-            throw new Error(`Failed to translate "${text}" (${sourceLang} -> ${targetLang})\n${status} ${data}`);
+            throw new Error(`Translation request failed (${sourceLang} -> ${targetLang}): status ${status}`);
     }
 
     const { detected_language, translation }: KagiData = data;

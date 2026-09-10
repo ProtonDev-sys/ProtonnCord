@@ -36,6 +36,7 @@ import { formatLowerBadge, QUEST_PAGE } from "./utils/ui";
 
 let isSwitchingAccount = false;
 let didAttemptAutoCompleteResume = false;
+let lifecycleGeneration = 0;
 const notifiedCompletedQuests = new Set<string>();
 export const enabledOnStartup = PlainSettings.plugins.Questify?.enabled;
 
@@ -655,6 +656,7 @@ export default definePlugin({
     renderQuestifyButton: ErrorBoundary.wrap(QuestButton, { noop: true }),
 
     start() {
+        const generation = ++lifecycleGeneration;
         if (!enabledOnStartup && PlainSettings.plugins.Questify?.enabled) {
             setRestartDirty(true);
         }
@@ -666,6 +668,7 @@ export default definePlugin({
         }
 
         onceReady.then(() => {
+            if (generation !== lifecycleGeneration) return;
             showPendingQuestifyNotice();
 
             if (!getQuestifySettings().disableQuestsEverything) {
@@ -677,6 +680,7 @@ export default definePlugin({
     },
 
     stop() {
+        lifecycleGeneration++;
         const pluginEnabled = Settings.plugins.Questify?.enabled;
 
         disposeRestartTracking();

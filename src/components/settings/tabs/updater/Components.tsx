@@ -7,7 +7,6 @@
 import { useSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
-import { ErrorCard } from "@components/ErrorCard";
 import { Flex } from "@components/Flex";
 import { HeadingSecondary } from "@components/Heading";
 import { Link } from "@components/Link";
@@ -17,7 +16,7 @@ import { UPDATER_BRANCHES, type UpdaterBranch } from "@shared/Updater";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
 import { relaunch } from "@utils/native";
-import { changes, checkForUpdates, isNewer, resetUpdateState, update, updateError } from "@utils/updater";
+import { changes, checkForUpdates, isNewer, resetUpdateState, update } from "@utils/updater";
 import { ConfirmModal, openModal, React, Select, Toasts, useState } from "@webpack/common";
 
 import { runWithDispatch } from "./runWithDispatch";
@@ -77,7 +76,7 @@ export function Newer(props: CommonProps) {
     return (
         <>
             <Paragraph>
-                Your local copy has more recent commits than the remote repository. This usually happens when you've made local changes. Please stash or reset them before updating.
+                Your local branch contains commits that are not on the selected remote branch. Review these differences before updating.
             </Paragraph>
             <Changes {...props} updates={changes} />
         </>
@@ -93,7 +92,7 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
     const busy = isUpdating || isChecking;
     const disabled = props.disabled || busy;
 
-    const isOutdated = (updates?.length ?? 0) > 0;
+    const isOutdated = updates.length > 0;
 
     return (
         <>
@@ -118,7 +117,9 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                 <Button
                     disabled={disabled}
                     onClick={runWithDispatch(setIsChecking, async () => {
+                        const branch = settings.updateBranch;
                         const outdated = await checkForUpdates();
+                        if (settings.updateBranch !== branch) return;
                         setHasChecked(true);
 
                         if (outdated || isNewer) {
@@ -145,10 +146,14 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                         variant="primary"
                         disabled={disabled}
                         onClick={runWithDispatch(setIsUpdating, async () => {
-                            if (await update()) {
+                            const branch = settings.updateBranch;
+                            const updated = await update();
+                            if (settings.updateBranch !== branch) return;
+                            if (updated) {
                                 setUpdates([]);
 
-                                await new Promise<void>(r => {
+                                await new Promise<void>((r, reject) => {
+                                    let confirmed = false;
                                     openModal(props => (
                                         <ConfirmModal
                                             {...props}
@@ -158,12 +163,18 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                                             cancelText="Not now!"
                                             variant="primary"
                                             onConfirm={() => {
-                                                relaunch();
-                                                r();
+                                                confirmed = true;
+                                                return relaunch().then(r, reject);
                                             }}
                                             onCancel={r}
                                         />
-                                    ));
+                                    ), { onCloseCallback: () => { if (!confirmed) r(); } });
+                                });
+                            } else {
+                                Toasts.show({
+                                    message: "The update could not be installed. Check for updates and try again.",
+                                    id: Toasts.genId(),
+                                    type: Toasts.Type.FAILURE
                                 });
                             }
                         })}
@@ -172,14 +183,7 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                     </Button>
                 )}
             </Flex>
-            {isNewer ? <Newer {...props} /> : !updates && updateError ? (
-                <>
-                    <Span size="md" weight="medium" color="text-strong">Error checking for updates</Span>
-                    <ErrorCard className={Margins.top8} style={{ padding: "1em" }}>
-                        <p>{updateError.stderr || updateError.stdout || updateError.message || "An unknown error occurred"}</p>
-                    </ErrorCard>
-                </>
-            ) : isOutdated ? (
+            {isNewer ? <Newer {...props} /> : isOutdated ? (
                 <>
                     <Paragraph>
                         There {updates.length === 1 ? "is 1 update" : `are ${updates.length} updates`} available. Click the button above to download and install.

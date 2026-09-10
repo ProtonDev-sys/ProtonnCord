@@ -43,7 +43,7 @@ export interface LanguageJson {
     aliases?: string[];
 }
 
-export const languages: Record<string, Language> = {};
+export const languages: Record<string, Language> = Object.create(null);
 
 let loadLanguagesPromise: Promise<void> | undefined;
 const grammarPromises = new Map<string, Promise<NonNullable<ILanguageRegistration["grammar"]>>>();
@@ -54,7 +54,11 @@ export const loadLanguages = async () => {
     loadLanguagesPromise = (async () => {
         if (Object.keys(languages).length > 0) return;
 
-        const langsJson: LanguageJson[] = await fetch(JSON_URL).then(res => res.ok ? res.json() : []);
+        const response = await fetch(JSON_URL, { signal: AbortSignal.timeout(10_000) });
+        if (!response.ok) throw new Error(`Shiki language request failed: ${response.status}`);
+        const langsJson: LanguageJson[] = await response.json();
+        if (!Array.isArray(langsJson) || !langsJson.every(lang => lang && typeof lang.name === "string" && typeof lang.displayName === "string" && typeof lang.scopeName === "string"))
+            throw new Error("Invalid Shiki language index");
         const loadedLanguages = Object.fromEntries(
             langsJson.map(lang => {
                 const { name, displayName, ...rest } = lang;
@@ -81,8 +85,11 @@ export const getGrammar = (lang: Language): Promise<NonNullable<ILanguageRegistr
     const cachedPromise = grammarPromises.get(lang.id);
     if (cachedPromise) return cachedPromise;
 
-    const grammarPromise = fetch(lang.grammarUrl)
-        .then(res => res.json())
+    const grammarPromise = fetch(lang.grammarUrl, { signal: AbortSignal.timeout(10_000) })
+        .then(res => {
+            if (!res.ok) throw new Error(`Shiki grammar request failed: ${res.status}`);
+            return res.json();
+        })
         .then(grammar => {
             lang.grammar = grammar;
             grammarPromises.delete(lang.id);

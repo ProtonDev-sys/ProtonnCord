@@ -29,7 +29,8 @@ import { getLanguages } from "./utils";
 const LanguageSettingKeys = ["receivedInput", "receivedOutput", "sentInput", "sentOutput"] as const;
 
 function LanguageSelect({ settingsKey, includeAuto }: { settingsKey: typeof LanguageSettingKeys[number]; includeAuto: boolean; }) {
-    const currentValue = settings.use([settingsKey])[settingsKey];
+    const config = settings.use([settingsKey, "service"]);
+    const currentValue = config[settingsKey];
 
     const options = useMemo(
         () => {
@@ -38,7 +39,7 @@ function LanguageSelect({ settingsKey, includeAuto }: { settingsKey: typeof Lang
                 options.shift();
 
             return options;
-        }, []
+        }, [config.service, includeAuto]
     );
 
     return (

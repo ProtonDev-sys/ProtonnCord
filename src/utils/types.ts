@@ -31,13 +31,14 @@ import type { NicknameIconFactory } from "@api/NicknameIcons";
 import { ProfileCollectionData } from "@api/ProfileCollections";
 import { ProfileSectionData } from "@api/ProfileSections";
 import type { UserAreaButtonData } from "@api/UserArea";
+import { registerPluginDefinition } from "@shared/pluginDefinition";
 import type { Command, FluxEvents } from "@vencord/discord-types";
 import type { ReactNode } from "react";
 import type { LiteralUnion } from "type-fest";
 
 // exists to export default definePlugin({...})
 export default function definePlugin<P extends PluginDef>(p: P & Record<PropertyKey, any>) {
-    return p as typeof p & Plugin;
+    return registerPluginDefinition(p as typeof p & Plugin);
 }
 
 export function makeRange(start: number, end: number, step = 1) {
@@ -212,7 +213,6 @@ export interface PluginDef {
      */
     managedStyle?: string;
 
-    userProfileBadge?: ProfileBadge;
     userProfileBadges?: ProfileBadge[];
 
     messagePopoverButton?: MessagePopoverButtonData;

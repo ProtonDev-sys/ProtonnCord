@@ -28,30 +28,37 @@ import { classifyUpdateChanges } from "./updateClassification";
 export const UpdateLogger = /* #__PURE__*/ new Logger("Updater", "white");
 export let isOutdated = false;
 export let isNewer = false;
-export let updateError: any;
 export let changes: Record<"hash" | "author" | "message", string>[] = [];
+let checkRevision = 0;
+let installation: { branch: typeof Settings.updateBranch; promise: Promise<boolean>; } | undefined;
 
 async function Unwrap<T>(p: Promise<IpcRes<T>>) {
     const res = await p;
 
     if (res.ok) return res.value;
 
-    updateError = res.error;
     throw res.error;
 }
 
 export function resetUpdateState() {
+    checkRevision++;
     isOutdated = false;
     isNewer = false;
-    updateError = undefined;
     changes = [];
 }
 
 export async function checkForUpdates() {
-    changes = await Unwrap(VencordNative.updater.getUpdates(Settings.updateBranch));
+    const branch = Settings.updateBranch;
+    const revision = ++checkRevision;
+    const [nextChanges, diagnostics] = await Promise.all([
+        Unwrap(VencordNative.updater.getUpdates(branch)),
+        Unwrap(VencordNative.updater.getDiagnostics(branch)),
+    ]);
+    if (branch !== Settings.updateBranch) return false;
+    if (revision !== checkRevision) return isOutdated;
+    changes = nextChanges;
 
-    // we only want to check this for the git updater, not the http updater
-    if (!IS_STANDALONE) {
+    if (diagnostics.backend === "git") {
         const classification = classifyUpdateChanges(changes, gitHash);
         isNewer = classification.isNewer;
         return (isOutdated = classification.isOutdated);
@@ -61,19 +68,33 @@ export async function checkForUpdates() {
     return (isOutdated = changes.length > 0);
 }
 
-export async function update() {
-    if (!isOutdated) return true;
-
-    const res = await Unwrap(VencordNative.updater.update(Settings.updateBranch));
-
-    if (res) {
-        if (!await Unwrap(VencordNative.updater.rebuild()))
-            throw new Error("The Build failed. Please try manually building the new update");
-        isOutdated = false;
+async function install(force: boolean) {
+    const branch = Settings.updateBranch;
+    if (installation) {
+        if (installation.branch !== branch)
+            throw new Error("An update is already running for another branch. Wait for it to finish before trying again.");
+        return installation.promise;
     }
+    if (!force && !isOutdated) return true;
 
-    return res;
+    const promise = (async () => {
+        const res = await Unwrap(VencordNative.updater.update(branch, force));
+        if (!res && !force) return false;
+        if (!await Unwrap(VencordNative.updater.rebuild(branch)))
+            throw new Error("The build or archive installation failed. Please try again.");
+        if (branch === Settings.updateBranch) resetUpdateState();
+        return true;
+    })();
+    installation = { branch, promise };
+    try {
+        return await promise;
+    } finally {
+        installation = undefined;
+    }
 }
+
+export const update = () => install(false);
+export const repair = () => install(true);
 
 export const getRepo = () => Unwrap(VencordNative.updater.getRepo());
 
@@ -87,8 +108,7 @@ export async function maybePromptToUpdate(confirmMessage: string, checkForDev = 
             const wantsUpdate = confirm(confirmMessage);
             if (wantsUpdate && isNewer) return alert("Your local copy has more recent commits. Please stash or reset them.");
             if (wantsUpdate) {
-                await update();
-                relaunch();
+                if (await update()) await relaunch();
             }
         }
     } catch (err) {

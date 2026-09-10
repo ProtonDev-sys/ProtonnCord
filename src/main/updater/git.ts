@@ -27,7 +27,7 @@ import gitHash from "~git-hash";
 import gitRemote from "~git-remote";
 
 import { type GitCommandResult, inspectGitUpdates, pullGitUpdates } from "./gitOperations";
-import { serializeErrors } from "./ipc";
+import { createOperationQueue, serializeErrors } from "./ipc";
 
 const VENCORD_SRC_DIR = join(__dirname, "..");
 const PROTONN_CORD_DIR = join(__dirname, "../../");
@@ -37,6 +37,7 @@ const UPDATE_REPOSITORY = `https://github.com/${gitRemote}.git`;
 const GIT_TIMEOUT_MS = 60_000;
 const BUILD_TIMEOUT_MS = 10 * 60_000;
 let lastBuiltHead = gitHash;
+const enqueue = createOperationQueue();
 
 const isFlatpak = process.platform === "linux" && !!process.env.FLATPAK_ID;
 
@@ -72,7 +73,9 @@ async function pull(branch: unknown) {
     return pullGitUpdates(git, UPDATE_REPOSITORY, lastBuiltHead, parseUpdaterBranch(branch));
 }
 
-async function build() {
+async function build(branch?: unknown) {
+    if (branch !== undefined && (await git("branch", "--show-current")).stdout.trim() !== parseUpdaterBranch(branch))
+        throw new Error("The source branch changed before the update could be built. Check for updates again.");
     const opts = { cwd: PROTONN_CORD_DIR, timeout: BUILD_TIMEOUT_MS };
 
     const command = isFlatpak ? "flatpak-spawn" : "node";
@@ -97,7 +100,7 @@ async function getDiagnostics(branch: unknown): Promise<UpdaterDiagnostics> {
 }
 
 ipcMain.handle(IpcEvents.GET_REPO, serializeErrors(getRepo));
-ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors(calculateGitChanges));
-ipcMain.handle(IpcEvents.UPDATE, serializeErrors(pull));
-ipcMain.handle(IpcEvents.BUILD, serializeErrors(build));
+ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors((branch: unknown) => enqueue(() => calculateGitChanges(branch))));
+ipcMain.handle(IpcEvents.UPDATE, serializeErrors((branch: unknown) => enqueue(() => pull(branch))));
+ipcMain.handle(IpcEvents.BUILD, serializeErrors((branch?: unknown) => enqueue(() => build(branch))));
 ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors(getDiagnostics));

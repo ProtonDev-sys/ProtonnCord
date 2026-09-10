@@ -182,6 +182,7 @@ function EmojiPreview({ value }: { value: string; }) {
     if (renderedEmoji.kind === "custom") {
         return (
             <CustomEmojiPreview
+                key={`${renderedEmoji.id}:${renderedEmoji.animated}`}
                 id={renderedEmoji.id}
                 name={renderedEmoji.name}
                 animated={renderedEmoji.animated}

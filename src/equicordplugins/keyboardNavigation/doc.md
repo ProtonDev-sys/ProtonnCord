@@ -1,49 +1,42 @@
-# Command Palette Actions Guide
+# KeyboardNavigation actions
 
-Welcome to the Command Palette Actions Guide! This guide serves to inform you on how to implement your own actions to the CommandPalette plugin. To do so you have two options: hardcoding or utilizing the `registerAction` function. This guide will focus on using the function as its best practice and is what should be used in most situations.
+Use `registerAction` from [commands.tsx](commands.tsx) to add an action to KeyboardNavigation's command palette. Register it when your plugin starts and call the returned cleanup function when it stops.
 
-> [!IMPORTANT]
-> While both methods hardcoding and using `registerAction` offer similar implementations, it's recommended to refrain from Hardcoding unless you solely plan on using this locally.
+Each action needs a unique `id` and a visible `label`. Its optional `callback` runs when selected.
 
-### Implementing Multiple Choice Modals
+## Multiple choice
+
+[openMultipleChoice](components/MultipleChoice.tsx) returns the selected `ButtonAction`, or `null` if the modal is dismissed.
 
 ```ts
-registerAction({
-    id: 'multipleChoiceCommand',
-    label: 'Multiple Choice',
+const removeChoiceAction = registerAction({
+    id: "myPlugin.multipleChoice",
+    label: "Multiple Choice",
     callback: async () => {
-        // Open a modal with multiple choices
         const choice = await openMultipleChoice([
-            { id: 'test1', label: 'Test 1' },
-            { id: 'test2', label: 'Test 2' },
+            { id: "first", label: "First choice" },
+            { id: "second", label: "Second choice" },
         ]);
-
-        // Log the selected choice with its label and ID
-        console.log(`Selected ${choice.label} with the ID ${choice.id}`);
+        if (choice === null) return;
+        console.log(choice.id, choice.label);
     },
 });
 ```
 
-- **ID**: A unique identifier for the command/action, ensuring uniqueness across specific options in that modal instance.
-- **Label**: The text displayed in the command palette for user recognition.
-- **Callback (optional)**: The function executed when the command is triggered.
+## Text input
 
-Inside the callback, the `openMultipleChoice` function opens a modal with a list of choices. Users can select an option, and upon choosing, a `ButtonAction` type is returned. The user's choice is then logged for reference.
-
-### Implementing String Input Modals
+[openSimpleTextInput](components/TextInput.tsx) returns the entered string, or `null` if dismissed. An empty string is a valid result.
 
 ```ts
-registerAction({
-    id: 'stringInputCommand',
-    label: 'String Input',
+const removeTextAction = registerAction({
+    id: "myPlugin.textInput",
+    label: "Text Input",
     callback: async () => {
-        // Open a modal with a text input
         const text = await openSimpleTextInput();
-
-        // Log the inputted text to console
-        console.log(`They typed: ${text}`);
+        if (text === null) return;
+        console.log(text);
     },
 });
 ```
 
-When the `stringInputCommand` is triggered, a modal with a simple text input field appears. Users can input text, and the entered string is returned. In this case, we log their input to console.
+Call `removeChoiceAction()` and `removeTextAction()` from your plugin's stop hook to unregister these examples.

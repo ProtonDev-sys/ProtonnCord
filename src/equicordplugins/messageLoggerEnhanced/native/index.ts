@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { opendir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
+import { opendir, realpath, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { DATA_DIR } from "@main/utils/constants";
@@ -182,10 +182,13 @@ export async function deleteFileNative(event: IpcMainInvokeEvent, attachmentId: 
     });
 }
 
-export async function writeLogs(_event: IpcMainInvokeEvent, contents: string) {
+export async function writeLogs(event: IpcMainInvokeEvent, contents: string) {
+    if (!isTrustedDiscordRendererEvent(event)) throw new Error("Untrusted log file request");
+    if (typeof contents !== "string" || Buffer.byteLength(contents) > 64 * 1024 * 1024)
+        throw new Error("Invalid log file size");
     const logsDir = await getLogsDir();
 
-    writeFile(path.join(logsDir, LOGS_DATA_FILENAME), contents);
+    await writeFile(path.join(logsDir, LOGS_DATA_FILENAME), contents, { mode: 0o600 });
 }
 
 export async function getDefaultNativeImageDir(): Promise<string> {
@@ -227,17 +230,25 @@ export async function chooseDir(event: IpcMainInvokeEvent, logKey: "logsDir" | "
     return dir;
 }
 
-export async function showItemInFolder(_event: IpcMainInvokeEvent) {
+export async function showItemInFolder(event: IpcMainInvokeEvent) {
+    if (!isTrustedDiscordRendererEvent(event)) throw new Error("Untrusted folder request");
     shell.showItemInFolder(await getImageCacheDir());
 }
 
-export async function chooseFile(_event: IpcMainInvokeEvent, title: string, filters: Electron.FileFilter[], defaultPath?: string) {
+export async function chooseFile(event: IpcMainInvokeEvent, title: string, filters: Electron.FileFilter[], defaultPath?: string) {
+    if (!isTrustedDiscordRendererEvent(event)) throw new Error("Untrusted file request");
+    if (typeof title !== "string" || title.length > 1024 || !Array.isArray(filters) || filters.length > 16
+        || filters.some(filter => !filter || typeof filter.name !== "string" || filter.name.length > 256
+            || !Array.isArray(filter.extensions) || filter.extensions.length > 16
+            || filter.extensions.some(extension => typeof extension !== "string" || !/^[a-zA-Z0-9*]{1,16}$/.test(extension)))
+        || defaultPath !== undefined && (typeof defaultPath !== "string" || defaultPath.length > 32_768))
+        throw new Error("Invalid file dialog options");
     const res = await dialog.showOpenDialog({ title, filters, properties: ["openFile"], defaultPath });
     const [path] = res.filePaths;
 
     if (!path) throw Error("Invalid file");
 
-    return await readFile(path, "utf-8");
+    return (await readBoundedImageCacheFile(path, 64 * 1024 * 1024)).toString("utf8");
 }
 
 async function performAttachmentDownload(
