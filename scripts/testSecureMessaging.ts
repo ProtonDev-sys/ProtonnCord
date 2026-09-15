@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import EventEmitter from "node:events";
+import { readFileSync } from "node:fs";
 
 import type { CloudUpload } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
@@ -198,6 +199,37 @@ function seededGarbage(seed: number, length: number): string {
 }
 
 async function main(): Promise<void> {
+    const rendererSource = readFileSync(
+        new URL("../src/equicordplugins/secureMessaging.desktop/index.tsx", import.meta.url),
+        "utf8",
+    );
+    const outgoingListenerSource = rendererSource.slice(
+        rendererSource.indexOf("const outgoingListener"),
+        rendererSource.indexOf("const editListener"),
+    );
+    const attachmentUploadGuardSource = rendererSource.slice(
+        rendererSource.indexOf("function installAttachmentUploadGuard"),
+        rendererSource.indexOf("function uninstallAttachmentUploadGuard"),
+    );
+    assert.match(
+        attachmentUploadGuardSource,
+        /catch \(error\) \{\s*if \(approval\) throw error;/,
+        "approved encrypted uploads surface protection failures instead of pretending to finish",
+    );
+    const attachmentReservationIndex = outgoingListenerSource.indexOf("authorizeScopedAttachmentUploadReservations");
+    const attachmentApprovalIndex = outgoingListenerSource.indexOf("approvedAttachmentUploads.set");
+    const attachmentStartIndex = outgoingListenerSource.indexOf("await Promise.all(uploads.map(upload => upload.upload()))");
+    assert.ok(
+        attachmentReservationIndex !== -1 && attachmentApprovalIndex > attachmentReservationIndex &&
+        attachmentStartIndex > attachmentApprovalIndex,
+        "encrypted attachments are authorized, approved, and explicitly started in order",
+    );
+    assert.match(
+        outgoingListenerSource,
+        /if \(preparedAttachments\) \{\s*options\.uploads = uploads;\s*options\.attachmentsToUpload = uploads;/,
+        "every encrypted attachment set is handed back to Discord's upload pipeline",
+    );
+
     assert.deepEqual(extractSecureEmbedUrls([
         "Links:",
         "https://example.com/path?x=1.",

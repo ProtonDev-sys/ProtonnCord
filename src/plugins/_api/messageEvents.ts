@@ -43,14 +43,25 @@ export default definePlugin({
         },
         {
             find: ".handleSendMessage,onResize:",
-            replacement: {
-                // Adapted from upstream Vencord's current Discord matcher while preserving the raw
-                // content-options object Protonn Cord needs to encrypt pending uploads.
-                match: /let (\i)=\i\.\i\.parse\((\i),.+?\.getSendMessageOptions\((\{.+?\})\),location:\i\.\i\.\i\};(?=.+?(\i)\.flags=)(?<=\)\((\{.+?\})\)\.then.+?)/,
-                replace: (match, parsedMessage, channel, contentOptions, options, props) => match +
-                    `if(await Vencord.Api.MessageEvents._handlePreSend(${channel}.id,${parsedMessage},${options},${props},${contentOptions}))` +
-                    "return{shouldClear:false,shouldRefocus:true};"
-            }
+            group: true,
+            replacement: [
+                {
+                    match: /\.then\((?:async )?(\i)=>\{(?=let\{valid:\i,failureReason:)/,
+                    replace: ".then(async $1=>{",
+                },
+                {
+                    match: /let (\i)=\i\.\i\.parse\((\i),.{0,200}?\);.{0,200}?let (\i)=\{\.\.\.\i\.\i\.getSendMessageOptions\((\{.{0,400}?\})\),location:\i\.\i\.\i\};/,
+                    replace: (match, parsedMessage, channel, options, contentOptions) => match +
+                        `const vcContentOptions=${contentOptions},vcSendProps={` +
+                        "openWarningPopout:e=>this.setState({contentWarningProps:e})," +
+                        "type:this.props.chatInputType,content:vcContentOptions.content," +
+                        "hasStickers:(vcContentOptions.stickers?.length??0)>0," +
+                        "hasAttachments:(vcContentOptions.uploads?.length??0)>0," +
+                        `channel:${channel}};` +
+                        `if(await Vencord.Api.MessageEvents._handlePreSend(${channel}.id,${parsedMessage},${options},vcSendProps,vcContentOptions))` +
+                        "return{shouldClear:false,shouldRefocus:true};",
+                },
+            ],
         },
         {
             find: '("interactionUsernameProfile',
