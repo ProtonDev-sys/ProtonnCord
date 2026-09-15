@@ -178,10 +178,12 @@ test("production retains every native method and preserves all reviewed startup 
     const options = { resolvePluginName, isDev: false, isReporter: false };
     const production = await readManifest(options);
     const startup = Object.entries(production).filter(([, native]) => native.eager).map(([name]) => name);
-    assert.equal(Object.keys(production).length, 22);
+    assert.equal(Object.keys(production).length, 23);
     assert.deepEqual(startup, ["FixSpotifyEmbeds", "FixYoutubeEmbeds", "YoutubeAdblock", "MessageLoggerEnhanced", "SongSpotlight"]);
     assert.ok(production.SecureMessaging.methods.includes("encryptOutgoing"));
     assert.ok(production.DiscordMCP.methods.includes("initializeBridge"));
+    assert.deepEqual([...production.MessageImage.methods].sort(), ["capture", "copyImage"]);
+    assert.equal(production.MessageImage.eager, false, "message capture has no native startup work");
     assert.ok(production.MessageLoggerEnhanced.methods.includes("startNativeLogExport"), "wildcard native reexports are retained");
     assert.equal(production.UserpluginInstaller, undefined);
 
