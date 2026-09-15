@@ -8,6 +8,7 @@ import { DataStore } from "@api/index";
 import { chooseFile, saveFile } from "@utils/web";
 import { Toasts } from "@webpack/common";
 
+import { isCollectionList } from "../types";
 import { DATA_COLLECTION_NAME, getCollections, refreshCacheCollection } from "./collectionManager";
 import { logger } from "./misc";
 
@@ -30,7 +31,7 @@ export async function exportCollections() {
 export async function importCollections(data: string) {
     const parsed = JSON.parse(data);
 
-    if ("collections" in parsed) {
+    if (parsed && typeof parsed === "object" && isCollectionList(parsed.collections)) {
         await DataStore.set(DATA_COLLECTION_NAME, parsed.collections);
         await refreshCacheCollection();
     } else {

@@ -9,7 +9,7 @@ import { PaintbrushIcon } from "@components/Icons";
 import { EquicordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { extractAndLoadChunksLazy } from "@webpack";
-import { ChannelStore, closeModal, DraftType, FluxDispatcher, Menu, openModal, PendingReplyStore, SelectedChannelStore, UploadHandler } from "@webpack/common";
+import { ChannelStore, closeModal, DraftType, Menu, openModal, SelectedChannelStore, UploadHandler } from "@webpack/common";
 
 import RemixModal from "./RemixModal";
 import css from "./styles.css?managed";
@@ -18,6 +18,11 @@ const requireCreateStickerModal = extractAndLoadChunksLazy([".CREATE_STICKER_MOD
 const requireSettingsMenu = extractAndLoadChunksLazy(['type:"USER_SETTINGS_MODAL_OPEN"']);
 
 const validMediaTypes = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+const modalKey = "vc-remix";
+
+function openRemix(url?: string) {
+    openModal(modalProps => <RemixModal modalProps={modalProps} close={() => closeModal(modalKey)} url={url} />, { modalKey });
+}
 
 const UploadContextMenuPatch: NavContextMenuPatchCallback = (children, props) => {
     if (children.find(c => c?.props?.id === "vc-remix")) return;
@@ -25,11 +30,7 @@ const UploadContextMenuPatch: NavContextMenuPatchCallback = (children, props) =>
     children.push(<Menu.MenuItem
         id="vc-remix"
         label="Remix"
-        action={() => {
-            const key = openModal(props =>
-                <RemixModal modalProps={props} close={() => closeModal(key)} />
-            );
-        }}
+        action={() => openRemix()}
     />);
 };
 
@@ -48,22 +49,16 @@ const MessageContextMenuPatch: NavContextMenuPatchCallback = (children, props) =
         id="vc-remix"
         label="Remix"
         icon={PaintbrushIcon}
-        action={() => {
-            const key = openModal(modalProps =>
-                <RemixModal modalProps={modalProps} close={() => closeModal(key)} url={url} />
-            );
-        }}
+        action={() => openRemix(url)}
     />);
 };
 
-export function sendRemix(blob: Blob) {
-    const currentChannelId = SelectedChannelStore.getChannelId();
-    const channel = ChannelStore.getChannel(currentChannelId);
-    const reply = PendingReplyStore.getPendingReply(currentChannelId);
-    if (reply) FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", currentChannelId });
+export function sendRemix(blob: Blob, channelId = SelectedChannelStore.getChannelId()) {
+    const channel = ChannelStore.getChannel(channelId);
+    if (!channel) throw new Error("Select a channel before sending the image.");
 
     const file = new File([blob], "remix.png", { type: "image/png" });
-    UploadHandler.promptToUpload([file], channel, DraftType.ChannelMessage);
+    return UploadHandler.promptToUpload([file], channel, DraftType.ChannelMessage);
 }
 
 export default definePlugin({
@@ -80,5 +75,8 @@ export default definePlugin({
 
         await requireCreateStickerModal();
         await requireSettingsMenu();
+    },
+    stop() {
+        closeModal(modalKey);
     },
 });

@@ -263,6 +263,12 @@ async function runTranscription({ audio, model, quantized, language }) {
 }
 `;
 
+const activeWorkers = new Set<TranscriptionWorker>();
+
+export function terminateTranscriptionWorkers() {
+    for (const worker of activeWorkers) worker.terminate();
+}
+
 export class TranscriptionWorker {
     private worker: Worker;
     private workerUrl: string;
@@ -272,6 +278,7 @@ export class TranscriptionWorker {
     private onPartial: (output: any) => void;
     private onProgress: (progress: TranscriptionProgress) => void;
     private terminated = false;
+    private abort = new AbortController();
 
     constructor(
         onStatus: (status: string) => void,
@@ -288,8 +295,15 @@ export class TranscriptionWorker {
 
         const blob = new Blob([workerCode], { type: "text/javascript" });
         this.workerUrl = URL.createObjectURL(blob);
-        this.worker = new Worker(this.workerUrl, { type: "module" });
+        try { this.worker = new Worker(this.workerUrl, { type: "module" }); }
+        catch (error) { URL.revokeObjectURL(this.workerUrl); throw error; }
+        activeWorkers.add(this);
         this.worker.onmessage = this.handleMessage.bind(this);
+        this.worker.onerror = event => {
+            if (this.terminated) return;
+            this.onError(new Error(event.message || "Speech worker could not start"));
+            this.terminate();
+        };
     }
 
     private getMimeType(url: string): string {
@@ -300,12 +314,13 @@ export class TranscriptionWorker {
     }
 
     private validateModelUrl(url: string): void {
-        const { hostname } = new URL(url);
-        if (hostname !== "huggingface.co" && hostname !== "cdn.jsdelivr.net")
+        const { hostname, protocol, username, password, port } = new URL(url);
+        if (protocol !== "https:" || username || password || port || (hostname !== "huggingface.co" && hostname !== "cdn.jsdelivr.net"))
             throw new Error(`Blocked unexpected model host: ${hostname}`);
     }
 
     private async handleMessage(event: MessageEvent) {
+        if (this.terminated) return;
         const { type, id, url, status, output, error } = event.data;
 
         switch (type) {
@@ -326,10 +341,11 @@ export class TranscriptionWorker {
                             }
                         }, [cachedData]);
                     } else {
-                        const res = await fetch(url);
+                        const res = await fetch(url, { signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(300_000)]) });
                         if (!res.ok) throw new Error("Failed to fetch " + url);
 
                         const buffer = await res.arrayBuffer();
+                        if (this.terminated) return;
                         await DataStore.set(`VoiceMessageTranscriber_${url}`, buffer);
                         if (this.terminated) return;
 
@@ -371,6 +387,7 @@ export class TranscriptionWorker {
     }
 
     public run(audio: Float32Array, model: string, quantized: boolean = true, language?: string) {
+        if (this.terminated) return;
         this.worker.postMessage({
             type: "run",
             audio,
@@ -383,6 +400,8 @@ export class TranscriptionWorker {
     public terminate() {
         if (this.terminated) return;
         this.terminated = true;
+        this.abort.abort();
+        activeWorkers.delete(this);
         this.worker.terminate();
         URL.revokeObjectURL(this.workerUrl);
     }

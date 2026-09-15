@@ -4,17 +4,20 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { useSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
-import { ErrorCard } from "@components/ErrorCard";
 import { Flex } from "@components/Flex";
+import { HeadingSecondary } from "@components/Heading";
 import { Link } from "@components/Link";
 import { Paragraph } from "@components/Paragraph";
 import { Span } from "@components/Span";
+import { UPDATER_BRANCHES, type UpdaterBranch } from "@shared/Updater";
 import { Margins } from "@utils/margins";
+import { classes } from "@utils/misc";
 import { relaunch } from "@utils/native";
-import { changes, checkForUpdates, update, updateError } from "@utils/updater";
-import { ConfirmModal, openModal, React, Toasts, useState } from "@webpack/common";
+import { changes, checkForUpdates, isNewer, resetUpdateState, update } from "@utils/updater";
+import { ConfirmModal, openModal, React, Select, Toasts, useState } from "@webpack/common";
 
 import { runWithDispatch } from "./runWithDispatch";
 
@@ -22,6 +25,16 @@ export interface CommonProps {
     repo: string;
     repoPending: boolean;
 }
+
+const UPDATE_BRANCH_LABELS: Record<UpdaterBranch, string> = {
+    main: "Main (stable)",
+    nightly: "Nightly (latest previews)",
+    staging: "Staging (tested previews)",
+};
+const UPDATE_BRANCH_OPTIONS = UPDATER_BRANCHES.map(branch => ({
+    label: UPDATE_BRANCH_LABELS[branch],
+    value: branch,
+}));
 
 export function HashLink({ repo, hash, disabled = false }: { repo: string, hash: string, disabled?: boolean; }) {
     return (
@@ -63,29 +76,53 @@ export function Newer(props: CommonProps) {
     return (
         <>
             <Paragraph>
-                Your local copy has more recent commits than the remote repository. This usually happens when you've made local changes. Please stash or reset them before updating.
+                Your local branch contains commits that are not on the selected remote branch. Review these differences before updating.
             </Paragraph>
             <Changes {...props} updates={changes} />
         </>
     );
 }
 
-export function Updatable(props: CommonProps) {
+export function Updatable(props: CommonProps & { disabled?: boolean; }) {
+    const settings = useSettings(["updateBranch"]);
     const [updates, setUpdates] = useState(changes);
     const [isChecking, setIsChecking] = useState(false);
     const [isUpdating, setIsUpdating] = useState(false);
+    const [hasChecked, setHasChecked] = useState(false);
+    const busy = isUpdating || isChecking;
+    const disabled = props.disabled || busy;
 
-    const isOutdated = (updates?.length ?? 0) > 0;
+    const isOutdated = updates.length > 0;
 
     return (
         <>
-            <Flex className={Margins.bottom8} gap="8px">
+            <HeadingSecondary>Update branch</HeadingSecondary>
+            <Paragraph className={Margins.bottom8}>
+                Main is stable. Staging contains tested previews, while Nightly follows the latest preview work. Select a branch, check for updates, then install the available update.
+            </Paragraph>
+            <Select
+                placeholder="Main (stable)"
+                options={UPDATE_BRANCH_OPTIONS}
+                isDisabled={disabled}
+                closeOnSelect={true}
+                select={(branch: UpdaterBranch) => {
+                    if (disabled || settings.updateBranch === branch) return;
+                    resetUpdateState();
+                    settings.updateBranch = branch;
+                }}
+                isSelected={branch => branch === settings.updateBranch}
+                serialize={branch => branch}
+            />
+            <Flex className={classes(Margins.top16, Margins.bottom8)} gap="8px">
                 <Button
-                    disabled={isUpdating || isChecking}
+                    disabled={disabled}
                     onClick={runWithDispatch(setIsChecking, async () => {
+                        const branch = settings.updateBranch;
                         const outdated = await checkForUpdates();
+                        if (settings.updateBranch !== branch) return;
+                        setHasChecked(true);
 
-                        if (outdated) {
+                        if (outdated || isNewer) {
                             setUpdates(changes);
                         } else {
                             setUpdates([]);
@@ -103,16 +140,20 @@ export function Updatable(props: CommonProps) {
                 >
                     Check for Updates
                 </Button>
-                {isOutdated && (
+                {isOutdated && !isNewer && (
                     <Button
                         size="small"
                         variant="primary"
-                        disabled={isUpdating || isChecking}
+                        disabled={disabled}
                         onClick={runWithDispatch(setIsUpdating, async () => {
-                            if (await update()) {
+                            const branch = settings.updateBranch;
+                            const updated = await update();
+                            if (settings.updateBranch !== branch) return;
+                            if (updated) {
                                 setUpdates([]);
 
-                                await new Promise<void>(r => {
+                                await new Promise<void>((r, reject) => {
+                                    let confirmed = false;
                                     openModal(props => (
                                         <ConfirmModal
                                             {...props}
@@ -122,12 +163,18 @@ export function Updatable(props: CommonProps) {
                                             cancelText="Not now!"
                                             variant="primary"
                                             onConfirm={() => {
-                                                relaunch();
-                                                r();
+                                                confirmed = true;
+                                                return relaunch().then(r, reject);
                                             }}
                                             onCancel={r}
                                         />
-                                    ));
+                                    ), { onCloseCallback: () => { if (!confirmed) r(); } });
+                                });
+                            } else {
+                                Toasts.show({
+                                    message: "The update could not be installed. Check for updates and try again.",
+                                    id: Toasts.genId(),
+                                    type: Toasts.Type.FAILURE
                                 });
                             }
                         })}
@@ -136,14 +183,7 @@ export function Updatable(props: CommonProps) {
                     </Button>
                 )}
             </Flex>
-            {!updates && updateError ? (
-                <>
-                    <Span size="md" weight="medium" color="text-strong">Error checking for updates</Span>
-                    <ErrorCard className={Margins.top8} style={{ padding: "1em" }}>
-                        <p>{updateError.stderr || updateError.stdout || updateError.message || "An unknown error occurred"}</p>
-                    </ErrorCard>
-                </>
-            ) : isOutdated ? (
+            {isNewer ? <Newer {...props} /> : isOutdated ? (
                 <>
                     <Paragraph>
                         There {updates.length === 1 ? "is 1 update" : `are ${updates.length} updates`} available. Click the button above to download and install.
@@ -152,7 +192,9 @@ export function Updatable(props: CommonProps) {
                 </>
             ) : (
                 <Paragraph>
-                    You're running the latest version of Protonn Cord.
+                    {hasChecked
+                        ? `You're running the latest available version on ${settings.updateBranch}.`
+                        : `Check for updates to see what's available on ${settings.updateBranch}.`}
                 </Paragraph>
             )}
         </>

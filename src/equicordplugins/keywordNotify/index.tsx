@@ -13,9 +13,9 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { DoubleCheckmarkIcon } from "@components/Icons";
 import { EquicordDevs } from "@utils/constants";
 import { classNameFactory } from "@utils/css";
-import { classes } from "@utils/misc";
+import { classes, isObject } from "@utils/misc";
 import definePlugin, { OptionType } from "@utils/types";
-import { Message, ScrollerBaseRef } from "@vencord/discord-types";
+import { Message, MessageJSON, ScrollerBaseRef } from "@vencord/discord-types";
 import { findByCodeLazy, findCssClassesLazy } from "@webpack";
 import {
     ChannelStore,
@@ -23,6 +23,7 @@ import {
     ScrollerThin,
     TabBar,
     Tooltip,
+    useEffect,
     useRef,
     UserStore,
     useState
@@ -42,11 +43,26 @@ interface KeywordEntry {
     listPriority: ListType;
 }
 
+type KeywordMessage = Omit<MessageJSON, "mentions" | "author"> & {
+    mentions: { id: string; }[];
+    author: MessageJSON["author"] & { bot?: boolean; };
+};
+
+function isKeywordEntry(value: unknown): value is KeywordEntry {
+    if (!isObject(value)) return false;
+    const entry = value as Partial<KeywordEntry>;
+    return typeof entry.regex === "string" && [entry.whitelist, entry.blacklist, entry.listIds]
+        .every(ids => ids == null || (Array.isArray(ids) && ids.every(id => typeof id === "string")));
+}
+
 export let keywordEntries: Array<KeywordEntry> = [];
 let keywordLog: Array<Message> = [];
 let storedKeywordLog: string[] = [];
 const storedKeywordLogIds = new Set<string>();
 let keywordLogWrite = Promise.resolve();
+let keywordEntriesWrite = Promise.resolve();
+let startGeneration = 0;
+const regexCache = new Map<string, RegExp | null>();
 let interceptor: (e: any) => void;
 
 interface ScrollerContext {
@@ -86,7 +102,7 @@ function storedMessageId(serialized: string): string | null {
 }
 
 function trimStoredKeywordLog() {
-    const amountToKeep = Math.max(0, settings.store.amountToKeep);
+    const amountToKeep = getAmountToKeep();
     while (storedKeywordLog.length > amountToKeep) {
         const removed = storedKeywordLog.shift();
         if (removed) {
@@ -94,6 +110,17 @@ function trimStoredKeywordLog() {
             if (id) storedKeywordLogIds.delete(id);
         }
     }
+}
+
+function getAmountToKeep() {
+    const amount = settings.store.amountToKeep;
+    return Number.isFinite(amount) ? Math.max(0, Math.floor(amount)) : 50;
+}
+
+export function persistKeywordEntries() {
+    const snapshot = structuredClone(keywordEntries);
+    keywordEntriesWrite = keywordEntriesWrite.catch(() => undefined).then(() => DataStore.set(KEYWORD_ENTRIES_KEY, snapshot));
+    return keywordEntriesWrite;
 }
 
 function persistKeywordLog() {
@@ -116,22 +143,32 @@ export async function addKeywordEntry(forceUpdate: () => void) {
         blacklist: [],
         listPriority: ListType.BlackList,
     });
-    await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
     forceUpdate();
+    await persistKeywordEntries().catch(console.error);
 }
 
 export async function removeKeywordEntry(idx: number, forceUpdate: () => void) {
     keywordEntries.splice(idx, 1);
-    await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
     forceUpdate();
+    await persistKeywordEntries().catch(console.error);
 }
 
-function safeMatchesRegex(str: string, regex: string, flags: string) {
+function compiledRegex(regex: string, flags: string) {
+    const key = JSON.stringify([regex, flags]);
+    if (regexCache.has(key)) return regexCache.get(key);
+    let compiled: RegExp | null;
     try {
-        return str.match(new RegExp(regex, flags));
+        compiled = new RegExp(regex, flags);
     } catch {
-        return false;
+        compiled = null;
     }
+    if (regexCache.size >= 256) regexCache.delete(regexCache.keys().next().value!);
+    regexCache.set(key, compiled);
+    return compiled;
+}
+
+function safeMatchesRegex(str: unknown, regex: string, flags: string) {
+    return typeof str === "string" && compiledRegex(regex, flags)?.test(str) === true;
 }
 
 export enum ListType {
@@ -140,27 +177,19 @@ export enum ListType {
 }
 
 function highlightKeywords(str: string, entries: Array<KeywordEntry>) {
-    let regexes: Array<RegExp>;
-    try {
-        regexes = entries.map(e => new RegExp(e.regex, "g" + (e.ignoreCase ? "i" : "")));
-    } catch (err) {
-        return [str];
+    for (const entry of entries) {
+        if (!entry.regex) continue;
+        const match = compiledRegex(entry.regex, entry.ignoreCase ? "i" : "")?.exec(str);
+        if (!match?.[0]) continue;
+        return (
+            <>
+                <span>{str.substring(0, match.index)}</span>
+                <span className="highlight">{match[0]}</span>
+                <span>{str.substring(match.index + match[0].length)}</span>
+            </>
+        );
     }
-
-    const matches = regexes.map(r => str.match(r)).flat().filter(e => e != null) as Array<string>;
-    if (matches.length === 0) {
-        return [str];
-    }
-
-    const idx = str.indexOf(matches[0]);
-
-    return (
-        <>
-            <span>{str.substring(0, idx)}</span>
-            <span className="highlight">{matches[0]}</span>
-            <span>{str.substring(idx + matches[0].length)}</span>
-        </>
-    );
+    return [str];
 }
 
 const settings = definePluginSettings({
@@ -217,14 +246,19 @@ export default definePlugin({
     ],
 
     async start() {
+        const generation = ++startGeneration;
         this.onUpdate = () => null;
-        await keywordLogWrite.catch(() => undefined);
+        await Promise.all([keywordLogWrite.catch(() => undefined), keywordEntriesWrite.catch(() => undefined)]);
+        if (generation !== startGeneration) return;
         keywordLog = [];
         storedKeywordLog = [];
         storedKeywordLogIds.clear();
         keywordLogWrite = Promise.resolve();
 
-        keywordEntries = await DataStore.get(KEYWORD_ENTRIES_KEY) ?? [];
+        const entries = await DataStore.get(KEYWORD_ENTRIES_KEY) ?? [];
+        if (generation !== startGeneration) return;
+        if (!Array.isArray(entries) || !entries.every(isKeywordEntry)) throw new Error("Invalid saved KeywordNotify entries");
+        keywordEntries = entries;
         keywordEntries.forEach(entry => {
             entry.ignoreBots = entry.ignoreBots ?? this.settings.store.ignoreBots;
 
@@ -242,9 +276,11 @@ export default definePlugin({
             delete entry.listIds;
             delete entry.listType;
         });
-        await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+        await persistKeywordEntries();
+        if (generation !== startGeneration) return;
 
         const persistedLog = await DataStore.get(KEYWORD_LOG_KEY);
+        if (generation !== startGeneration) return;
         for (const serialized of Array.isArray(persistedLog) ? persistedLog : []) {
             if (typeof serialized !== "string") continue;
             try {
@@ -261,6 +297,7 @@ export default definePlugin({
         trimStoredKeywordLog();
         if (storedKeywordLog.length !== loadedLength || storedKeywordLog.length !== (Array.isArray(persistedLog) ? persistedLog.length : 0))
             await persistKeywordLog();
+        if (generation !== startGeneration) return;
 
         interceptor = (e: any) => {
             return this.modify(e);
@@ -268,13 +305,17 @@ export default definePlugin({
         FluxDispatcher.addInterceptor(interceptor);
     },
     stop() {
+        startGeneration++;
+        regexCache.clear();
+        this.onUpdate = () => null;
         const index = FluxDispatcher._interceptors.indexOf(interceptor);
         if (index > -1) {
             FluxDispatcher._interceptors.splice(index, 1);
         }
     },
 
-    applyKeywordEntries(m: Message) {
+    applyKeywordEntries(m: KeywordMessage) {
+        if (!m?.author || typeof m.channel_id !== "string") return;
         let matches = false;
 
         for (const entry of keywordEntries) {
@@ -328,7 +369,7 @@ export default definePlugin({
             if (safeMatchesRegex(m.content, entry.regex, flags)) {
                 matches = true;
             } else {
-                for (const embed of m.embeds as any) {
+                for (const embed of m.embeds ?? []) {
                     if (safeMatchesRegex(embed.description, entry.regex, flags) || safeMatchesRegex(embed.title, entry.regex, flags)) {
                         matches = true;
                         break;
@@ -342,13 +383,14 @@ export default definePlugin({
                     }
                 }
             }
+            if (matches) break;
         }
 
         if (matches) {
             const id = UserStore.getCurrentUser()?.id;
             if (id != null) {
-                // @ts-ignore
-                m.mentions.push({ id: id });
+                if (Array.isArray(m.mentions) && !m.mentions.some(mention => mention.id === id))
+                    m.mentions.push({ id: id });
             }
 
             if (m.author.id !== id) {
@@ -357,7 +399,7 @@ export default definePlugin({
             }
         }
     },
-    storeMessage(m: Message) {
+    storeMessage(m: KeywordMessage) {
         if (m == null || typeof m.id !== "string" || storedKeywordLogIds.has(m.id)) return;
 
         storedKeywordLog.push(JSON.stringify(m));
@@ -370,7 +412,7 @@ export default definePlugin({
         storedKeywordLog = storedKeywordLog.filter(serialized => storedMessageId(serialized) !== id);
         void persistKeywordLog().catch(console.error);
     },
-    addToLog(m: Message) {
+    addToLog(m: KeywordMessage) {
         if (m == null || keywordLog.some(e => e.id === m.id))
             return;
 
@@ -385,7 +427,7 @@ export default definePlugin({
         keywordLog.push(messageRecord);
         keywordLog.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
-        while (keywordLog.length > Math.max(0, settings.store.amountToKeep)) {
+        while (keywordLog.length > getAmountToKeep()) {
             keywordLog.pop();
         }
 
@@ -435,10 +477,14 @@ export default definePlugin({
 
         const navigator = createNavigator("keywords", navigatorScrollerRef);
 
-        this.onUpdate = () => {
-            const newLog = Array.from(keywordLog);
-            setKeywordLog(newLog);
-        };
+        useEffect(() => {
+            const onUpdate = () => setKeywordLog(Array.from(keywordLog));
+            this.onUpdate = onUpdate;
+            onUpdate();
+            return () => {
+                if (this.onUpdate === onUpdate) this.onUpdate = () => null;
+            };
+        }, []);
 
         const RenderMsgWrapper = (message: Message & { _keyword?: boolean; }): JSX.Element => {
             message._keyword = true;

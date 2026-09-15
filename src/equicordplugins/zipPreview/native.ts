@@ -26,8 +26,16 @@ export async function fetchDiscordAttachment(
         });
         if (previewDialog.response !== 1) return { success: false, error: "ZIP preview was cancelled." };
 
-        const response = await fetch(attachmentUrl);
-        if (!response.ok) return { success: false, error: `Fetch failed: ${response.status} ${response.statusText}` };
+        const response = await fetch(attachmentUrl, {
+            cache: "no-store",
+            credentials: "omit",
+            redirect: "error",
+            signal: AbortSignal.timeout(30_000)
+        });
+        if (!response.ok) {
+            void response.body?.cancel();
+            return { success: false, error: `ZIP download failed with status ${response.status}.` };
+        }
 
         return {
             success: true,
@@ -41,6 +49,7 @@ export async function fetchDiscordAttachment(
 async function readLimitedResponse(response: Response): Promise<ArrayBuffer> {
     const contentLength = Number(response.headers.get("content-length"));
     if (Number.isFinite(contentLength) && contentLength > MAX_ZIP_BYTES) {
+        void response.body?.cancel();
         throw new Error("ZIP is too large to preview.");
     }
 
@@ -54,18 +63,25 @@ async function readLimitedResponse(response: Response): Promise<ArrayBuffer> {
     const chunks: Uint8Array[] = [];
     let totalBytes = 0;
 
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!value) continue;
+    try {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (!value) continue;
 
-        totalBytes += value.byteLength;
-        if (totalBytes > MAX_ZIP_BYTES) {
-            await reader.cancel();
-            throw new Error("ZIP is too large to preview.");
+            totalBytes += value.byteLength;
+            if (totalBytes > MAX_ZIP_BYTES) {
+                await reader.cancel();
+                throw new Error("ZIP is too large to preview.");
+            }
+
+            chunks.push(value);
         }
-
-        chunks.push(value);
+    } catch (error) {
+        await reader.cancel().catch(() => undefined);
+        throw error;
+    } finally {
+        reader.releaseLock();
     }
 
     const result = new Uint8Array(totalBytes);

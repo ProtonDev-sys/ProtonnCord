@@ -21,10 +21,10 @@ interface SettingsProto {
         proto: {
             status?: {
                 status: {
-                    value: String;
+                    value: string;
                 },
                 showCurrentGame: {
-                    value: Boolean;
+                    value: boolean;
                 },
             };
         };
@@ -97,12 +97,12 @@ export default definePlugin({
             if (protoStatus !== undefined) {
                 const steamStatus: SteamStatus = settings.store[`${protoStatus.status.value}Status`];
 
-                if (settings.store.goInvisibleIfActivityIsHidden && !protoStatus.showCurrentGame.value) {
+                if (settings.store.goInvisibleIfActivityIsHidden && protoStatus.showCurrentGame?.value === false) {
                     open(`steam://friends/status/${SteamStatus.Invisible}`);
 
                     return;
                 }
-                if (steamStatus === SteamStatus.None) { return; }
+                if (!steamStatus || steamStatus === SteamStatus.None) { return; }
 
                 // Open steam protocol URI for status change
                 open(`steam://friends/status/${steamStatus}`);

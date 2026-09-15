@@ -4,10 +4,15 @@ on:
         branches:
             - main
             - dev
+            - nightly
+            - staging
+            - "agent/**"
     pull_request:
         branches:
             - main
             - dev
+            - nightly
+            - staging
 
 jobs:
     Test:
@@ -27,6 +32,27 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
+            - name: Test Secure Messaging crypto caches
+              run: pnpm exec tsx scripts/testSecureMessagingCryptoCache.ts
+
+            - name: Test Secure Messaging cache lifecycle
+              run: pnpm exec tsx --test scripts/testSecureMessagingCaches.ts
+
+            - name: Test Secure Messaging attachment metadata
+              run: pnpm exec tsx --test scripts/testSecureMessagingAttachmentMetadata.ts
+
+            - name: Test Secure Messaging layout stability
+              run: pnpm exec tsx scripts/testSecureMessagingLayoutStability.ts
+
+            - name: Test Secure Messaging performance boundaries
+              run: pnpm testSecureMessagingPerformance
+
+            - name: Benchmark Secure Messaging
+              run: pnpm exec tsx scripts/benchmarkSecureMessaging.ts
+
+            - name: Build production desktop test inputs
+              run: pnpm build
+
             - name: Lint & Test if desktop version compiles
               run: pnpm test
 
@@ -35,3 +61,8 @@ jobs:
 
             - name: Test if plugin structure is valid
               run: pnpm generatePluginJson
+
+            - name: Test the generated API type package
+              run: |
+                  pnpm generateTypes
+                  pnpm --dir packages/vencord-types test

@@ -11,7 +11,7 @@ import { Flex } from "@components/Flex";
 import { Heading, HeadingTertiary } from "@components/Heading";
 import { copyToClipboard } from "@utils/clipboard";
 import { findByPropsLazy, findCssClassesLazy } from "@webpack";
-import { Button, Parser, useEffect, useState } from "@webpack/common";
+import { Button, Parser, showToast, Toasts, useEffect, useRef, useState } from "@webpack/common";
 
 import { FriendInvite } from "./types";
 
@@ -20,10 +20,13 @@ const { createFriendInvite, getAllFriendInvites, revokeFriendInvites } = findByP
 
 function CopyButton({ copyText, copiedText, onClick }) {
     const [copied, setCopied] = useState(false);
+    const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    useEffect(() => () => clearTimeout(timeout.current), []);
 
     const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
         setCopied(true);
-        setTimeout(() => setCopied(false), 1000);
+        clearTimeout(timeout.current);
+        timeout.current = setTimeout(() => setCopied(false), 1000);
         onClick(e);
     };
 
@@ -65,13 +68,15 @@ function FriendInviteCard({ invite }: { invite: FriendInvite; }) {
 
 export default function FriendCodesPanel() {
     const [invites, setInvites] = useState<FriendInvite[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        setLoading(true);
+        let active = true;
         getAllFriendInvites()
-            .then(setInvites)
-            .then(() => setLoading(false));
+            .then(value => { if (active) setInvites(value); })
+            .catch(() => { if (active) showToast("Failed to load friend codes.", Toasts.Type.FAILURE); })
+            .finally(() => { if (active) setLoading(false); });
+        return () => { active = false; };
     }, []);
 
     return (
@@ -93,7 +98,10 @@ export default function FriendCodesPanel() {
                         <Button
                             color={Button.Colors.GREEN}
                             look={Button.Looks.FILLED}
-                            onClick={() => createFriendInvite().then((invite: FriendInvite) => setInvites([...invites, invite]))}
+                            disabled={loading}
+                            onClick={() => createFriendInvite()
+                                .then((invite: FriendInvite) => setInvites(current => [...current, invite]))
+                                .catch(() => showToast("Failed to create a friend code.", Toasts.Type.FAILURE))}
                         >
                             Create Friend Code
                         </Button>
@@ -101,8 +109,10 @@ export default function FriendCodesPanel() {
                             style={{ marginLeft: "8px" }}
                             color={Button.Colors.RED}
                             look={Button.Looks.FILLED}
-                            disabled={!invites.length}
-                            onClick={() => revokeFriendInvites().then(setInvites([]))}
+                            disabled={loading || !invites.length}
+                            onClick={() => revokeFriendInvites()
+                                .then(() => setInvites([]))
+                                .catch(() => showToast("Failed to revoke friend codes.", Toasts.Type.FAILURE))}
                         >
                             Revoke all Friend Codes
                         </Button>

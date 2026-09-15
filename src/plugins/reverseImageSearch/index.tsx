@@ -40,7 +40,7 @@ const engineEntries = Object.entries(Engines).map(([name, url]) => ({
 }));
 
 function search(src: string, engine: string) {
-    open(engine + encodeURIComponent(src), "_blank");
+    open(engine + encodeURIComponent(src), "_blank", "noopener,noreferrer");
 }
 
 function makeSearchItem(src: string) {
@@ -97,6 +97,7 @@ const messageContextMenuPatch: NavContextMenuPatchCallback = (children, props) =
     if (props?.reverseImageSearchType !== "img") return;
 
     const src = props.itemHref ?? props.itemSrc;
+    if (typeof src !== "string" || !src) return;
 
     const group = findGroupChildrenByChildId("copy-link", children);
     group?.push(makeSearchItem(src));

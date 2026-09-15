@@ -159,7 +159,7 @@ export function Palette({ onClose, initialPage }: PaletteProps) {
     const [actionsIndex, setActionsIndex] = useState(0);
     const [recordingFor, setRecordingFor] = useState<string | null>(null);
     const [listItems, setListItems] = useState<PaletteListItem[]>([]);
-    const [, setVersion] = useState(0);
+    const [version, setVersion] = useState(0);
 
     const inputRef = useRef<HTMLInputElement>(null);
     const formRef = useRef<FormHandle | null>(null);
@@ -198,12 +198,14 @@ export function Palette({ onClose, initialPage }: PaletteProps) {
         }
 
         let cancelled = false;
-        Promise.resolve(currentPage.spec.items(query)).then(items => {
+        const { spec } = currentPage;
+        setListItems([]);
+        Promise.resolve().then(() => spec.items(query)).then(items => {
             if (!cancelled) setListItems(items);
         }).catch(e => logger.error("List page items failed", e));
 
         return () => { cancelled = true; };
-    }, [currentPage, query]);
+    }, [currentPage, query, version]);
 
     const expanded = currentPage != null || query.trim() !== "" || forceExpanded;
 
@@ -283,8 +285,10 @@ export function Palette({ onClose, initialPage }: PaletteProps) {
             await action.run(ctx);
         } catch (e) {
             logger.error(`Action ${action.id} failed`, e);
+            return;
         }
 
+        setVersion(version => version + 1);
         if (!action.keepOpen && settings.store.closeAfterExecute) onClose();
     }
 
@@ -551,7 +555,7 @@ export function Palette({ onClose, initialPage }: PaletteProps) {
                             />
                         )}
                         {currentPage?.spec.type === "form" && (
-                            <FormPage spec={currentPage.spec} ctx={ctx} formRef={formRef} />
+                            <FormPage key={pages.length} spec={currentPage.spec} ctx={ctx} formRef={formRef} />
                         )}
                         {currentPage?.spec.type === "detail" && (
                             <DetailPage spec={currentPage.spec} />

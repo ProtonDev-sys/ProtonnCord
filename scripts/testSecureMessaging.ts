@@ -14,6 +14,7 @@ import {
     encryptedAttachmentCiphertextSize,
     encryptAttachmentBytes,
     generateAttachmentBundleMaterial,
+    isValidAttachmentWaveform,
     parseSecurePlaintext,
     serializeSecurePlaintext,
 } from "../src/equicordplugins/secureMessaging.desktop/attachments";
@@ -38,12 +39,15 @@ import {
     decodeBase64Url,
     encodeBase64Url,
     ENCRYPTED_MESSAGE_PREFIX,
+    extractMentionedUserIds,
     isEncryptedMessage,
     isKeyAnnouncement,
     KEY_ANNOUNCEMENT_PREFIX,
     LEGACY_ENCRYPTED_MESSAGE_PREFIX,
     MAX_DISCORD_MESSAGE_LENGTH,
     MAX_SELECTED_RECIPIENTS,
+    PREVIOUS_ENCRYPTED_MESSAGE_PREFIX,
+    PREVIOUS_ENCRYPTED_MESSAGE_VERSION,
     parseEncryptedEnvelope,
     parseKeyAnnouncement,
     serializeEncryptedEnvelope,
@@ -73,8 +77,22 @@ import {
 } from "../src/equicordplugins/secureMessaging.desktop/wireAuthorizations";
 import { availableSelectedRecipientIds } from "../src/equicordplugins/secureMessaging.desktop/conversationSelection";
 import { discordEditedTimestamp, discordMessageNonce } from "../src/equicordplugins/secureMessaging.desktop/messageMetadata";
+import {
+    encryptedAllowedMentions,
+    encryptedMessageMentionsUser,
+} from "../src/equicordplugins/secureMessaging.desktop/mentionNotifications";
+import {
+    secureMessageGroupFlags,
+    SecureMessageGroup,
+    type SecureMessageGroupCandidate,
+} from "../src/equicordplugins/secureMessaging.desktop/messageGrouping";
 import { KeyReviewGate } from "../src/equicordplugins/secureMessaging.desktop/keyReviewGate";
-import { extractSecureEmbedUrls } from "../src/equicordplugins/secureMessaging.desktop/embedUrls";
+import {
+    extractSecureEmbedUrls,
+    isSecureInlineMediaEmbedType,
+    secureEmbedOnlyUrl,
+    shouldHideSecureEmbedOnlyPlaintext,
+} from "../src/equicordplugins/secureMessaging.desktop/embedUrls";
 
 const ALICE_ID = "100000000000000001";
 const BOB_ID = "100000000000000002";
@@ -198,14 +216,86 @@ function seededGarbage(seed: number, length: number): string {
     return result;
 }
 
+function groupedMessage(
+    id: string,
+    authorId: string,
+    offset: number,
+    overrides: Partial<SecureMessageGroupCandidate> = {},
+): SecureMessageGroupCandidate {
+    return {
+        attachments: [],
+        author: { id: authorId },
+        components: [],
+        content: `${ENCRYPTED_MESSAGE_PREFIX}fixture`,
+        embeds: [],
+        id,
+        reactions: [],
+        stickerItems: [],
+        timestamp: new Date(NOW + offset),
+        ...overrides,
+    };
+}
+
 async function main(): Promise<void> {
     const rendererSource = readFileSync(
         new URL("../src/equicordplugins/secureMessaging.desktop/index.tsx", import.meta.url),
         "utf8",
     );
+    const sidebarChatSource = readFileSync(
+        new URL("../src/equicordplugins/sidebarChat/index.tsx", import.meta.url),
+        "utf8",
+    );
+    const messageManagerPatch = rendererSource.match(
+        /find: '"MessageManager"',[\s\S]{0,250}?match: \/(.+?)\/,[\s\S]{0,100}?replace: "([^"]+)"/,
+    );
+    assert.ok(messageManagerPatch, "protected DMs patch the shared MessageManager entry");
+    assert.doesNotMatch(messageManagerPatch[1], /\.\+|\.\*/, "the no-fetch patch must remain bounded");
+    const patchMatcher = new RegExp(messageManagerPatch[1].replaceAll("\\i", "(?:[A-Za-z_$][\\w$]*)"));
+    const managerFixture = 'let logger=new Logger("MessageManager");function M(e){let{isPreload,channelId,forceFetch}=e;return fetch(channelId)}return M({channelId:"42"});';
+    const patchedManager = managerFixture.replace(
+        patchMatcher,
+        messageManagerPatch[2],
+    );
+    assert.notEqual(patchedManager, managerFixture, "the no-fetch patch applies without relying on destructuring order");
+    const runPatchedManager = new Function("Logger", "$self", "fetch", patchedManager) as (
+        logger: new (name: string) => object,
+        plugin: { shouldSuppressChatLoad(): boolean; deferChatLoad(): Promise<unknown>; },
+        fetch: (channelId: string) => string,
+    ) => unknown;
+    let fetchCount = 0;
+    const Logger = class { constructor(_name: string) { } };
+    const deferred = Promise.withResolvers<unknown>();
+    const plugin = { shouldSuppressChatLoad: () => true, deferChatLoad: () => deferred.promise };
+    assert.equal(runPatchedManager(Logger, plugin, () => { fetchCount++; return "loaded"; }), deferred.promise);
+    assert.equal(fetchCount, 0, "a locked protected channel never reaches MessageManager fetch");
+    plugin.shouldSuppressChatLoad = () => false;
+    assert.equal(runPatchedManager(Logger, plugin, () => { fetchCount++; return "loaded"; }), "loaded");
+    assert.equal(fetchCount, 1, "an unlocked channel resumes normal MessageManager fetch");
+
+    assert.match(rendererSource, /function installChatLoadGuard\(\)[\s\S]{0,900}actions\.fetchMessages = guardedFetchMessages/, "direct chat fetch actions share the same fail-closed guard");
+    assert.match(rendererSource, /find: "Missing channel in Channel\.renderHeaderToolbar"[\s\S]{0,300}renderChatGate/, "protected DMs replace the whole chat before its message list and composer mount");
+    assert.match(rendererSource, /protectedChannelIds === null[\s\S]{0,100}hardwareVaultLocked \? "locked" : "unavailable"/, "legacy access state remains fail-closed");
+    assert.match(rendererSource, /<ConversationManager[\s\S]{0,200}unlockOnly/, "locked protected chats reuse the unlock-only conversation manager");
+    assert.match(rendererSource, /let chatAccessGateEnabled = true;/, "enabled builds fail closed before the plugin start hook runs");
+    assert.match(rendererSource, /function chatGateReason[\s\S]{0,200}!chatAccessGateEnabled/, "disabled lifecycle state cannot leave an injected chat gate active");
+    const protectionResolver = rendererSource.slice(
+        rendererSource.indexOf("async function resolveConversationProtection"),
+        rendererSource.indexOf("function installAttachmentUploadGuard"),
+    );
+    const channelProtectionLookup = protectionResolver.indexOf("Native.getChannelProtection");
+    const conversationLookup = protectionResolver.indexOf("Native.getConversation");
+    assert.ok(
+        channelProtectionLookup !== -1 && conversationLookup !== -1 && channelProtectionLookup < conversationLookup,
+        "locked unprotected DMs are identified before the encrypted vault is opened",
+    );
     const outgoingListenerSource = rendererSource.slice(
         rendererSource.indexOf("const outgoingListener"),
         rendererSource.indexOf("const editListener"),
+    );
+    assert.match(
+        outgoingListenerSource,
+        /resolveConversationProtection\(channelId\)[\s\S]{0,200}protection\.kind === "unprotected"\) return/,
+        "ordinary DMs bypass encrypted send handling while the hardware vault is locked",
     );
     const attachmentUploadGuardSource = rendererSource.slice(
         rendererSource.indexOf("function installAttachmentUploadGuard"),
@@ -229,6 +319,68 @@ async function main(): Promise<void> {
         /if \(preparedAttachments\) \{\s*options\.uploads = uploads;\s*options\.attachmentsToUpload = uploads;/,
         "every encrypted attachment set is handed back to Discord's upload pipeline",
     );
+    assert.equal(
+        sidebarChatSource.match(/if \(secureMessagingGated \|\| !channel\?\.id[\s\S]{0,200}?MessageActions\.fetchMessages/g)?.length,
+        2,
+        "sidebar and popout effects do not fetch while the secure gate is active",
+    );
+    assert.match(sidebarChatSource, /secureMessagingGated \? renderSecureMessagingChatGate\(channel\) : View/, "sidebar chats replace their direct Chat mount with the secure gate");
+    assert.match(sidebarChatSource, /secureMessagingGated[\s\S]{0,150}renderSecureMessagingChatGate\(channel\)[\s\S]{0,150}<FullChannelView/, "popout chats replace their direct FullChannelView mount with the secure gate");
+
+    const groupedMessages = [
+        groupedMessage("group-1", ALICE_ID, 0),
+        groupedMessage("group-2", ALICE_ID, 1_000),
+        groupedMessage("group-3", ALICE_ID, 2_000),
+    ];
+    assert.equal(secureMessageGroupFlags(groupedMessages[0], groupedMessages), SecureMessageGroup.Next);
+    assert.equal(
+        secureMessageGroupFlags(groupedMessages[1], groupedMessages),
+        SecureMessageGroup.Previous | SecureMessageGroup.Next,
+    );
+    assert.equal(secureMessageGroupFlags(groupedMessages[2], groupedMessages), SecureMessageGroup.Previous);
+    assert.equal(
+        secureMessageGroupFlags(groupedMessages[0], groupedMessages, () => false),
+        0,
+        "failed decryptions split secure cards",
+    );
+    const differentAuthor = [groupedMessages[0], groupedMessage("different-author", BOB_ID, 1_000)];
+    assert.equal(secureMessageGroupFlags(differentAuthor[0], differentAuthor), 0, "different authors do not share a secure card");
+    const replyBoundary = [groupedMessages[0], groupedMessage("reply", ALICE_ID, 1_000, { messageReference: {} })];
+    assert.equal(secureMessageGroupFlags(replyBoundary[0], replyBoundary), 0, "reply previews split secure cards");
+    const previousReplyBoundary = [groupedMessage("previous-reply", ALICE_ID, 0, { messageReference: {} }), groupedMessages[1]];
+    assert.equal(secureMessageGroupFlags(previousReplyBoundary[0], previousReplyBoundary), SecureMessageGroup.Next,
+        "a reply can join the following message in the same native group");
+    assert.equal(secureMessageGroupFlags(previousReplyBoundary[1], previousReplyBoundary), SecureMessageGroup.Previous,
+        "messages after replies continue the native group");
+    assert.equal(secureMessageGroupFlags(previousReplyBoundary[1], previousReplyBoundary, () => true, () => true), 0,
+        "a native group boundary after a reply still splits secure cards");
+    const reactionBoundary = [groupedMessage("reacted", ALICE_ID, 0, { reactions: [{}] }), groupedMessages[1]];
+    assert.equal(secureMessageGroupFlags(reactionBoundary[0], reactionBoundary), 0, "reactions stay below a closed secure card");
+    const nextAttachmentBoundary = [groupedMessages[0], groupedMessage("attached", ALICE_ID, 1_000, { attachments: [{}] })];
+    assert.equal(
+        secureMessageGroupFlags(nextAttachmentBoundary[0], nextAttachmentBoundary),
+        0,
+        "a following attachment starts a separate secure card",
+    );
+    const timeBoundary = [groupedMessages[0], groupedMessage("later", ALICE_ID, 5 * 60 * 1_000)];
+    assert.equal(secureMessageGroupFlags(timeBoundary[0], timeBoundary), 0, "separate Discord message groups stay separate");
+    const nativeGroupBoundary = [groupedMessages[0], groupedMessages[1]];
+    const isNativeGroupStart = (message: SecureMessageGroupCandidate) => message.id === groupedMessages[1].id;
+    assert.equal(
+        secureMessageGroupFlags(nativeGroupBoundary[0], nativeGroupBoundary, () => true, isNativeGroupStart),
+        0,
+        "a visible Discord author header closes the preceding secure card",
+    );
+    assert.equal(
+        secureMessageGroupFlags(nativeGroupBoundary[1], nativeGroupBoundary, () => true, isNativeGroupStart),
+        0,
+        "a visible Discord author header starts an independent secure card",
+    );
+    assert.equal(
+        secureMessageGroupFlags(nativeGroupBoundary[0], nativeGroupBoundary, () => true, () => null),
+        0,
+        "an unobserved neighboring row stays closed until its native layout is known",
+    );
 
     assert.deepEqual(extractSecureEmbedUrls([
         "Links:",
@@ -247,10 +399,50 @@ async function main(): Promise<void> {
         10,
         "encrypted messages preserve Discord's ten-embed limit",
     );
+    const gifOnlyUrl = "https://media.tenor.com/example/video.mp4";
+    assert.equal(secureEmbedOnlyUrl(gifOnlyUrl), gifOnlyUrl, "a sole media URL is recognized as embed-only plaintext");
+    assert.equal(
+        secureEmbedOnlyUrl("  " + gifOnlyUrl + "\n"),
+        gifOnlyUrl,
+        "surrounding whitespace does not turn a sole media URL into visible message text",
+    );
+    assert.equal(secureEmbedOnlyUrl("watch this " + gifOnlyUrl), null, "a caption keeps its media URL visible");
+    assert.equal(secureEmbedOnlyUrl(gifOnlyUrl + " nice"), null, "trailing text keeps its media URL visible");
+    assert.equal(secureEmbedOnlyUrl(gifOnlyUrl + "."), null, "message punctuation is not discarded as redundant embed text");
+    assert.equal(secureEmbedOnlyUrl("<" + gifOnlyUrl + ">"), null, "Discord's explicit no-embed form remains visible");
+    assert.equal(
+        secureEmbedOnlyUrl(gifOnlyUrl + " https://example.com/second.gif"),
+        null,
+        "multiple media URLs remain visible as message text",
+    );
+    assert.equal(
+        shouldHideSecureEmbedOnlyPlaintext(gifOnlyUrl, "pending"),
+        false,
+        "an embed-only URL remains visible until its native preview is ready",
+    );
+    assert.equal(
+        shouldHideSecureEmbedOnlyPlaintext(gifOnlyUrl, "present"),
+        true,
+        "an embed-only URL stays hidden when Discord supplies inline media",
+    );
+    assert.equal(
+        shouldHideSecureEmbedOnlyPlaintext(gifOnlyUrl, "absent"),
+        false,
+        "the URL returns when Discord cannot supply inline media",
+    );
+    assert.equal(
+        shouldHideSecureEmbedOnlyPlaintext("caption " + gifOnlyUrl, "present"),
+        false,
+        "a caption and its link stay visible above inline media",
+    );
+    assert.equal(isSecureInlineMediaEmbedType("gifv"), true);
+    assert.equal(isSecureInlineMediaEmbedType("image"), true);
+    assert.equal(isSecureInlineMediaEmbedType("video"), true);
+    assert.equal(isSecureInlineMediaEmbedType("article"), false, "rich link cards keep their source URL visible");
     const reviewGate = new KeyReviewGate();
-    reviewGate.begin(ALICE_ID, BOB_ID);
+    reviewGate.begin(ALICE_ID, BOB_ID, "new-key-message", 20);
     reviewGate.fail(ALICE_ID, BOB_ID, "new-key-message");
-    reviewGate.finish(ALICE_ID, BOB_ID);
+    reviewGate.finish(ALICE_ID, BOB_ID, "new-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), true, "failed key review stays fail-closed");
     reviewGate.succeed(ALICE_ID, BOB_ID, "old-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), true, "another successful history review cannot clear a different failure");
@@ -258,11 +450,11 @@ async function main(): Promise<void> {
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), true, "another local account cannot clear this account's failure");
     reviewGate.succeed(ALICE_ID, BOB_ID, "new-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), false, "only the exact failed review retry clears its gate");
-    reviewGate.begin(ALICE_ID, BOB_ID);
-    reviewGate.begin(ALICE_ID, BOB_ID);
-    reviewGate.finish(ALICE_ID, BOB_ID);
+    reviewGate.begin(ALICE_ID, BOB_ID, "retry-key-message", 30);
+    reviewGate.begin(ALICE_ID, BOB_ID, "retry-key-message", 30);
+    reviewGate.finish(ALICE_ID, BOB_ID, "retry-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), true, "concurrent review count remains pending until all work finishes");
-    reviewGate.finish(ALICE_ID, BOB_ID);
+    reviewGate.finish(ALICE_ID, BOB_ID, "retry-key-message");
     assert.equal(reviewGate.isBlocked(ALICE_ID, BOB_ID), false);
 
     assert.equal(discordEditedTimestamp({ edited_timestamp: "2026-01-01T00:00:00+00:00" }), "2026-01-01T00:00:00.000Z");
@@ -441,6 +633,7 @@ async function main(): Promise<void> {
         width: null,
         height: null,
         duration: null,
+        waveform: null,
     };
     const encryptedAttachments = await Promise.all([
         encryptAttachmentBytes({
@@ -613,6 +806,7 @@ async function main(): Promise<void> {
         name: DETACHED_TEXT_FILENAME,
         size: largeMessageFile.size,
         spoiler: false,
+        waveform: null,
         width: null,
     };
     const plannedLargeMessageBytes = encryptedAttachmentCiphertextSize(largeMessageMetadata);
@@ -662,6 +856,93 @@ async function main(): Promise<void> {
     assert.equal(new TextDecoder("utf-8", { fatal: true }).decode(openedLargeMessage.data), largeMessageText);
     assert.equal(openedLargeMessage.metadata.name, DETACHED_TEXT_FILENAME);
     assert.equal(openedLargeMessage.metadata.mimeType, DETACHED_TEXT_MIME_TYPE);
+
+    const voiceWaveform = btoa(String.fromCharCode(...new Uint8Array([0, 16, 64, 128, 255])));
+    assert.equal(isValidAttachmentWaveform(voiceWaveform), true, "Discord voice waveforms use canonical bounded base64");
+    assert.equal(isValidAttachmentWaveform(voiceWaveform.replace(/=+$/u, "")), false, "non-canonical voice waveforms are rejected");
+    const voiceBytes = new Uint8Array([0x4f, 0x67, 0x67, 0x53, 0, 1, 2, 3, 4, 5]);
+    const voiceFile = new File([voiceBytes], "voice-message.ogg", { type: "audio/ogg; codecs=opus" });
+    const voiceUpload = Object.assign(new EventEmitter(), {
+        channelId: CHANNEL_ID,
+        classification: "unknown",
+        clip: null,
+        contentHash: null,
+        currentSize: voiceFile.size,
+        description: null,
+        durationSecs: 1.25,
+        etag: undefined,
+        error: null,
+        filename: voiceFile.name,
+        id: "0",
+        isImage: false,
+        status: "NOT_STARTED" as const,
+        isThumbnail: false,
+        isVideo: false,
+        uploadedFilename: "",
+        responseUrl: "",
+        item: { file: voiceFile, origin: "test", platform: CloudUploadPlatform.WEB },
+        loaded: 0,
+        mimeType: voiceFile.type,
+        origin: "test",
+        postCompressionSize: undefined,
+        preCompressionSize: voiceFile.size,
+        sensitive: false,
+        spoiler: false,
+        startTime: 0,
+        uniqueId: "voice-test",
+        waveform: voiceWaveform,
+        async upload() { },
+        cancel() { },
+        async delete() { },
+        getSize() { return this.currentSize; },
+        async maybeConvertToWebP() { },
+        removeFromMsgDraft() { },
+        setFilename(value: string) { this.filename = value; },
+    }) satisfies CloudUpload;
+    const preparedVoice = await prepareEncryptedAttachments([voiceUpload], "", CHANNEL_ID, ALICE_ID);
+    const voiceDescriptor = parseSecurePlaintext(preparedVoice.plaintext).attachments;
+    assert.ok(voiceDescriptor, "encrypted voice messages carry an authenticated attachment descriptor");
+    preparedVoice.apply();
+    assert.equal(voiceUpload.durationSecs, undefined, "Discord does not receive voice duration for opaque ciphertext");
+    assert.equal(voiceUpload.waveform, undefined, "Discord does not receive the encrypted voice waveform");
+    assert.equal(voiceUpload.item.file.type, "application/octet-stream", "Discord uploads opaque voice ciphertext");
+    const openedVoice = await decryptAttachmentBytes({
+        bundleId: voiceDescriptor.id,
+        channelId: CHANNEL_ID,
+        ciphertext: new Uint8Array(await voiceUpload.item.file.arrayBuffer()),
+        count: voiceDescriptor.count,
+        index: 0,
+        masterKey: decodeBase64Url(voiceDescriptor.key, 32),
+        senderUserId: ALICE_ID,
+    });
+    assert.deepEqual(openedVoice.data, voiceBytes);
+    assert.deepEqual(openedVoice.metadata, {
+        description: null,
+        duration: 1.25,
+        height: null,
+        mimeType: "audio/ogg; codecs=opus",
+        name: "voice-message.ogg",
+        size: voiceBytes.byteLength,
+        spoiler: false,
+        waveform: voiceWaveform,
+        width: null,
+    }, "voice duration and waveform are authenticated and restored for Discord's native player");
+    const preparedVoiceRetry = await prepareEncryptedAttachments([voiceUpload], "", CHANNEL_ID, ALICE_ID);
+    const voiceRetryDescriptor = parseSecurePlaintext(preparedVoiceRetry.plaintext).attachments;
+    assert.ok(voiceRetryDescriptor);
+    preparedVoiceRetry.apply();
+    const openedVoiceRetry = await decryptAttachmentBytes({
+        bundleId: voiceRetryDescriptor.id,
+        channelId: CHANNEL_ID,
+        ciphertext: new Uint8Array(await voiceUpload.item.file.arrayBuffer()),
+        count: voiceRetryDescriptor.count,
+        index: 0,
+        masterKey: decodeBase64Url(voiceRetryDescriptor.key, 32),
+        senderUserId: ALICE_ID,
+    });
+    assert.equal(openedVoiceRetry.metadata.duration, 1.25, "an encrypted voice retry retains its original authenticated duration");
+    assert.equal(openedVoiceRetry.metadata.waveform, voiceWaveform, "an encrypted voice retry retains its original authenticated waveform");
+    assert.deepEqual(openedVoiceRetry.data, voiceBytes, "an encrypted voice retry rebuilds from the original Ogg bytes");
     assert.throws(
         () => serializeSecurePlaintext("", null, [sticker, sticker]),
         /duplicates/,
@@ -814,7 +1095,7 @@ async function main(): Promise<void> {
         /snowflake/,
     );
 
-    const plaintext = "Hello Bob and Carol 👋 — こんにちは — café — null:\u0000 — astral: 𠜎";
+    const plaintext = `Hello <@${ALICE_ID}> and <@${BOB_ID}> 👋 — こんにちは — café — null:\u0000 — astral: 𠜎`;
     const encrypted = await encryptMessage({
         channelId: CHANNEL_ID,
         identity: aliceIdentity,
@@ -823,6 +1104,7 @@ async function main(): Promise<void> {
         senderUserId: ALICE_ID,
         now: NOW + 10,
         messageId: MESSAGE_ID,
+        mentionedUserIds: [ALICE_ID, BOB_ID],
         counter: 7,
     });
     const envelope = parseTestEnvelope(encrypted);
@@ -835,20 +1117,74 @@ async function main(): Promise<void> {
     assert.equal(envelope.k, alicePublic.fingerprint);
     assert.equal(envelope.q, 7);
     assert.equal(envelope.i, MESSAGE_ID);
+    assert.deepEqual(envelope.m, [ALICE_ID, BOB_ID], "PCEM3 carries explicitly mentioned selected participants, including the author");
+    assert.ok(encrypted.includes(JSON.stringify(`<@${ALICE_ID}>`)), "the authenticated wire carries author mention state immediately");
+    assert.ok(encrypted.includes(JSON.stringify(`<@${BOB_ID}>`)), "the authenticated wire contains Discord mention syntax");
+    assert.deepEqual(
+        encryptedAllowedMentions(encrypted, { channelId: CHANNEL_ID, discordAuthorId: ALICE_ID }, {
+            parse: ["everyone", "roles", "users"],
+            replied_user: true,
+        }),
+        { parse: [], users: [BOB_ID], replied_user: true },
+        "the REST allowlist permits only authenticated user notifications while preserving reply notification intent",
+    );
+    assert.equal(
+        encryptedMessageMentionsUser(encrypted, { channelId: CHANNEL_ID, discordAuthorId: ALICE_ID }, ALICE_ID),
+        true,
+        "the sender's encrypted row can establish its mention highlight before decryption",
+    );
+    assert.equal(
+        encryptedMessageMentionsUser(encrypted, { channelId: CHANNEL_ID, discordAuthorId: ALICE_ID }, CAROL_ID),
+        false,
+        "unmentioned selected participants do not receive a mentioned-message highlight",
+    );
+    assert.deepEqual(
+        extractMentionedUserIds(`<@!${CAROL_ID}> <@${BOB_ID}> <@${BOB_ID}> <@&${ALICE_ID}>`),
+        [BOB_ID, CAROL_ID],
+        "user mentions are normalized, deduplicated, sorted, and role mentions are ignored",
+    );
     assert.deepEqual(
         envelope.r.map(recipient => recipient.u),
         [ALICE_ID, BOB_ID, CAROL_ID],
         "recipients are deduplicated, sorted, and always include the sender",
     );
+    const { m: _mentionedUserIds, ...envelopeWithoutMentions } = envelope;
+    const previousEquivalent = serializeEncryptedEnvelope({
+        ...envelopeWithoutMentions,
+        v: PREVIOUS_ENCRYPTED_MESSAGE_VERSION,
+    });
+    assert.ok(previousEquivalent.startsWith(PREVIOUS_ENCRYPTED_MESSAGE_PREFIX));
+    assert.equal(parseTestEnvelope(previousEquivalent).v, PREVIOUS_ENCRYPTED_MESSAGE_VERSION, "existing PCEM2 messages remain parseable");
+    assert.ok(isEncryptedMessage(previousEquivalent), "PCEM2 encrypted messages remain detectable");
+    assert.deepEqual(
+        encryptedAllowedMentions(previousEquivalent, { channelId: CHANNEL_ID, discordAuthorId: ALICE_ID }, null),
+        { parse: [], users: [] },
+        "older encrypted envelopes cannot acquire phantom notification targets",
+    );
+    assert.equal(
+        encryptedMessageMentionsUser(
+            previousEquivalent,
+            { channelId: CHANNEL_ID, discordAuthorId: ALICE_ID },
+            ALICE_ID,
+            plaintext,
+        ),
+        true,
+        "verified plaintext supplies mention state for older envelopes",
+    );
     const legacyEquivalent = serializeEncryptedEnvelope({
-        ...envelope,
+        ...envelopeWithoutMentions,
         v: 1,
         i: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     });
     const envelopeBytesSaved = legacyEquivalent.length - encrypted.length;
-    assert.ok(envelopeBytesSaved >= 100, `compact envelope should save at least 100 characters, saved ${envelopeBytesSaved}`);
+    assert.ok(envelopeBytesSaved >= 90, `compact envelope with two mention tokens should save at least 90 characters, saved ${envelopeBytesSaved}`);
     assert.equal(parseEncryptedEnvelope(legacyEquivalent).v, 1, "existing PCEM1 messages remain parseable");
     assert.ok(isEncryptedMessage(legacyEquivalent), "legacy encrypted messages remain detectable");
+    assert.throws(
+        () => parseEncryptedEnvelope(`${LEGACY_ENCRYPTED_MESSAGE_PREFIX}null`),
+        /malformed encrypted envelope/iu,
+        "a non-object PCEM1 root is rejected as malformed instead of throwing a property-access error",
+    );
 
     for (const [label, identity, userId] of [
         ["sender", aliceIdentity, ALICE_ID],
@@ -950,7 +1286,7 @@ async function main(): Promise<void> {
     );
 
     const badSignature = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
-        value[7] = mutateBase64Url(value[7]);
+        value[8] = mutateBase64Url(value[8]);
     });
     await assert.rejects(
         decryptMessage(makeDecryptInput(badSignature, bobIdentity, BOB_ID, alicePublic)),
@@ -958,7 +1294,7 @@ async function main(): Promise<void> {
         "envelope signature tampering is rejected",
     );
     const nonCanonicalEnvelopeSignature = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
-        value[7] = makeNonCanonicalBase64Url(value[7]);
+        value[8] = makeNonCanonicalBase64Url(value[8]);
     });
     await assert.rejects(
         decryptMessage(makeDecryptInput(nonCanonicalEnvelopeSignature, bobIdentity, BOB_ID, alicePublic)),
@@ -973,12 +1309,20 @@ async function main(): Promise<void> {
     );
 
     const unsignedContentTamper = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
-        value[6] = mutateBase64Url(value[6]);
+        value[7] = mutateBase64Url(value[7]);
     });
     await assert.rejects(
         decryptMessage(makeDecryptInput(unsignedContentTamper, bobIdentity, BOB_ID, alicePublic)),
         /signature is invalid/,
         "ciphertext is covered by the sender signature",
+    );
+    const mentionTamper = mutateWirePayload(encrypted, ENCRYPTED_MESSAGE_PREFIX, value => {
+        value[5][1] = `<@${CAROL_ID}>`;
+    });
+    await assert.rejects(
+        decryptMessage(makeDecryptInput(mentionTamper, bobIdentity, BOB_ID, alicePublic)),
+        /signature is invalid/,
+        "Discord mentioned users are covered by the sender signature",
     );
     const contentTamperEnvelope = clone(envelope);
     contentTamperEnvelope.x = mutateBase64Url(contentTamperEnvelope.x);
@@ -1025,13 +1369,13 @@ async function main(): Promise<void> {
 
     await assert.rejects(
         decryptMessage(makeDecryptInput(encrypted, bobIdentity, BOB_ID, alicePublic, CHANNEL_ID, BOB_ID)),
-        /sender does not match its Discord author/,
+        /sender does not match its Discord author|mentioned user/,
         "the observed Discord author must match the signed sender",
     );
     const observedAuthorTamper = { ...alicePublic, userId: BOB_ID };
     await assert.rejects(
         decryptMessage(makeDecryptInput(encrypted, bobIdentity, BOB_ID, observedAuthorTamper, CHANNEL_ID, BOB_ID)),
-        /unverified sender key|malformed|signature is invalid/,
+        /unverified sender key|malformed|signature is invalid|mentioned user/,
         "the authenticated Discord author context cannot be changed",
     );
 
@@ -1139,10 +1483,15 @@ async function main(): Promise<void> {
         ["oversized wrapped key", value => { value[4][0][2] = "A".repeat(129); }],
         ["duplicate recipients", value => { value[4][1][0] = value[4][0][0]; }],
         ["unsorted recipients", value => { [value[4][0], value[4][1]] = [value[4][1], value[4][0]]; }],
-        ["short nonce", value => { value[5] = value[5].slice(1); }],
-        ["short ciphertext", value => { value[6] = "A".repeat(21); }],
-        ["short envelope signature", value => { value[7] = value[7].slice(1); }],
-        ["invalid envelope signature alphabet", value => { value[7] = `!${value[7].slice(1)}`; }],
+        ["non-array mentioned-user list", value => { value[5] = {}; }],
+        ["non-canonical mention syntax", value => { value[5][0] = `<@!${ALICE_ID}>`; }],
+        ["duplicate mentioned users", value => { value[5].push(value[5][0]); }],
+        ["unsorted mentioned users", value => { [value[5][0], value[5][1]] = [value[5][1], value[5][0]]; }],
+        ["mentioned user outside recipients", value => { value[5][0] = `<@${MALLORY_ID}>`; }],
+        ["short nonce", value => { value[6] = value[6].slice(1); }],
+        ["short ciphertext", value => { value[7] = "A".repeat(21); }],
+        ["short envelope signature", value => { value[8] = value[8].slice(1); }],
+        ["invalid envelope signature alphabet", value => { value[8] = `!${value[8].slice(1)}`; }],
     ];
     for (const [label, mutate] of envelopeMutations) {
         const candidate = clone(validEnvelopeObject);

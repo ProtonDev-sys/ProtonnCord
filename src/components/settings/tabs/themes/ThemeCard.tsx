@@ -8,8 +8,10 @@ import type { ThemeActivationMode } from "@api/Settings";
 import { Flex } from "@components/Flex";
 import { CogWheel, DeleteIcon, FolderIcon } from "@components/Icons";
 import { Link } from "@components/Link";
-import { OnlineThemeCard } from "@components/settings/OnlineThemeCard";
+import { AddonCard } from "@components/settings/AddonCard";
+import { EditableText } from "@components/settings/EditableText";
 import { UserThemeHeader } from "@main/themes";
+import { parseExternalHttpsUrl } from "@shared/externalUrls";
 import { classNameFactory } from "@utils/css";
 import { openInviteModal } from "@utils/discord";
 import { findComponentByCodeLazy } from "@webpack";
@@ -106,6 +108,8 @@ export interface ThemeCardProps {
 }
 
 export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton, onEditName, disabled, onPin, isPinned, onRefresh, onOpenFolder, onCopyUrl, onDownload, themeLink, isLocal, activationMode = "always", onActivationModeChange }: ThemeCardProps) {
+    const name = theme.customName || theme.name || theme.fileName || "Unknown Theme";
+    const website = parseExternalHttpsUrl(theme.website);
     const openThemeMenu = (e: React.MouseEvent) => {
         ContextMenuApi.openContextMenu(e, () => (
             <ThemeActivationMenu
@@ -121,12 +125,12 @@ export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton
                         action={onPin}
                     />
                 )}
-                {theme.website && (
+                {website && (
                     <Menu.MenuItem
                         id="open-website"
                         label="Open Website"
                         icon={HomeIcon}
-                        action={() => window.open(theme.website, "_blank")}
+                        action={() => VencordNative.native.openExternal(website)}
                     />
                 )}
                 {theme.invite && (
@@ -190,9 +194,8 @@ export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton
     };
 
     return (
-        <OnlineThemeCard
-            customName={theme.customName}
-            name={theme.name || theme.fileName || "Unknown Theme"}
+        <AddonCard
+            name={onEditName ? <EditableText value={name} onChange={onEditName} className="vc-addon-editable" /> : name}
             description={theme.description || "No description provided."}
             author={theme.author || "Unknown"}
             enabled={enabled}
@@ -200,12 +203,14 @@ export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton
             disabled={disabled}
             infoButton={
                 (IS_WEB || showDeleteButton || onPin) && (
-                    <div
+                    <button
+                        type="button"
+                        aria-label={`Manage ${name}`}
                         className={cl("menu-button")}
                         onClick={openThemeMenu}
                     >
                         <CogWheel />
-                    </div>
+                    </button>
                 )
             }
             footer={
@@ -234,8 +239,8 @@ export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton
                             )}
                         </Tooltip>
                     )}
-                    {!!theme.website && <Link href={theme.website}>Website</Link>}
-                    {!!(theme.website && theme.invite) && (
+                    {!!website && <Link href={website}>Website</Link>}
+                    {!!(website && theme.invite) && (
                         <span style={{ color: "var(--text-muted)" }}>•</span>
                     )}
                     {!!theme.invite && (
@@ -254,14 +259,12 @@ export function ThemeCard({ theme, enabled, onChange, onDelete, showDeleteButton
                     )}
                     {activationMode !== "always" && (
                         <>
-                            {!!(theme.website || theme.invite) && <span style={{ color: "var(--text-muted)" }}>•</span>}
+                            {!!(website || theme.invite) && <span style={{ color: "var(--text-muted)" }}>•</span>}
                             <span style={{ color: "var(--text-muted)" }}>{getThemeActivationModeLabel(activationMode)}</span>
                         </>
                     )}
                 </Flex>
             }
-
-            onEditName={onEditName}
         />
     );
 }

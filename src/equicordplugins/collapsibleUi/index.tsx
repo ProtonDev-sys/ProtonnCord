@@ -349,6 +349,7 @@ function stopDetachedUserAreaDrag() {
     detachedUserAreaPositionChanged = false;
     document.removeEventListener("mousemove", handleDetachedUserAreaMouseMove, true);
     document.removeEventListener("mouseup", stopDetachedUserAreaDrag, true);
+    window.removeEventListener("blur", stopDetachedUserAreaDrag);
 }
 
 function startDetachedUserAreaDrag(event: ReactMouseEvent<HTMLElement>) {
@@ -370,6 +371,7 @@ function startDetachedUserAreaDrag(event: ReactMouseEvent<HTMLElement>) {
 
     document.addEventListener("mousemove", handleDetachedUserAreaMouseMove, true);
     document.addEventListener("mouseup", stopDetachedUserAreaDrag, true);
+    window.addEventListener("blur", stopDetachedUserAreaDrag);
 }
 
 const ToolbarMenu = ErrorBoundary.wrap(({ onClose }: { onClose(): void; }) => {
@@ -424,10 +426,8 @@ const CollapsedMenuButton = ErrorBoundary.wrap(() => (
     </Clickable>
 ), { noop: true });
 
-const ChatButtonsRow = ErrorBoundary.wrap(({ buttons }: { buttons: ReactNode[]; }) => {
+const ChatButtonsRow = ErrorBoundary.wrap(({ buttons }: { buttons: ReactNode; }) => {
     const chatButtonsCollapsed = usePanelCollapsed("chatButtons");
-
-    if (buttons.length === 0) return <>{buttons}</>;
 
     return (
         <div className={classes(cl("chat-buttons"), chatButtonsCollapsed && cl("chat-buttons-collapsed"))}>
@@ -458,20 +458,21 @@ export default definePlugin({
 
     chatBarButtonWrapper: {
         wrapper: (buttons: ReactNode) => {
-            if (!Array.isArray(buttons) || buttons.length === 0) return buttons;
+            if (buttons == null || typeof buttons === "boolean" || (Array.isArray(buttons) && buttons.length === 0)) return buttons;
             return <ChatButtonsRow buttons={buttons} />;
         },
         priority: 0,
     },
 
     start() {
+        this.stop();
         const panelAttr = (classId: string, collapsed: boolean): SurfaceProvidedProps => ({
             [`data-vc-collapsible-ui-${classId}`]: "",
             [`data-vc-collapsible-ui-${classId}-${collapsed ? "collapsed" : "expanded"}`]: "",
         } as SurfaceProvidedProps);
 
-        providerUnsubs = [
-            addSurfacePropsProvider("guildBar", () => {
+        for (const addProvider of [
+            () => addSurfacePropsProvider("guildBar", () => {
                 const collapsed = isPanelCollapsed("guildBar");
                 const attrs: SurfaceProvidedProps = panelAttr(panelRegistry.guildBar.classId, collapsed);
                 if (collapsed && guildBarExpandedByInteraction) {
@@ -479,14 +480,14 @@ export default definePlugin({
                 }
                 return attrs;
             }),
-            addSurfacePropsProvider("channelList", () => {
+            () => addSurfacePropsProvider("channelList", () => {
                 const attrs: SurfaceProvidedProps = panelAttr(panelRegistry.channelList.classId, isPanelCollapsed("channelList"));
                 attrs.ref = setChannelListElement;
                 return attrs;
             }),
-            addSurfacePropsProvider("membersList", () => panelAttr(panelRegistry.membersList.classId, isPanelCollapsed("membersList"))),
-            addSurfacePropsProvider("titleBar", () => panelAttr(panelRegistry.titleBar.classId, isPanelCollapsed("titleBar"))),
-            addSurfacePropsProvider("headerBar", () => {
+            () => addSurfacePropsProvider("membersList", () => panelAttr(panelRegistry.membersList.classId, isPanelCollapsed("membersList"))),
+            () => addSurfacePropsProvider("titleBar", () => panelAttr(panelRegistry.titleBar.classId, isPanelCollapsed("titleBar"))),
+            () => addSurfacePropsProvider("headerBar", () => {
                 const collapsed = isPanelCollapsed("headerBar");
                 const attrs: SurfaceProvidedProps = panelAttr(panelRegistry.headerBar.classId, collapsed);
                 if (collapsed && headerBarExpandedByInteraction) {
@@ -501,7 +502,7 @@ export default definePlugin({
                 };
                 return attrs;
             }),
-            addSurfacePropsProvider("userArea", () => {
+            () => addSurfacePropsProvider("userArea", () => {
                 const uaCollapsed = isPanelCollapsed("userArea");
                 const gbCollapsed = isPanelCollapsed("guildBar");
                 const userAreaDetached = shouldDetachUserArea();
@@ -522,7 +523,7 @@ export default definePlugin({
                 }
                 return attrs;
             }),
-            addSurfacePropsProvider("base", () => {
+            () => addSurfacePropsProvider("base", () => {
                 const channelListCollapsed = isPanelCollapsed("channelList");
                 const headerBarCollapsed = isPanelCollapsed("headerBar");
                 return {
@@ -533,7 +534,7 @@ export default definePlugin({
                     ...(headerBarCollapsed && headerBarExpandedByInteraction ? { "data-vc-collapsible-ui-base-header-bar-expanded": "" } : {}),
                 } as SurfaceProvidedProps;
             }),
-            addSurfacePropsProvider("sidebar", () => {
+            () => addSurfacePropsProvider("sidebar", () => {
                 const collapsed = isPanelCollapsed("channelList");
                 const userAreaDetached = shouldDetachUserArea();
                 return {
@@ -548,7 +549,9 @@ export default definePlugin({
                     onMouseOutCapture: handleSidebarLeave,
                 } as SurfaceProvidedProps;
             }),
-        ];
+        ]) {
+            providerUnsubs.push(addProvider());
+        }
 
         setCollapseSettingChangeHandler(syncPanelCollapsedState);
         setUserAreaDetachSettingChangeHandler(syncUserAreaDetachState);

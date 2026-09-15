@@ -5,9 +5,12 @@
  */
 
 import { showNotice } from "@api/Notices";
-import { plugins, startDependenciesRecursive, startPlugin, stopPlugin } from "@api/PluginManager";
+import { isPluginEnabled, isPluginRequired, pluginRequiresRestart, plugins, startDependenciesRecursive, startPlugin, stopPlugin } from "@api/PluginManager";
 import { Settings } from "@api/Settings";
+import { reload } from "@utils/native";
 import { Alerts, Toasts } from "@webpack/common";
+
+import { PluginManifest } from "~plugins";
 
 function showErrorToast(message: string) {
     Toasts.show({
@@ -46,13 +49,13 @@ export async function toggleEnabled(name: string) {
         restartNeeded = true;
     }
 
-    async function beforeReturn(settings: any, wasEnabled: boolean) {
+    async function beforeReturn(wasEnabled: boolean) {
         if (restartNeeded) {
             const confirmed = await restartPrompt();
             if (!confirmed) return false;
 
-            settings.enabled = !wasEnabled;
-            location.reload();
+            Settings.plugins[name].enabled = !wasEnabled;
+            await reload();
             return true;
         }
 
@@ -60,9 +63,12 @@ export async function toggleEnabled(name: string) {
     }
 
     const plugin = plugins[name];
+    if (!plugin) return false;
+    if (isPluginRequired(name) || Object.values(PluginManifest).some(candidate =>
+        candidate.dependencies?.includes(name) && isPluginEnabled(candidate.name)
+    )) return false;
     const settings = Settings.plugins[plugin.name];
-    const isEnabled = () => settings.enabled ?? false;
-    const wasEnabled = isEnabled();
+    const wasEnabled = isPluginEnabled(name);
 
     if (!wasEnabled) {
         const { restartNeeded, failures } = startDependenciesRecursive(plugin);
@@ -71,20 +77,19 @@ export async function toggleEnabled(name: string) {
             showNotice("Failed to start dependencies: " + failures.join(", "), "Close", () => null);
             return false;
         } else if (restartNeeded) {
-            settings.enabled = true;
             onRestartNeeded();
-            return await beforeReturn(settings, wasEnabled);
+            return await beforeReturn(wasEnabled);
         }
     }
 
-    if (plugin.patches?.length) {
+    if (pluginRequiresRestart(plugin)) {
         onRestartNeeded();
-        return await beforeReturn(settings, wasEnabled);
+        return await beforeReturn(wasEnabled);
     }
 
     if (wasEnabled && !plugin.started) {
         settings.enabled = !wasEnabled;
-        return await beforeReturn(settings, wasEnabled);
+        return await beforeReturn(wasEnabled);
     }
 
     const result = wasEnabled ? stopPlugin(plugin) : startPlugin(plugin);
@@ -98,7 +103,7 @@ export async function toggleEnabled(name: string) {
     }
 
     settings.enabled = !wasEnabled;
-    return await beforeReturn(settings, wasEnabled);
+    return await beforeReturn(wasEnabled);
 }
 
 export function getWindowsName(release: string) {

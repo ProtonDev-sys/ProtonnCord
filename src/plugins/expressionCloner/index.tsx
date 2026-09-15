@@ -24,7 +24,7 @@ import { Flex } from "@components/Flex";
 import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { Devs } from "@utils/constants";
-import { getGuildAcronym } from "@utils/discord";
+import { getGuildAcronym, hasGuildFeature } from "@utils/discord";
 import { Logger } from "@utils/Logger";
 import definePlugin from "@utils/types";
 import { Guild, GuildSticker } from "@vencord/discord-types";
@@ -34,8 +34,6 @@ import { Constants, EmojiStore, FluxDispatcher, GuildStore, IconUtils, Menu, Mod
 import { Promisable } from "type-fest";
 
 const uploadEmoji = findByCodeLazy(".GUILD_EMOJIS(", "EMOJI_UPLOAD_START");
-
-const getGuildMaxEmojiSlots = findByCodeLazy(".additionalEmojiSlots") as (guild: Guild) => number;
 
 interface Sticker extends GuildSticker {
     t: "Sticker";
@@ -72,6 +70,13 @@ function getGuildMaxStickerSlots(guild: Guild) {
         return 120;
 
     return PremiumTierStickerLimitMap[guild.premiumTier] ?? PremiumTierStickerLimitMap[0];
+}
+
+function getGuildMaxEmojiSlots(guild: Guild) {
+    return Math.max(
+        hasGuildFeature(guild, "MORE_EMOJI") ? 200 : 50,
+        50 + (guild.premiumFeatures?.additionalEmojiSlots ?? 0)
+    );
 }
 
 function getUrl(data: Data, size: number) {
@@ -122,9 +127,11 @@ async function cloneSticker(guildId: string, sticker: Sticker) {
 async function cloneEmoji(guildId: string, emoji: Emoji) {
     const data = await fetchBlob(emoji);
 
-    const dataUrl = await new Promise<string>(resolve => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error ?? new Error("Failed to read emoji image"));
+        reader.onabort = () => reject(new Error("Emoji image read was cancelled"));
         reader.readAsDataURL(data);
     });
 
@@ -174,7 +181,7 @@ async function fetchBlob(data: Data) {
 
     for (let size = 4096; size >= 16; size /= 2) {
         const url = getUrl(data, size);
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
         if (!res.ok)
             throw new Error(`Failed to fetch ${url} - ${res.status}`);
 
@@ -357,9 +364,14 @@ function buildMenuItem(type: "Emoji" | "Sticker", fetchData: () => Promisable<Om
     );
 }
 
-function isGifUrl(url: string) {
-    const u = new URL(url);
-    return u.pathname.endsWith(".gif") || u.searchParams.get("animated") === "true";
+function isGifUrl(url: string | undefined) {
+    if (!url) return false;
+    try {
+        const u = new URL(url);
+        return u.pathname.endsWith(".gif") || u.searchParams.get("animated") === "true";
+    } catch {
+        return false;
+    }
 }
 
 const messageContextMenuPatch: NavContextMenuPatchCallback = (children, props) => {
@@ -370,8 +382,8 @@ const messageContextMenuPatch: NavContextMenuPatchCallback = (children, props) =
     const menuItem = (() => {
         switch (favoriteableType) {
             case "emoji":
-                const match = props.message.content.match(RegExp(`<a?:(\\w+)(?:~\\d+)?:${favoriteableId}>|https://cdn\\.discordapp\\.com/emojis/${favoriteableId}\\.`));
-                const reaction = props.message.reactions.find(reaction => reaction.emoji.id === favoriteableId);
+                const match = props.message?.content?.match(RegExp(`<a?:(\\w+)(?:~\\d+)?:${favoriteableId}>|https://cdn\\.discordapp\\.com/emojis/${favoriteableId}\\.`));
+                const reaction = props.message?.reactions?.find(reaction => reaction.emoji.id === favoriteableId);
                 if (!match && !reaction) return;
                 const name = (match && match[1]) ?? reaction?.emoji.name ?? "FakeNitroEmoji";
 
@@ -381,7 +393,7 @@ const messageContextMenuPatch: NavContextMenuPatchCallback = (children, props) =
                     isAnimated: isGifUrl(itemHref ?? itemSrc)
                 }));
             case "sticker":
-                const sticker = props.message.stickerItems.find(s => s.id === favoriteableId);
+                const sticker = props.message?.stickerItems?.find(s => s.id === favoriteableId);
                 if (sticker?.format_type === 3 /* LOTTIE */) return;
 
                 return buildMenuItem("Sticker", () => fetchSticker(favoriteableId));

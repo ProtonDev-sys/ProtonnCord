@@ -18,10 +18,11 @@
 
 import "./styles.css";
 
-import { ApplicationCommandInputType, ApplicationCommandOptionType, findOption, registerCommand, sendBotMessage, unregisterCommand } from "@api/Commands";
-import { migratePluginSettings } from "@api/Settings";
+import { ApplicationCommandInputType, ApplicationCommandOptionType, BUILT_IN, commands, findOption, registerCommand, sendBotMessage, unregisterCommand, VencordCommand } from "@api/Commands";
+import { migratePluginSettings, SettingsStore } from "@api/Settings";
 import { Devs } from "@utils/constants";
 import { sendMessage } from "@utils/discord";
+import { Logger } from "@utils/Logger";
 import definePlugin from "@utils/types";
 import { FluxDispatcher, MessageActions, PendingReplyStore } from "@webpack/common";
 
@@ -30,31 +31,70 @@ import { getTag, getTags, removeTag, settings, Tag } from "./settings";
 
 const CustomCommandsMarker = Symbol("CustomCommands");
 const ArgumentRegex = /{{(.+?)}}/g;
+const logger = new Logger("CustomCommands");
+let active = false;
+
+type TagCommand = VencordCommand & { [CustomCommandsMarker]?: string; };
+
+function parseArgument(value: string) {
+    const separator = value.indexOf("=");
+    return {
+        name: (separator === -1 ? value : value.slice(0, separator)).trim().toLowerCase(),
+        defaultValue: separator === -1 ? null : value.slice(separator + 1).trim()
+    };
+}
 
 export function parseTagArguments(message: string) {
-    const args = [] as { name: string, defaultValue: string | null; }[];
-
+    const args: ReturnType<typeof parseArgument>[] = [];
     for (const [, value] of message.matchAll(ArgumentRegex)) {
-        const [name, defaultValue] = value.split("=").map(s => s.trim());
-
-        if (!name) continue;
-        if (args.some(arg => arg.name === name)) continue;
-
-        args.push({ name: name.toLowerCase(), defaultValue: defaultValue ?? null });
+        const arg = parseArgument(value);
+        if (!arg.name) continue;
+        const previous = args.find(previous => previous.name === arg.name);
+        if (!previous) args.push(arg);
+        else if (arg.defaultValue === null) previous.defaultValue = null;
     }
-
     return args;
 }
 
-export function registerTagCommand(tag: Tag) {
-    const tagArguments = parseTagArguments(tag.message);
+export function validateTag(tag: Tag) {
+    if (!tag.name.trim() || tag.name !== tag.name.trim()) return "Enter a name without leading or trailing spaces.";
+    if (!tag.message.trim()) return "Enter a response.";
+    if (tag.name === "tags" || tag.name.startsWith("tags ") || Object.hasOwn(Object.prototype, tag.name))
+        return "This command name is reserved.";
+    if (parseTagArguments(tag.message).some(arg => arg.name === "ephemeral"))
+        return 'The argument name "ephemeral" is reserved and cannot be used.';
+    const existing: TagCommand | undefined = commands[tag.name];
+    if ((existing && existing[CustomCommandsMarker] === undefined) || BUILT_IN?.some(command => command.name === tag.name && command !== existing))
+        return `A command with the name "${tag.name}" already exists.`;
+}
 
-    registerCommand({
+function syncTagCommands(_data?: unknown, path = "") {
+    if (!active || (path && path !== "plugins" && path !== "plugins.CustomCommands" && path !== "plugins.CustomCommands.tagsList" && !path.startsWith("plugins.CustomCommands.tagsList."))) return;
+    for (const command of Object.values(commands) as TagCommand[]) {
+        if (command[CustomCommandsMarker] === undefined) continue;
+        const tag = getTag(command.name);
+        if (!tag || tag.message !== command[CustomCommandsMarker]) unregisterCommand(command.name);
+    }
+    for (const tag of getTags()) {
+        const command: TagCommand | undefined = commands[tag.name];
+        if (command?.[CustomCommandsMarker] === tag.message) continue;
+        try { registerTagCommand(tag); } catch (error) { logger.error("Could not register custom command", tag.name, error); }
+    }
+}
+
+export function registerTagCommand(tag: Tag) {
+    const error = validateTag(tag);
+    if (error) throw new Error(error);
+    if (!active) return;
+    if (!BUILT_IN) throw new Error("Commands are not ready yet. Try again after restarting Discord.");
+    const tagArguments = parseTagArguments(tag.message);
+    const { message } = tag;
+    const command: TagCommand = {
         name: tag.name,
         description: tag.name,
         inputType: ApplicationCommandInputType.BUILT_IN,
         options: [
-            ...tagArguments.map(arg => ({
+            ...tagArguments.sort((a, b) => Number(b.defaultValue === null) - Number(a.defaultValue === null)).map(arg => ({
                 name: arg.name,
                 description: arg.name,
                 type: ApplicationCommandOptionType.STRING,
@@ -69,21 +109,35 @@ export function registerTagCommand(tag: Tag) {
         ],
 
         execute: async (args, { channel }) => {
+            if (!active || commands[command.name] !== command) return;
             const ephemeral = findOption(args, "ephemeral", false);
 
-            const response = tag.message
+            const response = message
                 .replace(ArgumentRegex, (fullMatch, value: string) => {
-                    const [argName, defaultValue] = value.split("=").map(s => s.trim());
-                    return findOption(args, argName, null) ?? defaultValue ?? fullMatch;
+                    const { name, defaultValue } = parseArgument(value);
+                    return name ? findOption(args, name, null) ?? defaultValue ?? fullMatch : fullMatch;
                 })
                 .replaceAll("\\n", "\n");
 
-            const doSend = ephemeral ? sendBotMessage : sendMessage;
-            doSend(channel.id, { content: response }, false, MessageActions.getSendMessageOptionsForReply(PendingReplyStore.getPendingReply(channel.id)));
-            FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId: channel.id });
+            if (ephemeral) {
+                sendBotMessage(channel.id, { content: response });
+                return;
+            }
+            const reply = PendingReplyStore.getPendingReply(channel.id);
+            await sendMessage(channel.id, { content: response }, false, MessageActions.getSendMessageOptionsForReply(reply));
+            if (active && commands[command.name] === command && reply && PendingReplyStore.getPendingReply(channel.id) === reply)
+                FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId: channel.id });
         },
-        [CustomCommandsMarker]: true,
-    }, "CustomCommands");
+        [CustomCommandsMarker]: message,
+    };
+    const previous = commands[tag.name];
+    if (previous) unregisterCommand(tag.name);
+    try {
+        registerCommand(command, "CustomCommands");
+    } catch (error) {
+        if (previous) registerCommand(previous, "CustomCommands");
+        throw error;
+    }
 }
 
 migratePluginSettings("CustomCommands", "MessageTags");
@@ -97,11 +151,17 @@ export default definePlugin({
     settings,
 
     start() {
-        getTags().forEach(registerTagCommand);
+        active = true;
+        SettingsStore.addGlobalChangeListener(syncTagCommands);
+        syncTagCommands();
     },
 
     stop() {
-        getTags().forEach(tag => unregisterCommand(tag.name));
+        active = false;
+        SettingsStore.removeGlobalChangeListener(syncTagCommands);
+        for (const command of Object.values(commands) as TagCommand[]) {
+            if (command[CustomCommandsMarker] !== undefined) unregisterCommand(command.name);
+        }
     },
 
     commands: [

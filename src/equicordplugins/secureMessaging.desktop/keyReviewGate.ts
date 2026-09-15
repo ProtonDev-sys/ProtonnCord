@@ -8,44 +8,51 @@ function scopeKey(localUserId: string, peerUserId: string): string {
     return `${localUserId}\0${peerUserId}`;
 }
 
-export class KeyReviewGate {
-    private readonly failures = new Map<string, Set<string>>();
-    private readonly pending = new Map<string, number>();
+interface KeyReviewGateState {
+    attemptId: string;
+    failed: boolean;
+    order: number;
+    pending: number;
+}
 
-    begin(localUserId: string, peerUserId: string): void {
+function isNewerAttempt(state: KeyReviewGateState, attemptId: string, order: number): boolean {
+    return order > state.order || (order === state.order && attemptId > state.attemptId);
+}
+
+export class KeyReviewGate {
+    private readonly states = new Map<string, KeyReviewGateState>();
+
+    begin(localUserId: string, peerUserId: string, attemptId: string, order: number): void {
         const scope = scopeKey(localUserId, peerUserId);
-        this.pending.set(scope, (this.pending.get(scope) ?? 0) + 1);
+        const existing = this.states.get(scope);
+        if (!existing || isNewerAttempt(existing, attemptId, order)) {
+            this.states.set(scope, { attemptId, failed: false, order, pending: 1 });
+            return;
+        }
+        if (existing.attemptId === attemptId && existing.order === order) existing.pending++;
     }
 
-    finish(localUserId: string, peerUserId: string): void {
-        const scope = scopeKey(localUserId, peerUserId);
-        const remaining = (this.pending.get(scope) ?? 0) - 1;
-        if (remaining > 0) this.pending.set(scope, remaining);
-        else this.pending.delete(scope);
+    finish(localUserId: string, peerUserId: string, attemptId: string): void {
+        const state = this.states.get(scopeKey(localUserId, peerUserId));
+        if (state?.attemptId === attemptId && state.pending > 0) state.pending--;
     }
 
     fail(localUserId: string, peerUserId: string, attemptId: string): void {
-        const scope = scopeKey(localUserId, peerUserId);
-        const attempts = this.failures.get(scope) ?? new Set<string>();
-        attempts.add(attemptId);
-        this.failures.set(scope, attempts);
+        const state = this.states.get(scopeKey(localUserId, peerUserId));
+        if (state?.attemptId === attemptId) state.failed = true;
     }
 
     succeed(localUserId: string, peerUserId: string, attemptId: string): void {
-        const scope = scopeKey(localUserId, peerUserId);
-        const attempts = this.failures.get(scope);
-        if (!attempts) return;
-        attempts.delete(attemptId);
-        if (attempts.size === 0) this.failures.delete(scope);
+        const state = this.states.get(scopeKey(localUserId, peerUserId));
+        if (state?.attemptId === attemptId) state.failed = false;
     }
 
     isBlocked(localUserId: string, peerUserId: string): boolean {
-        const scope = scopeKey(localUserId, peerUserId);
-        return this.pending.has(scope) || this.failures.has(scope);
+        const state = this.states.get(scopeKey(localUserId, peerUserId));
+        return Boolean(state && (state.pending > 0 || state.failed));
     }
 
     clear(): void {
-        this.pending.clear();
-        this.failures.clear();
+        this.states.clear();
     }
 }

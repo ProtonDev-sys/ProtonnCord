@@ -6,14 +6,28 @@
 
 import * as DataStore from "@api/DataStore";
 
-import { removeRecentStickerByPackId } from "./components";
-import { DynamicPackSetMeta, DynamicStickerPackMeta, StickerPack, StickerPackMeta } from "./types";
-import { corsFetch, Mutex } from "./utils";
-
-const mutex = new Mutex();
+import { DynamicStickerPackMeta, StickerPack, StickerPackMeta } from "./types";
 
 const PACKS_KEY = "MoreStickers:Packs";
-const DYNAMIC_PACK_SET_METAS_KEY = "MoreStickers:DynamicPackSetMetas";
+const RECENTS_KEY = "MoreStickers:RecentStickers";
+const RESERVED_KEYS = new Set([PACKS_KEY, RECENTS_KEY, "Vencord-MoreStickers-Packs", "Vencord-MoreStickers-RecentStickers"]);
+
+export function validateStickerPack(value: unknown): asserts value is StickerPack {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid sticker pack");
+    const pack = value as StickerPack;
+    const validSticker = (sticker: any) => sticker && typeof sticker === "object" && !Array.isArray(sticker)
+        && typeof sticker.id === "string" && !!sticker.id && typeof sticker.title === "string"
+        && typeof sticker.image === "string" && typeof sticker.stickerPackId === "string";
+    if (typeof pack.id !== "string" || !pack.id || RESERVED_KEYS.has(pack.id) || typeof pack.title !== "string"
+        || !validSticker(pack.logo) || !Array.isArray(pack.stickers) || !pack.stickers.every(validSticker))
+        throw new Error("Invalid sticker pack");
+}
+
+function readMetas(value: unknown): StickerPackMeta[] {
+    if (value === undefined || value === null) return [];
+    if (!Array.isArray(value)) throw new Error("Stored sticker metadata is invalid and has been preserved");
+    return value;
+}
 
 /**
   * Convert StickerPack to StickerPackMeta
@@ -21,10 +35,10 @@ const DYNAMIC_PACK_SET_METAS_KEY = "MoreStickers:DynamicPackSetMetas";
   * @param {StickerPack} sp The StickerPack to convert.
   * @return {StickerPackMeta} The sticker pack metadata.
   */
-function stickerPackToMeta(sp: StickerPack): StickerPackMeta {
+export function stickerPackToMeta(sp: StickerPack): StickerPackMeta {
     return {
         id: sp.id,
-        title: sp.title = sp.title === "null" ? sp.id.match(/\d+/)?.[0] ?? sp.id : sp.title,
+        title: sp.title === "null" ? sp.id.match(/\d+/)?.[0] ?? sp.id : sp.title,
         author: sp.author,
         logo: sp.logo,
         dynamic: sp.dynamic,
@@ -38,26 +52,34 @@ function stickerPackToMeta(sp: StickerPack): StickerPackMeta {
   * @return {Promise<void>}
   */
 export async function saveStickerPack(sp: StickerPack, packsKey: string = PACKS_KEY): Promise<void> {
-    const meta = stickerPackToMeta(sp);
+    return saveStickerPacks([sp], packsKey);
+}
 
-    await Promise.all([
-        DataStore.set(`${sp.id}`, sp),
-        (async () => {
-            const unlock = await mutex.lock();
-
-            try {
-                let packs = (await DataStore.get(packsKey) ?? null) as (StickerPackMeta[] | null);
-                if (packs?.some(p => p.id === sp.id)) {
-                    packs = packs.map(p => p.id === sp.id ? meta : p);
-                } else {
-                    packs = packs === null ? [meta] : [...packs, meta];
-                }
-                await DataStore.set(packsKey, packs);
-            } finally {
-                unlock();
+export async function saveStickerPacks(imported: StickerPack[], packsKey: string = PACKS_KEY): Promise<void> {
+    imported.forEach(sp => {
+        validateStickerPack(sp);
+        if (sp.id === packsKey) throw new Error("Invalid sticker pack ID");
+    });
+    const keys = [...new Set([packsKey, ...imported.map(sp => sp.id)])];
+    await DataStore.updateMany(keys, values => {
+        const records = new Map(keys.map((key, index) => [key, values[index]]));
+        let packs = readMetas(records.get(packsKey));
+        const writes = new Map<string, unknown>();
+        for (const sp of imported) {
+            const existing = writes.get(sp.id) ?? records.get(sp.id);
+            if (existing !== undefined) {
+                validateStickerPack(existing);
+                if (existing.id !== sp.id) throw new Error("Stored sticker pack ID does not match");
             }
-        })()
-    ]);
+            const meta = stickerPackToMeta(sp);
+            writes.set(sp.id, { ...existing as StickerPack | undefined, ...sp });
+            packs = packs.some(p => p.id === sp.id)
+                ? packs.map(p => p.id === sp.id ? { ...p, ...meta } : p)
+                : [...packs, meta];
+        }
+        writes.set(packsKey, packs);
+        return { set: [...writes] };
+    });
 }
 
 /**
@@ -67,7 +89,7 @@ export async function saveStickerPack(sp: StickerPack, packsKey: string = PACKS_
   */
 export async function getStickerPackMetas(packsKey: string | undefined = PACKS_KEY): Promise<StickerPackMeta[]> {
     const packs = (await DataStore.get(packsKey)) ?? null as (StickerPackMeta[] | null);
-    return packs ?? [];
+    return readMetas(packs);
 }
 
 /**
@@ -81,113 +103,38 @@ export async function getStickerPack(id: string): Promise<StickerPack | null> {
 }
 
 /**
- * Get a sticker pack meta from the DataStore
- *
- * @param {string} id The id of the sticker pack.
- * @return {Promise<StickerPackMeta | null>}
- * */
-export async function getStickerPackMeta(id: string): Promise<StickerPackMeta | null> {
-    const sp = await getStickerPack(id);
-    return sp ? stickerPackToMeta(sp) : null;
-}
-
-/**
  * Delete a sticker pack from the DataStore
  *
  * @param {string} id The id of the sticker pack.
  * @return {Promise<void>}
  * */
 export async function deleteStickerPack(id: string, packsKey: string = PACKS_KEY): Promise<void> {
-    await Promise.all([
-        DataStore.del(id),
-        removeRecentStickerByPackId(id),
-        (async () => {
-            const unlock = await mutex.lock();
-
-            try {
-                const packs = (await DataStore.get(packsKey) ?? null) as (StickerPackMeta[] | null);
-                if (packs === null) return;
-                await DataStore.set(packsKey, packs.filter(p => p.id !== id));
-            } finally {
-                unlock();
-            }
-        })()
-    ]);
+    if (!id || RESERVED_KEYS.has(id) || id === packsKey) throw new Error("Invalid sticker pack ID");
+    await DataStore.updateMany([id, packsKey, RECENTS_KEY], ([pack, metas, recents]) => {
+        if (pack !== undefined) {
+            validateStickerPack(pack);
+            if (pack.id !== id) throw new Error("Stored sticker pack ID does not match");
+        }
+        if (recents !== undefined && !Array.isArray(recents)) throw new Error("Stored recent stickers are invalid and have been preserved");
+        return { delete: [id], set: [
+            [packsKey, readMetas(metas).filter(meta => meta.id !== id)],
+            [RECENTS_KEY, (recents ?? []).filter(sticker => sticker.stickerPackId !== id)]
+        ] };
+    });
 }
 
 // ---------------------------- Dynamic Packs ----------------------------
 
 export async function getDynamicStickerPack(dspm: DynamicStickerPackMeta): Promise<StickerPack | null> {
-    const dsp = await corsFetch(dspm.dynamic.refreshUrl, {
+    const dsp = await fetch(dspm.dynamic.refreshUrl, {
         headers: dspm.dynamic.authHeaders,
+        credentials: "omit",
+        redirect: "error",
+        signal: AbortSignal.timeout(60_000),
     });
     if (!dsp.ok) return null;
-    return await dsp.json();
-}
-
-export async function getDynamicPackSetMetas(dpsmKey: string = DYNAMIC_PACK_SET_METAS_KEY): Promise<DynamicPackSetMeta[] | null> {
-    return (await DataStore.get(dpsmKey)) ?? null as DynamicPackSetMeta[] | null;
-}
-
-function hasDynamicPackSetMeta(dpsm: DynamicPackSetMeta, metas?: DynamicPackSetMeta[] | null): boolean {
-    return !!metas?.some(m => m.id === dpsm.id);
-}
-
-export async function fetchDynamicPackSetMeta(dpsm: DynamicPackSetMeta): Promise<DynamicPackSetMeta | null> {
-    const dpsm_ = await corsFetch(dpsm.refreshUrl, {
-        headers: dpsm.authHeaders,
-    });
-    if (!dpsm_.ok) return null;
-
-    const dpsmData = await dpsm_.json();
-    return dpsmData as DynamicPackSetMeta;
-}
-
-export async function refreshDynamicPackSet(old: DynamicPackSetMeta, _new: DynamicPackSetMeta): Promise<void> {
-    const oldPackIds = new Set<string>();
-    for (const pack of old.packs) {
-        oldPackIds.add(pack.id);
-    }
-
-    const newPackIds = new Set<string>();
-    for (const pack of _new.packs) {
-        newPackIds.add(pack.id);
-    }
-
-    const toRemove: string[] = [];
-    for (const pack of old.packs) {
-        if (!newPackIds.has(pack.id)) toRemove.push(pack.id);
-    }
-
-    const toAdd: DynamicStickerPackMeta[] = [];
-    for (const pack of _new.packs) {
-        if (!oldPackIds.has(pack.id)) toAdd.push(pack);
-    }
-
-    await Promise.all([
-        ...toRemove.map(id => deleteStickerPack(id)),
-        ...toAdd.map(pack => getDynamicStickerPack(pack).then(sp => sp && saveStickerPack(sp)))
-    ]);
-}
-
-export async function saveDynamicPackSetMeta(dpsm: DynamicPackSetMeta, dpsmKey: string = DYNAMIC_PACK_SET_METAS_KEY): Promise<void> {
-    let metas = (await DataStore.get(dpsmKey) ?? null) as (DynamicPackSetMeta[] | null);
-    if (hasDynamicPackSetMeta(dpsm, metas)) {
-        await refreshDynamicPackSet(metas!.find(m => m.id === dpsm.id)!, dpsm);
-        metas = metas!.map(m => m.id === dpsm.id ? dpsm : m);
-    }
-
-    const unlock = await mutex.lock();
-    try {
-        await DataStore.set(dpsmKey, metas === null ? [dpsm] : metas);
-    } finally {
-        unlock();
-    }
-}
-
-export async function fetchAndRefreshDynamicPackSet(dpsm: DynamicPackSetMeta, dpsmKey: string = DYNAMIC_PACK_SET_METAS_KEY): Promise<void> {
-    const _new = await fetchDynamicPackSetMeta(dpsm);
-    if (!_new) return;
-
-    await saveDynamicPackSetMeta(_new, dpsmKey);
+    const pack = await dsp.json();
+    validateStickerPack(pack);
+    if (pack.id !== dspm.id) throw new Error("Refreshed pack ID does not match");
+    return pack;
 }

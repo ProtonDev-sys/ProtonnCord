@@ -7,13 +7,12 @@
 import "./styles.css";
 
 import { Icon, User } from "@vencord/discord-types";
-import { findComponentByCodeLazy, findStoreLazy } from "@webpack";
-import { Button, ChannelActionCreators, ChannelStore, GuildActions, MediaEngineStore, NavigationRouter, PermissionsBits, PermissionStore, Tooltip, UserStore, VoiceActions, VoiceStateStore } from "@webpack/common";
+import { findComponentByCodeLazy } from "@webpack";
+import { Button, ChannelActionCreators, ChannelStore, GuildActions, MediaEngineStore, NavigationRouter, PermissionsBits, PermissionStore, SoundboardStore, Tooltip, UserStore, VoiceActions, VoiceStateStore } from "@webpack/common";
 import { JSX } from "react";
 
 import { settings } from "./settings";
 
-const SoundboardStore = findStoreLazy("SoundboardStore");
 const DeafenIconSelf = findComponentByCodeLazy("M22.7 2.7a1", "1.4l20-20ZM17") as Icon;
 const DeafenIconOther = findComponentByCodeLazy("M21.76.83a5.02", "M12.38") as Icon;
 const ChatIcon = findComponentByCodeLazy(".css,d:\"M12 22a10") as Icon;
@@ -110,7 +109,7 @@ export function UserMuteButton({ user }: { user: User; }) {
     const useServerMuteForSelf = isCurrent && settings.store.serverSelf;
 
     const isLocalMuted = (isCurrent && MediaEngineStore.isSelfMute()) || MediaEngineStore.isLocalMute(user.id);
-    const isMuted = canServerMute ? isServerMuted : isLocalMuted;
+    const isMuted = canServerMute && (useServerMuteForSelf || !isCurrent) ? isServerMuted : isLocalMuted;
     const color = isMuted ? "var(--status-danger)" : "var(--channels-default)";
 
     const muteAction = canServerMute && (useServerMuteForSelf || !isCurrent) ? "Server Mute" : "Mute";
@@ -123,7 +122,7 @@ export function UserMuteButton({ user }: { user: User; }) {
             icon={isCurrent ? <MuteIconSelf muted={isMuted} size="sm" color={color} /> : <MuteIconOther muted={isMuted} size="sm" color={color} />}
             onClick={() => {
                 if (canServerMute) {
-                    if (!useServerMuteForSelf) {
+                    if (isCurrent && !useServerMuteForSelf) {
                         VoiceActions.toggleSelfMute();
                         return;
                     }
@@ -170,7 +169,7 @@ export function UserDeafenButton({ user }: { user: User; }) {
             icon={isCurrent ? <DeafenIconSelf muted={isDeafened} size="sm" color={color} /> : <DeafenIconOther muted={isDeafened} size="sm" color={color} />}
             onClick={() => {
                 if (canServerDeafen) {
-                    if (!useServerDeafenForSelf) {
+                    if (isCurrent && !useServerDeafenForSelf) {
                         VoiceActions.toggleSelfDeaf();
                         return;
                     }

@@ -22,15 +22,19 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { Devs, EquicordDevs } from "@utils/constants";
 import { SYM_LAZY_CACHED } from "@utils/lazy";
 import definePlugin from "@utils/types";
+import { useEffect } from "@webpack/common";
 
 import { settings, toggleHoverControls } from "./settings";
 import { migrateOldLyrics } from "./spotify/lyrics/api";
 import { SpotifyLyrics } from "./spotify/lyrics/components/lyrics";
+import { SpotifyLrcStore } from "./spotify/lyrics/providers/store";
 import { SpotifyPlayer } from "./spotify/PlayerComponent";
 import { TidalLyrics } from "./tidal/lyrics/components/lyrics";
 import { TidalLrcStore } from "./tidal/lyrics/providers/store";
 import { TidalPlayer } from "./tidal/TidalPlayer";
 import { TidalStore } from "./tidal/TidalStore";
+
+let startGeneration = 0;
 
 export default definePlugin({
     name: "MusicControls",
@@ -90,7 +94,13 @@ export default definePlugin({
     ],
 
     PanelWrapper({ VencordOriginal, ...props }) {
-        const { showTidalControls, showTidalLyrics, showSpotifyLyrics, showSpotifyControls, lyricsPosition } = settings.store;
+        const { showTidalControls, showTidalLyrics, showSpotifyLyrics, showSpotifyControls, lyricsPosition } = settings.use([
+            "showTidalControls", "showTidalLyrics", "showSpotifyLyrics", "showSpotifyControls", "lyricsPosition"
+        ]);
+        useEffect(() => {
+            if (showTidalControls || showTidalLyrics) TidalStore.init();
+            else (TidalStore as any)[SYM_LAZY_CACHED]?.destroy?.();
+        }, [showTidalControls, showTidalLyrics]);
         return (
             <>
                 <ErrorBoundary
@@ -115,11 +125,19 @@ export default definePlugin({
     },
 
     async start() {
+        const generation = ++startGeneration;
         await migrateOldLyrics();
+        if (generation !== startGeneration) return;
         toggleHoverControls(settings.store.hoverControls);
+        if (settings.store.showSpotifyLyrics) (SpotifyLrcStore as any)[SYM_LAZY_CACHED]?.init?.();
+        if (settings.store.showTidalLyrics) (TidalLrcStore as any)[SYM_LAZY_CACHED]?.init?.();
+        if (settings.store.showTidalControls || settings.store.showTidalLyrics) (TidalStore as any)[SYM_LAZY_CACHED]?.init?.();
     },
 
     stop() {
+        startGeneration++;
+        toggleHoverControls(false);
+        (SpotifyLrcStore as any)[SYM_LAZY_CACHED]?.destroy?.();
         (TidalLrcStore as any)[SYM_LAZY_CACHED]?.destroy?.();
         (TidalStore as any)[SYM_LAZY_CACHED]?.destroy?.();
     },

@@ -71,19 +71,14 @@ function extractUnpatchedModule(id: PropertyKey): string {
 export function getModulePatchedBy(id: PropertyKey, usePatched = companionSettings.store.usePatchedModule): string[] {
     return [...usePatched && getFactoryPatchedBy(id) || []];
 }
-export function parseNode(node: FindNode): any {
+export function parseNode(node: FindNode): string | RegExp {
     switch (node.type) {
         case "string":
             return node.value;
         case "regex":
             return new RegExp(node.value.pattern, node.value.flags);
-        case "function":
-            // We LOVE remote code execution
-            // Safety: This comes from localhost only, which actually means we have less permissions than the source,
-            // since we're running in the browser sandbox, whereas the sender has host access
-            return (0, eval)(node.value);
         default:
-            throw new Error("Unknown Node Type " + (node as any).type);
+            throw new Error("Unknown node type");
     }
 }
 // we need to have our own because the one in webpack returns the first with no handling of more than one module

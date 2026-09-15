@@ -22,10 +22,7 @@ import { Devs, EquicordDevs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { Message, User } from "@vencord/discord-types";
-import { findStoreLazy } from "@webpack";
-import { MessageStore, RelationshipStore } from "@webpack/common";
-
-const ReferencedMessageStore = findStoreLazy("ReferencedMessageStore");
+import { MessageStore, ReferencedMessageStore, RelationshipStore } from "@webpack/common";
 
 interface ChannelStreamDividerProps {
     type: "DIVIDER",
@@ -167,7 +164,7 @@ export default definePlugin({
         const suppressed = this.isSuppressed(message);
         const replyToSuppressed = this.isReplyToSuppressed(message);
 
-        if (message.type === 24 && settings.store.allowAutoModMessages) return [true, suppressed];
+        if (message.type === 24 && settings.store.allowAutoModMessages) return [true, suppressed.suppressed];
         if (suppressed.suppressed) return [!suppressed.hide, true];
         if (replyToSuppressed.suppressed) return [!replyToSuppressed.hide, true];
 

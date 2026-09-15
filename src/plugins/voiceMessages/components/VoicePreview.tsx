@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { useTimer } from "@utils/react";
+import { useEffect, useState } from "@webpack/common";
 
 import { cl, VoiceMessage } from "..";
 
@@ -40,9 +40,14 @@ export const VoicePreview = ({
     waveform,
     recording,
 }: VoicePreviewOptions) => {
-    const durationMs = useTimer({
-        deps: [recording]
-    });
+    const [durationMs, setDurationMs] = useState(0);
+    useEffect(() => {
+        setDurationMs(0);
+        if (!recording) return;
+        const startedAt = Date.now();
+        const timer = setInterval(() => setDurationMs(Date.now() - startedAt), 1000);
+        return () => clearInterval(timer);
+    }, [recording]);
 
     const durationSeconds = recording ? Math.floor(durationMs / 1000) : 0;
     const durationDisplay = Math.floor(durationSeconds / 60) + ":" + (durationSeconds % 60).toString().padStart(2, "0");

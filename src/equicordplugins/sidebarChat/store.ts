@@ -6,9 +6,10 @@
 
 import { definePluginSettings } from "@api/Settings";
 import { proxyLazy } from "@utils/lazy";
+import { Logger } from "@utils/Logger";
 import { OptionType } from "@utils/types";
 import { Flux as TFlux } from "@vencord/discord-types";
-import { ChannelActionCreators, Flux as FluxWP, FluxDispatcher, PopoutActions, PopoutWindowStore } from "@webpack/common";
+import { ChannelActionCreators, ChannelStore, Flux as FluxWP, FluxDispatcher, PopoutActions, PopoutWindowStore } from "@webpack/common";
 
 interface IFlux extends TFlux {
     PersistedStore: TFlux["Store"];
@@ -57,6 +58,7 @@ export const SidebarStore = proxyLazy(() => {
     };
 
     let previous = { ...current };
+    let selectionGeneration = 0;
 
     class SidebarStore extends (FluxWP as IFlux).PersistedStore {
         static persistKey = "SidebarStore";
@@ -78,6 +80,7 @@ export const SidebarStore = proxyLazy(() => {
     const store = new SidebarStore(FluxDispatcher, {
         // @ts-ignore
         async VC_SIDEBAR_CHAT_NEW({ guildId: newGId, id }: { guildId: string | null; id: string; }) {
+            const generation = ++selectionGeneration;
             previous = { ...current };
 
             current.guildId = newGId || "";
@@ -88,11 +91,20 @@ export const SidebarStore = proxyLazy(() => {
                 return;
             }
 
-            current.channelId = await ChannelActionCreators.getOrEnsurePrivateChannel(id);
-            store.emitChange();
+            try {
+                const channelId = ChannelStore.getChannel(id)?.isPrivate()
+                    ? id
+                    : await ChannelActionCreators.getOrEnsurePrivateChannel(id);
+                if (generation !== selectionGeneration) return;
+                current.channelId = channelId;
+                store.emitChange();
+            } catch (error) {
+                new Logger("SidebarChat").error("Could not open private channel", error);
+            }
         },
 
         VC_SIDEBAR_CHAT_PREVIOUS() {
+            selectionGeneration++;
             if (previous.channelId) {
                 current.guildId = previous.guildId;
                 current.channelId = previous.channelId;
@@ -101,6 +113,7 @@ export const SidebarStore = proxyLazy(() => {
         },
 
         VC_SIDEBAR_CHAT_CLOSE() {
+            selectionGeneration++;
             previous = { ...current };
             current.guildId = "";
             current.channelId = "";

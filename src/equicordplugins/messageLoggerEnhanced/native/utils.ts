@@ -5,7 +5,6 @@
  */
 
 import { access, mkdir } from "fs/promises";
-import path from "path";
 
 export async function exists(filename: string) {
     try {
@@ -19,10 +18,6 @@ export async function exists(filename: string) {
 export async function ensureDirectoryExists(cacheDir: string) {
     if (!await exists(cacheDir))
         await mkdir(cacheDir);
-}
-
-export function getAttachmentIdFromFilename(filename: string) {
-    return path.parse(filename).name;
 }
 
 export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

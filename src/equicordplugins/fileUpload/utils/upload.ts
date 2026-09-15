@@ -6,22 +6,32 @@
 
 import { normalizeCorsProxyUrl, toProxiedUrl } from "@equicordplugins/fileUpload/constants";
 import { settings } from "@equicordplugins/fileUpload/settings";
-import { fallbackServiceOrder, serviceLabels, ServiceType, ShareXUploaderConfig, UploadResponse } from "@equicordplugins/fileUpload/types";
+import { CustomEndpointApprovalRequest, fallbackServiceOrder, serviceLabels, ServiceType, ShareXUploaderConfig, UploadResponse } from "@equicordplugins/fileUpload/types";
 import { copyToClipboard } from "@utils/clipboard";
 import { insertTextIntoChatInputBox } from "@utils/discord";
 import { Logger } from "@utils/Logger";
 import { PluginNative } from "@utils/types";
 import { chooseFile } from "@utils/web";
-import { showToast, Toasts } from "@webpack/common";
+import { SelectedChannelStore, showToast, Toasts, UserStore } from "@webpack/common";
 
-import { convertApngToGif } from "./apngToGif";
+import { convertApngToGif, stopApngConversion } from "./apngToGif";
 import { getExtensionFromBytes, getExtensionFromMime, getMimeFromExtension, getUrlExtension } from "./getMediaUrl";
 import { isS3Configured, uploadToS3 } from "./s3";
 import { parseShareXConfig, resolveShareXTemplate } from "./sharex";
 
-const Native = IS_DISCORD_DESKTOP
+const nativeHelpers = IS_DISCORD_DESKTOP
     ? VencordNative.pluginHelpers.FileUpload as PluginNative<typeof import("../native")>
     : null;
+const Native = nativeHelpers && new Proxy(nativeHelpers, {
+    get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver);
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+            assertUploadCurrent();
+            return value.apply(target, args);
+        };
+    }
+});
 
 export const logger = new Logger("FileUpload", "#7cb7ff");
 
@@ -73,6 +83,52 @@ const uploadStateListeners = new Set<() => void>();
 let activeAbortController: AbortController | null = null;
 let activeXhr: XMLHttpRequest | null = null;
 let cancelRequested = false;
+let uploadGeneration = 0;
+let activeUploadGeneration = 0;
+let activeUploadAccountId: string | undefined;
+let activeUploadChannelId: string | undefined;
+let resetTimer: ReturnType<typeof setTimeout> | undefined;
+
+export function isUploadBusy() {
+    return isUploading;
+}
+
+function assertUploadCurrent() {
+    if (cancelRequested || activeUploadGeneration !== uploadGeneration
+        || UserStore.getCurrentUser()?.id !== activeUploadAccountId) throw new Error("Upload cancelled");
+}
+
+function beginUpload() {
+    clearTimeout(resetTimer);
+    resetTimer = undefined;
+    isUploading = true;
+    cancelRequested = false;
+    activeUploadGeneration = ++uploadGeneration;
+    activeUploadAccountId = UserStore.getCurrentUser()?.id;
+    activeUploadChannelId = SelectedChannelStore.getChannelId();
+}
+
+function finishUpload() {
+    isUploading = false;
+    activeAbortController = null;
+    activeXhr = null;
+    const generation = activeUploadGeneration;
+    if (generation !== uploadGeneration) return;
+    resetTimer = setTimeout(() => {
+        if (generation !== uploadGeneration) return;
+        resetTimer = undefined;
+        resetUploadState();
+    }, 1800);
+}
+
+export function stopUploads() {
+    cancelCurrentUpload();
+    uploadGeneration++;
+    clearTimeout(resetTimer);
+    resetTimer = undefined;
+    stopApngConversion();
+    resetUploadState();
+}
 
 function isUploadCancelledError(error: unknown): boolean {
     if (cancelRequested) return true;
@@ -96,7 +152,11 @@ function getFallbackServices(): ServiceType[] {
 
 function emitUploadState() {
     for (const listener of uploadStateListeners) {
-        listener();
+        try {
+            listener();
+        } catch (error) {
+            logger.error("Upload progress listener failed", error);
+        }
     }
 }
 
@@ -145,16 +205,19 @@ function getUploadTimeoutMs(): number {
 }
 
 async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+    assertUploadCurrent();
     const controller = new AbortController();
     activeAbortController = controller;
     const timeout = setTimeout(() => controller.abort(), getUploadTimeoutMs());
     const requestUrl = toProxyUrl(url);
 
     try {
-        return await fetch(requestUrl, {
+        const response = await fetch(requestUrl, {
             ...options,
             signal: controller.signal
         });
+        const body = await response.blob();
+        return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
     } catch (error) {
         if (cancelRequested || controller.signal.aborted) {
             throw new Error(cancelRequested ? "Upload cancelled by user" : "Upload timed out");
@@ -214,6 +277,7 @@ class XhrResponse {
 }
 
 function setXhrUploadProgress(event: ProgressEvent) {
+    if (cancelRequested || activeUploadGeneration !== uploadGeneration) return;
     if (!event.lengthComputable || event.total <= 0) {
         setUploadState({
             status: uploadState.currentServiceLabel
@@ -236,6 +300,7 @@ function setXhrUploadProgress(event: ProgressEvent) {
 }
 
 async function uploadRequestWithTimeout(url: string, options: RequestInit): Promise<XhrResponse> {
+    assertUploadCurrent();
     const requestUrl = toProxyUrl(url);
 
     return new Promise((resolve, reject) => {
@@ -243,33 +308,37 @@ async function uploadRequestWithTimeout(url: string, options: RequestInit): Prom
         activeXhr = xhr;
         const timeout = setTimeout(() => xhr.abort(), getUploadTimeoutMs());
 
-        xhr.open(options.method || "GET", requestUrl);
-
-        for (const [key, value] of getHeaderEntries(options.headers)) {
-            xhr.setRequestHeader(key, value);
-        }
-
-        xhr.upload.onprogress = setXhrUploadProgress;
-        xhr.onload = () => resolve(new XhrResponse(xhr));
-        xhr.onerror = () => reject(new Error("Upload failed"));
-        xhr.onabort = () => reject(new Error(cancelRequested ? "Upload cancelled by user" : "Upload timed out"));
-        xhr.onloadend = () => {
+        const cleanup = () => {
             clearTimeout(timeout);
             xhr.upload.onprogress = null;
             if (activeXhr === xhr) {
                 activeXhr = null;
             }
         };
-
-        const { body } = options;
-        xhr.send(body instanceof ReadableStream ? null : body as XMLHttpRequestBodyInit | null);
+        try {
+            xhr.open(options.method || "GET", requestUrl);
+            for (const [key, value] of getHeaderEntries(options.headers)) xhr.setRequestHeader(key, value);
+            xhr.upload.onprogress = setXhrUploadProgress;
+            xhr.onload = () => {
+                try { resolve(new XhrResponse(xhr)); } catch (error) { reject(error); }
+            };
+            xhr.onerror = () => reject(new Error("Upload failed"));
+            xhr.onabort = () => reject(new Error(cancelRequested ? "Upload cancelled by user" : "Upload timed out"));
+            xhr.onloadend = cleanup;
+            const { body } = options;
+            if (body instanceof ReadableStream) throw new Error("Streaming upload bodies are not supported");
+            xhr.send(body as XMLHttpRequestBodyInit | null);
+        } catch (error) {
+            cleanup();
+            reject(error);
+        }
     });
 }
 
 function resolveShareXRequestValue(value: string | number | boolean, filename: string): string {
     return String(value)
-        .replace(/\$filename\$/g, filename)
-        .replace(/\{filename\}/g, filename);
+        .replace(/\$filename\$/g, () => filename)
+        .replace(/\{filename\}/g, () => filename);
 }
 
 function parseShareXConfigFromSettings(): ShareXUploaderConfig {
@@ -985,7 +1054,18 @@ function buildWebdavAuthHeader(): string | null {
     return null;
 }
 
-async function createWebdavShare(relativePath: string, serverOrigin: string, filename: string): Promise<string> {
+interface ApprovedWebdavEndpoint {
+    approvalId: string;
+    request: CustomEndpointApprovalRequest & { kind: "webdav"; };
+    uploadReceipt: string;
+}
+
+async function createWebdavShare(
+    relativePath: string,
+    serverOrigin: string,
+    filename: string,
+    approvedEndpoint?: ApprovedWebdavEndpoint
+): Promise<string> {
     const { webdavServerType, webdavShareType } = settings.store as {
         webdavServerType?: string;
         webdavShareType?: string;
@@ -1013,7 +1093,15 @@ async function createWebdavShare(relativePath: string, serverOrigin: string, fil
     let shareUrl: string | undefined;
 
     if (Native) {
-        const result = await Native.createWebdavShare(ocsUrl, ocsHeaders, body);
+        if (!approvedEndpoint) throw new Error("WebDAV endpoint was not approved");
+        const result = await Native.createWebdavShare(
+            ocsUrl,
+            ocsHeaders,
+            body,
+            approvedEndpoint.approvalId,
+            approvedEndpoint.request,
+            approvedEndpoint.uploadReceipt
+        );
         if (!result.success) {
             throw new Error(result.error || "Failed to create public share");
         }
@@ -1097,11 +1185,37 @@ async function uploadToWebdav(fileBlob: Blob, filename: string): Promise<string>
     }
 
     if (Native) {
+        const approvalRequest = { baseUrl: webdavUrl, kind: "webdav" } as const;
+        const approval = await Native.approveCustomEndpoint(approvalRequest);
+        if (!approval.success || !approval.approvalId)
+            throw new Error(approval.error || "WebDAV endpoint was not approved");
         const arrayBuffer = await fileBlob.arrayBuffer();
-        const result = await Native.uploadToWebdav(arrayBuffer, uploadUrl, requestHeaders);
+        const result = await Native.uploadToWebdav(
+            arrayBuffer,
+            uploadUrl,
+            requestHeaders,
+            approval.approvalId,
+            approvalRequest
+        );
         if (!result.success) {
             throw new Error(result.error || "Upload failed");
         }
+
+        if (serverType === "generic") return uploadUrl;
+        if (!result.receipt) throw new Error("No WebDAV upload receipt was returned");
+        const approvedEndpoint: ApprovedWebdavEndpoint = {
+            approvalId: approval.approvalId,
+            request: approvalRequest,
+            uploadReceipt: result.receipt
+        };
+
+        let serverOrigin: string;
+        try {
+            serverOrigin = new URL(webdavUrl).origin;
+        } catch {
+            throw new Error("Invalid WebDAV server URL");
+        }
+        return await createWebdavShare(relativePath, serverOrigin, filename, approvedEndpoint);
     } else {
         const response = await uploadRequestWithTimeout(uploadUrl, {
             method: "PUT",
@@ -1115,9 +1229,7 @@ async function uploadToWebdav(fileBlob: Blob, filename: string): Promise<string>
         }
     }
 
-    if (serverType === "generic") {
-        return uploadUrl;
-    }
+    if (serverType === "generic") return uploadUrl;
 
     let serverOrigin: string;
     try {
@@ -1302,6 +1414,7 @@ function getFilenameExtension(filename: string): string | undefined {
 }
 
 async function notifyUploadSuccess(finalUrl: string, forceSend?: boolean): Promise<void> {
+    assertUploadCurrent();
     if (settings.store.autoCopy) {
         if (!finalUrl || !finalUrl.trim()) {
             showToast("Upload successful, but no URL was available to copy", Toasts.Type.MESSAGE);
@@ -1321,7 +1434,8 @@ async function notifyUploadSuccess(finalUrl: string, forceSend?: boolean): Promi
 
     const autoSend = forceSend || Boolean((settings.store as { autoSend?: boolean; }).autoSend);
     const autoFormat = Boolean((settings.store as { autoFormat?: boolean; }).autoFormat);
-    if (autoSend) {
+    assertUploadCurrent();
+    if (autoSend && activeUploadChannelId && SelectedChannelStore.getChannelId() === activeUploadChannelId) {
         insertTextIntoChatInputBox(autoFormat ? `<${finalUrl}>` : finalUrl);
     }
 }
@@ -1346,7 +1460,7 @@ async function uploadWithFallbacks(fileBlob: Blob, filename: string, primary: Se
     });
 
     for (const service of uploadOrder) {
-        if (cancelRequested) throw new Error("Upload cancelled by user");
+        assertUploadCurrent();
 
         const attempt = attempted.length + 1;
 
@@ -1365,6 +1479,7 @@ async function uploadWithFallbacks(fileBlob: Blob, filename: string, primary: Se
 
         try {
             const uploadedUrl = await uploadToService(service, fileBlob, filename);
+            assertUploadCurrent();
             if (attempted.length) {
                 showToast(`Upload succeeded with ${serviceLabels[service]} after fallback`, Toasts.Type.SUCCESS);
             }
@@ -1452,8 +1567,10 @@ async function normalizeUploadBlob(blob: Blob, sourceUrl?: string): Promise<{ bl
 }
 
 async function uploadPreparedBlob(blob: Blob, sourceUrl?: string, forceSend?: boolean): Promise<string> {
+    assertUploadCurrent();
     const primary = settings.store.serviceType as ServiceType;
     const { blob: normalizedBlob, filename } = await normalizeUploadBlob(blob, sourceUrl);
+    assertUploadCurrent();
     setUploadState({ fileName: filename, status: "File ready, starting upload...", percent: 4 });
     const uploadedUrl = await uploadWithFallbacks(normalizedBlob, filename, primary);
     const finalUrl = applyEmbedProxy(finalizeUploadedUrl(uploadedUrl));
@@ -1472,8 +1589,7 @@ export async function uploadFile(url: string): Promise<void> {
         return;
     }
 
-    isUploading = true;
-    cancelRequested = false;
+    beginUpload();
     setUploadState({
         phase: "preparing",
         fileName: "",
@@ -1501,12 +1617,7 @@ export async function uploadFile(url: string): Promise<void> {
                 contentType = res.contentType || "";
                 blob = new Blob([res.data], { type: contentType });
             } else {
-                const response = await fetch(fetchUrl);
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch file: ${response.status}`);
-                }
-                contentType = response.headers.get("content-type") || "";
-                blob = await response.blob();
+                throw new Error(res.error || "Remote media fetch was blocked");
             }
         } else {
             const response = await fetchWithTimeout(fetchUrl, {
@@ -1525,6 +1636,7 @@ export async function uploadFile(url: string): Promise<void> {
 
         await uploadPreparedBlob(blob, url);
     } catch (error) {
+        if (activeUploadGeneration !== uploadGeneration) return;
         const message = error instanceof Error ? error.message : "Unknown error";
         if (isUploadCancelledError(error)) {
             showToast("Upload cancelled", Toasts.Type.MESSAGE);
@@ -1535,16 +1647,15 @@ export async function uploadFile(url: string): Promise<void> {
             setUploadState({ phase: "failed", status: `Upload failed: ${message}`, canCancel: false, percent: 0 });
         }
     } finally {
-        isUploading = false;
-        activeAbortController = null;
-        activeXhr = null;
-        setTimeout(() => resetUploadState(), 1800);
+        finishUpload();
     }
 }
 
 export async function uploadPickedFile(): Promise<void> {
+    const generation = uploadGeneration;
+    const accountId = UserStore.getCurrentUser()?.id;
     const file = await chooseFile("*/*");
-    if (!file) return;
+    if (!file || generation !== uploadGeneration || UserStore.getCurrentUser()?.id !== accountId) return;
 
     if (!isFileTypeAllowed(file)) {
         showToast("File type not allowed by current filter", Toasts.Type.FAILURE);
@@ -1554,27 +1665,27 @@ export async function uploadPickedFile(): Promise<void> {
     await uploadProvidedFiles([file]);
 }
 
-export async function uploadProvidedFiles(files: readonly File[], forceSend?: boolean): Promise<void> {
+export async function uploadProvidedFiles(files: readonly File[], forceSend?: boolean): Promise<boolean> {
     if (isUploading) {
         showToast("Upload already in progress", Toasts.Type.MESSAGE);
-        return;
+        return false;
     }
 
     if (!isConfigured()) {
         showToast("Please configure FileUpload settings first", Toasts.Type.FAILURE);
-        return;
+        return false;
     }
 
-    if (!files.length) return;
+    if (!files.length) return false;
 
     const uploadFiles = files.filter(file => Boolean(file) && isFileTypeAllowed(file));
-    if (!uploadFiles.length) return;
+    if (!uploadFiles.length) return false;
 
-    isUploading = true;
-    cancelRequested = false;
+    beginUpload();
 
     try {
         for (let i = 0; i < uploadFiles.length; i++) {
+            assertUploadCurrent();
             const file = uploadFiles[i];
             const current = i + 1;
             const suffix = uploadFiles.length > 1 ? ` (${current}/${uploadFiles.length})` : "";
@@ -1593,7 +1704,9 @@ export async function uploadProvidedFiles(files: readonly File[], forceSend?: bo
 
             await uploadPreparedBlob(file, undefined, forceSend);
         }
+        return true;
     } catch (error) {
+        if (activeUploadGeneration !== uploadGeneration) return false;
         const message = error instanceof Error ? error.message : "Unknown error";
         if (isUploadCancelledError(error)) {
             showToast("Upload cancelled", Toasts.Type.MESSAGE);
@@ -1603,10 +1716,8 @@ export async function uploadProvidedFiles(files: readonly File[], forceSend?: bo
             logger.error("Manual upload error", error);
             setUploadState({ phase: "failed", status: `Upload failed: ${message}`, canCancel: false, percent: 0 });
         }
+        return false;
     } finally {
-        isUploading = false;
-        activeAbortController = null;
-        activeXhr = null;
-        setTimeout(() => resetUploadState(), 1800);
+        finishUpload();
     }
 }

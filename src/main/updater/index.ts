@@ -17,22 +17,28 @@
 */
 
 import { IpcEvents } from "@shared/IpcEvents";
-import type { UpdaterDiagnostics } from "@shared/Updater";
+import { parseUpdaterBranch, type UpdaterDiagnostics } from "@shared/Updater";
 import { ipcMain } from "electron";
 
 import gitHash from "~git-hash";
 import gitRemote from "~git-remote";
 
-import { serializeErrors } from "./common";
+import { serializeErrors } from "./ipc";
 
 if (!IS_UPDATER_DISABLED) {
-    require(IS_STANDALONE ? "./http" : "./git");
+    // Standalone builds also produce unpacked folders. Only a running archive can
+    // be replaced atomically by the HTTP updater; source directories use Git.
+    const { statSync } = require("original-fs") as typeof import("original-fs");
+    require(statSync(__dirname).isFile() ? "./http" : "./git");
 } else {
     ipcMain.handle(IpcEvents.GET_REPO, serializeErrors(() => `https://github.com/${gitRemote}`));
-    ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors(() => []));
-    ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors((): UpdaterDiagnostics => ({
+    ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors((branch: unknown) => {
+        parseUpdaterBranch(branch);
+        return [];
+    }));
+    ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors((branch: unknown): UpdaterDiagnostics => ({
         backend: "disabled",
-        branch: null,
+        branch: parseUpdaterBranch(branch),
         builtHead: gitHash,
         sourceRoot: null,
     })));

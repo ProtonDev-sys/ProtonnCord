@@ -61,7 +61,7 @@ const settings = definePluginSettings({
     },
 });
 
-const { isVideoEnabled } = findByPropsLazy("isVideoEnabled");
+const VideoState = findByPropsLazy("isVideoEnabled");
 
 function handleKeydown({ code, ctrlKey, shiftKey, altKey, repeat }: KeyboardEvent) {
     if (repeat) return;
@@ -70,7 +70,7 @@ function handleKeydown({ code, ctrlKey, shiftKey, altKey, repeat }: KeyboardEven
 
     FluxDispatcher.dispatch({
         type: "MEDIA_ENGINE_SET_VIDEO_ENABLED",
-        enabled: !isVideoEnabled(),
+        enabled: !VideoState.isVideoEnabled(),
     });
 }
 

@@ -28,7 +28,7 @@ export const settings = definePluginSettings({
                 <Paragraph className={classes(Margins.top8, Margins.bottom8)}>
                     You can also access Decor decorations from the <TextButton
                         variant="link"
-                        onClick={async () => {
+                        onClick={() => {
                             closePluginSettings();
                             SettingsRouter.openUserSettings("profile_panel");
                         }}

@@ -17,8 +17,7 @@
 */
 
 import { Settings } from "@api/Settings";
-import { findStoreLazy } from "@webpack";
-import { ChannelStore, SelectedChannelStore, UserStore } from "@webpack/common";
+import { ChannelStore, SelectedChannelStore, UserGuildSettingsStore, UserStore } from "@webpack/common";
 
 import { settings } from "../index";
 import { LoggedMessageJSON } from "../types";
@@ -77,8 +76,6 @@ interface ShouldIgnoreArguments {
 }
 
 const EPHEMERAL = 64;
-
-const UserGuildSettingsStore = findStoreLazy("UserGuildSettingsStore");
 
 export type ListType = "blacklistedIds" | "whitelistedIds";
 
@@ -216,8 +213,8 @@ export function shouldIgnore({ channelId, authorId, guildId, flags, bot, ghostPi
     if (isBlacklisted && (!isAuthorWhitelisted || !isChannelWhitelisted)) return true; // ignore
 
     if (guildId != null && shouldIgnoreMutedGuilds && UserGuildSettingsStore.isMuted(guildId)) return true; // ignore
-    if (channelId != null && shouldIgnoreMutedCategories && UserGuildSettingsStore.isCategoryMuted(guildId, channelId)) return true; // ignore
-    if (channelId != null && shouldIgnoreMutedChannels && UserGuildSettingsStore.isChannelMuted(guildId, channelId)) return true; // ignore
+    if (channelId != null && shouldIgnoreMutedCategories && UserGuildSettingsStore.isCategoryMuted(guildId!, channelId)) return true; // ignore
+    if (channelId != null && shouldIgnoreMutedChannels && UserGuildSettingsStore.isChannelMuted(guildId!, channelId)) return true; // ignore
 
     return false; // keep;
 }

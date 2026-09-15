@@ -87,6 +87,7 @@ function TarModal({ modalProps }: { modalProps: RenderModalProps; }) {
     const { buildNumber, builtAt } = getBuildNumber();
     const [, rerender] = useState({});
     const [isLoading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const paths = Webpack.getChunkPaths(webpackRequire);
     let loading = 0;
     let loaded = 0;
@@ -112,13 +113,16 @@ function TarModal({ modalProps }: { modalProps: RenderModalProps; }) {
                 {
                     text: "Create",
                     variant: "primary",
-                    onClick: () => {
-                        saveTar(patched);
-                        modalProps.onClose();
+                    onClick: async () => {
+                        try {
+                            await saveTar(patched);
+                            modalProps.onClose();
+                        } catch (error) { setError(String(error)); }
                     }
                 }
             ]}
         >
+            {error && <BaseText role="alert">{error}</BaseText>}
             <div style={{ marginBottom: "16px" }}>
                 <BaseText size="md">
                     <Timestamp timestamp={new Date(builtAt)} isInline={false}>
@@ -144,10 +148,14 @@ function TarModal({ modalProps }: { modalProps: RenderModalProps; }) {
                         disabled={loading === all || isLoading}
                         onClick={async () => {
                             setLoading(true);
+                            setError(null);
+                            try {
                             // @ts-ignore
                             await Webpack.protectWebpack(window[WEBPACK_CHUNK], async () => {
                                 await Webpack.forceLoadAll(webpackRequire, rerender);
                             });
+                            } catch (error) { setError(String(error)); }
+                            finally { setLoading(false); }
                         }}
                     >
                         {loaded === all ? "Loaded" : loading === all ? "Loading" : "Load all"}

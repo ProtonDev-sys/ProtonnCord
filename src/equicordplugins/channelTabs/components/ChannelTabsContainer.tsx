@@ -8,11 +8,12 @@ import { Flex } from "@components/Flex";
 import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { BasicChannelTabsProps, ChannelTabsProps, clearStaleNavigationContext, closeTab, createTab, handleChannelSwitch, isNavigationFromSource, isTabSelected, moveToTab, openedTabs, openStartupTabs, saveTabs, settings, setUpdaterFunction, useGhostTabs } from "@equicordplugins/channelTabs/util";
+import { matchesKeybind } from "@equicordplugins/channelTabs/util/keybinds";
 import { classNameFactory } from "@utils/css";
 import { classes } from "@utils/misc";
 import { useForceUpdater } from "@utils/react";
-import { findComponentByCodeLazy, findStoreLazy } from "@webpack";
-import { Button, ContextMenuApi, FluxDispatcher, useCallback, useEffect, useRef, UserStore, useState, useStateFromStores } from "@webpack/common";
+import { findComponentByCodeLazy } from "@webpack";
+import { Button, ChannelRTCStore, ContextMenuApi, FluxDispatcher, useCallback, useEffect, useRef, UserStore, useState, useStateFromStores } from "@webpack/common";
 
 import channelTabs from "..";
 import BookmarkContainer, { HorizontalScroller } from "./BookmarkContainer";
@@ -22,7 +23,6 @@ import { BasicContextMenu } from "./ContextMenus";
 type TabSet = Record<string, ChannelTabsProps[]>;
 
 const PlusSmallIcon = findComponentByCodeLazy("0v-5h5a1");
-const ChannelRTCStore = findStoreLazy("ChannelRTCStore");
 
 const cl = classNameFactory("vc-channeltabs-");
 
@@ -163,31 +163,6 @@ export default function ChannelsTabsContainer(props: BasicChannelTabsProps) {
     }, [openedTabs.length, newTabButtonBehavior]);
 
     useEffect(() => {
-        const matchesKeybind = (event: KeyboardEvent, keybindString: string): boolean => {
-            const parts = keybindString.split("+");
-            const hasCtrl = parts.includes("CTRL");
-            const hasShift = parts.includes("SHIFT");
-            const hasAlt = parts.includes("ALT");
-            const mainKey = parts[parts.length - 1].toLowerCase();
-
-            const ctrlPressed = event.ctrlKey || event.metaKey;
-            const shiftPressed = event.shiftKey;
-            const altPressed = event.altKey;
-            const keyPressed = event.key.toLowerCase();
-
-            // special handling for TAB key
-            if (mainKey === "tab") {
-                return hasCtrl === ctrlPressed && hasShift === shiftPressed && hasAlt === altPressed && keyPressed === "tab";
-            }
-
-            // special handling for SPACE
-            if (mainKey === "space") {
-                return hasCtrl === ctrlPressed && hasShift === shiftPressed && hasAlt === altPressed && keyPressed === " ";
-            }
-
-            return hasCtrl === ctrlPressed && hasShift === shiftPressed && hasAlt === altPressed && keyPressed === mainKey;
-        };
-
         const handleKeyDown = (event: KeyboardEvent) => {
             const target = event.target as HTMLElement;
 

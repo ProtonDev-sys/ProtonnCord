@@ -9,11 +9,9 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { Channel } from "@vencord/discord-types";
-import { findComponentByCodeLazy, findStoreLazy } from "@webpack";
-import { ReadStateStore, useStateFromStores } from "@webpack/common";
+import { findComponentByCodeLazy } from "@webpack";
+import { JoinedThreadsStore, ReadStateStore, UserGuildSettingsStore, useStateFromStores } from "@webpack/common";
 
-const UserGuildSettingsStore = findStoreLazy("UserGuildSettingsStore");
-const JoinedThreadsStore = findStoreLazy("JoinedThreadsStore");
 const NumberBadge = findComponentByCodeLazy("BADGE_NOTIFICATION_BACKGROUND", "let{count:");
 
 const settings = definePluginSettings({
@@ -61,17 +59,20 @@ export default definePlugin({
     ],
 
     CountBadge: ErrorBoundary.wrap(({ channel }: { channel: Channel; }) => {
+        const { showOnMutedChannels, notificationCountLimit } = settings.use();
         const unreadCount = useStateFromStores([ReadStateStore], () => ReadStateStore.getUnreadCount(channel.id));
+        const muted = useStateFromStores([UserGuildSettingsStore, JoinedThreadsStore], () =>
+            UserGuildSettingsStore.isChannelMuted(channel.guild_id, channel.id) || JoinedThreadsStore.isMuted(channel.id));
         if (!unreadCount) return null;
 
-        if (!settings.store.showOnMutedChannels && (UserGuildSettingsStore.isChannelMuted(channel.guild_id, channel.id) || JoinedThreadsStore.isMuted(channel.id)))
+        if (!showOnMutedChannels && muted)
             return null;
 
         return (
             <NumberBadge
                 color="var(--brand-500)"
                 count={
-                    unreadCount > 99 && settings.store.notificationCountLimit
+                    unreadCount > 99 && notificationCountLimit
                         ? "+99"
                         : unreadCount
                 }

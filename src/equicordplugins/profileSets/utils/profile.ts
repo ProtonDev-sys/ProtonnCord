@@ -6,11 +6,14 @@
 
 import { getUserSettingLazy } from "@api/UserSettings";
 import { AvatarDecorationData, CustomStatus, DisplayNameStyles, Nameplate, ProfileEffect, ProfilePreset } from "@vencord/discord-types";
-import { findStoreLazy } from "@webpack";
-import { FluxDispatcher, GuildMemberStore, IconUtils, UserProfileStore, UserStore } from "@webpack/common";
+import { FluxDispatcher, GuildMemberStore, IconUtils, UserProfileSettingsStore, UserProfileStore, UserStore } from "@webpack/common";
 
-const UserProfileSettingsStore = findStoreLazy("UserProfileSettingsStore");
 const CustomStatusSettings = getUserSettingLazy("status", "customStatus")!;
+let pendingLoadGeneration = 0;
+
+export function cancelPendingPresetLoad() {
+    pendingLoadGeneration++;
+}
 
 type PendingChanges = Record<string, unknown> & {
     pendingAvatar?: ImageInput;
@@ -28,7 +31,7 @@ type PendingChanges = Record<string, unknown> & {
     pendingPrimaryGuildId?: string | null;
 };
 
-type ImageInput = string | { imageUri: string; [key: string]: unknown; } | null | undefined;
+type ImageInput = string | { imageUri: string;[key: string]: unknown; } | null | undefined;
 type AvatarDecorationLike = AvatarDecorationData & {
     label?: string;
     type?: number;
@@ -109,12 +112,15 @@ function normalizeDisplayNameStyles(value: DisplayNameStylesLike | null | undefi
 
 export async function imageUrlToBase64(url: string): Promise<string | null> {
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+        if (!response.ok) return null;
         const blob = await response.blob();
+        if (!blob.type.startsWith("image/")) return null;
         return await new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
+            reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
             reader.onerror = reject;
+            reader.onabort = () => resolve(null);
             reader.readAsDataURL(blob);
         });
     } catch {
@@ -153,6 +159,7 @@ async function processImage(imageData: ImageInput, userId: string, type: "avatar
 
 export async function getCurrentProfile(guildId?: string, options: CurrentProfileOptions = {}): Promise<Omit<ProfilePreset, "name" | "timestamp">> {
     const currentUser = UserStore.getCurrentUser();
+    if (!currentUser) throw new Error("No current user");
     const baseProfile = UserProfileStore.getUserProfile(currentUser.id);
     const isGuildProfile = options.isGuildProfile ?? Boolean(guildId);
     const effectiveGuildId = isGuildProfile ? guildId : undefined;
@@ -176,8 +183,9 @@ export async function getCurrentProfile(guildId?: string, options: CurrentProfil
             expiresAtMs: customStatusSetting?.expiresAtMs ?? "0"
         };
 
-    const avatarDecorationSource = pendingChanges.pendingAvatarDecoration
-        ?? (isGuildProfile ? guildMember?.avatarDecoration : userAny.avatarDecorationData);
+    const avatarDecorationSource = pendingChanges.pendingAvatarDecoration !== undefined
+        ? pendingChanges.pendingAvatarDecoration
+        : (isGuildProfile ? guildMember?.avatarDecoration : userAny.avatarDecorationData);
     const avatarDecoration = hasAvatarDecoration(avatarDecorationSource)
         ? {
             ...avatarDecorationSource,
@@ -187,7 +195,7 @@ export async function getCurrentProfile(guildId?: string, options: CurrentProfil
         : null;
 
     let profileEffect: ProfileEffect | null = null;
-    const effectToUse = pendingChanges.pendingProfileEffect ?? userProfile?.profileEffect;
+    const effectToUse = pendingChanges.pendingProfileEffect !== undefined ? pendingChanges.pendingProfileEffect : userProfile?.profileEffect;
 
     if (effectToUse) {
         if (effectToUse.skuId && effectToUse.effects) {
@@ -223,8 +231,9 @@ export async function getCurrentProfile(guildId?: string, options: CurrentProfil
         }
     }
 
-    const nameplateToUse = pendingChanges.pendingNameplate
-        ?? (isGuildProfile ? guildMember?.collectibles?.nameplate : userAny.collectibles?.nameplate);
+    const nameplateToUse = pendingChanges.pendingNameplate !== undefined
+        ? pendingChanges.pendingNameplate
+        : (isGuildProfile ? guildMember?.collectibles?.nameplate : userAny.collectibles?.nameplate);
     const nameplate = nameplateToUse ? {
         skuId: nameplateToUse.skuId,
         asset: nameplateToUse.asset,
@@ -236,11 +245,11 @@ export async function getCurrentProfile(guildId?: string, options: CurrentProfil
     const savedDisplayNameStyles = isGuildProfile
         ? (guildMember?.displayNameStyles ?? userAny.displayNameStyles)
         : userAny.displayNameStyles;
-    const displayNameStylesToUse = pendingChanges.pendingDisplayNameStyles ?? savedDisplayNameStyles;
+    const displayNameStylesToUse = pendingChanges.pendingDisplayNameStyles !== undefined ? pendingChanges.pendingDisplayNameStyles : savedDisplayNameStyles;
     const displayNameStyles = normalizeDisplayNameStyles(displayNameStylesToUse);
 
     const { pendingAvatar } = pendingChanges;
-    const avatarToUse: ImageInput = hasImageInput(pendingAvatar)
+    const avatarToUse: ImageInput = pendingAvatar !== undefined
         ? pendingAvatar
         : (isGuildProfile ? (guildMember?.avatar ?? currentUser.avatar ?? null) : (currentUser.avatar ?? null));
 
@@ -253,7 +262,7 @@ export async function getCurrentProfile(guildId?: string, options: CurrentProfil
     const resolvedAvatarDataUrl = avatarDataUrl ?? IconUtils.getDefaultAvatarURL(currentUser.id);
 
     const { pendingBanner } = pendingChanges;
-    const bannerToUse: ImageInput = hasImageInput(pendingBanner)
+    const bannerToUse: ImageInput = pendingBanner !== undefined
         ? pendingBanner
         : (isGuildProfile ? (guildProfile?.banner ?? baseProfile?.banner) : baseProfile?.banner);
     const useGuildBanner = !!(effectiveGuildId && isGuildProfile && guildProfile?.banner && bannerToUse === guildProfile?.banner);
@@ -264,8 +273,8 @@ export async function getCurrentProfile(guildId?: string, options: CurrentProfil
         avatarDataUrl: resolvedAvatarDataUrl,
         bannerDataUrl,
         bio: pendingChanges.pendingBio ?? userProfile?.bio ?? null,
-        accentColor: pendingChanges.pendingAccentColor ?? userProfile?.accentColor ?? null,
-        themeColors: pendingChanges.pendingThemeColors ?? userProfile?.themeColors ?? null,
+        accentColor: pendingChanges.pendingAccentColor !== undefined ? pendingChanges.pendingAccentColor : userProfile?.accentColor ?? null,
+        themeColors: pendingChanges.pendingThemeColors !== undefined ? pendingChanges.pendingThemeColors : userProfile?.themeColors ?? null,
         globalName: isGuildProfile
             ? (pendingChanges.pendingNickname ?? guildMember?.nick ?? null)
             : (pendingChanges.pendingGlobalName ?? currentUser.globalName ?? null),
@@ -325,12 +334,16 @@ function nameplateEq(a: { skuId?: string | number | null; asset?: string | null;
 }
 
 export async function loadPresetAsPending(preset: ProfilePreset, guildId?: string, options: LoadPresetOptions = {}) {
+    const generation = ++pendingLoadGeneration;
+    const userId = UserStore.getCurrentUser()?.id;
+    if (!userId || !preset) return;
     try {
         const isGuild = options.isGuildProfile ?? Boolean(guildId);
         if (isGuild && !guildId) return;
         const current = await getCurrentProfile(guildId, {
             isGuildProfile: isGuild
         });
+        if (generation !== pendingLoadGeneration || UserStore.getCurrentUser()?.id !== userId) return;
         const pendingChanges = (isGuild && guildId
             ? UserProfileSettingsStore.getPendingChanges(guildId)
             : UserProfileSettingsStore.getPendingChanges());
@@ -414,22 +427,26 @@ export async function loadPresetAsPending(preset: ProfilePreset, guildId?: strin
             });
         }
 
-        if (preset.displayNameStyles) {
+        if (preset.displayNameStyles !== undefined) {
             const presetDisplayNameStyles = normalizeDisplayNameStyles(preset.displayNameStyles);
             if (!jsonEq(presetDisplayNameStyles, current.displayNameStyles)) {
                 setPending({ pendingDisplayNameStyles: presetDisplayNameStyles });
             }
         }
 
-        if (preset.themeColors && !jsonEq(preset.themeColors, current.themeColors)) {
+        if (preset.accentColor !== undefined && preset.accentColor !== current.accentColor) {
+            setPending({ pendingAccentColor: preset.accentColor });
+        }
+
+        if (preset.themeColors !== undefined && !jsonEq(preset.themeColors, current.themeColors)) {
             setPending({ pendingThemeColors: preset.themeColors });
         }
 
-        if (preset.primaryGuildId && !isGuild && preset.primaryGuildId !== current.primaryGuildId) {
+        if (preset.primaryGuildId !== undefined && !isGuild && preset.primaryGuildId !== current.primaryGuildId) {
             setPending({ pendingPrimaryGuildId: preset.primaryGuildId });
         }
 
-        if (preset.customStatus && !isGuild && !customStatusEq(preset.customStatus, current.customStatus)) {
+        if (preset.customStatus !== undefined && !isGuild && !customStatusEq(preset.customStatus, current.customStatus)) {
             CustomStatusSettings.updateSetting({
                 text: preset.customStatus?.text ?? "",
                 expiresAtMs: preset.customStatus?.expiresAtMs ?? "0",

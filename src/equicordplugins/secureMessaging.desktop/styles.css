@@ -13,6 +13,15 @@
     display: none;
 }
 
+[id^="chat-messages-"]:has(.pc-secure-message-mentioned) {
+    background-color: var(--background-mentioned, color-mix(in srgb, var(--status-warning) 10%, transparent));
+    box-shadow: inset 2px 0 var(--info-warning-foreground, var(--status-warning));
+}
+
+[id^="chat-messages-"]:has(.pc-secure-message-mentioned):hover {
+    background-color: var(--background-mentioned-hover, color-mix(in srgb, var(--status-warning) 14%, transparent));
+}
+
 .pc-secure-screenshot-mode .pc-secure-message > * {
     display: none;
 }
@@ -31,6 +40,25 @@
     font-size: 0.875rem;
 }
 
+.pc-secure-chat-gate {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    padding: 2rem;
+    background: var(--background-primary);
+}
+
+.pc-secure-chat-gate-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: center;
+    max-width: 28rem;
+    text-align: center;
+}
+
 .vc-secure-messaging-send-status {
     align-self: center;
     max-width: 10rem;
@@ -39,13 +67,57 @@
 }
 
 .pc-secure-card {
+    --pc-secure-card-border: color-mix(in srgb, var(--status-positive) 45%, var(--border-subtle));
+    --pc-secure-card-background: color-mix(in srgb, var(--background-secondary) 92%, var(--status-positive));
+
+    position: relative;
     box-sizing: border-box;
     max-width: min(42rem, 100%);
     margin-top: 0.25rem;
     padding: 0.65rem 0.75rem;
-    border: 1px solid color-mix(in srgb, var(--status-positive) 45%, var(--border-subtle));
+    border: 1px solid var(--pc-secure-card-border);
     border-radius: 0.5rem;
-    background: color-mix(in srgb, var(--background-secondary) 92%, var(--status-positive));
+    background: var(--pc-secure-card-background);
+}
+
+.pc-secure-message-joined-below {
+    padding-bottom: 0.1rem;
+    border-bottom-color: transparent;
+    border-bottom-right-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+.pc-secure-message-joined-above {
+    margin-top: 0;
+    padding-top: 0.1rem;
+    border-top-color: transparent;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+
+.pc-secure-message-joined-above::before {
+    position: absolute;
+    right: -1px;
+    bottom: 100%;
+    left: -1px;
+    box-sizing: border-box;
+    height: 1rem;
+    border-right: 1px solid var(--pc-secure-card-border);
+    border-left: 1px solid var(--pc-secure-card-border);
+    background: var(--pc-secure-card-background);
+    content: "";
+    pointer-events: none;
+}
+
+.pc-secure-message-placeholder {
+    display: block;
+    width: 16rem;
+    height: 0.75rem;
+    max-width: 65%;
+    margin-top: 0.25rem;
+    border-radius: 0.25rem;
+    background: var(--background-modifier-accent);
+    opacity: 0.55;
 }
 
 .pc-secure-card-warning {
@@ -69,6 +141,8 @@
 }
 
 .pc-secure-card-plaintext {
+    flex: 1;
+    min-width: 0;
     overflow-wrap: anywhere;
     color: var(--text-default);
     white-space: break-spaces;
@@ -81,23 +155,6 @@
     gap: 0.5rem;
     align-items: center;
     margin-top: 0.55rem;
-}
-
-.pc-secure-media-attachment {
-    display: grid;
-    gap: 0.35rem;
-    margin-top: 0.5rem;
-}
-
-.pc-secure-media-player {
-    width: min(100%, 34rem);
-    max-height: 24rem;
-    border-radius: 0.5rem;
-    background: black;
-}
-
-.pc-secure-audio-player {
-    width: min(100%, 34rem);
 }
 
 .pc-secure-fingerprint {
@@ -131,6 +188,18 @@
 .pc-secure-modal-section:last-child {
     padding-bottom: 0;
     border-bottom: 0;
+}
+
+.pc-secure-onekey-guide {
+    margin: 0;
+    padding-left: 1.25rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    line-height: 1.45;
+}
+
+.pc-secure-onekey-guide li + li {
+    margin-top: 0.35rem;
 }
 
 .pc-secure-participant {

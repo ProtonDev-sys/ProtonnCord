@@ -6,6 +6,8 @@
 
 import { createHash } from "node:crypto";
 
+import { type UpdaterBranch,updaterReleaseEndpoint } from "@shared/Updater";
+
 export interface HttpChange {
     author: string;
     hash: string;
@@ -61,10 +63,10 @@ function releaseHash(name: unknown): string {
     return hash;
 }
 
-function parseRelease(value: unknown, currentHash: string, asarFile: string): ReleaseState {
+function parseRelease(value: unknown, currentHash: string, asarFile: string, force = false): ReleaseState {
     const release = record(value);
     const hash = releaseHash(release?.name);
-    if (hash.toLowerCase() === currentHash.toLowerCase()) return { hash, pending: null };
+    if (!force && hash.toLowerCase() === currentHash.toLowerCase()) return { hash, pending: null };
 
     if (!Array.isArray(release?.assets))
         throw new Error(`The latest Protonn Cord release is missing ${asarFile}`);
@@ -114,20 +116,27 @@ export async function inspectHttpUpdates(
     request: JsonRequest,
     currentHash: string,
     asarFile: string,
+    branch: UpdaterBranch = "main",
 ): Promise<HttpUpdateInspection> {
-    const release = parseRelease(await request("/releases/latest"), currentHash, asarFile);
+    const release = parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile);
     if (!release.pending) return { changes: [], pending: null };
 
     const comparison = await request(`/compare/${currentHash}...${release.hash}`);
-    return { changes: parseChanges(comparison), pending: release.pending };
+    const parsedChanges = parseChanges(comparison);
+    const changes = parsedChanges.length > 0
+        ? parsedChanges
+        : [{ author: "ProtonnCord", hash: release.hash, message: `Switch update branch to ${branch}` }];
+    return { changes, pending: release.pending };
 }
 
 export async function findHttpUpdate(
     request: JsonRequest,
     currentHash: string,
     asarFile: string,
+    branch: UpdaterBranch = "main",
+    force = false,
 ): Promise<PendingHttpUpdate | null> {
-    return parseRelease(await request("/releases/latest"), currentHash, asarFile).pending;
+    return parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile, force).pending;
 }
 
 export async function requestBytes(

@@ -12,6 +12,7 @@ import { ApplicationAssetUtils, FluxDispatcher } from "@webpack/common";
 import md5 from "md5";
 
 import { settings } from "../settings";
+import { normalizeNavidromeAlbumArtMode } from "./navidromePrivacy";
 
 function md5Hex(str: string): string {
     return md5(str);
@@ -41,7 +42,6 @@ interface NdTrack {
     bitRate?: number;
     duration?: number;
     minutesAgo?: number;
-    coverArt?: string;
     username?: string;
     state?: string;
     positionMs?: number;
@@ -158,7 +158,7 @@ async function getActivity(signal?: AbortSignal): Promise<Activity | null> {
         }
     }
 
-    const { nd_clientId, nd_showSmallImage, nd_serverUrl, nd_showAlbum, nd_nameString, nd_detailsString, nd_stateString, nd_largeTextString, nd_activityType, nd_statusDisplayType, nd_lastfmApiKey, nd_hideOnPause } = settings.store;
+    const { nd_clientId, nd_showSmallImage, nd_showAlbum, nd_nameString, nd_detailsString, nd_stateString, nd_largeTextString, nd_activityType, nd_statusDisplayType, nd_lastfmApiKey, nd_hideOnPause } = settings.store;
 
     if (isPaused && nd_hideOnPause) {
         cachedPauseTimestamp = undefined;
@@ -167,10 +167,6 @@ async function getActivity(signal?: AbortSignal): Promise<Activity | null> {
 
     const _clientId = nd_clientId?.trim();
     const appId = _clientId === "" ? "1470554657506984069" : (_clientId ?? "1470554657506984069");
-
-    const _serverUrl = nd_serverUrl?.trim();
-    const parsedExternalUrl = parseUrl(_serverUrl ?? "");
-    const externalBaseUrl = parsedExternalUrl ? parsedExternalUrl.href.replace(/\/$/, "") : null;
 
     const durationMs = (track.duration ?? 0) * 1000;
 
@@ -234,15 +230,10 @@ async function getActivity(signal?: AbortSignal): Promise<Activity | null> {
         }
     }
 
-    const albumArtMode = settings.store.nd_albumArtMode ?? "none";
+    const albumArtMode = normalizeNavidromeAlbumArtMode(settings.store.nd_albumArtMode);
     let resolvedCoverArtUrl: string | null = null;
 
-    if (albumArtMode === "instance" && track.coverArt && externalBaseUrl) {
-        const { nd_username, nd_password } = settings.store;
-        const salt = Math.random().toString(36).substring(2, 8);
-        const token = md5Hex((nd_password ?? "") + salt);
-        resolvedCoverArtUrl = `${externalBaseUrl}/rest/getCoverArt?id=${encodeURIComponent(track.coverArt)}&u=${encodeURIComponent(nd_username ?? "")}&t=${token}&s=${salt}&v=1.12.0&c=equicord-rpc`;
-    } else if (albumArtMode === "lastfm" && track.artist) {
+    if (albumArtMode === "lastfm" && track.artist) {
         const trimmedKey = nd_lastfmApiKey?.trim();
         const apiKey = trimmedKey || "feff915bf5987580c9dc354d523dc6b9";
         const cacheKey = `${track.id}:${apiKey}`;
@@ -335,8 +326,11 @@ async function getActivity(signal?: AbortSignal): Promise<Activity | null> {
 }
 
 async function updatePresence() {
+    const controller = abortController;
+    if (!controller || controller.signal.aborted) return;
     try {
-        const activity = await getActivity(abortController?.signal);
+        const activity = await getActivity(controller.signal);
+        if (abortController !== controller || controller.signal.aborted) return;
         setActivity(activity);
         if (!activity) {
             currentTrackId = undefined;
@@ -348,6 +342,7 @@ async function updatePresence() {
             cachedPauseTimestamp = undefined;
         }
     } catch (e: unknown) {
+        if (abortController !== controller || controller.signal.aborted) return;
         if (e instanceof Error && e.name === "AbortError") return;
         logger.error("Failed to update presence", e);
         setActivity(null);
@@ -360,15 +355,16 @@ async function updatePresence() {
         cachedTrackState = undefined;
     }
 
-    if (abortController && !abortController.signal.aborted) {
+    if (abortController === controller && !controller.signal.aborted) {
         const interval = (settings.store.nd_refreshInterval as number) ?? 10;
         updateTimer = setTimeout(updatePresence, interval * 1000);
     }
 }
 
 export function start() {
+    if (abortController && !abortController.signal.aborted) return;
     abortController = new AbortController();
-    updatePresence();
+    void updatePresence();
 }
 
 export function forceUpdate() {
@@ -382,7 +378,7 @@ export function forceUpdate() {
         abortController.abort();
         clearTimeout(updateTimer);
         abortController = new AbortController();
-        updatePresence();
+        void updatePresence();
     }
 }
 

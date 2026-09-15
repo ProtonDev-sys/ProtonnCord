@@ -9,7 +9,7 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { ChevronSmallDownIcon, ChevronSmallUpIcon, FolderIcon } from "@components/Icons";
 import { classNameFactory } from "@utils/css";
 import { copyWithToast } from "@utils/discord";
-import { Modal,openModal, useEffect, useMemo, useRef, useState } from "@webpack/common";
+import { Modal,openModal, showToast, Toasts, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
 import {
     createImageObjectUrl,
@@ -18,8 +18,9 @@ import {
     getCachedZip,
     getCodeLanguage,
     isZipFile,
+    LoadedZipEntry,
+    loadZipEntry,
     makeDownload,
-    MAX_ENTRIES,
     readTextEntry,
     ZipEntry,
     ZipPreviewAttachmentProps,
@@ -72,6 +73,10 @@ export function ZipPreviewInline(props: ZipPreviewAttachmentProps) {
 
     useEffect(() => {
         loadRequestIdRef.current++;
+        if (animationFrameRef.current != null) cancelAnimationFrame(animationFrameRef.current);
+        if (animationTimeoutRef.current != null) clearTimeout(animationTimeoutRef.current);
+        animationFrameRef.current = null;
+        animationTimeoutRef.current = null;
         setCacheState(null);
         setCurrentPath("");
         setIsExpanded(false);
@@ -93,8 +98,8 @@ export function ZipPreviewInline(props: ZipPreviewAttachmentProps) {
 
         if (state.status === "pending") {
             state.promise
-                .then(() => {
-                    if (loadRequestIdRef.current === loadRequestId) setCacheState(getCachedZip(url));
+                .then(result => {
+                    if (loadRequestIdRef.current === loadRequestId) setCacheState({ status: "resolved", result });
                 })
                 .catch(error => {
                     if (loadRequestIdRef.current !== loadRequestId) return;
@@ -169,7 +174,7 @@ function ZipPreviewContent({
         return <div className={cl("state")}>{cacheState.message}</div>;
     }
 
-    const { entries, truncated } = cacheState.result;
+    const { entries } = cacheState.result;
     if (entries.length === 0) {
         return <div className={cl("state")}>This ZIP is empty.</div>;
     }
@@ -177,7 +182,6 @@ function ZipPreviewContent({
     return (
         <>
             <ZipPreviewBreadcrumb path={currentPath} onNavigate={onNavigate} />
-            {truncated && <div className={cl("state")}>Only showing first {MAX_ENTRIES} entries.</div>}
             <div className={cl("entries")}>
                 <ZipPreviewFileList entries={entries} currentPath={currentPath} onNavigate={onNavigate} />
             </div>
@@ -287,7 +291,7 @@ function ZipPreviewFileRow({ entry }: { entry: ZipEntry; }) {
             onClick={event => {
                 event.preventDefault();
                 event.stopPropagation();
-                openZipEntryModal(entry);
+                void openZipEntryModal(entry);
             }}
         >
             {entry.name} <span className={cl("size")}>({formatBytes(entry.size)})</span>
@@ -295,18 +299,21 @@ function ZipPreviewFileRow({ entry }: { entry: ZipEntry; }) {
     );
 }
 
-function openZipEntryModal(entry: ZipEntry) {
-    if (entry.kind === "image") {
-        openImageEntryModal(entry);
-        return;
-    }
+async function openZipEntryModal(entry: ZipEntry) {
+    try {
+        const loadedEntry = await loadZipEntry(entry);
+        if (loadedEntry.kind === "image") {
+            openImageEntryModal(loadedEntry);
+            return;
+        }
 
-    if (entry.kind === "text") {
-        openTextEntryModal(entry);
+        if (loadedEntry.kind === "text") openTextEntryModal(loadedEntry);
+    } catch (error) {
+        showToast(error instanceof Error ? error.message : "ZIP entry could not be previewed.", Toasts.Type.FAILURE);
     }
 }
 
-function openTextEntryModal(entry: ZipEntry) {
+function openTextEntryModal(entry: LoadedZipEntry) {
     const content = readTextEntry(entry);
     openModal(modalProps => (
         <ErrorBoundary>
@@ -328,14 +335,14 @@ function openTextEntryModal(entry: ZipEntry) {
                 ]}
             >
                 <div className={cl("code-wrap")}>
-                    <CodeBlock content={content} lang={getCodeLanguage(entry)} />
+                    {content.length <= 100_000 ? <CodeBlock content={content} lang={getCodeLanguage(entry)} /> : <pre>{content}</pre>}
                 </div>
             </Modal>
         </ErrorBoundary>
     ));
 }
 
-function openImageEntryModal(entry: ZipEntry) {
+function openImageEntryModal(entry: LoadedZipEntry) {
     openModal(modalProps => (
         <ErrorBoundary>
             <Modal
@@ -356,12 +363,14 @@ function openImageEntryModal(entry: ZipEntry) {
     ));
 }
 
-function ZipImagePreview({ entry }: { entry: ZipEntry; }) {
-    const [url] = useState(() => createImageObjectUrl(entry));
+function ZipImagePreview({ entry }: { entry: LoadedZipEntry; }) {
+    const [url, setUrl] = useState<string>();
 
     useEffect(() => {
+        const url = createImageObjectUrl(entry);
+        setUrl(url);
         return () => URL.revokeObjectURL(url);
-    }, [url]);
+    }, [entry]);
 
     return (
         <div className={cl("image-wrap")}>

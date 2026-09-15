@@ -9,7 +9,7 @@ import "./style.css";
 import { ButtonAction } from "@equicordplugins/keyboardNavigation/commands";
 import { classNameFactory } from "@utils/css";
 import { RenderModalProps } from "@vencord/discord-types";
-import { closeAllModals, Modal,openModal, React, TextInput, useEffect, useState } from "@webpack/common";
+import { Modal, openModal, React, TextInput, useEffect, useState } from "@webpack/common";
 
 import { settings } from "..";
 
@@ -20,7 +20,7 @@ interface MultipleChoiceProps {
 }
 
 export function MultipleChoice({ modalProps, onSelect, choices }: MultipleChoiceProps) {
-    const cl = classNameFactory("vc-command-palette-");
+    const cl = classNameFactory("vc-keyboard-navigation-");
     const [queryEh, setQuery] = useState("");
     const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
     const [startIndex, setStartIndex] = useState(0);
@@ -44,7 +44,7 @@ export function MultipleChoice({ modalProps, onSelect, choices }: MultipleChoice
             onSelect(selectedAction);
         }
 
-        closeAllModals();
+        modalProps.onClose();
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -102,6 +102,7 @@ export function MultipleChoice({ modalProps, onSelect, choices }: MultipleChoice
         <Modal {...modalProps} size="md" title="Multiple Choice">
             <div className={cl("root")} onKeyDown={handleKeyDown} onWheel={handleWheel}>
                 <TextInput
+                    autoFocus
                     value={queryEh}
                     onChange={e => setQuery(e)}
                     style={{ width: "100%", borderBottomLeftRadius: "0", borderBottomRightRadius: "0", paddingLeft: "0.9rem" }}
@@ -126,17 +127,16 @@ export function MultipleChoice({ modalProps, onSelect, choices }: MultipleChoice
     );
 }
 
-export function openMultipleChoice(choices: ButtonAction[]): Promise<ButtonAction> {
+export function openMultipleChoice(choices: ButtonAction[]): Promise<ButtonAction | null> {
     return new Promise(resolve => {
         openModal(modalProps => (
             <MultipleChoice
                 modalProps={modalProps}
                 onSelect={selectedValue => {
-                    closeAllModals();
                     resolve(selectedValue);
                 }}
                 choices={choices}
             />
-        ));
+        ), { onCloseCallback: () => resolve(null) });
     });
 }
