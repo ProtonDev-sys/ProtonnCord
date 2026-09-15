@@ -41,6 +41,7 @@
         "testPrimaryStreamAudio": "tsx scripts/testPrimaryStreamAudio.ts",
         "testNewPluginsManager": "tsx scripts/testNewPluginsManager.ts",
         "testClientsideGuildIcons": "tsx scripts/testClientsideGuildIcons.ts",
+        "testServerReview": "tsx scripts/testServerReview.ts",
         "testPromiseTimeout": "tsx scripts/testPromiseTimeout.ts",
         "testUpdaterClassification": "tsx scripts/testUpdaterClassification.ts",
         "testUpdaterGit": "tsx scripts/testUpdaterGit.ts",
