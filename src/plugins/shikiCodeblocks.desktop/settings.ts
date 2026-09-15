@@ -18,6 +18,7 @@
 
 import { definePluginSettings } from "@api/Settings";
 import { disableStyle, enableStyle } from "@api/Styles";
+import { Logger } from "@utils/Logger";
 import { parseUrl } from "@utils/misc";
 import { wordsFromPascal, wordsToTitle } from "@utils/text";
 import { OptionType } from "@utils/types";
@@ -28,6 +29,7 @@ import deviconStyle from "./devicon.css?managed";
 import { DeviconSetting, HljsSetting } from "./types";
 
 const themeNames = Object.keys(themes) as (keyof typeof themes)[];
+const setTheme = (theme: string) => shiki.setTheme(theme).catch(error => new Logger("ShikiCodeblocks").error("Failed to load theme", error));
 
 export type ShikiSettings = typeof settings.store;
 export const settings = definePluginSettings({
@@ -39,14 +41,14 @@ export const settings = definePluginSettings({
             value: themes[themeName],
             default: themes[themeName] === themes.DarkPlus,
         })),
-        onChange: shiki.setTheme,
+        onChange: () => setTheme(settings.store.customTheme || settings.store.theme),
     },
     customTheme: {
         type: OptionType.STRING,
         description: "A link to a custom vscode theme",
         placeholder: themes.MaterialCandy,
         onChange: value => {
-            shiki.setTheme(value || settings.store.theme);
+            void setTheme(value || settings.store.theme);
         },
     },
     tryHljs: {
@@ -101,6 +103,7 @@ export const settings = definePluginSettings({
         description: "Background opacity",
         markers: [0, 20, 40, 60, 80, 100],
         default: 100,
+        isValid: value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100,
         stickToMarkers: false,
         componentProps: {
             onValueRender: null, // Defaults to percentage
@@ -115,6 +118,7 @@ export const settings = definePluginSettings({
             if (!value) return true;
             const url = parseUrl(value);
             if (!url) return "Must be a valid URL";
+            if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return "Must be an HTTP or HTTPS URL without credentials";
 
             if (!url.pathname.endsWith(".json")) return "Must be a json file";
 

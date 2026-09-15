@@ -8,14 +8,15 @@ import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { ChannelStore, UserSettingsActionCreators } from "@webpack/common";
 
-function generateSearchResults(query) {
-    const frequentChannelsWithQuery = Object.entries(UserSettingsActionCreators.FrecencyUserSettingsActionCreators.getCurrentValue().guildAndChannelFrecency.guildAndChannels)
-        .map(([key, value]) => key)
+function generateSearchResults(query: string) {
+    const channels = UserSettingsActionCreators.FrecencyUserSettingsActionCreators.getCurrentValue()?.guildAndChannelFrecency?.guildAndChannels ?? {};
+    const normalizedQuery = query.toLowerCase();
+    const frequentChannelsWithQuery = Object.keys(channels)
         .filter(id => ChannelStore.getChannel(id) != null)
-        .filter(id => ChannelStore.getChannel(id).name.includes(query))
+        .filter(id => ChannelStore.getChannel(id).name?.toLowerCase().includes(normalizedQuery))
         .sort((id1, id2) => {
-            const channel1 = UserSettingsActionCreators.FrecencyUserSettingsActionCreators.getCurrentValue().guildAndChannelFrecency.guildAndChannels[id1];
-            const channel2 = UserSettingsActionCreators.FrecencyUserSettingsActionCreators.getCurrentValue().guildAndChannelFrecency.guildAndChannels[id2];
+            const channel1 = channels[id1];
+            const channel2 = channels[id2];
             return channel2.totalUses - channel1.totalUses;
         })
         .slice(0, 20);

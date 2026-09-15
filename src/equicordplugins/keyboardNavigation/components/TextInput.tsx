@@ -7,7 +7,7 @@
 import "./style.css";
 
 import { RenderModalProps } from "@vencord/discord-types";
-import { closeAllModals, Modal,openModal, React, TextInput, useEffect, useState } from "@webpack/common";
+import { Modal, openModal, React, TextInput, useEffect, useState } from "@webpack/common";
 
 interface SimpleTextInputProps {
     modalProps: RenderModalProps;
@@ -22,8 +22,10 @@ export function SimpleTextInput({ modalProps, onSelect, placeholder, info }: Sim
     const handleKeyDown = (e: React.KeyboardEvent) => {
         switch (e.key) {
             case "Enter":
+                if (e.nativeEvent.isComposing) return;
+                e.preventDefault();
                 onSelect(inputValue);
-                closeAllModals();
+                modalProps.onClose();
                 break;
             default:
                 break;
@@ -36,20 +38,21 @@ export function SimpleTextInput({ modalProps, onSelect, placeholder, info }: Sim
 
     return (
         <Modal {...modalProps} size="sm" title="Text Input">
-            <div className="vc-command-palette-simple-text" onKeyDown={handleKeyDown}>
+            <div className="vc-keyboard-navigation-simple-text" onKeyDown={handleKeyDown}>
                 <TextInput
+                    autoFocus
                     value={inputValue}
                     onChange={e => setInputValue(e as unknown as string)}
-                    style={{ width: "30vw", borderRadius: "5px" }}
+                    style={{ width: "100%", borderRadius: "5px" }}
                     placeholder={placeholder ?? "Type and press Enter"}
                 />
-                {info && <div className="vc-command-palette-textinfo">{info}</div>}
+                {info && <div className="vc-keyboard-navigation-textinfo">{info}</div>}
             </div>
         </Modal>
     );
 }
 
-export function openSimpleTextInput(placeholder?: string, info?: string): Promise<string> {
+export function openSimpleTextInput(placeholder?: string, info?: string): Promise<string | null> {
     return new Promise(resolve => {
         openModal(modalProps => (
             <SimpleTextInput
@@ -58,6 +61,6 @@ export function openSimpleTextInput(placeholder?: string, info?: string): Promis
                 placeholder={placeholder}
                 info={info}
             />
-        ));
+        ), { onCloseCallback: () => resolve(null) });
     });
 }

@@ -23,6 +23,16 @@ let hasShownConfigError = false;
 let isUpdating = false;
 let lastAuthFailureAt = 0;
 let updateGeneration = 0;
+let authConfig = "";
+
+function currentAuthConfig(): string {
+    const { abs_serverUrl, abs_username, abs_password } = settings.store;
+    return JSON.stringify([abs_serverUrl, abs_username, abs_password]);
+}
+
+function isCurrentRequest(generation: number, config: string): boolean {
+    return generation === updateGeneration && config === currentAuthConfig();
+}
 
 async function getAsset(key: string): Promise<string> {
     return getCachedApplicationAsset(APPLICATION_ID, key);
@@ -32,7 +42,7 @@ function setActivity(activity: Activity | null) {
     FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity, socketId: SOCKET_ID });
 }
 
-async function authenticate(): Promise<boolean> {
+async function authenticate(generation: number, config: string): Promise<boolean> {
     const { abs_serverUrl, abs_username, abs_password } = settings.store;
     if (!abs_serverUrl || !abs_username || !abs_password) {
         if (!hasShownConfigError) {
@@ -54,13 +64,15 @@ async function authenticate(): Promise<boolean> {
 
         if (!res.ok) throw `${res.status} ${res.statusText}`;
         const data = await res.json();
-        authToken = data.user?.token;
+        if (!isCurrentRequest(generation, config)) return false;
+        authToken = typeof data.user?.token === "string" ? data.user.token : null;
         if (authToken) {
             hasShownConfigError = false;
             lastAuthFailureAt = 0;
         }
         return !!authToken;
     } catch (e) {
+        if (!isCurrentRequest(generation, config)) return false;
         logger.error("Failed to authenticate with AudioBookShelf", e);
         authToken = null;
         lastAuthFailureAt = Date.now();
@@ -68,25 +80,31 @@ async function authenticate(): Promise<boolean> {
     }
 }
 
-async function fetchMediaData(): Promise<AbsMediaData | null> {
+async function fetchMediaData(generation: number, config: string, allowReauthentication = true): Promise<AbsMediaData | null> {
+    if (!isCurrentRequest(generation, config)) return null;
     if (!authToken && lastAuthFailureAt && Date.now() - lastAuthFailureAt < AUTH_FAILURE_COOLDOWN_MS) return null;
-    if (!authToken && !(await authenticate())) return null;
+    if (!authToken && !(await authenticate(generation, config))) return null;
+    if (!isCurrentRequest(generation, config)) return null;
 
     try {
         const baseUrl = settings.store.abs_serverUrl!.replace(/\/$/, "");
         const res = await fetch(`${baseUrl}/api/me/listening-sessions`, {
             headers: { "Authorization": `Bearer ${authToken}` },
         });
+        if (!isCurrentRequest(generation, config)) return null;
 
         if (!res.ok) {
             if (res.status === 401) {
                 authToken = null;
-                if (await authenticate()) return fetchMediaData();
+                if (allowReauthentication && await authenticate(generation, config)) return fetchMediaData(generation, config, false);
+                if (!isCurrentRequest(generation, config)) return null;
+                lastAuthFailureAt = Date.now();
             }
             throw `${res.status} ${res.statusText}`;
         }
 
         const { sessions }: { sessions: AbsSession[]; } = await res.json();
+        if (!isCurrentRequest(generation, config)) return null;
         const activeSession = sessions.find(s => s.updatedAt && !s.isFinished);
         if (!activeSession?.updatedAt || (Date.now() - activeSession.updatedAt) / 1000 > 30) return null;
 
@@ -104,13 +122,14 @@ async function fetchMediaData(): Promise<AbsMediaData | null> {
             isFinished: activeSession.isFinished || false,
         };
     } catch (e) {
+        if (!isCurrentRequest(generation, config)) return null;
         logger.error("Failed to query AudioBookShelf API", e);
         return null;
     }
 }
 
-async function getActivity(): Promise<Activity | null> {
-    const mediaData = await fetchMediaData();
+async function getActivity(generation: number, config: string): Promise<Activity | null> {
+    const mediaData = await fetchMediaData(generation, config);
     if (!mediaData || mediaData.isFinished) return null;
 
     const largeImage = mediaData.imageUrl;
@@ -145,13 +164,20 @@ async function updatePresence() {
     if (isUpdating) return;
 
     const generation = updateGeneration;
+    const config = currentAuthConfig();
+    if (authConfig !== config) {
+        authConfig = config;
+        authToken = null;
+        lastAuthFailureAt = 0;
+        hasShownConfigError = false;
+    }
     isUpdating = true;
     try {
-        const activity = await getActivity();
-        if (generation === updateGeneration) setActivity(activity);
+        const activity = await getActivity(generation, config);
+        if (isCurrentRequest(generation, config)) setActivity(activity);
     } catch (e) {
         logger.error("Failed to update presence", e);
-        if (generation === updateGeneration) setActivity(null);
+        if (isCurrentRequest(generation, config)) setActivity(null);
     } finally {
         if (generation === updateGeneration) isUpdating = false;
     }
@@ -162,6 +188,7 @@ export function start() {
 
     updateGeneration++;
     authToken = null;
+    authConfig = "";
     hasShownConfigError = false;
     lastAuthFailureAt = 0;
     void updatePresence();
@@ -174,6 +201,7 @@ export function stop() {
     updateInterval = undefined;
     isUpdating = false;
     authToken = null;
+    authConfig = "";
     lastAuthFailureAt = 0;
     setActivity(null);
 }

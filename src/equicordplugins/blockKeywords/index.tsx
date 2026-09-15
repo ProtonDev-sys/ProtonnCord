@@ -168,20 +168,20 @@ export default definePlugin({
     containsBlockedKeywords,
 
     start() {
+        blockedKeywords = [];
         const blockedWordsList = splitPatterns(settings.store.blockedWords);
         const caseSensitiveFlag = settings.store.caseSensitive ? "" : "i";
 
         if (blockedWordsList.length === 0) return;
 
-        if (settings.store.useRegex) {
-            blockedKeywords = blockedWordsList.map(word => {
-                return new RegExp(word, caseSensitiveFlag);
-            });
-        } else {
-            blockedKeywords = blockedWordsList.map(word => {
-                // escape regex chars in word https://stackoverflow.com/a/6969486
-                return new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, caseSensitiveFlag);
-            });
+        for (const word of blockedWordsList) {
+            try {
+                // Escape regex characters in literal keyword mode.
+                const pattern = settings.store.useRegex ? word : `\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`;
+                blockedKeywords.push(new RegExp(pattern, caseSensitiveFlag));
+            } catch (error) {
+                console.error("[BlockKeywords] Ignoring an invalid regular expression:", error);
+            }
         }
     },
 

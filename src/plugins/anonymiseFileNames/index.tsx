@@ -19,7 +19,7 @@
 import { ApplicationCommandInputType, ApplicationCommandOptionType, findOption, sendBotMessage } from "@api/Commands";
 import { definePluginSettings, Settings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
-import { reverseExtensionMap } from "@equicordplugins/fixFileExtensions";
+import { reverseExtensionMap, tarExtMatcher } from "@equicordplugins/fixFileExtensions";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { CloudUpload } from "@vencord/discord-types";
@@ -28,15 +28,9 @@ import { useState } from "@webpack/common";
 
 const ActionBarIcon = findByCodeLazy("Children.map", "isValidElement", "dangerous:");
 
-const enum Methods {
-    Random,
-    Consistent,
-    Timestamp,
-    Date
-}
+const Methods = { Random: 0, Consistent: 1, Timestamp: 2, Date: 3 } as const;
 
 const ANONYMISE_UPLOAD_SYMBOL = Symbol("vcAnonymise");
-export const tarExtMatcher = /\.tar\.\w+$/;
 
 const settings = definePluginSettings({
     anonymiseByDefault: {
@@ -62,7 +56,8 @@ const settings = definePluginSettings({
     randomisedLength: {
         description: "Random characters length",
         type: OptionType.NUMBER,
-        default: 7
+        default: 7,
+        isValid: value => typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 256 || "Enter a whole number from 1 to 256."
     },
     consistent: {
         description: "Consistent filename",
@@ -140,43 +135,44 @@ export default definePlugin({
         const tarMatch = tarExtMatcher.exec(originalFileName);
         const extIdx = tarMatch?.index ?? originalFileName.lastIndexOf(".");
         let ext = extIdx !== -1 ? originalFileName.slice(extIdx) : "";
-        const addSpoilerPrefix = (str: string) => settings.store.spoilerMessages ? "SPOILER_" + str : str;
+        let name = extIdx !== -1 ? originalFileName.slice(0, extIdx) : originalFileName;
 
         if (Settings.plugins.FixFileExtensions.enabled) {
-            ext = reverseExtensionMap[ext] || ext;
+            ext = reverseExtensionMap[ext.toLowerCase()] || ext;
         }
 
-        if ((upload[ANONYMISE_UPLOAD_SYMBOL] ?? settings.store.anonymiseByDefault) === false) return addSpoilerPrefix(originalFileName + ext);
-
-        const newFilename = (() => {
+        if (upload[ANONYMISE_UPLOAD_SYMBOL] ?? settings.store.anonymiseByDefault) {
             switch (settings.store.method) {
-                case Methods.Random:
-                    const chars = "0123456789bdfhjkmnpqrstvwxz";
-                    const returnedName = Array.from(
-                        { length: settings.store.randomisedLength },
-                        () => chars[Math.floor(Math.random() * chars.length)]
-                    ).join("") + ext;
-                    return addSpoilerPrefix(returnedName);
                 case Methods.Consistent:
-                    return addSpoilerPrefix(settings.store.consistent + ext);
+                    name = settings.store.consistent;
+                    break;
                 case Methods.Timestamp:
-                    return addSpoilerPrefix(Date.now().toString() + ext);
+                    name = Date.now().toString();
+                    break;
                 case Methods.Date:
                     const now = new Date();
-                    const format = settings.store.dateFormat
+                    name = settings.store.dateFormat
                         .replace(/YYYY/g, now.getFullYear().toString())
                         .replace(/MM/g, (now.getMonth() + 1).toString().padStart(2, "0"))
                         .replace(/DD/g, now.getDate().toString().padStart(2, "0"))
                         .replace(/HH/g, now.getHours().toString().padStart(2, "0"))
                         .replace(/mm/g, now.getMinutes().toString().padStart(2, "0"))
                         .replace(/ss/g, now.getSeconds().toString().padStart(2, "0"))
-                        .replace(/SSS/g, now.getMilliseconds().toString().padStart(3, "0"));
-
-                    return format ? addSpoilerPrefix(format + ext) : addSpoilerPrefix(Date.now().toString() + ext);
+                        .replace(/SSS/g, now.getMilliseconds().toString().padStart(3, "0")) || Date.now().toString();
+                    break;
+                default:
+                    const chars = "0123456789bdfhjkmnpqrstvwxz";
+                    const length = settings.def.randomisedLength.isValid.call(settings, settings.store.randomisedLength) === true
+                        ? settings.store.randomisedLength
+                        : settings.def.randomisedLength.default;
+                    name = Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
             }
-        })();
+        }
 
-        upload.filename = newFilename;
+        upload.filename = name + ext;
+        if (settings.store.spoilerMessages && !upload.filename.startsWith("SPOILER_")) {
+            upload.filename = "SPOILER_" + upload.filename;
+        }
     },
 
     commands: [

@@ -448,6 +448,7 @@ function ServicePicker(props: {
 }
 
 function FallbackOrderSettings() {
+    settings.use();
     const update = useForceUpdater();
     const { store } = settings;
     const [dragIndex, setDragIndex] = React.useState<number | null>(null);
@@ -475,7 +476,9 @@ function FallbackOrderSettings() {
                         onDragOver={event => event.preventDefault()}
                         onDrop={event => {
                             event.preventDefault();
-                            const sourceIndex = dragIndex ?? Number(event.dataTransfer.getData("text/plain"));
+                            const source = event.dataTransfer.getData("text/plain");
+                            if (dragIndex === null && !source.trim()) return;
+                            const sourceIndex = dragIndex ?? Number(source);
                             if (!Number.isInteger(sourceIndex) || sourceIndex === index || sourceIndex < 0 || sourceIndex >= order.length) {
                                 setDragIndex(null);
                                 return;
@@ -505,6 +508,7 @@ function FallbackOrderSettings() {
 }
 
 export function SettingsComponent() {
+    settings.use();
     const update = useForceUpdater();
     const { store } = settings;
     const sharexFileInputRef = React.useRef<HTMLInputElement>(null);
@@ -552,6 +556,7 @@ export function SettingsComponent() {
                 showToast(message, Toasts.Type.FAILURE);
             }
         };
+        reader.onerror = () => showToast("Could not read ShareX config file", Toasts.Type.FAILURE);
         reader.readAsText(file);
         event.target.value = "";
     };

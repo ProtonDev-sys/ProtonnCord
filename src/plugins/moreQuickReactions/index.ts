@@ -94,7 +94,7 @@ export default definePlugin({
                 // Add a custom class to identify the quick reactions have been modified and a CSS variable for the number of columns to display
                 {
                     match: /className:(\i\.\i),(?=children:)/,
-                    replace: 'className:"vc-better-quick-react "+($self.settings.store.compactMode?"vc-better-quick-react-compact ":"")+$1,style:{"--vc-better-quick-react-columns":$self.settings.store.columns},'
+                    replace: 'className:"vc-better-quick-react "+($self.settings.store.compactMode?"vc-better-quick-react-compact ":"")+$1,style:{"--vc-better-quick-react-columns":$self.columns},'
                 },
                 // Scroll handler + Apply the emoji count limit from earlier with custom logic
                 {
@@ -120,10 +120,16 @@ export default definePlugin({
         }
     ],
     getMaxQuickReactions() {
-        return Math.max(0, settings.store.rows * settings.store.columns);
+        const { rows } = settings.store;
+        return (Number.isFinite(rows) ? Math.max(1, Math.min(16, Math.floor(rows))) : 2) * this.columns;
+    },
+    get columns() {
+        const { columns } = settings.store;
+        return Number.isFinite(columns) ? Math.max(1, Math.min(12, Math.floor(columns))) : 4;
     },
     get reactionCount() {
-        return Math.max(0, Math.min(42, settings.store.reactionCount));
+        const count = settings.store.reactionCount;
+        return Number.isFinite(count) ? Math.max(0, Math.min(42, Math.floor(count))) : 5;
     },
     applyScroll(emojis: any[], index: number) {
         const maxReactions = this.getMaxQuickReactions();
@@ -144,7 +150,7 @@ export default definePlugin({
             if (e.deltaY === 0 || e.shiftKey) return;
             e.stopPropagation(); // does this do anything?
             const modifier = e.deltaY < 0 ? -1 : 1;
-            const newValue = currentScrollValue + (modifier * settings.store.columns);
+            const newValue = currentScrollValue + (modifier * this.columns);
             setScrollHook(Math.max(0, Math.min(newValue, maxScroll)));
         };
     },

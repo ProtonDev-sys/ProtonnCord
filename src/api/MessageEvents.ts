@@ -46,6 +46,7 @@ export interface MessageContentOptions {
 
 export interface SendMessageOptions extends MessageContentOptions {
     attachmentsToUpload?: CloudUpload[];
+    flags?: number;
     messageReference?: Message["messageReference"];
     allowedMentions?: {
         parse: string[];
@@ -169,6 +170,7 @@ export async function _handlePreSend(channelId: string, messageObj: MessageObjec
         "MessageSendHandler: Listener encountered an unknown error\n",
     );
     if (listenerOptions.attachmentsToUpload) options.attachmentsToUpload = listenerOptions.attachmentsToUpload;
+    if ("flags" in listenerOptions) options.flags = listenerOptions.flags;
     return cancelled;
 }
 

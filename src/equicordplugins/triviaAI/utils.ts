@@ -8,7 +8,7 @@ import { sendBotMessage } from "@api/Commands";
 import { insertTextIntoChatInputBox, sendMessage } from "@utils/discord";
 import { Logger } from "@utils/Logger";
 import { Message } from "@vencord/discord-types";
-import { MessageStore, showToast, Toasts, UserStore } from "@webpack/common";
+import { MessageStore, SelectedChannelStore, showToast, Toasts, UserStore } from "@webpack/common";
 
 import { settings } from "./settings";
 
@@ -184,7 +184,7 @@ export function parseMessageContent(message: Message): ContentPayload | null {
 
 async function toBase64Image(part: ImagePart): Promise<ImagePart | null> {
     try {
-        const req = await fetch(part.image_url.url);
+        const req = await fetch(part.image_url.url, { signal: AbortSignal.timeout(15_000) });
         if (!req.ok) return null;
 
         let binary = "";
@@ -203,12 +203,12 @@ async function toBase64Image(part: ImagePart): Promise<ImagePart | null> {
     }
 }
 
-export async function handleResponse(message: Message, response: string): Promise<string> {
+export async function handleResponse(message: Message, response: string, mode = settings.store.mode): Promise<string> {
     if (!response.trim()) return "";
 
-    switch (settings.store.mode) {
+    switch (mode) {
         case "autoreply":
-            sendMessage(
+            await sendMessage(
                 message.channel_id,
                 { content: response },
                 true,
@@ -216,6 +216,7 @@ export async function handleResponse(message: Message, response: string): Promis
             );
             break;
         case "chatbar":
+            if (SelectedChannelStore.getChannelId() !== message.channel_id) return "";
             insertTextIntoChatInputBox(response);
             break;
         case "bot":
@@ -244,6 +245,8 @@ export async function getResponse(payload: ApiMessage[]): Promise<string> {
     try {
         const req = await fetch(settings.store.endpoint, {
             method: "POST",
+            signal: AbortSignal.timeout(60_000),
+            redirect: "error",
             headers: {
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${settings.store.apiKey}`
@@ -275,7 +278,7 @@ export async function getResponse(payload: ApiMessage[]): Promise<string> {
         }
 
         const response = data.choices?.[0]?.message?.content;
-        if (!response?.trim()) {
+        if (typeof response !== "string" || !response.trim()) {
             logger.warn("no response from AI model");
             return "";
         }

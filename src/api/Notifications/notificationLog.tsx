@@ -21,6 +21,7 @@ import { Settings } from "@api/Settings";
 import { Paragraph } from "@components/Paragraph";
 import { openNotificationSettingsModal } from "@components/settings/tabs/vencord/NotificationSettings";
 import { classNameFactory } from "@utils/css";
+import { Logger } from "@utils/Logger";
 import { useAwaiter } from "@utils/react";
 import { RenderModalProps } from "@vencord/discord-types";
 import { ConfirmModal, ListScrollerThin, Modal, openModal, React, Timestamp, useEffect, useReducer, useState } from "@webpack/common";
@@ -36,6 +37,7 @@ interface PersistentNotificationData extends Pick<NotificationData, "title" | "b
 }
 
 const KEY = "notification-log";
+const logger = new Logger("NotificationLog");
 
 const getLog = async () => {
     const log = await DataStore.get(KEY) as PersistentNotificationData[] | undefined;
@@ -121,7 +123,12 @@ function NotificationEntry({ data }: { data: PersistentNotificationData; }) {
                     if (removing) return;
                     setRemoving(true);
 
-                    setTimeout(() => deleteNotification(data.id), 200);
+                    setTimeout(() => {
+                        deleteNotification(data.id).catch(error => {
+                            setRemoving(false);
+                            logger.error("Failed to delete notification", error);
+                        });
+                    }, 200);
                 }}
                 richBody={
                     <div className={cl("body-wrapper")}>

@@ -18,43 +18,77 @@
 
 import * as DataStore from "@api/DataStore";
 import { classNameFactory } from "@utils/css";
-import { UserStore } from "@webpack/common";
+import { React, UserStore, useStateFromStores } from "@webpack/common";
 
 import { ChromeIcon, DiscordIcon, EdgeIcon, FirefoxIcon, IEIcon, MobileIcon, OperaIcon, SafariIcon, UnknownIcon } from "./components/icons";
 import { SessionInfo } from "./types";
 
-const getDataKey = () => {
+export const getDataKey = () => {
     const currentUserId = UserStore.getCurrentUser()?.id;
     return currentUserId ? `BetterSessions_savedSessions_${currentUserId}` : undefined;
 };
 
 export const cl = classNameFactory("vc-betterSessions-");
 export const savedSessionsCache: Map<string, { name: string, isNew: boolean; }> = new Map();
+let cacheDataKey: string | undefined;
+let cacheVersion = 0;
+const listeners = new Set<() => void>();
+
+function notifySessionNames() {
+    cacheVersion++;
+    listeners.forEach(listener => listener());
+}
+
+function subscribe(listener: () => void) {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+}
+
+export function useSessionNames() {
+    useStateFromStores([UserStore], () => UserStore.getCurrentUser()?.id);
+    React.useSyncExternalStore(subscribe, () => cacheVersion);
+    return isSessionCacheCurrent() ? savedSessionsCache : undefined;
+}
+
+export function isSessionCacheCurrent() {
+    return cacheDataKey !== undefined && cacheDataKey === getDataKey();
+}
+
+export function resetSessionCache() {
+    cacheDataKey = undefined;
+    savedSessionsCache.clear();
+    notifySessionNames();
+}
 
 export function getDefaultName(clientInfo: SessionInfo["session"]["client_info"]) {
     return `${clientInfo.os} · ${clientInfo.platform}`;
 }
 
 export function saveSessionsToDataStore() {
-    const dataKey = getDataKey();
-    if (!dataKey) return Promise.resolve();
+    const dataKey = cacheDataKey;
+    if (!dataKey || dataKey !== getDataKey()) return Promise.reject(new Error("Session names belong to a different or unloaded account"));
 
-    return DataStore.set(dataKey, savedSessionsCache);
+    const snapshot = new Map(Array.from(savedSessionsCache, ([id, data]) => [id, { ...data }]));
+    notifySessionNames();
+    return DataStore.set(dataKey, snapshot);
 }
 
 export async function fetchNamesFromDataStore(shouldApply = () => true) {
-    savedSessionsCache.clear();
+    resetSessionCache();
 
     const dataKey = getDataKey();
-    if (!dataKey) return;
+    if (!dataKey) return false;
 
     const savedSessions = await DataStore.get<Map<string, { name: string, isNew: boolean; }>>(dataKey) || new Map();
-    if (!shouldApply()) return;
+    if (!shouldApply() || dataKey !== getDataKey()) return false;
 
     savedSessionsCache.clear();
     savedSessions.forEach((data, idHash) => {
         savedSessionsCache.set(idHash, data);
     });
+    cacheDataKey = dataKey;
+    notifySessionNames();
+    return true;
 }
 
 export function GetOsColor(os: string) {

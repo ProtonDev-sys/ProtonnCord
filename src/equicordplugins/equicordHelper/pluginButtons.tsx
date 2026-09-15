@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { isPluginEnabled, plugins } from "@api/PluginManager";
+import { isPluginEnabled } from "@api/PluginManager";
+import { useSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Logger } from "@utils/Logger";
 import { isEquicordGuild, isEquicordSupport } from "@utils/misc";
@@ -12,9 +13,17 @@ import { Message } from "@vencord/discord-types";
 import { Button, showToast, Toasts } from "@webpack/common";
 import { JSX } from "react";
 
+import { PluginManifest as plugins } from "~plugins";
+
 import { toggleEnabled } from "./utils";
 
-export const PluginButtons = ErrorBoundary.wrap(function PluginCards({ message }: { message: Message; }) {
+export const PluginButtons = ErrorBoundary.wrap(function PluginButtons({ message }: { message: Message; }) {
+    if (!isEquicordGuild(message.channel_id) || !isEquicordSupport(message.author.id)) return null;
+    return <TrustedPluginButtons message={message} />;
+}, { noop: true });
+
+function TrustedPluginButtons({ message }: { message: Message; }) {
+    useSettings();
     const pluginButtons = [] as JSX.Element[];
     const msg = message.content?.toLowerCase() ?? "";
 
@@ -23,11 +32,10 @@ export const PluginButtons = ErrorBoundary.wrap(function PluginCards({ message }
     const matchedPlugin = matchedPlugins.sort((a, b) => b.length - a.length)[0];
     const pluginData = matchedPlugin ? plugins[matchedPlugin] : null;
 
-    const isEquicord = isEquicordGuild(message.channel_id) && isEquicordSupport(message.author.id);
     const startsWithEnabled = msg.startsWith("enable");
     const startsWithDisabled = msg.startsWith("disable");
 
-    const shouldAddPluginButtons = pluginData && isEquicord && (startsWithEnabled || startsWithDisabled);
+    const shouldAddPluginButtons = pluginData && (startsWithEnabled || startsWithDisabled);
 
     if (shouldAddPluginButtons) {
         if (pluginData.required || pluginData.name.endsWith("API")) return;
@@ -69,4 +77,4 @@ export const PluginButtons = ErrorBoundary.wrap(function PluginCards({ message }
             {pluginButtons}
         </div>
     );
-}, { noop: true });
+}

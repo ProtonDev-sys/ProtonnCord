@@ -80,9 +80,11 @@ function textProcessing(input: string) {
     // Preserve code blocks
     const codeBlockRegex = /```[\s\S]*?```|`[\s\S]*?`/g;
     const codeBlocks: string[] = [];
+    let codePrefix = "__VC_POLISH_CODE_";
+    while (input.includes(codePrefix)) codePrefix = `_${codePrefix}`;
     text = text.replace(codeBlockRegex, match => {
         codeBlocks.push(match);
-        return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+        return `${codePrefix}${codeBlocks.length - 1}__`;
     });
 
     // Run message through formatters.
@@ -91,7 +93,7 @@ function textProcessing(input: string) {
     if (settings.store.fixPunctuation && (Math.random() * 100 < settings.store.fixPunctuationFrequency)) text = addPeriods(text);
     if (settings.store.expandContractions) text = expandContractions(text);
 
-    text = text.replace(/__CODE_BLOCK_(\d+)__/g, (_, index) => codeBlocks[parseInt(index)]);
+    text = text.replace(new RegExp(`${codePrefix}(\\d+)__`, "g"), (match, index) => codeBlocks[Number(index)] ?? match);
 
     return text;
 }
@@ -149,6 +151,9 @@ for (const contraction in contractionsMap) {
     missingApostropheMap[withoutApostrophe] = contraction;
 }
 
+const findMissingRegex = new RegExp(`\\b(${Object.keys(missingApostropheMap).join("|")})\\b`, "gi");
+const contractionRegex = new RegExp(`\\b(${Object.keys(contractionsMap).join("|")})\\b`, "gi");
+
 function getCapData(str: string) {
     const booleanArray: boolean[] = [];
     for (const char of str) {
@@ -183,16 +188,6 @@ function restoreCap(str: string, data: boolean[]): string {
 function ensureApostrophe(textInput: string): string {
     // This function makes sure all contractions have apostrophes
 
-    const potentialContractions = Object.keys(missingApostropheMap);
-    if (potentialContractions.length === 0) {
-        return textInput; // Nothing to check if the map is empty
-    }
-
-    const findMissingRegex = new RegExp(
-        `\\b(${potentialContractions.join("|")})\\b`, // Match any of the keys as whole words
-        "gi" // Global (all occurrences), Case-insensitive
-    );
-
     return textInput.replace(findMissingRegex, match => {
         const lowerCaseMatch = match.toLowerCase();
 
@@ -205,11 +200,6 @@ function ensureApostrophe(textInput: string): string {
 }
 
 function expandContractions(textInput: string) {
-    const contractionRegex = new RegExp(
-        `\\b(${Object.keys(contractionsMap).join("|")})\\b`,
-        "gi"
-    );
-
     return textInput.replace(contractionRegex, match => {
         const lowerCaseMatch = match.toLowerCase();
         if (Object.prototype.hasOwnProperty.call(contractionsMap, lowerCaseMatch)) {

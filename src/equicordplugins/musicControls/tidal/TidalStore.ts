@@ -36,21 +36,23 @@ export type Repeat = 0 | 1 | 2;
 const logger = new Logger("TidalControls");
 
 function mapApiResponseToTrack(apiData: any): Track | null {
-    if (!apiData?.track) return null;
+    if (!apiData?.track || typeof apiData.track !== "object") return null;
 
     const { track } = apiData;
-    const artist = track.artist?.name || (track.artists?.[0]?.name) || "Unknown Artist";
+    const artistName = track.artist?.name || track.artists?.[0]?.name;
+    const artist = typeof artistName === "string" ? artistName : "Unknown Artist";
+    const duration = apiData.duration ?? track.duration;
 
     return {
-        name: track.title || "Unknown Title",
+        name: typeof track.title === "string" ? track.title : "Unknown Title",
         artist,
-        imageSrc: apiData.coverUrl || null,
-        songDuration: apiData.duration || track.duration || 0,
-        elapsedSeconds: apiData.currentTime || 0,
-        url: track.url || null,
-        album: track.album?.title || null,
-        id: track.id?.toString() || "0",
-        vibrantColor: track.album?.vibrantColor || null,
+        imageSrc: typeof apiData.coverUrl === "string" ? apiData.coverUrl : null,
+        songDuration: Number.isFinite(duration) ? Math.max(0, duration) : 0,
+        elapsedSeconds: Number.isFinite(apiData.currentTime) ? Math.max(0, apiData.currentTime) : 0,
+        url: typeof track.url === "string" ? track.url : undefined,
+        album: typeof track.album?.title === "string" ? track.album.title : null,
+        id: typeof track.id === "string" || typeof track.id === "number" ? String(track.id) : "0",
+        vibrantColor: typeof track.album?.vibrantColor === "string" ? track.album.vibrantColor : null,
     };
 }
 
@@ -139,6 +141,9 @@ class TidalSocket {
             return;
         }
         this.connecting = true;
+        const previousSocket = this.socket;
+        this.socket = undefined;
+        previousSocket?.close();
         const socket = new WebSocket(url);
         this.socket = socket;
 
@@ -167,6 +172,7 @@ class TidalSocket {
 
         socket.addEventListener("message", e => {
             if (this.socket !== socket) return;
+            if (typeof e.data !== "string" || e.data.length > 1_000_000) return;
             let message: Message;
             try {
                 message = JSON.parse(e.data) as Message;
@@ -180,7 +186,7 @@ class TidalSocket {
                         break;
                 }
             } catch (err) {
-                logger.error("Invalid JSON:", err, `\n${e.data}`);
+                logger.error("Invalid Tidal update", err);
                 return;
             }
         });
@@ -201,29 +207,38 @@ export const TidalStore = proxyLazyWebpack(() => {
         public volume = 100;
         public playerElement: HTMLElement | null = null;
         private appliedVibrantColor: string | null = null;
+        private apiState: Record<string, any> = {};
 
         public socket = new TidalSocket((message: Message) => {
-            if (message.type === "update" && message.all && message.fields) {
-                const apiData = message.fields;
+            if (message.type === "update") {
+                const fields = message.fields && typeof message.fields === "object" ? message.fields
+                    : typeof message.field === "string" ? { [message.field]: message.value } : null;
+                if (!fields) return;
+                const knownFields = ["track", "coverUrl", "duration", "currentTime", "playing", "repeatMode", "shuffle", "volume"];
+                if (message.all) this.apiState = {};
+                for (const field of knownFields) {
+                    if (Object.hasOwn(fields, field)) this.apiState[field] = fields[field];
+                }
+                const apiData = this.apiState;
 
                 const track = mapApiResponseToTrack(apiData);
+                if (!track || !isSameTrack(store.track, track)) store.track = track;
+                if (Object.hasOwn(fields, "currentTime")) store.position = Number.isFinite(apiData.currentTime) ? Math.max(0, apiData.currentTime) : 0;
+                else if (typeof apiData.playing === "boolean" && apiData.playing !== store.isPlaying) store.position /= 1000;
+                this.applyVibrantColor(track?.vibrantColor);
 
-                if (track) {
-                    if (!isSameTrack(store.track, track)) {
-                        store.track = track;
-                    }
-                    store.position = (apiData.currentTime || 0);
-                    this.applyVibrantColor(track.vibrantColor);
-                }
-
-                if (apiData.playing !== undefined) store.isPlaying = apiData.playing;
-                if (apiData.repeatMode !== undefined) store.repeat = apiData.repeatMode;
-                if (apiData.shuffle !== undefined) store.shuffle = apiData.shuffle;
-                if (apiData.volume !== undefined) store.volume = apiData.volume;
+                if (typeof apiData.playing === "boolean") store.isPlaying = apiData.playing;
+                if ([0, 1, 2].includes(apiData.repeatMode)) store.repeat = apiData.repeatMode;
+                if (typeof apiData.shuffle === "boolean") store.shuffle = apiData.shuffle;
+                if (Number.isFinite(apiData.volume)) store.volume = Math.max(0, Math.min(100, apiData.volume));
 
                 store.emitChange();
             }
         });
+
+        public init() {
+            this.socket.reconnect();
+        }
 
         public openExternal(path: string) {
             VencordNative.native.openExternal(path.replace("http://www.tidal.com", "tidal://"));
@@ -231,7 +246,14 @@ export const TidalStore = proxyLazyWebpack(() => {
         }
 
         private applyVibrantColor(vibrantColor?: string | null) {
-            if (!vibrantColor) return;
+            if (!this.playerElement?.isConnected) this.playerElement = null;
+            if (vibrantColor && !CSS.supports("color", vibrantColor)) vibrantColor = null;
+            if (!vibrantColor) {
+                this.playerElement?.style.removeProperty("--eq-tdl-slider-gradient");
+                this.playerElement?.style.removeProperty("--eq-tdl-slider-grabber");
+                this.appliedVibrantColor = null;
+                return;
+            }
             if (this.playerElement && this.appliedVibrantColor === vibrantColor) return;
 
             this.playerElement ??= document.querySelector("#eq-tdl-player");
@@ -264,8 +286,8 @@ export const TidalStore = proxyLazyWebpack(() => {
             this.socket.routes.next();
         }
         setVolume(percent: number) {
-            if (!this.ensureSocketReady()) return;
-            const volume = Math.max(1, Math.min(100, Math.round(percent)));
+            if (!this.ensureSocketReady() || !Number.isFinite(percent)) return;
+            const volume = Math.max(0, Math.min(100, Math.round(percent)));
             this.socket.routes.volume(volume);
             this.volume = volume;
             this.emitChange();
@@ -273,7 +295,9 @@ export const TidalStore = proxyLazyWebpack(() => {
         setPlaying(playing: boolean) {
             if (!this.ensureSocketReady()) return;
             this.socket.routes[playing ? "play" : "pause"]();
+            this.position /= 1000;
             this.isPlaying = playing;
+            this.emitChange();
         }
         setRepeat(state: Repeat) {
             if (!this.ensureSocketReady()) return;
@@ -288,8 +312,8 @@ export const TidalStore = proxyLazyWebpack(() => {
             this.emitChange();
         }
         seek(ms: number) {
-            if (!this.ensureSocketReady()) return;
-            this.socket.routes.seek(Math.round(ms / 1000));
+            if (!this.ensureSocketReady() || !Number.isFinite(ms)) return;
+            this.socket.routes.seek(Math.max(0, Math.round(ms / 1000)));
         }
 
         public ensureSocketReady(): boolean {
@@ -301,6 +325,7 @@ export const TidalStore = proxyLazyWebpack(() => {
 
         public destroy() {
             this.socket.destroy();
+            this.apiState = {};
             this.track = null;
             this.isPlaying = false;
             this.mPosition = 0;

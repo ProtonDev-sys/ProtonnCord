@@ -21,6 +21,7 @@ interface ReposModalProps {
 }
 
 export function ReposModal({ groups, initialActiveKey, username, rootProps }: ReposModalProps & { rootProps: RenderModalProps; }) {
+    const { showStars, showLanguage } = settings.use(["showStars", "showLanguage"]);
     const [activeKey, setActiveKey] = useState(initialActiveKey);
     const [sortMode, setSortMode] = useState<RepoSortMode>("count");
 
@@ -37,7 +38,7 @@ export function ReposModal({ groups, initialActiveKey, username, rootProps }: Re
                 {
                     text: "View on GitHub",
                     variant: "link",
-                    onClick: () => window.open(`https://github.com/${username}?tab=repositories`, "_blank")
+                    onClick: () => window.open(`https://github.com/${encodeURIComponent(username)}?tab=repositories`, "_blank", "noopener,noreferrer")
                 },
                 {
                     text: "Close",
@@ -60,8 +61,8 @@ export function ReposModal({ groups, initialActiveKey, username, rootProps }: Re
                         <RepoCard
                             key={repo.id}
                             repo={repo}
-                            showStars={settings.store.showStars}
-                            showLanguage={settings.store.showLanguage}
+                            showStars={showStars}
+                            showLanguage={showLanguage}
                         />
                     ))}
                 </div>

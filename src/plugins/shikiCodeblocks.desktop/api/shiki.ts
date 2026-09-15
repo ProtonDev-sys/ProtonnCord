@@ -28,6 +28,35 @@ import { themes } from "./themes";
 const themeUrls = Object.values(themes);
 
 let resolveClient: (client: WorkerClient<ShikiSpec>) => void;
+let rejectClient: (reason: Error) => void;
+let generation = 0;
+let themeGeneration = 0;
+let initialization: Promise<void> | undefined;
+const pendingThemes = new Map<string, Promise<void>>();
+const pendingLanguages = new Map<string, Promise<void>>();
+
+function createClientPromise() {
+    const promise = new Promise<WorkerClient<ShikiSpec>>((resolve, reject) => {
+        resolveClient = resolve;
+        rejectClient = reject;
+    });
+    void promise.catch(() => {});
+    return promise;
+}
+
+function withDeadline<T>(operation: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout>;
+    return Promise.race([
+        operation,
+        new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Shiki operation timed out")), shiki.timeoutMs);
+        })
+    ]).finally(() => clearTimeout(timer));
+}
+
+function assertCurrent(client: WorkerClient<ShikiSpec>) {
+    if (client !== shiki.client) throw new Error("Shiki session ended");
+}
 
 export const shiki = {
     client: null as WorkerClient<ShikiSpec> | null,
@@ -38,81 +67,119 @@ export const shiki = {
     themes,
     loadedThemes: new Set<string>(),
     loadedLangs: new Set<string>(),
-    clientPromise: new Promise<WorkerClient<ShikiSpec>>(resolve => resolveClient = resolve),
+    clientPromise: createClientPromise(),
 
-    init: async (initThemeUrl: string | undefined) => {
-        /** https://stackoverflow.com/q/58098143 */
-        const workerBlob = await fetch(shikiWorkerSrc).then(res => res.blob());
+    init: (initThemeUrl: string | undefined): Promise<void> => {
+        if (initialization) return initialization;
+        const currentGeneration = ++generation;
+        initialization = (async () => {
+            const response = await fetch(shikiWorkerSrc, { signal: AbortSignal.timeout(shiki.timeoutMs) });
+            if (!response.ok) throw new Error(`Shiki worker request failed: ${response.status}`);
+            const workerBlob = await response.blob();
+            if (generation !== currentGeneration) return;
 
-        const client = shiki.client = new WorkerClient<ShikiSpec>(
-            "shiki-client",
-            "shiki-host",
-            workerBlob,
-            { name: "ShikiWorker" },
-        );
-        await client.init();
-
-        const themeUrl = initThemeUrl || themeUrls[0];
-
-        await loadLanguages();
-        await client.run("setOnigasm", { wasm: shikiOnigasmSrc });
-        await client.run("setHighlighter", { theme: themeUrl, langs: [] });
-        shiki.loadedThemes.add(themeUrl);
-        await shiki._setTheme(themeUrl);
-        resolveClient(client);
+            const client = shiki.client = new WorkerClient<ShikiSpec>(
+                "shiki-client", "shiki-host", workerBlob, { name: "ShikiWorker" }
+            );
+            await withDeadline(client.init());
+            assertCurrent(client);
+            const themeUrl = initThemeUrl || themeUrls[0];
+            await loadLanguages();
+            assertCurrent(client);
+            await withDeadline(client.run("setOnigasm", { wasm: shikiOnigasmSrc }));
+            assertCurrent(client);
+            await withDeadline(client.run("setHighlighter", { theme: themeUrl, langs: [] }));
+            assertCurrent(client);
+            shiki.loadedThemes.add(themeUrl);
+            await shiki._setTheme(themeUrl, themeGeneration);
+            assertCurrent(client);
+            resolveClient(client);
+        })().catch(error => {
+            if (generation === currentGeneration) shiki.destroy();
+            throw error;
+        });
+        return initialization;
     },
-    _setTheme: async (themeUrl: string) => {
+    _setTheme: async (themeUrl: string, request = ++themeGeneration) => {
+        const { client } = shiki;
+        if (!client) return;
+        const { themeData } = await withDeadline(client.run("getTheme", { theme: themeUrl }));
+        assertCurrent(client);
+        if (request !== themeGeneration) return;
+        const theme = JSON.parse(themeData);
+        if (!theme || typeof theme !== "object" || Array.isArray(theme)) throw new Error("Invalid Shiki theme");
         shiki.currentThemeUrl = themeUrl;
-        const { themeData } = await shiki.client!.run("getTheme", { theme: themeUrl });
-        shiki.currentTheme = JSON.parse(themeData);
-        dispatchTheme({ id: themeUrl, theme: shiki.currentTheme });
+        shiki.currentTheme = theme;
+        dispatchTheme({ id: themeUrl, theme });
     },
     loadTheme: async (themeUrl: string) => {
         const client = await shiki.clientPromise;
+        assertCurrent(client);
         if (shiki.loadedThemes.has(themeUrl)) return;
-
-        await client.run("loadTheme", { theme: themeUrl });
-
-        shiki.loadedThemes.add(themeUrl);
+        if (pendingThemes.has(themeUrl)) return pendingThemes.get(themeUrl);
+        const pending = withDeadline(client.run("loadTheme", { theme: themeUrl })).then(() => {
+            assertCurrent(client);
+            shiki.loadedThemes.add(themeUrl);
+        }).finally(() => {
+            if (pendingThemes.get(themeUrl) === pending) pendingThemes.delete(themeUrl);
+        });
+        pendingThemes.set(themeUrl, pending);
+        return pending;
     },
     setTheme: async (themeUrl: string) => {
-        await shiki.clientPromise;
+        const request = ++themeGeneration;
+        const client = await shiki.clientPromise;
+        assertCurrent(client);
         themeUrl ||= themeUrls[0];
         if (!shiki.loadedThemes.has(themeUrl)) await shiki.loadTheme(themeUrl);
-
-        await shiki._setTheme(themeUrl);
+        assertCurrent(client);
+        if (request !== themeGeneration) return;
+        await shiki._setTheme(themeUrl, request);
     },
     loadLang: async (langId: string) => {
         const client = await shiki.clientPromise;
+        assertCurrent(client);
         const lang = resolveLang(langId);
-
         if (!lang || shiki.loadedLangs.has(lang.id)) return;
-
-        await client.run("loadLanguage", {
-            lang: {
-                ...lang,
-                grammar: lang.grammar ?? await getGrammar(lang),
-            }
+        if (pendingLanguages.has(lang.id)) return pendingLanguages.get(lang.id);
+        const pending = (async () => {
+            const grammar = lang.grammar ?? await getGrammar(lang);
+            assertCurrent(client);
+            await withDeadline(client.run("loadLanguage", { lang: { ...lang, grammar } }));
+            assertCurrent(client);
+            shiki.loadedLangs.add(lang.id);
+        })().finally(() => {
+            if (pendingLanguages.get(lang.id) === pending) pendingLanguages.delete(lang.id);
         });
-        shiki.loadedLangs.add(lang.id);
+        pendingLanguages.set(lang.id, pending);
+        return pending;
     },
     tokenizeCode: async (code: string, langId: string): Promise<IThemedToken[][]> => {
         const client = await shiki.clientPromise;
+        assertCurrent(client);
         const lang = resolveLang(langId);
         if (!lang) return [];
-
         if (!shiki.loadedLangs.has(lang.id)) await shiki.loadLang(lang.id);
-
-        return await client.run("codeToThemedTokens", {
-            code,
-            lang: langId,
-            theme: shiki.currentThemeUrl ?? themeUrls[0],
-        });
+        assertCurrent(client);
+        return withDeadline(client.run("codeToThemedTokens", {
+            code, lang: lang.id, theme: shiki.currentThemeUrl ?? themeUrls[0],
+        }));
     },
     destroy() {
+        generation++;
+        themeGeneration++;
+        rejectClient(new Error("Shiki session ended"));
+        shiki.clientPromise = createClientPromise();
+        initialization = undefined;
         shiki.currentTheme = null;
         shiki.currentThemeUrl = null;
+        shiki.loadedThemes.clear();
+        shiki.loadedLangs.clear();
+        pendingThemes.clear();
+        pendingLanguages.clear();
+        const { client } = shiki;
+        shiki.client = null;
+        client?.destroy();
         dispatchTheme({ id: null, theme: null });
-        shiki.client?.destroy();
     }
 };

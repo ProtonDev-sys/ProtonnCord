@@ -28,17 +28,12 @@ import { Paragraph } from "@components/Paragraph";
 import { SettingsTab, wrapTab } from "@components/settings/tabs/BaseTab";
 import { Margins } from "@utils/margins";
 import { useAwaiter } from "@utils/react";
-import { getRepo, isNewer, UpdateLogger } from "@utils/updater";
+import { getRepo, UpdateLogger } from "@utils/updater";
 import { React } from "@webpack/common";
 
 import gitHash from "~git-hash";
 
-import { HashLink, Newer, Updatable } from "./Components";
-
-interface CommonProps {
-    repo: string;
-    repoPending: boolean;
-}
+import { HashLink, Updatable } from "./Components";
 
 function EquibopSection() {
     if (!IS_EQUIBOP) return null;
@@ -68,23 +63,11 @@ function EquibopSection() {
     );
 }
 
-function Updater() {
+function UpdatePreferences() {
     const settings = useSettings(["autoUpdate", "autoUpdateNotification"]);
 
-    const [repo, err, repoPending] = useAwaiter(getRepo, { fallbackValue: "Loading..." });
-
-    React.useEffect(() => {
-        if (err)
-            UpdateLogger.error("Failed to retrieve repo", err);
-    }, [err]);
-
-    const commonProps: CommonProps = {
-        repo,
-        repoPending
-    };
-
     return (
-        <SettingsTab>
+        <>
             <EquibopSection />
             <Heading className={Margins.top16}>Update Preferences</Heading>
             <Paragraph className={Margins.bottom20}>
@@ -106,35 +89,41 @@ function Updater() {
                 disabled={!settings.autoUpdate}
                 hideBorder
             />
+        </>
+    );
+}
 
+function Updater() {
+    const settings = useSettings(["updateBranch"]);
+    const [repo, error, repoPending] = useAwaiter(getRepo, { fallbackValue: "Loading..." });
+
+    React.useEffect(() => {
+        if (error) UpdateLogger.error("Failed to retrieve repo", error);
+    }, [error]);
+
+    return (
+        <SettingsTab>
+            <Heading className={Margins.top16}>Updates</Heading>
+            {IS_UPDATER_DISABLED ? (
+                <Paragraph>Updates are disabled in this build. Use a release build to select an update branch and install updates here.</Paragraph>
+            ) : (
+                <>
+                    <Updatable key={settings.updateBranch} repo={repo} repoPending={repoPending} disabled={repoPending || Boolean(error)} />
+                    <UpdatePreferences />
+                </>
+            )}
             <Divider className={Margins.top20} />
-
             <Heading className={Margins.top20}>Repository</Heading>
-            <Paragraph className={Margins.bottom8}>
-                This is the GitHub repository where Protonn Cord fetches updates from.
-            </Paragraph>
             <Paragraph color="text-subtle">
-                {repoPending
-                    ? repo
-                    : err
-                        ? "Failed to retrieve - check console"
-                        : (
-                            <Link href={repo}>
-                                {repo.split("/").slice(-2).join("/")}
-                            </Link>
-                        )
-                }
-                {" "}(<HashLink hash={gitHash} repo={repo} disabled={repoPending} />)
+                {repoPending ? repo : error ? "Failed to retrieve repository." : (
+                    <>
+                        <Link href={repo}>{repo.split("/").slice(-2).join("/")}</Link>
+                        {" "}(<HashLink hash={gitHash} repo={repo} />)
+                    </>
+                )}
             </Paragraph>
-
-            <Divider className={Margins.top20} />
-
-            <Heading className={Margins.top20}>Updates</Heading>
-            {isNewer ? <Newer {...commonProps} /> : <Updatable {...commonProps} />}
         </SettingsTab>
     );
 }
 
-export default IS_UPDATER_DISABLED
-    ? null
-    : wrapTab(Updater, "Updater");
+export default wrapTab(Updater, "Updates");

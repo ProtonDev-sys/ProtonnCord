@@ -41,13 +41,11 @@ function OnekoColorSettings() {
     const handleFurColorChange = (value: number | null) => {
         const hex = formatNumberToHex(value);
         settings.store.furColor = hex;
-        load();
     };
 
     const handleOutlineColorChange = (value: number | null) => {
         const hex = formatNumberToHex(value);
         settings.store.outlineColor = hex;
-        load();
     };
 
     return (
@@ -196,7 +194,11 @@ const settings = definePluginSettings({
     }
 });
 
+let disposeBuddy: (() => void) | undefined;
+
 function unload() {
+    disposeBuddy?.();
+    disposeBuddy = undefined;
     document.getElementById("oneko")?.remove();
     document.getElementById("fathorse")?.remove();
 }
@@ -207,7 +209,7 @@ function load() {
 
     switch (settings.store.buddy) {
         case "oneko": {
-            oneko({
+            disposeBuddy = oneko({
                 speed: settings.store.speed,
                 fps: settings.store.fps,
                 image: ONEKO_IMAGE,
@@ -218,7 +220,7 @@ function load() {
             break;
         }
         case "fathorse": {
-            fathorse({
+            disposeBuddy = fathorse({
                 speed: settings.store.speed,
                 fps: settings.store.fps,
                 size: settings.store.size,

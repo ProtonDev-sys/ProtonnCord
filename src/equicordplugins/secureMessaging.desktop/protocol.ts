@@ -6,9 +6,11 @@
 
 export const KEY_ANNOUNCEMENT_PREFIX = "PCEK1:";
 export const LEGACY_ENCRYPTED_MESSAGE_PREFIX = "PCEM1:";
-export const ENCRYPTED_MESSAGE_PREFIX = "PCEM2:";
+export const PREVIOUS_ENCRYPTED_MESSAGE_PREFIX = "PCEM2:";
+export const ENCRYPTED_MESSAGE_PREFIX = "PCEM3:";
 export const PROTOCOL_VERSION = 1 as const;
-export const ENCRYPTED_MESSAGE_VERSION = 2 as const;
+export const PREVIOUS_ENCRYPTED_MESSAGE_VERSION = 2 as const;
+export const ENCRYPTED_MESSAGE_VERSION = 3 as const;
 export const MAX_DISCORD_MESSAGE_LENGTH = 2_000;
 export const MAX_SELECTED_RECIPIENTS = 24;
 
@@ -54,7 +56,7 @@ export interface WrappedContentKey {
 }
 
 export interface UnsignedEncryptedEnvelope {
-    v: typeof PROTOCOL_VERSION | typeof ENCRYPTED_MESSAGE_VERSION;
+    v: typeof PROTOCOL_VERSION | typeof PREVIOUS_ENCRYPTED_MESSAGE_VERSION | typeof ENCRYPTED_MESSAGE_VERSION;
     t: "m";
     i: string;
     c: string;
@@ -63,6 +65,8 @@ export interface UnsignedEncryptedEnvelope {
     q: number;
     k: string;
     r: WrappedContentKey[];
+    /** Discord user IDs intentionally exposed as authenticated mention metadata in PCEM3. */
+    m?: string[];
     n: string;
     x: string;
 }
@@ -171,7 +175,16 @@ export function isKeyAnnouncement(content: unknown): content is string {
 
 export function isEncryptedMessage(content: unknown): content is string {
     return typeof content === "string" &&
-        (content.startsWith(ENCRYPTED_MESSAGE_PREFIX) || content.startsWith(LEGACY_ENCRYPTED_MESSAGE_PREFIX));
+        (content.startsWith(ENCRYPTED_MESSAGE_PREFIX) || content.startsWith(PREVIOUS_ENCRYPTED_MESSAGE_PREFIX) ||
+            content.startsWith(LEGACY_ENCRYPTED_MESSAGE_PREFIX));
+}
+
+/** Extract canonical Discord user-mention IDs from visible plaintext. */
+export function extractMentionedUserIds(content: string): string[] {
+    if (typeof content !== "string") throw new Error("Mention source must be text");
+    const userIds = new Set<string>();
+    for (const match of content.matchAll(/<@!?(\d{17,20})>/gu)) userIds.add(match[1]);
+    return [...userIds].sort((left, right) => left.localeCompare(right));
 }
 
 export function parseKeyAnnouncement(content: string): KeyAnnouncement {
@@ -190,11 +203,16 @@ export function parseKeyAnnouncement(content: string): KeyAnnouncement {
 }
 
 function validateEnvelopeFields(value: Record<string, unknown>): EncryptedEnvelope {
-    if (!isRecord(value) || !hasExactKeys(value, ["v", "t", "i", "c", "s", "d", "q", "k", "r", "n", "x", "z"]))
+    if (!isRecord(value)) throw new Error("Malformed encrypted envelope");
+    const current = value.v === ENCRYPTED_MESSAGE_VERSION;
+    if (!hasExactKeys(value, current
+        ? ["v", "t", "i", "c", "s", "d", "q", "k", "r", "m", "n", "x", "z"]
+        : ["v", "t", "i", "c", "s", "d", "q", "k", "r", "n", "x", "z"]))
         throw new Error("Malformed encrypted envelope");
     const validId = value.v === PROTOCOL_VERSION
         ? typeof value.i === "string" && UUID.test(value.i)
-        : value.v === ENCRYPTED_MESSAGE_VERSION && typeof value.i === "string" && BASE64URL_16.test(value.i) && isCanonicalBase64Url(value.i, 16);
+        : (value.v === PREVIOUS_ENCRYPTED_MESSAGE_VERSION || value.v === ENCRYPTED_MESSAGE_VERSION) &&
+            typeof value.i === "string" && BASE64URL_16.test(value.i) && isCanonicalBase64Url(value.i, 16);
     if (!validId || value.t !== "m" ||
         !isSnowflake(value.c) || !isSnowflake(value.s) || !isTimestamp(value.d) ||
         !Number.isSafeInteger(value.q) || (value.q as number) < 1 ||
@@ -214,20 +232,32 @@ function validateEnvelopeFields(value: Record<string, unknown>): EncryptedEnvelo
             throw new Error("Invalid or unsorted encrypted recipient entry");
         previousUserId = recipient.u;
     }
+
+    if (current) {
+        if (!Array.isArray(value.m) || value.m.length > MAX_SELECTED_RECIPIENTS)
+            throw new Error("Invalid encrypted mentioned users");
+        const recipientIds = new Set(recipients.map(recipient => (recipient as Record<string, unknown>).u));
+        let previousMentionId = "";
+        for (const userId of value.m) {
+            if (!isSnowflake(userId) || userId <= previousMentionId || !recipientIds.has(userId))
+                throw new Error("Invalid or unsorted encrypted mentioned user");
+            previousMentionId = userId;
+        }
+    }
     return value as unknown as EncryptedEnvelope;
 }
 
 function compactEnvelopeWire(value: EncryptedEnvelope): unknown[] {
-    return [
+    const prefix = [
         value.i,
         value.d,
         value.q,
         value.k,
         value.r.map(recipient => [recipient.u, recipient.e, recipient.x]),
-        value.n,
-        value.x,
-        value.z,
     ];
+    return value.v === ENCRYPTED_MESSAGE_VERSION
+        ? [...prefix, (value.m ?? []).map(userId => `<@${userId}>`), value.n, value.x, value.z]
+        : [...prefix, value.n, value.x, value.z];
 }
 
 export function parseEncryptedEnvelope(content: string, context?: EncryptedEnvelopeContext): EncryptedEnvelope {
@@ -241,18 +271,31 @@ export function parseEncryptedEnvelope(content: string, context?: EncryptedEnvel
             throw new Error("Encrypted envelope is not canonically encoded");
         return envelope;
     }
-    if (!content.startsWith(ENCRYPTED_MESSAGE_PREFIX)) throw new Error("Unsupported secure-message payload");
+    const current = content.startsWith(ENCRYPTED_MESSAGE_PREFIX);
+    const previous = content.startsWith(PREVIOUS_ENCRYPTED_MESSAGE_PREFIX);
+    if (!current && !previous) throw new Error("Unsupported secure-message payload");
     if (!context || !isSnowflake(context.channelId) || !isSnowflake(context.discordAuthorId))
         throw new Error("Compact encrypted envelope requires valid Discord context");
-    const value = parseJsonAfterPrefix(content, ENCRYPTED_MESSAGE_PREFIX);
-    if (!Array.isArray(value) || value.length !== 8 || !Array.isArray(value[4]))
+    const prefix = current ? ENCRYPTED_MESSAGE_PREFIX : PREVIOUS_ENCRYPTED_MESSAGE_PREFIX;
+    const version = current ? ENCRYPTED_MESSAGE_VERSION : PREVIOUS_ENCRYPTED_MESSAGE_VERSION;
+    const value = parseJsonAfterPrefix(content, prefix);
+    if (!Array.isArray(value) || value.length !== (current ? 9 : 8) || !Array.isArray(value[4]) ||
+        (current && !Array.isArray(value[5])))
         throw new Error("Malformed encrypted envelope");
     const recipients = value[4].map(recipient => {
         if (!Array.isArray(recipient) || recipient.length !== 3) throw new Error("Invalid encrypted recipient entry");
         return { u: recipient[0], e: recipient[1], x: recipient[2] };
     });
+    const mentionedUserIds = current
+        ? value[5].map(mention => {
+            if (typeof mention !== "string") throw new Error("Invalid encrypted mentioned user");
+            const match = /^<@(\d{17,20})>$/u.exec(mention);
+            if (!match) throw new Error("Invalid encrypted mentioned user");
+            return match[1];
+        })
+        : undefined;
     const envelope = validateEnvelopeFields({
-        v: ENCRYPTED_MESSAGE_VERSION,
+        v: version,
         t: "m",
         i: value[0],
         c: context.channelId,
@@ -261,11 +304,12 @@ export function parseEncryptedEnvelope(content: string, context?: EncryptedEnvel
         q: value[2],
         k: value[3],
         r: recipients,
-        n: value[5],
-        x: value[6],
-        z: value[7],
+        ...(current ? { m: mentionedUserIds } : {}),
+        n: value[current ? 6 : 5],
+        x: value[current ? 7 : 6],
+        z: value[current ? 8 : 7],
     });
-    if (JSON.stringify(compactEnvelopeWire(envelope)) !== content.slice(ENCRYPTED_MESSAGE_PREFIX.length))
+    if (JSON.stringify(compactEnvelopeWire(envelope)) !== content.slice(prefix.length))
         throw new Error("Encrypted envelope is not canonically encoded");
     return envelope;
 }
@@ -281,9 +325,20 @@ export function canonicalKeyAnnouncement(value: UnsignedKeyAnnouncement): Uint8A
     }));
 }
 
-export function envelopeHeader(value: Pick<UnsignedEncryptedEnvelope, "v" | "t" | "i" | "c" | "s" | "d" | "q" | "k" | "r">): Uint8Array {
+export function envelopeHeader(value: Pick<UnsignedEncryptedEnvelope, "v" | "t" | "i" | "c" | "s" | "d" | "q" | "k" | "r" | "m">): Uint8Array {
     if (value.v === ENCRYPTED_MESSAGE_VERSION) return new TextEncoder().encode(JSON.stringify([
         ENCRYPTED_MESSAGE_PREFIX,
+        value.i,
+        value.c,
+        value.s,
+        value.d,
+        value.q,
+        value.k,
+        value.r.map(recipient => recipient.u),
+        value.m ?? [],
+    ]));
+    if (value.v === PREVIOUS_ENCRYPTED_MESSAGE_VERSION) return new TextEncoder().encode(JSON.stringify([
+        PREVIOUS_ENCRYPTED_MESSAGE_PREFIX,
         value.i,
         value.c,
         value.s,
@@ -308,6 +363,19 @@ export function envelopeHeader(value: Pick<UnsignedEncryptedEnvelope, "v" | "t" 
 export function canonicalEncryptedEnvelope(value: UnsignedEncryptedEnvelope): Uint8Array {
     if (value.v === ENCRYPTED_MESSAGE_VERSION) return new TextEncoder().encode(JSON.stringify([
         ENCRYPTED_MESSAGE_PREFIX,
+        value.i,
+        value.c,
+        value.s,
+        value.d,
+        value.q,
+        value.k,
+        value.r.map(recipient => [recipient.u, recipient.e, recipient.x]),
+        value.m ?? [],
+        value.n,
+        value.x,
+    ]));
+    if (value.v === PREVIOUS_ENCRYPTED_MESSAGE_VERSION) return new TextEncoder().encode(JSON.stringify([
+        PREVIOUS_ENCRYPTED_MESSAGE_PREFIX,
         value.i,
         value.c,
         value.s,
@@ -342,7 +410,9 @@ export function serializeKeyAnnouncement(value: KeyAnnouncement): string {
 export function serializeEncryptedEnvelope(value: EncryptedEnvelope): string {
     const serialized = value.v === ENCRYPTED_MESSAGE_VERSION
         ? `${ENCRYPTED_MESSAGE_PREFIX}${JSON.stringify(compactEnvelopeWire(value))}`
-        : `${LEGACY_ENCRYPTED_MESSAGE_PREFIX}${JSON.stringify(value)}`;
+        : value.v === PREVIOUS_ENCRYPTED_MESSAGE_VERSION
+            ? `${PREVIOUS_ENCRYPTED_MESSAGE_PREFIX}${JSON.stringify(compactEnvelopeWire(value))}`
+            : `${LEGACY_ENCRYPTED_MESSAGE_PREFIX}${JSON.stringify(value)}`;
     if (serialized.length > MAX_DISCORD_MESSAGE_LENGTH)
         throw new Error("Encrypted message exceeds Discord's 2,000 character limit; shorten the text or select fewer recipients");
     return serialized;

@@ -137,4 +137,5 @@ export function removeKeyboardListeners() {
     window.removeEventListener("keyup", handleKeyUp, true);
     paletteHandler = null;
     globalHandler = null;
+    hotkeysSuspended = false;
 }

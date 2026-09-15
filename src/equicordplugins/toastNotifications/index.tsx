@@ -126,6 +126,7 @@ export default definePlugin({
     authors: [EquicordDevs.Skully, EquicordDevs.Ethan, EquicordDevs.Buzzy],
     settings,
     flux: {
+        CONNECTION_OPEN() { teardownNotifications(); },
         MESSAGE_CREATE({ message }: { message: Message; }) {
             const authorId = message.author?.id;
             if (!authorId) return;

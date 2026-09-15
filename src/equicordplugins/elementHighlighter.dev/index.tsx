@@ -30,7 +30,7 @@ let pendingX = 0;
 let pendingY = 0;
 let pendingElement: Element | null = null;
 
-const colorCache = new WeakMap<Element, string | null>();
+let colorCache = new WeakMap<Element, string | null>();
 let cachedRules: { selector: string; specificity: number; color: string; }[] = [];
 
 function KeybindRecorder() {
@@ -149,6 +149,7 @@ function calcSpecificity(sel: string): number {
 }
 
 function cacheRules() {
+    colorCache = new WeakMap();
     cachedRules = [];
     for (const sheet of document.styleSheets) {
         try {
@@ -217,57 +218,61 @@ function formatBoxValue(value: string): string | null {
     return value;
 }
 
+function escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
+}
+
 function buildTooltipContent(el: Element, computed: CSSStyleDeclaration, rect: DOMRect): string {
     const tag = el.tagName.toLowerCase();
     const colorVar = getColorVar(el) ?? computed.color;
     const hex = rgbToHex(computed.color);
 
-    let html = `<span class="${cl("tag")}">&lt;${tag}&gt;</span> `;
+    let html = `<span class="${cl("tag")}">&lt;${escapeHtml(tag)}&gt;</span> `;
     html += `<span class="${cl("size")}">${Math.round(rect.width)}x${Math.round(rect.height)}</span>`;
-    html += `<div class="${cl("color")}"><span class="${cl("swatch")}" style="--c:${computed.color}"></span>${colorVar}</div>`;
-    html += `<div class="${cl("hex")}">${hex}</div>`;
+    html += `<div class="${cl("color")}"><span class="${cl("swatch")}" style="--c:${escapeHtml(computed.color)}"></span>${escapeHtml(colorVar)}</div>`;
+    html += `<div class="${cl("hex")}">${escapeHtml(hex)}</div>`;
 
     const { store } = settings;
 
     if (store.showId) {
         const { id } = el;
-        if (id) html += `<div class="${cl("info")}"><span class="${cl("label")}">id:</span> #${id}</div>`;
+        if (id) html += `<div class="${cl("info")}"><span class="${cl("label")}">id:</span> #${escapeHtml(id)}</div>`;
     }
 
     if (store.showClasses) {
         const classes = el.className;
         if (classes && typeof classes === "string") {
             const truncated = classes.length > 60 ? classes.slice(0, 60) + "…" : classes;
-            html += `<div class="${cl("info")}"><span class="${cl("label")}">class:</span> ${truncated}</div>`;
+            html += `<div class="${cl("info")}"><span class="${cl("label")}">class:</span> ${escapeHtml(truncated)}</div>`;
         }
     }
 
     if (store.showFont) {
         const font = computed.fontFamily.split(",")[0].replace(/["']/g, "");
         const size = computed.fontSize;
-        html += `<div class="${cl("info")}"><span class="${cl("label")}">font:</span> ${font} ${size}</div>`;
+        html += `<div class="${cl("info")}"><span class="${cl("label")}">font:</span> ${escapeHtml(font)} ${escapeHtml(size)}</div>`;
     }
 
     if (store.showPadding) {
         const padding = formatBoxValue(computed.padding);
-        if (padding) html += `<div class="${cl("info")}"><span class="${cl("label")}">padding:</span> ${padding}</div>`;
+        if (padding) html += `<div class="${cl("info")}"><span class="${cl("label")}">padding:</span> ${escapeHtml(padding)}</div>`;
     }
 
     if (store.showMargin) {
         const margin = formatBoxValue(computed.margin);
-        if (margin) html += `<div class="${cl("info")}"><span class="${cl("label")}">margin:</span> ${margin}</div>`;
+        if (margin) html += `<div class="${cl("info")}"><span class="${cl("label")}">margin:</span> ${escapeHtml(margin)}</div>`;
     }
 
     if (store.showBorderRadius) {
         const radius = formatBoxValue(computed.borderRadius);
-        if (radius) html += `<div class="${cl("info")}"><span class="${cl("label")}">radius:</span> ${radius}</div>`;
+        if (radius) html += `<div class="${cl("info")}"><span class="${cl("label")}">radius:</span> ${escapeHtml(radius)}</div>`;
     }
 
     if (store.showPosition) {
         const pos = computed.position;
         if (pos !== "static") {
             const zIndex = computed.zIndex !== "auto" ? ` z:${computed.zIndex}` : "";
-            html += `<div class="${cl("info")}"><span class="${cl("label")}">position:</span> ${pos}${zIndex}</div>`;
+            html += `<div class="${cl("info")}"><span class="${cl("label")}">position:</span> ${escapeHtml(pos)}${escapeHtml(zIndex)}</div>`;
         }
     }
 
@@ -279,7 +284,7 @@ function buildTooltipContent(el: Element, computed: CSSStyleDeclaration, rect: D
         } else if (display === "grid" || display === "inline-grid") {
             extra = ` gap:${computed.gap}`;
         }
-        html += `<div class="${cl("info")}"><span class="${cl("label")}">display:</span> ${display}${extra}</div>`;
+        html += `<div class="${cl("info")}"><span class="${cl("label")}">display:</span> ${escapeHtml(display)}${escapeHtml(extra)}</div>`;
     }
 
     return html;
@@ -408,7 +413,7 @@ function getConfiguredKeybind(): string[] {
 
 function matchesKeybind(e: KeyboardEvent): boolean {
     const keybind = getConfiguredKeybind();
-    const pressed = e.key.toLowerCase();
+    const pressed = e.key === " " ? "space" : e.key === "Escape" ? "esc" : e.key.toLowerCase();
     const code = e.code.toLowerCase().replace("key", "").replace("digit", "");
 
     let hasNonModifier = false;
@@ -440,6 +445,7 @@ function matchesKeybind(e: KeyboardEvent): boolean {
 }
 
 function onToggle(e: KeyboardEvent) {
+    if (e.repeat) return;
     if (matchesKeybind(e)) {
         e.preventDefault();
         active ? disable() : enable();

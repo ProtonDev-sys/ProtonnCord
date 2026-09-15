@@ -4,44 +4,106 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { popNotice, showNotice } from "@api/Notices";
 import { Settings } from "@api/Settings";
-import ErrorBoundary from "@components/ErrorBoundary";
 import { loadLazyChunks } from "@debug/loadLazyChunks";
 import { reporterData } from "@debug/reporterData";
 import { getIntlMessageFromHash } from "@utils/discord";
-import { canonicalizeMatch, canonicalizeReplace } from "@utils/patches";
+import { canonicalizeMatch } from "@utils/patches";
 import { filters, findAll, search, wreq } from "@webpack";
-import { React, Toasts, useState } from "@webpack/common";
+import { Toasts } from "@webpack/common";
 
 import { CLIENT_VERSION, logger, PORT, settings } from ".";
+import { CompanionAuthenticator, createCompanionAuthenticator, isValidAuthSecret } from "./auth";
 import { Recieve } from "./types";
 import { FullOutgoingMessage, OutgoingMessage } from "./types/send";
 import { extractModule, extractOrThrow, findAllModuleIds, findModuleId, getModulePatchedBy, mkRegexFind, parseNode, toggleEnabled, } from "./util";
 
-export function stopWs() {
-    socket?.close(1000, "Plugin Stopped");
-    socket = void 0;
+export const MAX_COMPANION_MESSAGE_LENGTH = 256 * 1024;
+export const MAX_AUTHENTICATED_COMMANDS_PER_WINDOW = 30;
+
+const AUTHENTICATION_TIMEOUT_MS = 5000;
+const AUTHENTICATED_COMMAND_WINDOW_MS = 10_000;
+const POLICY_VIOLATION = 1008;
+
+function areStrings(values: Array<string | RegExp>): values is string[] {
+    return values.every((value): value is string => typeof value === "string");
 }
 
-export let socket: WebSocket | undefined;
+export function stopWs() {
+    const close = disconnect;
+    disconnect = undefined;
+    close?.();
+}
+
+let disconnect: (() => void) | undefined;
 
 export function initWs(isManual = false) {
-    let wasConnected = isManual;
-    let hasErrored = false;
-    const ws = socket = new WebSocket(`ws://127.0.0.1:${PORT}`);
-
-    function replyData(data: OutgoingMessage) {
-        ws.send(JSON.stringify(data));
+    stopWs();
+    const secret = settings.store.authSecret;
+    if (!isValidAuthSecret(secret)) {
+        logger.warn("Dev Companion is disabled until a valid authentication secret is configured");
+        if (isManual) {
+            Toasts.show({
+                message: "Configure a valid Dev Companion authentication secret first",
+                id: Toasts.genId(),
+                type: Toasts.Type.FAILURE,
+                options: { position: Toasts.Position.TOP }
+            });
+        }
+        return;
     }
 
-    ws.addEventListener("open", () => {
-        wasConnected = true;
+    let hasErrored = false;
+    let authenticated = false;
+    let authenticationFailed = false;
+    let authenticator: CompanionAuthenticator | undefined;
+    let authenticationTimeout: number | undefined;
+    const authenticatedCommandTimes: number[] = [];
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}`);
+    disconnect = closeConnection;
 
-        logger.info("Connected to WebSocket");
+    function closeConnection() {
+        clearAuthenticationTimeout();
+        ws.close(1000, "Connection replaced or stopped");
+    }
 
-        // send module cache to vscode
-        replyData({
+    function isCurrentConnection() {
+        return disconnect === closeConnection && ws.readyState === WebSocket.OPEN;
+    }
+
+    function sendData(data: object) {
+        if (isCurrentConnection()) ws.send(JSON.stringify(data));
+    }
+
+    function clearAuthenticationTimeout() {
+        if (authenticationTimeout === undefined) return;
+        window.clearTimeout(authenticationTimeout);
+        authenticationTimeout = undefined;
+    }
+
+    function failAuthentication() {
+        if (!isCurrentConnection() || authenticationFailed || authenticated) return;
+        authenticationFailed = true;
+        clearAuthenticationTimeout();
+        logger.warn("Rejected unauthenticated Dev Companion connection");
+        if (isManual) {
+            Toasts.show({
+                message: "Dev Companion authentication failed",
+                id: Toasts.genId(),
+                type: Toasts.Type.FAILURE,
+                options: { position: Toasts.Position.TOP }
+            });
+        }
+        ws.close(POLICY_VIOLATION, "Authentication failed");
+    }
+
+    function finishAuthentication() {
+        authenticated = true;
+        clearAuthenticationTimeout();
+
+        logger.info("Authenticated Dev Companion connection");
+
+        sendData({
             type: "moduleList",
             data: {
                 modules: Object.keys(wreq.m)
@@ -56,7 +118,7 @@ export function initWs(isManual = false) {
                 return v;
             });
 
-            socket?.send(JSON.stringify({
+            ws.send(JSON.stringify({
                 type: "report",
                 data: JSON.parse(toSend),
                 ok: true
@@ -66,7 +128,7 @@ export function initWs(isManual = false) {
         try {
             if (settings.store.notifyOnAutoConnect || isManual) {
                 Toasts.show({
-                    message: "Connected to WebSocket",
+                    message: "Authenticated with Dev Companion",
                     id: Toasts.genId(),
                     type: Toasts.Type.SUCCESS,
                     options: {
@@ -75,17 +137,38 @@ export function initWs(isManual = false) {
                 });
             }
         }
-        catch (e) {
-            console.error(e);
+        catch (error) {
+            logger.error("Failed to show Dev Companion connection status", error);
         }
+    }
+
+    function acceptAuthenticatedCommand(): boolean {
+        const now = Date.now();
+        while (authenticatedCommandTimes.length > 0
+            && authenticatedCommandTimes[0] <= now - AUTHENTICATED_COMMAND_WINDOW_MS)
+            authenticatedCommandTimes.shift();
+
+        if (authenticatedCommandTimes.length >= MAX_AUTHENTICATED_COMMANDS_PER_WINDOW) return false;
+        authenticatedCommandTimes.push(now);
+        return true;
+    }
+
+    ws.addEventListener("open", () => {
+        if (!isCurrentConnection()) return;
+        authenticationTimeout = window.setTimeout(failAuthentication, AUTHENTICATION_TIMEOUT_MS);
+        void createCompanionAuthenticator(secret).then(createdAuthenticator => {
+            if (authenticationFailed || !isCurrentConnection()) return;
+            authenticator = createdAuthenticator;
+            ws.send(JSON.stringify(authenticator.hello));
+        }).catch(failAuthentication);
     });
 
-    ws.addEventListener("error", e => {
-        if (!wasConnected) return;
+    ws.addEventListener("error", () => {
+        if (!isCurrentConnection() || !authenticated) return;
 
         hasErrored = true;
 
-        logger.error("Dev Companion Error:", e);
+        logger.error("Dev Companion connection error");
 
         Toasts.show({
             message: "Dev Companion Error",
@@ -98,9 +181,12 @@ export function initWs(isManual = false) {
     });
 
     ws.addEventListener("close", e => {
-        if (!wasConnected || hasErrored) return;
+        clearAuthenticationTimeout();
+        if (disconnect !== closeConnection) return;
+        disconnect = undefined;
+        if (!authenticated || hasErrored) return;
 
-        logger.info("Dev Companion Disconnected:", e.code, e.reason);
+        logger.info("Dev Companion disconnected with code", e.code);
 
         Toasts.show({
             message: "Dev Companion Disconnected",
@@ -112,32 +198,78 @@ export function initWs(isManual = false) {
         });
     });
 
-    ws.addEventListener("message", e => {
-        try {
-            var d = JSON.parse(e.data) as Recieve.FullIncomingMessage;
-        } catch (err) {
-            logger.error("Invalid JSON:", err, "\n" + e.data);
+    ws.addEventListener("message", event => {
+        if (!isCurrentConnection()) return;
+        if (typeof event.data !== "string" || event.data.length > MAX_COMPANION_MESSAGE_LENGTH) {
+            failAuthentication();
+            if (authenticated) ws.close(POLICY_VIOLATION, "Invalid message");
             return;
         }
+
+        if (!authenticated) {
+            if (!authenticator) return failAuthentication();
+
+            let message: unknown;
+            try {
+                message = JSON.parse(event.data);
+            } catch {
+                return failAuthentication();
+            }
+
+            void authenticator.receive(message).then(result => {
+                if (authenticationFailed || !isCurrentConnection()) return;
+                if (!result.authenticated) ws.send(JSON.stringify(result.response));
+                else finishAuthentication();
+            }).catch(failAuthentication);
+            return;
+        }
+
+        if (!acceptAuthenticatedCommand()) {
+            logger.warn("Dev Companion command rate limit exceeded");
+            ws.close(POLICY_VIOLATION, "Rate limit exceeded");
+            return;
+        }
+
+        try {
+            handleAuthenticatedMessage(event.data);
+        } catch {
+            logger.warn("Rejected invalid authenticated Dev Companion message");
+        }
+    });
+
+    function handleAuthenticatedMessage(rawMessage: string) {
+        let parsedMessage: unknown;
+        try {
+            parsedMessage = JSON.parse(rawMessage);
+        } catch {
+            logger.warn("Dev Companion sent invalid JSON");
+            ws.close(POLICY_VIOLATION, "Invalid message");
+            return;
+        }
+        const d = Recieve.parseIncomingMessage(parsedMessage);
+        if (!d) {
+            logger.warn("Dev Companion sent an invalid command schema");
+            ws.close(POLICY_VIOLATION, "Invalid message");
+            return;
+        }
+        const requestNonce = d.nonce;
         /**
          * @param error the error to reply with. if there is no error, the reply is a sucess
          */
         function reply(error?: string) {
-            const toSend = { nonce: d.nonce, ok: !error } as Record<string, unknown>;
+            const toSend = { nonce: requestNonce, ok: !error } as Record<string, unknown>;
             if (error) toSend.error = error;
-            logger.debug("Replying with:", toSend);
-            ws.send(JSON.stringify(toSend));
+            logger.debug("Replying to authenticated Dev Companion request");
+            sendData(toSend);
         }
         function replyData(data: OutgoingMessage) {
             const toSend: FullOutgoingMessage = {
                 ...data,
-                nonce: d.nonce
+                nonce: requestNonce
             };
-            logger.debug(`Replying with data: ${toSend}`);
-            ws.send(JSON.stringify(toSend));
+            logger.debug("Replying with data to authenticated Dev Companion request");
+            sendData(toSend);
         }
-
-        logger.debug(`Received Message: ${d.type}`, "\n", d.data);
 
         switch (d.type) {
             case "disable": {
@@ -260,15 +392,17 @@ export function initWs(isManual = false) {
                                 switch (m.findType.replace("find", "").replace("Lazy", "")) {
                                     case "":
                                     case "Component":
-                                        moduleIds = findAllModuleIds(parsedArgs[0]);
-                                        break;
+                                        return reply("Function-based finds are disabled for security");
                                     case "CssClasses":
+                                        if (!areStrings(parsedArgs)) return reply("CSS class finds accept only string arguments");
                                         moduleIds = findAllModuleIds(filters.byClassNames(...parsedArgs), { topLevelOnly: true });
                                         break;
                                     case "ByProps":
+                                        if (!areStrings(parsedArgs)) return reply("Property finds accept only string arguments");
                                         moduleIds = findAllModuleIds(filters.byProps(...parsedArgs));
                                         break;
                                     case "Store":
+                                        if (!areStrings(parsedArgs)) return reply("Store finds accept only string arguments");
                                         moduleIds = findAllModuleIds(filters.byStoreName(parsedArgs[0]));
                                         break;
                                     case "ByCode":
@@ -314,48 +448,7 @@ export function initWs(isManual = false) {
                 break;
             }
             case "testPatch": {
-                const m = d.data;
-                let candidates;
-                if (d.data.findType === "string")
-                    candidates = search(m.find.toString());
-
-                else
-                    candidates = search(...mkRegexFind(m.find));
-
-                // const candidates = search(find);
-                const keys = Object.keys(candidates);
-                if (keys.length !== 1)
-                    return reply("Expected exactly one 'find' matches, found " + keys.length);
-
-                const mod = candidates[keys[0]];
-                let src = String(mod).replaceAll("\n", "");
-
-                if (src.startsWith("function(")) {
-                    src = "0," + src;
-                } else if (src.charCodeAt(0) >= 49 /* 1*/ && src.charCodeAt(0) <= 57 /* 9*/) {
-                    src = "0,function" + src.substring(src.indexOf("("));
-                }
-
-                let i = 0;
-
-                for (const { match, replace } of m.replacement) {
-                    i++;
-
-                    try {
-                        const matcher = canonicalizeMatch(parseNode(match));
-                        const replacement = canonicalizeReplace(parseNode(replace), 'Vencord.Plugins.plugins["PlaceHolderPluginName"]');
-
-                        const newSource = src.replace(matcher, replacement as string);
-
-                        if (src === newSource) throw "Had no effect";
-                        Function(newSource);
-
-                        src = newSource;
-                    } catch (err) {
-                        return reply(`Replacement ${i} failed: ${err}`);
-                    }
-                }
-                reply();
+                reply("Remote patch compilation is disabled for security");
                 break;
             }
             case "testFind": {
@@ -367,19 +460,21 @@ export function initWs(isManual = false) {
                 }
 
                 try {
-                    let results: any[];
+                    let results: unknown[];
                     switch (m.type.replace("find", "").replace("Lazy", "")) {
                         case "":
                         case "Component":
-                            results = findAll(parsedArgs[0]);
-                            break;
+                            return reply("Function-based finds are disabled for security");
                         case "ByProps":
+                            if (!areStrings(parsedArgs)) return reply("Property finds accept only string arguments");
                             results = findAll(filters.byProps(...parsedArgs));
                             break;
                         case "CssClasses":
+                            if (!areStrings(parsedArgs)) return reply("CSS class finds accept only string arguments");
                             results = findAll(filters.byClassNames(...parsedArgs), { topLevelOnly: true });
                             break;
                         case "Store":
+                            if (!areStrings(parsedArgs)) return reply("Store finds accept only string arguments");
                             results = findAll(filters.byStoreName(parsedArgs[0]));
                             break;
                         case "ByCode":
@@ -406,25 +501,8 @@ export function initWs(isManual = false) {
                 break;
             }
             case "allModules": {
-                const { promise, resolve, reject } = Promise.withResolvers<void>();
-                // wrap in try/catch to prevent crashing if notice api is not loaded
-                try {
-                    let closed = false;
-                    const close = () => {
-                        if (closed) return;
-                        closed = true;
-                        popNotice();
-                    };
-                    showNotice(<AllModulesNoti done={promise} close={close} />, "OK", () => {
-                        closed = true;
-                        popNotice();
-                    });
-                } catch (e) {
-                    console.error(e);
-                }
                 loadLazyChunks()
                     .then(() => {
-                        resolve();
                         replyData({
                             type: "moduleList",
                             data: {
@@ -434,14 +512,13 @@ export function initWs(isManual = false) {
                         });
                     })
                     .catch(e => {
-                        console.error(e);
+                        logger.error("Failed to load modules", e);
                         replyData({
                             type: "moduleList",
                             ok: false,
                             error: String(e),
                             data: null
                         });
-                        reject(e);
                     });
                 break;
             }
@@ -467,25 +544,8 @@ export function initWs(isManual = false) {
                 break;
             }
             default:
-                // @ts-expect-error should be never
-                reply("Unknown Type " + d?.type);
+                reply("Unknown message type");
                 break;
         }
-    });
+    }
 }
-
-interface AllModulesNotiProps {
-    done: Promise<unknown>;
-    close: () => void;
-}
-
-const AllModulesNoti = ErrorBoundary.wrap(function ({ done, close }: AllModulesNotiProps) {
-    const [state, setState] = useState<0 | 1 | -1>(0);
-    done.then(setState.bind(null, 1)).catch(setState.bind(null, -1));
-    if (state === 1) setTimeout(close, 5000);
-    return (<>
-        {state === 0 && "Loading lazy modules, restarting could lead to errors"}
-        {state === 1 && "Loaded all lazy modules"}
-        {state === -1 && "Failed to load lazy modules, check console for errors"}
-    </>);
-}, { noop: true });

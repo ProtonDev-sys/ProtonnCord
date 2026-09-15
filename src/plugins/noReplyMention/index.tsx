@@ -59,6 +59,18 @@ const settings = definePluginSettings({
     }
 });
 
+const idLists = new Map<string, { raw: string; ids: Set<string>; }>();
+
+function containsId(setting: "userList" | "roleList", id: string) {
+    const raw = settings.store[setting] ?? "";
+    let cached = idLists.get(setting);
+    if (!cached || cached.raw !== raw) {
+        cached = { raw, ids: new Set(raw.split(/[,\s]+/).filter(Boolean)) };
+        idLists.set(setting, cached);
+    }
+    return cached.ids.has(id);
+}
+
 export default definePlugin({
     name: "NoReplyMention",
     description: "Disables reply pings by default",
@@ -67,12 +79,12 @@ export default definePlugin({
     settings,
 
     shouldMention(message: Message, isHoldingShift: boolean) {
-        let isListed = settings.store.userList.includes(message.author.id);
+        let isListed = containsId("userList", message.author.id);
 
         const channel = ChannelStore.getChannel(message.channel_id);
         if (channel?.guild_id && !isListed) {
             const roles = GuildMemberStore.getMember(channel.guild_id, message.author.id)?.roles;
-            isListed = !!roles && roles.some(role => settings.store.roleList.includes(role));
+            isListed = !!roles && roles.some(role => containsId("roleList", role));
         }
 
         const isExempt = settings.store.shouldPingListed ? isListed : !isListed;

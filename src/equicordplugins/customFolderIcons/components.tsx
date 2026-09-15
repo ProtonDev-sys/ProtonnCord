@@ -9,9 +9,12 @@ import { Button, closeModal, Menu, Modal,openModalLazy, Slider, TextInput, useSt
 import { folderIconsData, settings } from "./settings";
 import { folderProp, int2rgba, setFolderData } from "./util";
 
+const sizeMarkers = Array.from({ length: 176 }, (_, index) => index + 25);
+
 export function ImageModal(folderProps: folderProp) {
-    const [data, setData] = useState(((settings.store.folderIcons ?? {}) as folderIconsData)[folderProps.folderId]?.url ?? "");
-    const [size, setSize] = useState(100);
+    const existing = (settings.store.folderIcons as folderIconsData | undefined)?.[folderProps.folderId];
+    const [data, setData] = useState(existing?.url ?? "");
+    const [size, setSize] = useState(existing?.size ?? 100);
     return (
         <>
             <TextInput
@@ -29,14 +32,14 @@ export function ImageModal(folderProps: folderProp) {
                     color: "#FFF"
                 }}>Change the size of the folder icon</div>
                 <Slider
-                    initialValue={100}
+                    initialValue={size}
                     onValueChange={(v: number) => {
                         setSize(v);
                     }}
                     maxValue={200}
                     minValue={25}
                     // [25, 200]
-                    markers={Array.apply(0, Array(176)).map((_, i) => i + 25)}
+                    markers={sizeMarkers}
                     stickToMarkers={true}
                     keyboardStep={1}
                     renderMarker={() => null} />
@@ -55,7 +58,7 @@ export function ImageModal(folderProps: folderProp) {
             <Button onClick={() => {
                 // INFO: unset button
                 const folderSettings = settings.store.folderIcons as folderIconsData;
-                if (folderSettings[folderProps.folderId]) {
+                if (folderSettings?.[folderProps.folderId]) {
                     folderSettings[folderProps.folderId] = null;
                 }
                 closeModal("custom-folder-icon");
@@ -69,7 +72,7 @@ export function ImageModal(folderProps: folderProp) {
 export function RenderPreview({ folderProps, url, size }: { folderProps: folderProp; url: string; size: number; }) {
     if (!url) return null;
     return (
-        <div className="test1234" style={{
+        <div style={{
             width: "20vh",
             height: "20vh",
             overflow: "hidden",

@@ -174,31 +174,31 @@ function hiddenReplyComponent() {
 function activeNowView(cards) {
     if (!Array.isArray(cards)) return cards;
 
-    return cards.filter(card => {
-        if (!card?.key) return false;
+    return cards.flatMap(card => {
+        if (!card?.key) return [];
 
         const newKey = card.key.match(/(?:user-|party-spotify:)(.+)/)?.[1];
-        if (newKey) return !shouldHideUser(newKey);
+        if (newKey) return shouldHideUser(newKey) ? [] : [card];
 
         if (card.key.startsWith("channel-") && settings.store.hideVc) {
             const { party } = card.props;
-            if (!party) return true;
+            if (!party) return [card];
 
             const { applicationStreams, partiedMembers, priorityMembers, voiceChannels } = party;
-            voiceChannels?.forEach(vc => vc.members = vc.members?.filter(m => !shouldHideUser(m.id)) ?? []);
-            party.applicationStreams = (applicationStreams ?? []).filter(applicationStream => !shouldHideUser(applicationStream.streamUser.id));
-            party.priorityMembers = priorityMembers?.filter(m => !shouldHideUser(m.user.id)) ?? [];
-            party.partiedMembers = partiedMembers?.filter(m => !shouldHideUser(m.id)) ?? [];
+            const filteredParty = {
+                ...party,
+                voiceChannels: voiceChannels?.map(vc => ({ ...vc, members: vc.members?.filter(m => !shouldHideUser(m.id)) ?? [] })),
+                applicationStreams: (applicationStreams ?? []).filter(applicationStream => !shouldHideUser(applicationStream.streamUser.id)),
+                priorityMembers: priorityMembers?.filter(m => !shouldHideUser(m.user.id)) ?? [],
+                partiedMembers: partiedMembers?.filter(m => !shouldHideUser(m.id)) ?? []
+            };
+            const hasMembers = (filteredParty.voiceChannels?.some(vc => vc.members?.length) ?? false) ||
+                filteredParty.partiedMembers.length || filteredParty.priorityMembers.length || filteredParty.applicationStreams.length;
 
-            const hasMembers = (voiceChannels?.some(vc => vc.members?.length) ?? false) ||
-                (party.partiedMembers?.length ?? 0) ||
-                (party.priorityMembers?.length ?? 0) ||
-                (party.applicationStreams?.length ?? 0);
-
-            return hasMembers;
+            return hasMembers ? [React.cloneElement(card, { party: filteredParty })] : [];
         }
 
-        return true;
+        return [card];
     });
 }
 

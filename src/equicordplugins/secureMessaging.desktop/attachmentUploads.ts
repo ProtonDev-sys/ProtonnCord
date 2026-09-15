@@ -8,8 +8,9 @@ import type { CloudUpload } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 
 import {
-    attachmentBundleRoot,
+    attachmentBundleRootFromDigests,
     type AttachmentMetadata,
+    createAttachmentManifest,
     DETACHED_TEXT_FILENAME,
     DETACHED_TEXT_MIME_TYPE,
     encodedImageDimensions,
@@ -17,6 +18,7 @@ import {
     encryptedAttachmentCiphertextSize,
     encryptedAttachmentFilename,
     generateAttachmentBundleMaterial,
+    isValidAttachmentWaveform,
     MAX_ATTACHMENT_CIPHERTEXT_BYTES,
     MAX_ATTACHMENT_COUNT,
     MAX_DETACHED_TEXT_BYTES,
@@ -31,10 +33,14 @@ interface MutableCloudUpload extends CloudUpload {
 }
 
 interface UploadSource {
+    description: string | null;
+    durationSecs: number | undefined;
     encryptedFile?: File;
     file: File;
     filename: string;
     mimeType: string;
+    spoiler: boolean;
+    waveform: string | undefined;
 }
 
 interface UploadMediaMetadata {
@@ -176,25 +182,33 @@ function sourceForUpload(upload: CloudUpload): UploadSource {
     if (existing?.encryptedFile === currentFile) return existing;
 
     const source = {
+        description: upload.description,
+        durationSecs: upload.durationSecs,
         file: currentFile,
         filename: upload.filename || currentFile.name,
         mimeType: currentFile.type || upload.mimeType || "application/octet-stream",
+        spoiler: upload.spoiler,
+        waveform: upload.waveform,
     };
     uploadSources.set(upload, source);
     return source;
 }
 
-async function metadataForUpload(upload: CloudUpload, source: UploadSource): Promise<AttachmentMetadata> {
-    const metadata = await mediaMetadata(source.file);
+async function metadataForUpload(source: UploadSource): Promise<AttachmentMetadata> {
+    const providedDuration = validMediaDuration(source.durationSecs);
+    const metadata = providedDuration !== null && source.file.type.startsWith("audio/")
+        ? { duration: providedDuration, height: null, width: null }
+        : await mediaMetadata(source.file);
     return {
         name: source.filename,
         mimeType: source.mimeType,
         size: source.file.size,
-        spoiler: upload.spoiler,
-        description: upload.description,
+        spoiler: source.spoiler,
+        description: source.description,
         width: metadata.width,
         height: metadata.height,
-        duration: validMediaDuration(upload.durationSecs) ?? metadata.duration,
+        duration: providedDuration ?? metadata.duration,
+        waveform: isValidAttachmentWaveform(source.waveform) ? source.waveform : null,
     };
 }
 
@@ -218,7 +232,7 @@ export async function prepareEncryptedAttachments(
     if (detachedTextIndex !== null && (!Number.isInteger(detachedTextIndex) ||
         detachedTextIndex < 0 || detachedTextIndex >= uploads.length || sources[detachedTextIndex].file.size > MAX_DETACHED_TEXT_BYTES))
         throw new Error("The encrypted message text attachment is invalid or too large");
-    const metadata = await Promise.all(uploads.map((upload, index) => metadataForUpload(upload, sources[index])));
+    const metadata = await Promise.all(sources.map(metadataForUpload));
     if (detachedTextIndex !== null) {
         metadata[detachedTextIndex] = {
             name: DETACHED_TEXT_FILENAME,
@@ -229,6 +243,7 @@ export async function prepareEncryptedAttachments(
             width: null,
             height: null,
             duration: null,
+            waveform: null,
         };
     }
     const plannedSizes = metadata.map(encryptedAttachmentCiphertextSize);
@@ -246,7 +261,6 @@ export async function prepareEncryptedAttachments(
     const ciphertexts: Uint8Array[] = [];
     try {
         for (let index = 0; index < uploads.length; index++) {
-            const upload = uploads[index];
             const source = sources[index];
             const plaintext = new Uint8Array(await source.file.arrayBuffer());
             try {
@@ -265,7 +279,8 @@ export async function prepareEncryptedAttachments(
             }
         }
 
-        const root = await attachmentBundleRoot(descriptor.id, ciphertexts);
+        const manifest = await createAttachmentManifest(ciphertexts, metadata);
+        const root = await attachmentBundleRootFromDigests(descriptor.id, manifest.map(entry => entry.digest));
         const replacements = ciphertexts.map((ciphertext, index) => {
             const filename = encryptedAttachmentFilename(descriptor.id, index);
             const encryptedFile = new File([Uint8Array.from(ciphertext).buffer], filename, {
@@ -280,19 +295,23 @@ export async function prepareEncryptedAttachments(
                     const { encryptedFile, filename, upload } = replacements[index];
                     sources[index].encryptedFile = encryptedFile;
                     upload.item.file = encryptedFile;
+                    upload.spoiler = false;
+                    upload.description = null;
                     upload.setFilename(filename);
                     upload.mimeType = encryptedFile.type;
                     upload.classification = "unknown";
                     upload.isImage = false;
                     upload.isVideo = false;
                     upload.allowOptimization = false;
+                    upload.durationSecs = undefined;
                     upload.currentSize = encryptedFile.size;
                     upload.preCompressionSize = encryptedFile.size;
                     upload.postCompressionSize = undefined;
+                    upload.waveform = undefined;
                 }
             },
             files: replacements.map(({ encryptedFile, filename }) => ({ filename, size: encryptedFile.size })),
-            plaintext: serializeSecurePlaintext(text, { ...descriptor, root }, stickers, detachedTextIndex),
+            plaintext: serializeSecurePlaintext(text, { ...descriptor, root, manifest }, stickers, detachedTextIndex),
             totalUploadBytes,
         };
     } finally {

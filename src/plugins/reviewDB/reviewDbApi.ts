@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { Toasts } from "@webpack/common";
+import { Toasts, UserStore } from "@webpack/common";
 
 import { Auth, authorize, getToken, updateAuth } from "./auth";
 import { Review, ReviewDBCurrentUser, ReviewDBUser, ReviewType } from "./entities";
@@ -36,10 +36,12 @@ interface ReviewVotesData {
 
 const WarningFlag = 0b00000010;
 
-async function rdbRequest<T = unknown>(path: string, options: RequestInit = {}): Promise<T | null> {
+async function rdbRequest<T = unknown>(path: string, options: RequestInit = {}, accountId = UserStore.getCurrentUser()?.id): Promise<T | null> {
+    const token = await getToken().catch(() => undefined);
+    if (accountId !== UserStore.getCurrentUser()?.id) return null;
     const headers: Record<string, string> = {
         Accept: "application/json",
-        Authorization: await getToken() ?? "",
+        Authorization: token ?? "",
         ...options.headers as Record<string, string>,
     };
 
@@ -50,6 +52,7 @@ async function rdbRequest<T = unknown>(path: string, options: RequestInit = {}):
     const res = await fetch(API_URL + path, {
         ...options,
         headers,
+        signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
     }).catch(err => {
         showToast("Network error: Failed to connect to ReviewDB.", Toasts.Type.FAILURE);
         return null;
@@ -58,6 +61,7 @@ async function rdbRequest<T = unknown>(path: string, options: RequestInit = {}):
     if (!res) return null;
 
     const data = await res.json().catch(() => null);
+    if (accountId !== UserStore.getCurrentUser()?.id) return null;
 
     if (!res.ok) {
         const message = data?.message ?? `ReviewDB: Request failed with status ${res.status}`;
@@ -78,12 +82,17 @@ export async function getReviews(id: string, { limit, offset = 0, fetchVotes = f
     if (limit) params.append("limit", String(limit));
 
     const votesPromise = fetchVotes ? getReviewVotes(id).catch(() => []) : Promise.resolve([]);
-    const req = await fetch(`${API_URL}/users/${id}/reviews?${params}`);
+    const req = await fetch(`${API_URL}/users/${encodeURIComponent(id)}/reviews?${params}`, { signal: AbortSignal.timeout(10_000) }).catch(() => null);
+    const data = req?.ok ? await req.json().catch(() => null) : null;
+    const valid = data && Array.isArray(data.reviews) && data.reviews.every(review =>
+        review && typeof review.id === "number" && typeof review.comment === "string"
+        && Number.isFinite(review.timestamp) && review.sender && typeof review.sender.discordID === "string"
+        && typeof review.sender.username === "string" && Array.isArray(review.sender.badges));
 
-    const res = (req.ok)
-        ? await req.json() as UserReviewsData
+    const res: UserReviewsData = valid
+        ? data
         : {
-            message: req.status === 429 ? "You are sending requests too fast. Wait a few seconds and try again." : "An Error occured while fetching reviews. Please try again later.",
+            message: req?.status === 429 ? "You are sending requests too fast. Wait a few seconds and try again." : "An error occurred while fetching reviews. Please try again later.",
             reviews: [],
             updated: false,
             hasNextPage: false,
@@ -91,7 +100,7 @@ export async function getReviews(id: string, { limit, offset = 0, fetchVotes = f
             hasOptedOut: false,
         };
 
-    if (!req.ok) {
+    if (!valid) {
         showToast(res.message, Toasts.Type.FAILURE);
         return {
             ...res,
@@ -133,16 +142,20 @@ export async function getReviews(id: string, { limit, offset = 0, fetchVotes = f
 }
 
 export async function getReviewVotes(id: string): Promise<ReviewVote[]> {
-    const token = await getToken();
+    const accountId = UserStore.getCurrentUser()?.id;
+    const token = await getToken().catch(() => undefined);
+    if (accountId !== UserStore.getCurrentUser()?.id) return [];
     if (!token) return [];
 
-    const res = await rdbRequest<ReviewVotesData>(`/users/${id}/reviews/votes`);
-    return res?.votes ?? [];
+    const res = await rdbRequest<ReviewVotesData>(`/users/${id}/reviews/votes`, {}, accountId);
+    return Array.isArray(res?.votes) ? res.votes.filter(vote => Number.isFinite(vote?.reviewID) && typeof vote.isUpvote === "boolean") : [];
 }
 
 export async function addReview(review): Promise<UserReviewsData | null> {
+    const accountId = UserStore.getCurrentUser()?.id;
 
-    const token = await getToken();
+    const token = await getToken().catch(() => undefined);
+    if (accountId !== UserStore.getCurrentUser()?.id) return null;
     if (!token) {
         showToast("Please authorize to add a review.");
         authorize();
@@ -152,7 +165,7 @@ export async function addReview(review): Promise<UserReviewsData | null> {
     const data = await rdbRequest<UserReviewsData>(`/users/${review.userid}/reviews`, {
         method: "PUT",
         body: JSON.stringify(review),
-    });
+    }, accountId);
     if (data?.message) showToast(data.message);
     return data;
 }
@@ -179,7 +192,9 @@ export async function reportReview(id: number) {
 }
 
 export async function voteReview(id: number, isUpvote: boolean) {
-    const token = await getToken();
+    const accountId = UserStore.getCurrentUser()?.id;
+    const token = await getToken().catch(() => undefined);
+    if (accountId !== UserStore.getCurrentUser()?.id) return false;
     if (!token) {
         showToast("Please authorize to vote on reviews.");
         authorize();
@@ -189,7 +204,7 @@ export async function voteReview(id: number, isUpvote: boolean) {
     const data = await rdbRequest<{ message?: string; }>(`/reviews/${id}/vote`, {
         method: "POST",
         body: JSON.stringify({ isUpvote })
-    });
+    }, accountId);
 
     if (!data) return false;
 
@@ -197,7 +212,9 @@ export async function voteReview(id: number, isUpvote: boolean) {
 }
 
 export async function deleteReviewVote(id: number) {
-    const token = await getToken();
+    const accountId = UserStore.getCurrentUser()?.id;
+    const token = await getToken().catch(() => undefined);
+    if (accountId !== UserStore.getCurrentUser()?.id) return false;
     if (!token) {
         showToast("Please authorize to vote on reviews.");
         authorize();
@@ -206,7 +223,7 @@ export async function deleteReviewVote(id: number) {
 
     const data = await rdbRequest<{ message?: string; }>(`/reviews/${id}/vote`, {
         method: "DELETE",
-    });
+    }, accountId);
 
     if (!data) return false;
 
@@ -214,6 +231,7 @@ export async function deleteReviewVote(id: number) {
 }
 
 async function patchBlock(action: "block" | "unblock", userId: string) {
+    const accountId = UserStore.getCurrentUser()?.id;
     const data = await rdbRequest("/blocks", {
         method: "PATCH",
         body: JSON.stringify({
@@ -222,23 +240,27 @@ async function patchBlock(action: "block" | "unblock", userId: string) {
         })
     });
 
-    if (!data) return;
+    if (!data || accountId !== UserStore.getCurrentUser()?.id) return false;
 
     showToast(`Successfully ${action}ed user`, Toasts.Type.SUCCESS);
 
     if (Auth?.user?.blockedUsers) {
         const newBlockedUsers = action === "block"
-            ? [...Auth.user.blockedUsers, userId]
+            ? [...new Set([...Auth.user.blockedUsers, userId])]
             : Auth.user.blockedUsers.filter(id => id !== userId);
-        updateAuth({ user: { ...Auth.user, blockedUsers: newBlockedUsers } });
+        await updateAuth({ user: { ...Auth.user, blockedUsers: newBlockedUsers } }, accountId).catch(() => {
+            showToast("The block was updated, but its local cache could not be saved.", Toasts.Type.FAILURE);
+        });
     }
+    return true;
 }
 
 export const blockUser = (userId: string) => patchBlock("block", userId);
 export const unblockUser = (userId: string) => patchBlock("unblock", userId);
 
 export async function fetchBlocks(): Promise<ReviewDBUser[]> {
-    return await rdbRequest<ReviewDBUser[]>("/blocks") ?? [];
+    const blocks = await rdbRequest<ReviewDBUser[]>("/blocks");
+    return Array.isArray(blocks) ? blocks : [];
 }
 
 export function getCurrentUserInfo(): Promise<ReviewDBCurrentUser | null> {

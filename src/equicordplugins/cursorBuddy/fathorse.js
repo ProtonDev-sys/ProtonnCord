@@ -39,6 +39,10 @@ export default function fathorse(cfg) {
     const freeroamSpeed = 12;
 
     const fathorse = document.createElement("div");
+    const controller = new AbortController();
+    const originalTransform = document.body.style.transform;
+    const originalWillChange = document.body.style.willChange;
+    let requestId = 0;
 
     let lastFrame, shakeUntil = 0;
     function lifecycle() {
@@ -59,7 +63,7 @@ export default function fathorse(cfg) {
             }
         }
 
-        requestAnimationFrame(lifecycle);
+        requestId = requestAnimationFrame(lifecycle);
     }
 
     function moved() {
@@ -161,9 +165,17 @@ export default function fathorse(cfg) {
 
         nextMove = Date.now() + freeroamStart;
         isRoaming = false;
-    });
+    }, { signal: controller.signal });
 
-    requestAnimationFrame(lifecycle);
+    requestId = requestAnimationFrame(lifecycle);
 
-    return mousePos;
+    return () => {
+        controller.abort();
+        cancelAnimationFrame(requestId);
+        fathorse.remove();
+        if (config.shake) {
+            document.body.style.transform = originalTransform;
+            document.body.style.willChange = originalWillChange;
+        }
+    };
 };

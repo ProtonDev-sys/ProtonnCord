@@ -19,7 +19,7 @@ import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { Emoji, Message } from "@vencord/discord-types";
 import { findByPropsLazy } from "@webpack";
-import { EmojiStore, Menu, openModal,TextInput, Toasts, useEffect, useState } from "@webpack/common";
+import { EmojiStore, Menu, openModal, TextInput, Toasts, useEffect, useState } from "@webpack/common";
 
 import { ClearAliasesConfirmModal } from "./components/modals/ClearAliasesConfirmModal";
 import { SetAliasModal } from "./components/modals/SetAliasModal";
@@ -102,8 +102,10 @@ const logger = new Logger("EmojiAlias");
 const EmojiQueryService = findByPropsLazy("queryEmojiResults");
 const cl = classNameFactory("vc-emoji-alias-");
 
-let aliasMap: AliasMap = {};
+let aliasMap: AliasMap = Object.create(null);
 let aliasEntries: Array<[string, StoredEmojiRef]> = [];
+let aliasWriteQueue = Promise.resolve();
+let lifecycleGeneration = 0;
 const aliasListeners = new Set<() => void>();
 let globalContextPatch: GlobalContextMenuPatchCallback | null = null;
 const unicodeSurrogateCache = new Map<string, string | null>();
@@ -137,7 +139,7 @@ function notifyAliasesChanged() {
 }
 
 function setAliasMap(nextMap: AliasMap) {
-    aliasMap = nextMap;
+    aliasMap = Object.assign(Object.create(null), nextMap);
     aliasEntries = Object.entries(aliasMap).sort(([left], [right]) => left.localeCompare(right));
 }
 
@@ -179,7 +181,7 @@ function parseAliasMap(value: unknown): AliasMap {
         return {};
     }
 
-    const parsed: AliasMap = {};
+    const parsed: AliasMap = Object.create(null);
 
     for (const [alias, ref] of Object.entries(value)) {
         if (!/^[a-z0-9_]{2,32}$/.test(alias) || !isStoredEmojiRef(ref)) {
@@ -202,23 +204,35 @@ function parseAliasMap(value: unknown): AliasMap {
     return parsed;
 }
 
-async function loadAliases() {
+async function loadAliases(generation: number) {
+    let loaded: AliasMap;
     try {
-        setAliasMap(parseAliasMap(await DataStore.get(DATA_KEY)));
+        await aliasWriteQueue;
+        const stored = await DataStore.get(DATA_KEY);
+        if (generation !== lifecycleGeneration) return;
+        loaded = parseAliasMap(stored);
     } catch (error) {
-        setAliasMap({});
+        if (generation !== lifecycleGeneration) return;
+        loaded = {};
         logger.error("Failed to load emoji aliases.", error);
     }
+    setAliasMap(loaded);
     unicodeSurrogateCache.clear();
     aliasResultCache.clear();
     notifyAliasesChanged();
 }
 
 async function persistAliases(nextMap: AliasMap) {
+    await DataStore.set(DATA_KEY, nextMap);
     setAliasMap(nextMap);
-    await DataStore.set(DATA_KEY, aliasMap);
     aliasResultCache.clear();
     notifyAliasesChanged();
+}
+
+function queueAliasWrite<T>(operation: () => Promise<T>): Promise<T> {
+    const pending = aliasWriteQueue.then(operation);
+    aliasWriteQueue = pending.then(() => {}, () => {});
+    return pending;
 }
 
 function emojiIdentityFromRef(ref: StoredEmojiRef): string {
@@ -675,7 +689,11 @@ function getExistingAliasForEmoji(ref: StoredEmojiRef): string {
     return "";
 }
 
-async function saveAlias(aliasInput: string, ref: StoredEmojiRef): Promise<{ ok: true; } | { ok: false; error: string; }> {
+function saveAlias(aliasInput: string, ref: StoredEmojiRef): Promise<{ ok: true; } | { ok: false; error: string; }> {
+    return queueAliasWrite(() => saveAliasNow(aliasInput, ref));
+}
+
+async function saveAliasNow(aliasInput: string, ref: StoredEmojiRef): Promise<{ ok: true; } | { ok: false; error: string; }> {
     const validationError = getAliasValidationError(aliasInput);
     if (validationError) return { ok: false, error: validationError };
 
@@ -694,7 +712,7 @@ async function saveAlias(aliasInput: string, ref: StoredEmojiRef): Promise<{ ok:
         }
         : ref;
 
-    const nextMap = { ...aliasMap };
+    const nextMap: AliasMap = Object.assign(Object.create(null), aliasMap);
     for (const [existingAlias, existingRef] of Object.entries(nextMap)) {
         if (existingAlias === alias) continue;
         if (!isSameEmoji(existingRef, normalizedRef)) continue;
@@ -715,7 +733,11 @@ function getAliasMenuLabel(ref: StoredEmojiRef): string {
     return getExistingAliasForEmoji(ref) ? "Edit alias" : "Set alias";
 }
 
-async function removeAlias(alias: string) {
+function removeAlias(alias: string) {
+    return queueAliasWrite(() => removeAliasNow(alias));
+}
+
+async function removeAliasNow(alias: string) {
     if (!(alias in aliasMap)) return;
 
     const nextMap = { ...aliasMap };
@@ -738,7 +760,11 @@ async function removeAlias(alias: string) {
     }
 }
 
-async function clearAliases() {
+function clearAliases() {
+    return queueAliasWrite(clearAliasesNow);
+}
+
+async function clearAliasesNow() {
     if (!aliasEntries.length) return;
 
     try {
@@ -1158,13 +1184,6 @@ export default definePlugin({
             ],
         },
         {
-            find: "renderResults({results:",
-            replacement: {
-                match: /let \i=.{1,100}renderResults\({results:(\i)\.query\.results,/,
-                replace: "$self.sortEmojis($1);$&"
-            },
-        },
-        {
             find: "numEmojiResults:",
             replacement: [
                 {
@@ -1186,7 +1205,9 @@ export default definePlugin({
     injectAliasResults,
 
     async start() {
-        await loadAliases();
+        const generation = ++lifecycleGeneration;
+        await loadAliases(generation);
+        if (generation !== lifecycleGeneration || globalContextPatch) return;
 
         globalContextPatch = (_navId, children, ...args) => {
             if (_navId === "expression-picker" || _navId === "message" || _navId === "message-actions" || _navId === "textarea-context") {
@@ -1209,8 +1230,8 @@ export default definePlugin({
     },
 
     stop() {
-        if (!globalContextPatch) return;
-        removeGlobalContextMenuPatch(globalContextPatch);
+        lifecycleGeneration++;
+        if (globalContextPatch) removeGlobalContextMenuPatch(globalContextPatch);
         globalContextPatch = null;
         unicodeSurrogateCache.clear();
         aliasResultCache.clear();

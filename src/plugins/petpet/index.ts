@@ -19,7 +19,6 @@
 import { ApplicationCommandInputType, ApplicationCommandOptionType, findOption, sendBotMessage } from "@api/Commands";
 import { migratePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
-import { makeLazy } from "@utils/lazy";
 import definePlugin from "@utils/types";
 import { CommandArgument, CommandContext } from "@vencord/discord-types";
 import { DraftType, UploadAttachmentStore, UploadHandler, UploadManager, UserUtils } from "@webpack/common";
@@ -27,14 +26,19 @@ import { GIFEncoder, nearestColorIndex, quantize } from "gifenc";
 
 const DEFAULT_DELAY = 20;
 const DEFAULT_RESOLUTION = 128;
+const MAX_RESOLUTION = 1024;
 const FRAMES = 10;
 
-const getFrames = makeLazy(() => Promise.all(
+let framesPromise: Promise<HTMLImageElement[]> | undefined;
+const getFrames = () => framesPromise ??= Promise.all(
     Array.from(
         { length: FRAMES },
         (_, i) => loadImage(`https://raw.githubusercontent.com/VenPlugs/petpet/main/frames/pet${i}.gif`)
-    ))
-);
+    )
+).catch(error => {
+    framesPromise = undefined;
+    throw error;
+});
 
 function loadImage(source: File | string) {
     const isFile = source instanceof File;
@@ -42,16 +46,24 @@ function loadImage(source: File | string) {
 
     return new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
-        const revokeUrl = () => {
+        const timeout = setTimeout(() => {
+            cleanup();
+            img.src = "";
+            reject(new Error("Image loading timed out"));
+        }, 10000);
+        const cleanup = () => {
+            clearTimeout(timeout);
+            img.onload = null;
+            img.onerror = null;
             if (isFile) URL.revokeObjectURL(url);
         };
 
         img.onload = () => {
-            revokeUrl();
+            cleanup();
             resolve(img);
         };
         img.onerror = _event => {
-            revokeUrl();
+            cleanup();
             reject(Error(`An error occurred while loading ${url}. Check the console for more info.`));
         };
         img.crossOrigin = "Anonymous";
@@ -132,7 +144,7 @@ export default definePlugin({
                 },
                 {
                     name: "resolution",
-                    description: "Resolution for the gif. Defaults to 120. If you enter an insane number and it freezes Discord that's your fault.",
+                    description: `Resolution for the gif, from 1 to ${MAX_RESOLUTION} pixels. Defaults to ${DEFAULT_RESOLUTION}.`,
                     type: ApplicationCommandOptionType.INTEGER
                 },
                 {
@@ -157,6 +169,14 @@ export default definePlugin({
                 }
             ],
             execute: async (opts, cmdCtx) => {
+                const delay = findOption(opts, "delay", DEFAULT_DELAY);
+                if (!Number.isInteger(delay) || delay < 20 || delay > 655350)
+                    return sendBotMessage(cmdCtx.channel.id, { content: "Delay must be an integer from 20 to 655350 milliseconds." });
+
+                const resolution = findOption(opts, "resolution", DEFAULT_RESOLUTION);
+                if (!Number.isInteger(resolution) || resolution < 1 || resolution > MAX_RESOLUTION)
+                    return sendBotMessage(cmdCtx.channel.id, { content: `Resolution must be an integer from 1 to ${MAX_RESOLUTION}.` });
+
                 const frames = await getFrames();
 
                 const noServerPfp = findOption(opts, "no-server-pfp", false);
@@ -172,12 +192,6 @@ export default definePlugin({
                 }
 
                 const avatar = await loadImage(url);
-
-                const delay = findOption(opts, "delay", DEFAULT_DELAY);
-                // Frame delays < 20ms don't function correctly on chromium and firefox
-                if (delay < 20) return sendBotMessage(cmdCtx.channel.id, { content: "Delay must be at least 20." });
-
-                const resolution = findOption(opts, "resolution", DEFAULT_RESOLUTION);
 
                 const gif = GIFEncoder();
 

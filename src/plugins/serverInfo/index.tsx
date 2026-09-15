@@ -14,6 +14,7 @@ import { Menu } from "@webpack/common";
 import { openGuildInfoModal } from "./GuildInfoModal";
 
 const Patch: NavContextMenuPatchCallback = (children, { guild }: { guild: Guild; }) => {
+    if (!guild) return;
     const group = findGroupChildrenByChildId("privacy", children);
 
     group?.push(

@@ -18,7 +18,7 @@
 
 import { Heading } from "@components/Heading";
 import { RenderModalProps } from "@vencord/discord-types";
-import { Modal, openModal, React, TextInput } from "@webpack/common";
+import { Modal, openModal, React, showToast, TextInput, Toasts } from "@webpack/common";
 
 import { buildEmbed, decrypt } from "../index";
 
@@ -26,11 +26,15 @@ export function DecModal(props: RenderModalProps & { message: any; }) {
     const encryptedMessage: string = props?.message?.content;
     const [password, setPassword] = React.useState("password");
 
-    const onDecrypt = () => {
-        const toSend = decrypt(encryptedMessage, password, true);
-        if (!toSend || !props?.message) return;
-        buildEmbed(props?.message, toSend);
-        props.onClose();
+    const onDecrypt = async () => {
+        try {
+            const toSend = decrypt(encryptedMessage, password, true);
+            if (!toSend || !props?.message) return;
+            await buildEmbed(props.message, toSend);
+            props.onClose();
+        } catch {
+            showToast("Could not decrypt this message with that password.", Toasts.Type.FAILURE);
+        }
     };
 
     return (
@@ -56,6 +60,8 @@ export function DecModal(props: RenderModalProps & { message: any; }) {
             <Heading style={{ marginTop: "10px" }}>Password</Heading>
             <TextInput
                 style={{ marginBottom: "20px" }}
+                type="password"
+                value={password}
                 onChange={setPassword}
             />
         </Modal>

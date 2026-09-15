@@ -23,22 +23,13 @@ import { Devs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { maybePromptToUpdate } from "@utils/updater";
-import { filters, findBulk, proxyLazyWebpack } from "@webpack";
+import { findByPropsLazy } from "@webpack";
 import { closeAllModals, DraftType, ExpressionPickerStore, FluxDispatcher, NavigationRouter, SelectedChannelStore } from "@webpack/common";
 
 const CrashHandlerLogger = new Logger("CrashHandler");
 
-const { ModalStack, DraftManager } = proxyLazyWebpack(() => {
-    const [ModalStack, DraftManager] = findBulk(
-        filters.byProps("pushLazy", "popAll"),
-        filters.byProps("clearDraft", "saveDraft"),
-    );
-
-    return {
-        ModalStack,
-        DraftManager
-    };
-});
+const ModalStack = findByPropsLazy("pushLazy", "popAll");
+const DraftManager = findByPropsLazy("clearDraft", "saveDraft");
 
 const settings = definePluginSettings({
     attemptToPreventCrashes: {
@@ -76,7 +67,12 @@ export default definePlugin({
     ],
 
     handleCrash(_this: any, errorState: any) {
-        DataStore.del("KeepCurrentChannel_previousData");
+        try {
+            void Promise.resolve(DataStore.del("KeepCurrentChannel_previousData"))
+                .catch(error => CrashHandlerLogger.error("Failed to clear the saved channel during crash recovery", error));
+        } catch (error) {
+            CrashHandlerLogger.error("Failed to clear the saved channel during crash recovery", error);
+        }
 
         if (IS_DEV) {
             try {
@@ -93,6 +89,9 @@ export default definePlugin({
 
         // 1 ms timeout to avoid react breaking when re-rendering
         setTimeout(() => {
+            // Set isRecovering to false before setting the state to allow us to handle the next crash error correcty, in case it happens
+            setImmediate(() => isRecovering = false);
+
             try {
                 // Prevent a crash loop with an error that could not be handled
                 if (!shouldAttemptRecover) {
@@ -116,7 +115,8 @@ export default definePlugin({
             try {
                 if (!hasCrashedOnce) {
                     hasCrashedOnce = true;
-                    maybePromptToUpdate("Uh oh, Discord has just crashed... but good news, there is a Protonn Cord update available that might fix this issue! Would you like to update now?", true);
+                    void Promise.resolve(maybePromptToUpdate("Uh oh, Discord has just crashed... but good news, there is a Protonn Cord update available that might fix this issue! Would you like to update now?", true))
+                        .catch(error => CrashHandlerLogger.error("Failed to check for updates after a crash", error));
                 }
             } catch { }
 
@@ -198,9 +198,6 @@ export default definePlugin({
                 CrashHandlerLogger.debug("Failed to navigate to home", err);
             }
         }
-
-        // Set isRecovering to false before setting the state to allow us to handle the next crash error correcty, in case it happens
-        setImmediate(() => isRecovering = false);
 
         try {
             _this.setState({ error: null, info: null });

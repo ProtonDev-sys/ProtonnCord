@@ -100,9 +100,13 @@ export const getTheme = (url: string): Promise<IShikiTheme> => {
     const cachedPromise = themePromises.get(url);
     if (cachedPromise) return cachedPromise;
 
-    const themePromise = fetch(url)
-        .then(res => res.json())
+    const themePromise = fetch(url, { signal: AbortSignal.timeout(10_000) })
+        .then(res => {
+            if (!res.ok) throw new Error(`Shiki theme request failed: ${res.status}`);
+            return res.json();
+        })
         .then(theme => {
+            if (!theme || typeof theme !== "object" || Array.isArray(theme)) throw new Error("Invalid Shiki theme");
             themeCache.set(url, theme);
             themePromises.delete(url);
             return theme;

@@ -72,7 +72,13 @@ export default definePlugin({
             if (!triggerRegex?.test(message.content ?? "")) return;
 
             const url = settings.store.url.trim();
-            if (url) VencordNative.native.openExternal(url);
+            if (url) {
+                try {
+                    await VencordNative.native.openExternal(url);
+                } catch (error) {
+                    logger.error("Could not open configured URL", error);
+                }
+            }
         }
     }
 });

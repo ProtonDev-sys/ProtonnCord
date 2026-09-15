@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -17,6 +17,10 @@ import type { IpcMainInvokeEvent } from "electron";
 
 import {
     attachmentBundleRoot,
+    attachmentBundleRootFromDigests,
+    type AttachmentBundleDescriptor,
+    type AttachmentMetadata,
+    createAttachmentManifest,
     DETACHED_TEXT_FILENAME,
     DETACHED_TEXT_MIME_TYPE,
     encryptAttachmentBytes,
@@ -24,6 +28,7 @@ import {
     serializeSecurePlaintext,
 } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import type { ConversationSnapshot } from "../src/equicordplugins/secureMessaging.desktop/native";
+import { parseEncryptedEnvelope } from "../src/equicordplugins/secureMessaging.desktop/protocol";
 
 type NativeModule = typeof import("../src/equicordplugins/secureMessaging.desktop/native");
 
@@ -45,6 +50,12 @@ class AuthenticatedProtector {
     failVaultDirectorySync = false;
     finalFileSyncCalls = 0;
     parentDirectorySyncCalls = 0;
+    pauseVaultStatAt: number | null = null;
+    resumeVaultStat: Promise<void> | null = null;
+    resumeVaultWrite: Promise<void> | null = null;
+    vaultStatCalls = 0;
+    vaultStatPaused: (() => void) | null = null;
+    vaultWritePaused: (() => void) | null = null;
     vaultDirectorySyncCalls = 0;
     readonly key = createHash("sha256").update("secure-messaging-native-test-protector").digest();
 
@@ -76,6 +87,9 @@ interface HarnessRuntime {
     appListeners?: Array<[string, (event: unknown, window: HarnessWindow) => void]>;
     browserWindows?: HarnessWindow[];
     dataDir: string;
+    oneKeyCipherPause?: Promise<void>;
+    oneKeyCipherStarted?: () => void;
+    oneKeySecret?: Buffer;
     protector: AuthenticatedProtector;
 }
 
@@ -163,6 +177,10 @@ const runtimeStubs: Plugin = {
         bundle.onResolve({ filter: /^electron$/ }, () => ({ path: "electron", namespace: "secure-native-test" }));
         bundle.onResolve({ filter: /^@main\/utils\/constants$/ }, () => ({ path: "constants", namespace: "secure-native-test" }));
         bundle.onResolve({ filter: /^fs\/promises$/ }, () => ({ path: "fs-promises", namespace: "secure-native-test" }));
+        bundle.onResolve({ filter: /^\.\/oneKeyWindowsVault$/ }, () => ({
+            path: "onekey-windows-vault",
+            namespace: "secure-native-test",
+        }));
         bundle.onLoad({ filter: /^electron$/, namespace: "secure-native-test" }, () => ({
             contents: `
                 const runtime = globalThis.__secureMessagingNativeHarness;
@@ -173,7 +191,14 @@ const runtimeStubs: Plugin = {
                     decryptString: value => runtime.protector.decryptString(value),
                 };
                 export const BrowserWindow = {
+                    fromWebContents: () => null,
                     getAllWindows: () => runtime.browserWindows ?? [],
+                };
+                export const session = {
+                    fromPartition: () => ({
+                        setPermissionRequestHandler() {},
+                        async clearStorageData() {},
+                    }),
                 };
                 export const app = {
                     getPath: name => {
@@ -191,10 +216,46 @@ const runtimeStubs: Plugin = {
             contents: "export const DATA_DIR = globalThis.__secureMessagingNativeHarness.dataDir;",
             loader: "js",
         }));
+        bundle.onLoad({ filter: /^onekey-windows-vault$/, namespace: "secure-native-test" }, () => ({
+            contents: `
+                import { Buffer } from "node:buffer";
+                export async function runOneKeyWindowsVaultCipher() {
+                    const runtime = globalThis.__secureMessagingNativeHarness;
+                    runtime.oneKeyCipherStarted?.();
+                    if (runtime.oneKeyCipherPause) await runtime.oneKeyCipherPause;
+                    const configured = runtime.oneKeySecret;
+                    return { ok: true, value: configured ? Buffer.from(configured) : Buffer.alloc(32, 0x51) };
+                }
+            `,
+            loader: "js",
+        }));
         bundle.onLoad({ filter: /^fs-promises$/, namespace: "secure-native-test" }, () => ({
             contents: `
                 import * as fs from "node:fs/promises";
                 export * from "node:fs/promises";
+                export async function stat(path, options) {
+                    const value = await fs.stat(path, options);
+                    const protector = globalThis.__secureMessagingNativeHarness.protector;
+                    if (String(path).replaceAll("\\\\", "/").endsWith("/secure-messaging/vault.bin")) {
+                        protector.vaultStatCalls++;
+                        if (protector.vaultStatCalls === protector.pauseVaultStatAt) {
+                            protector.vaultStatPaused?.();
+                            await protector.resumeVaultStat;
+                        }
+                    }
+                    return value;
+                }
+                export async function writeFile(path, data, options) {
+                    const value = await fs.writeFile(path, data, options);
+                    const protector = globalThis.__secureMessagingNativeHarness.protector;
+                    const normalizedPath = String(path).replaceAll("\\\\", "/");
+                    if (protector.resumeVaultWrite && normalizedPath.includes("/secure-messaging/vault.") &&
+                        normalizedPath.endsWith(".tmp")) {
+                        protector.vaultWritePaused?.();
+                        await protector.resumeVaultWrite;
+                    }
+                    return value;
+                }
                 export async function open(path, flags, mode) {
                     const handle = await fs.open(path, flags, mode);
                     const runtime = globalThis.__secureMessagingNativeHarness;
@@ -255,11 +316,40 @@ async function buildNativeBundle(bundlePath: string, emulatePlatform?: "linux" |
 
 let loadSequence = 0;
 
-async function loadNative(bundlePath: string, dataDir: string): Promise<NativeModule> {
-    harnessGlobal.__secureMessagingNativeHarness = { dataDir, protector };
+async function loadNative(bundlePath: string, dataDir: string, oneKeySecret?: Buffer): Promise<NativeModule> {
+    harnessGlobal.__secureMessagingNativeHarness = { dataDir, oneKeySecret, protector };
     const url = pathToFileURL(bundlePath);
     url.searchParams.set("instance", String(++loadSequence));
     return import(url.href) as Promise<NativeModule>;
+}
+
+function pauseNextOneKeyCipher(): { release(): void; started: Promise<void>; } {
+    const runtime = harnessGlobal.__secureMessagingNativeHarness;
+    let releasePause!: () => void;
+    const started = new Promise<void>(resolve => { runtime.oneKeyCipherStarted = resolve; });
+    runtime.oneKeyCipherPause = new Promise<void>(resolve => { releasePause = resolve; });
+    return {
+        release() {
+            runtime.oneKeyCipherPause = undefined;
+            runtime.oneKeyCipherStarted = undefined;
+            releasePause();
+        },
+        started,
+    };
+}
+
+function pauseNextVaultWrite(): { release(): void; started: Promise<void>; } {
+    let releasePause!: () => void;
+    const started = new Promise<void>(resolve => { protector.vaultWritePaused = resolve; });
+    protector.resumeVaultWrite = new Promise<void>(resolve => { releasePause = resolve; });
+    return {
+        release() {
+            protector.resumeVaultWrite = null;
+            protector.vaultWritePaused = null;
+            releasePause();
+        },
+        started,
+    };
 }
 
 async function createAnnouncement(native: NativeModule, userId: string): Promise<string> {
@@ -337,7 +427,12 @@ async function testInvalidInputs(native: NativeModule): Promise<void> {
         "capture-protection input must be boolean",
     );
     expectStatus(await native.getIdentity(hostileEvent, ALICE_ID), "invalid_input", "non-Discord IPC origin");
+    expectStatus(await native.exportMobilePairing(hostileEvent, ALICE_ID), "invalid_input", "non-Discord pairing IPC origin");
+    expectStatus(await native.exportMobilePairing(DISCORD_EVENT, "not-a-snowflake"), "invalid_input", "invalid pairing user");
+    expectStatus(await native.exportMobilePairing(DISCORD_EVENT, ALICE_ID), "unavailable", "pairing without an unlocked OneKey");
     expectStatus(await native.getIdentity(DISCORD_EVENT, "not-a-snowflake"), "invalid_input", "invalid local user");
+    expectStatus(await native.getChatAccessState(hostileEvent, ALICE_ID), "invalid_input", "non-Discord chat-access origin");
+    expectStatus(await native.getChatAccessState(DISCORD_EVENT, "not-a-snowflake"), "invalid_input", "invalid chat-access user");
     expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, "not-a-snowflake"), "invalid_input", "invalid protection channel");
     expectStatus(await native.rotateIdentity(DISCORD_EVENT, ALICE_ID, "bad"), "invalid_input", "invalid rotation fingerprint");
     expectStatus(
@@ -577,6 +672,202 @@ async function testStorageFailures(bundlePath: string, linuxBundlePath: string, 
     assert.ok(protector.finalFileSyncCalls > failedFinalFileSyncCalls, "Windows reload retries the failed final-file flush");
 }
 
+async function testSelectiveAttachmentTransfers(native: NativeModule, dataDir: string): Promise<void> {
+    const pngBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j6xkAAAAASUVORK5CYII=", "base64");
+    const zipBytes = new Uint8Array(256 * 1024).fill(0x5a);
+    const executableBytes = new Uint8Array(1024 * 1024).fill(0x45);
+    const files = [
+        { data: pngBytes, name: "selective-preview.png", mimeType: "image/png", spoiler: false },
+        { data: zipBytes, name: "selective-archive.zip", mimeType: "application/zip", spoiler: true },
+        { data: executableBytes, name: "selective-inert.exe", mimeType: "application/octet-stream", spoiler: false },
+    ];
+    const served = new Map<string, Uint8Array>();
+    const requests: Array<{ id: string; bytes: number; }> = [];
+    let nextId = 8_000;
+    const createFixture = async (sourceFiles: typeof files) => {
+        const { descriptor, keyBytes } = generateAttachmentBundleMaterial(sourceFiles.length);
+        const metadata: AttachmentMetadata[] = sourceFiles.map(file => ({
+            name: file.name, mimeType: file.mimeType, size: file.data.byteLength,
+            description: null, duration: null, height: file.mimeType === "image/png" ? 1 : null,
+            width: file.mimeType === "image/png" ? 1 : null, spoiler: file.spoiler, waveform: null,
+        }));
+        let ciphertexts: Uint8Array[];
+        try {
+            ciphertexts = await Promise.all(sourceFiles.map((file, index) => encryptAttachmentBytes({
+                bundleId: descriptor.id, channelId: DM_CHANNEL_ID, count: sourceFiles.length,
+                data: file.data, index, masterKey: keyBytes, metadata: metadata[index], senderUserId: ALICE_ID,
+            })));
+        } finally {
+            keyBytes.fill(0);
+        }
+        const manifest = await createAttachmentManifest(ciphertexts, metadata);
+        const bundle: AttachmentBundleDescriptor = {
+            ...descriptor, manifest,
+            root: await attachmentBundleRootFromDigests(descriptor.id, manifest.map(entry => entry.digest)),
+        };
+        const attachments = ciphertexts.map(ciphertext => {
+            const id = messageId(nextId++);
+            served.set(id, ciphertext);
+            return {
+                id, size: ciphertext.byteLength,
+                url: `https://cdn.discordapp.com/attachments/${DM_CHANNEL_ID}/${id}/encrypted.pcaf`,
+                proxyUrl: `https://media.discordapp.net/attachments/${DM_CHANNEL_ID}/${id}/encrypted.pcaf`,
+            };
+        });
+        const sign = async (signedBundle = bundle, detachedTextIndex: number | null = null) => {
+            const encrypted = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+                plaintext: serializeSecurePlaintext("", signedBundle, [], detachedTextIndex),
+                snapshot: dmSnapshot(DM_CHANNEL_ID, BOB_ID),
+            });
+            expectStatus(encrypted, "encrypted", "the selective-download fixture has an authenticated envelope");
+            return {
+                channelId: DM_CHANNEL_ID, content: encrypted.content, discordAuthorId: ALICE_ID,
+                discordEditedTimestamp: null, discordMessageId: messageId(nextId++), attachments,
+            };
+        };
+        return { attachments, bundle, ciphertexts, sign };
+    };
+    const originalFetch = globalThis.fetch;
+    try {
+        globalThis.fetch = async input => {
+            const id = new URL(String(input)).pathname.split("/")[3];
+            const data = served.get(id);
+            assert.ok(data, "the fixture serves only its synthetic Discord attachment references");
+            requests.push({ id, bytes: data.byteLength });
+            return new Response(Buffer.from(data), { headers: { "content-length": String(data.byteLength) } });
+        };
+        const mixed = await createFixture(files);
+        const { manifest: _manifest, ...legacyBundle } = mixed.bundle;
+        const legacyInput = await mixed.sign(legacyBundle);
+        const legacyPreview = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, legacyInput, "previews");
+        expectStatus(legacyPreview, "decrypted", "legacy history can render before fetching attachment bytes");
+        assert.deepEqual(legacyPreview.attachments, []);
+        assert.equal(legacyPreview.deferredAttachments?.length, 3);
+        assert.equal(requests.length, 0, "legacy previews do not fetch an unverifiable subset");
+        const legacyAll = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, legacyInput, "all");
+        expectStatus(legacyAll, "decrypted", "an explicit legacy load still authenticates the complete bundle root");
+        assert.deepEqual(legacyAll.attachments.map(attachment => Buffer.from(attachment.data)), files.map(file => Buffer.from(file.data)));
+        assert.equal(requests.length, 3);
+        const eagerBytes = requests.reduce((total, request) => total + request.bytes, 0);
+        assert.equal(eagerBytes, mixed.ciphertexts.reduce((total, ciphertext) => total + ciphertext.byteLength, 0));
+
+        requests.length = 0;
+        const manifestInput = await mixed.sign();
+        const preview = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, manifestInput, "previews");
+        expectStatus(preview, "decrypted", "only the manifest's previewable image is fetched while reading history");
+        assert.deepEqual(preview.attachments.map(attachment => attachment.id), [mixed.attachments[0].id]);
+        assert.deepEqual(Buffer.from(preview.attachments[0].data), pngBytes);
+        assert.deepEqual(preview.deferredAttachments, files.slice(1).map((file, index) => ({
+            id: mixed.attachments[index + 1].id, name: file.name, size: file.data.byteLength, spoiler: file.spoiler,
+        })));
+        assert.deepEqual(requests, [{ id: mixed.attachments[0].id, bytes: mixed.ciphertexts[0].byteLength }]);
+        const previewBytes = requests[0].bytes;
+        const repeatPreview = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, manifestInput, "previews");
+        expectStatus(repeatPreview, "decrypted", "preview rerenders reuse authenticated bytes");
+        assert.equal(requests.length, 1);
+
+        for (const index of [1, 2]) {
+            requests.length = 0;
+            const download = await native.downloadIncomingAttachment(DISCORD_EVENT, BOB_ID, manifestInput, mixed.attachments[index].id);
+            expectStatus(download, "saved", "clicking a generic file authenticates and saves that file alone");
+            assert.deepEqual(requests, [{ id: mixed.attachments[index].id, bytes: mixed.ciphertexts[index].byteLength }]);
+            assert.equal(download.filename, files[index].name);
+            assert.deepEqual(await readFile(join(dataDir, "Downloads", download.filename)), Buffer.from(files[index].data));
+        }
+        requests.length = 0;
+        const cachedDownload = await native.downloadIncomingAttachment(DISCORD_EVENT, BOB_ID, manifestInput, mixed.attachments[1].id);
+        expectStatus(cachedDownload, "saved", "a second click saves authenticated cached bytes");
+        assert.equal(requests.length, 0);
+        assert.deepEqual(await readFile(join(dataDir, "Downloads", cachedDownload.filename)), Buffer.from(zipBytes));
+
+        const downloadsBeforeRejections = (await readdir(join(dataDir, "Downloads"))).sort();
+        const malformed: Array<[string, AttachmentBundleDescriptor]> = [];
+        const badRoot = structuredClone(mixed.bundle);
+        badRoot.root = badRoot.key;
+        malformed.push(["root", badRoot]);
+        for (const field of ["digest", "name", "size", "preview", "spoiler"] as const) {
+            const descriptor = structuredClone(mixed.bundle);
+            assert.ok(descriptor.manifest);
+            if (field === "digest") {
+                descriptor.manifest[1].digest = descriptor.key;
+                descriptor.root = await attachmentBundleRootFromDigests(descriptor.id, descriptor.manifest.map(entry => entry.digest));
+            } else if (field === "name") descriptor.manifest[1].name = "wrong-authenticated-name.zip";
+            else if (field === "size") descriptor.manifest[1].size++;
+            else if (field === "preview") descriptor.manifest[1].preview = true;
+            else descriptor.manifest[1].spoiler = false;
+            malformed.push([field, descriptor]);
+        }
+        for (const [field, descriptor] of malformed) {
+            requests.length = 0;
+            const input = await mixed.sign(descriptor);
+            const result = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, input, { attachmentId: mixed.attachments[1].id });
+            expectStatus(result, "invalid_message", `selected decryption rejects a signed manifest with a wrong ${field}`);
+            assert.ok(requests.every(request => request.id === mixed.attachments[1].id));
+            assert.equal(requests.length, field === "root" ? 0 : 2, "authentication failure tries only the selected CDN and proxy");
+        }
+        const badAead = structuredClone(mixed.bundle);
+        assert.ok(badAead.manifest);
+        const tamperedZip = Uint8Array.from(mixed.ciphertexts[1]);
+        tamperedZip[tamperedZip.length - 1] ^= 1;
+        badAead.manifest[1].digest = createHash("sha256").update(tamperedZip).digest("base64url");
+        badAead.root = await attachmentBundleRootFromDigests(badAead.id, badAead.manifest.map(entry => entry.digest));
+        const badAeadInput = await mixed.sign(badAead);
+        requests.length = 0;
+        served.set(mixed.attachments[1].id, tamperedZip);
+        try {
+            expectStatus(await native.downloadIncomingAttachment(DISCORD_EVENT, BOB_ID, badAeadInput, mixed.attachments[1].id), "invalid_message",
+                "a matching signed digest and bundle root cannot replace the selected file's AEAD authentication");
+            assert.equal(requests.length, 2);
+            assert.ok(requests.every(request => request.id === mixed.attachments[1].id));
+        } finally {
+            served.set(mixed.attachments[1].id, mixed.ciphertexts[1]);
+            tamperedZip.fill(0);
+        }
+        assert.deepEqual((await readdir(join(dataDir, "Downloads"))).sort(), downloadsBeforeRejections,
+            "failed authentication cannot create any downloaded file");
+        const badLegacyRoot = await mixed.sign({ ...legacyBundle, root: legacyBundle.key });
+        requests.length = 0;
+        expectStatus(await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, badLegacyRoot, "all"), "invalid_message",
+            "legacy explicit loads retain complete bundle-root authentication");
+        assert.equal(requests.length, 3);
+
+        const longText = "Selective detached text with generic siblings. ".repeat(160);
+        const textBytes = new TextEncoder().encode(longText);
+        const detached = await createFixture([
+            files[1], { data: textBytes, name: DETACHED_TEXT_FILENAME, mimeType: DETACHED_TEXT_MIME_TYPE, spoiler: false }, files[2],
+        ]);
+        const detachedInput = await detached.sign(detached.bundle, 1);
+        requests.length = 0;
+        const selectedText = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, detachedInput, "text");
+        expectStatus(selectedText, "decrypted", "detached text loads independently of adjacent generic files");
+        assert.equal(selectedText.plaintext, longText);
+        assert.deepEqual(selectedText.attachments, [], "the detached transport never becomes a visible file");
+        assert.deepEqual(selectedText.deferredAttachments?.map(attachment => attachment.id), [detached.attachments[0].id, detached.attachments[2].id]);
+        assert.deepEqual(requests, [{ id: detached.attachments[1].id, bytes: detached.ciphertexts[1].byteLength }]);
+        requests.length = 0;
+        const repeatText = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, detachedInput, "text");
+        expectStatus(repeatText, "decrypted", "detached text reuses its authenticated native cache");
+        assert.equal(repeatText.plaintext, longText);
+        assert.equal(requests.length, 0);
+        expectStatus(await native.downloadIncomingAttachment(DISCORD_EVENT, BOB_ID, detachedInput, detached.attachments[1].id), "invalid_message",
+            "the selected detached-text transport is not downloadable");
+        const siblingDownload = await native.downloadIncomingAttachment(DISCORD_EVENT, BOB_ID, detachedInput, detached.attachments[0].id);
+        expectStatus(siblingDownload, "saved", "downloading a detached text sibling leaves other siblings deferred");
+        assert.deepEqual(requests, [{ id: detached.attachments[0].id, bytes: detached.ciphertexts[0].byteLength }]);
+        assert.deepEqual(await readFile(join(dataDir, "Downloads", siblingDownload.filename)), Buffer.from(zipBytes));
+        console.log("selective attachment transfer proof:", JSON.stringify({
+            files: ["PNG", "ZIP", "inert EXE fixture"],
+            eager: { requests: 3, bytes: eagerBytes },
+            previews: { requests: 1, bytes: previewBytes },
+            deferredBytes: eagerBytes - previewBytes,
+            detachedText: { requests: 1, bytes: detached.ciphertexts[1].byteLength },
+        }));
+    } finally {
+        globalThis.fetch = originalFetch;
+        for (const bytes of served.values()) bytes.fill(0);
+    }
+}
+
 async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise<void> {
     const vaultDirectory = join(dataDir, "secure-messaging");
     const staleVaultTemporary = join(vaultDirectory, "vault.00000000-0000-4000-8000-000000000001.tmp");
@@ -694,9 +985,25 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     expectStatus(decrypted, "decrypted", "Alice initially decrypts Bob pre-replacement message");
     assert.equal(decrypted.plaintext, bobHistoricalPlaintext);
 
-    const dmPlaintext = "native DM secret α";
-    const encryptedDm = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, { plaintext: dmPlaintext, snapshot: aliceDm });
+    const dmPlaintext = `native DM secret <@${ALICE_ID}> <@${BOB_ID}> α`;
+    const encryptedDm = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        mentionedUserIds: [ALICE_ID, BOB_ID],
+        plaintext: dmPlaintext,
+        snapshot: aliceDm,
+    });
     expectStatus(encryptedDm, "encrypted", "Alice encrypts for Bob");
+    assert.deepEqual(
+        parseEncryptedEnvelope(encryptedDm.content, { channelId: DM_CHANNEL_ID, discordAuthorId: ALICE_ID }).m,
+        [ALICE_ID, BOB_ID],
+        "native encryption authenticates selected mentioned participants, including the author",
+    );
+    assert.ok(encryptedDm.content.includes(`<@${ALICE_ID}>`), "the author's local mentioned state is available before decryption");
+    assert.ok(encryptedDm.content.includes(`<@${BOB_ID}>`), "the recipient target is visible to Discord's mention parser");
+    expectStatus(await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        mentionedUserIds: [CAROL_ID],
+        plaintext: `must not ping <@${CAROL_ID}>`,
+        snapshot: aliceDm,
+    }), "invalid_input", "mentioned user outside selected encrypted participants");
     const bobDmInput = {
         channelId: DM_CHANNEL_ID,
         content: encryptedDm.content,
@@ -817,6 +1124,7 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
             name: "incoming-secret.txt",
             size: incomingAttachmentBytes.byteLength,
             spoiler: false,
+            waveform: null,
             width: null,
         },
         senderUserId: ALICE_ID,
@@ -1143,6 +1451,7 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
             name: DETACHED_TEXT_FILENAME,
             size: detachedTextBytes.byteLength,
             spoiler: false,
+            waveform: null,
             width: null,
         },
         senderUserId: ALICE_ID,
@@ -1198,6 +1507,8 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     } finally {
         globalThis.fetch = originalFetch;
     }
+
+    await testSelectiveAttachmentTransfers(native, dataDir);
 
     decrypted = await native.decryptIncoming(DISCORD_EVENT, BOB_ID, bobDmInput);
     expectStatus(decrypted, "decrypted", "exact message rerender is idempotent");
@@ -1664,7 +1975,7 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         snapshot: aliceDm,
     });
     expectStatus(rotationDisabled, "not_enabled", "local rotation disables sending");
-    assert.equal(rotationDisabled.reason, "unverified_recipients", "rotation review latch persists until reconfiguration");
+    assert.equal(rotationDisabled.reason, "local_identity_changed", "rotation review latch persists until reconfiguration");
 
     decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, aliceHistoricalInput);
     expectStatus(decrypted, "decrypted", "historical message survives both local rotation and peer replacement");
@@ -1727,6 +2038,248 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         assert.equal(vaultBytes.includes(Buffer.from(plaintext, "utf8")), false, "vault bytes do not expose message plaintext");
 }
 
+async function testOneKeyIdentityLifecycle(bundlePath: string, root: string): Promise<void> {
+    const oneKeySecret = Buffer.alloc(32, 0x6b);
+    const otherOneKeySecret = Buffer.alloc(32, 0x9d);
+    try {
+        const firstDataDir = join(root, "secure-messaging-live-onekey-identity-first");
+        const vaultPath = join(firstDataDir, "secure-messaging", "vault.bin");
+        const native = await loadNative(bundlePath, firstDataDir, oneKeySecret);
+        const aliceBefore = await native.getIdentity(DISCORD_EVENT, ALICE_ID);
+        const bobBefore = await native.getIdentity(DISCORD_EVENT, BOB_ID);
+        expectStatus(aliceBefore, "ready", "Alice software identity before OneKey migration");
+        expectStatus(bobBefore, "ready", "Bob software identity before OneKey migration");
+
+        await trustAnnouncement(native, ALICE_ID, BOB_ID, await createAnnouncement(native, BOB_ID));
+        const configured = await native.configureConversation(DISCORD_EVENT, ALICE_ID, {
+            enabled: true,
+            selectedRecipientIds: [BOB_ID],
+            snapshot: dmSnapshot(DM_CHANNEL_ID, BOB_ID),
+        });
+        expectStatus(configured, "enabled", "conversation enabled before OneKey identity migration");
+        expectStatus(await native.configureConversation(DISCORD_EVENT, ALICE_ID, {
+            enabled: false,
+            selectedRecipientIds: [BOB_ID],
+            snapshot: dmSnapshot(OUTSIDER_CHANNEL_ID, BOB_ID),
+        }), "disabled", "disabled conversations stay outside the protected-channel index");
+
+        const setupStartedAt = Date.now();
+        const setupBarrier = pauseNextOneKeyCipher();
+        const pendingSetup = native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID);
+        await setupBarrier.started;
+        const lockDuringSetup = native.lockSecurityKeyVault(DISCORD_EVENT);
+        setupBarrier.release();
+        const staleSetup = await pendingSetup;
+        expectStatus(staleSetup, "unavailable", "lock invalidates a pending OneKey setup ceremony");
+        assert.equal(staleSetup.reason, "security_key_locked");
+        expectStatus(await lockDuringSetup, "not_configured", "lock completes before stale setup activation");
+        expectStatus(await native.getSecurityKeyVaultState(DISCORD_EVENT), "not_configured",
+            "a stale setup ceremony cannot reactivate or protect the vault");
+
+        const setupWriteBarrier = pauseNextVaultWrite();
+        const setupDuringSave = native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID);
+        await setupWriteBarrier.started;
+        const lockDuringSetupSave = native.lockSecurityKeyVault(DISCORD_EVENT);
+        setupWriteBarrier.release();
+        const canceledSetupSave = await setupDuringSave;
+        expectStatus(canceledSetupSave, "unavailable", "lock cancels setup after activation but before commit");
+        assert.equal(canceledSetupSave.reason, "security_key_locked");
+        expectStatus(await lockDuringSetupSave, "not_configured", "lock completes after canceled setup commit");
+        const canceledSetupStored = JSON.parse(protector.decryptString(await readFile(vaultPath))) as Record<string, unknown>;
+        assert.equal("mode" in canceledSetupStored, false,
+            "a canceled setup must not atomically replace the plaintext vault with a hardware envelope");
+        assert.equal((await readdir(join(firstDataDir, "secure-messaging"))).some(name => /^vault\..+\.tmp$/u.test(name)), false,
+            "the canceled setup temporary envelope must be removed");
+
+        const setup = await native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID);
+        expectStatus(setup, "unlocked", "OneKey setup");
+        assert.equal(setup.profile.provider, "onekey");
+        assert.equal(setup.identityChanged, true, "setup reports deterministic identity installation");
+        assert.equal(setup.disabledConversationCount, 1, "setup disables conversations under replaced identities");
+        const setupAccess = await native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        expectStatus(setupAccess, "ready", "unlocked hardware-vault chat access");
+        assert.equal(setupAccess.hardwareVaultLocked, false);
+        assert.deepEqual(setupAccess.protectedChannelIds, [DM_CHANNEL_ID],
+            "identity-review conversations remain protected in the outer index");
+
+        const aliceOneKey = await native.getIdentity(DISCORD_EVENT, ALICE_ID);
+        const bobOneKey = await native.getIdentity(DISCORD_EVENT, BOB_ID);
+        expectStatus(aliceOneKey, "ready", "Alice OneKey identity");
+        expectStatus(bobOneKey, "ready", "Bob OneKey identity");
+        assert.notEqual(aliceOneKey.identity.fingerprint, aliceBefore.identity.fingerprint);
+        assert.notEqual(bobOneKey.identity.fingerprint, bobBefore.identity.fingerprint,
+            "setup migrates every Discord account already stored in the shared vault");
+        const disabled = await native.getConversation(DISCORD_EVENT, ALICE_ID, dmSnapshot(DM_CHANNEL_ID, BOB_ID));
+        expectStatus(disabled, "local_identity_changed", "identity replacement requires explicit conversation review");
+
+        const blockedRotation = await native.rotateIdentity(
+            DISCORD_EVENT,
+            ALICE_ID,
+            aliceOneKey.identity.fingerprint,
+        );
+        expectStatus(blockedRotation, "invalid_input", "OneKey-derived identity rotation remains blocked while protected");
+
+        expectStatus(await native.lockSecurityKeyVault(DISCORD_EVENT), "locked", "OneKey vault lock");
+        const lockedAccess = await native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        expectStatus(lockedAccess, "ready", "locked hardware-vault chat access");
+        assert.equal(lockedAccess.hardwareVaultLocked, true);
+        assert.deepEqual(lockedAccess.protectedChannelIds, [DM_CHANNEL_ID]);
+        expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, DM_CHANNEL_ID), "protected",
+            "locked lookup identifies a protected conversation without decrypting the vault");
+        expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, OUTSIDER_CHANNEL_ID), "unconfigured",
+            "locked lookup does not expose a configured but disabled conversation");
+        expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, "200000000000000099"), "unconfigured",
+            "locked lookup treats an unknown conversation as unconfigured");
+
+        const unlockBarrier = pauseNextOneKeyCipher();
+        const pendingUnlock = native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID);
+        await unlockBarrier.started;
+        const lockDuringUnlock = native.lockSecurityKeyVault(DISCORD_EVENT);
+        unlockBarrier.release();
+        const staleUnlock = await pendingUnlock;
+        expectStatus(staleUnlock, "unavailable", "lock invalidates a pending OneKey unlock ceremony");
+        assert.equal(staleUnlock.reason, "security_key_locked");
+        expectStatus(await lockDuringUnlock, "locked", "lock completes before stale unlock activation");
+        expectStatus(await native.getSecurityKeyVaultState(DISCORD_EVENT), "locked",
+            "a stale unlock ceremony cannot restore the cleared hardware session");
+
+        const unlocked = await native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID);
+        expectStatus(unlocked, "unlocked", "OneKey vault unlock");
+        assert.equal(unlocked.identityChanged, undefined, "unlocking with the same OneKey does not rotate identities");
+        expectStatus(await native.configureConversation(DISCORD_EVENT, ALICE_ID, {
+            enabled: false,
+            selectedRecipientIds: [BOB_ID],
+            snapshot: dmSnapshot(DM_CHANNEL_ID, BOB_ID),
+        }), "disabled", "disabling a conversation updates the outer index");
+        expectStatus(await native.lockSecurityKeyVault(DISCORD_EVENT), "locked", "lock after protected-index update");
+        const disabledAccess = await native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        expectStatus(disabledAccess, "ready", "updated locked hardware-vault chat access");
+        assert.deepEqual(disabledAccess.protectedChannelIds, []);
+        expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, DM_CHANNEL_ID), "unconfigured",
+            "a disabled conversation is removed from the locked-readable index");
+
+        expectStatus(await native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID), "unlocked", "unlock before legacy-index check");
+        expectStatus(await native.configureConversation(DISCORD_EVENT, ALICE_ID, {
+            enabled: true,
+            selectedRecipientIds: [BOB_ID],
+            snapshot: dmSnapshot(DM_CHANNEL_ID, BOB_ID),
+        }), "enabled", "re-enabling a conversation restores the outer index");
+        expectStatus(await native.lockSecurityKeyVault(DISCORD_EVENT), "locked", "lock before legacy-index check");
+
+        const legacyEnvelope = JSON.parse(protector.decryptString(await readFile(vaultPath))) as Record<string, unknown>;
+        delete legacyEnvelope.protectedChannelIdsByUser;
+        await writeFile(vaultPath, protector.encryptString(JSON.stringify(legacyEnvelope)));
+        const legacyAccess = await native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        expectStatus(legacyAccess, "ready", "legacy hardware-vault chat access");
+        assert.equal(legacyAccess.hardwareVaultLocked, true);
+        assert.equal(legacyAccess.protectedChannelIds, null,
+            "an absent legacy index remains explicitly unknown");
+        const legacyLookup = await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, DM_CHANNEL_ID);
+        expectStatus(legacyLookup, "unavailable", "legacy locked protection lookup fails closed");
+        assert.equal(legacyLookup.reason, "security_key_locked");
+
+        expectStatus(await native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID), "unlocked",
+            "legacy envelopes remain decryptable");
+        const migratedEnvelope = JSON.parse(protector.decryptString(await readFile(vaultPath))) as {
+            protectedChannelIdsByUser?: Record<string, string[]>;
+        };
+        assert.deepEqual(migratedEnvelope.protectedChannelIdsByUser?.[ALICE_ID], [DM_CHANNEL_ID],
+            "unlocking alone persists the derived legacy protected-channel index");
+        const unlockedLegacyAccess = await native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        expectStatus(unlockedLegacyAccess, "ready", "unlocked legacy chat access");
+        assert.equal(unlockedLegacyAccess.hardwareVaultLocked, false);
+        assert.deepEqual(unlockedLegacyAccess.protectedChannelIds, [DM_CHANNEL_ID]);
+        expectStatus(await native.lockSecurityKeyVault(DISCORD_EVENT), "locked", "lock after automatic legacy-index upgrade");
+        const upgradedAccess = await native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        expectStatus(upgradedAccess, "ready", "upgraded hardware-vault chat access");
+        assert.equal(upgradedAccess.hardwareVaultLocked, true);
+        assert.deepEqual(upgradedAccess.protectedChannelIds, [DM_CHANNEL_ID]);
+        expectStatus(await native.getChannelProtection(DISCORD_EVENT, ALICE_ID, DM_CHANNEL_ID), "protected",
+            "the automatically migrated index survives relocking");
+        expectStatus(await native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID), "unlocked", "unlock after index lifecycle checks");
+
+        const concurrentLegacyEnvelope = JSON.parse(
+            protector.decryptString(await readFile(vaultPath)),
+        ) as Record<string, unknown>;
+        delete concurrentLegacyEnvelope.protectedChannelIdsByUser;
+        await writeFile(vaultPath, protector.encryptString(JSON.stringify(concurrentLegacyEnvelope)));
+        let resumeVaultStat!: () => void;
+        const vaultStatPaused = new Promise<void>(resolve => { protector.vaultStatPaused = resolve; });
+        protector.resumeVaultStat = new Promise<void>(resolve => { resumeVaultStat = resolve; });
+        protector.pauseVaultStatAt = protector.vaultStatCalls + 4;
+        const concurrentMigration = native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
+        await vaultStatPaused;
+        const concurrentLock = native.lockSecurityKeyVault(DISCORD_EVENT);
+        resumeVaultStat();
+        const interruptedMigration = await concurrentMigration;
+        expectStatus(interruptedMigration, "unavailable", "concurrent lock interrupts legacy-index migration");
+        assert.equal(interruptedMigration.reason, "security_key_locked");
+        expectStatus(await concurrentLock, "locked", "concurrent lock completes after guarded migration");
+        protector.pauseVaultStatAt = null;
+        protector.resumeVaultStat = null;
+        protector.vaultStatPaused = null;
+        const preservedEnvelope = JSON.parse(protector.decryptString(await readFile(vaultPath))) as Record<string, unknown>;
+        assert.equal(preservedEnvelope.mode, "security_key",
+            "a concurrent memory lock must not downgrade the hardware envelope to plaintext");
+        assert.equal("accounts" in preservedEnvelope, false,
+            "private vault contents must remain inside the hardware ciphertext after the race");
+        expectStatus(await native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID), "unlocked",
+            "the preserved legacy envelope remains unlockable after the interrupted migration");
+        expectStatus(await native.removeSecurityKeyVault(DISCORD_EVENT), "not_configured", "remove OneKey protection");
+
+        const stored = JSON.parse(protector.decryptString(await readFile(
+            vaultPath,
+        ))) as {
+            accounts: Record<string, {
+                identityHistory: Record<string, unknown>;
+                sendCounter: number;
+            }>;
+        };
+        for (const [userId, identity] of [[ALICE_ID, aliceOneKey], [BOB_ID, bobOneKey]] as const) {
+            assert.ok(stored.accounts[userId].sendCounter >= setupStartedAt * 1_000,
+                "OneKey migration seeds a portable monotonic send-counter floor");
+            assert.equal(identity.status, "ready");
+            assert.equal(identity.identity.fingerprint in stored.accounts[userId].identityHistory, false,
+                "the current deterministic fingerprint is not duplicated in retired-key history");
+        }
+
+        const repeatedSetup = await native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID);
+        expectStatus(repeatedSetup, "unlocked", "repeat setup with the same OneKey");
+        assert.equal(repeatedSetup.identityChanged, undefined, "repeat setup preserves the current deterministic identity");
+
+        const cleanNative = await loadNative(
+            bundlePath,
+            join(root, "secure-messaging-live-onekey-identity-clean"),
+            oneKeySecret,
+        );
+        expectStatus(await cleanNative.setupOneKeyVault(DISCORD_EVENT, ALICE_ID), "unlocked", "clean OneKey setup");
+        const cleanAlice = await cleanNative.getIdentity(DISCORD_EVENT, ALICE_ID);
+        const cleanBob = await cleanNative.getIdentity(DISCORD_EVENT, BOB_ID);
+        expectStatus(cleanAlice, "ready", "clean Alice OneKey identity");
+        expectStatus(cleanBob, "ready", "account first opened after OneKey setup");
+        assert.equal(cleanAlice.identity.fingerprint, aliceOneKey.identity.fingerprint,
+            "the same OneKey and Discord account restore Alice's fingerprint on a clean installation");
+        assert.equal(cleanBob.identity.fingerprint, bobOneKey.identity.fingerprint,
+            "an account first opened later is still derived from the active OneKey root");
+        assert.notEqual(cleanAlice.identity.fingerprint, cleanBob.identity.fingerprint,
+            "Discord account IDs domain-separate identities derived from one OneKey");
+
+        const otherNative = await loadNative(
+            bundlePath,
+            join(root, "secure-messaging-live-onekey-identity-other-key"),
+            otherOneKeySecret,
+        );
+        expectStatus(await otherNative.setupOneKeyVault(DISCORD_EVENT, ALICE_ID), "unlocked", "other OneKey setup");
+        const otherAlice = await otherNative.getIdentity(DISCORD_EVENT, ALICE_ID);
+        expectStatus(otherAlice, "ready", "other OneKey Alice identity");
+        assert.notEqual(otherAlice.identity.fingerprint, aliceOneKey.identity.fingerprint,
+            "a different physical OneKey derives a different public identity");
+    } finally {
+        oneKeySecret.fill(0);
+        otherOneKeySecret.fill(0);
+    }
+}
+
 async function main(): Promise<void> {
     const root = await mkdtemp(join(tmpdir(), "protonncord-secure-native-"));
     const bundlePath = join(root, "secure-messaging-native.mjs");
@@ -1738,6 +2291,7 @@ async function main(): Promise<void> {
         await buildNativeBundle(windowsBundlePath, "win32");
         await testStorageFailures(bundlePath, linuxBundlePath, windowsBundlePath, root);
         await testNativeLifecycle(bundlePath, join(root, "secure-messaging-live-lifecycle"));
+        await testOneKeyIdentityLifecycle(windowsBundlePath, root);
         console.log("secure-messaging native IPC checks passed");
     } finally {
         await rm(root, { force: true, recursive: true });

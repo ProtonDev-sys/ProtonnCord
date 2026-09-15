@@ -23,17 +23,9 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { Devs } from "@utils/constants";
 import { classNameFactory } from "@utils/css";
 import definePlugin, { OptionType } from "@utils/types";
-import { FluxStore } from "@vencord/discord-types";
-import { findStoreLazy } from "@webpack";
 
 import { MemberCount } from "./MemberCount";
-
-export const ChannelMemberStore = findStoreLazy("ChannelMemberStore") as FluxStore & {
-    getProps(guildId?: string, channelId?: string): { groups: { count: number; id: string; }[]; };
-};
-export const ThreadMemberListStore = findStoreLazy("ThreadMemberListStore") as FluxStore & {
-    getMemberListSections(channelId?: string): { [sectionId: string]: { sectionId: string; userIds: string[]; }; };
-};
+import { OnlineMemberCountStore } from "./OnlineMemberCountStore";
 
 export const settings = definePluginSettings({
     toolTip: {
@@ -65,6 +57,14 @@ export default definePlugin({
     tags: ["Servers", "Utility"],
     authors: [Devs.Ven, Devs.Commandtechno, Devs.Apexo],
     settings,
+
+    start() {
+        OnlineMemberCountStore.start();
+    },
+
+    stop() {
+        OnlineMemberCountStore.stop();
+    },
 
     patches: [
         {

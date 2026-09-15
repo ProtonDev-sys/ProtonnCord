@@ -123,8 +123,8 @@ export const settings = definePluginSettings({
                 color={Button.Colors.RED}
                 onClick={async () => {
                     try {
-                        await setUserDatabaseTimezone(UserStore.getCurrentUser().id, null);
-                        await deleteTimezone();
+                        const userId = UserStore.getCurrentUser()?.id;
+                        if (userId && await deleteTimezone()) await setUserDatabaseTimezone(userId, null);
                     } catch (error) {
                         console.error("Error resetting database timezone:", error);
                         showToast("Failed to reset database timezone", Toasts.Type.FAILURE);
@@ -144,9 +144,24 @@ export const settings = definePluginSettings({
     }
 });
 
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function getFormatter(options: Intl.DateTimeFormatOptions) {
+    const currentLocale = locale.getLocale() ?? "en-US";
+    if (options.timeZone === undefined) return new Intl.DateTimeFormat(currentLocale, options);
+    const key = JSON.stringify([currentLocale, options]);
+    let formatter = formatterCache.get(key);
+    if (!formatter) {
+        formatter = new Intl.DateTimeFormat(currentLocale, options);
+        if (formatterCache.size >= 128) formatterCache.clear();
+        formatterCache.set(key, formatter);
+    }
+    return formatter;
+}
+
 function getTime(timezone: string, timestamp: string | number, props: Intl.DateTimeFormatOptions = {}) {
     const date = new Date(timestamp);
-    const formatter = new Intl.DateTimeFormat(locale.getLocale() ?? "en-US", {
+    const formatter = getFormatter({
         hour12: !settings.store.twentyFourHourFormat,
         timeZone: timezone,
         ...props
@@ -156,7 +171,7 @@ function getTime(timezone: string, timestamp: string | number, props: Intl.DateT
 
 function getTimezoneAbbreviation(timezone: string, timestamp: string | number) {
     const date = new Date(timestamp);
-    const formatter = new Intl.DateTimeFormat(locale.getLocale() ?? "en-US", {
+    const formatter = getFormatter({
         timeZone: timezone,
         timeZoneName: "short"
     });
@@ -280,10 +295,10 @@ export default definePlugin({
     patches: [
         // stolen from ViewIcons
         {
-            find: 'backgroundColor:"COMPLETE"',
+            find: '"--custom-cutout-radius":',
             replacement: {
-                match: /(?<=backgroundImage.+?children:)!\i.{0,100}className:\i\.\i\}\)/,
-                replace: "[$self.renderProfileTimezone(arguments[0]),$&]"
+                match: /(?<=children:\[)\i.{0,100}className:\i\.\i\}\)/,
+                replace: "$self.renderProfileTimezone(arguments[0]),$&"
             }
         },
         {
@@ -350,11 +365,16 @@ export default definePlugin({
     settings,
     getTime,
 
-    renderProfileTimezone: (props?: { user?: User; }) => {
-        if (!settings.store.showProfileTime || !props?.user?.id) return null;
-        if (props.user.id === UserStore.getCurrentUser().id && !settings.store.showOwnTimezone) return null;
+    renderProfileTimezone: props => {
+        if (!settings.store.showProfileTime || !props?.bannerSrc) return null;
 
-        return <TimestampComponent userId={props.user.id} type="profile" />;
+        const match = /\/banners\/(\d+)\//.exec(props.bannerSrc);
+        const userId = match?.[1];
+        if (!userId) return null;
+
+        if (userId === UserStore.getCurrentUser().id && !settings.store.showOwnTimezone) return null;
+
+        return <TimestampComponent userId={userId} type="profile" />;
     },
 
     renderMessageTimezone: (props?: { message?: Message; }) => {

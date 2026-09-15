@@ -23,7 +23,6 @@ import { getUserSettingLazy } from "@api/UserSettings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { EquicordDevs } from "@utils/constants";
 import { proxyLazy } from "@utils/lazy";
-import { useForceUpdater } from "@utils/react";
 import definePlugin, { OptionType, StartAt } from "@utils/types";
 import { extractAndLoadChunksLazy, findComponentByCodeLazy, findModuleId, wreq } from "@webpack";
 import { Menu, openModalLazy,OverridePremiumTypeStore, Toasts } from "@webpack/common";
@@ -76,7 +75,7 @@ function setStatus(status: DiscordStatus) {
 
 const StatusSubMenuComponent = () => {
     const premiumType = OverridePremiumTypeStore.getState().premiumTypeActual ?? 0;
-    const update = useForceUpdater();
+    settings.use();
 
     return (
         <Menu.Menu navId="sp-custom-status-submenu" onClose={() => { }}>
@@ -97,10 +96,9 @@ const StatusSubMenuComponent = () => {
                             id={"status-presets-delete-" + index}
                             label="Delete Preset"
                             action={() => {
-                                const newPresets = JSON.parse(JSON.stringify(settings.store.StatusPresets));
-                                delete newPresets[status.text];
+                                const newPresets = { ...settings.store.StatusPresets };
+                                delete newPresets[index];
                                 settings.store.StatusPresets = newPresets;
-                                update();
                             }}
                         />
                     </Menu.MenuItem>
@@ -184,7 +182,7 @@ export default definePlugin({
             text: "Keep",
             style: { marginLeft: "20px" },
             onClick: () => {
-                settings.store.StatusPresets[status.text] = status;
+                settings.store.StatusPresets = { ...settings.store.StatusPresets, [status.text]: structuredClone(status) };
                 Toasts.show({
                     message: "Successfully Saved Status",
                     type: Toasts.Type.SUCCESS,

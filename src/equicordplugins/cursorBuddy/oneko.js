@@ -22,6 +22,8 @@ export default function oneko(options = {}) {
     } = options;
 
     const nekoEl = document.createElement("div");
+    const controller = new AbortController();
+    let requestId = 0;
     let nekoPosX = 32;
     let nekoPosY = 32;
 
@@ -102,6 +104,7 @@ export default function oneko(options = {}) {
             const img = new Image();
             img.crossOrigin = "anonymous"; // * Needed for CORS
             img.onload = () => {
+                try {
                 const canvas = document.createElement("canvas");
                 canvas.width = img.width;
                 canvas.height = img.height;
@@ -139,6 +142,9 @@ export default function oneko(options = {}) {
 
                 ctx.putImageData(imageData, 0, 0);
                 resolve(canvas.toDataURL());
+                } catch (error) {
+                    reject(error);
+                }
             };
             img.onerror = reject;
             img.src = src;
@@ -199,7 +205,7 @@ export default function oneko(options = {}) {
         document.addEventListener("mousemove", function (event) {
             mousePosX = event.clientX;
             mousePosY = event.clientY;
-        });
+        }, { signal: controller.signal });
 
         if (persistPosition) {
             window.addEventListener("beforeunload", function (event) {
@@ -217,10 +223,10 @@ export default function oneko(options = {}) {
                         bgPos: nekoEl.style.backgroundPosition,
                     })
                 );
-            });
+            }, { signal: controller.signal });
         }
 
-        window.requestAnimationFrame(onAnimationFrame);
+        requestId = window.requestAnimationFrame(onAnimationFrame);
     }
 
     let lastFrameTimestamp;
@@ -232,7 +238,7 @@ export default function oneko(options = {}) {
             lastFrameTimestamp = timestamp;
             frame();
         }
-        window.requestAnimationFrame(onAnimationFrame);
+        requestId = window.requestAnimationFrame(onAnimationFrame);
     }
 
     function setSprite(name, frame) {
@@ -335,4 +341,9 @@ export default function oneko(options = {}) {
     }
 
     init();
+    return () => {
+        controller.abort();
+        window.cancelAnimationFrame(requestId);
+        nekoEl.remove();
+    };
 }

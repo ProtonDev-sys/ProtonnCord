@@ -62,11 +62,11 @@ export const enum SearchStatus {
 
 export type ThemeLikeProps = {
     status: number;
-    likes: [{
-        themeId: number;
+    likes: {
+        themeId: string | number;
         likes: number;
         hasLiked?: boolean;
-    }];
+    }[];
 };
 
 export interface Contributor {

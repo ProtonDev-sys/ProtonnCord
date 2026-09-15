@@ -57,7 +57,7 @@ const settings = definePluginSettings({
             }
         ],
         onChange: () => {
-            if (audioContext) void initSoundBuffers(true);
+            if (audioContext) void initSoundBuffers(true).catch(err => console.error("[Animalese]", err));
             else clearSoundBuffers();
         }
     }
@@ -95,9 +95,15 @@ async function initSoundBuffers(force = false) {
     const context = getAudioContext();
     const quality = settings.store.soundQuality;
     if (!force && loadedSoundQuality === quality) return;
-    if (initSoundBuffersPromise) return initSoundBuffersPromise;
+    if (initSoundBuffersPromise) {
+        await initSoundBuffersPromise;
+        if (audioContext === context && loadedSoundQuality !== settings.store.soundQuality) {
+            await initSoundBuffers();
+        }
+        return;
+    }
 
-    initSoundBuffersPromise = Promise.all(
+    const pending = Promise.all(
         highSounds.map(async file => {
             const nameWithoutExt = file.replace(".wav", "");
             const buffer = await loadSound(context, `${BASE_URL_HIGH}/${quality}/${file}`);
@@ -112,10 +118,14 @@ async function initSoundBuffers(force = false) {
         }
         loadedSoundQuality = quality;
     }).finally(() => {
-        initSoundBuffersPromise = null;
+        if (initSoundBuffersPromise === pending) initSoundBuffersPromise = null;
     });
 
-    return initSoundBuffersPromise;
+    initSoundBuffersPromise = pending;
+    await pending;
+    if (audioContext === context && loadedSoundQuality !== settings.store.soundQuality) {
+        await initSoundBuffers();
+    }
 }
 
 async function loadSound(context: AudioContext, url: string): Promise<AudioBuffer> {
@@ -239,6 +249,8 @@ export default definePlugin({
 
     flux: {
         async MESSAGE_CREATE({ optimistic, type, message, channelId }) {
+            const context = audioContext;
+            if (!context) return;
             if (optimistic || type !== "MESSAGE_CREATE") return;
             if (message.state === "SENDING") return;
             const { content } = message;
@@ -260,8 +272,11 @@ export default definePlugin({
 
             try {
                 await initSoundBuffers();
+                if (audioContext !== context || channelId !== SelectedChannelStore.getChannelId()) return;
                 const buffer = await generateAnimalese(content);
-                if (buffer) playSound(buffer, settings.store.volume);
+                if (buffer && audioContext === context && channelId === SelectedChannelStore.getChannelId()) {
+                    playSound(buffer, settings.store.volume);
+                }
             } catch (err) {
                 console.error("[Animalese]", err);
             }
@@ -277,9 +292,10 @@ export default definePlugin({
 
     stop() {
         if (audioContext) {
-            audioContext.close();
+            void audioContext.close().catch(err => console.error("[Animalese]", err));
             audioContext = null;
         }
+        initSoundBuffersPromise = null;
         clearSoundBuffers();
     },
 });

@@ -41,13 +41,13 @@ const settings = definePluginSettings({
 function parseTime(time: string) {
     const cleanTime = time.slice(1, -1).replace(/(\d)(AM|PM)$/i, "$1 $2");
 
-    let ms = new Date(`${new Date().toDateString()} ${cleanTime}`).getTime() / 1000;
-    if (isNaN(ms)) return time;
+    const date = new Date(`${new Date().toDateString()} ${cleanTime}`);
+    if (Number.isNaN(date.getTime())) return time;
 
-    // add 24h if time is in the past
-    if (Date.now() / 1000 > ms) ms += 86400;
+    // Keep the local clock time when tomorrow crosses a daylight-saving change.
+    if (Date.now() > date.getTime()) date.setDate(date.getDate() + 1);
 
-    return `<t:${Math.round(ms)}:t>`;
+    return `<t:${Math.round(date.getTime() / 1000)}:t>`;
 }
 
 const Formats = ["", "t", "T", "d", "D", "f", "F", "s", "S", "R"] as const;
@@ -56,9 +56,10 @@ type Format = typeof Formats[number];
 const cl = classNameFactory("vc-st-");
 
 function PickerModal(props: RenderModalProps) {
-    const [value, setValue] = useState<string>();
+    const [value, setValue] = useState("");
     const [format, setFormat] = useState<Format>("");
-    const time = Math.round((new Date(value!).getTime() || Date.now()) / 1000);
+    const selectedTime = new Date(value).getTime();
+    const time = Math.round((Number.isFinite(selectedTime) ? selectedTime : Date.now()) / 1000);
 
     const formatTimestamp = (time: number, format: Format) => `<t:${time}${format && `:${format}`}>`;
 

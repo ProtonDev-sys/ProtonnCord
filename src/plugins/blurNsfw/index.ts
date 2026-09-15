@@ -10,13 +10,14 @@ import { Devs } from "@utils/constants";
 import { createAndAppendStyle } from "@utils/css";
 import definePlugin, { OptionType } from "@utils/types";
 
-let style: HTMLStyleElement;
+let style: HTMLStyleElement | undefined;
 
 const settings = definePluginSettings({
     blurAmount: {
         type: OptionType.NUMBER,
         description: "Blur Amount (in pixels)",
         default: 10,
+        isValid: value => typeof value === "number" && Number.isFinite(value) && value >= 0,
         onChange: setCss
     },
     blurAllChannels: {
@@ -27,12 +28,17 @@ const settings = definePluginSettings({
 });
 
 function setCss() {
+    if (!style) return;
+    const configuredAmount = settings.store.blurAmount;
+    const blurAmount = settings.def.blurAmount.isValid.call(settings, configuredAmount)
+        ? configuredAmount
+        : settings.def.blurAmount.default;
     style.textContent = `
         .vc-nsfw-img [class*=imageContainer] img,
         .vc-nsfw-img [class*=imageContainer] video,
         .vc-nsfw-img [class*=wrapperPaused] img,
         .vc-nsfw-img [class*=wrapperPaused] video {
-            filter: blur(${settings.store.blurAmount}px);
+            filter: blur(${blurAmount}px);
             transition: filter 0.2s;
         }
 
@@ -73,5 +79,6 @@ export default definePlugin({
 
     stop() {
         style?.remove();
+        style = undefined;
     }
 });

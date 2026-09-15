@@ -48,6 +48,7 @@ export default definePlugin({
         icon: Icon,
         render(msg) {
             const channel = ChannelStore.getChannel(msg.channel_id);
+            if (!channel) return null;
             if (channel.guild_id && !PermissionStore.can(PermissionsBits.SEND_MESSAGES, channel)) return null;
 
             return {

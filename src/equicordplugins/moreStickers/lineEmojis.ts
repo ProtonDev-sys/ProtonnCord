@@ -98,7 +98,9 @@ export function convert(sp: LineEmojiPack): StickerPack {
 export function parseHtml(html: string): LineEmojiPack {
     const doc = new DOMParser().parseFromString(html, "text/html");
     const mainImage = JSON.parse((doc.querySelector("[ref=mainImage]") as HTMLElement)?.dataset?.preview ?? "null") as LineEmoji;
+    if (!mainImage || typeof mainImage.id !== "string") throw new Error("Could not find sticker pack metadata");
     const { id } = mainImage;
+    mainImage.stickerPackId = id;
 
     const stickers =
         [...doc.querySelectorAll(".FnStickerPreviewItem")]
@@ -132,6 +134,7 @@ export function isLineEmojiPackHtml(html: string): boolean {
   */
 export async function getStickerPackById(id: string, region = "en"): Promise<LineEmojiPack> {
     const res = await corsFetch(`https://store.line.me/emojishop/product/${id}/${region}`);
+    if (!res.ok) throw new Error("Could not load sticker pack");
     const html = await res.text();
 
     return parseHtml(html);

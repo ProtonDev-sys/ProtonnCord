@@ -8,6 +8,7 @@ import { definePluginSettings } from "@api/Settings";
 import { BaseText } from "@components/BaseText";
 import { EquicordDevs } from "@utils/constants";
 import definePlugin, { makeRange, OptionType } from "@utils/types";
+import { React } from "@webpack/common";
 import { ReactNode } from "react";
 
 import ExampleWiggle from "./ui/components/ExampleWiggle";
@@ -43,8 +44,9 @@ const classMap = [
     }
 ];
 
-let styles: HTMLStyleElement;
+let styles: HTMLStyleElement | undefined;
 const updateStyles = () => {
+    if (!styles) return;
     const inten = settings.store.intensity + "px";
     styles.textContent = `
 .wiggle-example {
@@ -172,7 +174,7 @@ export default definePlugin({
         react(data: { content: any[]; className: string; }, output: (...args: any[]) => ReactNode[]) {
             let offset = 0;
             const traverse = (raw: any) => {
-                const children = !Array.isArray(raw) ? [raw] : raw;
+                const children = !Array.isArray(raw) ? [raw] : [...raw];
                 let modified = false;
 
                 let j = -1;
@@ -180,7 +182,7 @@ export default definePlugin({
                     j++;
                     if (typeof child === "string") {
                         modified = true;
-                        children[j] = child.split("").map((x, i) => (
+                        children[j] = [...child].map((x, i) => (
                             <span key={i}>
                                 <span
                                     className={`wiggle-inner ${data.className}`}
@@ -192,8 +194,10 @@ export default definePlugin({
                                 </span>
                             </span>
                         ));
-                    } else if (child?.props?.children)
-                        child.props.children = traverse(child.props.children);
+                    } else if (React.isValidElement<{ children?: ReactNode; }>(child) && child.props.children != null) {
+                        modified = true;
+                        children[j] = React.cloneElement(child, undefined, traverse(child.props.children));
+                    }
                 }
 
                 return modified ? children : raw;
@@ -211,5 +215,8 @@ export default definePlugin({
         updateStyles();
     },
 
-    stop: () => styles.remove()
+    stop: () => {
+        styles?.remove();
+        styles = undefined;
+    }
 });

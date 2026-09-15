@@ -8,7 +8,7 @@ import { DATA_DIR } from "@main/utils/constants";
 import { ensureSafePath } from "@main/utils/ensureSafePath";
 import { randomUUID } from "crypto";
 import { dialog, type IpcMainInvokeEvent } from "electron";
-import { mkdir, readFile, rm, writeFile } from "fs/promises";
+import { mkdir, open, rm, writeFile } from "fs/promises";
 import { basename, extname, join, resolve } from "path";
 
 interface TempEntry {
@@ -40,6 +40,25 @@ const CLIP_FOOTER = Buffer.from([
 ]);
 const CLIP_FOOTER_SIZE = CLIP_FOOTER.length;
 
+async function readClipFile(filePath: string): Promise<Buffer> {
+    const file = await open(filePath, "r");
+    try {
+        const info = await file.stat();
+        if (!info.isFile() || info.size <= 0 || info.size > MAX_CLIP_SIZE) throw new Error("Invalid clip file size.");
+        const data = Buffer.alloc(info.size + 1);
+        let offset = 0;
+        while (offset < data.length) {
+            const { bytesRead } = await file.read(data, offset, data.length - offset, offset);
+            if (bytesRead === 0) break;
+            offset += bytesRead;
+        }
+        if (offset > info.size) throw new Error("Clip file changed while reading.");
+        return data.subarray(0, offset);
+    } finally {
+        await file.close();
+    }
+}
+
 function getMimeType(filePath: string): string {
     return MIME_TYPES[extname(filePath).toLowerCase()] ?? "application/octet-stream";
 }
@@ -51,7 +70,7 @@ function stripClipFooter(data: Buffer): Buffer {
 
 async function parseClipMetadata(filePath: string): Promise<RawClipAttachment[] | null> {
     try {
-        const buf = await readFile(filePath);
+        const buf = await readClipFile(filePath);
         if (buf.length <= CLIP_FOOTER_SIZE) return null;
 
         const footerIdx = buf.indexOf(CLIP_FOOTER);
@@ -92,20 +111,22 @@ export async function createTempVideoFile(_: IpcMainInvokeEvent, token: string):
     const originalPath = pendingTokens.get(token);
     if (!originalPath) return null;
     pendingTokens.delete(token);
+    const tmpDir = join(CLIP_UPLOAD_DIR, randomUUID());
 
     try {
-        const tmpDir = join(CLIP_UPLOAD_DIR, randomUUID());
         const tmpPath = join(tmpDir, basename(originalPath));
 
         if (!ensureSafePath(tmpDir, basename(originalPath))) return null;
 
+        const data = stripClipFooter(await readClipFile(originalPath));
         await mkdir(tmpDir, { recursive: true });
-        await writeFile(tmpPath, stripClipFooter(await readFile(originalPath)));
+        await writeFile(tmpPath, data);
 
         const tmpToken = randomUUID();
         tempEntries.set(tmpToken, { tmpDir, tmpPath });
         return tmpToken;
     } catch {
+        await rm(tmpDir, { force: true, recursive: true }).catch(() => { });
         return null;
     }
 }
@@ -116,8 +137,8 @@ export async function createTempVideoFileFromBytes(_: IpcMainInvokeEvent, name: 
     const fileName = basename(name);
     if (fileName !== name || !ALLOWED_EXTENSIONS.has(extname(fileName).toLowerCase())) return null;
 
+    const tmpDir = join(CLIP_UPLOAD_DIR, randomUUID());
     try {
-        const tmpDir = join(CLIP_UPLOAD_DIR, randomUUID());
         const tmpPath = join(tmpDir, fileName);
 
         if (!ensureSafePath(tmpDir, fileName)) return null;
@@ -129,6 +150,7 @@ export async function createTempVideoFileFromBytes(_: IpcMainInvokeEvent, name: 
         tempEntries.set(tmpToken, { tmpDir, tmpPath });
         return tmpToken;
     } catch {
+        await rm(tmpDir, { force: true, recursive: true }).catch(() => { });
         return null;
     }
 }
@@ -145,7 +167,7 @@ export async function readVideoFile(_: IpcMainInvokeEvent, token: string): Promi
     if (!entry) return null;
 
     try {
-        const buf = await readFile(entry.tmpPath);
+        const buf = await readClipFile(entry.tmpPath);
         return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
     } catch {
         return null;

@@ -18,11 +18,11 @@ import {
     findByPropsLazy,
     findComponentByCodeLazy,
     findCssClassesLazy,
-    findStoreLazy,
 } from "@webpack";
 import {
     ChannelActionCreators,
     ChannelRouter,
+    ChannelSectionStore,
     ChannelStore,
     FluxDispatcher,
     GuildStore,
@@ -79,7 +79,28 @@ const ChatInputTypes = findByPropsLazy("FORM", "NORMAL");
 const Sidebars = findByPropsLazy("ThreadSidebar", "MessageRequestSidebar");
 const ChatClasses = findCssClassesLazy("threadSidebarOpen", "loader");
 
-const ChannelSectionStore = findStoreLazy("ChannelSectionStore");
+interface SecureMessagingChatGate {
+    renderChatGate(channel: Channel): React.ReactNode;
+    shouldGateChat(channel: Channel): boolean;
+    started: boolean;
+}
+
+function getSecureMessagingChatGate(): Partial<SecureMessagingChatGate> | undefined {
+    return Vencord.Plugins.plugins.SecureMessaging as Partial<SecureMessagingChatGate> | undefined;
+}
+
+function useSecureMessagingChatGate(channel: Channel | null | undefined): boolean {
+    return useStateFromStores([ChannelStore], () => {
+        const gate = getSecureMessagingChatGate();
+        const enabled = gate?.started === true || Vencord.Settings.plugins.SecureMessaging?.enabled === true;
+        return Boolean(enabled && channel && typeof gate?.shouldGateChat === "function" && gate.shouldGateChat(channel));
+    }, [channel?.id]);
+}
+
+function renderSecureMessagingChatGate(channel: Channel): React.ReactNode {
+    const gate = getSecureMessagingChatGate();
+    return typeof gate?.renderChatGate === "function" ? gate.renderChatGate(channel) : null;
+}
 
 const requireForumView = extractAndLoadChunksLazy(
     ["Missing channel in Channel.renderHeaderToolbar"],
@@ -263,6 +284,7 @@ const createPopoutChatContextMenuItem = (id: string, label: string, action: () =
 };
 
 const UserContextPatch: NavContextMenuPatchCallback = (children, args: { user: User; }) => {
+    if (!args.user || !UserStore.getCurrentUser()) return;
     const checks = [
         args.user,
         args.user.id !== UserStore.getCurrentUser().id,
@@ -287,6 +309,7 @@ const UserContextPatch: NavContextMenuPatchCallback = (children, args: { user: U
 };
 
 const ChannelContextPatch: NavContextMenuPatchCallback = (children, args: { channel: Channel; }) => {
+    if (!args.channel) return;
     const checks = [
         args.channel,
         args.channel.type !== ChannelType.GUILD_CATEGORY,
@@ -377,21 +400,22 @@ export default definePlugin({
         const [channelSidebar, guildSidebar] = useStateFromStores(
             [ChannelSectionStore, SelectedChannelStore, ChannelStore], () => {
                 const currentChannelId = SelectedChannelStore.getChannelId();
-                const currentGuildId = SelectedGuildStore.getGuildId();
+                const currentGuildId = SelectedGuildStore.getGuildId()!;
                 return [
                     ChannelSectionStore.getSidebarState(currentChannelId),
                     ChannelSectionStore.getGuildSidebarState(currentGuildId),
                 ];
             }, []
         );
+        const secureMessagingGated = useSecureMessagingChatGate(channel);
 
         useEffect(() => {
-            if (!channel?.id || MessageStore.getLastMessage(channel.id)) return;
+            if (secureMessagingGated || !channel?.id || MessageStore.getLastMessage(channel.id)) return;
             MessageActions.fetchMessages({
                 channelId: channel.id,
                 limit: 50,
             });
-        }, [channel?.id]);
+        }, [channel?.id, secureMessagingGated]);
 
         const [width, setWidth] = useState(window.innerWidth);
 
@@ -407,8 +431,11 @@ export default definePlugin({
         useEffect(() => {
             if (!channel) return;
 
+            let active = true;
+
             if (channel.isForumLikeChannel()) {
                 requireForumView().then(() => {
+                    if (!active) return;
                     setViewComponent(
                         <ForumView
                             channel={channel}
@@ -416,7 +443,7 @@ export default definePlugin({
                             sidebarState={null}
                         />
                     );
-                });
+                }).catch(() => { if (active) setViewComponent(null); });
 
                 setViewComponent(
                     <div className={ChatClasses.loader}>
@@ -432,7 +459,8 @@ export default definePlugin({
                     />
                 );
             }
-        }, [channel]);
+            return () => { active = false; };
+        }, [channel, guild]);
 
         if (!channel || channelSidebar || guildSidebar) return null;
 
@@ -443,7 +471,7 @@ export default definePlugin({
                     maxWidth={~~(width * 0.31)/* width - 690*/}
                 >
                     <Header channel={channel} guild={guild} />
-                    {View}
+                    {secureMessagingGated ? renderSecureMessagingChatGate(channel) : View}
                 </Resize>
             </ErrorBoundary>
         );
@@ -507,16 +535,17 @@ const Header = ({ guild, channel }: { guild: Guild; channel: Channel; }) => {
 };
 
 const RenderPopout = ErrorBoundary.wrap(({ channel, name, windowKey }: { channel: Channel; name: string; windowKey: string; }) => {
+    const secureMessagingGated = useSecureMessagingChatGate(channel);
     // Copy from an unexported function of the one they use in the experiment
     // right click a channel and search withTitleBar:!0,windowKey
     useEffect(() => {
-        if (!channel?.id || MessageStore.getLastMessage(channel.id)) return;
+        if (secureMessagingGated || !channel?.id || MessageStore.getLastMessage(channel.id)) return;
 
         MessageActions.fetchMessages({
             channelId: channel.id,
             limit: 50,
         });
-    }, [channel?.id]);
+    }, [channel?.id, secureMessagingGated]);
 
     return (
         <PopoutWindow
@@ -526,7 +555,9 @@ const RenderPopout = ErrorBoundary.wrap(({ channel, name, windowKey }: { channel
             channelId={channel.id}
         >
             <div className={cl("window")}>
-                <FullChannelView providedChannel={channel} />
+                {secureMessagingGated
+                    ? renderSecureMessagingChatGate(channel)
+                    : <FullChannelView providedChannel={channel} />}
             </div>
         </PopoutWindow>
     );

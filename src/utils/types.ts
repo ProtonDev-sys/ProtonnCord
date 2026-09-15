@@ -31,13 +31,14 @@ import type { NicknameIconFactory } from "@api/NicknameIcons";
 import { ProfileCollectionData } from "@api/ProfileCollections";
 import { ProfileSectionData } from "@api/ProfileSections";
 import type { UserAreaButtonData } from "@api/UserArea";
+import { registerPluginDefinition } from "@shared/pluginDefinition";
 import type { Command, FluxEvents } from "@vencord/discord-types";
 import type { ReactNode } from "react";
 import type { LiteralUnion } from "type-fest";
 
 // exists to export default definePlugin({...})
 export default function definePlugin<P extends PluginDef>(p: P & Record<PropertyKey, any>) {
-    return p as typeof p & Plugin;
+    return registerPluginDefinition(p as typeof p & Plugin);
 }
 
 export function makeRange(start: number, end: number, step = 1) {
@@ -212,7 +213,6 @@ export interface PluginDef {
      */
     managedStyle?: string;
 
-    userProfileBadge?: ProfileBadge;
     userProfileBadges?: ProfileBadge[];
 
     messagePopoverButton?: MessagePopoverButtonData;
@@ -335,6 +335,8 @@ export interface PluginSettingStringDef extends PluginSettingDefCommon {
 export interface PluginSettingNumberDef extends PluginSettingDefCommon {
     type: OptionType.NUMBER;
     default?: number;
+    /** Explicitly allow this non-secret value in server-readable, untrusted cloud snapshots. */
+    cloudSync?: boolean;
 }
 export interface PluginSettingBigIntDef extends PluginSettingDefCommon {
     type: OptionType.BIGINT;
@@ -343,11 +345,15 @@ export interface PluginSettingBigIntDef extends PluginSettingDefCommon {
 export interface PluginSettingBooleanDef extends PluginSettingDefCommon {
     type: OptionType.BOOLEAN;
     default?: boolean;
+    /** Explicitly allow this non-secret value in server-readable, untrusted cloud snapshots. */
+    cloudSync?: boolean;
 }
 
 export interface PluginSettingSelectDef extends PluginSettingDefCommon {
     type: OptionType.SELECT;
     options: readonly PluginSettingSelectOption[];
+    /** Explicitly allow this non-secret value in server-readable, untrusted cloud snapshots. */
+    cloudSync?: boolean;
 }
 
 export interface PluginSettingSelectOption {
@@ -376,6 +382,8 @@ export interface PluginSettingSliderDef extends PluginSettingDefCommon {
      * If false, allow users to select values in-between your markers.
      */
     stickToMarkers?: boolean;
+    /** Explicitly allow this non-secret value in server-readable, untrusted cloud snapshots. */
+    cloudSync?: boolean;
 }
 
 export interface PluginSettingComponentDef extends Omit<PluginSettingDefCommon, "description" | "placeholder" | "displayName"> {
@@ -452,3 +460,9 @@ export type PluginNative<PluginExports extends Record<string, (event: Electron.I
 };
 
 export type AllOrNothing<T> = T | { [K in keyof T]?: never; };
+
+export type ConstEnumToRuntimeEnum<T> = {
+    [K in keyof T as T[K] extends number ? T[K] : never]: K;
+} & {
+    [K in keyof T]: T[K];
+};

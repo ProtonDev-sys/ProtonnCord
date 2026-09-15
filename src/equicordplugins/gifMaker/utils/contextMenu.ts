@@ -32,12 +32,13 @@ interface MediaMessage {
 }
 
 export function getMediaInfo(props: Record<string, unknown>): { url: string; isVideo: boolean; sourceWidth?: number; sourceHeight?: number; } | null {
+    if (!props) return null;
     const msg = props.message as MediaMessage | undefined;
 
     const directAttachment = props.attachment as MediaAttachment | undefined;
-    if (directAttachment?.proxy_url && MEDIA_TYPES.some(t => directAttachment.content_type?.startsWith(t))) {
+    if ((directAttachment?.proxy_url || directAttachment?.url) && MEDIA_TYPES.some(t => directAttachment.content_type?.startsWith(t))) {
         return {
-            url: directAttachment.proxy_url ?? directAttachment.url,
+            url: directAttachment.proxy_url || directAttachment.url!,
             isVideo: directAttachment.content_type?.startsWith("video/") || false,
             sourceWidth: directAttachment.width,
             sourceHeight: directAttachment.height
@@ -45,9 +46,9 @@ export function getMediaInfo(props: Record<string, unknown>): { url: string; isV
     }
 
     const msgAttachment = msg?.attachments?.find(a => MEDIA_TYPES.some(t => a.content_type?.startsWith(t)));
-    if (msgAttachment?.proxy_url) {
+    if (msgAttachment?.proxy_url || msgAttachment?.url) {
         return {
-            url: msgAttachment.proxy_url ?? msgAttachment.url,
+            url: msgAttachment.proxy_url || msgAttachment.url!,
             isVideo: msgAttachment.content_type?.startsWith("video/") || false,
             sourceWidth: msgAttachment.width,
             sourceHeight: msgAttachment.height

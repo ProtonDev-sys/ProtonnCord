@@ -52,7 +52,7 @@ export default definePlugin({
                     const params = new URLSearchParams(searchPart);
                     const dn = params.get("dn");
                     if (dn) {
-                        filename = decodeURIComponent(dn.replace(/\+/g, " "));
+                        filename = dn;
                     }
                 }
             } catch (err) {

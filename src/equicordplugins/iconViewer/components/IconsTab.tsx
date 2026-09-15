@@ -9,7 +9,6 @@ import { Heading } from "@components/Heading";
 import { SettingsTab, wrapTab } from "@components/settings";
 import { TooltipContainer } from "@components/TooltipContainer";
 import { iconsModule } from "@equicordplugins/_core/concatenatedModules";
-import { debounce } from "@shared/debounce";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
 import { useIntersection } from "@utils/react";
@@ -67,15 +66,10 @@ function IconsTab() {
 
     const icons = useMemo(() => getIcons(), []);
 
-    const debouncedSetSearch = useMemo(
-        () => debounce((query: string) => setSearch(query), 150),
-        []
-    );
-
-    const onSearch = useCallback((query: string) => {
-        setSearchInput(query);
-        debouncedSetSearch(query);
-    }, [debouncedSetSearch]);
+    useEffect(() => {
+        const timer = setTimeout(() => setSearch(searchInput), 150);
+        return () => clearTimeout(timer);
+    }, [searchInput]);
 
     const filteredIcons = useMemo(() =>
         Object.entries(icons).filter(([name, Icon]) => searchMatch(search, name, Icon, searchByFunction)),
@@ -106,7 +100,7 @@ function IconsTab() {
     return (
         <SettingsTab>
             <div className={classes(Margins.top16, "vc-icon-tab-search-bar-grid")}>
-                <TextInput autoFocus value={searchInput} placeholder={`Search ${Object.keys(icons).length} icons...`} onChange={onSearch} />
+                <TextInput autoFocus value={searchInput} placeholder={`Search ${Object.keys(icons).length} icons...`} onChange={setSearchInput} />
                 <TooltipContainer text="Search by function context">
                     <Button
                         size="small"

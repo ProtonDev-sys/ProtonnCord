@@ -34,11 +34,11 @@ export default definePlugin({
                 },
                 {
                     match: /(?<=userIds:\i,listType:\i\}=(\i).{0,30}(\i)\.useState\(\d+\);)/,
-                    replace: "let [searchResults,setSearchResults]=$2.useState([]);$self.setUpdateFunc($1,setSearchResults);"
+                    replace: "let [searchResults,setSearchResults]=$2.useState(null);$self.setUpdateFunc($1,setSearchResults);"
                 },
                 {
                     match: /(?<=\i,children:)(\i)(?=\.slice)/,
-                    replace: "(searchResults.length?searchResults:$1)"
+                    replace: "(searchResults??$1)"
                 },
             ]
         }

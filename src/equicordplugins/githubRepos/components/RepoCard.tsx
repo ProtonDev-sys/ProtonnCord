@@ -14,7 +14,7 @@ import { cl } from "..";
 import { Star } from "./Star";
 
 export function RepoCard({ repo, showStars, showLanguage }: RepoCardProps) {
-    const handleClick = () => window.open(repo.html_url, "_blank");
+    const handleClick = () => window.open(repo.html_url, "_blank", "noopener,noreferrer");
     const langColor = getLanguageColor(repo?.language);
 
     return (

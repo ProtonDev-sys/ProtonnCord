@@ -12,13 +12,13 @@ import { useForceUpdater } from "@utils/react";
 import { PluginNative } from "@utils/types";
 import { Channel, MessageAttachment } from "@vencord/discord-types";
 import { findByCodeLazy, findByPropsLazy } from "@webpack";
-import { Constants, DraftType, FluxDispatcher, MessageActions, PendingReplyStore, PermissionStore, RestAPI, Toasts, UploadAttachmentStore, UploadHandler, UploadManager, useCallback, useEffect, useRef, UserSettingsActionCreators, UserSettingsProtoStore, useStateFromStores } from "@webpack/common";
+import { DraftType, FluxDispatcher, MessageActions, PendingReplyStore, PermissionStore, Toasts, UploadAttachmentStore, UploadHandler, UploadManager, useCallback, useEffect, useRef, UserSettingsActionCreators, UserSettingsProtoStore, UserStore, useStateFromStores } from "@webpack/common";
 import { deflateSync, inflateSync } from "fflate";
 import { Key } from "react";
 import { JsonValue } from "type-fest";
 
 import { base64ToUint8Array, uint8ArrayToBase64 } from "./polyfills";
-import { AttachmentTransformer, CustomItemDef, CustomItemFormat, FavouriteItem, FavouriteItemFormat, ImageUtils as ImageUtils_, ItemsDef, ResizeObserverHook, UnfurledEmbedsResponse } from "./types";
+import { AttachmentTransformer, CustomItemDef, CustomItemFormat, FavouriteItem, FavouriteItemFormat, ImageUtils as ImageUtils_, ItemsDef, ResizeObserverHook } from "./types";
 
 const Native = VencordNative.pluginHelpers.FavouriteAnything as PluginNative<typeof import("./native")>;
 
@@ -54,7 +54,7 @@ function defineItems<T extends Record<CustomItemFormat, CustomItemDef>>(def: Ite
                 if (!Array.isArray(parsed)) return null;
 
                 const [format, data] = parsed as [keyof typeof def, JsonValue];
-                if (!(format in def)) return null;
+                if (!Object.hasOwn(def, format)) return null;
 
                 return { format, data: def[format].decode(data) } as {
                     [F in CustomItemFormat]: { format: F; data: Type<F>; };
@@ -102,25 +102,9 @@ export const defs = defineItems({
 const fallbackThumbnail = new URL("https://images-ext-1.discordapp.net/external/pGTJg3YdSHpyGTltH4vZUKEyQoNzf5mtqbSJs7I4ebc/https/equicord.org/assets/plugins/favoriteAnything/invalid.png");
 
 export async function getThumbnailUrl(data: string, width: number, height: number): Promise<URL | null> {
-    try {
-        const decoded = defs.decode(data);
-        if (!decoded || !width || !height) return null;
-
-        const text = defs.stringify(decoded.format, decoded.data);
-        const url = new URL(`https://placehold.jp/42/444/fff/${width}x${height}.png`);
-        url.searchParams.append("text", text);
-
-        return await RestAPI.post({
-            url: Constants.Endpoints.UNFURL_EMBED_URLS,
-            body: { urls: [url] },
-            retries: 3
-        }).then(({ body }: { body: UnfurledEmbedsResponse; }) => {
-            const [{ thumbnail } = {}] = body.embeds;
-            return thumbnail?.proxy_url ? new URL(thumbnail.proxy_url) : fallbackThumbnail;
-        });
-    } catch {
-        return fallbackThumbnail;
-    }
+    if (!defs.decode(data) || !width || !height) return null;
+    // Use a generic compatibility thumbnail instead of sending filenames to a third-party image service.
+    return new URL(fallbackThumbnail);
 }
 
 export const isAllowedHost = proxyLazy(() => {
@@ -144,9 +128,9 @@ async function fetchAttachment(attachment: MessageAttachment): Promise<File> {
 
     const { content_type, filename } = attachment;
     const url = URL.parse(attachment.url);
-    if (!url || !isAllowedHost(url.hostname)) throw new Error("Invalid URL");
+    if (!url || url.protocol !== "https:" || url.username || url.password || url.port || !isAllowedHost(url.hostname)) throw new Error("Invalid URL");
 
-    const res = await fetch(url, { headers: { Accept: "*/*" } });
+    const res = await fetch(url, { headers: { Accept: "*/*" }, redirect: "error", credentials: "omit", signal: AbortSignal.timeout(120_000) });
     if (!res.ok) throw new Error("Server error");
 
     const blob = await res.blob();
@@ -157,24 +141,27 @@ async function fetchAttachment(attachment: MessageAttachment): Promise<File> {
 }
 
 export async function sendAttachment(attachment: MessageAttachment, channel: Channel) {
+    const accountId = UserStore.getCurrentUser()?.id;
+    if (!accountId) return false;
     const { filename, title, description } = attachment;
     const file = await fetchAttachment(attachment).catch(() =>
         Toasts.show({ message: `Couldn't fetch ${filename}`, id: Toasts.genId(), type: Toasts.Type.FAILURE })
     );
-    if (!file) return;
+    if (!file || UserStore.getCurrentUser()?.id !== accountId) return false;
 
     // Using promptToUpload instead of addFiles directly since it has file size checks with error popups
     await UploadHandler.promptToUpload([file], channel, DraftType.ChannelMessage).catch(() =>
         Toasts.show({ message: `Couldn't upload ${filename}`, id: Toasts.genId(), type: Toasts.Type.FAILURE })
     );
+    if (UserStore.getCurrentUser()?.id !== accountId) return false;
 
     const uploads = [...UploadAttachmentStore.getUploads(channel.id, DraftType.ChannelMessage)];
     const uploadIdx = uploads.findIndex(({ item }) => item.file === file);
-    if (uploadIdx === -1) return;
+    if (uploadIdx === -1) return false;
 
     const reply = PendingReplyStore.getPendingReply(channel.id);
 
-    const [upload] = uploads.splice(uploadIdx);
+    const [upload] = uploads.splice(uploadIdx, 1);
     UploadManager.setUploads({ uploads, channelId: channel.id, draftType: DraftType.ChannelMessage });
     // Empty titles and descriptions are allowed
     if (title != null) upload.filename = title;
@@ -182,10 +169,16 @@ export async function sendAttachment(attachment: MessageAttachment, channel: Cha
 
     FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId: channel.id });
 
-    void sendMessage(channel.id, {}, false, {
-        ...MessageActions.getSendMessageOptionsForReply(reply),
-        attachmentsToUpload: [upload]
-    });
+    try {
+        await sendMessage(channel.id, {}, false, {
+            ...MessageActions.getSendMessageOptionsForReply(reply),
+            attachmentsToUpload: [upload]
+        });
+        return true;
+    } catch {
+        Toasts.show({ message: `Couldn't send ${filename}`, id: Toasts.genId(), type: Toasts.Type.FAILURE });
+        return false;
+    }
 }
 
 export function hasPermission(permission: bigint, channel: Channel | null): boolean {
@@ -219,7 +212,11 @@ function fuzzySearch(searchQuery: string, searchString: string) {
 }
 
 export function useFavourites(itemFormat: CustomItemFormat, searchQuery?: string) {
-    useEffect(() => void UserSettingsActionCreators.FrecencyUserSettingsActionCreators.loadIfNecessary(), []);
+    useEffect(() => {
+        Promise.resolve(UserSettingsActionCreators.FrecencyUserSettingsActionCreators.loadIfNecessary()).catch(() =>
+            Toasts.show({ message: "Couldn't load favourite files", id: Toasts.genId(), type: Toasts.Type.FAILURE })
+        );
+    }, []);
 
     const items = useStateFromStores(
         [UserSettingsProtoStore],
@@ -292,6 +289,14 @@ export class BatchedRequestQueue<T> {
     private items: T[] = [];
     private timer: NodeJS.Timeout | null = null;
     private readonly queue: Queue = new Queue();
+    private generation = 0;
+
+    public clear() {
+        this.generation++;
+        if (this.timer) clearTimeout(this.timer);
+        this.timer = null;
+        this.items = [];
+    }
 
     constructor(
         private readonly cb: (items: T[]) => Promise<void>,
@@ -316,7 +321,15 @@ export class BatchedRequestQueue<T> {
 
         if (this.items.length === 0) return;
 
-        const batch = this.items.splice(0, 50);
-        this.queue.push(() => this.cb(batch).catch(() => this.items.push(...batch)));
+        const batch = this.items.splice(0, this.options.maxCount);
+        const { generation } = this;
+        this.queue.push(async () => {
+            if (generation !== this.generation) return;
+            try {
+                await this.cb(batch);
+            } catch {
+                if (generation === this.generation) this.items.push(...batch.filter(item => !this.items.includes(item)));
+            }
+        });
     }
 }

@@ -18,6 +18,7 @@
         "strict": true,
         "noImplicitAny": false,
         "target": "ESNEXT",
+        "noEmit": true,
         "jsx": "preserve",
         "paths": {
             "@main/*": [
@@ -53,9 +54,6 @@
             "@webpack/patcher": [
                 "./src/webpack/patchWebpack"
             ],
-            "@webpack/wreq.d": [
-                "./src/webpack/wreq.d"
-            ],
             "@webpack/types": [
                 "./src/webpack/types"
             ],
@@ -69,8 +67,7 @@
                 "transform": "typescript-transform-paths",
                 "afterDeclarations": true
             }
-        ],
-        "outDir": "who-fucking-cares-dude"
+        ]
     },
     "include": [
         "src/**/*",

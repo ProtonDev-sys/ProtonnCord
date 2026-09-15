@@ -21,7 +21,8 @@ const DefaultEngines = {
     GitHub: "https://github.com/search?q=",
     Reddit: "https://www.reddit.com/search?q=",
     Wikipedia: "https://wikipedia.org/w/index.php?search=",
-    Startpage: "https://www.startpage.com/sp/search?query="
+    Startpage: "https://www.startpage.com/sp/search?query=",
+    Kagi: "https://kagi.com/search?q="
 } as const;
 
 const enum ReplacementEngineValue {
@@ -33,6 +34,15 @@ interface SearchEngineEntry {
     name: string;
     url: string;
     iconUrl: string | null;
+}
+
+function isSearchUrl(value: string) {
+    try {
+        const url = new URL(value);
+        return (url.protocol === "https:" || url.protocol === "http:") && !url.username && !url.password;
+    } catch {
+        return false;
+    }
 }
 
 function getEngineIconUrl(url: string) {
@@ -64,7 +74,8 @@ const settings = definePluginSettings({
         displayName: "Custom Engine URL",
         description: "The URL of your Engine",
         type: OptionType.STRING,
-        placeholder: "https://google.com/search?q="
+        placeholder: "https://google.com/search?q=",
+        isValid: value => !value || (typeof value === "string" && isSearchUrl(value)) || "Enter an HTTP or HTTPS search URL without credentials"
     },
     replacementEngine: {
         description: "Replace with a specific search engine instead of adding a menu",
@@ -78,7 +89,8 @@ const settings = definePluginSettings({
 });
 
 function search(src: string, engine: string) {
-    open(engine + encodeURIComponent(src.trim()), "_blank");
+    if (!isSearchUrl(engine)) return;
+    open(engine + encodeURIComponent(src.trim()), "_blank", "noopener,noreferrer");
 }
 
 function makeSearchItem(src: string) {
@@ -86,7 +98,7 @@ function makeSearchItem(src: string) {
 
     const customName = customEngineName?.trim();
     const customUrl = customEngineURL?.trim();
-    const customEngine = customName && customUrl ? makeEngineEntry(customName, customUrl) : null;
+    const customEngine = customName && customUrl && isSearchUrl(customUrl) ? makeEngineEntry(customName, customUrl) : null;
     const engineEntries = customEngine
         ? defaultEngineEntries.some(({ name }) => name === customEngine.name)
             ? defaultEngineEntries.map(entry => entry.name === customEngine.name ? customEngine : entry)

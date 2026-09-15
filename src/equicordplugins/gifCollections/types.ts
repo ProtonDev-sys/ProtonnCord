@@ -32,6 +32,18 @@ type WithRequired<T, K extends keyof T> = T & { [P in K]-?: T[P] };
 
 export type Collection = WithRequired<Category, "gifs">;
 
+export function isCollectionList(value: unknown): value is Collection[] {
+    return Array.isArray(value) && value.every(collection =>
+        collection && typeof collection.name === "string" && typeof collection.src === "string"
+        && (collection.type === "Category" || collection.type === "Trending")
+        && (collection.format === Format.IMAGE || collection.format === Format.VIDEO)
+        && Array.isArray(collection.gifs) && collection.gifs.every(gif =>
+            gif && typeof gif.id === "string" && typeof gif.src === "string" && typeof gif.url === "string"
+            && Number.isFinite(gif.height) && gif.height >= 0 && Number.isFinite(gif.width) && gif.width >= 0
+        )
+    );
+}
+
 export interface GifPickerInstance {
     props: {
         query: string;

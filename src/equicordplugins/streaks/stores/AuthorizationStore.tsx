@@ -17,7 +17,7 @@ interface AuthorizationState {
     tokens: Record<string, string>;
     init: () => void;
     authorize: () => Promise<void>;
-    setToken: (token: string) => void;
+    setToken: (token: string, id?: string) => void;
     remove: (id: string) => void;
     isAuthorized: () => boolean;
 }
@@ -37,11 +37,13 @@ export const useAuthorizationStore = proxyLazy(() => zustandCreate(
         (set: any, get: any) => ({
             token: null,
             tokens: {},
-            init: () => { set({ token: get().tokens[UserStore.getCurrentUser()?.id] ?? null }); },
-            setToken: (token: string) => {
-                const id = UserStore.getCurrentUser()?.id;
+            init: () => {
+                useStreaksStore.getState().clear();
+                set({ token: get().tokens?.[UserStore.getCurrentUser()?.id] ?? null });
+            },
+            setToken: (token: string, id = UserStore.getCurrentUser()?.id) => {
                 if (!id) return;
-                set({ token, tokens: { ...get().tokens, [id]: token } });
+                set({ token: UserStore.getCurrentUser()?.id === id ? token : get().token, tokens: { ...get().tokens, [id]: token } });
             },
             remove: (id: string) => {
                 const { tokens, init } = get();
@@ -51,6 +53,8 @@ export const useAuthorizationStore = proxyLazy(() => zustandCreate(
                 init();
             },
             async authorize() {
+                const userId = UserStore.getCurrentUser()?.id;
+                if (!userId) throw new Error("No current account");
                 return new Promise((resolve, reject) => {
                     let hasCallbackStarted = false;
                     openModal(props =>
@@ -66,12 +70,17 @@ export const useAuthorizationStore = proxyLazy(() => zustandCreate(
                                 hasCallbackStarted = true;
                                 try {
                                     const url = new URL(response.location);
+                                    const expected = new URL(AUTHORIZE_URL);
+                                    if (url.origin !== expected.origin || url.pathname !== expected.pathname) throw new Error("Unexpected authorization callback");
+                                    if (UserStore.getCurrentUser()?.id !== userId) throw new Error("The account changed during authorization");
                                     const code = url.searchParams.get("code");
                                     if (!code) throw new Error("No code in redirect");
-                                    const req = await fetch(`${AUTHORIZE_URL}?code=${encodeURIComponent(code)}`);
+                                    const req = await fetch(`${AUTHORIZE_URL}?code=${encodeURIComponent(code)}`, { signal: AbortSignal.timeout(15_000), redirect: "error" });
                                     if (req?.ok) {
                                         const { access_token: token } = await req.json();
-                                        if (token) get().setToken(token);
+                                        if (typeof token !== "string" || !token) throw new Error("No access token returned");
+                                        if (UserStore.getCurrentUser()?.id !== userId) throw new Error("The account changed during authorization");
+                                        get().setToken(token, userId);
                                     } else {
                                         throw new Error(`Request not OK: ${req.status}`);
                                     }
@@ -80,8 +89,8 @@ export const useAuthorizationStore = proxyLazy(() => zustandCreate(
                                     if (e instanceof Error) {
                                         showToast(`Failed to authorize: ${e.message}`, Toasts.Type.FAILURE);
                                         new Logger("Streaks").error("Failed to authorize", e);
-                                        reject(e);
                                     }
+                                    reject(e);
                                 }
                             }}
                         />, {
@@ -93,7 +102,7 @@ export const useAuthorizationStore = proxyLazy(() => zustandCreate(
                     });
                 });
             },
-            isAuthorized: () => !!get().token,
+            isAuthorized: () => typeof get().tokens?.[UserStore.getCurrentUser()?.id] === "string" && !!get().tokens[UserStore.getCurrentUser()?.id],
         } as AuthorizationState),
         {
             name: "vc-streaks-auth",

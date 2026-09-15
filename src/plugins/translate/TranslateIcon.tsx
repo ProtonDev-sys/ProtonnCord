@@ -67,9 +67,12 @@ export const TranslateChatBarIcon: ChatBarButtonFactory = ({ isMainChat }) => {
 
     const [shouldShowTranslateEnabledTooltip, setter] = useState(false);
     useEffect(() => {
+        if (!isMainChat) return;
         setShouldShowTranslateEnabledTooltip = setter;
-        return () => setShouldShowTranslateEnabledTooltip = undefined;
-    }, []);
+        return () => {
+            if (setShouldShowTranslateEnabledTooltip === setter) setShouldShowTranslateEnabledTooltip = undefined;
+        };
+    }, [isMainChat]);
 
     if (!isMainChat) return null;
 

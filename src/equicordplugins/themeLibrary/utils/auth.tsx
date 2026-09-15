@@ -13,35 +13,55 @@ const TOKEN_KEY = "ThemeLibrary_uniqueToken";
 
 let tokenCache: string | null | undefined;
 let tokenLoadPromise: Promise<string | null> | null = null;
+let tokenGeneration = 0;
+let tokenMutation = Promise.resolve();
 
 export async function getThemeLibraryToken(): Promise<string | null> {
+    const mutation = tokenMutation;
+    await mutation.catch(() => undefined);
+    if (mutation !== tokenMutation) return getThemeLibraryToken();
     if (tokenCache !== undefined) return tokenCache;
 
-    tokenLoadPromise ??= DataStore.get<string>(TOKEN_KEY)
-        .then(token => token ?? null)
+    const generation = tokenGeneration;
+    const pending = tokenLoadPromise ??= DataStore.get<string>(TOKEN_KEY)
+        .then(token => {
+            if (generation !== tokenGeneration) return getThemeLibraryToken();
+            return tokenCache = typeof token === "string" && token ? token : null;
+        })
         .finally(() => {
-            tokenLoadPromise = null;
+            if (tokenLoadPromise === pending) tokenLoadPromise = null;
         });
 
-    tokenCache = await tokenLoadPromise;
-    return tokenCache;
+    return pending;
 }
 
 async function setThemeLibraryToken(token: string) {
-    await DataStore.set(TOKEN_KEY, token);
-    tokenCache = token;
+    tokenGeneration++;
+    tokenLoadPromise = null;
+    tokenMutation = tokenMutation.catch(() => undefined).then(async () => {
+        await DataStore.set(TOKEN_KEY, token);
+        tokenCache = token;
+    });
+    await tokenMutation;
 }
 
-async function deleteThemeLibraryToken() {
-    await DataStore.del(TOKEN_KEY);
-    tokenCache = null;
+async function deleteThemeLibraryToken(expectedToken?: string) {
+    tokenGeneration++;
+    tokenLoadPromise = null;
+    tokenMutation = tokenMutation.catch(() => undefined).then(async () => {
+        if (expectedToken && tokenCache !== expectedToken) return;
+        await DataStore.del(TOKEN_KEY);
+        tokenCache = null;
+    });
+    await tokenMutation;
 }
 
 export async function authorizeUser(triggerModal: boolean = true) {
+    const userId = UserStore.getCurrentUser()?.id;
     const isAuthorized = await getAuthorization();
 
     if (isAuthorized === false) {
-        if (!triggerModal) return false;
+        if (!triggerModal || !userId || UserStore.getCurrentUser()?.id !== userId) return false;
         openModal((props: any) => <OAuth2AuthorizeModal
             {...props}
             scopes={["identify", "connections"]}
@@ -54,13 +74,19 @@ export async function authorizeUser(triggerModal: boolean = true) {
                 if (!location) return logger.error("No redirect location returned");
 
                 try {
+                    const callbackUrl = new URL(location);
+                    if (callbackUrl.origin !== "https://themes.equicord.org" || callbackUrl.pathname !== "/api/user/auth")
+                        throw new Error("Unexpected authorization callback");
+                    if (UserStore.getCurrentUser()?.id !== userId) return;
                     const response = await fetch(location, {
-                        headers: { Accept: "application/json" }
+                        headers: { Accept: "application/json" }, signal: AbortSignal.timeout(15_000), redirect: "error"
                     });
+                    if (!response.ok) throw new Error(`Authorization failed (${response.status})`);
 
                     const { token } = await response.json();
+                    if (UserStore.getCurrentUser()?.id !== userId) return;
 
-                    if (token) {
+                    if (typeof token === "string" && token) {
                         await setThemeLibraryToken(token);
                         showNotification({
                             title: "ThemeLibrary",
@@ -121,7 +147,7 @@ export async function deauthorizeUser() {
     });
 
     if (res.ok) {
-        await deleteThemeLibraryToken();
+        await deleteThemeLibraryToken(uniqueToken);
         showNotification({
             title: "ThemeLibrary",
             body: "Successfully deauthorized from ThemeLibrary!"
@@ -129,7 +155,7 @@ export async function deauthorizeUser() {
     } else {
         // try to delete anyway
         try {
-            await deleteThemeLibraryToken();
+            await deleteThemeLibraryToken(uniqueToken);
         } catch (e) {
             logger.error("Failed to delete token", e);
             showNotification({
@@ -154,7 +180,7 @@ export async function getAuthorization() {
             },
         });
 
-        if (res.status === 400 || res.status === 500) {
+        if (!res.ok) {
             return false;
         } else {
             return uniqueToken;

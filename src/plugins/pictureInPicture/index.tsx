@@ -20,6 +20,7 @@ const settings = definePluginSettings({
         restartNeeded: false
     }
 });
+const activeVideos = new Set<() => void>();
 
 export default definePlugin({
     name: "PictureInPicture",
@@ -27,6 +28,9 @@ export default definePlugin({
     tags: ["Media", "Utility"],
     authors: [Devs.Lumap],
     settings,
+    stop() {
+        for (const cleanup of activeVideos) cleanup();
+    },
     patches: [
         {
             find: '["VIDEO","CLIP","AUDIO"]',
@@ -60,21 +64,27 @@ export default definePlugin({
                             paddingRight: "4px",
                         }}
                         onClick={e => {
-                            const video = e.currentTarget.parentNode!.parentNode!.querySelector("video")!;
+                            const sourceVideo = e.currentTarget.parentNode?.parentNode?.querySelector("video");
+                            if (!sourceVideo) return;
+                            const video = sourceVideo;
+                            const wasPaused = video.paused;
                             const videoClone = document.body.appendChild(video.cloneNode(true)) as HTMLVideoElement;
 
                             videoClone.loop = settings.store.loop;
                             videoClone.style.display = "none";
 
                             let cleaned = false;
+                            let started = false;
                             function cleanup() {
                                 if (cleaned) return;
                                 cleaned = true;
+                                activeVideos.delete(cleanup);
 
-                                const { currentTime } = videoClone;
+                                const currentTime = started ? videoClone.currentTime : video.currentTime;
 
                                 videoClone.onloadedmetadata = null;
                                 videoClone.onleavepictureinpicture = null;
+                                videoClone.onerror = null;
 
                                 videoClone.pause();
                                 videoClone.removeAttribute("src");
@@ -84,17 +94,22 @@ export default definePlugin({
                                 // resume original if still in the document
                                 if (video.isConnected) {
                                     video.currentTime = currentTime;
-                                    video.play().catch(() => 0);
+                                    if (!wasPaused) video.play().catch(() => 0);
                                 }
                             }
 
                             videoClone.onleavepictureinpicture = cleanup;
+                            videoClone.onerror = cleanup;
+                            activeVideos.add(cleanup);
 
                             async function launchPiP() {
+                                if (cleaned) return;
                                 try {
                                     videoClone.currentTime = video.currentTime;
+                                    started = true;
                                     video.pause();
                                     await videoClone.play();
+                                    if (cleaned) return;
                                     await videoClone.requestPictureInPicture();
                                 } catch (err) {
                                     console.error("Failed to enter Picture-in-Picture", err);

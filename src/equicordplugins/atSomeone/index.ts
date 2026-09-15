@@ -7,7 +7,7 @@
 import { addMessagePreSendListener, removeMessagePreSendListener } from "@api/MessageEvents";
 import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
-import { ChannelStore, GuildMemberStore, SelectedChannelStore, SelectedGuildStore } from "@webpack/common";
+import { ChannelStore, GuildMemberStore } from "@webpack/common";
 
 export default definePlugin({
     name: "AtSomeone",
@@ -33,8 +33,11 @@ export default definePlugin({
         }
     ],
     start() {
-        this.preSend = addMessagePreSendListener((_, msg) => {
-            msg.content = msg.content.replace(/@someone/g, () => `<@${randomUser()}>`);
+        this.preSend = addMessagePreSendListener((channelId, msg) => {
+            msg.content = msg.content.replace(/@someone/g, match => {
+                const userId = randomUser(channelId);
+                return userId ? `<@${userId}>` : match;
+            });
         });
     },
 
@@ -43,12 +46,13 @@ export default definePlugin({
     }
 });
 
-const randomUser = () => {
-    const guildId = SelectedGuildStore.getGuildId();
-    if (guildId === null) {
-        const dmUsers = ChannelStore.getChannel(SelectedChannelStore.getChannelId()).recipients;
-        return dmUsers[~~(dmUsers.length * Math.random())];
+const randomUser = (channelId: string) => {
+    const channel = ChannelStore.getChannel(channelId);
+    if (!channel) return;
+    if (!channel.guild_id) {
+        const dmUsers = channel.recipients ?? [];
+        return dmUsers[Math.floor(dmUsers.length * Math.random())];
     }
-    const members = GuildMemberStore.getMembers(guildId);
-    return members[~~(members.length * Math.random())].userId;
+    const members = GuildMemberStore.getMembers(channel.guild_id);
+    return members[Math.floor(members.length * Math.random())]?.userId;
 };

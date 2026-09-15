@@ -253,6 +253,8 @@ export default definePlugin({
     ],
 
     async onDrop(event: DragEvent, channel?: Channel | null) {
+        const generation = dragGeneration;
+        const accountId = UserStore.getCurrentUser()?.id;
         if (isInputDragSource()) return;
         const { dataTransfer } = event;
         if (!dataTransfer || dataTransfer.files?.length) return;
@@ -275,6 +277,8 @@ export default definePlugin({
         }
 
         const payloads = await collectPayloadStrings(dataTransfer);
+        if (generation !== dragGeneration || UserStore.getCurrentUser()?.id !== accountId
+            || SelectedChannelStore.getChannelId() !== resolvedChannel.id) return;
         const entity = parseFromStrings(payloads, { ChannelStore, GuildStore, UserStore });
         if (!entity) {
             if (hasActiveDrag()) clearDragState();
@@ -285,8 +289,12 @@ export default definePlugin({
     },
 
     async handleDropEntity(entity: DropEntity, channel: Channel) {
+        const generation = dragGeneration;
+        const accountId = UserStore.getCurrentUser()?.id;
         try {
             const text = await this.buildText(entity, channel);
+            if (generation !== dragGeneration || UserStore.getCurrentUser()?.id !== accountId
+                || SelectedChannelStore.getChannelId() !== channel.id) return;
             if (!text) {
                 clearDragState();
                 return;
@@ -299,6 +307,7 @@ export default definePlugin({
             if (!inserted) throw new Error("Unable to insert drag content");
             clearDragState();
         } catch (error) {
+            if (generation !== dragGeneration) return;
             clearDragState();
             logger.error("Failed handling drop", error);
             showToast("Dragify failed to handle drop.", Toasts.Type.FAILURE);
@@ -332,6 +341,7 @@ export default definePlugin({
     },
 
     insertText(channelId: string, text: string, options?: { removeUnknownUser?: boolean; }): boolean {
+        if (SelectedChannelStore.getChannelId() !== channelId) return false;
         try {
             const nextText = options?.removeUnknownUser
                 ? text.replace(/@unknown[- ]user/gi, "").trim()
@@ -470,6 +480,9 @@ export default definePlugin({
     },
 
     globalDrop: async (event: DragEvent) => {
+        const generation = dragGeneration;
+        const accountId = UserStore.getCurrentUser()?.id;
+        const channelId = SelectedChannelStore.getChannelId();
         const inst = pluginInstance;
         if (!inst || !inst.isMessageInputEvent(event)) return;
         if (isInputDragSource()) return;
@@ -489,7 +502,8 @@ export default definePlugin({
             if (!parseFromStrings(payloads, { ChannelStore, GuildStore, UserStore })) return;
         }
 
-        const channelId = SelectedChannelStore.getChannelId();
+        if (generation !== dragGeneration || UserStore.getCurrentUser()?.id !== accountId
+            || SelectedChannelStore.getChannelId() !== channelId) return;
         const channel = ChannelStore.getChannel(channelId);
         if (!channel) {
             clearDragState();
@@ -501,7 +515,7 @@ export default definePlugin({
         event.preventDefault();
         event.stopPropagation();
         await inst.onDrop(event, channel);
-        hideDragGhost();
+        if (generation === dragGeneration) hideDragGhost();
     },
 
     globalDragStart: (event: DragEvent) => {

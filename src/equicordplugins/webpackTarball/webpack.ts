@@ -16,7 +16,8 @@ export async function protectWebpack<T>(webpack: any[], body: () => Promise<T>):
     try {
         return await body();
     } finally {
-        Object.defineProperty(Function.prototype, "m", prev_m);
+        if (prev_m) Object.defineProperty(Function.prototype, "m", prev_m);
+        else Reflect.deleteProperty(Function.prototype, "m");
     }
 }
 

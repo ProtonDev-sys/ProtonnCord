@@ -64,12 +64,11 @@ export const Notices = $Notices;
 export const Commands = $Commands;
 
 /**
- * A wrapper around IndexedDB. This can store arbitrarily
- * large data and supports a lot of datatypes (Blob, Map, ...).
+ * A wrapper around IndexedDB, subject to the browser's storage quota.
+ * It supports structured values such as Blob and Map.
  * For a full list, see the mdn link below.
  *
- * This should always be preferred over the Settings API if possible, as
- * localstorage has very strict size restrictions and blocks the event loop.
+ * Use this for plugin data and large or binary values; use Settings for preferences.
  *
  * Make sure your keys are unique (tip: prefix them with ur plugin name)
  * and please clean up no longer needed entries.
@@ -122,7 +121,6 @@ export const Settings = $Settings;
 
 /**
  * An API allowing you to dynamically load styles.
- * a
  */
 export const Styles = $Styles;
 

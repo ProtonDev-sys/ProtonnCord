@@ -77,6 +77,7 @@ export function PlayButton({ state, disabled, ...props }: PlayButtonProps) {
             {...props}
             disabled={disabled}
             data-toggled={state}
+            aria-label={state ? "Pause song preview" : "Play song preview"}
             className={classes(cl("icon-button"), props.className)}
         >
             {disabled

@@ -6,7 +6,7 @@
 
 import { definePluginSettings } from "@api/Settings";
 import { OptionType } from "@utils/types";
-import { Button, useStateFromStores } from "@webpack/common";
+import { Button, GuildStore, SortedGuildStore, useStateFromStores } from "@webpack/common";
 
 import { addIndicator, removeIndicator } from ".";
 import { HiddenServersMenu } from "./components/HiddenServersMenu";
@@ -29,7 +29,7 @@ export default definePluginSettings({
         type: OptionType.COMPONENT,
         description: "Remove hidden servers",
         component: () => {
-            const detail = useStateFromStores([HiddenServersStore], () => HiddenServersStore.hiddenGuildsDetail());
+            const detail = useStateFromStores([HiddenServersStore, GuildStore, SortedGuildStore], () => HiddenServersStore.hiddenGuildsDetail());
             return <HiddenServersMenu guilds={detail} />;
         }
     },

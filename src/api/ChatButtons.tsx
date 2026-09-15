@@ -200,7 +200,7 @@ export interface ChatBarButtonWrapperData {
 
 /**
  * Registry for plugins that need to wrap the entire chat bar button container.
- * Wrappers are applied in ascending priority order (lower number = outermost wrapper).
+ * Wrappers are applied in ascending priority order (higher number = outermost wrapper).
  */
 export const ChatBarButtonWrappers = new Map<string, ChatBarButtonWrapperData>();
 
@@ -208,12 +208,16 @@ export const addChatBarButtonWrapper = (id: string, wrapper: ChatBarButtonWrappe
 export const removeChatBarButtonWrapper = (id: string) => ChatBarButtonWrappers.delete(id);
 
 export function _wrapButtons(buttons: ReactNode) {
-    const sorted = [...ChatBarButtonWrappers.values()]
-        .sort((a, b) => a.priority - b.priority);
+    const sorted = [...ChatBarButtonWrappers]
+        .sort(([, a], [, b]) => a.priority - b.priority);
 
     let wrapped = buttons;
-    for (const { wrapper } of sorted) {
-        wrapped = wrapper(wrapped);
+    for (const [id, { wrapper }] of sorted) {
+        try {
+            wrapped = wrapper(wrapped);
+        } catch (error) {
+            logger.error(`Failed to wrap chat bar buttons for ${id}`, error);
+        }
     }
     return wrapped;
 }

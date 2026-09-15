@@ -4,21 +4,25 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { Channel, Message } from "@vencord/discord-types";
+import { Channel } from "@vencord/discord-types";
 import { findCssClassesLazy } from "@webpack";
 import { MessageStore, useEffect, UserStore, useState, useStateFromStores } from "@webpack/common";
 
 import { cl, settings } from ".";
 import { IconGhost } from "./IconGhost";
 
+let exemptedSource: string | undefined;
+let exemptedIds = new Set<string>();
+
 function isChannelExempted(channel: Channel): boolean {
-    const exemptList = settings.store.exemptedChannels
-        .split(",")
-        .map(id => id.trim())
-        .filter(id => id.length > 0);
+    const source = settings.store.exemptedChannels;
+    if (source !== exemptedSource) {
+        exemptedSource = source;
+        exemptedIds = new Set(source.split(",").map(id => id.trim()).filter(Boolean));
+    }
     const isGroupDmsExempted = settings.store.ignoreGroupDms && channel.isGroupDM();
 
-    return exemptList.includes(channel.id) || isGroupDmsExempted;
+    return exemptedIds.has(channel.id) || isGroupDmsExempted;
 }
 
 const countedChannels = new Set<string>();
@@ -85,34 +89,21 @@ const ChannelWrapperStyles = findCssClassesLazy("muted", "wrapper");
 
 export function Boo({ channel }: { channel: Channel; }) {
     const { id } = channel;
+    const { exemptedChannels, ignoreGroupDms, ignoreBots, maxInactiveTimeMs } = settings.use([
+        "exemptedChannels", "ignoreGroupDms", "ignoreBots", "maxInactiveTimeMs", "showDmIcons"
+    ]);
 
     const currentUserId = useStateFromStores([UserStore], () => UserStore.getCurrentUser()?.id);
-    const lastMessage: Message = useStateFromStores([MessageStore], () =>
-        MessageStore.getMessages(id)?.last()
-    );
-
-    const [state, setState] = useState({
-        isCurrentUser: null as boolean | null,
-        containsQuestionMark: false,
-        isDataProcessed: false,
-    });
-    const [isCleared, setIsCleared] = useState(false);
+    const lastMessage = useStateFromStores([MessageStore], () => MessageStore.getMessages(id)?.last());
+    const state = {
+        isCurrentUser: lastMessage?.author.id === currentUserId,
+        containsQuestionMark: lastMessage?.author.id !== currentUserId && !!lastMessage?.content.includes("?"),
+        isDataProcessed: !!lastMessage && !!currentUserId,
+    };
+    const [isCleared, setIsCleared] = useState(() => clearedChannels.has(id));
 
     const lastMessageTimestampMs = lastMessage ? new Date(lastMessage.timestamp).getTime() : 0;
-    const isInactive = !!lastMessage && settings.store.maxInactiveTimeMs > 0 && Number.isFinite(lastMessageTimestampMs) && Date.now() - lastMessageTimestampMs > settings.store.maxInactiveTimeMs;
-
-    useEffect(() => {
-        if (!lastMessage || !currentUserId) return;
-
-        const lastIsCurrentUser = lastMessage.author.id === currentUserId;
-        const containsQuestionMark = !lastIsCurrentUser && lastMessage.content.includes("?");
-
-        setState({
-            isCurrentUser: lastIsCurrentUser,
-            containsQuestionMark,
-            isDataProcessed: true,
-        });
-    }, [lastMessage, currentUserId]);
+    const isInactive = !!lastMessage && maxInactiveTimeMs > 0 && Number.isFinite(lastMessageTimestampMs) && Date.now() - lastMessageTimestampMs > maxInactiveTimeMs;
 
     // track if this channel was manually cleared
     useEffect(() => {
@@ -130,7 +121,7 @@ export function Boo({ channel }: { channel: Channel; }) {
     }, [id, lastMessage?.id]);
 
     useEffect(() => {
-        if (!state.isDataProcessed) return;
+        if (!state.isDataProcessed || !lastMessage) return;
 
         const isExempted = isChannelExempted(channel);
         let wasManuallyCleared = clearedChannels.has(id);
@@ -190,7 +181,7 @@ export function Boo({ channel }: { channel: Channel; }) {
                 setBooCount(getBooCount() + 1);
             }
         }
-    }, [state.isCurrentUser, state.isDataProcessed, id, lastMessage?.id, isInactive]);
+    }, [state.isCurrentUser, state.isDataProcessed, id, lastMessage?.id, isInactive, exemptedChannels, ignoreGroupDms, ignoreBots]);
 
     if (!state.isDataProcessed || !currentUserId || !lastMessage || state.isCurrentUser || isChannelExempted(channel) || isCleared || (settings.store.ignoreBots && lastMessage.author.bot) || isInactive)
         return null;

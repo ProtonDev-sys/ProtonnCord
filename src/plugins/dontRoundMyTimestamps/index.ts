@@ -20,6 +20,8 @@ import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { moment } from "@webpack/common";
 
+let previousRounding: ((value: number) => number) | undefined;
+
 export default definePlugin({
     name: "DontRoundMyTimestamps",
     authors: [Devs.Lexi],
@@ -27,10 +29,14 @@ export default definePlugin({
     tags: ["Appearance", "Utility"],
 
     start() {
+        if (previousRounding) return;
+        previousRounding = moment.relativeTimeRounding();
         moment.relativeTimeRounding(Math.floor);
     },
 
     stop() {
-        moment.relativeTimeRounding(Math.round);
+        if (previousRounding && moment.relativeTimeRounding() === Math.floor)
+            moment.relativeTimeRounding(previousRounding);
+        previousRounding = undefined;
     }
 });

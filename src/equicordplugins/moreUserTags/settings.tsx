@@ -15,17 +15,19 @@ import { Forms, TextInput, Tooltip } from "@webpack/common";
 
 import moreUserTags from ".";
 import { Tag, tags } from "./consts";
-import { TagSettings } from "./types";
+import { TagSetting, TagSettings } from "./types";
 
 function SettingsComponent() {
-    const tagSettings = (settings.store.tagSettings ??= {} as TagSettings);
+    const { tagSettings = {} as TagSettings } = settings.use(["tagSettings"]);
     const { localTags } = moreUserTags;
 
-    tags.forEach(t => {
-        if (!tagSettings[t.name]) {
-            tagSettings[t.name] = { text: t.displayName, showInChat: true, showInNotChat: true };
-        }
-    });
+    const update = (name: typeof tags[number]["name"], value: Partial<TagSetting>) => {
+        const current = settings.store.tagSettings;
+        settings.store.tagSettings = {
+            ...current,
+            [name]: { text: tags.find(tag => tag.name === name)!.displayName, showInChat: true, showInNotChat: true, ...current?.[name], ...value }
+        };
+    };
 
     return (
         <Flex flexDirection="column">
@@ -69,21 +71,21 @@ function SettingsComponent() {
                             type="text"
                             value={tagSettings[t.name]?.text ?? t.displayName}
                             placeholder={`Text on tag (default: ${t.displayName})`}
-                            onChange={v => tagSettings[t.name].text = v}
+                            onChange={v => update(t.name, { text: v })}
                             className={Margins.bottom16}
                         />
 
                         <FormSwitch
                             title="Show in messages"
                             value={tagSettings[t.name]?.showInChat ?? true}
-                            onChange={v => tagSettings[t.name].showInChat = v}
+                            onChange={v => update(t.name, { showInChat: v })}
                             hideBorder
                         />
 
                         <FormSwitch
                             title="Show in member list and profiles"
                             value={tagSettings[t.name]?.showInNotChat ?? true}
-                            onChange={v => tagSettings[t.name].showInNotChat = v}
+                            onChange={v => update(t.name, { showInNotChat: v })}
                             hideBorder
                         />
                     </Card>

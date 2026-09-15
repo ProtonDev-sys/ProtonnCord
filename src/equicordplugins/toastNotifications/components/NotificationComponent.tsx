@@ -69,15 +69,16 @@ function renderContextHeader(channel: MessageNotification["channel"]): React.Rea
 export default ErrorBoundary.wrap(function NotificationComponent(props: NotificationData) {
     const [isHover, setIsHover] = useState(false);
 
-    const timeout = (PluginSettings.store.timeout ?? 5) * 1000;
-    const opacity = PluginSettings.store.opacity / 100;
+    const { timeout: timeoutSeconds, opacity: opacityPercent } = PluginSettings.use(["timeout", "opacity"]);
+    const timeout = (timeoutSeconds ?? 5) * 1000;
+    const opacity = opacityPercent / 100;
 
     useEffect(() => {
-        if (isHover || props.permanent) return;
+        if (isHover || props.permanent || timeout <= 0) return;
 
         const closeTimeout = setTimeout(() => props.onClose!(), timeout);
         return () => clearTimeout(closeTimeout);
-    }, [isHover, props.permanent, timeout]);
+    }, [isHover, props.permanent, timeout, props.onClose]);
 
     const handleClick = () => {
         props.onClick?.();
@@ -106,6 +107,7 @@ export default ErrorBoundary.wrap(function NotificationComponent(props: Notifica
 
     const closeButton = useMemo(() => (
         <button
+            aria-label="Dismiss notification"
             className={cl("notification-close-btn")}
             onClick={e => {
                 e.preventDefault();
@@ -113,8 +115,7 @@ export default ErrorBoundary.wrap(function NotificationComponent(props: Notifica
                 props.onClose!();
             }}
         >
-            <svg width="24" height="24" viewBox="0 0 24 24" role="img" aria-labelledby="vc-toast-notifications-dismiss-title">
-                <title id="vc-toast-notifications-dismiss-title">Dismiss Notification</title>
+            <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
                 <path fill="currentColor" d="M18.4 4L12 10.4L5.6 4L4 5.6L10.4 12L4 18.4L5.6 20L12 13.6L18.4 20L20 18.4L13.6 12L20 5.6L18.4 4Z" />
             </svg>
         </button>
@@ -153,10 +154,18 @@ export default ErrorBoundary.wrap(function NotificationComponent(props: Notifica
     }
 
     return (
-        <button
+        <div
+            role="button"
+            tabIndex={0}
             style={{ opacity }}
             className={cl("notification-root")}
             onClick={handleClick}
+            onKeyDown={event => {
+                if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                    event.preventDefault();
+                    handleClick();
+                }
+            }}
             onContextMenu={handleContextMenu}
             onMouseEnter={() => setIsHover(true)}
             onMouseLeave={() => setIsHover(false)}
@@ -171,7 +180,7 @@ export default ErrorBoundary.wrap(function NotificationComponent(props: Notifica
                         : { animationDuration: `${timeout}ms` }}
                 />
             )}
-        </button>
+        </div>
     );
 }, {
     onError: ({ props }) => props.onClose!()

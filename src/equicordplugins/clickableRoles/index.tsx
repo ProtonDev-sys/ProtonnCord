@@ -80,6 +80,9 @@ function RoleMembersList({ roleId, guildId, closePopout, setPopoutRef }: { roleI
 
     useEffect(() => {
         let cancelled = false;
+        setLoading(true);
+        setMemberIds([]);
+        setTotalCount(0);
 
         const cached = getCachedMemberIds(guildId, roleId);
         if (cached) {

@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+import { parseExternalHttpsUrl } from "@shared/externalUrls";
+
 const splitRegex = /[^\S\r\n]*?\r?(?:\r\n|\n)[^\S\r\n]*?\*[^\S\r\n]?/;
 const escapedAtRegex = /^\\@/;
 
@@ -30,6 +32,7 @@ export interface UserThemeHeader {
     license?: string;
     source?: string;
     website?: string;
+    donate?: string;
     invite?: string;
     content?: string;
     customName?: string;
@@ -45,6 +48,7 @@ function makeHeader(fileName: string, opts: Partial<UserThemeHeader> = {}): User
         license: opts.license,
         source: opts.source,
         website: opts.website,
+        donate: opts.donate,
         invite: opts.invite
     };
 }
@@ -79,5 +83,8 @@ export function getThemeInfo(css: string, fileName: string): UserThemeHeader {
     }
     header[field] = accum.trim();
     delete header[""];
+    header.website = parseExternalHttpsUrl(header.website) ?? undefined;
+    header.source = parseExternalHttpsUrl(header.source) ?? undefined;
+    header.donate = parseExternalHttpsUrl(header.donate) ?? undefined;
     return makeHeader(fileName, header);
 }

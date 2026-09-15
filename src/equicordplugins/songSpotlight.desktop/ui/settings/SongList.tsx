@@ -162,6 +162,7 @@ export default function SongList({ localData, setLocalData }: SongListProps) {
         }).toArray().sort((a, b) => a.index - b.index);
 
         const last = mapped[mapped.length - 1];
+        if (!last) return;
         const spots = [
             ...mapped.map(({ index, top, size }) => ({ spot: index, position: top, size })),
             { spot: last.index + 1, position: last.bottom, size: last.size },

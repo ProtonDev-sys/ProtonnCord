@@ -13,13 +13,18 @@ import type { Channel } from "@vencord/discord-types";
 import { GuildChannelStore, Menu, React, RestAPI, UserStore, VoiceStateStore } from "@webpack/common";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+let active = false;
+let generation = 0;
 
 async function runSequential<T>(tasks: Array<() => Promise<T>>): Promise<T[]> {
+    const currentGeneration = generation;
+    const userId = UserStore.getCurrentUser()?.id;
     const results: T[] = [];
     const waitAfter = Math.max(1, settings.store.waitAfter);
     const waitMs = Math.max(0, settings.store.waitSeconds * 1000);
 
     for (let i = 0; i < tasks.length; i++) {
+        if (!active || generation !== currentGeneration || UserStore.getCurrentUser()?.id !== userId) break;
         const result = await tasks[i]();
         results.push(result);
 
@@ -196,6 +201,8 @@ export default definePlugin({
     authors: [Devs.D3SOX, EquicordDevs.nickwoah],
 
     settings,
+    start() { active = true; generation++; },
+    stop() { active = false; generation++; },
 
     contextMenus: {
         "channel-context": VoiceChannelContext

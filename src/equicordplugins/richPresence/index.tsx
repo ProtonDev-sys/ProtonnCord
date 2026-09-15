@@ -52,14 +52,19 @@ function syncServices() {
 
         if (shouldRun && !isRunning) {
             logger.info(`Starting ${id} service`);
-            service.start();
-            activeServices.add(id);
+            try {
+                service.start();
+                activeServices.add(id);
+            } catch (error) {
+                logger.error(`Failed to start ${id} service`, error);
+                try { service.stop(); } catch (cleanupError) { logger.error(`Failed to clean up ${id} service`, cleanupError); }
+            }
         } else if (!shouldRun && isRunning) {
             logger.info(`Stopping ${id} service`);
-            service.stop();
             activeServices.delete(id);
+            try { service.stop(); } catch (error) { logger.error(`Failed to stop ${id} service`, error); }
         } else if (shouldRun && isRunning && service.forceUpdate) {
-            service.forceUpdate();
+            try { service.forceUpdate(); } catch (error) { logger.error(`Failed to refresh ${id} service`, error); }
         }
     }
 }
@@ -67,7 +72,7 @@ function syncServices() {
 function stopAllServices() {
     for (const id of activeServices) {
         logger.info(`Stopping ${id} service`);
-        services[id].stop();
+        try { services[id].stop(); } catch (error) { logger.error(`Failed to stop ${id} service`, error); }
     }
     activeServices.clear();
 }
@@ -99,7 +104,7 @@ export default definePlugin({
     },
 
     stop() {
-        stopAllServices();
         setOnServiceChange(null);
+        stopAllServices();
     },
 });

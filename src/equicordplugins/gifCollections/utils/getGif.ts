@@ -13,8 +13,11 @@ import { cleanUrl } from "./cleanUrl";
 import { isAudio } from "./isAudio";
 import { uuidv4 } from "./uuidv4";
 
+const embedProviders = ["tenor", "klipy"];
+
 function isValidSnowflake(snowflake: string): boolean {
-    return !Number.isNaN(SnowflakeUtils.extractTimestamp(snowflake));
+    if (!/^\d{17,20}$/.test(snowflake)) return false;
+    return Number.isFinite(SnowflakeUtils.extractTimestamp(snowflake));
 }
 
 function getGifByTarget(url: string, target?: HTMLElement | null): Gif | null {
@@ -51,7 +54,7 @@ function getGifByMessageAndUrl(url: string, message: Message): Gif | null {
             e.video?.proxyURL,
             e.thumbnail?.proxyURL,
         ];
-        return urls.some(u => u === cleanedUrl);
+        return urls.some(u => u && cleanUrl(u) === cleanedUrl);
     });
 
     if (embed) {
@@ -60,7 +63,7 @@ function getGifByMessageAndUrl(url: string, message: Message): Gif | null {
                 id: uuidv4(settings.store.itemPrefix),
                 height: embed.image.height,
                 width: embed.image.width,
-                src: embed.image.proxyURL!,
+                src: embed.image.proxyURL ?? embed.image.url,
                 url: embed.image.url,
             };
         }
@@ -70,7 +73,7 @@ function getGifByMessageAndUrl(url: string, message: Message): Gif | null {
                 height: embed.video.height,
                 width: embed.video.width,
                 src: embed.video.proxyURL,
-                url: embed.provider?.name === "Tenor" ? embed.url ?? embed.video.url : embed.video.url,
+                url: embed.provider?.name && embedProviders.includes(embed.provider.name.toLowerCase()) ? embed.url ?? embed.video.url : embed.video.url,
             };
         }
         if (embed.thumbnail?.proxyURL) {
@@ -84,7 +87,7 @@ function getGifByMessageAndUrl(url: string, message: Message): Gif | null {
         }
     }
 
-    const attachment = message.attachments.find(a => cleanUrl(a.url) === cleanedUrl || a.proxy_url === cleanedUrl);
+    const attachment = message.attachments.find(a => cleanUrl(a.url) === cleanedUrl || a.proxy_url && cleanUrl(a.proxy_url) === cleanedUrl);
     if (attachment) {
         return {
             id: uuidv4(settings.store.itemPrefix),

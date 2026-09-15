@@ -101,8 +101,12 @@ const settings = definePluginSettings({
         type: OptionType.NUMBER,
         description: "Websocket port",
         default: 42070,
+        isValid: value => typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 65535,
         async onChange() {
-            await start();
+            if (active) {
+                stopSocket();
+                await start();
+            }
         }
     },
     preferUDP: {
@@ -180,16 +184,24 @@ const settings = definePluginSettings({
 
 let socket: WebSocket | null = null;
 let socketGeneration = 0;
+let connectionPromise: Promise<void> | undefined;
+let active = false;
+let notificationGeneration = 0;
 
 async function connectSocket() {
+    if (socket?.readyState === WebSocket.OPEN) return;
+    if (connectionPromise) return connectionPromise;
     const generation = ++socketGeneration;
     const previousSocket = socket;
-    const nextSocket = new WebSocket(`ws://127.0.0.1:${settings.store.webSocketPort ?? 42070}/?client=ProtonnCord`);
+    const configuredPort = settings.store.webSocketPort;
+    const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535 ? configuredPort : 42070;
+    const nextSocket = new WebSocket(`ws://127.0.0.1:${port}/?client=ProtonnCord`);
     socket = nextSocket;
     previousSocket?.close();
 
-    return new Promise<void>((resolve, reject) => {
+    const pending = new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
+            cleanup();
             if (socket === nextSocket && generation === socketGeneration) {
                 socket = null;
                 nextSocket.close();
@@ -210,6 +222,7 @@ async function connectSocket() {
 
             if (socket !== nextSocket || generation !== socketGeneration) {
                 nextSocket.close();
+                reject(new Error("XSOverlay connection was cancelled"));
                 return;
             }
 
@@ -226,14 +239,23 @@ async function connectSocket() {
             reject(new Error("XSOverlay socket closed before connecting"));
         };
     });
+    const result = pending.finally(() => {
+        if (connectionPromise === result) connectionPromise = undefined;
+    });
+    connectionPromise = result;
+    return result;
 }
 
 async function start() {
+    active = true;
+    notificationGeneration++;
+    if (!IS_WEB && settings.store.preferUDP) return;
     await connectSocket().catch(error => logger.error("Failed to connect to XSOverlay", error));
 }
 
 function stopSocket() {
     socketGeneration++;
+    connectionPromise = undefined;
     socket?.close();
     socket = null;
 }
@@ -250,7 +272,13 @@ export default definePlugin({
     settings,
 
     flux: {
+        LOGOUT() {
+            notificationGeneration++;
+            stopSocket();
+            avatarIconCache.clear();
+        },
         CALL_UPDATE({ call }: { call: Call; }) {
+            if (!active) return;
             const currentUserId = UserStore.getCurrentUser()?.id;
             if (currentUserId && call?.ringing?.includes(currentUserId) && settings.store.callNotifications) {
                 const channel = ChannelStore.getChannel(call.channel_id);
@@ -258,7 +286,7 @@ export default definePlugin({
             }
         },
         MESSAGE_CREATE({ message, optimistic }: { message: Message; optimistic: boolean; }) {
-            if (optimistic) return;
+            if (!active || optimistic) return;
             const channel = ChannelStore.getChannel(message.channel_id);
             if (!channel) return;
             if (!shouldNotify(message, message.channel_id)) return;
@@ -270,7 +298,7 @@ export default definePlugin({
 
             if (channel.guild_id) {
                 const guild = GuildStore.getGuild(channel.guild_id);
-                titleString = `${message.author.username} (${guild.name}, #${channel.name})`;
+                titleString = `${message.author.username} (${guild?.name ?? "Unknown server"}, #${channel.name})`;
             }
 
             switch (channel.type) {
@@ -349,15 +377,17 @@ export default definePlugin({
 
     start,
 
-    stop() {
+    async stop() {
+        active = false;
+        notificationGeneration++;
         stopSocket();
         avatarIconCache.clear();
-        Native.closeSocket();
+        if (!IS_WEB) await Native.closeSocket().catch(error => logger.error("Failed to close XSOverlay UDP socket", error));
     },
 
     settingsAboutComponent: () => (
         <>
-            <Button onClick={() => sendOtherNotif("This is a test notification! explode", "Hello from Vendor!")}>
+            <Button onClick={() => sendOtherNotif("This is a test notification! explode", "Hello from Vendor!", true)}>
                 Send test notification
             </Button>
         </>
@@ -365,9 +395,9 @@ export default definePlugin({
 });
 
 function shouldIgnoreForChannelType(channel: Channel) {
-    if (channel.type === ChannelTypes.DM && settings.store.dmNotifications) return false;
-    if (channel.type === ChannelTypes.GROUP_DM && settings.store.groupDmNotifications) return false;
-    else return !settings.store.serverNotifications;
+    if (channel.type === ChannelTypes.DM) return !settings.store.dmNotifications;
+    if (channel.type === ChannelTypes.GROUP_DM) return !settings.store.groupDmNotifications;
+    return !settings.store.serverNotifications;
 }
 
 function getCachedAvatarIcon(userId: string, avatar: string) {
@@ -380,15 +410,20 @@ function getCachedAvatarIcon(userId: string, avatar: string) {
         if (oldestKey != null) avatarIconCache.delete(oldestKey);
     }
 
-    const promise = fetch(`https://cdn.discordapp.com/avatars/${userId}/${avatar}.png?size=128`)
-        .then(response => response.blob())
-        .then(blob => new Promise<string>(resolve => {
+    const promise = fetch(`https://cdn.discordapp.com/avatars/${encodeURIComponent(userId)}/${encodeURIComponent(avatar)}.png?size=128`, { signal: AbortSignal.timeout(10_000) })
+        .then(response => {
+            if (!response.ok) throw new Error("Avatar download failed");
+            return response.blob();
+        })
+        .then(blob => new Promise<string>((resolve, reject) => {
             const r = new FileReader();
             r.onload = () => resolve((r.result as string).split(",")[1]);
+            r.onerror = () => reject(new Error("Avatar conversion failed"));
+            r.onabort = () => reject(new Error("Avatar conversion aborted"));
             r.readAsDataURL(blob);
         }))
         .catch(error => {
-            avatarIconCache.delete(cacheKey);
+            if (avatarIconCache.get(cacheKey) === promise) avatarIconCache.delete(cacheKey);
             throw error;
         });
 
@@ -397,8 +432,11 @@ function getCachedAvatarIcon(userId: string, avatar: string) {
 }
 
 function sendMsgNotif(titleString: string, content: string, message: Message) {
-    getCachedAvatarIcon(message.author.id, message.author.avatar)
+    const currentGeneration = notificationGeneration;
+    const accountId = UserStore.getCurrentUser()?.id;
+    (message.author.avatar ? getCachedAvatarIcon(message.author.id, message.author.avatar) : Promise.resolve("default"))
         .then(result => {
+            if (!active || currentGeneration !== notificationGeneration || accountId !== UserStore.getCurrentUser()?.id) return;
             const msgData: NotificationObject = {
                 type: 1,
                 timeout: settings.store.lengthBasedTimeout ? calculateTimeout(content) : settings.store.timeout,
@@ -408,17 +446,17 @@ function sendMsgNotif(titleString: string, content: string, message: Message) {
                 audioPath: settings.store.soundPath,
                 title: titleString,
                 content: content,
-                useBase64Icon: true,
+                useBase64Icon: result !== "default",
                 icon: result,
                 sourceApp: "Protonn Cord"
             };
 
-            void sendToOverlay(msgData).catch(error => logger.error("Failed to send XSOverlay message notification", error));
+            void sendToOverlay(msgData, currentGeneration, accountId).catch(error => logger.error("Failed to send XSOverlay message notification", error));
         })
         .catch(error => logger.error("Failed to load XSOverlay notification avatar", error));
 }
 
-function sendOtherNotif(content: string, titleString: string) {
+function sendOtherNotif(content: string, titleString: string, preview = false) {
     const msgData: NotificationObject = {
         type: 1,
         timeout: settings.store.lengthBasedTimeout ? calculateTimeout(content) : settings.store.timeout,
@@ -432,12 +470,15 @@ function sendOtherNotif(content: string, titleString: string) {
         icon: "default",
         sourceApp: "Protonn Cord"
     };
-    void sendToOverlay(msgData).catch(error => logger.error("Failed to send XSOverlay notification", error));
+    void sendToOverlay(msgData, notificationGeneration, UserStore.getCurrentUser()?.id, preview).catch(error => logger.error("Failed to send XSOverlay notification", error));
 }
 
-async function sendToOverlay(notif: NotificationObject) {
+async function sendToOverlay(notif: NotificationObject, currentGeneration: number, accountId: string | undefined, preview = false) {
+    const isCurrent = () => (active || preview) && currentGeneration === notificationGeneration && accountId === UserStore.getCurrentUser()?.id;
+    if (!isCurrent()) return;
     if (!IS_WEB && settings.store.preferUDP) {
-        Native.sendToOverlay(notif);
+        await Native.sendToOverlay(notif);
+        if (preview && !active) await Native.closeSocket();
         return;
     }
     const apiObject: ApiObject = {
@@ -448,8 +489,10 @@ async function sendToOverlay(notif: NotificationObject) {
         rawData: null
     };
     if (socket?.readyState !== WebSocket.OPEN) await connectSocket();
+    if (!isCurrent()) return;
     if (socket?.readyState !== WebSocket.OPEN) throw new Error("XSOverlay socket is not open");
     socket.send(JSON.stringify(apiObject));
+    if (preview && !active) stopSocket();
 }
 
 function shouldNotify(message: Message, channel: string) {

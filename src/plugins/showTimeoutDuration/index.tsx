@@ -43,19 +43,16 @@ function renderTimeout(message: Message, inline: boolean) {
 
     const member = GuildMemberStore.getMember(guildId, message.author.id);
     if (!member?.communicationDisabledUntil) return null;
+    const deadline = new Date(member.communicationDisabledUntil);
+    if (!Number.isFinite(deadline.getTime())) return null;
 
     const countdown = () => (
         <CountDown
-            deadline={new Date(member.communicationDisabledUntil!)}
+            deadline={deadline}
             showUnits
             stopAtOneSec
         />
     );
-
-    getIntlMessage("GUILD_ENABLE_COMMUNICATION_TIME_REMAINING", {
-        username: message.author.username,
-        countdown
-    });
 
     return inline
         ? countdown()
@@ -86,15 +83,16 @@ export default definePlugin({
     ],
 
     TooltipWrapper: ErrorBoundary.wrap(({ message, children, text }: { message: Message; children: ReactNode; text: ReactNode; }) => {
-        if (settings.store.displayStyle === DisplayStyle.Tooltip)
+        const timeoutText = renderTimeout(message, false);
+        if (!timeoutText || settings.store.displayStyle === DisplayStyle.Tooltip)
             return (
-                <Tooltip text={renderTimeout(message, false)}>
+                <Tooltip text={timeoutText ?? text}>
                     {tooltipProps => <span {...tooltipProps}>{children}</span>}
                 </Tooltip>
             );
 
         return (
-            <Tooltip text={renderTimeout(message, false)}>
+            <Tooltip text={timeoutText}>
                 {tooltipProps => (
                     <div {...tooltipProps} className="vc-std-wrapper">
                         {children}

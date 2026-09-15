@@ -8,7 +8,7 @@ import { ChatBarButton } from "@api/ChatButtons";
 import { definePluginSettings, migratePluginSetting } from "@api/Settings";
 import { EquicordDevs } from "@utils/constants";
 import definePlugin, { OptionType, StartAt } from "@utils/types";
-import { useEffect, useState } from "@webpack/common";
+import { useEffect, useRef, useState } from "@webpack/common";
 import type { MouseEventHandler, ReactNode } from "react";
 
 let hidechatbuttonsopen: boolean | undefined;
@@ -23,19 +23,20 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         description: "opened by default",
         default: false,
-        onChange: (store: { open: boolean; }) => {
-            hidechatbuttonsopen = store.open;
+        onChange: (open: boolean) => {
+            hidechatbuttonsopen = open;
         }
     },
 });
 
 function HideToggleButton(props: { open: boolean | undefined, onClick: MouseEventHandler<HTMLButtonElement>; }) {
+    const { color } = settings.use(["color"]);
     return (<ChatBarButton
         onClick={props.onClick}
         tooltip={props.open ? "Close" : "Open"}
     >
         <svg
-            fill={settings.store.color && props.open ? "#c32a32" : "currentColor"}
+            fill={color && props.open ? "#c32a32" : "currentColor"}
             fillRule="evenodd"
             width="20"
             height="20"
@@ -51,6 +52,21 @@ function HideToggleButton(props: { open: boolean | undefined, onClick: MouseEven
 }
 
 function ButtonsInnerComponent({ buttons }: { buttons: ReactNode; }) {
+    const { open: defaultOpen } = settings.use(["open"]);
+    const [open, setOpen] = useState(hidechatbuttonsopen ?? defaultOpen);
+    const previousDefault = useRef(defaultOpen);
+
+    useEffect(() => {
+        if (previousDefault.current !== defaultOpen) {
+            previousDefault.current = defaultOpen;
+            setOpen(defaultOpen);
+        }
+    }, [defaultOpen]);
+
+    useEffect(() => {
+        hidechatbuttonsopen = open;
+    }, [open]);
+
     const buttonItems = Array.isArray(buttons)
         ? buttons
         : buttons == null
@@ -58,12 +74,6 @@ function ButtonsInnerComponent({ buttons }: { buttons: ReactNode; }) {
             : [buttons];
 
     if (buttonItems.length === 0 || buttonItems.every(button => (button as any)?.props?.disabled === true)) return null;
-
-    const [open, setOpen] = useState(hidechatbuttonsopen);
-
-    useEffect(() => {
-        hidechatbuttonsopen = open;
-    }, [open]);
 
     return (
         <div key="chat-bar-buttons-menu" id="chat-bar-buttons-menu" style={{

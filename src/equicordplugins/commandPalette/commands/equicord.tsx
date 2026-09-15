@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { reload } from "@utils/native";
+
 import type { PaletteCommand } from "../api/types";
 import { BoltIcon, GearIcon, PaintIcon, RestartIcon } from "../ui/icons";
 import { openSettingsPage } from "./openSettings";
@@ -37,27 +39,14 @@ export const equicordCommands: PaletteCommand[] = [
     },
     {
         id: "equicord.updater",
-        title: "Open Updater",
+        title: "Open Updates",
         section: SECTION,
         keywords: ["update", "updater", "version"],
         icon: BoltIcon,
-        predicate: () => !IS_UPDATER_DISABLED,
         actions: [{
             id: "run",
-            label: "Open Updater",
+            label: "Open Updates",
             run: () => void openSettingsPage("equicord_updater")
-        }]
-    },
-    {
-        id: "equicord.changelog",
-        title: "Open Changelog",
-        section: SECTION,
-        keywords: ["changelog", "news", "whats new"],
-        icon: BoltIcon,
-        actions: [{
-            id: "run",
-            label: "Open Changelog",
-            run: () => void openSettingsPage("equicord_changelog")
         }]
     },
     {
@@ -69,7 +58,7 @@ export const equicordCommands: PaletteCommand[] = [
         actions: [{
             id: "run",
             label: "Restart Discord",
-            run: () => window.location.reload()
+            run: reload
         }]
     }
 ];

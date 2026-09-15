@@ -452,16 +452,6 @@
     padding: 18px;
 }
 
-.vc-cmdpal-root-form .vc-cmdpal-body {
-    flex: none;
-    min-height: 0;
-}
-
-.vc-cmdpal-root-form .vc-cmdpal-form {
-    flex: none;
-    overflow: visible;
-}
-
 .vc-cmdpal-field {
     display: flex;
     flex-direction: column;

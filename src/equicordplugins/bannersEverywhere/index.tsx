@@ -73,29 +73,39 @@ export default definePlugin({
     ],
 
     data: {},
+    generation: 0,
+    loaded: false,
     managedStyle: style,
     pngCache: new Map<string, Promise<string>>(),
     persistTimeout: undefined as ReturnType<typeof setTimeout> | undefined,
 
     async start() {
-        this.data = await DataStore.get(DATASTORE_KEY) || {};
+        const generation = ++this.generation;
+        this.loaded = false;
+        const saved = await DataStore.get(DATASTORE_KEY) || {};
+        if (generation !== this.generation) return;
+        this.data = { ...saved, ...this.data };
+        this.loaded = true;
+        this.queuePersist();
     },
 
     stop() {
+        this.generation++;
         if (this.persistTimeout) {
             clearTimeout(this.persistTimeout);
             this.persistTimeout = undefined;
         }
         this.pngCache.clear();
-        void DataStore.set(DATASTORE_KEY, this.data);
+        if (this.loaded) void DataStore.set(DATASTORE_KEY, this.data).catch(console.error);
+        this.loaded = false;
     },
 
     queuePersist() {
-        if (this.persistTimeout) return;
+        if (!this.loaded || this.persistTimeout) return;
 
         this.persistTimeout = setTimeout(() => {
             this.persistTimeout = undefined;
-            void DataStore.set(DATASTORE_KEY, this.data);
+            void DataStore.set(DATASTORE_KEY, this.data).catch(console.error);
         }, 2_000);
     },
 
@@ -111,14 +121,15 @@ export default definePlugin({
             // Discord Banners
             url = url.replace(".gif", ".png");
             // Usrbg Banners
+            const { generation } = this;
             this.gifToPng(url)
                 .then(pngUrl => {
                     const imgElement = document.getElementById(`vc-banners-everywhere-${user.id}`) as HTMLImageElement;
-                    if (imgElement) {
+                    if (generation === this.generation && !settings.store.animate && imgElement?.getAttribute("src") === url) {
                         imgElement.src = pngUrl;
                     }
                 })
-                .catch();
+                .catch(console.error);
         }
 
         return (
@@ -134,18 +145,19 @@ export default definePlugin({
             const img = new Image();
             img.crossOrigin = "anonymous";
             img.onload = () => {
-                const canvas = document.createElement("canvas");
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const ctx = canvas.getContext("2d");
-                if (ctx) {
+                try {
+                    const canvas = document.createElement("canvas");
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext("2d");
+                    if (!ctx) throw new Error("Failed to get canvas context.");
                     ctx.drawImage(img, 0, 0);
                     resolve(canvas.toDataURL("image/png"));
-                } else {
-                    reject(new Error("Failed to get canvas context."));
+                } catch (error) {
+                    reject(error);
                 }
             };
-            img.onerror = () => resolve("");
+            img.onerror = () => reject(new Error("Failed to load banner image."));
             img.src = url;
         });
         this.pngCache.set(url, promise);

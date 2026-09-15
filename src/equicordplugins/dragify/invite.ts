@@ -7,7 +7,7 @@
 import { Logger } from "@utils/Logger";
 import type { Channel } from "@vencord/discord-types";
 import { ChannelType } from "@vencord/discord-types/enums";
-import { ChannelStore, GuildChannelStore, GuildStore, PermissionsBits, PermissionStore, RestAPI, showToast, Toasts } from "@webpack/common";
+import { ChannelStore, GuildChannelStore, GuildStore, PermissionsBits, PermissionStore, RestAPI, showToast, Toasts, UserStore } from "@webpack/common";
 
 const logger = new Logger("Dragify");
 
@@ -27,8 +27,11 @@ export type InviteCacheEntry = {
 
 const inviteCache = new Map<string, InviteCacheEntry>();
 const MAX_INVITE_CACHE_ENTRIES = 100;
+let cacheGeneration = 0;
+let cacheAccountId: string | undefined;
 
 export function clearInviteCache() {
+    cacheGeneration++;
     inviteCache.clear();
 }
 
@@ -136,12 +139,13 @@ function resolveInviteChannel(guildId: string, currentChannel: Channel): Channel
         .find(canCreateInvite) ?? null;
 }
 
-async function fetchReusableInvite(guildId: string, inviteChannelId: string) {
+async function fetchReusableInvite(guildId: string, inviteChannelId: string, isCurrent: () => boolean) {
     const cached = getCachedInvite(guildId);
     if (cached?.maxUses === null) return { ok: true as const, code: cached.code };
 
     try {
         const { body } = await RestAPI.get({ url: `/channels/${inviteChannelId}/invites` });
+        if (!isCurrent()) return { ok: false as const, reason: "failed" as const };
         if (!Array.isArray(body)) return { ok: false as const, reason: "failed" as const };
 
         const now = Date.now();
@@ -169,6 +173,14 @@ function getInviteUrl(code: string) {
 }
 
 export async function createInvite(guildId: string, currentChannel: Channel, settings: InviteSettings): Promise<string | null> {
+    const accountId = UserStore.getCurrentUser()?.id;
+    if (!accountId) return null;
+    if (cacheAccountId !== accountId) {
+        clearInviteCache();
+        cacheAccountId = accountId;
+    }
+    const generation = cacheGeneration;
+    const isCurrent = () => generation === cacheGeneration && UserStore.getCurrentUser()?.id === accountId;
     const inviteChannel = resolveInviteChannel(guildId, currentChannel);
     if (!inviteChannel) {
         showToast("No channel available for invites.", Toasts.Type.FAILURE);
@@ -176,7 +188,8 @@ export async function createInvite(guildId: string, currentChannel: Channel, set
     }
 
     if (settings.reuseExistingInvites) {
-        const reused = await fetchReusableInvite(guildId, inviteChannel.id);
+        const reused = await fetchReusableInvite(guildId, inviteChannel.id, isCurrent);
+        if (!isCurrent()) return null;
         if (reused.ok) return getInviteUrl(reused.code);
 
         showToast(
@@ -200,6 +213,7 @@ export async function createInvite(guildId: string, currentChannel: Channel, set
                 unique: true,
             },
         });
+        if (!isCurrent()) return null;
 
         const code = typeof body === "object" && body ? (body as { code?: string; }).code : null;
         if (!code) throw new Error("Invite response missing code");

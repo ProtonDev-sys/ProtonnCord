@@ -24,7 +24,8 @@ const LANGUAGE_ICON_MAP: Record<string, string> = {
 export function getLanguageIconUrl(language: string | null): string {
     if (!language) return "https://cdn.jsdelivr.net/gh/devicons/devicon@develop/icons/github/github-original.svg";
 
-    const normalized = LANGUAGE_ICON_MAP[language.toLowerCase()] ?? language.toLowerCase().replace(/\s+/g, "");
+    const key = language.toLowerCase();
+    const normalized = Object.hasOwn(LANGUAGE_ICON_MAP, key) ? LANGUAGE_ICON_MAP[key] : key.replace(/\s+/g, "");
     return `https://cdn.jsdelivr.net/gh/devicons/devicon@develop/icons/${normalized}/${normalized}-original.svg`;
 }
 

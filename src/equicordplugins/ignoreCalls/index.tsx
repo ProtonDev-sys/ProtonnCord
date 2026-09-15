@@ -24,25 +24,43 @@ interface CallUpdate {
     region: string;
 }
 
-const args: CallUpdate = {
-    ringing: [],
-    ongoingRings: [],
-    messageId: "",
-    region: "",
-};
-
+const callUpdates = new Map<string, CallUpdate>();
 const ignoredChannelIds = new Set<string>();
+let accountId: string | undefined;
+
+function checkAccount() {
+    const currentId = UserStore.getCurrentUser()?.id;
+    if (accountId !== currentId) {
+        callUpdates.clear();
+        ignoredChannelIds.clear();
+        accountId = currentId;
+    }
+    return currentId;
+}
+
+function dismissCall(channelId: string, currentUserId: string) {
+    if (checkAccount() !== currentUserId) return;
+    const args = callUpdates.get(channelId);
+    if (!args || !args.ringing.includes(currentUserId) && !args.ongoingRings.includes(currentUserId)) return;
+    FluxDispatcher.dispatch({
+        type: "CALL_UPDATE",
+        channelId,
+        ...args,
+        ringing: args.ringing.filter(id => id !== currentUserId),
+        ongoingRings: args.ongoingRings.filter(id => id !== currentUserId)
+    });
+}
+
 const cl = classNameFactory("vc-ignore-calls-");
 const Deafen = findComponentByCodeLazy("0-1.02-.1H3.05a9");
-const filterOngoingRings = (currentUserId: string): CallUpdate["ongoingRings"] =>
-    args.ongoingRings.filter((id: string) => id !== currentUserId);
 
 const ContextMenuPatch: NavContextMenuPatchCallback = (children, { channel }: { channel: Channel; }) => {
-    if (!channel) return;
+    checkAccount();
     const permanentlyIgnoredUsers = settings.store.permanentlyIgnoredUsers.split(",").map(s => s.trim()).filter(Boolean);
 
-    const [tempChecked, setTempChecked] = React.useState(ignoredChannelIds.has(channel.id));
-    const [permChecked, setPermChecked] = React.useState(permanentlyIgnoredUsers.includes(channel.id));
+    const [tempChecked, setTempChecked] = React.useState(ignoredChannelIds.has(channel?.id));
+    const [permChecked, setPermChecked] = React.useState(permanentlyIgnoredUsers.includes(channel?.id));
+    if (!channel) return;
 
     children.push(
         <>
@@ -65,15 +83,16 @@ const ContextMenuPatch: NavContextMenuPatchCallback = (children, { channel }: { 
                 label="Permanently Ignore Calls"
                 checked={permChecked}
                 action={() => {
-                    let updated = permanentlyIgnoredUsers.slice();
-                    if (permChecked) {
+                    let updated = settings.store.permanentlyIgnoredUsers.split(",").map(value => value.trim()).filter(Boolean);
+                    const isIgnored = updated.includes(channel.id);
+                    if (isIgnored) {
                         updated = updated.filter(id => id !== channel.id);
                     } else {
                         updated.push(channel.id);
                     }
                     settings.store.permanentlyIgnoredUsers = updated.join(", ");
 
-                    setPermChecked(!permChecked);
+                    setPermChecked(!isIgnored);
                 }}
             />
         </>
@@ -109,25 +128,32 @@ export default definePlugin({
         "gdm-context": ContextMenuPatch,
     },
     flux: {
-        async CALL_UPDATE({ ringing, ongoingRings, messageId, region }) {
-            args.ringing = ringing || [];
-            args.ongoingRings = Array.isArray(ongoingRings) ? ongoingRings : [];
-            args.messageId = messageId;
-            args.region = region;
+        CALL_UPDATE({ channelId, ringing, ongoingRings, messageId, region }) {
+            checkAccount();
+            if (!channelId) return;
+            const previous = callUpdates.get(channelId);
+            callUpdates.set(channelId, {
+                ringing: Array.isArray(ringing) ? ringing : previous?.ringing ?? [],
+                ongoingRings: Array.isArray(ongoingRings) ? ongoingRings : previous?.ongoingRings ?? [],
+                messageId: messageId ?? previous?.messageId ?? "",
+                region: region ?? previous?.region ?? ""
+            });
+        },
+        CALL_DELETE({ channelId }) {
+            callUpdates.delete(channelId);
         }
     },
+    stop() {
+        callUpdates.clear();
+        ignoredChannelIds.clear();
+        accountId = undefined;
+    },
     renderIgnore(channel) {
-        const currentUserId = UserStore.getCurrentUser().id;
+        const currentUserId = checkAccount();
+        if (!currentUserId || !channel) return null;
         const permanentlyIgnoredUsers = settings.store.permanentlyIgnoredUsers.split(",").map(s => s.trim()).filter(Boolean);
         if (ignoredChannelIds.has(channel.id) || permanentlyIgnoredUsers.includes(channel.id)) {
-            FluxDispatcher.dispatch({
-                type: "CALL_UPDATE",
-                channelId: channel.id,
-                ringing: args.ringing.filter((id: string) => id !== currentUserId),
-                ongoingRings: filterOngoingRings(currentUserId),
-                messageId: args.messageId,
-                region: args.region
-            });
+            dismissCall(channel.id, currentUserId);
             return null;
         }
 
@@ -140,16 +166,7 @@ export default definePlugin({
                             size="small"
                             onMouseEnter={onMouseEnter}
                             onMouseLeave={onMouseLeave}
-                            onClick={() => {
-                                FluxDispatcher.dispatch({
-                                    type: "CALL_UPDATE",
-                                    channelId: channel.id,
-                                    ringing: args.ringing.filter((id: string) => id !== currentUserId),
-                                    ongoingRings: filterOngoingRings(currentUserId),
-                                    messageId: args.messageId,
-                                    region: args.region
-                                });
-                            }}
+                            onClick={() => dismissCall(channel.id, currentUserId)}
                         >
                             <Deafen color={"var(--interactive-icon-active)"} />
                         </Button>

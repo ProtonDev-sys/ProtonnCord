@@ -14,12 +14,12 @@ import { classNameFactory } from "@utils/css";
 import definePlugin from "@utils/types";
 import { CloudUpload } from "@vencord/discord-types";
 import { findByPropsLazy } from "@webpack";
-import { DraftType, FluxDispatcher, Menu, PermissionsBits, PermissionStore, React, showToast, Toasts, UploadAttachmentStore, useEffect, UserStore, useState } from "@webpack/common";
+import { DraftType, FluxDispatcher, Menu, PermissionsBits, PermissionStore, React, SelectedChannelStore, showToast, Toasts, UploadAttachmentStore, useEffect, UserStore, useState } from "@webpack/common";
 
 import { settings } from "./settings";
 import { serviceLabels, ServiceType } from "./types";
 import { getMediaUrl } from "./utils/getMediaUrl";
-import { cancelCurrentUpload, getUploadState, isConfigured, isFileTypeAllowed, logger, subscribeUploadState, uploadFile, uploadPickedFile, uploadProvidedFiles } from "./utils/upload";
+import { cancelCurrentUpload, getUploadState, isConfigured, isFileTypeAllowed, isUploadBusy, logger, stopUploads, subscribeUploadState, uploadFile, uploadPickedFile, uploadProvidedFiles } from "./utils/upload";
 const cl = classNameFactory("vc-file-upload-");
 const { getUserMaxFileSize } = findByPropsLazy("getUserMaxFileSize");
 let uploadAddFilesInterceptor: ((event: unknown) => void) | null = null;
@@ -75,16 +75,17 @@ function interceptUploadAddFiles(event: unknown): void {
 
     if (payload.draftType !== DraftType.ChannelMessage) return;
 
-    if (!settings.store.bypassDiscordUpload || !isConfigured()) return;
+    if (!settings.store.bypassDiscordUpload || !isConfigured() || isUploadBusy()) return;
 
     const files = [
         ...extractFilesFromValue(payload.files),
         ...extractFilesFromValue(payload.uploads),
         ...extractFilesFromValue(payload.items)
     ];
-    const uniqueFiles = Array.from(new Set(files)).filter(f => isFileTypeAllowed(f));
+    const uniqueFiles = Array.from(new Set(files));
 
     if (!uniqueFiles.length) return;
+    if (!uniqueFiles.every(isFileTypeAllowed)) return;
     if (!shouldInterceptUploadFiles(uniqueFiles, payload)) return;
 
     payload.files = [];
@@ -94,13 +95,14 @@ function interceptUploadAddFiles(event: unknown): void {
 }
 
 function handlePaste(event: ClipboardEvent) {
+    if (!(event.target instanceof Element) || !event.target.closest("[data-slate-editor]")) return;
     const files = Array.from(event.clipboardData?.files || []);
     if (files.length === 0) return;
 
-    if (!settings.store.autoUploadPastedFiles || !isConfigured()) return;
+    if (!settings.store.autoUploadPastedFiles || !isConfigured() || isUploadBusy()) return;
 
     const allowed = files.filter(f => isFileTypeAllowed(f));
-    if (allowed.length === 0) return;
+    if (allowed.length !== files.length) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -228,7 +230,9 @@ const imageContextMenuPatch: NavContextMenuPatchCallback = (children, props) => 
     );
 };
 
-async function handleUploadFileFromDraft(upload: CloudUpload) {
+async function handleUploadFileFromDraft(upload: CloudUpload, channelId: string) {
+    const accountId = UserStore.getCurrentUser()?.id;
+    if (SelectedChannelStore.getChannelId() !== channelId) return;
     const file = upload.item?.file;
     if (!file) return;
 
@@ -243,8 +247,9 @@ async function handleUploadFileFromDraft(upload: CloudUpload) {
     }
 
     try {
-        await uploadProvidedFiles([file], true);
-        upload.removeFromMsgDraft();
+        const succeeded = await uploadProvidedFiles([file], true);
+        if (succeeded && UserStore.getCurrentUser()?.id === accountId && SelectedChannelStore.getChannelId() === channelId)
+            upload.removeFromMsgDraft();
     } catch (e) {
         logger.warn("Draft upload encountered an unexpected error", e);
     }
@@ -278,7 +283,7 @@ const channelAttachMenuPatch: NavContextMenuPatchCallback = (children, props) =>
                         id={`file-upload-draft-${upload.id}`}
                         key={upload.id}
                         label={upload.filename}
-                        action={() => handleUploadFileFromDraft(upload)}
+                        action={() => handleUploadFileFromDraft(upload, channel.id)}
                     />
                 ))}
                 <Menu.MenuSeparator />
@@ -347,16 +352,12 @@ export default definePlugin({
         document.addEventListener("paste", pasteEventListener, true);
     },
     stop() {
-        if (!uploadAddFilesInterceptor) {
-            return;
+        stopUploads();
+        if (uploadAddFilesInterceptor) {
+            const index = FluxDispatcher._interceptors.indexOf(uploadAddFilesInterceptor);
+            if (index > -1) FluxDispatcher._interceptors.splice(index, 1);
+            uploadAddFilesInterceptor = null;
         }
-
-        const index = FluxDispatcher._interceptors.indexOf(uploadAddFilesInterceptor);
-        if (index > -1) {
-            FluxDispatcher._interceptors.splice(index, 1);
-        }
-
-        uploadAddFilesInterceptor = null;
 
         if (pasteEventListener) {
             document.removeEventListener("paste", pasteEventListener, true);

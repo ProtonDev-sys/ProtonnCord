@@ -26,6 +26,7 @@ const settings = definePluginSettings({
         default: 0,
         type: OptionType.NUMBER,
         restartNeeded: true,
+        isValid: value => typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
     },
 });
 
@@ -63,5 +64,5 @@ export default definePlugin({
             ]
         },
     ],
-    getMaxAccounts() { return settings.store.maxAccounts === 0 ? Infinity : settings.store.maxAccounts; },
+    getMaxAccounts() { return Number.isSafeInteger(settings.store.maxAccounts) && settings.store.maxAccounts > 0 ? settings.store.maxAccounts : Infinity; },
 });

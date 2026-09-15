@@ -302,11 +302,10 @@ export const settings = definePluginSettings({
         hidden: true,
     },
     nd_albumArtMode: {
-        description: "How to fetch album art.",
+        description: "How to fetch album art. Navidrome-hosted art is intentionally unavailable because sending its authenticated URL to Discord would disclose reusable server credentials.",
         type: OptionType.SELECT,
         options: [
             { label: "None", value: "none", default: true },
-            { label: "Navidrome Instance (Exposes Server URL to Discord, no auth sent)", value: "instance" },
             { label: "Last.fm API (Sends track metadata to Last.fm)", value: "lastfm" },
         ],
         hidden: true,

@@ -9,6 +9,7 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { settings } from "@equicordplugins/channelTabs/util";
+import { getKeybindString } from "@equicordplugins/channelTabs/util/keybinds";
 import { IS_MAC } from "@utils/constants";
 import { Button, React, Text, useEffect, useRef, useState } from "@webpack/common";
 import { JSX } from "react";
@@ -57,25 +58,7 @@ function KeybindInput({ label, description, settingKey, enabledKey }: KeybindInp
                 return;
             }
 
-            // Build keybind string
-            const keys: string[] = [];
-            if (IS_MAC && event.ctrlKey) {
-                if (event.ctrlKey) keys.push("CONTROL");
-                if (event.metaKey) keys.push("CTRL");
-            } else if (event.ctrlKey) {
-                keys.push("CTRL");
-            }
-            if (event.shiftKey) keys.push("SHIFT");
-            if (event.altKey) keys.push("ALT");
-
-            // Normalize the key name
-            let mainKey = event.key.toUpperCase();
-            if (mainKey === " ") mainKey = "SPACE";
-            if (mainKey === "ESCAPE") mainKey = "ESC";
-
-            keys.push(mainKey);
-
-            const keybindString = keys.join("+");
+            const keybindString = getKeybindString(event, IS_MAC);
 
             // Check for conflicts with other keybinds
             const allKeybinds = {
@@ -187,8 +170,7 @@ function formatKeybind(keybind: string): string {
     }
 
     // for other shortcuts, replace CTRL with CMD symbol on Mac
-    return keybind.replace("CTRL", "⌘");
-    // this is such a bad way to do this but i dont know man
+    return keybind.replace("CONTROL", "⌃").replace("CTRL", "⌘").replace("META", "⌘");
 }
 
 export function KeybindSettings(): JSX.Element {

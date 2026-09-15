@@ -24,6 +24,7 @@ import { addMessage } from "./LoggedMessageManager";
 import { settings } from "./settings";
 import { FetchMessagesResponse, LoadMessagePayload, LoggedMessage, LoggedMessageJSON, MessageCreatePayload, MessageDeleteBulkPayload, MessageDeletePayload, MessageUpdatePayload } from "./types";
 import { cleanUpCachedMessage, cleanupUserObject, getNative, isGhostPinged, mapTimestamp, messageJsonToMessageClass, reAddDeletedMessages } from "./utils";
+import { DEFAULT_ATTACHMENT_SIZE_LIMIT_MEGABYTES, MAX_ATTACHMENT_SIZE_LIMIT_MEGABYTES } from "./utils/constants";
 import { removeContextMenuBindings, setupContextMenuPatches } from "./utils/contextMenu";
 import { hasWhitelistedId, shouldIgnore } from "./utils/index";
 import { LimitedMap } from "./utils/LimitedMap";
@@ -47,6 +48,15 @@ export async function clearLogs(showToast = true) {
 }
 
 let oldGetMessage: typeof MessageStore.getMessage;
+let installedGetMessage: typeof MessageStore.getMessage | undefined;
+let startGeneration = 0;
+
+function clearRuntimeCaches() {
+    cacheSentMessages.clear();
+    idb.cachedMessages.clear();
+    messageJsonToMessageClass.clear();
+    imageUtils.clearAttachmentBlobUrlCache();
+}
 
 const handledMessageIds = new Set();
 async function messageDeleteHandler(payload: MessageDeletePayload & { isBulk: boolean; }) {
@@ -192,12 +202,12 @@ function messageCreateHandler(payload: MessageCreatePayload) {
 async function processMessageFetch(response: FetchMessagesResponse) {
     try {
         if (!response.ok) {
-            Flogger.error("Failed to fetch messages", response);
+            Flogger.error("Failed to fetch messages", response.status);
             return;
         }
 
         if (!Array.isArray(response.body)) {
-            Flogger.error("Failed to fetch messages: response body is not an array", response);
+            Flogger.error("Failed to fetch messages: response body is not an array");
             return;
         }
 
@@ -371,6 +381,8 @@ export default definePlugin({
     },
 
     flux: {
+        "CONNECTION_OPEN": clearRuntimeCaches,
+        "LOGOUT": clearRuntimeCaches,
         "MESSAGE_DELETE": messageDeleteHandler as any,
         "MESSAGE_DELETE_BULK": messageDeleteBulkHandler,
         "MESSAGE_UPDATE": messageUpdateHandler,
@@ -378,28 +390,46 @@ export default definePlugin({
     },
 
     async start() {
+        if (installedGetMessage) return;
+        const generation = ++startGeneration;
         this.oldGetMessage = oldGetMessage = MessageStore.getMessage;
+        const original = oldGetMessage;
 
         // we have to do this because the original message logger fetches the message from the store now
-        MessageStore.getMessage = (channelId: string, messageId: string) => {
+        MessageStore.getMessage = installedGetMessage = (channelId: string, messageId: string) => {
             const MLMessage = idb.cachedMessages.get(messageId);
-            if (!MLMessage)
-                return this.oldGetMessage(channelId, messageId);
+            if (generation !== startGeneration || !MLMessage || MLMessage.channel_id !== channelId)
+                return original.call(MessageStore, channelId, messageId);
 
             if (MLMessage.deleted)
                 return messageJsonToMessageClass({ message: MLMessage });
 
             // update the edited message with the latest data
-            const latestMessage = this.oldGetMessage(channelId, messageId);
+            const latestMessage = original.call(MessageStore, channelId, messageId);
             return messageJsonToMessageClass({
                 message: {
                     ...MLMessage,
                     ...(latestMessage ?? {}),
+                    timestamp: latestMessage?.timestamp.toISOString() ?? MLMessage.timestamp,
                 }
             });
         };
 
-        Native.init();
+        const configuredAttachmentSizeLimit = settings.store.attachmentSizeLimitInMegabytes;
+        const safeAttachmentSizeLimit = Number.isSafeInteger(configuredAttachmentSizeLimit)
+            && configuredAttachmentSizeLimit >= 1
+            && configuredAttachmentSizeLimit <= MAX_ATTACHMENT_SIZE_LIMIT_MEGABYTES
+            ? configuredAttachmentSizeLimit
+            : DEFAULT_ATTACHMENT_SIZE_LIMIT_MEGABYTES;
+        let attachmentSizeLimitInMegabytes = safeAttachmentSizeLimit;
+        try {
+            attachmentSizeLimitInMegabytes = await Native.updateAttachmentSizeLimit(safeAttachmentSizeLimit);
+        } catch (e) {
+            Flogger.error("Failed to sync attachment size limit natively", e);
+        }
+        if (generation !== startGeneration) return;
+        await Native.init();
+        if (generation !== startGeneration) return;
 
         if (settings.store.clearLogsOnRestart && !didClearLogsOnStartup) {
             try {
@@ -409,18 +439,23 @@ export default definePlugin({
                 Flogger.error("Failed to clear logs on restart", e);
             }
         }
+        if (generation !== startGeneration) return;
 
-        const { imageCacheDir, logsDir, attachmentFileExtensions } = await Native.getSettings();
+        const { imageCacheDir, logsDir, attachmentFileExtensions } = await Native.getSettingsNative();
+        if (generation !== startGeneration) return;
         settings.store.imageCacheDir = imageCacheDir;
         settings.store.logsDir = logsDir;
         settings.store.attachmentFileExtensions = attachmentFileExtensions ?? "none";
+        settings.store.attachmentSizeLimitInMegabytes = attachmentSizeLimitInMegabytes;
 
         setupContextMenuPatches();
     },
 
     stop() {
+        startGeneration++;
         removeContextMenuBindings();
-        MessageStore.getMessage = this.oldGetMessage;
-        imageUtils.clearAttachmentBlobUrlCache();
+        if (installedGetMessage && MessageStore.getMessage === installedGetMessage) MessageStore.getMessage = oldGetMessage;
+        installedGetMessage = undefined;
+        clearRuntimeCaches();
     }
 });

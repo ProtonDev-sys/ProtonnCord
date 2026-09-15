@@ -12,13 +12,13 @@ import { Devs } from "@utils/constants";
 import { classes } from "@utils/misc";
 import definePlugin, { OptionType, StartAt } from "@utils/types";
 import { Channel } from "@vencord/discord-types";
-import { findCssClassesLazy, findStoreLazy } from "@webpack";
+import { findCssClassesLazy } from "@webpack";
 import { Clickable, ContextMenuApi, FluxDispatcher, Menu, React } from "@webpack/common";
 
 import { contextMenus } from "./components/contextMenu";
 import { openCategoryModal, requireSettingsModal } from "./components/CreateCategoryModal";
 import { DEFAULT_CHUNK_SIZE } from "./constants";
-import { canMoveCategory, canMoveCategoryInDirection, Category, categoryLen, collapseCategory, getAllUncollapsedChannels, getCategoryByIndex, getCategoryChannels, getSections, init, isPinned, moveCategory, removeCategory, usePinnedDms } from "./data";
+import { canMoveCategory, canMoveCategoryInDirection, Category, categoryLen, collapseCategory, getAllUncollapsedChannels, getCategoryByIndex, getCategoryChannels, getSections, init, isPinned, moveCategory, removeCategory, reset, usePinnedDms } from "./data";
 
 interface ChannelComponentProps {
     children: React.ReactNode,
@@ -27,8 +27,6 @@ interface ChannelComponentProps {
 }
 
 const headerClasses = findCssClassesLazy("privateChannelsHeaderContainer", "headerText");
-
-export const PrivateChannelSortStore = findStoreLazy("PrivateChannelSortStore") as { getPrivateChannelIds: () => string[]; };
 
 export let instance: any;
 
@@ -167,8 +165,14 @@ export default definePlugin({
 
     startAt: StartAt.WebpackReady,
     start: init,
+    stop() {
+        reset();
+        this._instance = undefined;
+        this.sections = null;
+    },
     flux: {
         CONNECTION_OPEN: init,
+        LOGOUT: reset,
     },
 
     usePinnedDms,
@@ -180,7 +184,7 @@ export default definePlugin({
 
     makeProps(instance, { sections }: { sections: number[]; }) {
         this._instance = instance;
-        this.sections = sections;
+        this.sections = [...sections];
 
         this.sections.splice(1, 0, ...this.getSections());
 

@@ -31,7 +31,7 @@ import { classNameFactory } from "@utils/index";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { Message } from "@vencord/discord-types";
-import { React, Select, TextInput, UserStore, useState } from "@webpack/common";
+import { React, Select, TextInput, useEffect, UserStore, useState } from "@webpack/common";
 
 const cl = classNameFactory("vc-textReplace-");
 
@@ -136,6 +136,7 @@ function Input({ initialValue, onChange, placeholder }: {
     onChange(value: string): void;
 }) {
     const [value, setValue] = useState(initialValue);
+    useEffect(() => setValue(initialValue), [initialValue]);
     return (
         <TextInput
             placeholder={placeholder}
@@ -163,17 +164,20 @@ function TextRow({ label, description, value, onChange }: { label: string; descr
 }
 
 const isEmptyRule = (rule: Rule) => !rule.find;
+const isRule = (rule: unknown): rule is Rule => Boolean(rule && typeof rule === "object" && typeof (rule as Rule).find === "string" && typeof (rule as Rule).replace === "string");
 
 function matchesRuleSearch(rule: Rule, query: string) {
     if (!query) return true;
 
     const normalizedQuery = query.trim().toLowerCase();
-    return [rule.name ?? "", rule.find, rule.replace, rule.onlyIfIncludes]
+    return [rule.name ?? "", rule.find, rule.replace, rule.onlyIfIncludes ?? ""]
+        .filter(value => typeof value === "string")
         .some(value => value.toLowerCase().includes(normalizedQuery));
 }
 
 function normalizeRule(rule: Rule) {
     rule.name ??= "";
+    rule.onlyIfIncludes ??= "";
     rule.scope ??= "myMessages";
     rule.id ??= crypto.randomUUID();
 }
@@ -182,11 +186,15 @@ function TextReplace({ title, description, rulesArray, isRegex = false }: TextRe
     const [searchQuery, setSearchQuery] = useState("");
     const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-    function onClickRemove(index: number) {
+    function onClickRemove(id: string) {
+        const index = rulesArray.findIndex(rule => rule?.id === id);
+        if (index < 0) return;
         rulesArray.splice(index, 1);
     }
 
-    function onChange(e: string, index: number, key: string) {
+    function onChange(e: string, id: string, key: string) {
+        const index = rulesArray.findIndex(rule => rule?.id === id);
+        if (index < 0) return;
         rulesArray[index][key] = e;
 
         // If a rule is empty after editing and is not the last rule, remove it
@@ -201,7 +209,10 @@ function TextReplace({ title, description, rulesArray, isRegex = false }: TextRe
         { label: "Apply to all messages", value: "allMessages" }
     ];
 
+    if (!Array.isArray(rulesArray)) return <Paragraph>The saved replacement rules are not a valid list.</Paragraph>;
+
     const filteredRules = rulesArray.reduce((acc: RuleWithIndex[], rule, index) => {
+        if (!isRule(rule)) return acc;
         if (matchesRuleSearch(rule, searchQuery)) {
             acc.push({ rule, index });
         }
@@ -247,32 +258,32 @@ function TextReplace({ title, description, rulesArray, isRegex = false }: TextRe
                                             label="Name"
                                             description="An optional name to help you identify this rule."
                                             value={rule.name ?? ""}
-                                            onChange={e => onChange(e, index, "name")}
+                                            onChange={e => onChange(e, rule.id, "name")}
                                         />
                                         <TextRow
                                             label="Find"
                                             description={isRegex ? "The regex pattern" : "The text to replace"}
                                             value={rule.find}
-                                            onChange={e => onChange(e, index, "find")}
+                                            onChange={e => onChange(e, rule.id, "find")}
                                         />
                                         <TextRow
                                             label="Replace"
                                             description="The text to replace the found text with"
                                             value={rule.replace}
-                                            onChange={e => onChange(e, index, "replace")}
+                                            onChange={e => onChange(e, rule.id, "replace")}
                                         />
                                         <TextRow
                                             label="Only if includes"
                                             description="Optionally, only apply this rule if the message includes this text."
                                             value={rule.onlyIfIncludes}
-                                            onChange={e => onChange(e, index, "onlyIfIncludes")}
+                                            onChange={e => onChange(e, rule.id, "onlyIfIncludes")}
                                         />
                                     </div>
                                     <div style={{ marginTop: "0.25em" }}>
                                         <Select
                                             options={scopeOptions}
                                             isSelected={e => e === rule.scope}
-                                            select={e => onChange(e, index, "scope")}
+                                            select={e => onChange(e, rule.id, "scope")}
                                             serialize={e => e}
                                         />
                                     </div>
@@ -280,7 +291,7 @@ function TextReplace({ title, description, rulesArray, isRegex = false }: TextRe
                                     <Button
                                         className={cl("delete-button")}
                                         variant="dangerPrimary"
-                                        onClick={() => onClickRemove(index)}
+                                        onClick={() => onClickRemove(rule.id)}
                                     >
                                         Delete Rule
                                     </Button>
@@ -313,7 +324,7 @@ function TextReplace({ title, description, rulesArray, isRegex = false }: TextRe
                         setSearchQuery("");
                         rulesArray.push(makeEmptyRule());
                     }}
-                    disabled={rulesArray.length > 0 && isEmptyRule(rulesArray[rulesArray.length - 1])}
+                    disabled={rulesArray.length > 0 && isRule(rulesArray[rulesArray.length - 1]) && isEmptyRule(rulesArray[rulesArray.length - 1])}
                 >
                     Add Rule
                 </Button>
@@ -341,7 +352,8 @@ function applyRules(content: string, scope: "myMessages" | "othersMessages" | "a
         return content;
     }
 
-    for (const rule of settings.store.stringRules) {
+    for (const rule of Array.isArray(settings.store.stringRules) ? settings.store.stringRules : []) {
+        if (!isRule(rule)) continue;
         if (!rule.find) continue;
         if (rule.onlyIfIncludes && !content.includes(rule.onlyIfIncludes)) continue;
         if (rule.scope !== "allMessages" && rule.scope !== scope && scope !== "allMessages") continue;
@@ -349,7 +361,8 @@ function applyRules(content: string, scope: "myMessages" | "othersMessages" | "a
         content = ` ${content} `.replaceAll(rule.find, rule.replace.replaceAll("\\n", "\n")).replace(/^\s|\s$/g, "");
     }
 
-    for (const rule of settings.store.regexRules) {
+    for (const rule of Array.isArray(settings.store.regexRules) ? settings.store.regexRules : []) {
+        if (!isRule(rule)) continue;
         if (!rule.find) continue;
         if (rule.onlyIfIncludes && !content.includes(rule.onlyIfIncludes)) continue;
         if (rule.scope !== "allMessages" && rule.scope !== scope && scope !== "allMessages") continue;
@@ -406,8 +419,8 @@ export default definePlugin({
     start() {
         const { stringRules, regexRules } = settings.store;
 
-        stringRules.forEach(normalizeRule);
-        regexRules.forEach(normalizeRule);
+        if (Array.isArray(stringRules)) stringRules.filter(isRule).forEach(normalizeRule);
+        if (Array.isArray(regexRules)) regexRules.filter(isRule).forEach(normalizeRule);
     },
 
     onBeforeMessageSend(channelId, msg) {

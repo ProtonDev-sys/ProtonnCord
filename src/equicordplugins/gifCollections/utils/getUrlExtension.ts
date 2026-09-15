@@ -5,6 +5,10 @@
  */
 
 export function getUrlExtension(url: string) {
-    if (!url.startsWith("https:")) url = "https:" + url;
-    return new URL(url).pathname.split(".").pop();
+    try {
+        const parsed = new URL(url.startsWith("//") ? `https:${url}` : url);
+        return parsed.pathname.match(/\.([^./]+)$/)?.[1].toLowerCase();
+    } catch {
+        return undefined;
+    }
 }

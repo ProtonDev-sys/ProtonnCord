@@ -97,7 +97,7 @@ async function fetchMediaData(): Promise<JfMediaData | null> {
             url: `${baseUrl}/web/#!/details?id=${item.Id}`,
             imageUrl,
             duration: item.RunTimeTicks ? Math.floor(item.RunTimeTicks / 10000000) : undefined,
-            position: playState?.PositionTicks ? Math.floor(playState.PositionTicks / 10000000) : undefined,
+            position: playState?.PositionTicks != null ? Math.floor(playState.PositionTicks / 10000000) : undefined,
             isPaused: !!playState?.IsPaused,
         };
     } catch (e) {
@@ -164,10 +164,12 @@ async function getActivity(): Promise<Activity | null> {
             break;
     }
 
+    if (store.jf_privacyMode) appName = "Jellyfin";
+
     const assets = {
         large_image: !store.jf_privacyMode && mediaData.imageUrl
             ? await getAsset(mediaData.imageUrl) : undefined,
-        large_text: mediaData.seriesName || mediaData.album || undefined,
+        large_text: !store.jf_privacyMode ? mediaData.seriesName || mediaData.album || undefined : undefined,
     };
 
     const getDetails = () => {
@@ -181,6 +183,7 @@ async function getActivity(): Promise<Activity | null> {
     };
 
     const getState = () => {
+        if (store.jf_privacyMode) return mediaData.isPaused ? "Paused" : mediaData.type === "Audio" ? "Listening to music" : "Watching Something";
         let state: string | undefined;
 
         if (mediaData.type === "Episode" && mediaData.seriesName) {

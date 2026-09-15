@@ -68,7 +68,8 @@ const settings = definePluginSettings({
         type: OptionType.SLIDER,
         description: "Intensity of message coloring.",
         markers: makeRange(0, 100, 10),
-        default: 30
+        default: 30,
+        isValid: value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
     }
 });
 
@@ -198,13 +199,14 @@ export default definePlugin({
     useMessageColorsStyle(message: any) {
         try {
             const { messageSaturation } = settings.use(["messageSaturation"]);
+            const saturation = Number.isFinite(messageSaturation) && messageSaturation >= 0 && messageSaturation <= 100 ? messageSaturation : 30;
             const author = useMessageAuthor(message);
 
             // Do not apply role color if the send fails, otherwise it becomes indistinguishable
             if (message.state === "SEND_FAILED") return;
 
-            if (author.colorString != null && messageSaturation !== 0) {
-                const value = `color-mix(in oklab, ${author.colorString} ${messageSaturation}%, var({DEFAULT}))`;
+            if (author.colorString != null && saturation !== 0) {
+                const value = `color-mix(in oklab, ${author.colorString} ${saturation}%, var({DEFAULT}))`;
 
                 return {
                     color: value.replace("{DEFAULT}", "--text-default"),

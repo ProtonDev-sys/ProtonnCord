@@ -10,7 +10,7 @@ import definePlugin from "@utils/types";
 
 import { cl, SafeZipPreviewInline } from "./components";
 import managedStyle from "./style.css?managed";
-import { clearZipPreviewCache, getAttachmentFileName, isZipFile, ZipPreviewAttachmentProps } from "./utils";
+import { clearZipPreviewCache, getAttachmentFileName, getAttachmentUrl, isZipFile, ZipPreviewAttachmentProps } from "./utils";
 
 export default definePlugin({
     name: "ZipPreview",
@@ -32,9 +32,11 @@ export default definePlugin({
     stop() {
         clearZipPreviewCache();
     },
+    flux: { CONNECTION_OPEN: clearZipPreviewCache },
 
     renderZipPreview(props: ZipPreviewAttachmentProps) {
         if (!isZipFile(getAttachmentFileName(props))) return null;
+        if (/^blob:[^#]+#pc-secure-deferred=/u.test(getAttachmentUrl(props) ?? "")) return null;
         return <SafeZipPreviewInline {...props} />;
     },
 

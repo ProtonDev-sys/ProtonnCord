@@ -87,7 +87,7 @@ export async function deleteImage(attachmentId: string): Promise<void> {
 
 async function downloadAttachmentWeb(attachemnt: LoggedAttachment, attempts = 0) {
     if (!attachemnt?.url || !attachemnt?.id || !attachemnt?.fileExtension) {
-        Flogger.error("Invalid attachment", attachemnt);
+        Flogger.error("Invalid attachment");
         return;
     }
 

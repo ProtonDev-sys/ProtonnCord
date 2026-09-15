@@ -7,6 +7,7 @@
 import { definePluginSettings } from "@api/Settings";
 import { Paragraph } from "@components/Paragraph";
 import { Devs, IS_MAC } from "@utils/constants";
+import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType, PluginNative, ReporterTestable } from "@utils/types";
 import { Activity, ActivityAssets, ActivityButton } from "@vencord/discord-types";
 import { ActivityFlags, ActivityStatusDisplayType, ActivityType } from "@vencord/discord-types/enums";
@@ -45,6 +46,9 @@ const enum LinkType {
 const applicationId = "1239490006054207550";
 
 let updateInterval: NodeJS.Timeout | undefined;
+let updateGeneration = 0;
+let pendingUpdate: Promise<void> | undefined;
+const logger = new Logger("AppleMusicRichPresence");
 
 function setActivity(activity: Activity | null) {
     FluxDispatcher.dispatch({
@@ -181,10 +185,7 @@ const settings = definePluginSettings({
 });
 
 function customFormat(formatStr: string, data: TrackData) {
-    return formatStr
-        .replaceAll("{name}", data.name)
-        .replaceAll("{album}", data.album ?? "")
-        .replaceAll("{artist}", data.artist ?? "");
+    return formatStr.replace(/\{(name|album|artist)\}/g, (_, key: "name" | "album" | "artist") => data[key] ?? "");
 }
 
 function getLink(type: LinkType, data: TrackData) {
@@ -196,13 +197,17 @@ function getLink(type: LinkType, data: TrackData) {
 }
 
 function getImageAsset(type: AssetImageType, data: TrackData) {
+    if (type === AssetImageType.Disabled) return undefined;
     const source = type === AssetImageType.Album
         ? data.albumArtwork
         : data.artistArtwork;
 
     if (!source) return undefined;
 
-    return ApplicationAssetUtils.fetchAssetIds(applicationId, [source]).then(ids => ids[0]);
+    return ApplicationAssetUtils.fetchAssetIds(applicationId, [source]).then(ids => ids[0]).catch(error => {
+        logger.warn("Failed to load activity artwork", error);
+        return undefined;
+    });
 }
 
 export default definePlugin({
@@ -225,23 +230,40 @@ export default definePlugin({
     settings,
 
     start() {
+        updateGeneration++;
+        pendingUpdate = undefined;
+        clearInterval(updateInterval);
+        const interval = settings.store.refreshInterval;
+        updateInterval = setInterval(() => { this.updatePresence(); }, (typeof interval === "number" && interval >= 1 && interval <= 15 ? interval : 5) * 1000);
         this.updatePresence();
-        updateInterval = setInterval(() => { this.updatePresence(); }, settings.store.refreshInterval * 1000);
     },
 
     stop() {
+        updateGeneration++;
+        pendingUpdate = undefined;
         clearInterval(updateInterval);
         updateInterval = undefined;
-        FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity: null });
+        setActivity(null);
     },
 
     updatePresence() {
-        this.getActivity().then(activity => { setActivity(activity); });
+        if (pendingUpdate) return pendingUpdate;
+        const generation = updateGeneration;
+        pendingUpdate = this.getActivity().then(activity => {
+            if (generation === updateGeneration) setActivity(activity);
+        }).catch(error => {
+            logger.error("Failed to update activity", error);
+            if (generation === updateGeneration) setActivity(null);
+        }).finally(() => {
+            if (generation === updateGeneration) pendingUpdate = undefined;
+        });
+        return pendingUpdate;
     },
 
     async getActivity(): Promise<Activity | null> {
         const trackData = await Native.fetchTrackData();
         if (!trackData) return null;
+        const { playerPosition, duration } = trackData;
 
         const [largeImageAsset, smallImageAsset] = await Promise.all([
             getImageAsset(settings.store.largeImageType, trackData),
@@ -250,7 +272,8 @@ export default definePlugin({
 
         const assets: ActivityAssets = {};
 
-        const isRadio = Number.isNaN(trackData.duration) && (trackData.playerPosition === 0);
+        const isRadio = Number.isNaN(duration) && playerPosition === 0;
+        const now = Date.now();
 
         if (settings.store.largeImageType !== AssetImageType.Disabled) {
             assets.large_image = largeImageAsset;
@@ -289,9 +312,10 @@ export default definePlugin({
             details_url: getLink(settings.store.detailsLink, trackData),
             state_url: getLink(settings.store.stateLink, trackData),
 
-            timestamps: (trackData.playerPosition && trackData.duration && settings.store.enableTimestamps) ? {
-                start: Date.now() - (trackData.playerPosition * 1000),
-                end: Date.now() - (trackData.playerPosition * 1000) + (trackData.duration * 1000),
+            timestamps: (settings.store.enableTimestamps && playerPosition != null && Number.isFinite(playerPosition)
+                && playerPosition >= 0 && duration != null && Number.isFinite(duration) && duration > 0) ? {
+                start: now - (playerPosition * 1000),
+                end: now - (playerPosition * 1000) + (duration * 1000),
             } : undefined,
 
             assets,

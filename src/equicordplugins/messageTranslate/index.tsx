@@ -14,10 +14,17 @@ import { ChannelStore, FluxDispatcher, MessageStore, Parser, UserStore } from "@
 
 import { getIgnoredChannels, getIgnoredGuilds, getIgnoredUsers, refreshIgnoredIdCaches, settings } from "./settings";
 import { MessageWithContent } from "./types";
-import { clearCache, getCached, hasFailed, isInProgress, translate } from "./utils/translate";
+import { clearAllTranslations, clearCache, getCached, hasFailed, isInProgress, translate } from "./utils/translate";
 
 const cl = classNameFactory("mt-");
 const translatedMessages = new Map<string, string>();
+let generation = 0;
+let running = false;
+
+function markTranslated(messageId: string, sourceLang: string) {
+    if (!translatedMessages.has(messageId) && translatedMessages.size >= 1000) translatedMessages.delete(translatedMessages.keys().next().value!);
+    translatedMessages.set(messageId, sourceLang);
+}
 
 function shouldTranslate(message: MessageWithContent): boolean {
     if (!message.content || typeof message.content !== "string") return false;
@@ -73,23 +80,23 @@ export default definePlugin({
     ],
 
     transformMessage(message: MessageWithContent): MessageWithContent {
-        if (!settings.store.autoTranslate || !shouldTranslate(message)) {
+        if (!message) return message;
+        if (!running || !settings.store.autoTranslate || !shouldTranslate(message)) {
             translatedMessages.delete(message.id);
             return message;
         }
 
-        const cached = getCached(message.id);
+        let cached = getCached(message.id);
+        if (cached && cached.original !== message.content && cached.translated !== message.content) {
+            clearCache(message.id);
+            cached = undefined;
+        }
         if (cached) {
             if (message.content === cached.translated) {
-                translatedMessages.set(message.id, cached.sourceLang);
+                markTranslated(message.id, cached.sourceLang);
                 return message;
             }
-            if (cached.original !== message.content) {
-                clearCache(message.id);
-                translatedMessages.delete(message.id);
-                return message;
-            }
-            translatedMessages.set(message.id, cached.sourceLang);
+            markTranslated(message.id, cached.sourceLang);
 
             return settings.store.showOriginal !== "trans-in-subtext"
                 ? Object.assign(Object.create(Object.getPrototypeOf(message)), message, {
@@ -99,9 +106,10 @@ export default definePlugin({
         }
 
         translatedMessages.delete(message.id);
-        if (!isInProgress(message.id)) {
+        if (!isInProgress(message.id, message.content)) {
+            const currentGeneration = generation;
             translate(message.id, message.content).then(result => {
-                if (result) triggerReRender(message);
+                if (result && currentGeneration === generation && running) triggerReRender(message);
             });
         }
 
@@ -149,10 +157,15 @@ export default definePlugin({
     },
 
     start() {
+        generation++;
+        running = true;
         refreshIgnoredIdCaches();
     },
 
     stop() {
+        generation++;
+        running = false;
         translatedMessages.clear();
+        clearAllTranslations();
     },
 });

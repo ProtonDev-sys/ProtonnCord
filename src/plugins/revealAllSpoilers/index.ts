@@ -50,7 +50,8 @@ export default definePlugin({
             ? document.querySelector(`div.${messagesWrapper}`)
             : (target as HTMLSpanElement).parentElement;
 
-        for (const spoiler of parent!.querySelectorAll(`span.${spoilerContent}.${hidden}`)) {
+        if (!parent) return;
+        for (const spoiler of parent.querySelectorAll(`span.${spoilerContent}.${hidden}`)) {
             (spoiler as HTMLSpanElement).click();
         }
     }

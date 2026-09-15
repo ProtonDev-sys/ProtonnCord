@@ -34,13 +34,13 @@ export type EnsureChunkHandlers = {
      * @param chunkId The chunk id
      * @param promises The promises array to add the loading promise to
      */
-    j: (this: EnsureChunkHandlers, chunkId: PropertyKey, promises: Promise<void[]>) => void;
+    j: (this: EnsureChunkHandlers, chunkId: PropertyKey, promises: Promise<void>[]) => void;
     /**
      * Ensures the css file for this chunk is loaded, or starts to load if it's not.
      * @param chunkId The chunk id
      * @param promises The promises array to add the loading promise to. This array will likely contain the promise of the js file too
      */
-    css: (this: EnsureChunkHandlers, chunkId: PropertyKey, promises: Promise<void[]>) => void;
+    css: (this: EnsureChunkHandlers, chunkId: PropertyKey, promises: Promise<void>[]) => void;
     /**
      * Trigger for prefetching next chunks. This is called after ensuring a chunk is loaded and internally looks up
      * a map to see if the chunk that just loaded has next chunks to prefetch.
@@ -50,7 +50,7 @@ export type EnsureChunkHandlers = {
      * @param chunkId The chunk id
      * @param promises The promises array of ensuring the chunk is loaded
      */
-    prefetch: (this: EnsureChunkHandlers, chunkId: PropertyKey, promises: Promise<void[]>) => void;
+    prefetch: (this: EnsureChunkHandlers, chunkId: PropertyKey, promises: Promise<void>[]) => void;
 };
 
 export type PrefetchChunkHandlers = {
@@ -170,8 +170,8 @@ export type WebpackRequire = ((moduleId: PropertyKey) => ModuleExports) & {
     g: typeof globalThis;
     /** Harmony module decorator. Decorates a module as an ES Module, and prevents Node.js "module.exports" from being set */
     hmd: (this: WebpackRequire, module: Module) => any;
-    /** Shorthand for Object.prototype.hasOwnProperty */
-    o: typeof Object.prototype.hasOwnProperty;
+    /** Shorthand for Object.prototype.hasOwnProperty.call(object, property) */
+    o: (object: any, property: PropertyKey) => boolean;
     /**
      * Function to load a script tag. "done" is called when the loading has finished or a timeout has occurred.
      * "done" will be attached to existing scripts loading if src === url or data-webpack === `${uniqueName}:${key}`,

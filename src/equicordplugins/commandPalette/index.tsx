@@ -7,11 +7,13 @@
 import "./style.css";
 
 import { EquicordDevs } from "@utils/constants";
+import { Logger } from "@utils/Logger";
 import definePlugin from "@utils/types";
 
 import { clearRegistry, getCommandById } from "./api/registry";
 import type { PaletteContext } from "./api/types";
 import { registerBuiltinCommands } from "./commands";
+import { loadCustomCommands } from "./commands/custom";
 import { DEFAULT_HOTKEY, settings } from "./settings";
 import { loadAliases } from "./state/aliases";
 import { loadFrecency, recordUse } from "./state/frecency";
@@ -28,6 +30,8 @@ const headlessCtx: PaletteContext = {
 };
 
 const MODIFIER_KEYS = ["meta", "ctrl", "shift", "alt"];
+const logger = new Logger("CommandPalette");
+let lifecycleGeneration = 0;
 
 function hasModifier(combo: string[]) {
     return combo.some(key => MODIFIER_KEYS.includes(key) && key !== "shift");
@@ -59,7 +63,10 @@ function handleGlobalKey(e: KeyboardEvent): boolean {
             openPalette(command.page());
         } else if (command.actions?.[0]) {
             recordUse(commandId);
-            void command.actions[0].run(headlessCtx);
+            const action = command.actions[0];
+            Promise.resolve()
+                .then(() => action.run(headlessCtx))
+                .catch(error => logger.error(`Command ${commandId} failed`, error));
         } else {
             continue;
         }
@@ -78,14 +85,17 @@ export default definePlugin({
     settings,
 
     async start() {
+        const generation = ++lifecycleGeneration;
+        await Promise.all([loadFrecency(), loadPins(), loadAliases(), loadHotkeys(), loadCustomCommands()]);
+        if (generation !== lifecycleGeneration) return;
+
+        registerBuiltinCommands();
         installKeyboardListeners();
         setGlobalKeyHandler(handleGlobalKey);
-
-        await Promise.all([loadFrecency(), loadPins(), loadAliases(), loadHotkeys()]);
-        await registerBuiltinCommands();
     },
 
     stop() {
+        lifecycleGeneration++;
         closePalette();
         removeKeyboardListeners();
         clearRegistry();

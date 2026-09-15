@@ -13,7 +13,7 @@ import { Native } from "@equicordplugins/songSpotlight.desktop/service";
 import { parsers } from "@song-spotlight/api/handlers";
 import { Song } from "@song-spotlight/api/structs";
 import { RenderModalProps } from "@vencord/discord-types";
-import { Clickable, closeModal, Modal, openModal, TextInput, useState } from "@webpack/common";
+import { Clickable, closeModal, Modal, openModal, TextInput, useEffect, useRef, useState } from "@webpack/common";
 
 interface AddSongModalProps {
     modalProps: RenderModalProps;
@@ -25,6 +25,8 @@ function AddSongModal({ modalProps, close, onAdd }: AddSongModalProps) {
     const [url, setURL] = useState("");
     const [error, setError] = useState<string>();
     const [pending, setPending] = useState(false);
+    const mounted = useRef(true);
+    useEffect(() => () => { mounted.current = false; }, []);
 
     return (
         <ErrorBoundary>
@@ -41,6 +43,7 @@ function AddSongModal({ modalProps, close, onAdd }: AddSongModalProps) {
                             setPending(true);
                             try {
                                 const parsed = await Native.parseLink(url);
+                                if (!mounted.current) return;
                                 if (!parsed) {
                                     setError("Invalid link");
                                     return setPending(false);
@@ -54,6 +57,7 @@ function AddSongModal({ modalProps, close, onAdd }: AddSongModalProps) {
 
                                 close();
                             } catch (error) {
+                                if (!mounted.current) return;
                                 logger.error("parseLink error", error);
 
                                 setError("Failed to parse link");
@@ -68,6 +72,8 @@ function AddSongModal({ modalProps, close, onAdd }: AddSongModalProps) {
                         Song Spotlight supports these services: <b>{parsers.map(x => x.label).join(", ")}</b>
                     </BaseText>
                     <TextInput
+                        value={url}
+                        disabled={pending}
                         placeholder="https://open.spotify.com/..."
                         error={error}
                         onChange={value => {
@@ -91,6 +97,8 @@ interface AddSongProps {
 }
 
 export default function AddSong({ onAdd }: AddSongProps) {
+    const addRef = useRef(onAdd);
+    addRef.current = onAdd;
     return (
         <Clickable
             onClick={() => {
@@ -98,7 +106,7 @@ export default function AddSong({ onAdd }: AddSongProps) {
                     <AddSongModal
                         modalProps={modalProps}
                         close={() => closeModal(key)}
-                        onAdd={onAdd}
+                        onAdd={song => addRef.current(song)}
                     />
                 ));
             }}

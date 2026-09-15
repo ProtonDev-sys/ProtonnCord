@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { DataStore } from "@api/index";
 import { Button } from "@components/Button";
 import { Flex } from "@components/Flex";
 import { FormSwitch } from "@components/FormSwitch";
@@ -14,9 +13,9 @@ import { Margins } from "@components/margins";
 import { Paragraph } from "@components/Paragraph";
 import { classes } from "@utils/misc";
 import { useForceUpdater } from "@utils/react";
-import { TextInput, useState } from "@webpack/common";
+import { TextInput } from "@webpack/common";
 
-import { addKeywordEntry, cl, KEYWORD_ENTRIES_KEY, keywordEntries, ListType, removeKeywordEntry } from "..";
+import { addKeywordEntry, cl, keywordEntries, ListType, persistKeywordEntries, removeKeywordEntry } from "..";
 import { Collapsible } from "./Collapsible";
 import { FormGenericLabel } from "./FormGenericLabel";
 import { ListedIds } from "./ListedIds";
@@ -24,11 +23,11 @@ import { ListPrioritySelector } from "./ListPrioritySelector";
 
 export function KeywordEntries() {
     const update = useForceUpdater();
-    const [values] = useState(keywordEntries);
+    const values = keywordEntries;
 
     async function updateStoreAndRender() {
-        await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
         update();
+        await persistKeywordEntries().catch(console.error);
     }
 
     async function setRegex(index: number, value: string) {
@@ -57,14 +56,13 @@ export function KeywordEntries() {
     }
 
     async function setIgnoreBots(index: number, value: boolean) {
-        keywordEntries[index].ignoreBots = value,
-            updateStoreAndRender();
+        keywordEntries[index].ignoreBots = value;
+        updateStoreAndRender();
     }
 
     const elements = keywordEntries.map((entry, i) => {
         return (
-            <>
-                <Collapsible title={`Keyword Entry ${i + 1}`}>
+                <Collapsible key={i} title={`Keyword Entry ${i + 1}`}>
                     <Flex flexDirection="row">
                         <div style={{ flexGrow: 1 }}>
                             <TextInput
@@ -101,8 +99,7 @@ export function KeywordEntries() {
                             <Heading tag="h5">Whitelist</Heading>
                         </div>
                         <Button onClick={() => {
-                            values[i].whitelist.push("");
-                            update();
+                            setWhitelist(i, [...values[i].whitelist, ""]);
                         }}>Add ID</Button>
                     </Flex>
                     {!!values[i].whitelist.length && <>
@@ -119,8 +116,7 @@ export function KeywordEntries() {
                             <Heading tag="h5">Blacklist</Heading>
                         </div>
                         <Button onClick={() => {
-                            values[i].blacklist.push("");
-                            update();
+                            setBlacklist(i, [...values[i].blacklist, ""]);
                         }}>Add ID</Button>
                     </Flex>
                     {!!values[i].blacklist.length && <>
@@ -147,7 +143,6 @@ export function KeywordEntries() {
                         <ListPrioritySelector listType={values[i].listPriority} setListPriority={e => setListPriority(i, e)} />
                     </FormGenericLabel>
                 </Collapsible>
-            </>
         );
     });
 

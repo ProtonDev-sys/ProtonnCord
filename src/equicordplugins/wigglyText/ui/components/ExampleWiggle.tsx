@@ -5,7 +5,7 @@
  */
 
 export default function ExampleWiggle({ wiggle, children }: { wiggle: "x" | "y" | "xy", children: string; }) {
-    return children.split("").map((x, i) => (
+    return [...children].map((x, i) => (
         <span key={i}>
             <span
                 className={`wiggle-inner wiggle-inner-${wiggle}`}

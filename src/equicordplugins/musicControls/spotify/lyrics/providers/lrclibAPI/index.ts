@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { LyricsData, Provider, type SyncedLyric } from "@equicordplugins/musicControls/spotify/lyrics/providers/types";
+import { parseSyncedLyrics } from "@equicordplugins/musicControls/parseSyncedLyrics";
+import { LyricsData, Provider } from "@equicordplugins/musicControls/spotify/lyrics/providers/types";
 import { Track } from "@equicordplugins/musicControls/spotify/SpotifyStore";
 
 const baseUrlLrclib = "https://lrclib.net/api/get";
@@ -21,17 +22,10 @@ interface LrcLibResponse {
     syncedLyrics: string | null;
 }
 
-function lyricTimeToSeconds(time: string) {
-    const separatorIndex = time.indexOf(":");
-    const minutes = Number(time.slice(1, separatorIndex));
-    const seconds = Number(time.slice(separatorIndex + 1, -1));
-    return minutes * 60 + seconds;
-}
-
 export async function getLyricsLrclib(track: Track): Promise<LyricsData | null> {
     const info = {
         track_name: track.name,
-        artist_name: track.artists[0].name,
+        artist_name: track.artists[0]?.name ?? "",
         album_name: track.album.name,
         duration: String(track.duration / 1000)
     };
@@ -39,6 +33,7 @@ export async function getLyricsLrclib(track: Track): Promise<LyricsData | null> 
     const params = new URLSearchParams(info);
     const url = `${baseUrlLrclib}?${params.toString()}`;
     const response = await fetch(url, {
+        signal: AbortSignal.timeout(15_000),
         headers: {
             "User-Agent": "SpotifyLyrics for ProtonnCord (https://github.com/Masterjoona/vc-spotifylyrics)"
         }
@@ -47,19 +42,9 @@ export async function getLyricsLrclib(track: Track): Promise<LyricsData | null> 
     if (!response.ok) return null;
 
     const data = await response.json() as LrcLibResponse;
-    if (!data.syncedLyrics) return null;
-
-    const lines: SyncedLyric[] = [];
-    for (const line of data.syncedLyrics.split("\n")) {
-        if (!line.trim()) continue;
-
-        const [lrcTime, text] = line.split("]");
-        const trimmedText = text.trim();
-        lines.push({
-            time: lyricTimeToSeconds(lrcTime),
-            text: (trimmedText === "" || trimmedText === "♪") ? null : trimmedText
-        });
-    }
+    if (typeof data?.syncedLyrics !== "string") return null;
+    const lines = parseSyncedLyrics(data.syncedLyrics);
+    if (!lines.length) return null;
 
     return {
         useLyric: Provider.Lrclib,

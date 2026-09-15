@@ -21,13 +21,26 @@ import { Devs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType, ReporterTestable } from "@utils/types";
 
-import { initWs, socket, stopWs } from "./initWs";
+import { isValidAuthSecret } from "./auth";
+import { initWs, stopWs } from "./initWs";
 export const PORT = 8485;
-export const CLIENT_VERSION: readonly [major: number, minor: number, patch: number] = [0, 1, 2];
+export const CLIENT_VERSION: readonly [major: number, minor: number, patch: number] = [0, 2, 0];
 
 export const logger = new Logger("DevCompanion");
 
 export const settings = definePluginSettings({
+    authSecret: {
+        description: "A cryptographically generated 32-byte secret, encoded as 64 lowercase hexadecimal characters and shared with an authenticated Dev Companion server. Empty disables all connections.",
+        type: OptionType.STRING,
+        default: "",
+        restartNeeded: true,
+        componentProps: {
+            type: "password"
+        },
+        isValid(value: string) {
+            return value === "" || isValidAuthSecret(value) || "Use a generated 32-byte secret encoded as exactly 64 lowercase hexadecimal characters.";
+        }
+    },
     notifyOnAutoConnect: {
         description: "Whether to notify when Dev Companion has automatically connected.",
         type: OptionType.BOOLEAN,
@@ -56,7 +69,6 @@ export default definePlugin({
 
     toolboxActions: {
         Reconnect() {
-            socket?.close(1000, "Reconnecting");
             initWs(true);
         }
     },
@@ -65,10 +77,6 @@ export default definePlugin({
         // if we're running the reporter, we need to initws in the reporter file to avoid a race condition
         if (!IS_DEV) throw new Error("This plugin requires dev mode to run, please build with pnpm build --dev");
         initWs();
-        window.reconnectDevtools = () => {
-            socket?.close(1000, "Reconnecting");
-            initWs(true);
-        };
     },
 
     stop: stopWs,

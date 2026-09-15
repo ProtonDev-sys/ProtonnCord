@@ -17,21 +17,33 @@
 */
 
 import { copyToClipboard } from "@utils/clipboard";
+import { Logger } from "@utils/Logger";
 import { React } from "@webpack/common";
 
 export function useCopyCooldown(cooldown: number) {
     const [copyCooldown, setCopyCooldown] = React.useState(false);
     const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const active = React.useRef(true);
 
-    React.useEffect(() => () => {
-        if (timeoutRef.current === undefined) return;
+    React.useEffect(() => {
+        active.current = true;
+        return () => {
+            active.current = false;
+            if (timeoutRef.current === undefined) return;
 
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = undefined;
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = undefined;
+        };
     }, []);
 
-    function copy(text: string) {
-        copyToClipboard(text);
+    async function copy(text: string) {
+        try {
+            await copyToClipboard(text);
+        } catch (error) {
+            new Logger("ShikiCodeblocks").error("Failed to copy code", error);
+            return;
+        }
+        if (!active.current) return;
         setCopyCooldown(true);
 
         if (timeoutRef.current !== undefined) clearTimeout(timeoutRef.current);

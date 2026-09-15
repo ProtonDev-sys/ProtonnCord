@@ -33,38 +33,56 @@ function parseHeaders(headers) {
     return result;
 }
 
-function blobTo(to, blob) {
-    if (to === "arrayBuffer" && blob.arrayBuffer) return blob.arrayBuffer();
-    return new Promise((resolve, reject) => {
-        var fileReader = new FileReader();
-        fileReader.onload = event => resolve(event.target.result);
-        if (to === "arrayBuffer") fileReader.readAsArrayBuffer(blob);
-        else if (to === "text") fileReader.readAsText(blob, "utf-8");
-        else reject("unknown to");
-    });
-}
-
 function GM_fetch(url, opt) {
     return new Promise((resolve, reject) => {
         // https://www.tampermonkey.net/documentation.php?ext=dhdg#GM_xmlhttpRequest
-        const options = opt || {};
+        const options = { ...opt };
+        const signal = options.signal;
+        delete options.signal;
+        let request;
+        let settled = false;
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            signal?.removeEventListener("abort", onAbort);
+            callback(value);
+        };
+        const onAbort = () => {
+            finish(reject, signal.reason ?? new DOMException("The request was aborted", "AbortError"));
+            try { request?.abort(); } catch { }
+        };
+        if (signal?.aborted) {
+            onAbort();
+            return;
+        }
+        signal?.addEventListener("abort", onAbort, { once: true });
         options.url = url;
         options.data = options.body;
         options.responseType = "blob";
         options.onload = resp => {
-            var blob = resp.response;
-            resp.blob = () => Promise.resolve(blob);
-            resp.arrayBuffer = () => blobTo("arrayBuffer", blob);
-            resp.text = () => blobTo("text", blob);
-            resp.json = async () => JSON.parse(await blobTo("text", blob));
-            resp.headers = parseHeaders(resp.responseHeaders);
-            resp.ok = resp.status >= 200 && resp.status < 300;
-            resolve(resp);
+            if (settled) return;
+            try {
+                var blob = resp.response;
+                resp.blob = () => Promise.resolve(blob);
+                resp.arrayBuffer = () => blob.arrayBuffer();
+                resp.text = () => blob.text();
+                resp.json = async () => JSON.parse(await blob.text());
+                resp.headers = parseHeaders(resp.responseHeaders);
+                resp.ok = resp.status >= 200 && resp.status < 300;
+                finish(resolve, resp);
+            } catch (error) {
+                finish(reject, error);
+            }
         };
-        options.ontimeout = () => reject("fetch timeout");
-        options.onerror = () => reject("fetch error");
-        options.onabort = () => reject("fetch abort");
-        GM_xmlhttpRequest(options);
+        options.ontimeout = () => finish(reject, "fetch timeout");
+        options.onerror = () => finish(reject, "fetch error");
+        options.onabort = () => finish(reject, "fetch abort");
+        try {
+            request = GM_xmlhttpRequest(options);
+            if (signal?.aborted) request?.abort();
+        } catch (error) {
+            finish(reject, error);
+        }
     });
 }
 export const fetch = GM_fetch;

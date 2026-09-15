@@ -1,0 +1,134 @@
+name: Mobile nightly
+on:
+    push:
+        branches: [nightly]
+    pull_request:
+        branches: [nightly]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: mobile-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+            - uses: pnpm/action-setup@v6
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: pnpm
+            - run: pnpm install --frozen-lockfile
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: 1.3.4
+            - uses: denoland/setup-deno@v2
+              with:
+                  deno-version: v2.7.4
+            - uses: actions/setup-java@v5
+              with:
+                  distribution: temurin
+                  java-version: |
+                      21
+                      25
+            - uses: android-actions/setup-android@v3
+            - run: sdkmanager 'platforms;android-36' 'platforms;android-37.0' 'build-tools;36.0.0'
+            - uses: gradle/actions/setup-gradle@v4
+            - name: Build pinned Revenge API
+              working-directory: mobile
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  mkdir -p .toolchain
+                  revision=$(node -p "require('./toolchain.json').revengeNativeRevision")
+                  git clone --filter=blob:none https://github.com/revenge-mod/revenge-xposed.git .toolchain/revenge-xposed
+                  git -C .toolchain/revenge-xposed checkout --detach "$revision"
+                  cd .toolchain/revenge-xposed
+                  bash gradlew :api:publishToMavenLocal --console=plain
+            - name: Test mobile against this desktop revision
+              working-directory: mobile
+              run: |
+                  bun install --frozen-lockfile
+                  bun run test
+                  bun run lint:types
+                  bun run lint
+            - name: Version and package mobile
+              working-directory: mobile
+              run: |
+                  node tools/prepare-release.mjs '0.2.${{ github.run_number }}.${{ github.run_attempt }}-nightly'
+                  bash gradlew :plugins:secure-messaging:testDebugUnitTest packageSecureMessaging --console=plain
+                  bun run generate-index --dist build/dist --base-url 'https://github.com/${{ github.repository }}/releases/download/mobile-build-${{ github.run_id }}-${{ github.run_attempt }}' --out build/dist/index.json
+            - name: Build pinned Revenge runtime
+              working-directory: mobile
+              env:
+                  REVENGE_DISCORD_SERVER_URL: https://discord.com/invite/ddcQf3s2Uq
+                  REVENGE_DEFAULT_PLUGIN_REPOSITORY_URL: https://github.com/ProtonDev-sys/ProtonnCord/releases/download/mobile-nightly
+              run: |
+                  set -euo pipefail
+                  revision=$(node -p "require('./toolchain.json').revengeRuntimeRevision")
+                  git clone --filter=blob:none https://github.com/revenge-mod/revenge-bundle-next.git .toolchain/revenge-bundle-next
+                  git -C .toolchain/revenge-bundle-next checkout --detach "$revision"
+                  export REVENGE_SOURCE_REPOSITORY_URL="https://github.com/revenge-mod/revenge-bundle-next/tree/$revision"
+                  export REVENGE_LICENSE_URL="https://raw.githubusercontent.com/revenge-mod/revenge-bundle-next/$revision/LICENSE"
+                  cd .toolchain/revenge-bundle-next
+                  deno install --frozen
+                  node ../../tools/link-runtime-workspaces.mjs "$PWD"
+                  deno run --unstable-bare-node-builtins --permission-set=build scripts/build.ts 2>&1 | tee ../runtime-build.log
+                  if grep -Eq 'UNRESOLVED_IMPORT|MISSING_GLOBAL_NAME' ../runtime-build.log; then
+                      echo 'Runtime dependencies were not bundled correctly.'
+                      exit 1
+                  fi
+                  cp dist/revenge.bundle ../../build/dist/revenge.bundle
+                  git archive --format=zip --output=../../build/dist/revenge-runtime-source.zip HEAD
+                  cp LICENSE ../../build/dist/REVENGE-LICENSE
+            - name: Record provenance and checksums
+              working-directory: mobile
+              run: |
+                  cp toolchain.json build/dist/toolchain.json
+                  printf '%s\n' '${{ github.sha }}' > build/dist/desktop-commit.txt
+                  cd build/dist
+                  sha256sum *.zip revenge.bundle > SHA256SUMS
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: protonncord-mobile
+                  path: mobile/build/dist/
+                  if-no-files-found: error
+
+    publish:
+        if: github.repository == 'ProtonDev-sys/ProtonnCord' && github.ref == 'refs/heads/nightly' && github.event_name != 'pull_request'
+        needs: build
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v7
+            - uses: actions/download-artifact@v4
+              with:
+                  name: protonncord-mobile
+                  path: dist
+            - name: Publish immutable build then update nightly index
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  tag='mobile-build-${{ github.run_id }}-${{ github.run_attempt }}'
+                  gh release create "$tag" dist/* --target "$GITHUB_SHA" --prerelease --title "Mobile nightly $GITHUB_SHA" --notes "Android Secure Messaging built and tested against desktop revision $GITHUB_SHA."
+                  runtime=$(node -p "require('./mobile/toolchain.json').runtimeRelease")
+                  if ! gh release view "$runtime" >/dev/null 2>&1; then
+                      gh release create "$runtime" dist/revenge.bundle dist/revenge-runtime-source.zip dist/REVENGE-LICENSE dist/toolchain.json --target "$GITHUB_SHA" --prerelease --title 'Pinned Revenge Next runtime for ProtonnCord Mobile' --notes 'Revenge runtime, corresponding upstream source, and license. Runtime updates are pinned separately from plugin updates.'
+                  fi
+                  git fetch --no-tags origin refs/heads/nightly
+                  if [[ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ]]; then
+                      echo 'A newer nightly commit exists; leaving its channel pointer intact.'
+                      exit 0
+                  fi
+                  if ! gh release view mobile-nightly >/dev/null 2>&1; then
+                      gh release create mobile-nightly --target "$GITHUB_SHA" --prerelease --title 'ProtonnCord Mobile nightly' --notes 'Add this release download root as a Revenge plugin repository. Each index points to immutable, checksummed build assets.'
+                  fi
+                  gh release upload mobile-nightly dist/index.json --clobber

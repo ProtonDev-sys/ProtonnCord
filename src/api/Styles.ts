@@ -19,6 +19,9 @@
 import { generateTextCss } from "@components/BaseText";
 import { generateMarginCss } from "@components/margins";
 import { classNameFactory as _classNameFactory, classNameToSelector, createAndAppendStyle } from "@utils/css";
+import { Logger } from "@utils/Logger";
+
+const logger = new Logger("Styles");
 
 // Backwards compat for Vesktop
 /** @deprecated Import this from `@utils/css` instead */
@@ -57,16 +60,24 @@ export function initStyles() {
     const vesktopCssNode = (IS_VESKTOP || IS_EQUIBOP) ? createAndAppendStyle("vesktop-css-core", coreStyleRootNode) : null;
     createAndAppendStyle("vencord-margins", coreStyleRootNode).textContent = generateMarginCss();
 
-    VencordNative.native.getRendererCss().then(css => rendererCssNode.textContent = css);
+    let rendererCssUpdated = false;
+    VencordNative.native.getRendererCss().then(css => {
+        if (!rendererCssUpdated) rendererCssNode.textContent = css;
+    }).catch(error => logger.error("Failed to load renderer CSS", error));
     if (IS_DEV) {
         VencordNative.native.onRendererCssUpdate(newCss => {
+            rendererCssUpdated = true;
             rendererCssNode.textContent = newCss;
         });
     }
 
     if (IS_VESKTOP && VesktopNative.app.getRendererCss || IS_EQUIBOP && VesktopNative.app.getRendererCss) {
-        VesktopNative.app.getRendererCss().then(css => vesktopCssNode!.textContent = css);
+        let hostCssUpdated = false;
+        VesktopNative.app.getRendererCss().then(css => {
+            if (!hostCssUpdated) vesktopCssNode!.textContent = css;
+        }).catch(error => logger.error("Failed to load host CSS", error));
         VesktopNative.app.onRendererCssUpdate(newCss => {
+            hostCssUpdated = true;
             vesktopCssNode!.textContent = newCss;
         });
     }
@@ -77,7 +88,7 @@ export function initStyles() {
             .map(([k, v]) => `--${k}: ${v};`)
             .join("");
         osValuesNode.textContent = `:root{${variables}}`;
-    });
+    }).catch(error => logger.error("Failed to load system theme values", error));
 }
 
 document.addEventListener("DOMContentLoaded", () => {

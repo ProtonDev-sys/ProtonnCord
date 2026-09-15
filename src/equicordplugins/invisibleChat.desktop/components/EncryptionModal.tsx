@@ -20,7 +20,7 @@ import { FormSwitch } from "@components/FormSwitch";
 import { Heading } from "@components/Heading";
 import { insertTextIntoChatInputBox } from "@utils/discord";
 import { RenderModalProps } from "@vencord/discord-types";
-import { Modal, openModal, React, TextInput } from "@webpack/common";
+import { Modal, openModal, React, showToast, TextInput, Toasts } from "@webpack/common";
 
 import { encrypt } from "../index";
 
@@ -34,13 +34,15 @@ function EncModal(props: RenderModalProps) {
 
     const onSend = () => {
         if (!isValid) return;
-        const encrypted = encrypt(secret, password, noCover ? "d d" : cover);
-        const toSend = noCover ? encrypted.replaceAll("d", "") : encrypted;
-        if (!toSend) return;
-
-        insertTextIntoChatInputBox(toSend);
-
-        props.onClose();
+        try {
+            const encrypted = encrypt(secret, password, noCover ? "d d" : cover);
+            const toSend = noCover ? encrypted.replaceAll("d", "") : encrypted;
+            if (!toSend) return;
+            insertTextIntoChatInputBox(toSend);
+            props.onClose();
+        } catch {
+            showToast("Could not prepare the encrypted message.", Toasts.Type.FAILURE);
+        }
     };
 
     return (
@@ -78,7 +80,8 @@ function EncModal(props: RenderModalProps) {
             <Heading style={{ marginTop: "10px" }}>Password</Heading>
             <TextInput
                 style={{ marginBottom: "20px" }}
-                defaultValue={"password"}
+                type="password"
+                value={password}
                 onChange={(e: string) => {
                     setPassword(e);
                 }}

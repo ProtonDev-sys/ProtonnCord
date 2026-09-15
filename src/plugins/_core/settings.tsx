@@ -5,10 +5,9 @@
  */
 
 import { definePluginSettings } from "@api/Settings";
-import { BackupRestoreIcon, CloudIcon, LogIcon, MainSettingsIcon, PaintbrushIcon, PatchHelperIcon, PluginsIcon, UpdaterIcon } from "@components/Icons";
+import { BackupRestoreIcon, CloudIcon, MainSettingsIcon, PaintbrushIcon, PatchHelperIcon, PluginsIcon, UpdaterIcon } from "@components/Icons";
 import {
     BackupAndRestoreTab,
-    ChangelogTab,
     CloudTab,
     PatchHelperTab,
     PluginsTab,
@@ -24,28 +23,6 @@ import { waitFor } from "@webpack";
 import { React } from "@webpack/common";
 import type { ComponentType, PropsWithChildren, ReactNode } from "react";
 
-const enum LayoutType {
-    ROOT = 0,
-    SECTION = 1,
-    SIDEBAR_ITEM = 2,
-    PANEL = 3,
-    SPLIT = 4,
-    CATEGORY = 5,
-    ACCORDION = 6,
-    LIST = 7,
-    RELATED = 8,
-    FIELD_SET = 9,
-    TAB_ITEM = 10,
-    STATIC = 11,
-    BUTTON = 12,
-    TOGGLE = 13,
-    SLIDER = 14,
-    SELECT = 15,
-    RADIO = 16,
-    NAVIGATOR = 17,
-    CUSTOM = 18
-}
-
 let LayoutTypes = {
     SECTION: 1,
     SIDEBAR_ITEM: 2,
@@ -54,12 +31,6 @@ let LayoutTypes = {
     CUSTOM: 19,
 };
 waitFor(["SECTION", "SIDEBAR_ITEM", "PANEL", "CUSTOM"], v => LayoutTypes = v);
-
-const enum SectionType {
-    HEADER = "HEADER",
-    DIVIDER = "DIVIDER",
-    CUSTOM = "CUSTOM"
-}
 
 type SettingsLocation =
     | "top"
@@ -70,23 +41,20 @@ type SettingsLocation =
     | "bottom";
 
 interface SettingsLayoutNode {
-    type: LayoutType;
+    type: number;
     key?: string;
-    legacySearchKey?: string;
-    getLegacySearchKey?(): string;
-    useLabel?(): string;
     useTitle?(): string;
     buildLayout?(): SettingsLayoutNode[];
     icon?(): ReactNode;
-    render?(): ReactNode;
-    StronglyDiscouragedCustomComponent?(): ReactNode;
+    Component?: ComponentType;
+    useSearchTerms?(): string[];
 }
 
 interface EntryOptions {
     key: string;
     title: string;
     panelTitle?: string;
-    Component: ComponentType<{}>;
+    Component: ComponentType;
     Icon: ComponentType<IconProps>;
 }
 
@@ -210,18 +178,12 @@ export default definePlugin({
                 Component: ThemesTab,
                 Icon: PaintbrushIcon
             }),
-            !IS_UPDATER_DISABLED && UpdaterTab && buildEntry({
+            buildEntry({
                 key: "equicord_updater",
-                title: "Updater",
-                panelTitle: "Protonn Cord Updater",
+                title: "Updates",
+                panelTitle: "Protonn Cord Updates",
                 Component: UpdaterTab,
                 Icon: UpdaterIcon
-            }),
-            buildEntry({
-                key: "equicord_changelog",
-                title: "Changelog",
-                Component: ChangelogTab,
-                Icon: LogIcon,
             }),
             buildEntry({
                 key: "equicord_cloud",
@@ -277,7 +239,6 @@ export default definePlugin({
         return layout;
     },
 
-    customSections: [] as ((SectionTypes: Record<string, string>) => { section: string; element: ComponentType; label: string; id?: string; })[],
     customEntries: [] as EntryOptions[],
 
     get electronVersion() {

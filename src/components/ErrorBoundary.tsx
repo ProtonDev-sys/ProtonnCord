@@ -72,7 +72,11 @@ const ErrorBoundary = LazyComponent(() => {
         }
 
         componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-            this.props.onError?.({ error, errorInfo, props: this.props.wrappedProps });
+            try {
+                this.props.onError?.({ error, errorInfo, props: this.props.wrappedProps });
+            } catch (callbackError) {
+                logger.error("Error boundary callback failed", callbackError);
+            }
             logger.error(`${this.props.message || "A component threw an Error"}\n`, error, errorInfo.componentStack);
         }
 

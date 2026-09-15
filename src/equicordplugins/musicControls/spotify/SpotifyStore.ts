@@ -17,7 +17,6 @@
 */
 
 import { isPluginEnabled } from "@api/PluginManager";
-import OpenInAppPlugin from "@plugins/openInApp";
 import { findByProps, findByPropsLazy, proxyLazyWebpack } from "@webpack";
 import { Flux, FluxDispatcher } from "@webpack/common";
 
@@ -92,11 +91,11 @@ export const SpotifyStore = proxyLazyWebpack(() => {
         public isSettingPosition = false;
 
         public openExternal(path: string) {
-            const url = settings.store.useSpotifyUris || isPluginEnabled(OpenInAppPlugin.name)
+            const url = settings.store.useSpotifyUris || isPluginEnabled("OpenInApp")
                 ? "spotify:" + path.replaceAll("/", (_, idx) => idx === 0 ? "" : ":")
                 : "https://open.spotify.com" + path;
 
-            VencordNative.native.openExternal(url);
+            void VencordNative.native.openExternal(url).catch(console.error);
         }
 
         // Need to keep track of this manually
@@ -114,20 +113,23 @@ export const SpotifyStore = proxyLazyWebpack(() => {
         }
 
         prev() {
-            this._req("post", "/previous");
+            void this._req("post", "/previous");
         }
 
         next() {
-            this._req("post", "/next");
+            void this._req("post", "/next");
         }
 
         setVolume(percent: number) {
+            if (!Number.isFinite(percent)) return;
+            percent = Math.max(0, Math.min(100, percent));
             this._req("put", "/volume", {
                 query: {
                     volume_percent: Math.round(percent)
                 }
 
-            }).then(() => {
+            }).then(success => {
+                if (!success) return;
                 this.volume = percent;
                 this.emitChange();
             });
@@ -146,36 +148,44 @@ export const SpotifyStore = proxyLazyWebpack(() => {
         setShuffle(state: boolean) {
             this._req("put", "/shuffle", {
                 query: { state }
-            }).then(() => {
+            }).then(success => {
+                if (!success) return;
                 this.shuffle = state;
                 this.emitChange();
             });
         }
 
         seek(ms: number) {
-            if (this.isSettingPosition) return Promise.resolve();
+            if (this.isSettingPosition || !Number.isFinite(ms)) return Promise.resolve();
 
             this.isSettingPosition = true;
 
             return this._req("put", "/seek", {
                 query: {
-                    position_ms: Math.round(ms)
+                    position_ms: Math.max(0, Math.round(ms))
                 }
-            }).catch((e: any) => {
-                console.error("[VencordSpotifyControls] Failed to seek", e);
+            }).finally(() => {
                 this.isSettingPosition = false;
+                this.emitChange();
             });
         }
 
-        _req(method: "post" | "get" | "put", route: string, data: any = {}) {
+        async _req(method: "post" | "get" | "put", route: string, data: any = {}): Promise<boolean> {
+            try {
             if (this.device?.is_active)
                 (data.query ??= {}).device_id = this.device.id;
 
-            const { socket } = SpotifySocket.getActiveSocketAndDevice();
-            return SpotifyAPI[method](socket.accountId, socket.accessToken, {
+            const { socket } = SpotifySocket.getActiveSocketAndDevice() ?? {};
+            if (!socket) return false;
+            await SpotifyAPI[method](socket.accountId, socket.accessToken, {
                 url: API_BASE + route,
                 ...data
             });
+            return true;
+            } catch (error) {
+                console.error("[MusicControls] Spotify request failed", error);
+                return false;
+            }
         }
     }
 

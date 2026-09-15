@@ -27,7 +27,7 @@ export * from "./commandHelpers";
 export * from "./types";
 
 export let BUILT_IN: VencordCommand[];
-export const commands = {} as Record<string, VencordCommand>;
+export const commands: Record<string, VencordCommand> = Object.create(null);
 
 // hack for plugins being evaluated before we can grab these from webpack
 const OptPlaceholder = Symbol("OptionalMessageOption") as any as CommandOption;
@@ -80,7 +80,7 @@ export const _handleCommand = function (cmd: VencordCommand, args: CommandArgume
 
     try {
         const res = cmd.execute(args, ctx);
-        return res instanceof Promise ? res.catch(handleError) : res;
+        return res != null && typeof (res as PromiseLike<unknown>).then === "function" ? Promise.resolve(res).catch(handleError) : res;
     } catch (err) {
         return handleError(err);
     }
@@ -116,7 +116,7 @@ function registerSubCommands(cmd: VencordCommand, plugin: string) {
         const subCmd = {
             ...cmd,
             ...o,
-            options: o.options !== undefined ? o.options : undefined,
+            options: o.options,
             type: ApplicationCommandType.CHAT_INPUT,
             id: `${o.name}-${cmd.id}`,
             name: getSubCommandName(cmd, o),
@@ -150,7 +150,7 @@ export function registerCommand<C extends VencordCommand>(command: C, plugin: st
         return;
     }
 
-    if (BUILT_IN.some(c => c.name === command.name))
+    if (commands[command.name] || BUILT_IN.some(c => c.name === command.name))
         throw new Error(`Command '${command.name}' already exists.`);
 
     command.isVencordCommand = true;
@@ -166,16 +166,22 @@ export function registerCommand<C extends VencordCommand>(command: C, plugin: st
     commands[command.name] = command;
 
     if (isSubCommandParent(command)) {
-        registerSubCommands(command, plugin);
+        try {
+            registerSubCommands(command, plugin);
+        } catch (error) {
+            unregisterCommand(command.name);
+            throw error;
+        }
         return;
     }
 
     BUILT_IN.push(command);
 }
 
-export function unregisterCommand(name: string, isSubCommands = false) {
+export function unregisterCommand(name: string) {
     const cmd = commands[name];
-    if (cmd && isSubCommandParent(cmd)) {
+    if (!cmd) return false;
+    if (isSubCommandParent(cmd)) {
         delete commands[name];
         return unregisterSubCommands(cmd);
     }

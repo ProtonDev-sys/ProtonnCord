@@ -31,7 +31,6 @@ export default function SectionedGridList<ItemT, SectionU,>(props: SectionedGrid
             <Grid
                 renderItem={props.renderItem}
                 getItemKey={props.getItemKey}
-                itemKeyPrefix={props.getSectionKey(section)}
                 items={section.items}
             />
         </div>)}

@@ -81,7 +81,7 @@ export default definePlugin({
         const changeSpeed = (speed: number) => {
             const media = mediaRef?.current;
             if (media) {
-                media.playbackRate = speed;
+                media.playbackRate = Number.isFinite(speed) ? Math.min(max, Math.max(min, speed)) : 1;
             }
         };
 
@@ -93,6 +93,7 @@ export default definePlugin({
                 if (isVoiceMessage) {
                     // Workaround because Discord seems to override it somewhere
                     const setVoiceSpeed = () => changeSpeed(settings.store.defaultVoiceMessageSpeed);
+                    if (!media.paused) setVoiceSpeed();
                     media.addEventListener("play", setVoiceSpeed, { once: true });
                     return () => media.removeEventListener("play", setVoiceSpeed);
                 } else {
@@ -108,6 +109,8 @@ export default definePlugin({
                 {tooltipProps => (
                     <button
                         {...tooltipProps}
+                        type="button"
+                        aria-label="Playback speed"
                         className={cl("icon")}
                         onClick={e => {
                             ContextMenuApi.openContextMenu(e, () =>

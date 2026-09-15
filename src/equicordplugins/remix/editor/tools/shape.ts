@@ -101,9 +101,11 @@ export const ShapeTool: ToolDefinition = {
         Mouse.event.on("up", this.onMouseUpListener);
     },
     unselected() {
+        this.isDragging = false;
         shapeCanvas.clearRect(0, 0, shapeCanvas.canvas.width, shapeCanvas.canvas.height);
 
         Mouse.event.off("move", this.onMouseMoveListener);
         Mouse.event.off("up", this.onMouseUpListener);
+        render();
     },
 };

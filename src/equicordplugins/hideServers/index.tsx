@@ -18,8 +18,7 @@ import {
 import { EquicordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { Guild } from "@vencord/discord-types";
-import { findStoreLazy } from "@webpack";
-import { Menu, React, useStateFromStores } from "@webpack/common";
+import { Menu, React, SortedGuildStore, useStateFromStores } from "@webpack/common";
 
 import hiddenServersButton from "./components/HiddenServersButton";
 import { HiddenServersStore } from "./HiddenServersStore";
@@ -38,8 +37,6 @@ type qsResult = {
         guild_id?: string;
     };
 };
-
-export const SortedGuildStore = findStoreLazy("SortedGuildStore");
 
 const Patch: NavContextMenuPatchCallback = (
     children,
@@ -91,6 +88,7 @@ export default definePlugin({
             if ("folderId" in props) {
                 const { folderId } = props;
                 const folder = SortedGuildStore.getGuildFolderById(folderId);
+                if (!folder) return;
                 const { guildIds } = folder;
                 const isHidden = guildIds.every(id => HiddenServersStore.hiddenGuilds.has(id));
 
@@ -125,7 +123,7 @@ export default definePlugin({
             ]
         },
         {
-            find: "#{intl::QUICKSWITCHER_PROTIP}",
+            find: "#{intl::MfbDzS::raw}",
             replacement: {
                 match: /(?<=renderResults\(\){.{0,100})let{query/,
                 replace: "this.props.results = $self.filteredGuildResults(this.props.results);$&",
@@ -133,7 +131,7 @@ export default definePlugin({
         },
     ],
     settings,
-    useStore: () => { useStateFromStores([HiddenServersStore], () => HiddenServersStore.hiddenGuilds, undefined, (old, newer) => old.size === newer.size); },
+    useStore: () => { useStateFromStores([HiddenServersStore], () => HiddenServersStore.hiddenGuilds); },
 
     async start() {
         if (settings.store.showIndicator) {
@@ -150,13 +148,12 @@ export default definePlugin({
     useFilteredGuilds(guilds: guildsNode[]): guildsNode[] {
         const hiddenGuilds = useStateFromStores(
             [HiddenServersStore],
-            () => HiddenServersStore.hiddenGuilds,
-            undefined,
-            (old, newer) => old.size === newer.size
+            () => HiddenServersStore.hiddenGuilds
         );
 
+        if (hiddenGuilds.size === 0) return guilds;
+
         return guilds.flatMap(guild => {
-            if (!(hiddenGuilds instanceof Set)) return [guild];
             if (guild.type === "guild" && hiddenGuilds.has(guild.id.toString())) {
                 return [];
             }
@@ -182,7 +179,7 @@ export default definePlugin({
             if (result?.record?.guild_id && hiddenGuilds.has(result.record.guild_id)) {
                 return false;
             }
-            if (result.type === "GUILD" && hiddenGuilds.has(result.record!.id!)) {
+            if (result.type === "GUILD" && result.record?.id && hiddenGuilds.has(result.record.id)) {
                 return false;
             }
             return true;

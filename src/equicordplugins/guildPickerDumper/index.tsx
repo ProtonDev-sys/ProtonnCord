@@ -7,13 +7,15 @@
 import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { Devs, EquicordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
+import { saveFile } from "@utils/web";
 import type { Guild } from "@vencord/discord-types";
-import { EmojiStore, Menu, StickersStore } from "@webpack/common";
+import { EmojiStore, Menu, showToast, StickersStore, Toasts } from "@webpack/common";
 import { zipSync } from "fflate";
 
 const StickerExt = [, "png", "apng", "json", "gif"] as const;
 
 const Patch: NavContextMenuPatchCallback = (children, { guild }: { guild: Guild; }) => {
+    if (!guild) return;
     // Assuming "privacy" is the correct ID for the group you want to modify.
     const group = findGroupChildrenByChildId("privacy", children);
 
@@ -72,6 +74,7 @@ async function zipGuildAssets(guild: Guild, type: "emojis" | "stickers") {
             }
         }
 
+        if (!response.ok || response.headers.get("content-type")?.includes("text")) throw new Error(`Asset download failed (${response.status})`);
         const blob = await response.blob();
         const arrayBuffer = await blob.arrayBuffer();
         return { file: new Uint8Array(arrayBuffer), filename };
@@ -79,19 +82,15 @@ async function zipGuildAssets(guild: Guild, type: "emojis" | "stickers") {
 
     const assetPromises = items.map(e => fetchAsset(e));
 
-    Promise.all(assetPromises)
+    return Promise.all(assetPromises)
         .then(results => {
             const zipped = zipSync(Object.fromEntries(results.map(({ file, filename }) => [filename, file])));
-            const blob = new Blob([new Uint8Array(zipped)], { type: "application/zip" });
-            const link = document.createElement("a");
-            const url = URL.createObjectURL(blob);
-            link.href = url;
-            link.download = `${guild.name}-${type}.zip`;
-            link.click();
-            link.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 0);
+            saveFile(new File([new Uint8Array(zipped)], `${guild.name}-${type}.zip`, { type: "application/zip" }));
         })
-        .catch(console.error);
+        .catch(error => {
+            console.error(error);
+            showToast("Could not download the server assets. Please try again.", Toasts.Type.FAILURE);
+        });
 }
 
 export default definePlugin({

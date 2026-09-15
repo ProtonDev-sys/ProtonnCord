@@ -13,17 +13,24 @@ import { Icon } from "./icon";
 import { translate } from "./translator";
 
 const setters = new Map<string, (translation: Translation | undefined) => void>();
+const requests = new Map<string, object>();
 
 export function Accessory({ message }: { message: Message; }) {
     const [translation, setTranslation] = useState<Translation | undefined>(undefined);
 
     useEffect(() => {
+        setTranslation(undefined);
         if ((message as any).vencordEmbeddedBy) return;
 
         setters.set(message.id, setTranslation);
 
-        return () => void setters.delete(message.id);
-    }, [message.id]);
+        return () => {
+            if (setters.get(message.id) === setTranslation) {
+                setters.delete(message.id);
+                requests.delete(message.id);
+            }
+        };
+    }, [message.id, message.content]);
 
     if (!translation) return null;
 
@@ -42,14 +49,19 @@ export async function handleTranslate(message: Message) {
 
     const setTranslation = setters.get(message.id);
     if (!setTranslation) return;
+    const request = {};
+    requests.set(message.id, request);
+    const isCurrent = () => requests.get(message.id) === request && setters.get(message.id) === setTranslation;
 
     try {
         const translation = await translate(message.content);
-        if (setters.get(message.id) === setTranslation) setTranslation(translation);
+        if (isCurrent()) setTranslation(translation);
     } catch (error) {
         console.error("[TranslatePlus] Failed to translate message:", error);
-        if (setters.get(message.id) === setTranslation) {
+        if (isCurrent()) {
             setTranslation({ src: "en", text: "Translation failed due to an error." });
         }
+    } finally {
+        if (requests.get(message.id) === request) requests.delete(message.id);
     }
 }

@@ -6,9 +6,9 @@
 
 import { getCurrentChannel } from "@utils/discord";
 import { isObjectEmpty } from "@utils/misc";
-import { ChannelStore, GuildMemberCountStore, PermissionsBits, PermissionStore, SelectedChannelStore, Tooltip, useEffect, useStateFromStores, VoiceStateStore } from "@webpack/common";
+import { ChannelMemberStore, ChannelStore, GuildMemberCountStore, PermissionsBits, PermissionStore, SelectedChannelStore, ThreadMemberListStore, Tooltip, useEffect, useStateFromStores, VoiceStateStore } from "@webpack/common";
 
-import { ChannelMemberStore, cl, numberFormat, settings, ThreadMemberListStore } from ".";
+import { cl, numberFormat, settings } from ".";
 import { CircleIcon } from "./CircleIcon";
 import { OnlineMemberCountStore } from "./OnlineMemberCountStore";
 import { VoiceIcon } from "./VoiceIcon";
@@ -18,14 +18,14 @@ export function MemberCount({ isTooltip, tooltipGuildId }: { isTooltip?: true; t
     const includeVoice = voiceActivity && !isTooltip;
 
     const currentChannel = useStateFromStores(
-        [SelectedChannelStore], () => isTooltip ? undefined : getCurrentChannel(),
+        [SelectedChannelStore, ChannelStore], () => isTooltip ? undefined : getCurrentChannel(),
         [], (a, b) => a?.id === b?.id
     );
 
     const guildId = tooltipGuildId ?? currentChannel?.guild_id;
 
     const voiceActivityCount = useStateFromStores(
-        [VoiceStateStore],
+        [VoiceStateStore, ChannelStore, PermissionStore],
         () => {
             if (!includeVoice || !guildId) return 0;
 
@@ -60,7 +60,7 @@ export function MemberCount({ isTooltip, tooltipGuildId }: { isTooltip?: true; t
         () => {
             if (isTooltip || !guildId) return null;
 
-            const { groups } = ChannelMemberStore.getProps(guildId, currentChannel?.id);
+            const { groups = [] } = ChannelMemberStore.getProps(guildId, currentChannel?.id) ?? {};
 
             if (groups.length < 1 || groups[0].id === "unknown") return null;
 

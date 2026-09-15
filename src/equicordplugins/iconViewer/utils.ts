@@ -20,6 +20,7 @@ export function getCssColorKeys(): string[] {
 
 export const cssColors = new Proxy({} as Record<number, CssColorData>, {
     get: (target, key) => {
+        if (typeof key !== "string") return undefined;
         const idx = Number(key);
         if (isNaN(idx)) return undefined;
 
@@ -29,7 +30,7 @@ export const cssColors = new Proxy({} as Record<number, CssColorData>, {
         if (!colorKey || !Colors.colors[colorKey]?.css) return undefined;
 
         let name = "";
-        for (const part of colorKey.split("_")) {
+        for (const part of colorKey.split("_").filter(Boolean)) {
             if (name) name += " ";
             name += part[0].toUpperCase() + part.toLowerCase().slice(1);
         }

@@ -65,6 +65,7 @@ async function searchGoogleFonts(query: string) {
             body: JSON.stringify([[normalizedQuery, null, null, null, null, null, 1], [5], null, 16])
         });
 
+        if (!response.ok) return [];
         const data = await response.json();
         if (!data?.[1]) return [];
         const fonts = data[1].map(([_, fontData]: [string, any[]]) => ({
@@ -122,12 +123,13 @@ const applyFont = async (fontFamily: string) => {
             fontLinkUrl = nextFontLinkUrl;
         }
 
+        const fontValue = CSS.escape(fontFamily);
         styleElement.textContent = `
             * {
-                --font-primary: '${fontFamily}', sans-serif !important;
-                --font-display: '${fontFamily}', sans-serif !important;
-                --font-headline: '${fontFamily}', sans-serif !important;
-                ${settings.store.applyOnCodeBlocks ? "--font-code: '${fontFamily}', monospace !important;" : ""}
+                --font-primary: ${fontValue}, sans-serif !important;
+                --font-display: ${fontValue}, sans-serif !important;
+                --font-headline: ${fontValue}, sans-serif !important;
+                ${settings.store.applyOnCodeBlocks ? `--font-code: ${fontValue}, monospace !important;` : ""}
             }
         `;
     } catch (err) {
@@ -148,14 +150,16 @@ function GoogleFontSearch({ onSelect }: { onSelect: (font: GoogleFontMetadata) =
         previewLinks.current = [];
     }, []);
 
-    React.useEffect(() => () => {
-        mounted.current = false;
-        searchGeneration.current++;
-        clearPreviewLinks();
+    React.useEffect(() => {
+        mounted.current = true;
+        return () => {
+            mounted.current = false;
+            searchGeneration.current++;
+            clearPreviewLinks();
+        };
     }, [clearPreviewLinks]);
 
-    const debouncedSearch = React.useMemo(() => debounce(async (value: string) => {
-        const generation = ++searchGeneration.current;
+    const debouncedSearch = React.useMemo(() => debounce(async (value: string, generation: number) => {
         if (!mounted.current) return;
 
         setLoading(true);
@@ -178,7 +182,7 @@ function GoogleFontSearch({ onSelect }: { onSelect: (font: GoogleFontMetadata) =
 
     const handleSearch = (e: string) => {
         setQuery(e);
-        debouncedSearch(e);
+        debouncedSearch(e, ++searchGeneration.current);
     };
 
     return (

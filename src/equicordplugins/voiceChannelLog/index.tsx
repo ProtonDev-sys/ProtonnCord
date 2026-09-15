@@ -27,6 +27,7 @@ const MAX_ACTIVITY_NAME_CACHE_SIZE = 64;
 
 let clientOldChannelId: string | undefined;
 let clientJoinedAt = 0;
+let sessionGeneration = 0;
 
 type VoiceStateSnapshotInput = Omit<PreviousVoiceState, "selfStream" | "channelId"> & {
     channelId?: string | null;
@@ -86,6 +87,7 @@ function rememberPreviousState(userId: string, state: VoiceStateSnapshotInput) {
 }
 
 function clearSessionState() {
+    sessionGeneration++;
     previousStates.clear();
     loggedActivityUsersByApp.clear();
     existingUsers.clear();
@@ -149,6 +151,7 @@ export default definePlugin({
                 }
                 clearSessionState();
             } else if (joining && channelId && channelId !== oldChannel) {
+                sessionGeneration++;
                 const userId = getCurrentUserId();
                 if (!userId) return;
 
@@ -272,7 +275,10 @@ export default definePlugin({
 
             if (!joined.length && !left.length) return;
 
+            const generation = sessionGeneration;
+            const accountId = getCurrentUserId();
             const logWithName = (activityName: string) => {
+                if (generation !== sessionGeneration || accountId !== getCurrentUserId() || !isMyChannel(channelId)) return;
                 for (const userId of joined)
                     log({ type: "activity", userId, channelId, activityName, applicationId: appId });
                 for (const userId of left)
@@ -299,6 +305,7 @@ export default definePlugin({
     },
 
     start() {
+        clearSessionState();
         const userId = getCurrentUserId();
         if (!userId) return;
 

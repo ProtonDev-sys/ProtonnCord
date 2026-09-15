@@ -17,7 +17,7 @@
 */
 
 import { IpcEvents } from "@shared/IpcEvents";
-import type { UpdaterDiagnostics } from "@shared/Updater";
+import { parseUpdaterBranch, type UpdaterDiagnostics } from "@shared/Updater";
 import { execFile as cpExecFile } from "child_process";
 import { ipcMain } from "electron";
 import { join, resolve } from "path";
@@ -26,8 +26,8 @@ import { promisify } from "util";
 import gitHash from "~git-hash";
 import gitRemote from "~git-remote";
 
-import { serializeErrors } from "./common";
 import { type GitCommandResult, inspectGitUpdates, pullGitUpdates } from "./gitOperations";
+import { createOperationQueue, serializeErrors } from "./ipc";
 
 const VENCORD_SRC_DIR = join(__dirname, "..");
 const PROTONN_CORD_DIR = join(__dirname, "../../");
@@ -37,6 +37,7 @@ const UPDATE_REPOSITORY = `https://github.com/${gitRemote}.git`;
 const GIT_TIMEOUT_MS = 60_000;
 const BUILD_TIMEOUT_MS = 10 * 60_000;
 let lastBuiltHead = gitHash;
+const enqueue = createOperationQueue();
 
 const isFlatpak = process.platform === "linux" && !!process.env.FLATPAK_ID;
 
@@ -59,15 +60,22 @@ async function getRepo() {
     return UPDATE_REPOSITORY.replace(/\.git$/u, "");
 }
 
-async function calculateGitChanges() {
-    return (await inspectGitUpdates(git, UPDATE_REPOSITORY, lastBuiltHead)).changes;
+async function calculateGitChanges(branch: unknown) {
+    return (await inspectGitUpdates(
+        git,
+        UPDATE_REPOSITORY,
+        lastBuiltHead,
+        parseUpdaterBranch(branch),
+    )).changes;
 }
 
-async function pull() {
-    return pullGitUpdates(git, UPDATE_REPOSITORY, lastBuiltHead);
+async function pull(branch: unknown) {
+    return pullGitUpdates(git, UPDATE_REPOSITORY, lastBuiltHead, parseUpdaterBranch(branch));
 }
 
-async function build() {
+async function build(branch?: unknown) {
+    if (branch !== undefined && (await git("branch", "--show-current")).stdout.trim() !== parseUpdaterBranch(branch))
+        throw new Error("The source branch changed before the update could be built. Check for updates again.");
     const opts = { cwd: PROTONN_CORD_DIR, timeout: BUILD_TIMEOUT_MS };
 
     const command = isFlatpak ? "flatpak-spawn" : "node";
@@ -82,18 +90,17 @@ async function build() {
     return succeeded;
 }
 
-async function getDiagnostics(): Promise<UpdaterDiagnostics> {
-    const branch = (await git("branch", "--show-current")).stdout.trim() || null;
+async function getDiagnostics(branch: unknown): Promise<UpdaterDiagnostics> {
     return {
         backend: "git",
-        branch,
+        branch: parseUpdaterBranch(branch),
         builtHead: lastBuiltHead,
         sourceRoot: resolve(PROTONN_CORD_DIR),
     };
 }
 
 ipcMain.handle(IpcEvents.GET_REPO, serializeErrors(getRepo));
-ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors(calculateGitChanges));
-ipcMain.handle(IpcEvents.UPDATE, serializeErrors(pull));
-ipcMain.handle(IpcEvents.BUILD, serializeErrors(build));
+ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors((branch: unknown) => enqueue(() => calculateGitChanges(branch))));
+ipcMain.handle(IpcEvents.UPDATE, serializeErrors((branch: unknown) => enqueue(() => pull(branch))));
+ipcMain.handle(IpcEvents.BUILD, serializeErrors((branch?: unknown) => enqueue(() => build(branch))));
 ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors(getDiagnostics));

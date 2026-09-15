@@ -28,6 +28,7 @@ export function initInput() {
         Mouse.prevY = Mouse.y;
 
         const rect = targetCanvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
         const scaleX = targetCanvas.width / rect.width;
         const scaleY = targetCanvas.height / rect.height;
 
@@ -41,9 +42,11 @@ export function initInput() {
     };
 
     const onMouseDown = (e: MouseEvent) => {
+        if (e.button !== 0) return;
+        onMouseMove(e);
+        Mouse.prevX = Mouse.x;
+        Mouse.prevY = Mouse.y;
         Mouse.down = true;
-
-        Mouse.event.emit("down", e);
     };
 
     const onMouseUp = (e: MouseEvent) => {
@@ -52,22 +55,16 @@ export function initInput() {
         Mouse.event.emit("up", e);
     };
 
-    const onMouseLeave = (e: MouseEvent) => {
-        Mouse.down = false;
-
-        Mouse.event.emit("up", e);
-    };
-
     targetCanvas.addEventListener("mousemove", onMouseMove);
     targetCanvas.addEventListener("mousedown", onMouseDown);
     targetCanvas.addEventListener("mouseup", onMouseUp);
-    targetCanvas.addEventListener("mouseleave", onMouseLeave);
+    targetCanvas.addEventListener("mouseleave", onMouseUp);
 
     return () => {
         Mouse.down = false;
         targetCanvas.removeEventListener("mousemove", onMouseMove);
         targetCanvas.removeEventListener("mousedown", onMouseDown);
         targetCanvas.removeEventListener("mouseup", onMouseUp);
-        targetCanvas.removeEventListener("mouseleave", onMouseLeave);
+        targetCanvas.removeEventListener("mouseleave", onMouseUp);
     };
 }

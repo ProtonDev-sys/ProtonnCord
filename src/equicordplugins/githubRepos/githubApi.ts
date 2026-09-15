@@ -18,12 +18,13 @@ export interface GitHubUserInfo {
 
 export async function fetchUserInfo(username: string): Promise<GitHubUserInfo | null> {
     try {
-        const userInfoUrl = `https://api.github.com/users/${username}`;
+        const userInfoUrl = `https://api.github.com/users/${encodeURIComponent(username)}`;
         const userInfoResponse = await fetch(userInfoUrl);
 
         if (!userInfoResponse.ok) return null;
 
         const userData = await userInfoResponse.json();
+        if (!userData || typeof userData.login !== "string" || typeof userData.avatar_url !== "string") return null;
         return {
             username: userData.login,
             totalRepos: userData.public_repos,
@@ -37,7 +38,7 @@ export async function fetchUserInfo(username: string): Promise<GitHubUserInfo | 
 
 export async function fetchReposByUserId(githubId: string, perPage: number = 30): Promise<GitHubRepo[] | null> {
     try {
-        const apiUrl = `https://api.github.com/user/${githubId}/repos?sort=stars&direction=desc&per_page=${perPage}`;
+        const apiUrl = `https://api.github.com/user/${encodeURIComponent(githubId)}/repos?sort=stars&direction=desc&per_page=${perPage}`;
         const response = await fetch(apiUrl);
 
         if (!response.ok) return null;
@@ -51,7 +52,7 @@ export async function fetchReposByUserId(githubId: string, perPage: number = 30)
 }
 
 export async function fetchReposByUsername(username: string, perPage: number = 30): Promise<GitHubRepo[]> {
-    const apiUrl = `https://api.github.com/users/${username}/repos?sort=stars&direction=desc&per_page=${perPage}`;
+    const apiUrl = `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=stars&direction=desc&per_page=${perPage}`;
     const response = await fetch(apiUrl);
 
     if (!response.ok) {
@@ -64,12 +65,13 @@ export async function fetchReposByUsername(username: string, perPage: number = 3
 
 export async function fetchUserOrgs(username: string): Promise<GitHubOrg[]> {
     try {
-        const apiUrl = `https://api.github.com/users/${username}/orgs`;
+        const apiUrl = `https://api.github.com/users/${encodeURIComponent(username)}/orgs`;
         const response = await fetch(apiUrl);
 
         if (!response.ok) return [];
 
-        return await response.json();
+        const data = await response.json();
+        return Array.isArray(data) ? data.filter(org => org && typeof org.login === "string" && typeof org.avatar_url === "string") : [];
     } catch (error) {
         logger.error("Error fetching user orgs", error);
         return [];
@@ -78,7 +80,7 @@ export async function fetchUserOrgs(username: string): Promise<GitHubOrg[]> {
 
 export async function fetchOrgRepos(org: string, perPage: number = 30): Promise<GitHubRepo[]> {
     try {
-        const apiUrl = `https://api.github.com/orgs/${org}/repos?sort=stars&direction=desc&per_page=${perPage}`;
+        const apiUrl = `https://api.github.com/orgs/${encodeURIComponent(org)}/repos?sort=stars&direction=desc&per_page=${perPage}`;
         const response = await fetch(apiUrl);
 
         if (!response.ok) return [];
@@ -91,6 +93,11 @@ export async function fetchOrgRepos(org: string, perPage: number = 30): Promise<
     }
 }
 
-function sortReposByStars(repos: GitHubRepo[]): GitHubRepo[] {
-    return repos.sort((a, b) => b.stargazers_count - a.stargazers_count);
+function sortReposByStars(repos: unknown): GitHubRepo[] {
+    if (!Array.isArray(repos)) throw new Error("Invalid repository response");
+    return repos.filter(repo => {
+        if (!repo || typeof repo.name !== "string" || typeof repo.html_url !== "string" || !Number.isFinite(repo.stargazers_count)) return false;
+        const url = URL.parse(repo.html_url);
+        return url?.protocol === "https:" && url.hostname === "github.com" && !url.username && !url.password && !url.port;
+    }).sort((a, b) => b.stargazers_count - a.stargazers_count);
 }

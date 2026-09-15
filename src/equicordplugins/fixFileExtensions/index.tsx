@@ -5,10 +5,11 @@
  */
 
 import { isPluginEnabled } from "@api/PluginManager";
-import anonymiseFileNames, { tarExtMatcher } from "@plugins/anonymiseFileNames";
 import { Devs } from "@utils/constants";
 import definePlugin, { ReporterTestable } from "@utils/types";
 import { CloudUpload } from "@vencord/discord-types";
+
+export const tarExtMatcher = /\.tar\.\w+$/i;
 
 const extensionMap = {
     "ogg": [".ogv", ".oga", ".ogx", ".ogm", ".spx", ".aac", ".wma"],
@@ -41,16 +42,16 @@ export default definePlugin({
                     replace: "$&$1.forEach($self.fixExt);"
                 }
             ],
-            predicate: () => !isPluginEnabled(anonymiseFileNames.name),
+            predicate: () => !isPluginEnabled("AnonymiseFileNames"),
         },
     ],
     fixExt(upload: CloudUpload) {
         const file = upload.filename;
         const tarMatch = tarExtMatcher.exec(file);
         const extIdx = tarMatch?.index ?? file.lastIndexOf(".");
-        const fileName = extIdx !== -1 ? file.substring(0, extIdx) : "";
+        const fileName = extIdx !== -1 ? file.substring(0, extIdx) : file;
         const ext = extIdx !== -1 ? file.slice(extIdx) : "";
-        const newExt = reverseExtensionMap[ext] || ext;
+        const newExt = reverseExtensionMap[ext.toLowerCase()] || ext;
 
         upload.filename = fileName + newExt;
     },

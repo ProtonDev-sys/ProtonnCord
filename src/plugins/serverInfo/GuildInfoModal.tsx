@@ -68,7 +68,7 @@ function GuildInfoModal({ guild, modalProps }: GuildProps & { modalProps: Render
 
     const [currentTab, setCurrentTab] = useState(Tabs.ServerInfo);
 
-    const bannerUrl = guild.banner && IconUtils.getGuildBannerURL(guild, true)!.replace(/\?size=\d+$/, "?size=1024");
+    const bannerUrl = guild.banner && IconUtils.getGuildBannerURL(guild, true)?.replace(/\?size=\d+$/, "?size=1024");
 
     const iconUrl = guild.icon && IconUtils.getGuildIconURL({
         id: guild.id,
@@ -297,6 +297,7 @@ function UserList(type: "friends" | "blocked" | "ignored", guild: Guild, ids: st
 
     const sortedMembers = members
         .map(id => UserStore.getUser(id) as User & { globalName: string; })
+        .filter(Boolean)
         .sort(
             (a, b) => {
                 switch (settings.store.sorting) {

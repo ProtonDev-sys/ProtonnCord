@@ -20,7 +20,9 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { Devs } from "@utils/constants";
 import { getIntlMessage, hasGuildFeature } from "@utils/discord";
 import definePlugin from "@utils/types";
-import { Constants, GuildStore, PermissionStore, RestAPI } from "@webpack/common";
+import { Constants, GuildStore, PermissionStore, RestAPI, showToast, Toasts } from "@webpack/common";
+
+const pendingGuilds = new Set<string>();
 
 function showDisableInvites(guildId: string) {
     const guild = GuildStore.getGuild(guildId);
@@ -32,15 +34,24 @@ function showDisableInvites(guildId: string) {
     );
 }
 
-function disableInvites(guildId: string) {
+async function disableInvites(guildId: string) {
     const guild = GuildStore.getGuild(guildId);
-    if (!guild || hasGuildFeature(guild, "INVITES_DISABLED")) return;
+    if (!guild || !showDisableInvites(guildId) || pendingGuilds.has(guildId)) return false;
 
     const features = [...guild.features, "INVITES_DISABLED"];
-    void RestAPI.patch({
-        url: Constants.Endpoints.GUILD(guildId),
-        body: { features },
-    });
+    pendingGuilds.add(guildId);
+    try {
+        await RestAPI.patch({
+            url: Constants.Endpoints.GUILD(guildId),
+            body: { features },
+        });
+        return true;
+    } catch {
+        showToast("Could not pause invites. Please try again.", Toasts.Type.FAILURE);
+        return false;
+    } finally {
+        pendingGuilds.delete(guildId);
+    }
 }
 
 export default definePlugin({
@@ -71,9 +82,8 @@ export default definePlugin({
         return (
             <div>
                 {getIntlMessage("GUILD_INVITE_DISABLE_ACTION_SHEET_DESCRIPTION")}
-                {showDisableInvites(guildId) && <a role="button" onClick={() => {
-                    setChecked(true);
-                    disableInvites(guildId);
+                {showDisableInvites(guildId) && <a role="button" onClick={async () => {
+                    if (await disableInvites(guildId)) setChecked(true);
                 }}> Pause Indefinitely.</a>}
             </div>
         );
