@@ -19,11 +19,13 @@ import {
 } from "@api/MessageEvents";
 import { BaseText } from "@components/BaseText";
 import { Button } from "@components/Button";
+import ErrorBoundary from "@components/ErrorBoundary";
 import { Heading } from "@components/Heading";
 import { Span } from "@components/Span";
 import { copyToClipboard } from "@utils/clipboard";
 import { EquicordDevs } from "@utils/constants";
 import { sendMessage } from "@utils/discord";
+import { proxyLazy } from "@utils/lazy";
 import definePlugin, { PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
@@ -49,7 +51,9 @@ import {
     useEffect,
     UserStore,
     useState,
+    zustandCreate,
 } from "@webpack/common";
+import type { ReactNode } from "react";
 
 import {
     clearEncryptedAttachmentCache,
@@ -123,6 +127,24 @@ import {
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const SECURE_LISTENER_PRIORITY = 1_000_000;
+interface PendingEncryptedSend {
+    id: symbol;
+    stage: "Encrypting attachments…" | "Uploading encrypted attachments…";
+}
+const useEncryptedSendStatus = proxyLazy(() => zustandCreate(() => ({ pending: [] as PendingEncryptedSend[] })));
+
+const EncryptedSendStatus = ErrorBoundary.wrap(function EncryptedSendStatus({ buttons }: { buttons: ReactNode; }) {
+    const status = useEncryptedSendStatus((state: { pending: PendingEncryptedSend[]; }) => {
+        return state.pending.length > 1
+            ? `Sending ${state.pending.length} encrypted messages…`
+            : state.pending[0]?.stage ?? null;
+    });
+    return <>
+        {status && <BaseText size="xs" className="vc-secure-messaging-send-status" role="status">{status}</BaseText>}
+        {buttons}
+    </>;
+}, { noop: true });
+
 const UploadLimits = findByPropsLazy("getUserMaxFileSize") as {
     getUserMaxFileSize(user: unknown): unknown;
 };
@@ -854,10 +876,14 @@ function installAttachmentUploadGuard(): void {
         let protection: ConversationProtection;
         try {
             protection = await resolveConversationProtection(this.channelId);
-        } catch {
+        } catch (error) {
+            if (approval) throw error;
             return;
         }
-        if (generation !== attachmentGuardGeneration) return;
+        if (generation !== attachmentGuardGeneration) {
+            if (approval) throw new Error("Secure Messaging cancelled an encrypted attachment upload after its guard changed");
+            return;
+        }
         if (approval) {
             const scope = protection.kind === "snapshot"
                 ? conversationAuthorizationScope(protection.context.localUserId, protection.conversation)
@@ -867,7 +893,7 @@ function installAttachmentUploadGuard(): void {
                 protection.conversation.status !== "enabled" ||
                 hasSelectedKeyReviewBlock(protection.context.localUserId, protection.conversation)) {
                 approvedAttachmentUploads.delete(this);
-                return;
+                throw new Error("Secure Messaging blocked an encrypted attachment upload after its conversation changed");
             }
             return original.call(this);
         }
@@ -1257,6 +1283,13 @@ function uninstallNetworkGuard(): void {
 
 const outgoingListener: MessageSendListener = async (channelId, message, options, props) => {
     const generation = secureOperationGeneration;
+    const sendId = Symbol();
+    const setAttachmentStatus = (stage: PendingEncryptedSend["stage"]) => {
+        if (generation !== secureOperationGeneration) return;
+        useEncryptedSendStatus.setState((state: { pending: PendingEncryptedSend[]; }) => ({
+            pending: [...state.pending.filter(send => send.id !== sendId), { id: sendId, stage }],
+        }));
+    };
     let generatedDetachedUpload: { upload: CloudUpload; uploads: CloudUpload[]; } | null = null;
     let generatedDetachedUploadCommitted = false;
     try {
@@ -1306,6 +1339,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             detachedTextIndex = appended;
             generatedDetachedUpload = { upload: uploads[appended], uploads };
         }
+        if (uploads.length > 0) setAttachmentStatus("Encrypting attachments…");
         let preparedAttachments: PreparedEncryptedAttachments | null = uploads.length > 0
             ? await prepareEncryptedAttachments(
                 uploads,
@@ -1330,6 +1364,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             }
             detachedTextIndex = appended;
             generatedDetachedUpload = { upload: uploads[appended], uploads };
+            setAttachmentStatus("Encrypting attachments…");
             preparedAttachments = await prepareEncryptedAttachments(
                 uploads,
                 "",
@@ -1361,7 +1396,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             );
         }
         preparedAttachments?.apply();
-        if (detachedTextIndex !== null) {
+        if (preparedAttachments) {
             options.uploads = uploads;
             options.attachmentsToUpload = uploads;
         }
@@ -1371,18 +1406,31 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
         if (!scope) return { cancel: true };
         if (preparedAttachments)
             authorizeScopedAttachmentUploadReservations(channelId, preparedAttachments.files, scope);
+        for (const upload of uploads) approvedAttachmentUploads.set(upload, { file: upload.item.file, scope });
+        if (preparedAttachments) {
+            setAttachmentStatus("Uploading encrypted attachments…");
+            try {
+                await Promise.all(uploads.map(upload => upload.upload()));
+            } catch (error) {
+                for (const upload of uploads) approvedAttachmentUploads.delete(upload);
+                throw error;
+            }
+            if (!secureOperationIsCurrent(generation, context.localUserId)) return { cancel: true };
+        }
         authorizeScopedWirePayload(channelId, encrypted.content, attachmentFilenames, scope);
         message.content = encrypted.content;
         preparedOutgoingMessages.set(message, { ciphertext: encrypted.content, plaintext });
-        for (const upload of uploads) approvedAttachmentUploads.set(upload, { file: upload.item.file, scope });
         generatedDetachedUploadCommitted = true;
         return { stop: true };
     } catch (error) {
         showToast(error instanceof EncryptedAttachmentUploadLimitError
             ? `Encrypted ${error.filename} would use ${formatUploadBytes(error.encryptedBytes)}; Discord allows ${formatUploadBytes(error.limitBytes)} per file.`
-            : "Secure Messaging stopped the send because encryption failed unexpectedly.", Toasts.Type.FAILURE);
+            : "Secure Messaging stopped the send because encryption or upload failed unexpectedly.", Toasts.Type.FAILURE);
         return { cancel: true };
     } finally {
+        useEncryptedSendStatus.setState((state: { pending: PendingEncryptedSend[]; }) => ({
+            pending: state.pending.filter(send => send.id !== sendId),
+        }));
         if (generatedDetachedUpload && !generatedDetachedUploadCommitted) {
             const index = generatedDetachedUpload.uploads.indexOf(generatedDetachedUpload.upload);
             if (index !== -1) generatedDetachedUpload.uploads.splice(index, 1);
@@ -2182,6 +2230,11 @@ export default definePlugin({
         render: SecureMessagingButton,
     },
 
+    chatBarButtonWrapper: {
+        wrapper: buttons => <EncryptedSendStatus buttons={buttons} />,
+        priority: -100,
+    },
+
     renderMessageAccessory: props => <SecureMessageAccessory message={props.message} />,
 
     toolboxActions: {
@@ -2248,6 +2301,7 @@ export default definePlugin({
 
     stop() {
         secureOperationGeneration++;
+        useEncryptedSendStatus.setState({ pending: [] });
         secureRuntimeUserId = null;
         screenCaptureProtectionGeneration++;
         setScreenCaptureProtectionStatus("disabled");

@@ -31,6 +31,13 @@
     font-size: 0.875rem;
 }
 
+.vc-secure-messaging-send-status {
+    align-self: center;
+    max-width: 10rem;
+    margin-right: 0.5rem;
+    color: var(--text-muted);
+}
+
 .pc-secure-card {
     box-sizing: border-box;
     max-width: min(42rem, 100%);
