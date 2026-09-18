@@ -197,7 +197,9 @@ async function metadataForUpload(source: UploadSource): Promise<AttachmentMetada
     const metadata = providedDuration !== null && isAudio
         ? { duration: providedDuration, height: null, width: null }
         : await mediaMetadata(source.file, mimeType);
-    const duration = providedDuration ?? metadata.duration;
+    const duration = isAudio
+        ? providedDuration ?? metadata.duration
+        : metadata.duration;
     return {
         name: source.filename,
         mimeType: source.mimeType,
