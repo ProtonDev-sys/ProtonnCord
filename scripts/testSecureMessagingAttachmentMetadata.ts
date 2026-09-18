@@ -220,6 +220,7 @@ test("optional waveforms on non-audio files do not prevent sending", async () =>
     prepared.apply();
     const opened = await openAttachment(prepared, value.item.file);
     assert.equal(opened.metadata.waveform, null);
+    assert.equal(opened.metadata.duration, null);
     assert.equal(new TextDecoder().decode(opened.data), "private file bytes");
 });
 
@@ -265,6 +266,37 @@ test("fallback audio MIME types use known duration without decoding the file", a
     assert.equal(metadata.duration, 3);
     assert.equal(metadata.waveform, "AQID");
     assert.equal(metadata.mimeType, "Audio/Ogg; codecs=opus");
+});
+
+test("stale video duration does not override probed metadata", async t => {
+    class Media extends EventTarget {
+        currentTime = 0;
+        duration = 7;
+        muted = false;
+        playsInline = false;
+        preload = "";
+        src = "";
+        videoHeight = 360;
+        videoWidth = 640;
+        load() { if (this.src) this.dispatchEvent(new Event("loadedmetadata")); }
+        removeAttribute() { this.src = ""; }
+    }
+    const media = new Media();
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: () => media } });
+    t.after(() => {
+        if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+        else Reflect.deleteProperty(globalThis, "document");
+    });
+    const value: CloudUpload = upload();
+    value.item.file = new File(["video bytes"], "clip.webm", { type: "video/webm" });
+    value.durationSecs = 3;
+    const prepared = await prepareEncryptedAttachments([value], "", channelId, senderUserId);
+    prepared.apply();
+    const { metadata } = await openAttachment(prepared, value.item.file);
+    assert.equal(metadata.duration, 7);
+    assert.equal(metadata.width, 640);
+    assert.equal(metadata.height, 360);
 });
 
 test("fallback image MIME types retain encoded dimensions", async () => {
