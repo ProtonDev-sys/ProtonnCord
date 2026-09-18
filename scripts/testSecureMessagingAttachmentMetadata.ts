@@ -211,3 +211,103 @@ test("applying a prepared result twice keeps the same opaque file and private me
     assert.equal(opened.metadata.description, privateDescription);
     assert.equal(opened.metadata.spoiler, true);
 });
+
+test("optional waveforms on non-audio files do not prevent sending", async () => {
+    const value: CloudUpload = upload();
+    value.waveform = "AQID";
+    value.durationSecs = 2;
+    const prepared = await prepareEncryptedAttachments([value], "", channelId, senderUserId);
+    prepared.apply();
+    const opened = await openAttachment(prepared, value.item.file);
+    assert.equal(opened.metadata.waveform, null);
+    assert.equal(new TextDecoder().decode(opened.data), "private file bytes");
+});
+
+test("audio with unreadable duration omits the waveform and cleans up metadata probing", async t => {
+    class Media extends EventTarget {
+        duration = Number.NaN;
+        src = "";
+        preload = "";
+        load() { if (this.src) this.dispatchEvent(new Event("error")); }
+        removeAttribute() { this.src = ""; }
+    }
+    const media = new Media();
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: () => media } });
+    t.after(() => {
+        if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+        else Reflect.deleteProperty(globalThis, "document");
+    });
+    const revoke = t.mock.method(URL, "revokeObjectURL");
+    const value: CloudUpload = upload();
+    value.item.file = new File(["audio bytes"], "voice.ogg", { type: "audio/ogg" });
+    value.waveform = "AQID";
+    const prepared = await prepareEncryptedAttachments([value], "", channelId, senderUserId);
+    prepared.apply();
+    const opened = await openAttachment(prepared, value.item.file);
+    assert.equal(opened.metadata.waveform, null);
+    assert.equal(opened.metadata.duration, null);
+    assert.equal(new TextDecoder().decode(opened.data), "audio bytes");
+    assert.equal(media.preload, "metadata");
+    assert.equal(media.src, "");
+    assert.equal(revoke.mock.callCount(), 1);
+});
+
+test("fallback audio MIME types use known duration without decoding the file", async () => {
+    const value: CloudUpload = upload();
+    value.item.file = new File(["audio bytes"], "voice.ogg");
+    value.mimeType = " Audio/Ogg; codecs=opus ";
+    value.durationSecs = 3;
+    value.waveform = "AQID";
+    const prepared = await prepareEncryptedAttachments([value], "", channelId, senderUserId);
+    prepared.apply();
+    const { metadata } = await openAttachment(prepared, value.item.file);
+    assert.equal(metadata.duration, 3);
+    assert.equal(metadata.waveform, "AQID");
+    assert.equal(metadata.mimeType, "Audio/Ogg; codecs=opus");
+});
+
+test("fallback image MIME types retain encoded dimensions", async () => {
+    const value = upload();
+    const pngHeader = new Uint8Array(24);
+    pngHeader.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const view = new DataView(pngHeader.buffer);
+    view.setUint32(16, 320);
+    view.setUint32(20, 180);
+    value.item.file = new File([pngHeader], "image.png");
+    value.mimeType = "image/png";
+    const prepared = await prepareEncryptedAttachments([value], "", channelId, senderUserId);
+    prepared.apply();
+    const { metadata } = await openAttachment(prepared, value.item.file);
+    assert.equal(metadata.width, 320);
+    assert.equal(metadata.height, 180);
+});
+
+for (const change of ["replacement", "upload started"] as const) {
+    test(`a late change (${change}) aborts apply before changing any draft`, async () => {
+        const values = [upload(), upload()];
+        const originals = values.map(value => value.item.file);
+        const prepared = await prepareEncryptedAttachments(values, "", channelId, senderUserId);
+        if (change === "replacement") values[1].item.file = new File(["new bytes"], "replacement.txt");
+        else values[1].uploadedFilename = "already-uploaded.pcaf";
+        const secondFile = values[1].item.file;
+        assert.throws(prepared.apply);
+        assert.equal(values[0].item.file, originals[0]);
+        assert.equal(values[1].item.file, secondFile);
+        assert.ok(values.every(value => value.description === privateDescription && value.spoiler));
+    });
+}
+
+test("mutating the caller's upload array cannot replace an in-flight bundle member", async () => {
+    const original = upload();
+    const replacement = upload("replacement");
+    const values = [original];
+    const pending = prepareEncryptedAttachments(values, "", channelId, senderUserId);
+    values[0] = replacement;
+    const prepared = await pending;
+    prepared.apply();
+    assertOpaque(original);
+    assert.equal(replacement.description, "replacement");
+    const { metadata } = await openAttachment(prepared, original.item.file);
+    assert.equal(metadata.description, privateDescription);
+});

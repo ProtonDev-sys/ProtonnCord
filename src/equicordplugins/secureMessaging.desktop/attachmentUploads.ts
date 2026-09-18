@@ -26,6 +26,7 @@ import {
     type SecureStickerItem,
     serializeSecurePlaintext,
 } from "./attachments";
+import { exactArrayBuffer } from "./exactArrayBuffer";
 
 interface MutableCloudUpload extends CloudUpload {
     allowOptimization: boolean;
@@ -76,8 +77,8 @@ function assertUpload(upload: CloudUpload): asserts upload is MutableCloudUpload
         throw new Error("Secure Messaging can only encrypt attachments before Discord starts uploading them");
 }
 
-async function imageDimensions(file: File): Promise<{ height: number; width: number; } | null> {
-    if (!file.type.startsWith("image/")) return null;
+async function imageDimensions(file: File, mimeType: string): Promise<{ height: number; width: number; } | null> {
+    if (!mimeType.startsWith("image/")) return null;
     const encoded = encodedImageDimensions(new Uint8Array(await file.slice(0, 1024 * 1024).arrayBuffer()));
     if (encoded) return encoded;
     if (typeof createImageBitmap !== "function") return null;
@@ -94,27 +95,22 @@ async function imageDimensions(file: File): Promise<{ height: number; width: num
     }
 }
 
-function validDuration(value: unknown): number | null {
-    return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 604_800
+function validMediaDuration(value: unknown): number | null {
+    return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 604_800
         ? value
         : null;
 }
 
-function validMediaDuration(value: unknown): number | null {
-    const duration = validDuration(value);
-    return duration !== null && duration > 0 ? duration : null;
-}
-
-async function mediaMetadata(file: File): Promise<UploadMediaMetadata> {
-    const dimensions = await imageDimensions(file);
+async function mediaMetadata(file: File, mimeType: string): Promise<UploadMediaMetadata> {
+    const dimensions = await imageDimensions(file, mimeType);
     if (dimensions) return { ...dimensions, duration: null };
-    const isVideo = file.type.startsWith("video/");
-    if (!isVideo && !file.type.startsWith("audio/"))
+    const isVideo = mimeType.startsWith("video/");
+    if (!isVideo && !mimeType.startsWith("audio/"))
         return { duration: null, height: null, width: null };
 
     const media = document.createElement(isVideo ? "video" : "audio");
     const video = isVideo ? media as HTMLVideoElement : null;
-    media.preload = "auto";
+    media.preload = "metadata";
     if (video) {
         video.muted = true;
         video.playsInline = true;
@@ -186,7 +182,7 @@ function sourceForUpload(upload: CloudUpload): UploadSource {
         durationSecs: upload.durationSecs,
         file: currentFile,
         filename: upload.filename || currentFile.name,
-        mimeType: currentFile.type || upload.mimeType || "application/octet-stream",
+        mimeType: (currentFile.type || upload.mimeType || "application/octet-stream").trim() || "application/octet-stream",
         spoiler: upload.spoiler,
         waveform: upload.waveform,
     };
@@ -195,10 +191,13 @@ function sourceForUpload(upload: CloudUpload): UploadSource {
 }
 
 async function metadataForUpload(source: UploadSource): Promise<AttachmentMetadata> {
+    const mimeType = source.mimeType.split(";", 1)[0].trim().toLowerCase();
+    const isAudio = mimeType.startsWith("audio/");
     const providedDuration = validMediaDuration(source.durationSecs);
-    const metadata = providedDuration !== null && source.file.type.startsWith("audio/")
+    const metadata = providedDuration !== null && isAudio
         ? { duration: providedDuration, height: null, width: null }
-        : await mediaMetadata(source.file);
+        : await mediaMetadata(source.file, mimeType);
+    const duration = providedDuration ?? metadata.duration;
     return {
         name: source.filename,
         mimeType: source.mimeType,
@@ -207,8 +206,8 @@ async function metadataForUpload(source: UploadSource): Promise<AttachmentMetada
         description: source.description,
         width: metadata.width,
         height: metadata.height,
-        duration: providedDuration ?? metadata.duration,
-        waveform: isValidAttachmentWaveform(source.waveform) ? source.waveform : null,
+        duration,
+        waveform: isAudio && duration !== null && isValidAttachmentWaveform(source.waveform) ? source.waveform : null,
     };
 }
 
@@ -226,7 +225,9 @@ export async function prepareEncryptedAttachments(
     if (!Number.isSafeInteger(maxEncryptedFileBytes) || maxEncryptedFileBytes < 21 ||
         maxEncryptedFileBytes > MAX_ATTACHMENT_CIPHERTEXT_BYTES)
         throw new Error("Discord's encrypted attachment upload limit is invalid");
+    uploads = [...uploads];
     for (const upload of uploads) assertUpload(upload);
+    const inputFiles = uploads.map(upload => upload.item.file);
     const sources = uploads.map(sourceForUpload);
 
     if (detachedTextIndex !== null && (!Number.isInteger(detachedTextIndex) ||
@@ -283,7 +284,7 @@ export async function prepareEncryptedAttachments(
         const root = await attachmentBundleRootFromDigests(descriptor.id, manifest.map(entry => entry.digest));
         const replacements = ciphertexts.map((ciphertext, index) => {
             const filename = encryptedAttachmentFilename(descriptor.id, index);
-            const encryptedFile = new File([Uint8Array.from(ciphertext).buffer], filename, {
+            const encryptedFile = new File([exactArrayBuffer(ciphertext)], filename, {
                 type: "application/octet-stream",
                 lastModified: Date.now(),
             });
@@ -291,6 +292,12 @@ export async function prepareEncryptedAttachments(
         });
         return {
             apply() {
+                // Validate the entire batch before changing any draft attachment.
+                for (const [index, { upload, encryptedFile }] of replacements.entries()) {
+                    assertUpload(upload);
+                    if (upload.item.file !== inputFiles[index] && upload.item.file !== encryptedFile)
+                        throw new Error("The attachment changed while Secure Messaging was encrypting it; retry the send");
+                }
                 for (let index = 0; index < replacements.length; index++) {
                     const { encryptedFile, filename, upload } = replacements[index];
                     sources[index].encryptedFile = encryptedFile;
