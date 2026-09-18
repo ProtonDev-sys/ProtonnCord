@@ -23,6 +23,8 @@ import { createTaskQueue } from "./taskQueue";
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
 const MAX_CACHE_BYTES = 256 * 1024 * 1024;
 const MAX_CACHE_ENTRIES = 128;
+const MAX_TEXT_PREVIEW_BUNDLE_BYTES = 256 * 1024;
+const TEXT_PREVIEW_FILENAME = /\.(?:txt|log|md|json|csv|ya?ml|toml|ini|xml)$/iu;
 const FAILED_CACHE_RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000] as const;
 const SPOILER_FLAG = 8;
 const ANIMATED_FLAG = 32;
@@ -120,7 +122,7 @@ let inFlightBytes = 0;
 let cacheUserId: string | null = null;
 
 export function encryptedAttachmentCacheKey(message: Message): string {
-    return `${UserStore.getCurrentUser()?.id ?? ""}\0${message.channel_id}\0${message.id}\0${message.author?.id ?? ""}\0${discordEditedTimestamp(message) ?? ""}\0${message.content}\0${message.attachments.map(attachment =>
+    return `${UserStore.getCurrentUser()?.id ?? ""}\0${message.channel_id}\0${message.id}\0${message.author?.id ?? ""}\0${discordEditedTimestamp(message) ?? ""}\0${discordMessageNonce(message) ?? ""}\0${message.content}\0${message.attachments.map(attachment =>
         `${attachment.id}:${attachment.size}`).join("\0")}`;
 }
 
@@ -284,9 +286,22 @@ export function decryptIncomingAttachmentsCached(
     return promise;
 }
 
-function safeInlineMimeType(value: string | null): string {
+function safeInlineMimeType(value: string | null, textPreview: boolean): string {
     const normalized = value?.split(";", 1)[0].trim().toLowerCase() ?? "";
-    return isPreviewableAttachmentMimeType(normalized) ? normalized : "application/octet-stream";
+    if (isPreviewableAttachmentMimeType(normalized)) return normalized;
+    // Documents are always inert text, never HTML/SVG or another active MIME type.
+    return textPreview ? "text/plain" : "application/octet-stream";
+}
+
+function isTextPreviewFilename(name: string | null): boolean {
+    return name !== null && TEXT_PREVIEW_FILENAME.test(name);
+}
+
+function revokeObjectUrls(urls: readonly string[]): void {
+    for (const url of urls) {
+        downloadReferences.delete(url);
+        URL.revokeObjectURL(url);
+    }
 }
 
 function requiresSecureMediaPlayer(attachment: ExtendedAttachment): boolean {
@@ -302,10 +317,7 @@ function removeEntry(key: string, entry: AttachmentCacheEntry): void {
     entry.disposed = true;
     entry.renderOwners.clear();
     entry.statusListeners.clear();
-    for (const url of entry.objectUrls) {
-        downloadReferences.delete(url);
-        URL.revokeObjectURL(url);
-    }
+    revokeObjectUrls(entry.objectUrls);
 }
 
 function pruneCache(protectedKey: string, requiredBytes = 0, maximumEntries = MAX_CACHE_ENTRIES): void {
@@ -367,8 +379,8 @@ function failEntry(message: Message, key: string, entry: AttachmentCacheEntry, l
     scheduleRetry(message, key, entry, localUserId);
 }
 
-async function loadEntry(message: Message, key: string, entry: AttachmentCacheEntry, localUserId: string, refreshIds: readonly string[], hasManifest: boolean): Promise<void> {
-    const result = await decryptIncomingAttachmentsCached(localUserId, message, "previews", refreshIds);
+async function loadEntry(message: Message, key: string, entry: AttachmentCacheEntry, localUserId: string, refreshIds: readonly string[], hasManifest: boolean, selection: "all" | "previews"): Promise<void> {
+    const result = await decryptIncomingAttachmentsCached(localUserId, message, selection, refreshIds);
     if (entry.disposed) return;
     if (UserStore.getCurrentUser()?.id !== localUserId) {
         removeEntry(key, entry);
@@ -384,17 +396,14 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
     try {
         for (const attachment of result.attachments) {
             const { metadata } = attachment;
-            const contentType = safeInlineMimeType(metadata.mimeType);
+            const contentType = safeInlineMimeType(metadata.mimeType, selection === "all" && isTextPreviewFilename(metadata.name));
             const blob = new Blob([exactArrayBuffer(attachment.data)], {
                 type: contentType,
             });
             const objectUrl = URL.createObjectURL(blob);
             if (entry.disposed) {
                 URL.revokeObjectURL(objectUrl);
-                for (const previousUrl of objectUrls) {
-                    downloadReferences.delete(previousUrl);
-                    URL.revokeObjectURL(previousUrl);
-                }
+                revokeObjectUrls(objectUrls);
                 return;
             }
             objectUrls.push(objectUrl);
@@ -409,10 +418,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
                 }
             }
             if (entry.disposed) {
-                for (const previousUrl of objectUrls) {
-                    downloadReferences.delete(previousUrl);
-                    URL.revokeObjectURL(previousUrl);
-                }
+                revokeObjectUrls(objectUrls);
                 return;
             }
             attachments.push({
@@ -470,10 +476,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
         attachments.sort((left, right) =>
             message.attachments.findIndex(value => value.id === left.id) - message.attachments.findIndex(value => value.id === right.id));
     } catch (error) {
-        for (const objectUrl of objectUrls) {
-            downloadReferences.delete(objectUrl);
-            URL.revokeObjectURL(objectUrl);
-        }
+        revokeObjectUrls(objectUrls);
         throw error;
     }
     releaseReservation(entry);
@@ -516,7 +519,16 @@ function startEntryLoad(message: Message, key: string, entry: AttachmentCacheEnt
             return;
         }
         const manifest = inspected.attachmentBundle?.manifest;
-        const previewAttachments = message.attachments.filter((_, index) => manifest && (manifest[index]?.preview || inspected.detachedTextIndex === index));
+        // Keep wire preview flags unchanged: old clients authenticate them against the media allowlist.
+        // The existing full-bundle verifier can safely preview small document/media-only bundles.
+        const previewText = Boolean(manifest && inspected.detachedTextIndex === null &&
+            manifest.length === message.attachments.length &&
+            manifest.some(entry => !entry.preview && isTextPreviewFilename(entry.name)) &&
+            manifest.every(entry => entry.preview || (!entry.spoiler && isTextPreviewFilename(entry.name))) &&
+            message.attachments.every(attachment => Number.isSafeInteger(attachment.size) && attachment.size > 0) &&
+            message.attachments.reduce((total, attachment) => total + attachment.size, 0) <= MAX_TEXT_PREVIEW_BUNDLE_BYTES);
+        const previewAttachments = message.attachments.filter((_, index) =>
+            previewText || manifest && (manifest[index]?.preview || inspected.detachedTextIndex === index));
         const requiredBytes = previewAttachments.reduce((total, attachment) => total + attachment.size, 0);
         pruneCache(key, requiredBytes);
         if (!Number.isSafeInteger(requiredBytes) || requiredBytes < 0 || requiredBytes > MAX_CACHE_BYTES ||
@@ -530,7 +542,7 @@ function startEntryLoad(message: Message, key: string, entry: AttachmentCacheEnt
         entry.reservedBytes = requiredBytes;
         inFlightBytes += requiredBytes;
         try {
-            await loadEntry(message, key, entry, localUserId, previewAttachments.map(attachment => attachment.id), Boolean(manifest));
+            await loadEntry(message, key, entry, localUserId, previewAttachments.map(attachment => attachment.id), Boolean(manifest), previewText ? "all" : "previews");
         } finally {
             releaseReservation(entry);
         }
