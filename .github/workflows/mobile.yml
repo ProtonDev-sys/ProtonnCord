@@ -37,6 +37,9 @@ jobs:
                       21
                       25
             - uses: android-actions/setup-android@v3
+              with:
+                  # Command-line tools are installed by the action; the legacy tools package is unavailable.
+                  packages: platform-tools
             - run: sdkmanager 'platforms;android-36' 'platforms;android-37.0' 'build-tools;36.0.0'
             - uses: gradle/actions/setup-gradle@v4
             - name: Build pinned Revenge API

@@ -22,7 +22,8 @@ function normalizeSecureEmbedUrl(candidate: string): string | null {
         return null;
     }
     if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || parsed.username || parsed.password) return null;
-    return parsed.toString();
+    const normalized = parsed.toString();
+    return normalized.length <= MAX_EMBED_URL_LENGTH ? normalized : null;
 }
 
 function trimSecureEmbedUrl(candidate: string): string {
@@ -61,7 +62,10 @@ export function extractSecureEmbedUrls(plaintext: string): string[] {
             continue;
         }
         if (codeDelimiterLength !== 0 || plaintext[match.index - 1] === "<") continue;
-        const candidate = trimSecureEmbedUrl(token);
+        let candidate = trimSecureEmbedUrl(token);
+        const formatting = /(?:\*{1,3}|_{1,3}|~~)$/u.exec(plaintext.slice(Math.max(0, match.index - 3), match.index))?.[0];
+        if (formatting && candidate.endsWith(formatting))
+            candidate = trimSecureEmbedUrl(candidate.slice(0, -formatting.length));
         const normalized = normalizeSecureEmbedUrl(candidate);
         if (normalized === null) continue;
         if (seen.has(normalized)) continue;
