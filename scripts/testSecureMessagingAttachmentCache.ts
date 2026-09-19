@@ -27,7 +27,7 @@ function fixture(options: {
     filesOnly?: boolean;
     expiredUrls?: boolean;
     inspect?: () => Promise<DecryptIncomingResult>;
-    load?: () => Promise<DecryptIncomingAttachmentsResult>;
+    load?: (selection: string) => Promise<DecryptIncomingAttachmentsResult>;
     download?: () => Promise<DownloadIncomingAttachmentResult>;
     refresh?: (urls: string[]) => Promise<object>;
 } = {}) {
@@ -70,7 +70,7 @@ function fixture(options: {
             metrics.loads++;
             metrics.selections.push(selection);
             metrics.inputs.push(input);
-            return options.load ? options.load() : {
+            return options.load ? options.load(selection) : {
                 status: "decrypted", plaintext: "",
                 attachments: options.legacy || options.filesOnly ? [] : [{
                     id: message.attachments[1].id, data: new Uint8Array([1, 2, 3, 4]),
@@ -295,3 +295,128 @@ for (const legacy of [false, true]) {
         assert.deepEqual(Array.from(input.attachments, attachment => attachment.id), message.attachments.map(attachment => attachment.id));
     });
 }
+
+function documentFixture(options: {
+    name?: string | null;
+    spoiler?: boolean;
+    totalBytes?: number;
+    companion?: string;
+    load?: () => Promise<DecryptIncomingAttachmentsResult>;
+} = {}) {
+    const name = options.name === undefined ? "notes.txt" : options.name;
+    const files = [name ?? "notes.txt", options.companion ?? "image.png"].map((filename, index) => ({
+        id: `40000000000000000${index + 1}`,
+        data: new TextEncoder().encode(index === 0 ? "<script>inert document</script>" : "data"),
+        metadata: {
+            name: filename, mimeType: index === 0 ? "text/html" : filename === "image.png" ? "image/png" : "application/octet-stream",
+            size: index === 0 ? 30 : 4, spoiler: options.spoiler ?? false,
+            description: null, duration: null, height: null, width: null, waveform: null
+        }
+    }));
+    const manifest = files.map((file, index) => ({
+        digest: "A".repeat(43), name: index === 0 ? name : file.metadata.name,
+        preview: isPreviewableAttachmentMimeType(file.metadata.mimeType),
+        size: file.data.length, spoiler: file.metadata.spoiler
+    }));
+    const result = fixture({
+        expiredUrls: true,
+        inspect: async () => ({
+            status: "decrypted", plaintext: "", counter: 1, envelopeId: "fixture", detachedTextIndex: null, stickers: [],
+            attachmentBundle: { id: "A".repeat(22), key: "A".repeat(43), root: "A".repeat(43), count: 2, manifest }
+        }),
+        load: selection => options.load ? options.load() : Promise.resolve({
+            status: "decrypted", plaintext: "",
+            attachments: files.filter((_, index) => selection === "all" || manifest[index].preview),
+            deferredAttachments: files.flatMap((file, index) => selection !== "all" && !manifest[index].preview
+                ? [{ id: file.id, ...manifest[index] }]
+                : [])
+        })
+    });
+    result.message.attachments[0].size = (options.totalBytes ?? 1_024) - 100;
+    return { ...result, files };
+}
+
+for (const name of ["notes.txt", "README.MD", "settings.json", "data.csv", "config.yaml"]) {
+    test(`${name} previews authenticated document bytes as inert text without changing wire flags`, async t => {
+        const { api, message, metrics, blobs } = documentFixture({ name });
+        t.after(api.clearEncryptedAttachmentCache);
+        const owner = { forceUpdate() {} };
+        api.patchEncryptedMessageAttachments(message, owner);
+        await setImmediate();
+        const file = api.patchEncryptedMessageAttachments(message, owner).attachments[0];
+        assert.deepEqual(metrics.selections, ["all"]);
+        assert.equal(file.filename, name);
+        assert.equal(file.content_type, "text/plain");
+        assert.equal(await blobs.get(file.url.split("#")[0])?.text(), "<script>inert document</script>");
+        assert.equal(api.isEncryptedAttachmentMediaUrl(file.url), false);
+        assert.equal(api.isEncryptedAttachmentDownloadUrl(file.url), true);
+        assert.deepEqual(metrics.refreshRequests, [message.attachments.flatMap(attachment => [attachment.url, attachment.proxy_url])]);
+        for (let i = 0; i < 100; i++) api.patchEncryptedMessageAttachments(message, owner);
+        assert.equal(metrics.loads, 1);
+        assert.equal(metrics.downloads, 0);
+        api.clearEncryptedAttachmentCache();
+        assert.equal(blobs.size, 0);
+    });
+}
+
+for (const options of [
+    { name: null }, { name: "page.html" }, { name: "image.svg" }, { name: "archive.zip" },
+    { name: "notes.txt.exe" }, { spoiler: true }, { companion: "archive.zip" }, { totalBytes: 256 * 1024 + 1 }
+]) {
+    test(`unsafe or oversized document bundle remains deferred: ${JSON.stringify(options)}`, async t => {
+        const { api, message, metrics } = documentFixture(options);
+        t.after(api.clearEncryptedAttachmentCache);
+        message.attachments[0].filename = "public-untrusted-name.txt";
+        api.encryptedAttachmentStatus(message);
+        await setImmediate();
+        assert.deepEqual(metrics.selections, ["previews"]);
+        const file = api.patchEncryptedMessageAttachments(message, { forceUpdate() {} }).attachments[0];
+        assert.equal(file.content_type, "application/octet-stream");
+        assert.ok(file.url.includes("#pc-secure-deferred="));
+        assert.ok(metrics.refreshRequests.every(urls => !urls.includes(message.attachments[0].url)));
+    });
+}
+
+test("the document bundle limit includes the 256 KiB boundary", async t => {
+    const { api, message, metrics } = documentFixture({ totalBytes: 256 * 1024 });
+    t.after(api.clearEncryptedAttachmentCache);
+    api.encryptedAttachmentStatus(message);
+    await setImmediate();
+    assert.deepEqual(metrics.selections, ["all"]);
+});
+
+test("failed document authentication never exposes a blob", async t => {
+    const { api, message, blobs } = documentFixture({ load: async () => ({ status: "invalid_message" }) });
+    t.after(api.clearEncryptedAttachmentCache);
+    api.encryptedAttachmentStatus(message);
+    await setImmediate();
+    assert.equal(api.encryptedAttachmentStatus(message).status, "failed");
+    assert.equal(blobs.size, 0);
+    assert.equal(api.patchEncryptedMessageAttachments(message, { forceUpdate() {} }).attachments.length, 0);
+});
+
+test("clearing a pending document preview prevents late plaintext URLs", async () => {
+    const gate = Promise.withResolvers<DecryptIncomingAttachmentsResult>();
+    const { api, message, blobs, files, metrics } = documentFixture({ load: () => gate.promise });
+    api.encryptedAttachmentStatus(message);
+    await setImmediate();
+    assert.deepEqual(metrics.selections, ["all"]);
+    api.clearEncryptedAttachmentCache();
+    gate.resolve({ status: "decrypted", plaintext: "", attachments: files });
+    await setImmediate();
+    assert.equal(blobs.size, 0);
+});
+
+test("an updated optimistic nonce cannot reuse a cached replay failure", async t => {
+    const { api, message, metrics } = fixture({ inspect: async () => ({ status: "replay_detected" }) });
+    t.after(api.clearEncryptedAttachmentCache);
+    api.encryptedAttachmentStatus(message);
+    await setImmediate();
+    assert.equal(metrics.inspections, 1);
+    const key = api.encryptedAttachmentCacheKey(message);
+    message.nonce = "500000000000000001";
+    assert.notEqual(api.encryptedAttachmentCacheKey(message), key);
+    api.encryptedAttachmentStatus(message);
+    await setImmediate();
+    assert.equal(metrics.inspections, 2, "Changed authentication inputs must be checked again");
+});
