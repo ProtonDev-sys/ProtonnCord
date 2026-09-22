@@ -308,10 +308,11 @@ async function main(): Promise<void> {
     );
     const attachmentReservationIndex = outgoingListenerSource.indexOf("authorizeScopedAttachmentUploadReservations");
     const attachmentApprovalIndex = outgoingListenerSource.indexOf("approvedAttachmentUploads.set");
-    const attachmentStartIndex = outgoingListenerSource.indexOf("await Promise.all(uploads.map(upload => upload.upload()))");
+    const attachmentStartIndex = outgoingListenerSource.indexOf("await Promise.all(uploads.map(upload => uploadEncryptedAttachment(upload, uploadAbort.signal)))");
     assert.ok(
         attachmentReservationIndex !== -1 && attachmentApprovalIndex > attachmentReservationIndex &&
-        attachmentStartIndex > attachmentApprovalIndex,
+        attachmentStartIndex > attachmentApprovalIndex &&
+        outgoingListenerSource.indexOf("authorizeScopedWirePayload") > attachmentStartIndex,
         "encrypted attachments are authorized, approved, and explicitly started in order",
     );
     assert.match(

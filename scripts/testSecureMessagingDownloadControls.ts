@@ -33,7 +33,8 @@ let handlerSource = "";
 let fileActionsSource = "";
 function visit(node: Node) {
     if (isObjectLiteralExpression(node) && node.properties.some(value => isPropertyAssignment(value) && value.name.getText() === "find") &&
-        /\$self\.(?:downloadEncryptedAttachment|encryptedFileActions|renderZipPreview)/.test(node.getText())) {
+        /\$self\.(?:downloadEncryptedAttachment|encryptedFileActions|renderZipPreview)/.test(node.getText()) &&
+        !node.getText().includes("find: 'id:\"media-viewer-details\"'")) { // The grouped viewer patch runs against its captured fixture in testSecureMessagingImageActions.
         const find = property(node, "find");
         const replacement = property(node, "replacement");
         assert.ok(isObjectLiteralExpression(replacement));

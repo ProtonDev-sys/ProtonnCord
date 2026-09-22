@@ -61,6 +61,12 @@ export default definePlugin({
                         `if(await Vencord.Api.MessageEvents._handlePreSend(${channel}.id,${parsedMessage},${options},vcSendProps,vcContentOptions))` +
                         "return{shouldClear:false,shouldRefocus:true};",
                 },
+                {
+                    // The composer assigns its original drafts after the pre-send hook.
+                    // Keep an explicit listener override, including completed encrypted uploads.
+                    match: /(\i\.attachmentsToUpload)=(\i)(?=[,;])/,
+                    replace: "$1??=$2",
+                },
             ],
         },
         {
