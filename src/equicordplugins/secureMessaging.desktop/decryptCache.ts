@@ -157,6 +157,14 @@ export function decryptCachedMessage(localUserId: string, message: Message): Pro
     return ensureEntry(localUserId, message)[1].promise;
 }
 
+export function invalidateFailedDecryption(localUserId: string, message: Message): void {
+    const key = decryptCacheKey(localUserId, message);
+    const entry = cache.get(key);
+    // A second mounted copy can already have started a retry. Keep that shared work,
+    // and never invalidate an authenticated result or an author/replay rejection.
+    if (entry?.result && isTransientFailure(entry.result)) cache.delete(key);
+}
+
 export function prefetchCachedMessage(localUserId: string, message: Message): Promise<DecryptIncomingResult> | null {
     if (prefetches.size >= MAX_PREFETCH_ENTRIES || getCachedDecryption(localUserId, message)) return null;
     const promise = decryptCachedMessage(localUserId, message);

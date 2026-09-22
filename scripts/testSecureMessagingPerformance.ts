@@ -223,8 +223,8 @@ function testSourceBoundaries(): void {
     assert.match(index, /const RENDER_DECRYPT_BATCH_SIZE = 24/);
     assert.doesNotMatch(index, /Promise\.all\(batch\.map\(request => request\.promise\)\)/,
         "one slow decrypt cannot block every visible encrypted row");
-    assert.match(index, /secureMessageGroupingListeners = new Map<string, Set<\(\) => void>>/,
-        "grouping updates are scoped to the affected channel");
+    assert.match(index, /secureMessageGroupingListeners = new Map<string, Map<string, Set<\(\) => void>>>/,
+        "grouping updates are scoped to the affected channel and neighboring rows");
     assert.doesNotMatch(index, /messageLengthBypassKeys/,
         "message-length bypass state remains bounded to the selected conversation");
     assert.match(index, /announcementReviewOrder/,

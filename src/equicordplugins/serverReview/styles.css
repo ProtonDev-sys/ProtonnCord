@@ -1,0 +1,57 @@
+.pc-server-review {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.pc-server-review-tabs,
+.pc-server-review-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.pc-server-review-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--background-modifier-accent);
+}
+
+.pc-server-review-row img {
+    flex-shrink: 0;
+    border-radius: 8px;
+}
+
+.pc-server-review-info {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.pc-server-review-confirm {
+    padding: 16px;
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 4px;
+}
+
+.pc-server-review-names {
+    max-height: 120px;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+}
+
+@media (width <= 700px) {
+    .pc-server-review-row {
+        flex-wrap: wrap;
+    }
+
+    .pc-server-review-row > .pc-server-review-actions {
+        width: 100%;
+    }
+}

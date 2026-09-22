@@ -32,6 +32,7 @@ const DEFERRED_NATIVES = new Set([
     "equicordplugins/favouriteAnything",
     "equicordplugins/fileUpload",
     "equicordplugins/gifMaker",
+    "equicordplugins/messageImage.desktop",
     "equicordplugins/questify",
     "equicordplugins/richPresence",
     "equicordplugins/secureMessaging.desktop",
