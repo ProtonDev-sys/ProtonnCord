@@ -40,7 +40,7 @@ const messageIndexCache = new WeakMap<object, MessageIndexCache>();
 export function canGroupSecureMessageContent(result: DecryptIncomingResult | null, optimisticPlaintext?: string): boolean {
     if (result && (result.status !== "decrypted" || result.attachmentBundle !== null || result.stickers.length > 0)) return false;
     const plaintext = result?.status === "decrypted" ? result.plaintext : optimisticPlaintext;
-    return plaintext !== undefined && extractSecureEmbedUrls(plaintext).length === 0;
+    return plaintext !== undefined && plaintext.trim().length > 0 && extractSecureEmbedUrls(plaintext).length === 0;
 }
 
 function buildMessageIndexes<T extends SecureMessageGroupCandidate>(messages: readonly T[]): MessageIndexCache {
