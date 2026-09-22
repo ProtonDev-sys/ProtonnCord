@@ -45,6 +45,7 @@ function nativeFixture(extra: Record<string, any> = {}, globals: Record<string, 
     return load("native.ts", `
         export const runTestOperation = runSerialized;
         export const attachmentCacheSize = () => authenticatedAttachmentCache.size;
+        export { cacheAuthenticatedAttachment, cachedAuthenticatedAttachment, clearAuthenticatedAttachmentCache };
         export function useFixtureDecryption(value) { decryptIncoming = async () => value; }
     `, {
         "electron": { safeStorage: { isEncryptionAvailable: () => true } },
@@ -57,6 +58,22 @@ function nativeFixture(extra: Record<string, any> = {}, globals: Record<string, 
         ...extra
     }, globals);
 }
+
+test("reading a full authenticated attachment cache retains entries until an insertion needs space", t => {
+    const native = nativeFixture();
+    t.after(native.clearAuthenticatedAttachmentCache);
+    const input = { channelId: "channel", discordMessageId: "message", discordAuthorId: "peer", discordEditedTimestamp: null, content: "encrypted", attachments: [] };
+    for (let index = 0; index < 128; index++) native.cacheAuthenticatedAttachment("local", input, {
+        id: String(index), data: new Uint8Array([index]), metadata: { name: `file-${index}` },
+    });
+    for (let index = 0; index < 128; index++) {
+        assert.equal(native.cachedAuthenticatedAttachment("local", input, String(index))?.data[0], index);
+        assert.equal(native.attachmentCacheSize(), 128, "lookups must not reserve room for a new entry");
+    }
+    native.cacheAuthenticatedAttachment("local", input, { id: "new", data: new Uint8Array([255]), metadata: { name: "new-file" } });
+    assert.equal(native.attachmentCacheSize(), 128, "insertion still respects the entry limit");
+    assert.equal(native.cachedAuthenticatedAttachment("local", input, "new")?.data[0], 255);
+});
 
 test("SecureMessaging discards a native operation completed after session lock", async () => {
     const native = nativeFixture();

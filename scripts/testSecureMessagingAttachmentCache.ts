@@ -30,6 +30,7 @@ function fixture(options: {
     load?: (selection: string) => Promise<DecryptIncomingAttachmentsResult>;
     download?: () => Promise<DownloadIncomingAttachmentResult>;
     refresh?: (urls: string[]) => Promise<object>;
+    updateMessage?: () => void;
 } = {}) {
     let currentUserId = userId;
     const metrics = { inspections: 0, loads: 0, downloads: 0, refreshes: 0, selections: [] as string[], refreshRequests: [] as string[][], inputs: [] as DecryptIncomingAttachmentsInput[] };
@@ -91,6 +92,11 @@ function fixture(options: {
         }
     };
     const mocks: Record<string, object> = {
+        "@api/MessageUpdater": { updateMessage: (channelId: string, messageId: string) => {
+            assert.equal(channelId, message.channel_id);
+            assert.equal(messageId, message.id);
+            options.updateMessage?.();
+        } },
         "@webpack/common": {
             Constants: { Endpoints: { ATTACHMENTS_REFRESH_URLS: "/fixture-refresh" } },
             RestAPI: { async post({ body }: { body: { attachment_urls: string[]; }; }) {
@@ -120,6 +126,35 @@ function fixture(options: {
     });
     return { api: exports, message, metrics, blobs, switchAccount: () => { currentUserId = "100000000000000003"; } };
 }
+
+test("manual retry after a terminal failure restores the native media renderer without reopening chat", async t => {
+    let failed = true;
+    let render = () => {};
+    const { api, message, blobs } = fixture({
+        updateMessage: () => render(),
+        load: async () => failed ? { status: "invalid_message" } : {
+            status: "decrypted", plaintext: "",
+            attachments: [{
+                id: "400000000000000002", data: new Uint8Array([1, 2, 3, 4]),
+                metadata: { name: "image.png", mimeType: "image/png", size: 4, spoiler: false,
+                    description: null, duration: null, height: 1, width: 1, waveform: null }
+            }],
+        },
+    });
+    t.after(api.clearEncryptedAttachmentCache);
+    let rendered: Message;
+    const owner = { forceUpdate: () => render() };
+    render = () => { rendered = api.patchEncryptedMessageAttachments(message, owner); };
+    render();
+    await setImmediate();
+    assert.equal(api.encryptedAttachmentStatus(message).status, "failed");
+    assert.equal(blobs.size, 0);
+    failed = false;
+    api.retryEncryptedAttachmentLoad(message);
+    await setImmediate();
+    assert.equal(api.encryptedAttachmentStatus(message).status, "ready");
+    assert.equal(rendered!.attachments[0]?.filename, "image.png");
+});
 
 test("attachment rendering loads previews beside a 300 MiB ZIP without fetching the file", async t => {
     const { api, message, metrics, blobs } = fixture();
