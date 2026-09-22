@@ -14,9 +14,12 @@ import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 import {
     attachmentBundleRootFromDigests,
     attachmentCiphertextDigest,
+    type AttachmentMetadata,
     decryptAttachmentBytes,
     DETACHED_TEXT_FILENAME,
     DETACHED_TEXT_MIME_TYPE,
+    encryptAttachmentBytes,
+    generateAttachmentBundleMaterial,
     parseSecurePlaintext,
 } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import {
@@ -342,4 +345,67 @@ test("mutating the caller's upload array cannot replace an in-flight bundle memb
     assert.equal(replacement.description, "replacement");
     const { metadata } = await openAttachment(prepared, original.item.file);
     assert.equal(metadata.description, privateDescription);
+});
+
+function encryptionInput(data: Uint8Array | Blob) {
+    const { descriptor, keyBytes } = generateAttachmentBundleMaterial(1);
+    const metadata: AttachmentMetadata = {
+        name: "private-α.bin", mimeType: "application/octet-stream", size: data instanceof Blob ? data.size : data.byteLength,
+        description: privateDescription, spoiler: true, width: null, height: null, duration: null, waveform: null,
+    };
+    return { bundleId: descriptor.id, channelId, count: 1, data, index: 0, masterKey: keyBytes, metadata, senderUserId };
+}
+
+test("Blob framing is wire-identical to byte input and byte callers retain call-time snapshots", async () => {
+    const bytes = new TextEncoder().encode("authenticated attachment contents");
+    const original = bytes.slice();
+    const input = encryptionInput(bytes);
+    const pending = encryptAttachmentBytes(input);
+    bytes.fill(0);
+    const byteCiphertext = await pending;
+    const blobCiphertext = await encryptAttachmentBytes({ ...input, data: new Blob([original]) });
+    assert.deepEqual(blobCiphertext, byteCiphertext, "the same bundle metadata and plaintext produce identical AES-GCM framing");
+    const opened = await decryptAttachmentBytes({ ...input, ciphertext: blobCiphertext });
+    assert.deepEqual(opened.data, original);
+    assert.deepEqual(opened.metadata, input.metadata);
+    blobCiphertext[blobCiphertext.length - 1] ^= 1;
+    await assert.rejects(decryptAttachmentBytes({ ...input, ciphertext: blobCiphertext }), /authentication failed/u);
+});
+
+test("Blob size and binding failures are rejected before reading a plaintext buffer", async t => {
+    const input = encryptionInput(new Blob(["private bytes"]));
+    const read = t.mock.method(Blob.prototype, "arrayBuffer", () => { throw new Error("must not read invalid input"); });
+    await assert.rejects(encryptAttachmentBytes({ ...input, metadata: { ...input.metadata, size: input.metadata.size + 1 } }), /byte length/u);
+    await assert.rejects(encryptAttachmentBytes({ ...input, channelId: "invalid" }), /channel or sender/u);
+    await assert.rejects(encryptAttachmentBytes({ ...input, masterKey: new Uint8Array(31) }), /bundle key/u);
+    assert.equal(read.mock.callCount(), 0);
+});
+
+for (const fail of [false, true]) test(`framed plaintext is wiped after ${fail ? "failed" : "successful"} encryption`, async t => {
+    const encrypt = crypto.subtle.encrypt.bind(crypto.subtle);
+    const framed: Uint8Array[] = [];
+    t.mock.method(crypto.subtle, "encrypt", async (...args: Parameters<SubtleCrypto["encrypt"]>) => {
+        framed.push(new Uint8Array(args[2] as ArrayBuffer));
+        if (fail) throw new Error("injected encryption failure");
+        return encrypt(...args);
+    });
+    for (const data of [new Uint8Array([1, 2, 3]), new Blob([new Uint8Array([1, 2, 3])])]) {
+        const pending = encryptAttachmentBytes(encryptionInput(data));
+        if (fail) await assert.rejects(pending, /injected encryption failure/u);
+        else await pending;
+    }
+    assert.equal(framed.length, 2);
+    assert.ok(framed.every(bytes => bytes.length > 3 && bytes.every(byte => byte === 0)));
+});
+
+test("mutable-byte framing is wiped when key derivation fails before encryption", async t => {
+    const fill = Uint8Array.prototype.fill;
+    const wiped: number[] = [];
+    t.mock.method(Uint8Array.prototype, "fill", function (this: Uint8Array, ...args: Parameters<Uint8Array["fill"]>) {
+        const result = fill.apply(this, args);
+        if (args[0] === 0 && this.length > 32) wiped.push(this.length);
+        return result;
+    });
+    await assert.rejects(encryptAttachmentBytes({ ...encryptionInput(new Uint8Array([1, 2, 3])), masterKey: new Uint8Array(31) }), /bundle key/u);
+    assert.equal(wiped.length, 1, "the pre-await byte snapshot must be cleared even if no AES operation starts");
 });

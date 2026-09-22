@@ -22,6 +22,24 @@ type AttachmentCache = typeof import("../src/equicordplugins/secureMessaging.des
 const source = readFileSync(new URL("../src/equicordplugins/secureMessaging.desktop/attachmentCache.ts", import.meta.url), "utf8");
 const userId = "100000000000000001";
 
+test("native image metadata is limited to registered media in the current account", async t => {
+    const h = fixture();
+    t.after(h.api.clearEncryptedAttachmentCache);
+    h.api.encryptedAttachmentStatus(h.message);
+    await setImmediate();
+    const [file, image] = h.api.patchEncryptedMessageAttachments(h.message, { forceUpdate() {} }).attachments;
+    const info = h.api.encryptedAttachmentMediaInfo(image.url);
+    assert.equal(info?.contentType, "image/png");
+    assert.equal(info?.filename, "image.png");
+    assert.equal(h.api.encryptedAttachmentMediaInfo(image.proxy_url)?.filename, "image.png");
+    assert.equal(h.api.encryptedAttachmentMediaInfo(file.url), null);
+    assert.equal(h.api.encryptedAttachmentMediaInfo("blob:https://discord.com/spoof#image.png"), null);
+    assert.equal(h.api.encryptedAttachmentMediaInfo({ url: image.url }), null);
+    h.switchAccount();
+    assert.equal(h.api.encryptedAttachmentMediaInfo(image.url), null);
+    assert.equal(h.blobs.size, 0, "account changes revoke the previous account's blob resources");
+});
+
 function fixture(options: {
     legacy?: boolean;
     filesOnly?: boolean;
@@ -31,6 +49,8 @@ function fixture(options: {
     download?: () => Promise<DownloadIncomingAttachmentResult>;
     refresh?: (urls: string[]) => Promise<object>;
     updateMessage?: () => void;
+    document?: unknown;
+    maxCacheBytes?: number;
 } = {}) {
     let currentUserId = userId;
     const metrics = { inspections: 0, loads: 0, downloads: 0, refreshes: 0, selections: [] as string[], refreshRequests: [] as string[][], inputs: [] as DecryptIncomingAttachmentsInput[] };
@@ -117,15 +137,156 @@ function fixture(options: {
         "./taskQueue": { createTaskQueue }
     };
     const exports = {} as AttachmentCache;
-    runInNewContext(transpileModule(source, {
+    const implementation = options.maxCacheBytes === undefined ? source
+        : source.replace(/const MAX_CACHE_BYTES = [^;]+;/, `const MAX_CACHE_BYTES = ${options.maxCacheBytes};`);
+    runInNewContext(transpileModule(implementation, {
         compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
     }).outputText, {
-        exports, URL: LocalURL, Blob, setTimeout, clearTimeout,
+        exports, URL: LocalURL, Blob, setTimeout, clearTimeout, AbortController, document: options.document,
         VencordNative: { pluginHelpers: { SecureMessaging: native } },
         require(name: string) { assert.ok(name in mocks, name); return mocks[name]; }
     });
     return { api: exports, message, metrics, blobs, switchAccount: () => { currentUserId = "100000000000000003"; } };
 }
+
+function videoFixture(videoCount = 2, maxCacheBytes?: number) {
+    const videos: Array<{
+        src: string; videoWidth: number; videoHeight: number;
+        listeners: Map<string, () => void>;
+        addEventListener(name: string, listener: () => void): void;
+        removeEventListener(name: string): void;
+        removeAttribute(): void; load(): void;
+    }> = [];
+    const encoders: Array<(blob: Blob | null) => void> = [];
+    let refreshes = 0;
+    const ids = Array.from({ length: videoCount + 1 }, (_, index) => String(400000000000000001n + BigInt(index)));
+    const h = fixture({
+        maxCacheBytes, updateMessage: () => { refreshes++; },
+        document: {
+            createElement(type: string) {
+                if (type === "canvas") return { getContext: () => ({ drawImage() {} }), toBlob: (complete: (blob: Blob | null) => void) => encoders.push(complete) };
+                assert.equal(type, "video");
+                const video = {
+                    src: "", videoWidth: 640, videoHeight: 480, listeners: new Map<string, () => void>(),
+                    addEventListener(name: string, listener: () => void) { this.listeners.set(name, listener); },
+                    removeEventListener(name: string) { this.listeners.delete(name); },
+                    removeAttribute() { this.src = ""; }, load() {},
+                };
+                videos.push(video);
+                return video;
+            },
+        },
+        inspect: async () => ({ status: "decrypted", plaintext: "", stickers: [], detachedTextIndex: null, counter: 1, envelopeId: "fixture",
+            attachmentBundle: { id: "A".repeat(22), key: "A".repeat(43), root: "A".repeat(43), count: ids.length,
+                manifest: ids.map(() => ({ digest: "A".repeat(43), preview: true, spoiler: false, size: 4, name: null })) } }),
+        load: async () => ({ status: "decrypted", plaintext: "", attachments: ids.map((id, index) => ({
+            id, data: new Uint8Array([1, 2, 3, 4]), metadata: {
+                name: index === 1 ? "photo.png" : "clip.mp4", mimeType: index === 1 ? "image/png" : "video/mp4", size: 4,
+                width: 640, height: 480, duration: index === 1 ? null : 1, description: null, waveform: null, spoiler: false,
+            },
+        })) }),
+    });
+    h.message.attachments = ids.map(id => ({ ...h.message.attachments[1], id, size: 100,
+        url: `https://cdn.discordapp.com/attachments/${h.message.channel_id}/${id}/encrypted.pcaf`,
+        proxy_url: `https://media.discordapp.net/attachments/${h.message.channel_id}/${id}/encrypted.pcaf` }));
+    const owner = { forceUpdate() {} };
+    return { ...h, videos, encoders, owner, refreshes: () => refreshes,
+        render: () => h.api.patchEncryptedMessageAttachments(h.message, owner),
+        decode(index: number) { videos[index].listeners.get("loadeddata")?.(); },
+    };
+}
+
+test("mixed authenticated images and playable videos display before either poster decoder finishes", async t => {
+    const h = videoFixture();
+    t.after(() => h.api.clearEncryptedAttachmentCache());
+    h.render();
+    await setImmediate();
+    const attachments = h.render().attachments;
+    assert.equal(attachments.length, 3, "a slow video poster must not withhold the neighboring image");
+    assert.equal(h.api.encryptedAttachmentStatus(h.message).status, "ready");
+    assert.equal(h.videos.length, 2, "poster decoding has its own bounded queue");
+    assert.equal(attachments[0].content_type, "video/mp4");
+    const sourceUrl = attachments[0].url.split("#")[0];
+    const placeholderUrl = attachments[0].proxy_url.split("#")[0];
+    assert.equal(h.blobs.get(placeholderUrl)?.type, "image/png");
+    assert.notEqual(sourceUrl, placeholderUrl);
+    assert.deepEqual({ ...h.api.encryptedAttachmentMediaInfo(attachments[0].proxy_url) }, { contentType: "video/mp4", filename: "clip.mp4" });
+    h.decode(0);
+    h.encoders[0](new Blob(["poster"], { type: "image/webp" }));
+    await setImmediate();
+    const enhanced = h.render().attachments[0];
+    assert.equal(enhanced.url, attachments[0].url, "the playable authenticated video source stays unchanged");
+    assert.notEqual(enhanced.proxy_url, attachments[0].proxy_url);
+    assert.deepEqual({ ...h.api.encryptedAttachmentMediaInfo(enhanced.proxy_url) }, { contentType: "video/mp4", filename: "clip.mp4" });
+    assert.equal(h.refreshes(), 1);
+    h.api.clearEncryptedAttachmentCache();
+    assert.equal(h.blobs.size, 0);
+    assert.ok(h.videos.every(video => video.listeners.size === 0 && video.src === ""));
+});
+
+test("cache disposal aborts active posters and skips queued videos without leaking URLs", async t => {
+    const h = videoFixture(3);
+    t.after(() => h.api.clearEncryptedAttachmentCache());
+    h.render();
+    await setImmediate();
+    assert.equal(h.videos.length, 2);
+    h.decode(0);
+    h.api.clearEncryptedAttachmentCache();
+    h.encoders[0](new Blob(["late poster"], { type: "image/webp" }));
+    await setImmediate();
+    assert.equal(h.videos.length, 2, "the queued third decoder must never start after disposal");
+    assert.equal(h.blobs.size, 0);
+    assert.equal(h.refreshes(), 0);
+    assert.ok(h.videos.every(video => video.listeners.size === 0));
+});
+
+test("an account transition cannot publish a poster for the previous account", async t => {
+    const h = videoFixture(1);
+    t.after(() => h.api.clearEncryptedAttachmentCache());
+    h.render();
+    await setImmediate();
+    h.decode(0);
+    const urls = h.blobs.size;
+    h.switchAccount();
+    h.encoders[0](new Blob(["late poster"], { type: "image/webp" }));
+    await setImmediate();
+    assert.equal(h.blobs.size, urls, "no new plaintext URL is created after the account changes");
+    assert.equal(h.refreshes(), 0);
+    h.api.clearEncryptedAttachmentCache();
+    assert.equal(h.blobs.size, 0);
+});
+
+test("a full cache skips optional posters while retaining playable media", async t => {
+    const h = videoFixture(1, 200);
+    t.after(() => h.api.clearEncryptedAttachmentCache());
+    h.render();
+    await setImmediate();
+    const initial = h.render().attachments[0];
+    const urls = h.blobs.size;
+    h.decode(0);
+    h.encoders[0](new Blob([new Uint8Array(200)], { type: "image/webp" }));
+    await setImmediate();
+    assert.equal(h.render().attachments[0].proxy_url, initial.proxy_url);
+    assert.equal(h.blobs.size, urls);
+    assert.equal(h.refreshes(), 0);
+    assert.equal(h.api.encryptedAttachmentStatus(h.message).status, "ready");
+    h.api.clearEncryptedAttachmentCache();
+});
+
+test("poster timeouts clean up decoding without hiding authenticated attachments", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const h = videoFixture();
+    t.after(() => h.api.clearEncryptedAttachmentCache());
+    h.render();
+    await setImmediate();
+    const initialUrls = h.blobs.size;
+    t.mock.timers.tick(5_000);
+    await setImmediate();
+    assert.equal(h.render().attachments.length, 3);
+    assert.equal(h.blobs.size, initialUrls);
+    assert.equal(h.refreshes(), 0);
+    assert.ok(h.videos.every(video => video.listeners.size === 0 && video.src === ""));
+});
 
 test("manual retry after a terminal failure restores the native media renderer without reopening chat", async t => {
     let failed = true;
