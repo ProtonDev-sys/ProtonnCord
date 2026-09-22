@@ -76,6 +76,7 @@ import {
     clearEncryptedAttachmentCache,
     downloadEncryptedAttachmentUrl,
     encryptedAttachmentCacheKey,
+    encryptedAttachmentMediaInfo,
     encryptedAttachmentStatus,
     encryptedMediaAttachments,
     isEncryptedAttachmentDownloadUrl,
@@ -113,6 +114,7 @@ import {
     invalidateFailedDecryption,
     prefetchCachedMessage,
 } from "./decryptCache";
+import { safeDownloadFilename } from "./downloadFilename";
 import {
     clearEncryptedEmbedCache,
     encryptedMessageInlineEmbedStatus,
@@ -192,6 +194,12 @@ const UploadLimits = findByPropsLazy("getUserMaxFileSize") as {
     getUserMaxFileSize(user: unknown): unknown;
 };
 const NativeAttachmentDownload = findComponentByCodeLazy<{ href: string; mimeType: string[]; }>("getDefaultLinkInterceptor", "MEDIA_DOWNLOAD_BUTTON_TAPPED");
+const NativeImageActions = findByPropsLazy("copyImage", "canCopyImage", "saveImage") as {
+    canCopyImage(url: string): boolean;
+    canSaveImage(url: string, contentType: string): boolean;
+    copyImage(url: string, contentType?: string): Promise<void>;
+    saveImage(url: string, contentType?: string, extension?: string): Promise<"saved" | "canceled" | "errored">;
+};
 
 type ScreenCaptureProtectionStatus = "disabled" | "failed" | "pending" | "ready" | "screenshot";
 
@@ -3191,6 +3199,108 @@ export default definePlugin({
             },
         },
         {
+            find: 'id:"copy-image"',
+            group: true,
+            replacement: [
+                {
+                    match: /function \i\((\i),\i,(\i)\)\{(?=if\()/,
+                    replace: "$&$2=$self.encryptedImageMenuOptions($1,$2);const vcSecureImageMenuGuard=$self.encryptedMediaActionGuard($1,false);",
+                },
+                {
+                    match: /\(0,\i\.e7\)\((\i),\i\?\.contentType,\i\?\.originalContentType\)/,
+                    replace: "($self.canUseEncryptedImage($1)??$&)",
+                },
+                {
+                    match: /\(0,\i\.XW\)\((\i),\i\?\.contentType,\i\?\.originalContentType,\i\.N7\)/,
+                    replace: "($self.encryptedImageMenuUrl($1)??$&)",
+                },
+                {
+                    match: /\(0,\i\.PK\)\((\i),\i\?\.contentType,\i\?\.originalContentType\)/,
+                    replace: "($self.canUseEncryptedImage($1,true)??$&)",
+                },
+                {
+                    match: /(?<=async function \i\(\)\{try\{)(await \i\.Ay\.copyImage\()/,
+                    replace: "vcSecureImageMenuGuard?.();$1",
+                },
+                {
+                    match: /(?<=async function \i\(\)\{try\{)(let \i=await \i\.Ay\.saveImage\()/,
+                    replace: "vcSecureImageMenuGuard?.();$1",
+                },
+            ],
+        },
+        {
+            find: '"Copy image method called outside native app"',
+            group: true,
+            replacement: [
+                {
+                    match: /async copyImage\((\i),\i\)\{/,
+                    replace: "$&const vcSecureImageGuard=$self.encryptedMediaActionGuard($1);",
+                },
+                {
+                    match: /(\i\.clipboard\.copyImage\(\i\.from\(\i\),"image\.png"\);return)/,
+                    replace: "vcSecureImageGuard?.(),$1",
+                },
+                {
+                    match: /(\i\.clipboard\.copyImage\(\i\.from\(\i\),\i\)\},async copyImageBlob)/,
+                    replace: "vcSecureImageGuard?.(),$1",
+                },
+                {
+                    match: /async saveImage\((\i),\i,\i\)\{/,
+                    replace: "$&const vcSecureImageGuard=$self.encryptedMediaActionGuard($1);",
+                },
+                {
+                    match: /(async saveImage\((\i),\i,\i\)\{.{0,500}?let \i=)(\i\.pathname\.split\("\/"\)\.pop\(\)\?\?"unknown")/,
+                    replace: "$1$self.encryptedImageFilename($2)??$3",
+                },
+                {
+                    match: /(async saveImage\(\i,\i,\i\)\{.{0,1600}?)(await \i\.fileManager\.saveWithDialog2\([^)]*\))/,
+                    replace: "$1(vcSecureImageGuard?.(),$2)",
+                },
+                {
+                    match: /(async saveImage\(\i,\i,\i\)\{.{0,1800}?)(await \i\.fileManager\.saveWithDialog\([^)]*\))/,
+                    replace: "$1(vcSecureImageGuard?.(),$2)",
+                },
+            ],
+        },
+        {
+            find: 'id:"media-viewer-details"',
+            group: true,
+            replacement: [
+                {
+                    match: /\(0,\i\.e7\)\((\i),\i\.contentType,\i\.originalContentType\)/,
+                    replace: "($self.canUseEncryptedImage($1)??$&)",
+                },
+                {
+                    match: /\(0,\i\.PK\)\((\i),\i\.contentType,\i\.originalContentType\)/,
+                    replace: "($self.canUseEncryptedImage($1,true)??$&)",
+                },
+                {
+                    match: /\(0,\i\.XW\)\((\i),\i\.contentType,\i\.originalContentType,\i\.N7\)/g,
+                    replace: "($self.encryptedImageMenuUrl($1,true)??$&)",
+                },
+                {
+                    match: /((\i)=\(0,\i\.bc\)\(\i\.original,\i\.url\),)(?=\i="VIDEO"===)/,
+                    replace: "$1vcSecureViewerGuard=$self.encryptedMediaActionGuard($2,false),",
+                },
+                {
+                    match: /async function \i\(\)\{(?=if\(\i\.l\.markActionPerformed\(\i\.N\.SAVE_MEDIA_PRESSED)/,
+                    replace: "$&try{vcSecureViewerGuard?.()}catch{return;}",
+                },
+                {
+                    match: /(let\{item:\i,canCopyImage:\i,canCopyLink:\i,src:(\i)\}=\i;)/,
+                    replace: "$1const vcSecureViewerCopyGuard=$self.encryptedMediaActionGuard($2,false);",
+                },
+                {
+                    match: /try\{(?=await \i\.Ay\.copyImage\()/,
+                    replace: "$&vcSecureViewerCopyGuard?.();",
+                },
+                {
+                    match: /("VIDEO"===\i\.type&&)(\(0,\i\.h\)\(\{href:(\i)\}\))/,
+                    replace: "$1($self.downloadEncryptedAttachment($3)||$2)",
+                },
+            ],
+        },
+        {
             find: '"MessageManager"',
             replacement: {
                 match: /(?<="MessageManager"\);)function (\i)\(\i\)\{/,
@@ -3455,6 +3565,52 @@ export default definePlugin({
             searchParams: { append: () => undefined },
             toString: () => value,
         };
+    },
+
+    encryptedImageMenuOptions(value: unknown, options?: Record<string, unknown>) {
+        const info = encryptedAttachmentMediaInfo(value);
+        return info?.contentType.startsWith("image/")
+            ? { ...options, contentType: info.contentType, originalContentType: info.contentType }
+            : options;
+    },
+
+    canUseEncryptedImage(value: unknown, copy = false): boolean | null {
+        const info = encryptedAttachmentMediaInfo(value);
+        if (typeof value !== "string" || !info?.contentType.startsWith("image/")) return null;
+        // The menu and native manager live in different modules. A partial patch
+        // must not expose an image action without its final clipboard/dialog guard.
+        if (screenCaptureProtectionStatus !== "ready" ||
+            !NativeImageActions.copyImage.toString().includes("vcSecureImageGuard") ||
+            !NativeImageActions.saveImage.toString().includes("vcSecureImageGuard")) return false;
+        return copy
+            ? NativeImageActions.canCopyImage(`https://discord.com/image.${info.contentType.slice("image/".length)}`)
+            : NativeImageActions.canSaveImage(value, info.contentType);
+    },
+
+    encryptedImageMenuUrl(value: unknown, includeVideo = false): string | null {
+        const info = encryptedAttachmentMediaInfo(value);
+        return typeof value === "string" && info && (info.contentType.startsWith("image/") || includeVideo && info.contentType.startsWith("video/")) ? value : null;
+    },
+
+    encryptedMediaActionGuard(value: unknown, checkNow = true): (() => void) | undefined {
+        if (!encryptedAttachmentMediaInfo(value)) return;
+        const generation = secureOperationGeneration;
+        const visibilityGeneration = screenCaptureProtectionGeneration;
+        const localUserId = UserStore.getCurrentUser()?.id;
+        const guard = () => {
+            if (screenCaptureProtectionStatus !== "ready" || visibilityGeneration !== screenCaptureProtectionGeneration ||
+                !secureOperationIsCurrent(generation, localUserId) || !encryptedAttachmentMediaInfo(value))
+                throw new Error("The decrypted image is no longer available.");
+        };
+        if (checkNow) guard();
+        return guard;
+    },
+
+    encryptedImageFilename(value: unknown): string | null {
+        const info = encryptedAttachmentMediaInfo(value);
+        // Native saveImage decodes URL basenames before sanitizing them. Encoding
+        // once preserves literal percent sequences in the authenticated filename.
+        return info?.contentType.startsWith("image/") ? encodeURIComponent(safeDownloadFilename(info.filename)) : null;
     },
 
     patchEncryptedEmbeds(message: Message, owner: { forceUpdate(): void; }) {

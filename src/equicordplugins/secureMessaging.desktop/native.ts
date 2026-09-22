@@ -10,7 +10,7 @@ import { app, BrowserWindow, type IpcMainInvokeEvent, safeStorage } from "electr
 import { renameSync } from "fs";
 import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "fs/promises";
 import { createServer, type Server } from "net";
-import { dirname, extname, join, resolve } from "path";
+import { dirname, join, resolve } from "path";
 import { setTimeout as delay } from "timers/promises";
 
 import {
@@ -42,6 +42,7 @@ import {
     validateIdentityKeyPairs,
     verifyKeyAnnouncement,
 } from "./crypto";
+import { safeDownloadFilename } from "./downloadFilename";
 import { deriveOneKeyPrivateIdentity } from "./oneKeyVault";
 import {
     decodeBase64Url,
@@ -1414,28 +1415,6 @@ async function downloadEncryptedAttachment(
         }
     }
     throw new EncryptedAttachmentDownloadError(hadDownloadFailure);
-}
-
-function truncateUtf8(value: string, maximumBytes: number): string {
-    let result = "";
-    for (const character of value) {
-        if (Buffer.byteLength(result) + Buffer.byteLength(character) > maximumBytes) break;
-        result += character;
-    }
-    return result;
-}
-
-function safeDownloadFilename(value: string, duplicate: number): string {
-    let filename = value.normalize("NFC")
-        .replace(/[<>:"/\\|?*\u0000-\u001f]/gu, "_")
-        .replace(/[. ]+$/gu, "");
-    if (!filename || filename === "." || filename === "..") filename = "encrypted-attachment";
-    if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(filename)) filename = `_${filename}`;
-
-    const extension = truncateUtf8(extname(filename), 32);
-    const stem = filename.slice(0, filename.length - extname(filename).length);
-    const suffix = duplicate === 0 ? "" : ` (${duplicate})`;
-    return `${truncateUtf8(stem, 220 - Buffer.byteLength(extension) - Buffer.byteLength(suffix))}${suffix}${extension}`;
 }
 
 async function saveAuthenticatedAttachment(filename: string, data: Uint8Array): Promise<string> {

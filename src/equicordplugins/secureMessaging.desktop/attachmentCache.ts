@@ -41,6 +41,13 @@ const VIDEO_POSTER_TIMEOUT_MS = 5_000;
 const runAttachmentLoad = createTaskQueue(4);
 const runAttachmentDecrypt = createTaskQueue(4);
 const runAttachmentDownload = createTaskQueue(2);
+const runVideoPoster = createTaskQueue(2);
+// A transparent 1x1 PNG lets Discord's native video player mount before decoding a poster.
+const VIDEO_POSTER_PLACEHOLDER = new Uint8Array([
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1,
+    8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 11, 73, 68, 65, 84, 120, 156, 99, 96, 0, 2,
+    0, 0, 5, 0, 1, 122, 94, 171, 63, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+]);
 
 export interface ExtendedAttachment extends MessageAttachment {
     content_scan_version?: number;
@@ -50,40 +57,50 @@ export interface ExtendedAttachment extends MessageAttachment {
     waveform?: string;
 }
 
-async function createVideoPoster(sourceUrl: string): Promise<Blob | null> {
-    const video = document.createElement("video");
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = "auto";
-    try {
-        await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error("Timed out decoding the encrypted video poster.")), VIDEO_POSTER_TIMEOUT_MS);
-            video.addEventListener("loadeddata", () => {
-                clearTimeout(timeout);
-                resolve();
-            }, { once: true });
-            video.addEventListener("error", () => {
-                clearTimeout(timeout);
-                reject(new Error("Could not decode the encrypted video poster."));
-            }, { once: true });
+function createVideoPoster(sourceUrl: string, signal: AbortSignal): Promise<Blob | null> {
+    if (signal.aborted) return Promise.resolve(null);
+    return new Promise(resolve => {
+        const video = document.createElement("video");
+        let settled = false;
+        const finish = (poster: Blob | null) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            video.removeEventListener("loadeddata", onLoaded);
+            video.removeEventListener("error", onError);
+            signal.removeEventListener("abort", onError);
+            try {
+                video.removeAttribute("src");
+                video.load();
+            } catch { /* A disposed media element must still release the poster queue slot. */ }
+            resolve(poster);
+        };
+        const onError = () => finish(null);
+        const onLoaded = () => {
+            try {
+                if (video.videoWidth < 1 || video.videoHeight < 1) return finish(null);
+                const scale = Math.min(1, VIDEO_POSTER_MAX_EDGE / Math.max(video.videoWidth, video.videoHeight));
+                const canvas = document.createElement("canvas");
+                canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+                canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+                const context = canvas.getContext("2d");
+                if (!context) return finish(null);
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob(finish, "image/webp", 0.8);
+            } catch { finish(null); }
+        };
+        const timeout = setTimeout(onError, VIDEO_POSTER_TIMEOUT_MS);
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = "auto";
+        video.addEventListener("loadeddata", onLoaded, { once: true });
+        video.addEventListener("error", onError, { once: true });
+        signal.addEventListener("abort", onError, { once: true });
+        try {
             video.src = sourceUrl;
             video.load();
-        });
-        if (video.videoWidth < 1 || video.videoHeight < 1) return null;
-        const scale = Math.min(1, VIDEO_POSTER_MAX_EDGE / Math.max(video.videoWidth, video.videoHeight));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
-        canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
-        const context = canvas.getContext("2d");
-        if (!context) return null;
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        return await new Promise(resolve => canvas.toBlob(resolve, "image/webp", 0.8));
-    } catch {
-        return null;
-    } finally {
-        video.removeAttribute("src");
-        video.load();
-    }
+        } catch { finish(null); }
+    });
 }
 
 export type AttachmentCacheStatus =
@@ -96,6 +113,7 @@ interface AttachmentCacheEntry {
     disposed: boolean;
     lastAccess: number;
     objectUrls: string[];
+    posterController?: AbortController;
     renderOwners: Set<{ forceUpdate(): void; }>;
     reservedBytes: number;
     retryAttempt: number;
@@ -107,7 +125,9 @@ interface AttachmentCacheEntry {
 
 interface DownloadReference {
     attachmentId: string;
+    contentType: string;
     downloadPromise?: Promise<DownloadIncomingAttachmentResult | null>;
+    filename: string;
     hasManifest: boolean;
     isMedia: boolean;
     localUserId: string;
@@ -316,6 +336,7 @@ function removeEntry(key: string, entry: AttachmentCacheEntry): void {
     if (entry.retryTimer !== null) clearTimeout(entry.retryTimer);
     entry.retryTimer = null;
     entry.disposed = true;
+    entry.posterController?.abort();
     entry.renderOwners.clear();
     entry.statusListeners.clear();
     revokeObjectUrls(entry.objectUrls);
@@ -380,6 +401,29 @@ function failEntry(message: Message, key: string, entry: AttachmentCacheEntry, l
     scheduleRetry(message, key, entry, localUserId);
 }
 
+function improveVideoPoster(message: Message, key: string, entry: AttachmentCacheEntry, attachment: ExtendedAttachment, sourceUrl: string): void {
+    entry.posterController ??= new AbortController();
+    const { signal } = entry.posterController;
+    void runVideoPoster(async () => {
+        const reference = downloadReferences.get(sourceUrl);
+        if (!reference || entry.disposed || signal.aborted || cache.get(key) !== entry) return;
+        const poster = await createVideoPoster(sourceUrl, signal);
+        if (!poster || entry.disposed || signal.aborted || cache.get(key) !== entry ||
+            UserStore.getCurrentUser()?.id !== reference.localUserId) return;
+        pruneCache(key, poster.size);
+        if (cachedBytes + inFlightBytes + poster.size > MAX_CACHE_BYTES) return;
+        const posterUrl = URL.createObjectURL(poster);
+        // Poster aliases keep the original video's authenticated MIME type/name.
+        downloadReferences.set(posterUrl, reference);
+        entry.objectUrls.push(posterUrl);
+        entry.attachments = entry.attachments.map(value => value === attachment
+            ? { ...value, proxy_url: `${posterUrl}#poster.webp` } : value);
+        entry.bytes += poster.size;
+        cachedBytes += poster.size;
+        preserveEncryptedMessageScroll(message, () => updateMessage(message.channel_id, message.id));
+    }).catch(() => undefined); // Poster decoding is optional; authenticated media remains playable.
+}
+
 async function loadEntry(message: Message, key: string, entry: AttachmentCacheEntry, localUserId: string, refreshIds: readonly string[], hasManifest: boolean, selection: "all" | "previews"): Promise<void> {
     const result = await decryptIncomingAttachmentsCached(localUserId, message, selection, refreshIds);
     if (entry.disposed) return;
@@ -393,6 +437,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
     }
     const attachments: ExtendedAttachment[] = [];
     const objectUrls: string[] = [];
+    const videos: Array<{ attachment: ExtendedAttachment; sourceUrl: string; }> = [];
     let bytes = 0;
     try {
         for (const attachment of result.attachments) {
@@ -411,12 +456,10 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
             bytes += blob.size;
             let proxyObjectUrl = objectUrl;
             if (contentType.startsWith("video/")) {
-                const poster = await createVideoPoster(objectUrl);
-                if (poster) {
-                    proxyObjectUrl = URL.createObjectURL(poster);
-                    objectUrls.push(proxyObjectUrl);
-                    bytes += poster.size;
-                }
+                const placeholder = new Blob([exactArrayBuffer(VIDEO_POSTER_PLACEHOLDER)], { type: "image/png" });
+                proxyObjectUrl = URL.createObjectURL(placeholder);
+                objectUrls.push(proxyObjectUrl);
+                bytes += placeholder.size;
             }
             if (entry.disposed) {
                 revokeObjectUrls(objectUrls);
@@ -430,7 +473,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
                 size: metadata.size,
                 spoiler: metadata.spoiler,
                 url: `${objectUrl}#${encodeURIComponent(metadata.name)}`,
-                proxy_url: `${proxyObjectUrl}#${proxyObjectUrl === objectUrl ? encodeURIComponent(metadata.name) : "poster.webp"}`,
+                proxy_url: `${proxyObjectUrl}#${proxyObjectUrl === objectUrl ? encodeURIComponent(metadata.name) : "poster.png"}`,
                 description: metadata.description ?? undefined,
                 width: contentType.startsWith("image/") || contentType.startsWith("video/")
                     ? metadata.width ?? undefined
@@ -447,10 +490,13 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
                 flags: (metadata.spoiler ? SPOILER_FLAG : 0) |
                     (contentType === "image/gif" ? ANIMATED_FLAG : 0),
             });
+            if (contentType.startsWith("video/")) videos.push({ attachment: attachments.at(-1)!, sourceUrl: objectUrl });
             const downloadReference = {
                 attachmentId: attachment.id,
                 hasManifest,
                 isMedia: contentType.startsWith("audio/") || contentType.startsWith("image/") || contentType.startsWith("video/"),
+                filename: metadata.name,
+                contentType,
                 localUserId,
                 message,
             };
@@ -472,7 +518,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
                 url: `${url}#pc-secure-deferred=${encodeURIComponent(filename)}`,
                 proxy_url: `${url}#pc-secure-deferred=${encodeURIComponent(filename)}`,
             });
-            downloadReferences.set(url, { attachmentId: attachment.id, hasManifest, isMedia: false, localUserId, message });
+            downloadReferences.set(url, { attachmentId: attachment.id, hasManifest, isMedia: false, filename, contentType: "application/octet-stream", localUserId, message });
         }
         attachments.sort((left, right) =>
             message.attachments.findIndex(value => value.id === left.id) - message.attachments.findIndex(value => value.id === right.id));
@@ -491,6 +537,7 @@ async function loadEntry(message: Message, key: string, entry: AttachmentCacheEn
     cachedBytes += bytes;
     notifyReady(message, entry);
     pruneCache(key);
+    for (const video of videos) improveVideoPoster(message, key, entry, video.attachment, video.sourceUrl);
 }
 
 function startEntryLoad(message: Message, key: string, entry: AttachmentCacheEntry, localUserId: string): void {
@@ -567,6 +614,14 @@ export function isEncryptedAttachmentDownloadUrl(value: string): boolean {
 
 export function isEncryptedAttachmentMediaUrl(value: string): boolean {
     return downloadReferences.get(objectUrl(value))?.isMedia ?? false;
+}
+
+export function encryptedAttachmentMediaInfo(value: unknown): Pick<DownloadReference, "contentType" | "filename"> | null {
+    if (typeof value !== "string") return null;
+    const localUserId = syncCacheAccount();
+    const reference = downloadReferences.get(objectUrl(value));
+    if (!localUserId || !reference?.isMedia || reference.localUserId !== localUserId) return null;
+    return { contentType: reference.contentType, filename: reference.filename };
 }
 
 export async function downloadEncryptedAttachmentUrl(value: string): Promise<DownloadIncomingAttachmentResult | null> {

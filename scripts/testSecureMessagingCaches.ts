@@ -65,13 +65,14 @@ function harness(options: {
     decrypt?: () => Promise<DecryptIncomingResult>;
     expand?: (selection: string, refreshIds?: readonly string[]) => Promise<DecryptIncomingAttachmentsResult>;
     review?: () => Promise<AnnouncementReviewResult>;
-    unfurl?: () => Promise<object>;
+    unfurl?: (urls: string[]) => Promise<object>;
     convert?: (embed: Exports) => Exports | null;
 } = {}) {
     let userId = localUserId;
     let decryptCalls = 0;
     let reviewCalls = 0;
     let unfurlCalls = 0;
+    const retryDelays: number[] = [];
     const modules = new Map<string, Exports>();
     const native = {
         async decryptIncoming() {
@@ -84,7 +85,7 @@ function harness(options: {
         },
     };
     const mocks: Record<string, Exports> = {
-        "@utils/misc": { sleep: async () => undefined },
+        "@utils/misc": { sleep: async (delay: number) => { retryDelays.push(delay); } },
         "@webpack": {
             findByCodeLazy: () => (_channelId: string, _messageId: string, embed: Exports) =>
                 options.convert ? options.convert(embed) : embed,
@@ -92,9 +93,9 @@ function harness(options: {
         "@webpack/common": {
             Constants: { Endpoints: { UNFURL_EMBED_URLS: "/test-only/unfurl" } },
             RestAPI: {
-                async post() {
+                async post({ body }: { body: { urls: string[]; }; }) {
                     unfurlCalls++;
-                    return options.unfurl ? options.unfurl() : { body: { embeds: [rawEmbed] } };
+                    return options.unfurl ? options.unfurl(body.urls) : { body: { embeds: [rawEmbed] } };
                 },
             },
             UserStore: { getCurrentUser: () => ({ id: userId }) },
@@ -134,6 +135,7 @@ function harness(options: {
         decrypt: decryptCache,
         reviews: load("./announcementReviewCache") as ReviewCache,
         calls: () => ({ decrypt: decryptCalls, review: reviewCalls, unfurl: unfurlCalls }),
+        retryDelays,
         switchAccount: () => { userId = "100000000000000003"; },
     };
 }
@@ -254,6 +256,66 @@ test("authenticated stickers render before a slow unfurl and reentrant listeners
     assert.equal(h.embeds.encryptedMessageInlineEmbedStatus(value), "present");
     assert.equal(notifications, 2);
 });
+
+test("a ready encrypted preview does not wait through another URL's 4250ms retry backoff", async () => {
+    const slow = Promise.withResolvers<object>();
+    const h = harness({
+        decrypt: async () => ({ ...decrypted(), plaintext: `${previewUrl} https://example.com/slow`, stickers: [] }),
+        unfurl: urls => urls[0] === previewUrl ? Promise.resolve({ body: { embeds: [rawEmbed] } }) : slow.promise,
+    });
+    const value = message();
+    let notifications = 0;
+    const onReady = () => { notifications++; h.embeds.patchEncryptedMessageEmbeds(value, onReady); };
+    h.embeds.patchEncryptedMessageEmbeds(value, onReady);
+    await setImmediate();
+    assert.equal(h.embeds.patchEncryptedMessageEmbeds(value, onReady).embeds[0]?.url, previewUrl);
+    assert.equal(h.embeds.encryptedMessageInlineEmbedStatus(value), "present");
+    assert.equal(notifications, 1);
+    slow.resolve({ body: { embeds: [] } });
+    await setImmediate();
+    assert.deepEqual(h.retryDelays, [250, 1_000, 3_000], "the slow URL retains its existing retry policy");
+    assert.equal(h.calls().unfurl, 5);
+    assert.equal(notifications, 2, "reentrant listeners still receive final completion");
+    assert.equal(h.embeds.patchEncryptedMessageEmbeds(value, onReady).embeds.length, 1);
+});
+
+test("encrypted previews keep URL order when the first URL finishes last", async () => {
+    const first = Promise.withResolvers<object>();
+    const secondUrl = "https://example.com/second";
+    const h = harness({
+        decrypt: async () => ({ ...decrypted(), plaintext: `${previewUrl} ${secondUrl}`, stickers: [] }),
+        unfurl: urls => urls[0] === previewUrl ? first.promise : Promise.resolve({ body: { embeds: [{ type: "image", url: secondUrl }] } }),
+    });
+    const value = message();
+    assert.deepEqual((await render(h, value)).embeds.map(embed => embed.url), [secondUrl]);
+    first.resolve({ body: { embeds: [rawEmbed] } });
+    await setImmediate();
+    assert.deepEqual(h.embeds.patchEncryptedMessageEmbeds(value, noop).embeds.map(embed => embed.url), [previewUrl, secondUrl]);
+});
+
+for (const change of ["clear", "account", "suppression", "edit", "retry"] as const) {
+    test(`${change} invalidation prevents a late sibling preview from publishing`, async () => {
+        const slow = Promise.withResolvers<object>();
+        let conversions = 0;
+        const h = harness({
+            decrypt: async () => ({ ...decrypted(), plaintext: `${previewUrl} https://example.com/slow`, stickers: [] }),
+            unfurl: urls => urls[0] === previewUrl ? Promise.resolve({ body: { embeds: [rawEmbed] } }) : slow.promise,
+            convert: embed => { conversions++; return embed; },
+        });
+        const value = message();
+        h.embeds.patchEncryptedMessageEmbeds(value, noop);
+        await setImmediate();
+        assert.equal(conversions, 1);
+        if (change === "clear") h.embeds.clearEncryptedEmbedCache();
+        if (change === "account") h.switchAccount();
+        if (change === "suppression") value.flags = 4 as Message["flags"];
+        if (change === "edit") value.nonce = "200000000000000003";
+        if (change === "retry") h.embeds.invalidateEncryptedMessageEmbeds(value);
+        slow.resolve({ body: { embeds: [rawEmbed] } });
+        await setImmediate();
+        assert.equal(conversions, 1, "a stale entry cannot convert or publish the late response");
+    });
+}
 
 test("a rejected detached-text expansion does not poison the preview cache forever", async t => {
     t.mock.timers.enable({ apis: ["Date"], now: 0 });

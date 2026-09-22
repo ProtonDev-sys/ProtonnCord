@@ -231,28 +231,37 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
     if (entry.stickers.length > 0) notify(message, entry);
     if (!entryIsCurrent(message, key, entry)) return;
     // Matching Discord's native previews requires disclosing only the extracted URLs to its unfurl service.
-    const rawEmbeds = await unfurlEmbeds(urls);
-    if (!entryIsCurrent(message, key, entry)) return;
-    const converted: Embed[] = [];
-    for (const rawEmbed of rawEmbeds) {
-        try {
-            const embed = convertEmbed(message.channel_id, message.id, {
-                ...rawEmbed,
-                // Discord cannot scan a preview that only exists after local authenticated decryption.
-                content_scan_version: LOCAL_CONTENT_SCAN_VERSION,
-            });
-            if (embed) converted.push(embed);
-        } catch {
-            // One malformed response must not hide other Discord-provided embeds.
+    const convertedByUrl: Embed[][] = urls.map(() => []);
+    let remaining = urls.length;
+    await Promise.all(urls.map(async (url, index) => {
+        const rawEmbeds = await unfurlUrl(url);
+        if (!entryIsCurrent(message, key, entry)) return;
+        const converted: Embed[] = [];
+        for (const rawEmbed of rawEmbeds) {
+            try {
+                const embed = convertEmbed(message.channel_id, message.id, {
+                    ...rawEmbed,
+                    // Discord cannot scan a preview that only exists after local authenticated decryption.
+                    content_scan_version: LOCAL_CONTENT_SCAN_VERSION,
+                });
+                if (embed) converted.push(embed);
+            } catch {
+                // One malformed response must not hide other Discord-provided embeds.
+            }
         }
-    }
+        if (!entryIsCurrent(message, key, entry)) return;
+        convertedByUrl[index] = converted;
+        entry.embeds = convertedByUrl.flat();
+        // Publish available previews without waiting for an unrelated URL's retries.
+        // Indexing by input URL preserves message order even when requests finish out of order.
+        if (--remaining > 0 && converted.length > 0) notify(message, entry);
+    }));
     if (!entryIsCurrent(message, key, entry)) return;
-    entry.embeds = converted;
     finishEntry(
         message,
         key,
         entry,
-        converted.length > 0 ? Date.now() + SUCCESSFUL_UNFURL_TTL : Date.now() + EMPTY_UNFURL_TTL,
+        entry.embeds.length > 0 ? Date.now() + SUCCESSFUL_UNFURL_TTL : Date.now() + EMPTY_UNFURL_TTL,
     );
 }
 
@@ -284,16 +293,15 @@ export function patchEncryptedMessageEmbeds(message: Message, onReady: () => voi
     const entry = ensureEntry(message);
     if (!entry) return message;
     if (entry.status === "loading") entry.listeners.add(onReady);
-    return cloneWithEmbeds(message, entry.status === "ready" ? entry.embeds : []);
+    return cloneWithEmbeds(message, entry.embeds);
 }
 
 export function encryptedMessageInlineEmbedStatus(message: Message): SecureInlineEmbedStatus {
     if (!isEncryptedMessage(message.content) || (message.flags & EMBED_SUPPRESSED) !== 0) return "absent";
     const entry = cache.get(cacheKey(message));
-    if (!entry || entry.status === "loading" || entry.expiresAt <= Date.now()) return "pending";
-    return entry.embeds.some(embed => isSecureInlineMediaEmbedType(embed.type))
-        ? "present"
-        : "absent";
+    if (!entry || entry.expiresAt <= Date.now()) return "pending";
+    if (entry.embeds.some(embed => isSecureInlineMediaEmbedType(embed.type))) return "present";
+    return entry.status === "loading" ? "pending" : "absent";
 }
 
 export function patchEncryptedMessageStickers(message: Message, onReady: () => void, canDecrypt = true): Message {
