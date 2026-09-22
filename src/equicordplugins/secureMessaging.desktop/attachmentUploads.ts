@@ -342,21 +342,16 @@ export async function prepareEncryptedAttachments(
     try {
         for (let index = 0; index < uploads.length; index++) {
             const source = sources[index];
-            const plaintext = new Uint8Array(await source.file.arrayBuffer());
-            try {
-                ciphertexts.push(await encryptAttachmentBytes({
-                    bundleId: descriptor.id,
-                    channelId,
-                    count: uploads.length,
-                    data: plaintext,
-                    index,
-                    masterKey: keyBytes,
-                    metadata: metadata[index],
-                    senderUserId,
-                }));
-            } finally {
-                plaintext.fill(0);
-            }
+            ciphertexts.push(await encryptAttachmentBytes({
+                bundleId: descriptor.id,
+                channelId,
+                count: uploads.length,
+                data: source.file,
+                index,
+                masterKey: keyBytes,
+                metadata: metadata[index],
+                senderUserId,
+            }));
         }
 
         const manifest = await createAttachmentManifest(ciphertexts, metadata);
