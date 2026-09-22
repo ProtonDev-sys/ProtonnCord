@@ -52,16 +52,21 @@ function buildMessageIndexes<T extends SecureMessageGroupCandidate>(messages: re
     };
 }
 
-function messageIndex<T extends SecureMessageGroupCandidate>(message: T, messages: readonly T[]): number {
+function messageIndex<T extends SecureMessageGroupCandidate>(messageId: string, messages: readonly T[]): number {
     let cached = messageIndexCache.get(messages);
-    const cachedIndex = cached?.indexes.get(message.id);
+    const cachedIndex = cached?.indexes.get(messageId);
     if (!cached || cached.length !== messages.length || cached.firstId !== (messages[0]?.id ?? "") ||
         cached.lastId !== (messages.at(-1)?.id ?? "") || cachedIndex === undefined ||
-        messages[cachedIndex]?.id !== message.id) {
+        messages[cachedIndex]?.id !== messageId) {
         cached = buildMessageIndexes(messages);
         messageIndexCache.set(messages, cached);
     }
-    return cached.indexes.get(message.id) ?? -1;
+    return cached.indexes.get(messageId) ?? -1;
+}
+
+export function secureMessageGroupNeighborIds<T extends SecureMessageGroupCandidate>(messageId: string, messages: readonly T[]): string[] | null {
+    const index = messageIndex(messageId, messages);
+    return index < 0 ? null : messages.slice(Math.max(0, index - 1), index + 2).map(message => message.id);
 }
 
 function hasTrailingAccessories(message: SecureMessageGroupCandidate): boolean {
@@ -89,7 +94,7 @@ export function secureMessageGroupFlags<T extends SecureMessageGroupCandidate>(
     canJoin: (previous: T, next: T) => boolean = () => true,
     isGroupStart: (message: T) => boolean | null = () => false,
 ): number {
-    const index = messageIndex(message, messages);
+    const index = messageIndex(message.id, messages);
     if (index < 0) return 0;
     let flags = 0;
     if (index > 0 && canJoinMessages(messages[index - 1], message, canJoin, isGroupStart)) flags |= SecureMessageGroup.Previous;

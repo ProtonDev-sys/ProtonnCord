@@ -310,6 +310,10 @@ export function clearEncryptedEmbedCache(): void {
     unfurlCache.clear();
 }
 
+export function invalidateEncryptedMessageEmbeds(message: Message): void {
+    cache.delete(cacheKey(message));
+}
+
 export async function prefetchEncryptedMessageEmbeds(plaintext: string): Promise<void> {
     const urls = extractSecureEmbedUrls(plaintext);
     if (urls.length > 0) await unfurlEmbeds(urls);

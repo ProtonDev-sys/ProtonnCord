@@ -1519,11 +1519,11 @@ function removeAuthenticatedAttachmentCacheEntry(key: string, entry: Authenticat
     entry.data.fill(0);
 }
 
-function pruneAuthenticatedAttachmentCache(now: number, incomingBytes = 0): void {
+function pruneAuthenticatedAttachmentCache(now: number, incomingBytes = 0, incomingEntries = 0): void {
     for (const [key, entry] of authenticatedAttachmentCache) {
         if (entry.expiresAt <= now) removeAuthenticatedAttachmentCacheEntry(key, entry);
     }
-    while (authenticatedAttachmentCache.size >= MAX_AUTHENTICATED_ATTACHMENT_CACHE_ENTRIES ||
+    while (authenticatedAttachmentCache.size + incomingEntries > MAX_AUTHENTICATED_ATTACHMENT_CACHE_ENTRIES ||
         authenticatedAttachmentCacheBytes + incomingBytes > MAX_AUTHENTICATED_ATTACHMENT_CACHE_BYTES) {
         let oldest: [string, AuthenticatedAttachmentCacheEntry] | null = null;
         for (const candidate of authenticatedAttachmentCache) {
@@ -1567,7 +1567,7 @@ function cacheAuthenticatedAttachment(
     const previous = authenticatedAttachmentCache.get(key);
     if (previous) removeAuthenticatedAttachmentCacheEntry(key, previous);
     const now = Date.now();
-    pruneAuthenticatedAttachmentCache(now, attachment.data.byteLength);
+    pruneAuthenticatedAttachmentCache(now, attachment.data.byteLength, 1);
     const entry = {
         data: Uint8Array.from(attachment.data),
         downloadable,
