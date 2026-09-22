@@ -82,7 +82,7 @@
         "testSecureMessagingConfiguration": "tsx scripts/testSecureMessagingConfiguration.ts",
         "testSecureMessagingHistory": "tsx scripts/testSecureMessagingHistory.ts",
         "testSecureMessagingPlaintextRendering": "tsx scripts/testSecureMessagingPlaintextRendering.ts",
-        "testSecureMessagingAttachments": "tsx --test scripts/testSecureMessagingAttachmentManifest.ts scripts/testSecureMessagingAttachmentMetadata.ts scripts/testSecureMessagingAttachmentCache.ts scripts/testSecureMessagingAttachmentFallback.ts scripts/testSecureMessagingDownloadControls.ts scripts/testSecureMessagingMediaProxy.ts scripts/testSecureMessagingUploadRetry.ts",
+        "testSecureMessagingAttachments": "tsx --test scripts/testSecureMessagingAttachmentManifest.ts scripts/testSecureMessagingAttachmentMetadata.ts scripts/testSecureMessagingAttachmentCache.ts scripts/testSecureMessagingAttachmentFallback.ts scripts/testSecureMessagingDownloadControls.ts scripts/testSecureMessagingMediaProxy.ts scripts/testSecureMessagingUploadRetry.ts scripts/testSecureMessagingImageActions.ts",
         "testSecureMessagingEmbedUrls": "tsx scripts/testSecureMessagingEmbedUrls.ts",
         "testSecureMessagingPerformance": "tsx scripts/testSecureMessagingPerformance.ts && tsx scripts/testSecureMessagingReceive.ts",
         "testSecureMessagingNative": "tsx scripts/testSecureMessagingNative.ts",
