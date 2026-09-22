@@ -2657,7 +2657,8 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         ? result.attachmentBundle === null && result.stickers.length === 0
         : !result && message.attachments.length === 0 && message.stickerItems.length === 0) &&
         shouldHideSecureEmbedOnlyPlaintext(visiblePlaintext, inlineEmbedStatus);
-    const renderedPlaintext = captureProtection === "ready" && !embedOnly && (!result || result.status === "decrypted")
+    const hasPlaintext = !embedOnly && Boolean(visiblePlaintext?.trim());
+    const renderedPlaintext = captureProtection === "ready" && hasPlaintext && (!result || result.status === "decrypted")
         ? visiblePlaintext : undefined;
     const parsedPlaintext = useMemo(() => renderedPlaintext ? Parser.parse(renderedPlaintext) : null, [renderedPlaintext]);
     const mentionsLocalUser = Boolean(localUserId && message.author?.id && encryptedMessageMentionsUser(
@@ -2689,12 +2690,6 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         groupFlags & SecureMessageGroup.Previous ? "pc-secure-message-joined-above" : null,
         groupFlags & SecureMessageGroup.Next ? "pc-secure-message-joined-below" : null,
     );
-    const embedOnlyClassName = classes(
-        "pc-secure-message",
-        "pc-secure-replaces-content",
-        "pc-secure-embed-only",
-        mentionsLocalUser ? "pc-secure-message-mentioned" : null,
-    );
 
     useLayoutEffect(() => {
         const messageElement = cardRef.current?.closest<HTMLElement>('[id^="chat-messages-"]');
@@ -2704,6 +2699,21 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
         setNativeMessageGroupStartObservation(message.channel_id, message.id, groupStartObservationOwner, detectedGroupStart);
         return () => removeNativeMessageGroupStartObservation(message.channel_id, message.id, groupStartObservationOwner);
     }, [groupStartObservationOwner, message.channel_id, message.id, nativeGroupStart]);
+
+    useLayoutEffect(() => {
+        const card = cardRef.current;
+        if (!card) return;
+        const row = card.closest('[id^="chat-messages-"]');
+        const previous = row?.previousElementSibling?.querySelector<HTMLElement>(".pc-secure-message-joined-below");
+        const gap = groupFlags & SecureMessageGroup.Previous && previous
+            ? Math.max(0, card.getBoundingClientRect().top - previous.getBoundingClientRect().bottom)
+            : 0;
+        // Discord's row spacing varies with its density settings. Only bridge the
+        // actual space between cards so the preceding message is never painted over.
+        const value = `${gap}px`;
+        if (card.style.getPropertyValue("--pc-secure-message-join-gap") !== value)
+            card.style.setProperty("--pc-secure-message-join-gap", value);
+    });
 
     useEffect(() => {
         let active = true;
@@ -2746,8 +2756,8 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
 
     if (result?.status === "decrypted" || !result && optimisticPlaintext !== undefined) {
         return (
-            <div ref={cardRef} className={embedOnly ? embedOnlyClassName : cardClassName} hidden={embedOnly}>
-                {!embedOnly && visiblePlaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
+            <div ref={cardRef} className={classes(cardClassName, !hasPlaintext && "pc-secure-message-without-text")}>
+                {hasPlaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
                 {!embedOnly && result?.status === "decrypted" &&
                     <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />}
             </div>
@@ -3295,8 +3305,8 @@ export default definePlugin({
         return true;
     },
 
-    encryptedMediaProxyUrl(value: string) {
-        if (!isEncryptedAttachmentMediaUrl(value)) return null;
+    encryptedMediaProxyUrl(value: unknown) {
+        if (typeof value !== "string" || !isEncryptedAttachmentMediaUrl(value)) return null;
         return {
             searchParams: { append: () => undefined },
             toString: () => value,
