@@ -110,7 +110,7 @@ function testCurrentDiscordSendPatch(): string {
     const patched = patchDiscordMessageSend();
 
     assert.notEqual(patched, source, "the current Discord chat-input source must match the MessageEvents patch");
-    assert.match(patched, /\.then\(async e=>\{let\{valid:s,failureReason:f\}=e;/, "the callback remains valid when pre-send work awaits encryption");
+    assert.match(patched, /\.then\(async e=>\{let\{valid:s,failureReason:A\}=e;/, "the captured callback remains valid when pre-send work awaits encryption");
     assert.equal(
         patched.split("Vencord.Api.MessageEvents._handlePreSend").length - 1,
         1,
@@ -118,15 +118,21 @@ function testCurrentDiscordSendPatch(): string {
     );
     assert.match(
         patched,
-        /const vcContentOptions=\{content:t,channelId:h\.id,uploads:n,.+?scheduledTimestamp:.+?\},vcSendProps=\{openWarningPopout:.+?channel:h\};if\(await Vencord\.Api\.MessageEvents\._handlePreSend\(h\.id,_,I,vcSendProps,vcContentOptions\)\)/,
+        /const vcContentOptions=\{content:t,channelId:h\.id,uploads:n,.+?scheduledTimestamp:.+?\},vcSendProps=\{openWarningPopout:.+?channel:h\};if\(await Vencord\.Api\.MessageEvents\._handlePreSend\(h\.id,E,I,vcSendProps,vcContentOptions\)\)/,
         "the patch reconstructs Discord's validation props and forwards raw pending-upload options",
     );
     assert.doesNotThrow(() => Function(patched), "the patched current Discord chat-input source must remain valid JavaScript");
+    assert.match(patched, /I\.eagerDispatch=!1,I\.attachmentsToUpload\?\?=n,I\.onAttachmentUploadError=/);
+    assert.match(patched, /sendMessage\(h\.id,E,void 0,I\)/, "retain the observed four-argument native send signature");
+    assert.throws(() => patchDiscordMessageSend(source, [...replacements.slice(0, 2), {
+        match: /(if\(null!=(\i)&&\2\.length>0\))(\i)\.attachmentsToUpload=\2;/,
+        replace: "$1$3.attachmentsToUpload??=$2;",
+    }]), /patch group has no effect/, "the previous PR's unmatched third replacement must invalidate the entire group");
     return patched;
 }
 
 async function testCurrentDiscordUploadHandoff(events: MessageEventsModule, patched: string): Promise<void> {
-    for (const scenario of ["ordinary", "replacement", "empty", "generated", "cancelled"] as const) {
+    for (const scenario of ["ordinary", "replacement", "empty", "generated", "cancelled", "oversized"] as const) {
         const originals = (scenario === "generated" ? [] : [{
             id: "draft", filename: "image.png", status: scenario === "ordinary" ? "COMPLETED" : "NOT_STARTED",
             uploadedFilename: scenario === "ordinary" ? "uploaded-image.png" : "", responseUrl: scenario === "ordinary" ? "https://upload.invalid/original" : "",
@@ -136,30 +142,47 @@ async function testCurrentDiscordUploadHandoff(events: MessageEventsModule, patc
             uploadedFilename: "uploaded-encrypted.pcaf", responseUrl: "https://upload.invalid/encrypted",
         }]) as NonNullable<SendMessageOptions["uploads"]>;
         const sends: { message: MessageObject; options: SendMessageOptions; }[] = [];
+        let draftClears = 0;
+        let restoredUploads: unknown;
+        let restoredText: string | undefined;
+        let sizeChecks = 0;
         const listener: MessageSendListener = (_channel, message, options) => {
             assert.equal(options.uploads, originals, "listeners see the original pending draft");
-            if (scenario === "ordinary") return;
+            if (scenario === "ordinary" || scenario === "oversized") return;
             message.content = "PCEM3:fixture";
             options.uploads = options.attachmentsToUpload = replacements;
             return scenario === "cancelled" ? { cancel: true } : { stop: true };
         };
         events.addMessagePreSendListener(listener);
         try {
-            const outcome = await runInNewContext(`${patched}\nchatInput.props={chatInputType:0};chatInput.handleSendMessage();`, {
+            const outcome = await runInNewContext(`${patched}\nchatInput.props={channel,chatInputType:{drafts:{type:0}}};chatInput.setState=()=>{};chatInput.handleSendMessage(input);`, {
                 Vencord: { Api: { MessageEvents: events } },
-                t: "plain caption", n: originals, l: [], h: { id: "channel" }, A: false,
-                o: null, i: null, a: false, m: null, p: false, c: null, r: null,
-                nb: { i: async () => ({ valid: true }) },
-                tU: { Ay: { parse: (_channel: unknown, content: string) => ({ ...messageObj, content }) } },
-                nB: { Hx: { CHAT_INPUT: "chat_input" } },
+                input: { value: "plain caption", uploads: originals, stickers: [] },
+                channel: { id: "channel", getGuildId: () => null },
+                nT: { i: async () => ({ valid: true }) },
+                t$: { S: () => null },
+                tq: { Ay: { parse: (_channel: unknown, content: string) => ({ ...messageObj, content }) } },
+                nq: { Hx: { CHAT_INPUT: "chat_input" } },
+                nv: { LJ: (uploads: unknown) => uploads, fJ: () => { sizeChecks++; return scenario === "oversized"; } },
+                e_: { V() {} },
+                S: { A: { clearAll: () => { draftClears++; }, setUploads: ({ uploads }: { uploads: unknown; }) => { restoredUploads = uploads; } } },
+                eC: { A: { getDraft: () => "" }, C: { ChannelMessage: 0 } },
+                eE: { A: { getUploadCount: () => 0 } },
+                C: { A: { saveDraft: (_channel: string, content: string) => { restoredText = content; } } },
+                tV: { k: () => true }, w: { N3: () => ({}) }, nu: { Jx() {} }, nf: { x5() {} },
                 x: { A: {
                     getSendMessageOptions: () => ({}),
-                    sendMessage: (_channel: string, message: MessageObject, options: SendMessageOptions) => sends.push({ message, options }),
+                    sendMessage: async (_channel: string, message: MessageObject, third: unknown, options: SendMessageOptions) => {
+                        assert.equal(third, undefined);
+                        sends.push({ message, options });
+                    },
                 } },
             });
-            assert.equal(outcome.shouldClear, scenario !== "cancelled", scenario);
-            if (scenario === "cancelled") {
-                assert.equal(sends.length, 0, "cancellation must stop the host continuation");
+            assert.equal(outcome.shouldClear, scenario !== "cancelled" && scenario !== "oversized", scenario);
+            if (scenario === "cancelled" || scenario === "oversized") {
+                assert.equal(sends.length, 0, "cancellation or native size validation must stop the host continuation");
+                assert.equal(draftClears, 0);
+                assert.equal(sizeChecks, scenario === "oversized" ? 1 : 0);
                 continue;
             }
             assert.equal(sends.length, 1, scenario);
@@ -171,6 +194,13 @@ async function testCurrentDiscordUploadHandoff(events: MessageEventsModule, patc
             assert.equal(sends[0].message.content, scenario === "ordinary" ? "plain caption" : "PCEM3:fixture");
             assert.equal(originals[0]?.filename, scenario === "generated" ? undefined : "image.png", "handoff preserves original drafts");
             if (scenario !== "ordinary" && originals.length) assert.equal(originals[0].status, "NOT_STARTED");
+            assert.equal(draftClears, originals.length ? 1 : 0, "preserve native draft cleanup");
+            assert.equal(sizeChecks, originals.length ? 1 : 0, "preserve native file-size validation");
+            if (originals.length) {
+                (sends[0].options as SendMessageOptions & { onAttachmentUploadError(...args: unknown[]): void; }).onAttachmentUploadError({}, 500, {});
+                assert.equal(restoredUploads, originals, "native failures restore original drafts, not encrypted copies");
+                assert.equal(restoredText, "plain caption", "native failures restore the original caption");
+            }
         } finally {
             events.removeMessagePreSendListener(listener);
         }

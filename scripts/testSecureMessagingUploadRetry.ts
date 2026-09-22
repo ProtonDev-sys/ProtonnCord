@@ -17,7 +17,7 @@ import { createSourceFile, isVariableStatement, ModuleKind, ScriptTarget, transp
 import type { MessageSendListener, SendMessageOptions } from "../src/api/MessageEvents";
 import { parseSecurePlaintext, serializeSecurePlaintext } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import { createEncryptedUploadDraft, EncryptedAttachmentUploadLimitError, prepareEncryptedAttachments, uploadEncryptedAttachment } from "../src/equicordplugins/secureMessaging.desktop/attachmentUploads";
-import { patchDiscordMessageSend } from "./fixtures/discordMessageSend";
+import { discordMessageSendSource, patchDiscordMessageSend } from "./fixtures/discordMessageSend";
 
 class Upload extends EventEmitter {
     status = "NOT_STARTED";
@@ -127,6 +127,8 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
         invalidate: () => { current = false; },
         replaceStoredDraft: () => { storedDrafts = [newUpload("replacement"), ...storedDrafts.slice(1)]; },
         withoutStoredDrafts: () => { storedDrafts = []; },
+        storedDrafts: () => storedDrafts,
+        setStoredDrafts: (uploads: Upload[]) => { storedDrafts = uploads; },
         delayProtection: (gate: Promise<void>) => { protectionGate = gate; },
         delayStickers: (gate: Promise<void>) => { stickerGate = gate; },
         listener: send as MessageSendListener,
@@ -160,7 +162,7 @@ async function nativeUploadWait(uploads: Upload[]): Promise<void> {
     })));
 }
 
-for (const scenario of ["completed", "upload failure", "old handoff"] as const) {
+for (const scenario of ["completed", "upload failure", "old handoff", "patch rollback"] as const) {
     test(`composer handoff with actual Secure Messaging and MessageEvents: ${scenario}`, async t => {
         const h = fixture((upload, index) => scenario === "upload failure" && index === 1 ? upload.fail() : upload.complete());
         const events = messageEvents();
@@ -179,17 +181,22 @@ for (const scenario of ["completed", "upload failure", "old handoff"] as const) 
         let nativeCompleted = false;
         let content: string | undefined;
         const patched = patchDiscordMessageSend();
-        const composer = scenario === "old handoff" ? patched.replace(".attachmentsToUpload??=", ".attachmentsToUpload=") : patched;
-        const outcome = await runInNewContext(`${composer}\nchatInput.props={chatInputType:0};chatInput.handleSendMessage();`, {
+        const composer = scenario === "patch rollback" ? discordMessageSendSource
+            : scenario === "old handoff" ? patched.replace(".attachmentsToUpload??=", ".attachmentsToUpload=") : patched;
+        const outcome = await runInNewContext(`${composer}\nchatInput.props={channel:{id:"200000000000000001",getGuildId:()=>null},chatInputType:{drafts:{type:0}}};chatInput.setState=()=>{};chatInput.handleSendMessage({value:"private caption",uploads:originals,stickers:[]});`, {
             Vencord: { Api: { MessageEvents: events } },
-            t: "private caption", n: h.originals, l: [], h: { id: "200000000000000001" }, A: false,
-            o: null, i: null, a: false, m: null, p: false, c: null, r: null,
-            nb: { i: async () => ({ valid: true }) },
-            tU: { Ay: { parse: (_channel: unknown, plaintext: string) => ({ content: plaintext, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] }) } },
-            nB: { Hx: { CHAT_INPUT: "chat_input" } },
+            originals: h.originals,
+            nT: { i: async () => ({ valid: true }) }, t$: { S: () => null },
+            tq: { Ay: { parse: (_channel: unknown, plaintext: string) => ({ content: plaintext, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] }) } },
+            nq: { Hx: { CHAT_INPUT: "chat_input" } }, nv: { LJ: () => ({}), fJ: () => false },
+            eC: { A: { getDraft: () => "" }, C: { ChannelMessage: 0 } }, C: { A: { saveDraft() {} } },
+            eE: { A: { getUploadCount: () => h.storedDrafts().length } },
+            S: { A: { clearAll: h.withoutStoredDrafts, setUploads: ({ uploads }: { uploads: Upload[]; }) => h.setStoredDrafts(uploads) } },
+            w: { N3: () => ({}) }, nu: { Jx() {} }, nf: { x5() {} },
             x: { A: {
                 getSendMessageOptions: () => ({}),
-                sendMessage: (_channel: string, message: { content: string; }, options: SendMessageOptions) => {
+                sendMessage: (_channel: string, message: { content: string; }, unused: unknown, options: SendMessageOptions) => {
+                    assert.equal(unused, undefined, "the real composer passes send options as its fourth argument");
                     content = message.content;
                     const uploads = options.attachmentsToUpload as unknown as Upload[];
                     handedOff.push(uploads);
@@ -204,10 +211,16 @@ for (const scenario of ["completed", "upload failure", "old handoff"] as const) 
             assert.equal(handedOff.length, 0, "the composer must stop before native send after an encrypted upload fails");
             assert.equal(h.wires.length, 0);
             assert.equal(originalUploadCalls, 0);
-        } else if (scenario === "old handoff") {
+            assert.deepEqual(h.storedDrafts(), h.originals, "cancelled encryption must leave the composer draft list intact");
+        } else if (scenario === "old handoff" || scenario === "patch rollback") {
             assert.equal(handedOff[0], h.originals);
             assert.equal(originalUploadCalls, h.originals.length);
             assert.equal(nativeCompleted, false, "the previous overwrite reproduces the permanently pending native upload");
+            if (scenario === "patch rollback") {
+                assert.equal(content, "private caption", "atomic group rollback removes encryption interception completely");
+                assert.equal(h.nativeCalls(), 0);
+                assert.equal(h.shadows.length, 0);
+            }
         } else {
             assert.equal(outcome.shouldClear, true);
             assert.equal(content, "encrypted envelope");
@@ -216,6 +229,7 @@ for (const scenario of ["completed", "upload failure", "old handoff"] as const) 
             assert.ok(handedOff[0].every(upload => upload.status === "COMPLETED" && upload.item.file.type === "application/octet-stream"));
             assert.equal(originalUploadCalls, 0, "the original plaintext drafts must never enter native upload");
             assert.equal(nativeCompleted, true, "native upload completion must settle before the next event-loop turn");
+            assert.equal(h.storedDrafts().length, 0, "the real host continuation clears composer drafts after preparation succeeds");
         }
     });
 }
