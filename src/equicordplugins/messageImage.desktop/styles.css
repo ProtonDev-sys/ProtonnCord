@@ -1,0 +1,32 @@
+.pc-message-image {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.pc-message-image-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 8px 24px;
+}
+
+.pc-message-image-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.pc-message-image summary {
+    cursor: pointer;
+    color: var(--text-default);
+    margin-bottom: 8px;
+}
+
+.pc-message-image-preview {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    touch-action: none;
+    cursor: crosshair;
+}
