@@ -14,8 +14,10 @@ import type { CloudUpload } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 import { createSourceFile, isVariableStatement, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
+import type { MessageSendListener, SendMessageOptions } from "../src/api/MessageEvents";
 import { parseSecurePlaintext, serializeSecurePlaintext } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import { createEncryptedUploadDraft, EncryptedAttachmentUploadLimitError, prepareEncryptedAttachments, uploadEncryptedAttachment } from "../src/equicordplugins/secureMessaging.desktop/attachmentUploads";
+import { patchDiscordMessageSend } from "./fixtures/discordMessageSend";
 
 class Upload extends EventEmitter {
     status = "NOT_STARTED";
@@ -57,6 +59,22 @@ const declaration = source.statements.flatMap(statement => isVariableStatement(s
     .find(value => value.name.getText(source) === "outgoingListener");
 assert.ok(declaration?.initializer);
 const compiled = transpileModule(`(${declaration.initializer.getText(source)});`, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText;
+
+function messageEvents() {
+    const exports = {} as typeof import("../src/api/MessageEvents");
+    const code = transpileModule(readFileSync(new URL("../src/api/MessageEvents.ts", import.meta.url), "utf8"), {
+        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 },
+    }).outputText;
+    runInNewContext(code, {
+        exports,
+        require(name: string) {
+            if (name === "@utils/Logger") return { Logger: class { error() {} } };
+            assert.equal(name, "@webpack/common");
+            return { MessageStore: { getMessage() {} } };
+        },
+    });
+    return exports;
+}
 
 function fixture(behavior: (upload: Upload, index: number) => void | Promise<void> = upload => upload.complete(), count = 2) {
     const originals = Array.from({ length: count }, (_, index) => newUpload(String(index)));
@@ -101,7 +119,7 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
         Native: { encryptOutgoing: async () => { nativeCalls++; return { status: "encrypted", content: "encrypted envelope" }; } },
         prefetchEncryptedMessageEmbeds: async () => {}, conversationAuthorizationScope: () => "scope",
         authorizeScopedAttachmentUploadReservations() {}, authorizeScopedWirePayload: (_channel: string, content: string) => wires.push(content),
-        rememberOptimisticOutgoingPlaintext() {}, clearOutgoingStickers: (value: typeof options) => { value.stickerIds.length = 0; },
+        rememberOptimisticOutgoingPlaintext() {}, clearOutgoingStickers: (value: typeof options) => { if (Array.isArray(value.stickerIds)) value.stickerIds.length = 0; },
         showToast() {}, Toasts: { Type: { FAILURE: 1 } }, useEncryptedSendStatus: { setState() {} },
     }) as (...args: any[]) => Promise<{ cancel?: boolean; stop?: boolean; }>;
     return {
@@ -111,6 +129,7 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
         withoutStoredDrafts: () => { storedDrafts = []; },
         delayProtection: (gate: Promise<void>) => { protectionGate = gate; },
         delayStickers: (gate: Promise<void>) => { stickerGate = gate; },
+        listener: send as MessageSendListener,
         send: () => send("200000000000000001", { content: "private caption" }, options, { channel: {} }),
         assertDraft() {
             originals.forEach((upload, index) => {
@@ -124,6 +143,81 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
             });
         },
     };
+}
+
+// Discord module 358579, reduced to its status/event contract. A NOT_STARTED
+// upload waits for events even when its upload() call returns a resolved promise;
+// COMPLETED objects settle immediately without another upload() call.
+async function nativeUploadWait(uploads: Upload[]): Promise<void> {
+    await Promise.all(uploads.map(upload => new Promise<void>((resolve, reject) => {
+        switch (upload.status) {
+            case "NOT_STARTED": void upload.upload(); break;
+            case "COMPLETED": resolve(); break;
+            default: reject(new Error("Upload is unavailable"));
+        }
+        upload.on("complete", resolve);
+        upload.on("error", reject);
+    })));
+}
+
+for (const scenario of ["completed", "upload failure", "old handoff"] as const) {
+    test(`composer handoff with actual Secure Messaging and MessageEvents: ${scenario}`, async t => {
+        const h = fixture((upload, index) => scenario === "upload failure" && index === 1 ? upload.fail() : upload.complete());
+        const events = messageEvents();
+        events.addMessagePreSendListener(h.listener, { priority: 100, cancelOnError: true });
+        t.after(() => {
+            events.removeMessagePreSendListener(h.listener);
+            [...h.originals, ...h.shadows].forEach(upload => upload.removeAllListeners());
+        });
+        let originalUploadCalls = 0;
+        for (const original of h.originals) original.upload = async () => {
+            // The protected upload guard returns without starting an unapproved
+            // plaintext draft. It intentionally emits no upload completion event.
+            originalUploadCalls++;
+        };
+        const handedOff: Upload[][] = [];
+        let nativeCompleted = false;
+        let content: string | undefined;
+        const patched = patchDiscordMessageSend();
+        const composer = scenario === "old handoff" ? patched.replace(".attachmentsToUpload??=", ".attachmentsToUpload=") : patched;
+        const outcome = await runInNewContext(`${composer}\nchatInput.props={chatInputType:0};chatInput.handleSendMessage();`, {
+            Vencord: { Api: { MessageEvents: events } },
+            t: "private caption", n: h.originals, l: [], h: { id: "200000000000000001" }, A: false,
+            o: null, i: null, a: false, m: null, p: false, c: null, r: null,
+            nb: { i: async () => ({ valid: true }) },
+            tU: { Ay: { parse: (_channel: unknown, plaintext: string) => ({ content: plaintext, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] }) } },
+            nB: { Hx: { CHAT_INPUT: "chat_input" } },
+            x: { A: {
+                getSendMessageOptions: () => ({}),
+                sendMessage: (_channel: string, message: { content: string; }, options: SendMessageOptions) => {
+                    content = message.content;
+                    const uploads = options.attachmentsToUpload as unknown as Upload[];
+                    handedOff.push(uploads);
+                    return nativeUploadWait(uploads).then(() => { nativeCompleted = true; });
+                },
+            } },
+        }) as { shouldClear: boolean; };
+        await setImmediate();
+        h.assertDraft();
+        if (scenario === "upload failure") {
+            assert.equal(outcome.shouldClear, false);
+            assert.equal(handedOff.length, 0, "the composer must stop before native send after an encrypted upload fails");
+            assert.equal(h.wires.length, 0);
+            assert.equal(originalUploadCalls, 0);
+        } else if (scenario === "old handoff") {
+            assert.equal(handedOff[0], h.originals);
+            assert.equal(originalUploadCalls, h.originals.length);
+            assert.equal(nativeCompleted, false, "the previous overwrite reproduces the permanently pending native upload");
+        } else {
+            assert.equal(outcome.shouldClear, true);
+            assert.equal(content, "encrypted envelope");
+            assert.equal(handedOff.length, 1);
+            assert.deepEqual(handedOff[0], h.shadows, "the full native continuation receives the completed encrypted instances");
+            assert.ok(handedOff[0].every(upload => upload.status === "COMPLETED" && upload.item.file.type === "application/octet-stream"));
+            assert.equal(originalUploadCalls, 0, "the original plaintext drafts must never enter native upload");
+            assert.equal(nativeCompleted, true, "native upload completion must settle before the next event-loop turn");
+        }
+    });
 }
 
 test("resolved upload errors preserve mixed drafts and allow a fresh encrypted retry", async () => {

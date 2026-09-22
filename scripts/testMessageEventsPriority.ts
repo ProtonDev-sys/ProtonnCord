@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 
 import { build, type Plugin } from "esbuild";
 
@@ -18,6 +19,7 @@ import type {
 import messageEventsPlugin from "../src/plugins/_api/messageEvents";
 import { canonicalizeMatch } from "../src/utils/patches";
 import type { PatchReplacement } from "../src/utils/types";
+import { discordMessageSendSource, patchDiscordMessageSend } from "./fixtures/discordMessageSend";
 
 type MessageEventsModule = typeof import("../src/api/MessageEvents");
 
@@ -98,17 +100,14 @@ function applyReplacement(source: string, replacement: PatchReplacement): string
         : source.replace(match, replacement.replace);
 }
 
-function testCurrentDiscordSendPatch(): void {
+function testCurrentDiscordSendPatch(): string {
     const patch = messageEventsPlugin.patches?.find(candidate => candidate.find === ".handleSendMessage,onResize:");
     assert(patch, "the MessageEvents chat-input patch exists");
     const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
-    assert.equal(replacements.length, 2, "the chat-input patch updates its callback and send interception atomically");
+    assert.equal(replacements.length, 3, "the chat-input patch updates its callback, send interception and upload handoff atomically");
 
-    const source = `class ChatInput {handleSendMessage=async e=>{return(0,nb.i)({openWarningPopout:e=>this.setState({contentWarningProps:e}),type:this.props.chatInputType,content:t,hasStickers:null!=l&&l.length>0,hasAttachments:null!=n&&n.length>0,channel:h}).then(e=>{let{valid:s,failureReason:f}=e;let _=tU.Ay.parse(h,t);_.tts=_.tts||A,null!=o&&(_.content="",_.components=o);let I={...x.A.getSendMessageOptions({content:t,channelId:h.id,uploads:n,stickers:l,command:i,isGif:a,pendingReply:m,alsoForwardToChannelId:p?h.parent_id??void 0:void 0,scheduledTimestamp:this.props.scheduledMessageDraft?.scheduledTimestamp}),location:nB.Hx.CHAT_INPUT};null!=c&&(I.announcementSendOptions=c),null!=r&&(I.gifMetadata=r),null!=o&&(I.flags=(0,u.UI)(I.flags??0,eM.pr7.IS_COMPONENTS_V2));if(null!=n&&n.length>0)I.attachmentsToUpload=n;return{shouldClear:true}})}};const chatInput=new ChatInput(),view={handleSendMessage:chatInput.handleSendMessage,onResize:null};`;
-    const patched = replacements.reduce(
-        (current, replacement) => applyReplacement(current, replacement),
-        source,
-    );
+    const source = discordMessageSendSource;
+    const patched = patchDiscordMessageSend();
 
     assert.notEqual(patched, source, "the current Discord chat-input source must match the MessageEvents patch");
     assert.match(patched, /\.then\(async e=>\{let\{valid:s,failureReason:f\}=e;/, "the callback remains valid when pre-send work awaits encryption");
@@ -123,6 +122,59 @@ function testCurrentDiscordSendPatch(): void {
         "the patch reconstructs Discord's validation props and forwards raw pending-upload options",
     );
     assert.doesNotThrow(() => Function(patched), "the patched current Discord chat-input source must remain valid JavaScript");
+    return patched;
+}
+
+async function testCurrentDiscordUploadHandoff(events: MessageEventsModule, patched: string): Promise<void> {
+    for (const scenario of ["ordinary", "replacement", "empty", "generated", "cancelled"] as const) {
+        const originals = (scenario === "generated" ? [] : [{
+            id: "draft", filename: "image.png", status: scenario === "ordinary" ? "COMPLETED" : "NOT_STARTED",
+            uploadedFilename: scenario === "ordinary" ? "uploaded-image.png" : "", responseUrl: scenario === "ordinary" ? "https://upload.invalid/original" : "",
+        }]) as NonNullable<SendMessageOptions["uploads"]>;
+        const replacements = (scenario === "empty" ? [] : [{
+            id: "draft", filename: "encrypted.pcaf", status: "COMPLETED",
+            uploadedFilename: "uploaded-encrypted.pcaf", responseUrl: "https://upload.invalid/encrypted",
+        }]) as NonNullable<SendMessageOptions["uploads"]>;
+        const sends: { message: MessageObject; options: SendMessageOptions; }[] = [];
+        const listener: MessageSendListener = (_channel, message, options) => {
+            assert.equal(options.uploads, originals, "listeners see the original pending draft");
+            if (scenario === "ordinary") return;
+            message.content = "PCEM3:fixture";
+            options.uploads = options.attachmentsToUpload = replacements;
+            return scenario === "cancelled" ? { cancel: true } : { stop: true };
+        };
+        events.addMessagePreSendListener(listener);
+        try {
+            const outcome = await runInNewContext(`${patched}\nchatInput.props={chatInputType:0};chatInput.handleSendMessage();`, {
+                Vencord: { Api: { MessageEvents: events } },
+                t: "plain caption", n: originals, l: [], h: { id: "channel" }, A: false,
+                o: null, i: null, a: false, m: null, p: false, c: null, r: null,
+                nb: { i: async () => ({ valid: true }) },
+                tU: { Ay: { parse: (_channel: unknown, content: string) => ({ ...messageObj, content }) } },
+                nB: { Hx: { CHAT_INPUT: "chat_input" } },
+                x: { A: {
+                    getSendMessageOptions: () => ({}),
+                    sendMessage: (_channel: string, message: MessageObject, options: SendMessageOptions) => sends.push({ message, options }),
+                } },
+            });
+            assert.equal(outcome.shouldClear, scenario !== "cancelled", scenario);
+            if (scenario === "cancelled") {
+                assert.equal(sends.length, 0, "cancellation must stop the host continuation");
+                continue;
+            }
+            assert.equal(sends.length, 1, scenario);
+            const expected = scenario === "ordinary" ? originals : replacements;
+            assert.equal(sends[0].options.attachmentsToUpload, expected,
+                `${scenario}: native send must receive the selected upload instances after the host finishes assembling options`);
+            assert.deepEqual(sends[0].options.attachmentsToUpload?.map(upload => [upload.filename, upload.status, upload.uploadedFilename]),
+                expected.map(upload => [upload.filename, upload.status, upload.uploadedFilename]));
+            assert.equal(sends[0].message.content, scenario === "ordinary" ? "plain caption" : "PCEM3:fixture");
+            assert.equal(originals[0]?.filename, scenario === "generated" ? undefined : "image.png", "handoff preserves original drafts");
+            if (scenario !== "ordinary" && originals.length) assert.equal(originals[0].status, "NOT_STARTED");
+        } finally {
+            events.removeMessagePreSendListener(listener);
+        }
+    }
 }
 
 function testCurrentDiscordMessageLengthPatch(): void {
@@ -488,9 +540,11 @@ async function testEditDuplicatePreservesOriginalFailClosedRegistration(events: 
 }
 
 async function main(): Promise<void> {
-    testCurrentDiscordSendPatch();
+    const patchedSend = testCurrentDiscordSendPatch();
     testCurrentDiscordMessageLengthPatch();
     const events = await loadMessageEvents();
+
+    await testCurrentDiscordUploadHandoff(events, patchedSend);
 
     testMessageLengthBypassListeners(events);
 
