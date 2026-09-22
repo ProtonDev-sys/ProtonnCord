@@ -51,6 +51,7 @@ interface UploadMediaMetadata {
 }
 
 const uploadSources = new WeakMap<CloudUpload, UploadSource>();
+const pendingDraftUploads = new WeakSet<CloudUpload>();
 const MEDIA_METADATA_TIMEOUT_MS = 5_000;
 
 export interface PreparedEncryptedAttachments {
@@ -188,6 +189,82 @@ function sourceForUpload(upload: CloudUpload): UploadSource {
     };
     uploadSources.set(upload, source);
     return source;
+}
+
+export function createEncryptedUploadDraft(uploads: CloudUpload[], createUpload: (original: CloudUpload, file: File) => CloudUpload) {
+    const originals = [...uploads];
+    for (const upload of originals) {
+        assertUpload(upload);
+        if (pendingDraftUploads.has(upload)) throw new Error("These attachments are already being sent");
+    }
+    const sources = originals.map(sourceForUpload);
+    let released = false;
+    const release = () => {
+        if (released) return;
+        released = true;
+        originals.forEach(upload => pendingDraftUploads.delete(upload));
+    };
+    originals.forEach(upload => pendingDraftUploads.add(upload));
+    try {
+        return {
+            uploads: originals.map((original, index) => {
+                const source = sources[index];
+                const copy = createUpload(original, source.file) as MutableCloudUpload;
+                copy.setFilename(source.filename);
+                copy.description = source.description;
+                copy.spoiler = source.spoiler;
+                copy.mimeType = source.mimeType;
+                copy.durationSecs = source.durationSecs;
+                copy.waveform = source.waveform;
+                return copy;
+            }),
+            validate() {
+                if (uploads.length !== originals.length || uploads.some((upload, index) => upload !== originals[index]))
+                    throw new Error("The attachment draft changed while Secure Messaging was sending it");
+                for (const [index, upload] of originals.entries()) {
+                    assertUpload(upload);
+                    const current = sourceForUpload(upload);
+                    const expected = sources[index];
+                    if ((Object.keys(expected) as Array<keyof UploadSource>).some(key => current[key] !== expected[key]))
+                        throw new Error("The attachment changed while Secure Messaging was sending it");
+                }
+            },
+            release,
+        };
+    } catch (error) {
+        release();
+        throw error;
+    }
+}
+
+export function uploadEncryptedAttachment(upload: CloudUpload, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (error?: unknown) => {
+            if (settled) return;
+            settled = true;
+            upload.removeListener("complete", onComplete);
+            upload.removeListener("error", onError);
+            signal?.removeEventListener("abort", onError);
+            if (error) reject(error);
+            else resolve();
+        };
+        const onError = () => finish(new Error("Discord could not upload the encrypted attachment"));
+        const onComplete = () => {
+            if (upload.status === "COMPLETED" && upload.uploadedFilename && upload.responseUrl) finish();
+            else onError();
+        };
+        upload.once("complete", onComplete);
+        upload.once("error", onError);
+        signal?.addEventListener("abort", onError, { once: true });
+        if (signal?.aborted) onError();
+        // CloudUpload reports ordinary failures through events and can resolve its
+        // upload() promise before a delayed terminal event. Do not treat that as success.
+        void Promise.resolve().then(() => settled ? undefined : upload.upload()).then(() => {
+            if (upload.status === "COMPLETED") onComplete();
+            else if (!["STARTED", "UPLOADING"].includes(upload.status)) onError();
+        }, error => finish(error || new Error("Encrypted attachment upload failed")));
+    });
 }
 
 async function metadataForUpload(source: UploadSource): Promise<AttachmentMetadata> {

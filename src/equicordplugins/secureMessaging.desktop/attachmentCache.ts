@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { updateMessage } from "@api/MessageUpdater";
 import type { PluginNative } from "@utils/types";
 import type { Message, MessageAttachment } from "@vencord/discord-types";
 import { Constants, RestAPI, UserStore } from "@webpack/common";
@@ -654,11 +655,11 @@ export function subscribeEncryptedAttachmentStatus(message: Message, listener: (
     return () => entry.statusListeners.delete(listener);
 }
 
-export function retryEncryptedAttachmentLoad(message: Message): void {
+export function retryEncryptedAttachmentLoad(message: Message): boolean {
     const localUserId = syncCacheAccount();
     const key = encryptedAttachmentCacheKey(message);
     const entry = cache.get(key);
-    if (!localUserId || !entry || entry.disposed || entry.status.status !== "failed") return;
+    if (!localUserId || !entry || entry.disposed || entry.status.status !== "failed") return false;
     if (entry.retryTimer !== null) clearTimeout(entry.retryTimer);
     entry.retryTimer = null;
     entry.retryAttempt = 0;
@@ -666,6 +667,10 @@ export function retryEncryptedAttachmentLoad(message: Message): void {
     entry.status = { status: "loading" };
     notifyStatus(entry);
     startEntryLoad(message, key, entry, localUserId);
+    // Terminal failures release the old render owner. Re-render this message so
+    // its native attachment renderer subscribes to the retry before it completes.
+    updateMessage(message.channel_id, message.id);
+    return true;
 }
 
 export function clearEncryptedAttachmentCache(): void {

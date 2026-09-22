@@ -10,7 +10,7 @@ import { resolve } from "node:path";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { runInThisContext } from "node:vm";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { createSourceFile, isFunctionDeclaration, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import type { Message } from "@vencord/discord-types";
 
@@ -293,6 +293,83 @@ test("concurrent preview consumers share decryption and unfurl work", async () =
     await setImmediate();
     assert.deepEqual(h.calls(), { decrypt: 1, review: 0, unfurl: 1 });
     assert.equal(h.embeds.patchEncryptedMessageEmbeds(value, noop).embeds.length, 1);
+});
+
+test("repeated embed and sticker renders retain one completion callback per owner", async () => {
+    const source = readFileSync("src/equicordplugins/secureMessaging.desktop/index.tsx", "utf8");
+    const parsed = createSourceFile("index.tsx", source, ScriptTarget.ES2022, true);
+    const helper = parsed.statements.find(statement => isFunctionDeclaration(statement) && statement.name?.text === "encryptedRenderCallback");
+    assert.ok(helper);
+    const compiled = transpileModule(helper.getText(parsed), { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText;
+    const getCallback = runInThisContext(`(() => { const encryptedRenderCallbacks = new WeakMap(); ${compiled}; return encryptedRenderCallback; })()`) as (owner: { forceUpdate(): void; }) => () => void;
+    assert.match(source, /patchEncryptedMessageEmbeds\(message, encryptedRenderCallback\(owner\), ready\)/);
+    assert.match(source, /patchEncryptedMessageStickers\(message, encryptedRenderCallback\(owner\), ready\)/);
+    const pending = Promise.withResolvers<DecryptIncomingResult>();
+    const h = harness({ cachedDecrypt: () => pending.promise });
+    const value = message();
+    let notifications = 0;
+    const owner = { forceUpdate() { notifications++; } };
+    const otherOwner = { forceUpdate() { notifications++; } };
+    for (let render = 0; render < 100; render++) {
+        h.embeds.patchEncryptedMessageEmbeds(value, getCallback(owner));
+        h.embeds.patchEncryptedMessageStickers(value, getCallback(owner));
+    }
+    h.embeds.patchEncryptedMessageEmbeds(value, getCallback(otherOwner));
+    pending.resolve({ ...decrypted(), plaintext: "Plain authenticated text", stickers: [] });
+    await setImmediate();
+    assert.equal(notifications, 2, "notify each mounted renderer once, even after repeated renders");
+    assert.equal(h.calls().unfurl, 0);
+});
+
+for (const failure of [
+    { status: "failed", error: "cryptographic_operation_failed" },
+    { status: "unavailable", reason: "security_key_locked" },
+] satisfies DecryptIncomingResult[]) {
+    test(`manual retry replaces ${failure.status} once and shares pending work across mounted copies`, async () => {
+        const pending = Promise.withResolvers<DecryptIncomingResult>();
+        let retry = false;
+        const h = harness({ decrypt: () => retry ? pending.promise : Promise.resolve(failure) });
+        const value = message();
+        assert.equal((await h.decrypt.decryptCachedMessage(localUserId, value)).status, failure.status);
+        assert.equal(h.calls().decrypt, 4);
+        retry = true;
+        h.decrypt.invalidateFailedDecryption(localUserId, value);
+        const first = h.decrypt.decryptCachedMessage(localUserId, value);
+        h.decrypt.invalidateFailedDecryption(localUserId, value);
+        const duplicate = h.decrypt.decryptCachedMessage(localUserId, value);
+        assert.equal(first, duplicate);
+        pending.resolve(decrypted());
+        assert.equal((await first).status, "decrypted");
+        assert.equal(h.calls().decrypt, 5);
+    });
+}
+
+for (const result of [decrypted(), { status: "untrusted_author" }, { status: "replay_detected" }, { status: "invalid_message" }] satisfies DecryptIncomingResult[]) {
+    test(`manual retry cannot invalidate ${result.status} results`, async () => {
+        const h = harness({ decrypt: async () => result });
+        const value = message();
+        const original = h.decrypt.decryptCachedMessage(localUserId, value);
+        await original;
+        h.decrypt.invalidateFailedDecryption(localUserId, value);
+        assert.equal(h.decrypt.decryptCachedMessage(localUserId, value), original);
+        assert.equal(h.calls().decrypt, 1);
+    });
+}
+
+test("retrying a failed message refreshes its derived media before the transient TTL expires", async () => {
+    let failed = true;
+    const h = harness({ decrypt: async () => failed ? { status: "failed", error: "cryptographic_operation_failed" } : decrypted() });
+    const value = message();
+    assert.deepEqual((await render(h, value)).embeds, []);
+    assert.equal(h.calls().decrypt, 4);
+    failed = false;
+    h.decrypt.invalidateFailedDecryption(localUserId, value);
+    const retried = h.decrypt.decryptCachedMessage(localUserId, value);
+    h.embeds.invalidateEncryptedMessageEmbeds(value);
+    assert.equal((await render(h, value)).embeds.length, 1);
+    assert.equal(h.embeds.patchEncryptedMessageStickers(value, noop).stickerItems[0]?.id, sticker.id);
+    assert.equal((await retried).status, "decrypted");
+    assert.equal(h.calls().decrypt, 5, "the message and derived previews share the retry");
 });
 
 test("protected rendering and ordinary messages do not start decryption", async () => {
