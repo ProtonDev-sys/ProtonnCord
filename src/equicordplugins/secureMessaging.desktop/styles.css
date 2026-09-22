@@ -80,9 +80,14 @@
     background: var(--pc-secure-card-background);
 }
 
+.pc-secure-message-joined-above,
+.pc-secure-message-joined-below {
+    width: 42rem;
+}
+
 .pc-secure-message-joined-below {
     padding-bottom: 0.1rem;
-    border-bottom-color: transparent;
+    border-bottom-width: 0;
     border-bottom-right-radius: 0;
     border-bottom-left-radius: 0;
 }
@@ -90,7 +95,7 @@
 .pc-secure-message-joined-above {
     margin-top: 0;
     padding-top: 0.1rem;
-    border-top-color: transparent;
+    border-top-width: 0;
     border-top-left-radius: 0;
     border-top-right-radius: 0;
 }
@@ -101,7 +106,7 @@
     bottom: 100%;
     left: -1px;
     box-sizing: border-box;
-    height: 1rem;
+    height: var(--pc-secure-message-join-gap, 0);
     border-right: 1px solid var(--pc-secure-card-border);
     border-left: 1px solid var(--pc-secure-card-border);
     background: var(--pc-secure-card-background);
@@ -118,6 +123,12 @@
     border-radius: 0.25rem;
     background: var(--background-modifier-accent);
     opacity: 0.55;
+}
+
+/* Keep the replacement marker mounted so ciphertext stays hidden. Loading and
+ * failure details still occupy a card; native media needs no empty text card. */
+.pc-secure-message-without-text:empty {
+    display: none;
 }
 
 .pc-secure-card-warning {
