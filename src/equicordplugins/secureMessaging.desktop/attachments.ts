@@ -398,20 +398,27 @@ export async function encryptAttachmentBytes(input: {
     bundleId: string;
     channelId: string;
     count: number;
-    data: Uint8Array;
+    data: Uint8Array | Blob;
     index: number;
     masterKey: Uint8Array;
     metadata: AttachmentMetadata;
     senderUserId: string;
 }): Promise<Uint8Array> {
     validateAttachmentMetadata(input.metadata);
-    if (input.data.byteLength !== input.metadata.size) throw new Error("Attachment byte length does not match its metadata");
+    const { data } = input;
+    if ((data instanceof Blob ? data.size : data.byteLength) !== input.metadata.size)
+        throw new Error("Attachment byte length does not match its metadata");
     const metadataBytes = encodedAttachmentMetadata(input.metadata);
     const expectedCiphertextSize = encryptedAttachmentCiphertextSize(input.metadata);
-    const plaintext = concatBytes(uint32(metadataBytes.byteLength), metadataBytes, input.data);
-    const aad = attachmentAad(input.channelId, input.senderUserId, input.bundleId, input.index, input.count);
-    const { key, nonce } = await attachmentKeyAndNonce(input.masterKey, input.bundleId, aad);
+    // Snapshot mutable byte callers before the first await. Files are immutable and
+    // can supply their bytes directly to one framed buffer without a full-file copy.
+    let plaintext = data instanceof Blob ? new Uint8Array() : concatBytes(uint32(metadataBytes.byteLength), metadataBytes, data);
     try {
+        const aad = attachmentAad(input.channelId, input.senderUserId, input.bundleId, input.index, input.count);
+        const { key, nonce } = await attachmentKeyAndNonce(input.masterKey, input.bundleId, aad);
+        if (data instanceof Blob) plaintext = new Uint8Array(await new Blob([
+            cryptoBytes(uint32(metadataBytes.byteLength)), cryptoBytes(metadataBytes), data,
+        ]).arrayBuffer());
         const ciphertext = new Uint8Array(await crypto.subtle.encrypt({
             name: "AES-GCM",
             iv: cryptoBytes(nonce),

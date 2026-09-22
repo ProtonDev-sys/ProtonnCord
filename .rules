@@ -1,0 +1,13 @@
+# Protonn Cord checkout guidance
+
+This checkout may be older than nightly. Check its branch and working tree first; preserve unrelated edits. Read the code and package scripts here instead of relying on a copied API catalog.
+
+- Preserve plugin IDs, settings, unknown saved fields and upstream attribution. Storage changes need migration and failure/retry tests.
+- Prefer existing plugin APIs and components. Pair registrations, timers, listeners and media resources with cleanup. Keep asynchronous work tied to its current plugin, account and component.
+- Keep privileged filesystem, network and process work in native modules. Validate renderer arguments and restrict operations to their intended paths/hosts; never build shell commands from untrusted input.
+- Read the Secure Messaging README before changing encryption, trust, replay or vault behavior. Do not log plaintext messages or secrets.
+- Choose the smallest clear fix. Share code only for actual repeated behavior; keep useful error handling and data-protection checks.
+- Run relevant tests and inspect formatter changes. Use an isolated build for previews; live tests require their documented profile and destination conditions.
+- Keep temporary reports and task notes out of commits. Summarize checks and remaining limits in the PR.
+
+Coding-model selection belongs to the current client/session. Consult current provider documentation when needed; these project rules do not pin a model or override user instructions.

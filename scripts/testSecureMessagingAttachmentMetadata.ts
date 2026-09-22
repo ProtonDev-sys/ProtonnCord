@@ -14,9 +14,12 @@ import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 import {
     attachmentBundleRootFromDigests,
     attachmentCiphertextDigest,
+    type AttachmentMetadata,
     decryptAttachmentBytes,
     DETACHED_TEXT_FILENAME,
     DETACHED_TEXT_MIME_TYPE,
+    encryptAttachmentBytes,
+    generateAttachmentBundleMaterial,
     parseSecurePlaintext,
 } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import {
@@ -210,4 +213,199 @@ test("applying a prepared result twice keeps the same opaque file and private me
     const opened = await openAttachment(prepared, encryptedFile);
     assert.equal(opened.metadata.description, privateDescription);
     assert.equal(opened.metadata.spoiler, true);
+});
+
+test("optional waveforms on non-audio files do not prevent sending", async () => {
+    const value: CloudUpload = upload();
+    value.waveform = "AQID";
+    value.durationSecs = 2;
+    const prepared = await prepareEncryptedAttachments([value], "", channelId, senderUserId);
+    prepared.apply();
+    const opened = await openAttachment(prepared, value.item.file);
+    assert.equal(opened.metadata.waveform, null);
+    assert.equal(opened.metadata.duration, null);
+    assert.equal(new TextDecoder().decode(opened.data), "private file bytes");
+});
+
+test("audio with unreadable duration omits the waveform and cleans up metadata probing", async t => {
+    class Media extends EventTarget {
+        duration = Number.NaN;
+        src = "";
+        preload = "";
+        load() { if (this.src) this.dispatchEvent(new Event("error")); }
+        removeAttribute() { this.src = ""; }
+    }
+    const media = new Media();
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: () => media } });
+    t.after(() => {
+        if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+        else Reflect.deleteProperty(globalThis, "document");
+    });
+    const revoke = t.mock.method(URL, "revokeObjectURL");
+    const value: CloudUpload = upload();
+    value.item.file = new File(["audio bytes"], "voice.ogg", { type: "audio/ogg" });
+    value.waveform = "AQID";
+    const prepared = await prepareEncryptedAttachments([value], "", channelId, senderUserId);
+    prepared.apply();
+    const opened = await openAttachment(prepared, value.item.file);
+    assert.equal(opened.metadata.waveform, null);
+    assert.equal(opened.metadata.duration, null);
+    assert.equal(new TextDecoder().decode(opened.data), "audio bytes");
+    assert.equal(media.preload, "metadata");
+    assert.equal(media.src, "");
+    assert.equal(revoke.mock.callCount(), 1);
+});
+
+test("fallback audio MIME types use known duration without decoding the file", async () => {
+    const value: CloudUpload = upload();
+    value.item.file = new File(["audio bytes"], "voice.ogg");
+    value.mimeType = " Audio/Ogg; codecs=opus ";
+    value.durationSecs = 3;
+    value.waveform = "AQID";
+    const prepared = await prepareEncryptedAttachments([value], "", channelId, senderUserId);
+    prepared.apply();
+    const { metadata } = await openAttachment(prepared, value.item.file);
+    assert.equal(metadata.duration, 3);
+    assert.equal(metadata.waveform, "AQID");
+    assert.equal(metadata.mimeType, "Audio/Ogg; codecs=opus");
+});
+
+test("stale video duration does not override probed metadata", async t => {
+    class Media extends EventTarget {
+        currentTime = 0;
+        duration = 7;
+        muted = false;
+        playsInline = false;
+        preload = "";
+        src = "";
+        videoHeight = 360;
+        videoWidth = 640;
+        load() { if (this.src) this.dispatchEvent(new Event("loadedmetadata")); }
+        removeAttribute() { this.src = ""; }
+    }
+    const media = new Media();
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: () => media } });
+    t.after(() => {
+        if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+        else Reflect.deleteProperty(globalThis, "document");
+    });
+    const value: CloudUpload = upload();
+    value.item.file = new File(["video bytes"], "clip.webm", { type: "video/webm" });
+    value.durationSecs = 3;
+    const prepared = await prepareEncryptedAttachments([value], "", channelId, senderUserId);
+    prepared.apply();
+    const { metadata } = await openAttachment(prepared, value.item.file);
+    assert.equal(metadata.duration, 7);
+    assert.equal(metadata.width, 640);
+    assert.equal(metadata.height, 360);
+});
+
+test("fallback image MIME types retain encoded dimensions", async () => {
+    const value = upload();
+    const pngHeader = new Uint8Array(24);
+    pngHeader.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const view = new DataView(pngHeader.buffer);
+    view.setUint32(16, 320);
+    view.setUint32(20, 180);
+    value.item.file = new File([pngHeader], "image.png");
+    value.mimeType = "image/png";
+    const prepared = await prepareEncryptedAttachments([value], "", channelId, senderUserId);
+    prepared.apply();
+    const { metadata } = await openAttachment(prepared, value.item.file);
+    assert.equal(metadata.width, 320);
+    assert.equal(metadata.height, 180);
+});
+
+for (const change of ["replacement", "upload started"] as const) {
+    test(`a late change (${change}) aborts apply before changing any draft`, async () => {
+        const values = [upload(), upload()];
+        const originals = values.map(value => value.item.file);
+        const prepared = await prepareEncryptedAttachments(values, "", channelId, senderUserId);
+        if (change === "replacement") values[1].item.file = new File(["new bytes"], "replacement.txt");
+        else values[1].uploadedFilename = "already-uploaded.pcaf";
+        const secondFile = values[1].item.file;
+        assert.throws(prepared.apply);
+        assert.equal(values[0].item.file, originals[0]);
+        assert.equal(values[1].item.file, secondFile);
+        assert.ok(values.every(value => value.description === privateDescription && value.spoiler));
+    });
+}
+
+test("mutating the caller's upload array cannot replace an in-flight bundle member", async () => {
+    const original = upload();
+    const replacement = upload("replacement");
+    const values = [original];
+    const pending = prepareEncryptedAttachments(values, "", channelId, senderUserId);
+    values[0] = replacement;
+    const prepared = await pending;
+    prepared.apply();
+    assertOpaque(original);
+    assert.equal(replacement.description, "replacement");
+    const { metadata } = await openAttachment(prepared, original.item.file);
+    assert.equal(metadata.description, privateDescription);
+});
+
+function encryptionInput(data: Uint8Array | Blob) {
+    const { descriptor, keyBytes } = generateAttachmentBundleMaterial(1);
+    const metadata: AttachmentMetadata = {
+        name: "private-α.bin", mimeType: "application/octet-stream", size: data instanceof Blob ? data.size : data.byteLength,
+        description: privateDescription, spoiler: true, width: null, height: null, duration: null, waveform: null,
+    };
+    return { bundleId: descriptor.id, channelId, count: 1, data, index: 0, masterKey: keyBytes, metadata, senderUserId };
+}
+
+test("Blob framing is wire-identical to byte input and byte callers retain call-time snapshots", async () => {
+    const bytes = new TextEncoder().encode("authenticated attachment contents");
+    const original = bytes.slice();
+    const input = encryptionInput(bytes);
+    const pending = encryptAttachmentBytes(input);
+    bytes.fill(0);
+    const byteCiphertext = await pending;
+    const blobCiphertext = await encryptAttachmentBytes({ ...input, data: new Blob([original]) });
+    assert.deepEqual(blobCiphertext, byteCiphertext, "the same bundle metadata and plaintext produce identical AES-GCM framing");
+    const opened = await decryptAttachmentBytes({ ...input, ciphertext: blobCiphertext });
+    assert.deepEqual(opened.data, original);
+    assert.deepEqual(opened.metadata, input.metadata);
+    blobCiphertext[blobCiphertext.length - 1] ^= 1;
+    await assert.rejects(decryptAttachmentBytes({ ...input, ciphertext: blobCiphertext }), /authentication failed/u);
+});
+
+test("Blob size and binding failures are rejected before reading a plaintext buffer", async t => {
+    const input = encryptionInput(new Blob(["private bytes"]));
+    const read = t.mock.method(Blob.prototype, "arrayBuffer", () => { throw new Error("must not read invalid input"); });
+    await assert.rejects(encryptAttachmentBytes({ ...input, metadata: { ...input.metadata, size: input.metadata.size + 1 } }), /byte length/u);
+    await assert.rejects(encryptAttachmentBytes({ ...input, channelId: "invalid" }), /channel or sender/u);
+    await assert.rejects(encryptAttachmentBytes({ ...input, masterKey: new Uint8Array(31) }), /bundle key/u);
+    assert.equal(read.mock.callCount(), 0);
+});
+
+for (const fail of [false, true]) test(`framed plaintext is wiped after ${fail ? "failed" : "successful"} encryption`, async t => {
+    const encrypt = crypto.subtle.encrypt.bind(crypto.subtle);
+    const framed: Uint8Array[] = [];
+    t.mock.method(crypto.subtle, "encrypt", async (...args: Parameters<SubtleCrypto["encrypt"]>) => {
+        framed.push(new Uint8Array(args[2] as ArrayBuffer));
+        if (fail) throw new Error("injected encryption failure");
+        return encrypt(...args);
+    });
+    for (const data of [new Uint8Array([1, 2, 3]), new Blob([new Uint8Array([1, 2, 3])])]) {
+        const pending = encryptAttachmentBytes(encryptionInput(data));
+        if (fail) await assert.rejects(pending, /injected encryption failure/u);
+        else await pending;
+    }
+    assert.equal(framed.length, 2);
+    assert.ok(framed.every(bytes => bytes.length > 3 && bytes.every(byte => byte === 0)));
+});
+
+test("mutable-byte framing is wiped when key derivation fails before encryption", async t => {
+    const fill = Uint8Array.prototype.fill;
+    const wiped: number[] = [];
+    t.mock.method(Uint8Array.prototype, "fill", function (this: Uint8Array, ...args: Parameters<Uint8Array["fill"]>) {
+        const result = fill.apply(this, args);
+        if (args[0] === 0 && this.length > 32) wiped.push(this.length);
+        return result;
+    });
+    await assert.rejects(encryptAttachmentBytes({ ...encryptionInput(new Uint8Array([1, 2, 3])), masterKey: new Uint8Array(31) }), /bundle key/u);
+    assert.equal(wiped.length, 1, "the pre-await byte snapshot must be cleared even if no AES operation starts");
 });

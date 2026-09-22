@@ -123,3 +123,27 @@ for (const backslashes of [1, 2, 3, 4]) {
         });
     }
 }
+
+for (const delimiter of ["*", "**", "***", "_", "__", "___", "~~"]) {
+    test(`removes matching ${delimiter} formatting from unfurl URLs`, () => {
+        assert.deepEqual(extractSecureEmbedUrls(`${delimiter}${visibleUrl}${delimiter}.`), [visibleUrl]);
+        assert.deepEqual(extractSecureEmbedUrls(`${delimiter}${balancedUrls[0]}${delimiter}`), [balancedUrls[0]]);
+        assert.deepEqual(extractSecureEmbedUrls(`\`${delimiter}${hiddenUrl}${delimiter}\` ${visibleUrl}`), [visibleUrl]);
+    });
+}
+
+test("bare URL path characters are not removed as Markdown formatting", () => {
+    for (const suffix of ["*", "**", "_", "__", "~~"]) {
+        const url = `${visibleUrl}${suffix}`;
+        assert.deepEqual(extractSecureEmbedUrls(url), [url]);
+    }
+});
+
+test("enforces the URL limit after Unicode percent-encoding", () => {
+    const url = `https://example.com/${"界".repeat(250)}`;
+    assert.ok(url.length < 2_048 && new URL(url).href.length > 2_048);
+    assert.deepEqual(extractSecureEmbedUrls(url), []);
+    assert.equal(secureEmbedOnlyUrl(url), null);
+    const short = "https://example.com/界";
+    assert.deepEqual(extractSecureEmbedUrls(short), [new URL(short).href]);
+});

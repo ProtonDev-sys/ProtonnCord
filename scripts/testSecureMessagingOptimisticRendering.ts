@@ -46,6 +46,10 @@ for (const id of [provisionalId, canonicalId]) {
     }
 }
 assert.equal(canGroupSecureMessageContent(null), false, "pending incoming messages stay separate");
+for (const plaintext of ["", " \n\t"]) {
+    assert.equal(canGroupSecureMessageContent(null, plaintext), false, "empty optimistic rows cannot join a visible card");
+    assert.equal(canGroupSecureMessageContent({ ...authenticated, plaintext }), false, "empty decrypted rows cannot leave neighboring cards open");
+}
 assert.equal(canGroupSecureMessageContent(null, "https://example.com/image"), false);
 assert.equal(canGroupSecureMessageContent({ status: "failed", error: "cryptographic_operation_failed" }, "visible"), false,
     "optimistic plaintext must never override a failed authentication");
