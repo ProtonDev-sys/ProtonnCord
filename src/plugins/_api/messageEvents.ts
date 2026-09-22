@@ -64,8 +64,8 @@ export default definePlugin({
                 {
                     // The composer assigns its original drafts after the pre-send hook.
                     // Keep an explicit listener override, including completed encrypted uploads.
-                    match: /(if\(null!=(\i)&&\2\.length>0\))(\i)\.attachmentsToUpload=\2;/,
-                    replace: "$1$3.attachmentsToUpload??=$2;",
+                    match: /(\i\.attachmentsToUpload)=(\i)(?=[,;])/,
+                    replace: "$1??=$2",
                 },
             ],
         },
