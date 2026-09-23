@@ -68,9 +68,9 @@ export function normalizeFolderName(value: unknown): string {
     return value.trim();
 }
 
-export function normalizeGuildIds(value: unknown, allowEmpty = false): string[] {
-    if (!Array.isArray(value) || (!allowEmpty && value.length === 0) || value.length > 1000)
-        throw new Error(`guild_ids must contain ${allowEmpty ? "0" : "1"} to 1000 server IDs`);
+export function normalizeGuildIds(value: unknown): string[] {
+    if (!Array.isArray(value) || value.length === 0 || value.length > 1000)
+        throw new Error("guild_ids must contain 1 to 1000 server IDs");
     const ids = value.map(id => requireSnowflake(id, "guild_ids entry"));
     if (new Set(ids).size !== ids.length) throw new Error("guild_ids must not contain duplicates");
     return ids;

@@ -6,7 +6,7 @@ The tool list is fixed. It offers server and channel metadata, scoped message re
 
 ## Organizing servers
 
-Call `discord_list_server_folders` and `discord_list_server_activity` first. Folder IDs are strings. Create a folder with `discord_create_server_folder`, then pass its ID to `discord_move_servers`; pass `null` as `folder_id` to unfile servers. `discord_rename_server_folder` changes its name. `discord_reorder_server_folder` uses a zero-based top-level position, so the final position places a folder at the bottom. `discord_delete_server_folder` preserves every server as an unfiled entry at the deleted folder's position. Folder changes use Discord's own user-settings action.
+Call `discord_list_server_folders` and `discord_list_server_activity` first. Folder IDs are strings. Create a folder with `discord_create_server_folder` and at least one server, then pass its ID to `discord_move_servers`; pass `null` as `folder_id` to unfile servers. Discord removes a folder when its last server moves out. `discord_rename_server_folder` changes its name. `discord_reorder_server_folder` uses the zero-based visible positions from the listing, so the final position places a folder at the bottom. `discord_delete_server_folder` preserves every server as an unfiled entry at the deleted folder's position. Folder changes use Discord's own user-settings action.
 
 The activity tool reports ServerReview visit and emoji, sticker, and soundboard history. It classifies unused servers only while ServerReview tracking is active. Saved history without active tracking is labelled `saved_only`, and missing history is labelled `none`; both return `unknown` classifications.
 
