@@ -12,13 +12,17 @@ import {
     isDiscordSnowflake,
     normalizeMessageContent,
     normalizeMessageLimit,
+    normalizeFolderName,
+    normalizeGuildIds,
     normalizeSearchHas,
     normalizeSearchOffset,
     normalizeSearchQuery,
     normalizeSearchSortOrder,
     requireSnowflake,
+    requireFolderId,
     sentMessageKey,
 } from "../src/equicordplugins/discordMcp.desktop/policy";
+import { deleteFolder, moveServers, reorderFolder, withField } from "../src/equicordplugins/discordMcp.desktop/folders";
 
 assert.equal(isDiscordSnowflake("895063026686885909"), true);
 assert.equal(isDiscordSnowflake("invalid"), false);
@@ -42,6 +46,29 @@ assert.throws(() => normalizeSearchHas(["anything"]), /unsupported/);
 assert.equal(normalizeSearchSortOrder(undefined), "desc");
 assert.equal(normalizeSearchSortOrder("asc"), "asc");
 assert.throws(() => normalizeSearchSortOrder("relevance"), /asc or desc/);
+assert.equal(normalizeFolderName("  Games  "), "Games");
+assert.throws(() => normalizeFolderName(" "), /1 to 100/);
+assert.equal(requireFolderId("42"), "42");
+assert.throws(() => requireFolderId("0"), /positive/);
+assert.deepEqual(normalizeGuildIds(["895063026686885909"]), ["895063026686885909"]);
+assert.throws(() => normalizeGuildIds([]), /1 to 1000/);
+assert.throws(() => normalizeGuildIds(["895063026686885909", "895063026686885909"]), /duplicates/);
+
+const folderWithMetadata = { id: { value: "42" }, name: { value: "Games" }, color: { value: 12 }, guildIds: ["1", "2"] };
+const unknownField = Symbol("protobuf metadata");
+Object.defineProperty(folderWithMetadata, unknownField, { value: "preserved", enumerable: false });
+const layout = [{ guildIds: ["3"] }, folderWithMetadata, { guildIds: ["4"] }];
+const moved = moveServers(layout, ["3"], "42");
+assert.deepEqual(moved.map(folder => folder.guildIds), [["1", "2", "3"], ["4"]]);
+assert.equal(Reflect.get(moved[0], unknownField), "preserved");
+assert.deepEqual(layout[1].guildIds, ["1", "2"], "the source layout is not mutated");
+const unfiled = moveServers(moved, ["1", "2", "3"], null);
+assert.deepEqual(unfiled.map(folder => folder.guildIds), [["4"], ["1"], ["2"], ["3"]], "moving the last servers removes the empty folder");
+assert.deepEqual(moveServers(moved, ["1"], null, id => ({ guildIds: [id], proto: true } as any)).at(-1), { guildIds: ["1"], proto: true });
+assert.deepEqual(deleteFolder(moved, "42").map(folder => folder.guildIds), [["1"], ["2"], ["3"], ["4"]]);
+assert.deepEqual(reorderFolder(layout, "42", 2, ["g:3", "f:42", "g:4"]).map(folder => folder.guildIds), [["3"], ["4"], ["1", "2"]]);
+assert.deepEqual(reorderFolder([{ guildIds: ["hidden"] }, ...layout], "42", 2, ["g:3", "f:42", "g:4"]).map(folder => folder.guildIds), [["hidden"], ["3"], ["4"], ["1", "2"]], "hidden stored entries do not shift visible positions");
+assert.equal(Reflect.get(withField(folderWithMetadata, "name", { value: "Renamed" }), unknownField), "preserved");
 
 const sent = new Set([sentMessageKey("895063026686885909", "123456789012345678")]);
 assert.equal(canDeleteRecordedMessage(sent, "895063026686885909", "123456789012345678"), true);
@@ -100,6 +127,7 @@ function rpc(method: string, params?: unknown): Promise<any> {
 }
 
 let workerRunning = true;
+let folderCapabilities = true;
 const observedRequests: any[] = [];
 const fakeWorker = (async () => {
     while (workerRunning) {
@@ -113,7 +141,7 @@ const fakeWorker = (async () => {
                 observedRequests.push(request);
                 assert.equal(request.secret, secret, "queue requests authenticate with the private bridge secret");
                 const result = request.tool === "connection_status"
-                    ? { connected: true, channelAccess: "all_accessible_channels" }
+                    ? { connected: true, channelAccess: "all_accessible_channels", capabilities: { serverFolders: folderCapabilities, serverActivity: folderCapabilities } }
                     : request.tool === "download_attachment"
                         ? {
                             attachment: { filename: "test-image.png", contentType: "image/png" },
@@ -148,11 +176,25 @@ try {
     const searchTool = listed.tools.find((tool: any) => tool.name === "discord_search_messages");
     assert.ok(searchTool, "headless message search is exposed");
     assert.deepEqual(searchTool.inputSchema.anyOf, [{ required: ["channel_id"] }, { required: ["guild_id"] }]);
+    const moveTool = listed.tools.find((tool: any) => tool.name === "discord_move_servers");
+    assert.deepEqual(moveTool.inputSchema.required, ["guild_ids", "folder_id"]);
+    const createFolderTool = listed.tools.find((tool: any) => tool.name === "discord_create_server_folder");
+    assert.deepEqual(createFolderTool.inputSchema.required, ["name", "guild_ids"]);
+    assert.ok(listed.tools.some((tool: any) => tool.name === "discord_list_server_activity"));
 
     const status = await rpc("tools/call", { name: "discord_connection_status", arguments: {} });
     assert.equal(status.structuredContent.connected, true);
     assert.equal(status.structuredContent.channelAccess, "all_accessible_channels");
     assert.equal(observedRequests[0].tool, "connection_status", "public tool names map to the fixed bridge operation");
+    const folders = await rpc("tools/call", { name: "discord_list_server_folders", arguments: {} });
+    assert.equal(folders.structuredContent.echoedTool, "list_server_folders");
+    const move = await rpc("tools/call", { name: "discord_move_servers", arguments: { guild_ids: ["895063026686885909"], folder_id: null } });
+    assert.equal(move.structuredContent.echoedTool, "move_servers");
+    folderCapabilities = false;
+    const stale = await rpc("tools/call", { name: "discord_list_server_activity", arguments: {} });
+    assert.equal(stale.isError, true, "an older running plugin fails clearly before an unsupported bridge request");
+    assert.match(stale.content[0].text, /older than this MCP server/);
+    folderCapabilities = true;
 
     const imageDownload = await rpc("tools/call", {
         name: "discord_download_attachment",
