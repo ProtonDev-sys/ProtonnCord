@@ -27,7 +27,7 @@ export function withField(folder: ProtoFolder, field: string, value: unknown): P
     return copy;
 }
 
-/** Keep explicit folders, including empty ones, until they are explicitly deleted. */
+/** Move memberships and remove folders that no longer contain a server. */
 export function moveServers(
     folders: ProtoFolder[], selected: string[], destinationId: string | null,
     makeUnfiled: (id: string) => ProtoFolder = id => ({ guildIds: [id] })
@@ -43,7 +43,7 @@ export function moveServers(
         if (destination && folder === destination) result.push(withGuildIds(folder, destinationGuildIds));
         else {
             const remaining = folder.guildIds.filter(id => !selectedIds.has(String(id)));
-            if (folder.id || remaining.length) result.push(withGuildIds(folder, remaining));
+            if (remaining.length) result.push(withGuildIds(folder, remaining));
         }
     }
     if (!destination) for (const id of selected) result.push(makeUnfiled(id));
@@ -62,12 +62,19 @@ export function deleteFolder(
         : [folder]);
 }
 
-export function reorderFolder(folders: ProtoFolder[], id: string, position: number): ProtoFolder[] {
+export function reorderFolder(folders: ProtoFolder[], id: string, position: number, visibleKeys: string[]): ProtoFolder[] {
     validateFolders(folders);
     const target = findFolder(folders, id);
-    if (!Number.isInteger(position) || position < 0 || position >= folders.length)
-        throw new Error(`position must be between 0 and ${folders.length - 1}`);
+    const targetKey = `f:${id}`;
+    if (!visibleKeys.includes(targetKey)) throw new Error("Folder is not visible in the server bar");
+    const remainingVisible = visibleKeys.filter(key => key !== targetKey);
+    if (!Number.isInteger(position) || position < 0 || position > remainingVisible.length)
+        throw new Error(`position must be between 0 and ${remainingVisible.length}`);
     const result = folders.filter(folder => folder !== target);
-    result.splice(position, 0, target);
+    const keyOf = (folder: ProtoFolder) => folderId(folder) ? `f:${folderId(folder)}` : `g:${String(folder.guildIds[0])}`;
+    const rawIndex = remainingVisible.slice(position)
+        .map(key => result.findIndex(folder => keyOf(folder) === key))
+        .find(index => index >= 0) ?? result.length;
+    result.splice(rawIndex, 0, target);
     return result;
 }

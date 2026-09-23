@@ -55,11 +55,11 @@ export const TOOLS = [
     },
     {
         name: "discord_create_server_folder",
-        description: "Create a named server folder, optionally moving visible servers into it. Existing folder names are preserved; use discord_move_servers to reuse one.",
+        description: "Create a named server folder with at least one visible server. Discord does not show empty folders. Use discord_move_servers to reuse an existing folder.",
         inputSchema: {
             type: "object",
-            properties: { name: folderName, guild_ids: { ...guildIds, minItems: 0 } },
-            required: ["name"],
+            properties: { name: folderName, guild_ids: guildIds },
+            required: ["name", "guild_ids"],
             additionalProperties: false,
         },
     },
@@ -75,7 +75,7 @@ export const TOOLS = [
     },
     {
         name: "discord_move_servers",
-        description: "Move visible servers into a folder, or set folder_id to null to unfile them. Empty named folders remain until explicitly deleted.",
+        description: "Move visible servers into a folder, or set folder_id to null to unfile them. Discord removes a folder when its last server moves out.",
         inputSchema: {
             type: "object",
             properties: { guild_ids: guildIds, folder_id: { anyOf: [folderId, { type: "null" }] } },

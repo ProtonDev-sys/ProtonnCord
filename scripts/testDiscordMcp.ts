@@ -51,6 +51,7 @@ assert.throws(() => normalizeFolderName(" "), /1 to 100/);
 assert.equal(requireFolderId("42"), "42");
 assert.throws(() => requireFolderId("0"), /positive/);
 assert.deepEqual(normalizeGuildIds(["895063026686885909"]), ["895063026686885909"]);
+assert.throws(() => normalizeGuildIds([]), /1 to 1000/);
 assert.throws(() => normalizeGuildIds(["895063026686885909", "895063026686885909"]), /duplicates/);
 
 const folderWithMetadata = { id: { value: "42" }, name: { value: "Games" }, color: { value: 12 }, guildIds: ["1", "2"] };
@@ -62,10 +63,11 @@ assert.deepEqual(moved.map(folder => folder.guildIds), [["1", "2", "3"], ["4"]])
 assert.equal(Reflect.get(moved[0], unknownField), "preserved");
 assert.deepEqual(layout[1].guildIds, ["1", "2"], "the source layout is not mutated");
 const unfiled = moveServers(moved, ["1", "2", "3"], null);
-assert.deepEqual(unfiled.map(folder => folder.guildIds), [[], ["4"], ["1"], ["2"], ["3"]], "moving the last servers keeps the empty folder");
+assert.deepEqual(unfiled.map(folder => folder.guildIds), [["4"], ["1"], ["2"], ["3"]], "moving the last servers removes the empty folder");
 assert.deepEqual(moveServers(moved, ["1"], null, id => ({ guildIds: [id], proto: true } as any)).at(-1), { guildIds: ["1"], proto: true });
 assert.deepEqual(deleteFolder(moved, "42").map(folder => folder.guildIds), [["1"], ["2"], ["3"], ["4"]]);
-assert.deepEqual(reorderFolder(layout, "42", 2).map(folder => folder.guildIds), [["3"], ["4"], ["1", "2"]]);
+assert.deepEqual(reorderFolder(layout, "42", 2, ["g:3", "f:42", "g:4"]).map(folder => folder.guildIds), [["3"], ["4"], ["1", "2"]]);
+assert.deepEqual(reorderFolder([{ guildIds: ["hidden"] }, ...layout], "42", 2, ["g:3", "f:42", "g:4"]).map(folder => folder.guildIds), [["hidden"], ["3"], ["4"], ["1", "2"]], "hidden stored entries do not shift visible positions");
 assert.equal(Reflect.get(withField(folderWithMetadata, "name", { value: "Renamed" }), unknownField), "preserved");
 
 const sent = new Set([sentMessageKey("895063026686885909", "123456789012345678")]);
@@ -176,6 +178,8 @@ try {
     assert.deepEqual(searchTool.inputSchema.anyOf, [{ required: ["channel_id"] }, { required: ["guild_id"] }]);
     const moveTool = listed.tools.find((tool: any) => tool.name === "discord_move_servers");
     assert.deepEqual(moveTool.inputSchema.required, ["guild_ids", "folder_id"]);
+    const createFolderTool = listed.tools.find((tool: any) => tool.name === "discord_create_server_folder");
+    assert.deepEqual(createFolderTool.inputSchema.required, ["name", "guild_ids"]);
     assert.ok(listed.tools.some((tool: any) => tool.name === "discord_list_server_activity"));
 
     const status = await rpc("tools/call", { name: "discord_connection_status", arguments: {} });

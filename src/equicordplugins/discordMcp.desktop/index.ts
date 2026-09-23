@@ -11,7 +11,7 @@ import { Logger } from "@utils/Logger";
 import definePlugin, { PluginNative } from "@utils/types";
 import { Channel } from "@vencord/discord-types";
 import { ChannelType, MessageFlags } from "@vencord/discord-types/enums";
-import { findByPropsLazy } from "@webpack";
+import { findByProps } from "@webpack";
 import {
     ChannelStore,
     Constants,
@@ -334,7 +334,7 @@ function requireVisibleGuilds(ids: string[]): void {
 }
 
 function folderActions() {
-    const UserSettingsDelay = findByPropsLazy("INFREQUENT_USER_ACTION");
+    const UserSettingsDelay = findByProps("INFREQUENT_USER_ACTION");
     const actions = UserSettingsActionCreators.PreloadedUserSettingsActionCreators;
     const folderSettings = actions?.ProtoClass?.fields?.find((field: any) => field.localName === "guildFolders")?.T();
     const folderType = folderSettings?.fields?.find((field: any) => field.localName === "folders")?.T();
@@ -364,7 +364,7 @@ async function updateFolders<T>(change: (folders: ProtoFolder[], folderType: any
 
 function createServerFolder(args: ToolArguments) {
     const name = normalizeFolderName(args.name);
-    const guildIds = normalizeGuildIds(args.guild_ids ?? [], true);
+    const guildIds = normalizeGuildIds(args.guild_ids);
     requireVisibleGuilds(guildIds);
     return updateFolders((folders, folderType) => {
         const existingNames = folders.filter(folder => folderId(folder) && folder.name?.value === name);
@@ -415,7 +415,9 @@ function reorderServerFolder(args: ToolArguments) {
     const id = requireFolderId(args.folder_id);
     const { position } = args;
     return updateFolders(folders => {
-        const next = reorderFolder(folders, id, position as number);
+        const visibleKeys = SortedGuildStore.getGuildFolders().map(folder => folder.folderId == null
+            ? `g:${folder.guildIds[0]}` : `f:${folder.folderId}`);
+        const next = reorderFolder(folders, id, position as number, visibleKeys);
         return { folders: next, result: { folderId: id, position } };
     });
 }
