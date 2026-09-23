@@ -7,6 +7,13 @@
 export const DISCORD_MCP_TOOL_NAMES = [
     "connection_status",
     "list_servers",
+    "list_server_folders",
+    "list_server_activity",
+    "create_server_folder",
+    "rename_server_folder",
+    "delete_server_folder",
+    "move_servers",
+    "reorder_server_folder",
     "list_server_channels",
     "list_dms",
     "read_messages",
@@ -47,6 +54,26 @@ export function isDiscordSnowflake(value: unknown): value is string {
 export function requireSnowflake(value: unknown, fieldName: string): string {
     if (!isDiscordSnowflake(value)) throw new Error(`${fieldName} must be a Discord snowflake ID`);
     return value;
+}
+
+export function requireFolderId(value: unknown): string {
+    if (typeof value !== "string" || !/^[1-9]\d{0,19}$/.test(value))
+        throw new Error("folder_id must be a positive Discord folder ID string");
+    return value;
+}
+
+export function normalizeFolderName(value: unknown): string {
+    if (typeof value !== "string" || value.trim().length === 0 || value.length > 100)
+        throw new Error("name must contain 1 to 100 characters");
+    return value.trim();
+}
+
+export function normalizeGuildIds(value: unknown, allowEmpty = false): string[] {
+    if (!Array.isArray(value) || (!allowEmpty && value.length === 0) || value.length > 1000)
+        throw new Error(`guild_ids must contain ${allowEmpty ? "0" : "1"} to 1000 server IDs`);
+    const ids = value.map(id => requireSnowflake(id, "guild_ids entry"));
+    if (new Set(ids).size !== ids.length) throw new Error("guild_ids must not contain duplicates");
+    return ids;
 }
 
 export function normalizeMessageLimit(value: unknown): number {

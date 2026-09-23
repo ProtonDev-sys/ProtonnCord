@@ -107,7 +107,7 @@ async function main() {
         });
         assert.equal(initialized.serverInfo.name, "discord-mcp");
         const toolList = await rpc("tools/list");
-        assert.equal(toolList.tools.length, 15, "all fifteen silent, scoped tools are exposed over stdio MCP");
+        assert.equal(toolList.tools.length, 22, "all scoped tools are exposed over stdio MCP");
 
         const status = await callTool("discord_connection_status");
         assert.equal(status.connected, true);
@@ -117,6 +117,8 @@ async function main() {
         assert.equal(status.capabilities.silentBackground, true);
         assert.equal(status.capabilities.subscriptions, true);
         assert.equal(status.capabilities.messageSearch, true);
+        assert.equal(status.capabilities.serverFolders, true);
+        assert.equal(status.capabilities.serverActivity, true);
         assert.equal(status.capabilities.membershipChanges, false);
         assert.equal(status.capabilities.relationshipChanges, false);
         assert.equal(status.capabilities.blocking, false);
@@ -124,6 +126,11 @@ async function main() {
 
         const servers = await callTool("discord_list_servers");
         assert.ok(Array.isArray(servers) && servers.length > 0, "server listing returns the live account's servers");
+        const folders = await callTool("discord_list_server_folders");
+        assert.ok(Array.isArray(folders.entries), "folder listing returns the live server bar");
+        const activity = await callTool("discord_list_server_activity", { days: 30 });
+        assert.equal(activity.servers.length, servers.length, "activity includes every visible server");
+        assert.ok(["live", "saved_only", "none"].includes(activity.coverage));
         const serverChannels = await callTool("discord_list_server_channels", { guild_id: servers[0].id });
         assert.ok(Array.isArray(serverChannels), "server channel listing succeeds");
 
