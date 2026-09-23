@@ -129,7 +129,6 @@ const MAX_IN_FLIGHT_REQUESTS = 128;
 const waveformCache = new Map<string, Promise<string>>();
 const subscriptions = new Map<string, MessageSubscription>();
 const inFlightRequests = new Set<Promise<void>>();
-const UserSettingsDelay = findByPropsLazy("INFREQUENT_USER_ACTION");
 
 let bridgeGeneration = 0;
 
@@ -335,18 +334,19 @@ function requireVisibleGuilds(ids: string[]): void {
 }
 
 function folderActions() {
+    const UserSettingsDelay = findByPropsLazy("INFREQUENT_USER_ACTION");
     const actions = UserSettingsActionCreators.PreloadedUserSettingsActionCreators;
     const folderSettings = actions?.ProtoClass?.fields?.find((field: any) => field.localName === "guildFolders")?.T();
     const folderType = folderSettings?.fields?.find((field: any) => field.localName === "folders")?.T();
     if (!folderType?.fromJson || typeof actions.updateAsync !== "function")
         throw new Error("Discord's folder controls are unavailable. No folders were changed.");
-    return { actions, folderType };
+    return { actions, folderType, UserSettingsDelay };
 }
 
 async function updateFolders<T>(change: (folders: ProtoFolder[], folderType: any) => { folders: ProtoFolder[]; result: T; }): Promise<T> {
     const accountId = UserStore.getCurrentUser()?.id;
     if (!accountId) throw new Error("The authenticated Discord account is unavailable");
-    const { actions, folderType } = folderActions();
+    const { actions, folderType, UserSettingsDelay } = folderActions();
     let result: T | undefined;
     await actions.updateAsync("guildFolders", (value: { folders: ProtoFolder[]; }) => {
         if (UserStore.getCurrentUser()?.id !== accountId)
