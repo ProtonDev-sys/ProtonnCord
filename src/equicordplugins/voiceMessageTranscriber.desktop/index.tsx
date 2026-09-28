@@ -253,6 +253,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     const [translation, setTranslation] = useState<TranslationValue | null>(initial?.translation ?? null);
     const [targetLanguage, setTargetLanguage] = useState(initial?.targetLanguage);
     const [targetLanguageLabel, setTargetLanguageLabel] = useState(initial?.targetLanguageLabel);
+    const [pendingLanguageLabel, setPendingLanguageLabel] = useState<string>();
     const [showTimestamps, setShowTimestamps] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
@@ -273,14 +274,15 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
         const currentGeneration = generation;
         setStatus("translating");
         setError(null);
-        setTargetLanguage(language.value);
-        setTargetLanguageLabel(language.label);
+        setPendingLanguageLabel(language.label);
 
         try {
             const translated = await translateText(value.text, "auto", language.value);
             if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
 
             setTranslation(translated);
+            setTargetLanguage(language.value);
+            setTargetLanguageLabel(language.label);
             setStatus("complete");
             cacheResult(messageId, {
                 transcript: value,
@@ -292,7 +294,6 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
             if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
             setError(`Translation failed: ${caught instanceof Error ? caught.message : String(caught)}`);
             setStatus("complete");
-            cacheResult(messageId, { transcript: value });
         }
     }, [messageId]);
 
@@ -464,7 +465,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                         {status === "processing_audio" && "Preparing audio…"}
                         {status === "loading" && `Loading speech model${percent == null ? "…" : `… ${percent}%`}`}
                         {status === "transcribing" && "Transcribing on device…"}
-                        {status === "translating" && `Translating to ${targetLanguageLabel ?? targetLanguage ?? "selected language"}…`}
+                        {status === "translating" && `Translating to ${pendingLanguageLabel ?? "selected language"}…`}
                     </Span>
                     <TextButton variant="secondary" onClick={cancel}>Cancel</TextButton>
                 </Flex>

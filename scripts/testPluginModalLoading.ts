@@ -238,3 +238,17 @@ test("reset cancels pending saves, restores selected defaults and isolates mutab
     assert.deepEqual(defaults.list, ["original"]);
     assert.equal(find(f.render(), "boundary").some(boundary => boundary.props.key === "1:sound"), true, "reset remounts local input drafts");
 });
+
+test("reset restores the false fallback for boolean options without an explicit default", () => {
+    const f = loadPluginModal();
+    delete (f.plugin.settings.def.sound as { default?: boolean; }).default;
+    Object.assign(f.settings.plugins.Example, { sound: true, enabled: true, isFavorite: true, privateValue: "retained" });
+    const modal = f.render();
+    find(modal, "tooltip").map(tooltip => tooltip.props.children[0]({})).find(node => node.type === "button").props.onClick();
+    f.modalOpeners[0]({ onClose() {} }).props.onConfirm();
+    assert.equal(f.settings.plugins.Example.sound, false);
+    assert.equal(f.settings.plugins.Example.enabled, true);
+    assert.equal(f.settings.plugins.Example.isFavorite, true);
+    assert.equal((f.settings.plugins.Example as { privateValue?: string; }).privateValue, "retained");
+    assert.deepEqual(f.restartKeys, ["Example"]);
+});
