@@ -16,4 +16,6 @@ Stopping the plugin cancels requests it has claimed but not started. Started ope
 
 `discord_send_message` keeps the returned message fields and succeeds after a confirmed send even if local deletion tracking fails to save. In that case, `trackingWarning` explains that tracking is retried during polling or plugin restart without sending again. Until it is saved, tracking survives only in the running process; quitting Discord can leave `discord_delete_own_message` unable to authorize deletion. Do not resend a confirmed message to repair tracking.
 
+`discord_delete_own_message` likewise preserves `deleted: true` after a confirmed deletion if tracking fails to save. Its optional `trackingWarning` reports that only local tracking will be retried; the Discord deletion must not be repeated.
+
 For isolated testing, `PROTONN_CORD_DISCORD_MCP_DIR` may point at a temporary bridge directory.

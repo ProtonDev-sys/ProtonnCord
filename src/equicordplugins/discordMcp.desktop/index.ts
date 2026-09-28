@@ -850,8 +850,17 @@ async function deleteOwnMessage(args: ToolArguments, generation: number) {
     if (generation !== bridgeGeneration) throw new Error("Discord MCP stopped before deleting the message");
 
     await RestAPI.del({ url: Constants.Endpoints.MESSAGE(channelId, messageId) });
-    await Native.forgetSentMessage(channelId, messageId);
-    return { deleted: true, channelId, messageId };
+    const result = { deleted: true, channelId, messageId };
+    try {
+        await Native.forgetSentMessage(channelId, messageId);
+    } catch (error) {
+        logger.error("Deleted message ledger write failed", error);
+        return {
+            ...result,
+            trackingWarning: "Message deleted successfully. Local deletion tracking could not be saved; the bridge will retry tracking without deleting again. Do not retry this deletion."
+        };
+    }
+    return result;
 }
 
 async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Promise<unknown> {
