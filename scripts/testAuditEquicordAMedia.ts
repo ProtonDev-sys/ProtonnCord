@@ -347,7 +347,7 @@ test("MusicControls legacy lyric migration preserves newer entries before cleari
     const fixture = musicApi({ store: { lyricsProvider: "Spotify" } }, async () => null, async () => null,
         { newer: current }, { old: [{ time: 1, text: "old" }], newer: [{ time: 0, text: "outdated" }] });
     await fixture.api.migrateOldLyrics();
-    assert.deepEqual(fixture.data().newer, current);
+    assert.deepEqual(fixture.data().newer, { ...current, lyricsVersions: { ...current.lyricsVersions, LRCLIB: [{ time: 0, text: "outdated" }] } });
     assert.equal(fixture.data().old.lyricsVersions.LRCLIB[0].text, "old");
     assert.equal(fixture.stored.has("SpotifyLyricsCache"), false);
 });

@@ -70,8 +70,11 @@ export class LyricsCache {
                 if (Array.isArray(lines)) migrated.set(this.keyForTrack(id), entry({ useLyric: Provider.Lrclib, lyricsVersions: { [Provider.Lrclib]: lines } }));
             }
             for (const [id, data] of Object.entries(previous ?? {})) {
-                if (data && typeof data === "object" && "lyricsVersions" in data)
-                    migrated.set(this.keyForTrack(id), entry(data as LyricsData));
+                if (data && typeof data === "object" && "lyricsVersions" in data) {
+                    const key = this.keyForTrack(id);
+                    const current = data as LyricsData;
+                    migrated.set(key, entry({ ...current, lyricsVersions: { ...migrated.get(key)?.data.lyricsVersions, ...current.lyricsVersions } }));
+                }
             }
             for (const [key, value] of migrated) {
                 if (index[key] || value.bytes > MAX_ENTRY_BYTES) { migrated.delete(key); continue; }
