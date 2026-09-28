@@ -10,6 +10,7 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
+import { normalizeGuildIconFile, normalizeStoredGuildIcons } from "../src/equicordplugins/clientsideGuildIcons/iconStorage";
 import { parseSyncedLyrics } from "../src/equicordplugins/musicControls/parseSyncedLyrics";
 
 const react = { createElement: (type: any, props: any, ...children: any[]) => ({ type, props: { ...props, children } }) };
@@ -994,6 +995,32 @@ test("userplugin install failures reject without starting a build and metadata s
     assert.equal(builds, 0);
     const markup = Buffer.from(fixture.generateReviewPluginContent({ name: "<sample>&", description: "$&", usesNative: false, usesPreSend: false }).split(",")[1], "base64").toString();
     assert.equal(markup, "<h3>&lt;sample&gt;&amp;</h3><p>$&amp;</p>");
+});
+
+test("guild icon MIME recovery preserves stored files when persistence fails and retries on restart", async () => {
+    const legacy = new File(["fixture image bytes"], "icon.png");
+    let stored: Record<string, Blob> = { guild: legacy };
+    let fail = true;
+    const fixture = load("clientsideGuildIcons/index.tsx", "", {
+        "./iconStorage": { normalizeGuildIconFile, normalizeStoredGuildIcons },
+        "@api/DataStore": {
+            get: async () => stored,
+            set: async (_: string, value: Record<string, Blob>) => {
+                if (fail) throw new Error("fixture storage failure");
+                stored = value;
+            }
+        },
+        "@webpack/common": { GuildStore: { getGuild: () => undefined } }
+    });
+    await assert.rejects(fixture.default.start(), /fixture storage failure/);
+    assert.equal(stored.guild, legacy, "a failed migration retains the recoverable file");
+    assert.equal(Object.keys(fixture.data.icons).length, 0, "runtime state is not published before persistence succeeds");
+    fail = false;
+    await fixture.default.start();
+    assert.equal(stored.guild.type, "image/png");
+    assert.ok(fixture.data.icons.guild.startsWith("blob:"));
+    fixture.default.stop();
+    assert.equal(Object.keys(fixture.data.icons).length, 0);
 });
 
 test("voice-message native download rejects excess streamed data and cancels its reader", async () => {
