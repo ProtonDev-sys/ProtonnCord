@@ -160,10 +160,14 @@ async function recoverInterruptedClaims(): Promise<void> {
             const responsePath = join(RESPONSES_DIR, `${request.id}.json`);
             // A response already committed before shutdown must never be replaced.
             if (!await stat(responsePath).catch(() => undefined)) {
-                await atomicWrite(responsePath, JSON.stringify({
+                const response: BridgeResponse = {
                     id: request.id, ok: false,
                     error: "Discord MCP was interrupted before recording the result. The outcome is unknown; check for completed side effects before retrying."
-                }));
+                };
+                claimedRequests.set(request.id, path);
+                pendingResponses.set(request.id, response);
+                await persistResponse(response);
+                continue;
             }
         } catch {
             // Keep the claim for another recovery attempt when storage is available.
