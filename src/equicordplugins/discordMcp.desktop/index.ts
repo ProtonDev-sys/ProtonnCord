@@ -826,7 +826,15 @@ async function sendMessage(args: ToolArguments, generation: number) {
     });
     const message = response.body;
     if (!message?.id || String(message.channel_id) !== channelId) throw new Error("Discord did not return the sent message");
-    await Native.recordSentMessage(channelId, String(message.id));
+    try {
+        await Native.recordSentMessage(channelId, String(message.id));
+    } catch (error) {
+        logger.error("Sent message ledger write failed", error);
+        return {
+            ...serializeMessage(message),
+            trackingWarning: "Message sent successfully. Local deletion tracking could not be saved; the bridge will retry tracking without resending. If Discord exits before recovery, delete_own_message may refuse this message. Do not resend."
+        };
+    }
     return serializeMessage(message);
 }
 

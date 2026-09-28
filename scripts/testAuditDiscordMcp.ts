@@ -35,6 +35,7 @@ function loadRenderer(native: object, common: object = {}) {
         "@utils/constants": { EquicordDevs: {} },
         "@utils/Logger": { Logger: class { error() {} } },
         "@webpack/common": common,
+        "@vencord/discord-types/enums": { MessageFlags: { IS_VOICE_MESSAGE: 8192 } },
         "@plugins/voiceMessages/waveform": { generateWaveform: () => "waveform" },
         "../voiceMessageTranscriber.desktop/utils": { decodeAudio: async () => [] }
     };
@@ -176,6 +177,96 @@ test("Discord MCP restart gives abandoned claims an explicit unknown outcome wit
     await restarted.initializeBridge({}, session);
     assert.match((await f.response("abandoned-request")).error, /outcome is unknown/);
     assert.equal((await restarted.takeRequests({}, 0, session)).length, 0);
+});
+
+const channelId = "123456789012345678";
+const messageId = "234567890123456789";
+const sent = { id: messageId, channel_id: channelId, content: "fixture text", author: { id: "345678901234567890" } };
+function messageCommon(post: () => Promise<unknown>) {
+    return {
+        ChannelStore: { getChannel: () => ({ id: channelId }) },
+        Constants: { Endpoints: { MESSAGES: () => "fixture-messages" } },
+        SnowflakeUtils: { fromTimestamp: () => "fixture-nonce" },
+        RestAPI: { post }
+    };
+}
+
+test("Discord MCP confirms a sent message despite ledger failure and recovers tracking without reposting", async t => {
+    let fail = true;
+    const f = await nativeFixture(t, { rename: async (from: string, to: string) => {
+        if (fail && to.endsWith("sent-messages.json")) throw new Error("ledger unavailable");
+        await fsp.rename(from, to);
+    } });
+    let posts = 0;
+    const responses: any[] = [];
+    const renderer = loadRenderer({
+        recordSentMessage: (channel: string, message: string) => f.native.recordSentMessage({}, channel, message),
+        writeResponse: async (response: any) => responses.push(response)
+    }, messageCommon(async () => { posts++; return { body: sent }; }));
+    await renderer.handleBridgeRequest({ id: "send-request", tool: "send_message", arguments: { channel_id: channelId, content: sent.content } });
+    assert.equal(responses[0].ok, true, "bookkeeping cannot report an already sent message as failed");
+    assert.equal(responses[0].result.id, messageId);
+    assert.equal(responses[0].result.content, sent.content);
+    assert.match(responses[0].result.trackingWarning, /sent successfully/);
+    assert.equal(await f.native.isSentMessage({}, channelId, messageId), true, "failed persistence retains authorization in memory");
+    assert.equal(await f.native.isSentMessage({}, channelId, "999999999999999999"), false);
+
+    const beforeRecovery = f.load();
+    await beforeRecovery.initializeBridge({}, crypto.randomUUID());
+    assert.equal(await beforeRecovery.isSentMessage({}, channelId, messageId), false, "a process restart before persistence must fail closed as the warning says");
+    fail = false;
+    await f.native.takeRequests({}, 0, f.session);
+    const afterRecovery = f.load();
+    await afterRecovery.initializeBridge({}, crypto.randomUUID());
+    assert.equal(await afterRecovery.isSentMessage({}, channelId, messageId), true, "ledger-only recovery survives process restart");
+    assert.equal(await afterRecovery.isSentMessage({}, channelId, "999999999999999999"), false);
+    assert.equal(posts, 1, "tracking recovery never sends the message again");
+});
+
+test("Discord MCP REST rejection remains a failed send without recording deletion authorization", async () => {
+    let records = 0;
+    const responses: any[] = [];
+    const renderer = loadRenderer({
+        recordSentMessage: async () => { records++; },
+        writeResponse: async (response: any) => responses.push(response)
+    }, messageCommon(async () => { throw new Error("REST rejected"); }));
+    await renderer.handleBridgeRequest({ id: "failed-send", tool: "send_message", arguments: { channel_id: channelId, content: sent.content } });
+    assert.equal(responses[0].ok, false);
+    assert.match(responses[0].error, /REST rejected/);
+    assert.equal(records, 0);
+});
+
+test("Discord MCP stop cannot replace an already-started send's confirmed result with cancellation", async () => {
+    const post = deferred<object>();
+    const responses: any[] = [];
+    let records = 0;
+    const renderer = loadRenderer({
+        recordSentMessage: async () => { records++; },
+        writeResponse: async (response: any) => responses.push(response)
+    }, messageCommon(() => post.promise));
+    const request = renderer.handleBridgeRequest({ id: "started-send", tool: "send_message", arguments: { channel_id: channelId, content: sent.content } });
+    renderer.default.stop();
+    post.resolve({ body: sent });
+    await request;
+    assert.equal(responses[0].ok, true);
+    assert.equal(responses[0].result.id, messageId);
+    assert.equal(responses[0].result.trackingWarning, undefined);
+    assert.equal(records, 1);
+});
+
+test("Discord MCP tracking retry persists later deletions instead of restoring their authorization", async t => {
+    let fail = true;
+    const f = await nativeFixture(t, { rename: async (from: string, to: string) => {
+        if (fail && to.endsWith("sent-messages.json")) throw new Error("ledger unavailable");
+        await fsp.rename(from, to);
+    } });
+    await assert.rejects(f.native.recordSentMessage({}, channelId, messageId), /ledger unavailable/);
+    await assert.rejects(f.native.forgetSentMessage({}, channelId, messageId), /ledger unavailable/);
+    fail = false;
+    await f.native.initializeBridge({}, crypto.randomUUID());
+    const restarted = f.load();
+    await restarted.initializeBridge({}, crypto.randomUUID());
+    assert.equal(await restarted.isSentMessage({}, channelId, messageId), false);
 });
 
 for (const resolved of [false, true]) {

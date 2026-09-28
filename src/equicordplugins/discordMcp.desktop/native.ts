@@ -65,6 +65,8 @@ let initialization: Promise<void> | null = null;
 let bridgeSecret = "";
 let sentMessages = new Set<string>();
 let ledgerWrite = Promise.resolve();
+let ledgerRevision = 0;
+let persistedLedgerRevision = 0;
 let requestSession: { id: string; controller: AbortController; } | undefined;
 const claimedRequests = new Map<string, string>();
 const pendingResponses = new Map<string, BridgeResponse>();
@@ -115,10 +117,16 @@ async function loadSentLedger(): Promise<void> {
 }
 
 function persistSentLedger(): Promise<void> {
-    ledgerWrite = ledgerWrite.catch(() => { }).then(() =>
-        atomicWrite(SENT_LEDGER_PATH, `${JSON.stringify([...sentMessages], null, 2)}\n`)
-    );
+    ledgerWrite = ledgerWrite.catch(() => { }).then(async () => {
+        const revision = ledgerRevision;
+        await atomicWrite(SENT_LEDGER_PATH, `${JSON.stringify([...sentMessages], null, 2)}\n`);
+        persistedLedgerRevision = revision;
+    });
     return ledgerWrite;
+}
+
+async function retrySentLedger(): Promise<void> {
+    if (persistedLedgerRevision !== ledgerRevision) await persistSentLedger().catch(() => { });
 }
 
 async function cleanupStaleQueueFiles(): Promise<void> {
@@ -195,6 +203,7 @@ export async function initializeBridge(_: IpcMainInvokeEvent, sessionId?: string
         requestSession = { id: sessionId, controller: new AbortController() };
     }
     await ensureInitialized();
+    await retrySentLedger();
     await retryResponses();
     return {
         queueDirectory: BRIDGE_DIR,
@@ -270,6 +279,7 @@ export async function takeRequests(_: IpcMainInvokeEvent, waitMs = 10_000, sessi
     if (!session || session.id !== sessionId || session.controller.signal.aborted) return [];
     const { signal } = session.controller;
     await ensureInitialized();
+    await retrySentLedger();
     await retryResponses();
     const immediatelyAvailable = await claimRequests(signal);
     if (immediatelyAvailable.length > 0) return immediatelyAvailable;
@@ -305,6 +315,7 @@ export async function recordSentMessage(_: IpcMainInvokeEvent, channelId: string
     if (!isDiscordSnowflake(channelId) || !isDiscordSnowflake(messageId)) throw new Error("Invalid message identity");
     sentMessages.add(sentMessageKey(channelId, messageId));
     if (sentMessages.size > 10_000) sentMessages.delete(sentMessages.values().next().value!);
+    ledgerRevision++;
     await persistSentLedger();
 }
 
@@ -318,6 +329,7 @@ export async function forgetSentMessage(_: IpcMainInvokeEvent, channelId: string
     await ensureInitialized();
     if (!isDiscordSnowflake(channelId) || !isDiscordSnowflake(messageId)) return;
     sentMessages.delete(sentMessageKey(channelId, messageId));
+    ledgerRevision++;
     await persistSentLedger();
 }
 
