@@ -28,6 +28,7 @@ export const TidalLrcStore = proxyLazyWebpack(() => {
     let lastTrackId: string | null = null;
     let fetchGeneration = 0;
     let active = false;
+    let requestController: AbortController | undefined;
 
     class TidalLrcStore extends Flux.Store {
         init() {
@@ -44,6 +45,8 @@ export const TidalLrcStore = proxyLazyWebpack(() => {
         destroy() {
             active = false;
             fetchGeneration++;
+            requestController?.abort();
+            requestController = undefined;
             lastTrackId = null;
             lyrics = null;
             TidalStore.removeChangeListener(handleTidalStoreChange);
@@ -57,6 +60,8 @@ export const TidalLrcStore = proxyLazyWebpack(() => {
         const { track } = TidalStore;
         if (!track?.id) {
             fetchGeneration++;
+            requestController?.abort();
+            requestController = undefined;
             lastTrackId = null;
             lyrics = null;
             store.emitChange();
@@ -65,9 +70,13 @@ export const TidalLrcStore = proxyLazyWebpack(() => {
 
         if (lastTrackId === track.id) return;
 
+        requestController?.abort();
+        const controller = requestController = new AbortController();
         lastTrackId = track.id;
         const generation = ++fetchGeneration;
-        getLyrics(track)
+        lyrics = null;
+        store.emitChange();
+        getLyrics(track, 3, controller.signal)
             .then(l => {
                 if (generation !== fetchGeneration || TidalStore.track?.id !== track.id) return;
 
@@ -80,6 +89,9 @@ export const TidalLrcStore = proxyLazyWebpack(() => {
                 lyrics = null;
                 showNotif("Tidal Lyrics", "Failed to fetch lyrics");
                 store.emitChange();
+            })
+            .finally(() => {
+                if (requestController === controller) requestController = undefined;
             });
     }
 

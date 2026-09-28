@@ -29,10 +29,11 @@ function showNotif(title: string, body: string) {
 
 export const SpotifyLrcStore = proxyLazyWebpack(() => {
     let lyricsInfo: LyricsData | null = null;
-    const fetchingTrackIds = new Set<string>();
+    const fetchingTrackIds = new Map<string, number>();
     let lyricsRequestGeneration = 0;
     let active = false;
     let lastTrackKey: string | null = null;
+    let nextTrackRetryAt = 0;
 
     class SpotifyLrcStore extends Flux.Store {
         init() { active = true; }
@@ -64,11 +65,14 @@ export const SpotifyLrcStore = proxyLazyWebpack(() => {
 
             const trackKey = JSON.stringify([track.id, settings.store.lyricsProvider, settings.store.fallbackProvider,
                 settings.store.spotifyLyricsApiUrl, settings.store.lyricsConversion, settings.store.translateTo]);
-            if (lastTrackKey === trackKey) return;
+            if (lastTrackKey === trackKey && (lyricsInfo || fetchingTrackIds.has(track.id) || Date.now() < nextTrackRetryAt)) return;
             lastTrackKey = trackKey;
+            nextTrackRetryAt = Date.now() + 30_000;
 
             const generation = ++lyricsRequestGeneration;
-            fetchingTrackIds.add(track.id);
+            lyricsInfo = null;
+            store.emitChange();
+            fetchingTrackIds.set(track.id, generation);
 
             let nextLyricsInfo: LyricsData | null;
             try {
@@ -77,7 +81,7 @@ export const SpotifyLrcStore = proxyLazyWebpack(() => {
                 nextLyricsInfo = null;
                 if (generation === lyricsRequestGeneration) showNotif("Lyrics fetch failed", "Could not load lyrics");
             } finally {
-                fetchingTrackIds.delete(track.id);
+                if (fetchingTrackIds.get(track.id) === generation) fetchingTrackIds.delete(track.id);
             }
 
             if (generation !== lyricsRequestGeneration || SpotifyStore.track?.id !== track.id) return;
