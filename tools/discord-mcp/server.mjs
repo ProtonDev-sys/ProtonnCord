@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
 
 const SERVER_NAME = "discord-mcp";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.2.0";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 const snowflake = {
@@ -18,6 +18,10 @@ const snowflake = {
 };
 
 const channelId = { ...snowflake, description: "Any Discord channel ID visible to the authenticated account" };
+const guildId = { ...snowflake, description: "Server ID visible to the authenticated account" };
+const folderId = { type: "string", pattern: "^[1-9]\\d{0,19}$", description: "Folder ID returned by discord_list_server_folders" };
+const guildIds = { type: "array", items: guildId, minItems: 1, maxItems: 1000, uniqueItems: true };
+const folderName = { type: "string", minLength: 1, maxLength: 100 };
 const subscriptionId = {
     type: "string",
     pattern: "^[a-fA-F0-9]{8}-(?:[a-fA-F0-9]{4}-){3}[a-fA-F0-9]{12}$",
@@ -38,6 +42,51 @@ export const TOOLS = [
         name: "discord_list_servers",
         description: "List servers visible to the authenticated Discord account. This returns server metadata, never members or messages.",
         inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    },
+    {
+        name: "discord_list_server_folders",
+        description: "List the current server bar in order, including folder names, IDs, membership, and unfiled servers. Does not change Discord state.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    },
+    {
+        name: "discord_list_server_activity",
+        description: "Summarize the account's ServerReview visit and resource-use history. Only active tracking can classify a server as unused; otherwise the classification is unknown.",
+        inputSchema: { type: "object", properties: { days: { type: "integer", minimum: 1, maximum: 3650, default: 30 } }, additionalProperties: false },
+    },
+    {
+        name: "discord_create_server_folder",
+        description: "Create a named server folder with at least one visible server. Discord does not show empty folders. Use discord_move_servers to reuse an existing folder.",
+        inputSchema: {
+            type: "object",
+            properties: { name: folderName, guild_ids: guildIds },
+            required: ["name", "guild_ids"],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "discord_rename_server_folder",
+        description: "Rename one folder without changing its servers or other metadata.",
+        inputSchema: { type: "object", properties: { folder_id: folderId, name: folderName }, required: ["folder_id", "name"], additionalProperties: false },
+    },
+    {
+        name: "discord_delete_server_folder",
+        description: "Delete one folder while keeping every server in it as an unfiled entry at the same position. Does not leave any server.",
+        inputSchema: { type: "object", properties: { folder_id: folderId }, required: ["folder_id"], additionalProperties: false },
+    },
+    {
+        name: "discord_move_servers",
+        description: "Move visible servers into a folder, or set folder_id to null to unfile them. Discord removes a folder when its last server moves out.",
+        inputSchema: {
+            type: "object",
+            properties: { guild_ids: guildIds, folder_id: { anyOf: [folderId, { type: "null" }] } },
+            required: ["guild_ids", "folder_id"],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "discord_reorder_server_folder",
+        description: "Move a folder to a zero-based position in the top-level server bar. Use the positions from discord_list_server_folders to place an inactive folder last.",
+        inputSchema: { type: "object", properties: { folder_id: folderId, position: { type: "integer", minimum: 0 } }, required: ["folder_id", "position"], additionalProperties: false },
     },
     {
         name: "discord_list_server_channels",
@@ -207,9 +256,17 @@ export const TOOLS = [
 ];
 
 const toolMap = new Map(TOOLS.map(tool => [tool.name, tool]));
+const folderTools = new Set(["list_server_folders", "create_server_folder", "rename_server_folder", "delete_server_folder", "move_servers", "reorder_server_folder"]);
 const bridgeToolNames = new Map([
     ["discord_connection_status", "connection_status"],
     ["discord_list_servers", "list_servers"],
+    ["discord_list_server_folders", "list_server_folders"],
+    ["discord_list_server_activity", "list_server_activity"],
+    ["discord_create_server_folder", "create_server_folder"],
+    ["discord_rename_server_folder", "rename_server_folder"],
+    ["discord_delete_server_folder", "delete_server_folder"],
+    ["discord_move_servers", "move_servers"],
+    ["discord_reorder_server_folder", "reorder_server_folder"],
     ["discord_list_server_channels", "list_server_channels"],
     ["discord_list_dms", "list_dms"],
     ["discord_read_messages", "read_messages"],
@@ -274,6 +331,12 @@ async function writeAtomic(path, body) {
 }
 
 export async function callBridge(tool, args = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+    if (folderTools.has(tool) || tool === "list_server_activity") {
+        const status = await callBridge("connection_status", {}, timeoutMs);
+        const capability = tool === "list_server_activity" ? "serverActivity" : "serverFolders";
+        if (status?.capabilities?.[capability] !== true)
+            throw new Error("The running ProtonnCord DiscordMCP plugin is older than this MCP server. Update ProtonnCord and restart Discord.");
+    }
     const { directory, secret } = await loadBridgeConfig();
     const requestsDirectory = join(directory, "requests");
     const responsesDirectory = join(directory, "responses");
@@ -368,7 +431,7 @@ async function handleRequest(message) {
                 protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
                 capabilities: { tools: { listChanged: false } },
                 serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
-                instructions: "This silent background server can use every channel visible to the authenticated Discord account without navigating the active Discord view. It cannot change users, relationships, blocks, membership, roles, or moderation state, and it can delete only messages recorded as sent by this bridge.",
+                instructions: "This silent background server can use every channel visible to the authenticated Discord account without navigating the active Discord view. It can organize the current account's server folders while preserving server membership. Activity classifications require active ServerReview tracking. It cannot change users, relationships, blocks, membership, roles, or moderation state, and it can delete only messages recorded as sent by this bridge.",
             },
         });
         return;
