@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import * as DataStore from "@api/DataStore";
 import { generateWaveform } from "@plugins/voiceMessages/waveform";
 import { EquicordDevs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import definePlugin, { PluginNative } from "@utils/types";
 import { Channel } from "@vencord/discord-types";
 import { ChannelType, MessageFlags } from "@vencord/discord-types/enums";
+import { findByProps } from "@webpack";
 import {
     ChannelStore,
     Constants,
@@ -17,21 +19,30 @@ import {
     GuildStore,
     RestAPI,
     SnowflakeUtils,
+    SortedGuildStore,
+    UserSettingsActionCreators,
     UserStore,
 } from "@webpack/common";
 
 import gitHash from "~git-hash";
 
+import { ProtoFolder } from "../serverReview/folders";
+import { readHistory, reviewGroup } from "../serverReview/history";
+import { getHistory, isCurrent } from "../serverReview/tracking";
 import { decodeAudio } from "../voiceMessageTranscriber.desktop/utils";
+import { deleteFolder, findFolder, folderId, moveServers, reorderFolder, validateFolders, withField } from "./folders";
 import {
     DISCORD_MCP_TOOL_NAMES,
     DiscordMcpToolName,
+    normalizeFolderName,
+    normalizeGuildIds,
     normalizeMessageContent,
     normalizeMessageLimit,
     normalizeSearchHas,
     normalizeSearchOffset,
     normalizeSearchQuery,
     normalizeSearchSortOrder,
+    requireFolderId,
     requireSnowflake,
 } from "./policy";
 
@@ -42,6 +53,11 @@ interface BridgeRequest {
 }
 
 interface ToolArguments {
+    folder_id?: unknown;
+    guild_ids?: unknown;
+    name?: unknown;
+    position?: unknown;
+    days?: unknown;
     channel_id?: unknown;
     channel_ids?: unknown;
     guild_id?: unknown;
@@ -294,6 +310,150 @@ function listServers() {
             features: [...guild.features].sort(),
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function listServerFolders() {
+    const entries = SortedGuildStore.getGuildFolders().map((folder, position) => ({
+        position,
+        folderId: folder.folderId == null ? null : String(folder.folderId),
+        name: folder.folderName ?? null,
+        color: folder.folderColor ?? null,
+        guildIds: folder.guildIds,
+        guilds: folder.guildIds.map(id => ({ id, name: GuildStore.getGuild(id)?.name ?? null })),
+    }));
+    return {
+        entries,
+        folderCount: entries.filter(entry => entry.folderId !== null).length,
+        unfiledGuildIds: entries.filter(entry => entry.folderId === null).flatMap(entry => entry.guildIds),
+    };
+}
+
+function requireVisibleGuilds(ids: string[]): void {
+    for (const id of ids)
+        if (!GuildStore.getGuild(id)) throw new Error(`Server ${id} is not available in the authenticated Discord client`);
+}
+
+function folderActions() {
+    const UserSettingsDelay = findByProps("INFREQUENT_USER_ACTION");
+    const actions = UserSettingsActionCreators.PreloadedUserSettingsActionCreators;
+    const folderSettings = actions?.ProtoClass?.fields?.find((field: any) => field.localName === "guildFolders")?.T();
+    const folderType = folderSettings?.fields?.find((field: any) => field.localName === "folders")?.T();
+    if (!folderType?.fromJson || typeof actions.updateAsync !== "function")
+        throw new Error("Discord's folder controls are unavailable. No folders were changed.");
+    return { actions, folderType, UserSettingsDelay };
+}
+
+async function updateFolders<T>(change: (folders: ProtoFolder[], folderType: any) => { folders: ProtoFolder[]; result: T; }): Promise<T> {
+    const accountId = UserStore.getCurrentUser()?.id;
+    if (!accountId) throw new Error("The authenticated Discord account is unavailable");
+    const { actions, folderType, UserSettingsDelay } = folderActions();
+    let result: T | undefined;
+    await actions.updateAsync("guildFolders", (value: { folders: ProtoFolder[]; }) => {
+        if (UserStore.getCurrentUser()?.id !== accountId)
+            throw new Error("The Discord account changed. No folders were changed.");
+        validateFolders(value.folders);
+        const changed = change(value.folders, folderType);
+        value.folders = changed.folders;
+        result = changed.result;
+    }, UserSettingsDelay.INFREQUENT_USER_ACTION);
+    if (UserStore.getCurrentUser()?.id !== accountId)
+        throw new Error("The Discord account changed while updating folders");
+    if (result === undefined) throw new Error("Discord did not apply the folder update");
+    return result;
+}
+
+function createServerFolder(args: ToolArguments) {
+    const name = normalizeFolderName(args.name);
+    const guildIds = normalizeGuildIds(args.guild_ids);
+    requireVisibleGuilds(guildIds);
+    return updateFolders((folders, folderType) => {
+        const existingNames = folders.filter(folder => folderId(folder) && folder.name?.value === name);
+        if (existingNames.length) throw new Error("A folder with this name already exists; use its folder_id or choose another name");
+        let id: string;
+        do { id = String(crypto.getRandomValues(new Uint32Array(1))[0]); }
+        while (id === "0" || folders.some(folder => folderId(folder) === id));
+        const created = folderType.fromJson({ id, name, guildIds: [] }) as ProtoFolder;
+        const next = moveServers([...folders, created], guildIds, id);
+        return { folders: next, result: { folderId: id, name, guildIds } };
+    });
+}
+
+function renameServerFolder(args: ToolArguments) {
+    const id = requireFolderId(args.folder_id);
+    const name = normalizeFolderName(args.name);
+    return updateFolders((folders, folderType) => {
+        const target = findFolder(folders, id);
+        const updatedName = (folderType.fromJson({ name, guildIds: [] }) as ProtoFolder).name;
+        if (!updatedName) throw new Error("Discord's folder name format is unavailable");
+        return {
+            folders: folders.map(folder => folder === target ? withField(folder, "name", updatedName) : folder),
+            result: { folderId: id, name },
+        };
+    });
+}
+
+function deleteServerFolder(args: ToolArguments) {
+    const id = requireFolderId(args.folder_id);
+    return updateFolders((folders, folderType) => {
+        const target = findFolder(folders, id);
+        const guildIds = target.guildIds.map(String);
+        return { folders: deleteFolder(folders, id, guildId => folderType.fromJson({ guildIds: [guildId] })), result: { deleted: true, folderId: id, unfiledGuildIds: guildIds } };
+    });
+}
+
+function moveServersToFolder(args: ToolArguments) {
+    const ids = normalizeGuildIds(args.guild_ids);
+    requireVisibleGuilds(ids);
+    const destinationId = args.folder_id === null ? null : requireFolderId(args.folder_id);
+    return updateFolders((folders, folderType) => ({
+        folders: moveServers(folders, ids, destinationId, guildId => folderType.fromJson({ guildIds: [guildId] })),
+        result: { guildIds: ids, folderId: destinationId },
+    }));
+}
+
+function reorderServerFolder(args: ToolArguments) {
+    const id = requireFolderId(args.folder_id);
+    const { position } = args;
+    return updateFolders(folders => {
+        const visibleKeys = SortedGuildStore.getGuildFolders().map(folder => folder.folderId == null
+            ? `g:${folder.guildIds[0]}` : `f:${folder.folderId}`);
+        const next = reorderFolder(folders, id, position as number, visibleKeys);
+        return { folders: next, result: { folderId: id, position } };
+    });
+}
+
+async function listServerActivity(args: ToolArguments) {
+    const days = args.days === undefined ? 30 : args.days;
+    if (!Number.isInteger(days) || (days as number) < 1 || (days as number) > 3650)
+        throw new Error("days must be an integer from 1 to 3650");
+    const accountId = UserStore.getCurrentUser()?.id;
+    if (!accountId) throw new Error("The authenticated Discord account is unavailable");
+    const live = getHistory();
+    const isLive = Boolean(live?.ready && isCurrent(live));
+    const saved = isLive ? live!.data : await DataStore.get(`ServerReview:v1:${accountId}`);
+    if (UserStore.getCurrentUser()?.id !== accountId) throw new Error("The Discord account changed while reading activity");
+    const history = readHistory(saved);
+    const coverage = isLive ? "live" : saved === undefined ? "none" : "saved_only";
+    const now = Date.now();
+    return {
+        coverage,
+        days,
+        note: coverage === "live" ? null : "Tracking is not currently active; older records cannot prove a server is unused now.",
+        servers: Object.values(GuildStore.getGuilds()).map(guild => {
+            const record = history.guilds[guild.id];
+            const resourceAt = record ? Math.max(record.emoji ?? 0, record.sticker ?? 0, record.sound ?? 0) : 0;
+            return {
+                id: guild.id,
+                name: guild.name,
+                trackedSince: record?.since ?? null,
+                lastVisitAt: record?.visit ?? null,
+                lastResourceUseAt: resourceAt || null,
+                lastActivityAt: record ? Math.max(record.since, record.visit ?? 0, resourceAt) : null,
+                kept: record?.keep ?? false,
+                classification: record && isLive ? reviewGroup(record, days as number, now) : "unknown",
+            };
+        }).sort((a, b) => (a.lastActivityAt ?? 0) - (b.lastActivityAt ?? 0) || a.name.localeCompare(b.name)),
+    };
 }
 
 function listServerChannels(guildId: string) {
@@ -701,6 +861,8 @@ async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Pro
                 silentBackground: true,
                 subscriptions: true,
                 messageSearch: true,
+                serverFolders: true,
+                serverActivity: true,
                 membershipChanges: false,
                 relationshipChanges: false,
                 blocking: false,
@@ -710,6 +872,13 @@ async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Pro
             },
         };
         case "list_servers": return listServers();
+        case "list_server_folders": return listServerFolders();
+        case "list_server_activity": return listServerActivity(args);
+        case "create_server_folder": return createServerFolder(args);
+        case "rename_server_folder": return renameServerFolder(args);
+        case "delete_server_folder": return deleteServerFolder(args);
+        case "move_servers": return moveServersToFolder(args);
+        case "reorder_server_folder": return reorderServerFolder(args);
         case "list_server_channels": return listServerChannels(requireSnowflake(args.guild_id, "guild_id"));
         case "list_dms": return listDms();
         case "read_messages": return readMessages(args);
