@@ -207,16 +207,17 @@ async function generateAttachmentWaveformFromBytes(bytes: Uint8Array, contentTyp
 
 function generateAttachmentWaveform(attachment: RawAttachment): Promise<string> {
     if (typeof attachment.url !== "string") throw new Error("Voice attachment is missing its Discord CDN URL");
-    const cached = waveformCache.get(attachment.url);
+    const key = attachment.url;
+    const cached = waveformCache.get(key);
     if (cached) return cached;
 
-    const pending = Native.fetchDiscordAttachment(attachment.url)
+    const pending = Native.fetchDiscordAttachment(key)
         .then(({ contentType, data }) => generateAttachmentWaveformFromBytes(data, contentType))
         .catch(error => {
-            waveformCache.delete(attachment.url as string);
+            if (waveformCache.get(key) === pending) waveformCache.delete(key);
             throw error;
         });
-    waveformCache.set(attachment.url, pending);
+    waveformCache.set(key, pending);
     if (waveformCache.size > MAX_WAVEFORM_CACHE_ENTRIES) waveformCache.delete(waveformCache.keys().next().value!);
     return pending;
 }
