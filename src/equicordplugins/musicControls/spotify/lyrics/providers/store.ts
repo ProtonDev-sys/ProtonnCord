@@ -69,6 +69,8 @@ export const SpotifyLrcStore = proxyLazyWebpack(() => {
 
             const generation = ++lyricsRequestGeneration;
             fetchingTrackIds.add(track.id);
+            lyricsInfo = null;
+            store.emitChange();
 
             let nextLyricsInfo: LyricsData | null;
             try {

@@ -67,6 +67,8 @@ export const TidalLrcStore = proxyLazyWebpack(() => {
 
         lastTrackId = track.id;
         const generation = ++fetchGeneration;
+        lyrics = null;
+        store.emitChange();
         getLyrics(track)
             .then(l => {
                 if (generation !== fetchGeneration || TidalStore.track?.id !== track.id) return;
