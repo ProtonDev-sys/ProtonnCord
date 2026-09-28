@@ -131,6 +131,7 @@ const subscriptions = new Map<string, MessageSubscription>();
 const inFlightRequests = new Set<Promise<void>>();
 
 let bridgeGeneration = 0;
+let bridgeSession: { id: string; controller: AbortController; } | undefined;
 
 function requireAccessibleChannel(channelId: unknown): string {
     const normalized = requireSnowflake(channelId, "channel_id");
@@ -898,34 +899,41 @@ async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Pro
 }
 
 async function handleBridgeRequest(request: Awaited<ReturnType<typeof Native.takeRequests>>[number]): Promise<void> {
+    let response: Parameters<typeof Native.writeResponse>[0];
     try {
         if (!DISCORD_MCP_TOOL_NAMES.includes(request.tool as DiscordMcpToolName))
             throw new Error("Unsupported Discord MCP tool");
         const result = await executeTool(request.tool as DiscordMcpToolName, request.arguments);
-        await Native.writeResponse({ id: request.id, ok: true, result });
+        response = { id: request.id, ok: true, result };
     } catch (error) {
-        await Native.writeResponse({ id: request.id, ok: false, error: errorMessage(error) });
+        response = { id: request.id, ok: false, error: errorMessage(error) };
     }
+    // Persistence failure cannot turn an already completed operation into a failed one.
+    // The native queue retains this exact response for retry without repeating the tool.
+    await Native.writeResponse(response);
 }
 
-async function bridgeLoop(generation: number): Promise<void> {
+async function bridgeLoop(generation: number, session: NonNullable<typeof bridgeSession>): Promise<void> {
+    const stopped = new Promise<void>(resolve => session.controller.signal.addEventListener("abort", () => resolve(), { once: true }));
     while (generation === bridgeGeneration) {
         let requests: Awaited<ReturnType<typeof Native.takeRequests>>;
         try {
-            requests = await Native.takeRequests(LONG_POLL_MS);
+            requests = await Native.takeRequests(LONG_POLL_MS, session.id);
         } catch (error) {
             if (generation !== bridgeGeneration) return;
             logger.error("Bridge wait failed", error);
             await new Promise(resolve => setTimeout(resolve, 1_000));
             continue;
         }
-        if (generation !== bridgeGeneration) return;
-
         for (const request of requests) {
             while (generation === bridgeGeneration && inFlightRequests.size >= MAX_IN_FLIGHT_REQUESTS) {
-                await Promise.race(inFlightRequests);
+                await Promise.race([...inFlightRequests, stopped]);
             }
-            if (generation !== bridgeGeneration) return;
+            if (generation !== bridgeGeneration) {
+                await Native.writeResponse({ id: request.id, ok: false, error: "Discord MCP stopped before executing the request" })
+                    .catch(error => logger.error("Bridge cancellation response failed", error));
+                continue;
+            }
             const task = handleBridgeRequest(request).catch(error => logger.error("Bridge response failed", error));
             inFlightRequests.add(task);
             void task.finally(() => inFlightRequests.delete(task));
@@ -944,13 +952,20 @@ export default definePlugin({
 
     async start() {
         const generation = ++bridgeGeneration;
-        await Native.initializeBridge();
+        bridgeSession?.controller.abort();
+        const session = bridgeSession = { id: crypto.randomUUID(), controller: new AbortController() };
+        await Native.initializeBridge(session.id);
         if (generation !== bridgeGeneration) return;
-        void bridgeLoop(generation);
+        void bridgeLoop(generation, session);
     },
 
     stop() {
         bridgeGeneration++;
+        if (bridgeSession) {
+            bridgeSession.controller.abort();
+            void Native.cancelRequests(bridgeSession.id).catch(error => logger.error("Bridge cancellation failed", error));
+            bridgeSession = undefined;
+        }
         clearSubscriptions();
     },
 });
