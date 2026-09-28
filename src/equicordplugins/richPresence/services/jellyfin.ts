@@ -118,15 +118,19 @@ async function getActivity(): Promise<Activity | null> {
         richPresenceType = mediaData.type === "Audio" ? 2 : 3;
     }
 
-    const templateReplace = (template: string) =>
-        template
-            .replace(/\{name\}/g, mediaData.name || "")
-            .replace(/\{series\}/g, mediaData.seriesName || "")
-            .replace(/\{season\}/g, mediaData.seasonNumber?.toString() || "")
-            .replace(/\{episode\}/g, mediaData.episodeNumber?.toString() || "")
-            .replace(/\{artist\}/g, mediaData.artist || "")
-            .replace(/\{album\}/g, mediaData.album || "")
-            .replace(/\{year\}/g, mediaData.year?.toString() || "");
+    const templateValues = {
+        name: mediaData.name || "",
+        series: mediaData.seriesName || "",
+        season: mediaData.seasonNumber?.toString() || "",
+        episode: mediaData.episodeNumber?.toString() || "",
+        artist: mediaData.artist || "",
+        album: mediaData.album || "",
+        year: mediaData.year?.toString() || "",
+    };
+    const templateReplace = (template: string) => template.replace(
+        /\{(name|series|season|episode|artist|album|year)\}/g,
+        (_, field: keyof typeof templateValues) => templateValues[field]
+    );
 
     let appName: string;
     const nameSetting = store.jf_nameDisplay || "default";
