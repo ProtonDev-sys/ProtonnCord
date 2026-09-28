@@ -79,7 +79,7 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
 
     useEffect(() => {
         setPosition(Math.min(storePosition, duration));
-    }, [duration, storePosition]);
+    }, [track?.id, duration, storePosition]);
 
     useEffect(() => {
         const index = currLrcIndex ?? nextLyric;
@@ -89,11 +89,11 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
     useEffect(() => {
         if (!isPlaying) return;
 
-        setPosition(SpotifyStore.position);
-        const interval = setInterval(() => setPosition(p => Math.min(p + 1000, duration)), 1000);
+        setPosition(Math.min(SpotifyStore.position, duration));
+        const interval = setInterval(() => setPosition(Math.min(SpotifyStore.position, duration)), 1000);
 
         return () => clearInterval(interval);
-    }, [duration, storePosition, isPlaying]);
+    }, [track?.id, duration, storePosition, isPlaying]);
 
     return { track, lyricsInfo, lyricRefs, currLrcIndex, nextLyric };
 }
