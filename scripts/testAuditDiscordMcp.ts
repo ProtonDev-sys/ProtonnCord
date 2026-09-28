@@ -179,6 +179,33 @@ test("Discord MCP restart gives abandoned claims an explicit unknown outcome wit
     assert.equal((await restarted.takeRequests({}, 0, session)).length, 0);
 });
 
+test("Discord MCP retries interrupted-claim recovery on a later writable poll without replay", async t => {
+    let fail = false;
+    let committedResponses = 0;
+    const f = await nativeFixture(t, { rename: async (from: string, to: string) => {
+        const response = to.includes(`${path.sep}responses${path.sep}`);
+        if (fail && response) throw new Error("recovery response unavailable");
+        await fsp.rename(from, to);
+        if (response) committedResponses++;
+    } });
+    await f.request("recovery-request");
+    await f.native.takeRequests({}, 0, f.session);
+    fail = true;
+    const restarted = f.load();
+    const session = crypto.randomUUID();
+    await restarted.initializeBridge({}, session);
+    await assert.rejects(f.response("recovery-request"), { code: "ENOENT" });
+    assert.equal((await fsp.readdir(path.join(f.directory, "requests"))).filter(name => name.endsWith(".processing")).length, 1);
+    fail = false;
+    assert.equal((await restarted.takeRequests({}, 0, session)).length, 0);
+    const response = await f.response("recovery-request");
+    assert.equal(response.ok, false);
+    assert.match(response.error, /outcome is unknown/);
+    assert.equal((await fsp.readdir(path.join(f.directory, "requests"))).length, 0);
+    assert.equal((await restarted.takeRequests({}, 0, session)).length, 0);
+    assert.equal(committedResponses, 1, "recovery must commit exactly one terminal response and never replay the tool");
+});
+
 const channelId = "123456789012345678";
 const messageId = "234567890123456789";
 const sent = { id: messageId, channel_id: channelId, content: "fixture text", author: { id: "345678901234567890" } };
