@@ -11,14 +11,15 @@ import { runInNewContext } from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 async function activityName(template: string, item: Record<string, unknown>, privacy = false) {
+    const config = {
+        jf_serverUrl: "https://fixture.invalid", jf_apiKey: "fixture", jf_userId: "fixture",
+        jf_nameDisplay: "custom", jf_customName: template, jf_privacyMode: privacy, jf_overrideType: "off"
+    };
     const mocks: Record<string, unknown> = {
         "@utils/Logger": { Logger: class { warn() {} error() {} } },
         "@utils/text": { formatDurationMs: String },
         "@webpack/common": { FluxDispatcher: { dispatch() {} }, showToast() {} },
-        "../settings": { settings: { store: {
-            jf_serverUrl: "https://fixture.invalid", jf_apiKey: "fixture", jf_userId: "fixture",
-            jf_nameDisplay: "custom", jf_customName: template, jf_privacyMode: privacy, jf_overrideType: "off"
-        } } },
+        "./polling": { createPresencePolling: () => ({}) },
         "./assetCache": { getCachedApplicationAsset: async () => "fixture-asset" }
     };
     const source = readFileSync("src/equicordplugins/richPresence/services/jellyfin.ts", "utf8");
@@ -30,7 +31,7 @@ async function activityName(template: string, item: Record<string, unknown>, pri
         fetch: async () => ({ ok: true, headers: { get: () => "application/json" },
             json: async () => [{ UserId: "fixture", NowPlayingItem: { Type: "Audio", ...item } }] })
     });
-    return (await api.getActivity()).name;
+    return (await api.getActivity(config, { signal: new AbortController().signal, isCurrent: () => true, wait: (work: Promise<unknown>) => work })).name;
 }
 
 for (const value of ["$&", "$$", "$`", "$'", "{artist}", "{year}", "Title with {unknown}"]) {
