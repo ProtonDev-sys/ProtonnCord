@@ -65,6 +65,11 @@ let initialization: Promise<void> | null = null;
 let bridgeSecret = "";
 let sentMessages = new Set<string>();
 let ledgerWrite = Promise.resolve();
+let ledgerRevision = 0;
+let persistedLedgerRevision = 0;
+let requestSession: { id: string; controller: AbortController; } | undefined;
+const claimedRequests = new Map<string, string>();
+const pendingResponses = new Map<string, BridgeResponse>();
 
 function equalSecret(candidate: unknown): boolean {
     if (typeof candidate !== "string") return false;
@@ -112,10 +117,16 @@ async function loadSentLedger(): Promise<void> {
 }
 
 function persistSentLedger(): Promise<void> {
-    ledgerWrite = ledgerWrite.catch(() => { }).then(() =>
-        atomicWrite(SENT_LEDGER_PATH, `${JSON.stringify([...sentMessages], null, 2)}\n`)
-    );
+    ledgerWrite = ledgerWrite.catch(() => { }).then(async () => {
+        const revision = ledgerRevision;
+        await atomicWrite(SENT_LEDGER_PATH, `${JSON.stringify([...sentMessages], null, 2)}\n`);
+        persistedLedgerRevision = revision;
+    });
     return ledgerWrite;
+}
+
+async function retrySentLedger(): Promise<void> {
+    if (persistedLedgerRevision !== ledgerRevision) await persistSentLedger().catch(() => { });
 }
 
 async function cleanupStaleQueueFiles(): Promise<void> {
@@ -123,11 +134,46 @@ async function cleanupStaleQueueFiles(): Promise<void> {
     for (const directory of [REQUESTS_DIR, RESPONSES_DIR]) {
         for (const entry of await readdir(directory, { withFileTypes: true })) {
             if (!entry.isFile()) continue;
+            if (entry.name.endsWith(".processing")) continue; // Recovery owns unacknowledged claims.
             const path = join(directory, entry.name);
             try {
                 if ((await stat(path)).mtimeMs < cutoff) await rm(path, { force: true });
             } catch { }
         }
+    }
+}
+
+async function recoverInterruptedClaims(): Promise<void> {
+    for (const entry of await readdir(REQUESTS_DIR, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".processing")) continue;
+        const path = join(REQUESTS_DIR, entry.name);
+        try {
+            if ((await stat(path)).size > MAX_REQUEST_SIZE) {
+                await rm(path, { force: true });
+                continue;
+            }
+            const request = JSON.parse(await readFile(path, "utf8")) as BridgeRequest;
+            if (!REQUEST_ID.test(request.id) || !equalSecret(request.secret) || !allowedTools.has(request.tool)) {
+                await rm(path, { force: true });
+                continue;
+            }
+            const responsePath = join(RESPONSES_DIR, `${request.id}.json`);
+            // A response already committed before shutdown must never be replaced.
+            if (!await stat(responsePath).catch(() => undefined)) {
+                const response: BridgeResponse = {
+                    id: request.id, ok: false,
+                    error: "Discord MCP was interrupted before recording the result. The outcome is unknown; check for completed side effects before retrying."
+                };
+                claimedRequests.set(request.id, path);
+                pendingResponses.set(request.id, response);
+                await persistResponse(response);
+                continue;
+            }
+        } catch {
+            // Keep the claim for another recovery attempt when storage is available.
+            continue;
+        }
+        await rm(path, { force: true });
     }
 }
 
@@ -140,6 +186,7 @@ async function ensureInitialized(): Promise<void> {
                 mkdir(DOWNLOADS_DIR, { recursive: true }),
             ]);
             bridgeSecret = (await readOrCreateConfig()).secret;
+            await recoverInterruptedClaims();
             await Promise.all([loadSentLedger(), cleanupStaleQueueFiles()]);
         })().catch(error => {
             initialization = null;
@@ -149,12 +196,19 @@ async function ensureInitialized(): Promise<void> {
     return initialization;
 }
 
-export async function initializeBridge(_: IpcMainInvokeEvent): Promise<{
+export async function initializeBridge(_: IpcMainInvokeEvent, sessionId?: string): Promise<{
     queueDirectory: string;
     allowedTools: readonly string[];
     sentMessageCount: number;
 }> {
+    if (sessionId !== undefined) {
+        if (typeof sessionId !== "string" || !REQUEST_ID.test(sessionId)) throw new Error("Invalid Discord MCP session ID");
+        requestSession?.controller.abort();
+        requestSession = { id: sessionId, controller: new AbortController() };
+    }
     await ensureInitialized();
+    await retrySentLedger();
+    await retryResponses();
     return {
         queueDirectory: BRIDGE_DIR,
         allowedTools: DISCORD_MCP_TOOL_NAMES,
@@ -162,7 +216,11 @@ export async function initializeBridge(_: IpcMainInvokeEvent): Promise<{
     };
 }
 
-async function claimRequests(): Promise<BridgeRequest[]> {
+export function cancelRequests(_: IpcMainInvokeEvent, sessionId: string): void {
+    if (requestSession?.id === sessionId) requestSession.controller.abort();
+}
+
+async function claimRequests(signal: AbortSignal): Promise<BridgeRequest[]> {
     const requests: BridgeRequest[] = [];
     const entries = (await readdir(REQUESTS_DIR, { withFileTypes: true }))
         .filter(entry => entry.isFile() && entry.name.endsWith(".json"))
@@ -170,8 +228,10 @@ async function claimRequests(): Promise<BridgeRequest[]> {
         .slice(0, 20);
 
     for (const entry of entries) {
+        if (signal.aborted) break;
         const sourcePath = join(REQUESTS_DIR, entry.name);
         const claimedPath = `${sourcePath}.${randomUUID()}.processing`;
+        let retained = false;
         try {
             await rename(sourcePath, claimedPath);
             if ((await stat(claimedPath)).size > MAX_REQUEST_SIZE) continue;
@@ -180,15 +240,17 @@ async function claimRequests(): Promise<BridgeRequest[]> {
             if (!equalSecret(parsed.secret)) continue;
             if (!allowedTools.has(parsed.tool)) continue;
             if (!Number.isFinite(parsed.createdAt) || Math.abs(Date.now() - parsed.createdAt) > MAX_REQUEST_AGE_MS) continue;
+            claimedRequests.set(parsed.id, claimedPath);
+            retained = true;
             requests.push(parsed);
         } catch { }
-        finally { await rm(claimedPath, { force: true }).catch(() => undefined); }
+        finally { if (!retained) await rm(claimedPath, { force: true }).catch(() => undefined); }
     }
 
     return requests;
 }
 
-function waitForRequestSignal(timeoutMs: number): Promise<void> {
+function waitForRequestSignal(timeoutMs: number, signal: AbortSignal): Promise<void> {
     return new Promise(resolve => {
         let finished = false;
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -198,9 +260,12 @@ function waitForRequestSignal(timeoutMs: number): Promise<void> {
             finished = true;
             if (timer) clearTimeout(timer);
             watcher?.close();
+            signal.removeEventListener("abort", finish);
             resolve();
         };
 
+        signal.addEventListener("abort", finish, { once: true });
+        if (signal.aborted) return finish();
         try {
             watcher = watch(REQUESTS_DIR, { persistent: false }, (_event, filename) => {
                 if (!filename || filename.toString().endsWith(".json")) finish();
@@ -213,20 +278,40 @@ function waitForRequestSignal(timeoutMs: number): Promise<void> {
     });
 }
 
-export async function takeRequests(_: IpcMainInvokeEvent, waitMs = 10_000): Promise<BridgeRequest[]> {
+export async function takeRequests(_: IpcMainInvokeEvent, waitMs = 10_000, sessionId?: string): Promise<BridgeRequest[]> {
+    const session = requestSession;
+    if (!session || session.id !== sessionId || session.controller.signal.aborted) return [];
+    const { signal } = session.controller;
     await ensureInitialized();
-    const immediatelyAvailable = await claimRequests();
+    await retrySentLedger();
+    await retryResponses();
+    const immediatelyAvailable = await claimRequests(signal);
     if (immediatelyAvailable.length > 0) return immediatelyAvailable;
 
     const boundedWaitMs = Number.isFinite(waitMs) ? Math.max(0, Math.min(30_000, waitMs)) : 10_000;
-    if (boundedWaitMs > 0) await waitForRequestSignal(boundedWaitMs);
-    return claimRequests();
+    if (boundedWaitMs > 0) await waitForRequestSignal(boundedWaitMs, signal);
+    return claimRequests(signal);
+}
+
+async function persistResponse(response: BridgeResponse): Promise<void> {
+    await atomicWrite(join(RESPONSES_DIR, `${response.id}.json`), JSON.stringify(response));
+    if (pendingResponses.get(response.id) === response) pendingResponses.delete(response.id);
+    const claimed = claimedRequests.get(response.id);
+    if (claimed) {
+        await rm(claimed, { force: true });
+        claimedRequests.delete(response.id);
+    }
+}
+
+async function retryResponses(): Promise<void> {
+    for (const response of pendingResponses.values()) await persistResponse(response).catch(() => { });
 }
 
 export async function writeResponse(_: IpcMainInvokeEvent, response: BridgeResponse): Promise<void> {
     await ensureInitialized();
     if (!response || !REQUEST_ID.test(response.id)) throw new Error("Invalid Discord MCP response ID");
-    await atomicWrite(join(RESPONSES_DIR, `${response.id}.json`), JSON.stringify(response));
+    pendingResponses.set(response.id, response);
+    await persistResponse(response);
 }
 
 export async function recordSentMessage(_: IpcMainInvokeEvent, channelId: string, messageId: string): Promise<void> {
@@ -234,6 +319,7 @@ export async function recordSentMessage(_: IpcMainInvokeEvent, channelId: string
     if (!isDiscordSnowflake(channelId) || !isDiscordSnowflake(messageId)) throw new Error("Invalid message identity");
     sentMessages.add(sentMessageKey(channelId, messageId));
     if (sentMessages.size > 10_000) sentMessages.delete(sentMessages.values().next().value!);
+    ledgerRevision++;
     await persistSentLedger();
 }
 
@@ -247,6 +333,7 @@ export async function forgetSentMessage(_: IpcMainInvokeEvent, channelId: string
     await ensureInitialized();
     if (!isDiscordSnowflake(channelId) || !isDiscordSnowflake(messageId)) return;
     sentMessages.delete(sentMessageKey(channelId, messageId));
+    ledgerRevision++;
     await persistSentLedger();
 }
 
