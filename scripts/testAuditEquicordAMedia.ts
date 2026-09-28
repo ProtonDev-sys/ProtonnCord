@@ -72,6 +72,9 @@ function hookHarness() {
                 slots[i] = { dependencies, value: factory() };
             return slots[i].value;
         },
+        useCallback(callback: any, dependencies: any[]) {
+            return hooks.useMemo(() => callback, dependencies);
+        },
         useEffect(effect: any, dependencies?: any[]) {
             const i = cursor++;
             const previous = slots[i];
@@ -1011,6 +1014,58 @@ test("voice-message native download rejects excess streamed data and cancels its
     assert.equal(requests, 0);
     await assert.rejects(fixture.fetchAudio(null, "https://cdn.discordapp.com/attachments/fixture"), /25 MB/);
     assert.equal(cancelled, 1);
+});
+
+test("voice translations keep the completed text and language together through cancellation and failure", async () => {
+    const harness = hookHarness();
+    const requests: { resolve: (value: any) => void; reject: (error: Error) => void; }[] = [];
+    const fixture = load("voiceMessageTranscriber.desktop/index.tsx", "\nexport { VoiceMessageTranscriptionAccessory, cacheResult, resultCache };", {
+        "@components/Button": { Button: "button", TextButton: "text-button" },
+        "@plugins/translate/utils": { translateText: () => new Promise((resolve, reject) => requests.push({ resolve, reject })) },
+        "./utils": { LANGUAGES: {}, cl: (value: string) => value },
+        "./transcriptionData": { formatTimestampedTranscript: () => "" },
+        "@webpack/common": {
+            ...harness.hooks,
+            openModal: (render: any) => render({}).props.onSelect({ value: "de", label: "German" })
+        }
+    }, { Error, VencordNative: { pluginHelpers: {} } });
+    const transcript = { text: "Hello", chunks: [] };
+    const french = { text: "Bonjour", sourceLanguage: "English" };
+    fixture.cacheResult("message", { transcript, translation: french, targetLanguage: "fr", targetLanguageLabel: "French" });
+    const render = () => harness.render(() => fixture.VoiceMessageTranscriptionAccessory({ messageId: "message", src: "fixture", needsPlaybackFallback: false }));
+    const textNode = (tree: any, text: string) => findNode(tree, node => node?.props?.children?.includes(text));
+    const changeLanguage = () => textNode(render(), "Change translation…").props.onClick();
+    const assertFrench = () => {
+        const tree = render();
+        assert.ok(textNode(tree, "French"), "the heading still identifies the displayed French translation");
+        assert.ok(textNode(tree, "Bonjour"));
+        assert.equal(textNode(tree, "German"), undefined, "the pending language is not used to label completed text");
+        assert.equal(fixture.resultCache.get("message").translation, french);
+    };
+
+    changeLanguage();
+    assertFrench();
+    assert.ok(textNode(render(), "Translating to German…"));
+    textNode(render(), "Cancel").props.onClick();
+    requests[0].resolve({ text: "obsolete", sourceLanguage: "English" });
+    await new Promise(resolve => setImmediate(resolve));
+    assertFrench();
+
+    changeLanguage();
+    requests[1].reject(new Error("fixture provider failure"));
+    await new Promise(resolve => setImmediate(resolve));
+    assertFrench();
+    assert.ok(textNode(render(), "Translation failed: fixture provider failure"));
+
+    changeLanguage();
+    requests[2].resolve({ text: "Hallo", sourceLanguage: "English" });
+    await new Promise(resolve => setImmediate(resolve));
+    const completed = render();
+    assert.ok(textNode(completed, "German"));
+    assert.ok(textNode(completed, "Hallo"));
+    assert.equal(textNode(completed, "Bonjour"), undefined);
+    assert.equal(fixture.resultCache.get("message").targetLanguage, "de");
+    harness.unmount();
 });
 
 test("speech-worker termination aborts model downloads and prevents late cache writes", async () => {
