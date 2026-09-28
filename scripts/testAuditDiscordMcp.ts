@@ -296,6 +296,41 @@ test("Discord MCP tracking retry persists later deletions instead of restoring t
     assert.equal(await restarted.isSentMessage({}, channelId, messageId), false);
 });
 
+test("Discord MCP confirms deletion despite ledger failure and retries only tracking", async t => {
+    let fail = false;
+    const f = await nativeFixture(t, { rename: async (from: string, to: string) => {
+        if (fail && to.endsWith("sent-messages.json")) throw new Error("ledger unavailable");
+        await fsp.rename(from, to);
+    } });
+    await f.native.recordSentMessage({}, channelId, messageId);
+    fail = true;
+    let deletes = 0;
+    const responses: any[] = [];
+    const renderer = loadRenderer({
+        isSentMessage: (channel: string, message: string) => f.native.isSentMessage({}, channel, message),
+        forgetSentMessage: (channel: string, message: string) => f.native.forgetSentMessage({}, channel, message),
+        writeResponse: async (response: any) => responses.push(response)
+    }, {
+        ChannelStore: { getChannel: () => ({ id: channelId }) },
+        Constants: { Endpoints: { MESSAGES: () => "fixture-messages", MESSAGE: () => "fixture-message" } },
+        UserStore: { getCurrentUser: () => sent.author },
+        RestAPI: { get: async () => ({ body: [sent] }), del: async () => { deletes++; } }
+    });
+    await renderer.handleBridgeRequest({ id: "delete-request", tool: "delete_own_message", arguments: { channel_id: channelId, message_id: messageId } });
+    assert.equal(responses[0].ok, true, "bookkeeping cannot report a confirmed deletion as failed");
+    assert.equal(responses[0].result.deleted, true);
+    assert.equal(responses[0].result.channelId, channelId);
+    assert.equal(responses[0].result.messageId, messageId);
+    assert.match(responses[0].result.trackingWarning, /deleted successfully/);
+    assert.equal(await f.native.isSentMessage({}, channelId, messageId), false);
+    fail = false;
+    await f.native.takeRequests({}, 0, f.session);
+    const restarted = f.load();
+    await restarted.initializeBridge({}, crypto.randomUUID());
+    assert.equal(await restarted.isSentMessage({}, channelId, messageId), false);
+    assert.equal(deletes, 1, "tracking recovery cannot repeat the Discord deletion");
+});
+
 for (const resolved of [false, true]) {
     test(`Discord MCP evicted waveform failures preserve ${resolved ? "completed" : "pending"} replacements`, async () => {
         const requests: ReturnType<typeof deferred<any>>[] = [];
