@@ -317,6 +317,8 @@ function resetSettings(plugin: Plugin, onRestartNeeded?: (pluginName: string) =>
             newSettings[key] = defaultValue !== undefined ? defaultValue : "";
         } else if (defaultValue !== undefined) {
             newSettings[key] = defaultValue;
+        } else if (setting.type === OptionType.BOOLEAN) {
+            newSettings[key] = false;
         } else if (setting.type === OptionType.SELECT) {
             const selected = setting.options.find(option => option.default);
             if (selected) newSettings[key] = selected.value;
