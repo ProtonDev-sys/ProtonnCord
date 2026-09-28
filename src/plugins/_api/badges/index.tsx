@@ -80,7 +80,7 @@ const UserPluginContributorBadge: ProfileBadge = {
     },
 };
 
-type DonorBadgeMap = Record<string, Array<Record<"tooltip" | "badge", string>>>;
+type DonorBadgeMap = Record<string, Array<{ badge: string; tooltip?: string; }>>;
 
 let DonorBadges: DonorBadgeMap = {};
 let EquicordDonorBadges: DonorBadgeMap = {};
@@ -95,7 +95,7 @@ async function loadBadges(url: string, noCache = false) {
     const data: unknown = await response.json();
     if (!isObject(data) || !Object.values(data).every(badges =>
         Array.isArray(badges) && badges.every(badge => isObject(badge)
-            && "tooltip" in badge && typeof badge.tooltip === "string"
+            && (!("tooltip" in badge) || typeof badge.tooltip === "string")
             && "badge" in badge && typeof badge.badge === "string")
     )) throw new Error("Invalid badge response");
 
@@ -262,7 +262,7 @@ export default definePlugin({
         return DonorBadges[userId]?.map((badge, idx) => ({
             id: `vencord_donor_badge_${idx}`,
             iconSrc: badge.badge,
-            description: badge.tooltip.replace(/^Equicord/, "Protonn Cord"),
+            description: badge.tooltip?.replace(/^Equicord/, "Protonn Cord"),
             position: BadgePosition.START,
             props: {
                 style: {
