@@ -153,8 +153,8 @@ test("per-track migration is atomic, retryable, and preserves selected versions 
         Spotify: [{ time: 1, text: "current" }], Translated: [{ time: 1, text: "translated" }], Romanized: [{ time: 1, text: "romanized" }]
     } };
     const f = fixture(false, new Map([
-        ["SpotifyLyricsCache", { old: [{ time: 0, text: "legacy" }], shared: [{ time: 0, text: "obsolete" }] }],
-        ["SpotifyLyricsCacheNew", { shared: selected }], ["unrelated", { retained: true }]
+        ["SpotifyLyricsCache", { old: [{ time: 0, text: "legacy" }], shared: [{ time: 0, text: "legacy alternative" }], overlap: [{ time: 0, text: "obsolete" }] }],
+        ["SpotifyLyricsCacheNew", { shared: selected, overlap: { useLyric: Provider.Lrclib, lyricsVersions: { LRCLIB: [{ time: 1, text: "newer version" }] } } }], ["unrelated", { retained: true }]
     ]));
     f.failWrite(true);
     await assert.rejects(f.api.migrateOldLyrics(), /storage failure/);
@@ -164,7 +164,8 @@ test("per-track migration is atomic, retryable, and preserves selected versions 
     await f.api.migrateOldLyrics();
     assert.equal(f.data.has("SpotifyLyricsCache"), false);
     assert.equal(f.data.has("SpotifyLyricsCacheNew"), false);
-    assert.deepEqual(await f.api.getLyrics({ id: "shared" }), selected);
+    assert.deepEqual(await f.api.getLyrics({ id: "shared" }), { ...selected, lyricsVersions: { ...selected.lyricsVersions, LRCLIB: [{ time: 0, text: "legacy alternative" }] } });
+    assert.equal((await f.api.getLyrics({ id: "overlap" })).lyricsVersions.LRCLIB[0].text, "newer version", "newer provider versions override their legacy counterpart");
     assert.equal((await f.api.getLyrics({ id: "old" })).lyricsVersions.LRCLIB[0].text, "legacy");
     assert.deepEqual(f.data.get("unrelated"), { retained: true });
     await f.api.updateLyrics("shared", [{ time: 1, text: "new translation" }], Provider.Translated);
