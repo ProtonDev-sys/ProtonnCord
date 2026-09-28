@@ -291,20 +291,27 @@ test("Moyai stops active audio and queued repetitions when disabled", async () =
 
 const providerTypes = { Provider: { Spotify: "Spotify", Lrclib: "LRCLIB", Translated: "Translated", Romanized: "Romanized", None: "None" } };
 
-function musicApi(settings: any, spotify: any, lrclib: any, initial: any = {}) {
-    let data = structuredClone(initial);
+function musicApi(settings: any, spotify: any, lrclib: any, initial: any = {}, legacy: any = {}) {
+    const data = new Map<string, any>([["SpotifyLyricsCacheNew", structuredClone(initial)], ["SpotifyLyricsCache", structuredClone(legacy)]]);
     const dataStore = {
-        get: async () => structuredClone(data),
-        set: async (_: string, next: any) => { data = structuredClone(next); },
-        update: async (_: string, updater: any) => { data = structuredClone(updater(data)); }
+        get: async (key: string) => structuredClone(data.get(key)),
+        updateMany: async (keys: string[], updater: any) => {
+            const changes = updater(keys.map(key => structuredClone(data.get(key))));
+            for (const [key, value] of changes.set ?? []) data.set(key, structuredClone(value));
+            for (const key of changes.delete ?? []) data.delete(key);
+        }
     };
+    const cache = load("musicControls/spotify/lyrics/cache.ts", "", {
+        "@api/index": { DataStore: dataStore }, "./providers/types": providerTypes
+    }, { TextEncoder });
     return { api: load("musicControls/spotify/lyrics/api.tsx", "", {
-        "@api/index": { DataStore: dataStore },
+        "./cache": cache,
         "@equicordplugins/musicControls/settings": { settings },
         "./providers/SpotifyAPI": { getLyricsSpotify: spotify },
         "./providers/lrclibAPI": { getLyricsLrclib: lrclib },
         "./providers/types": providerTypes
-    }), data: () => data };
+    }), stored: data, data: () => Object.fromEntries([...data].filter(([key]) => key.startsWith(cache.CACHE_PREFIX))
+        .map(([key, value]) => [JSON.parse(key.slice(cache.CACHE_PREFIX.length))[0], value.data])) };
 }
 
 test("MusicControls honors disabled lyric fallback and atomically saves concurrent tracks", async () => {
@@ -337,22 +344,12 @@ test("MusicControls cache clear prevents a pending provider response from repopu
 
 test("MusicControls legacy lyric migration preserves newer entries before clearing the legacy key", async () => {
     const current = { useLyric: "Spotify", lyricsVersions: { Spotify: [{ time: 1, text: "new" }] } };
-    const data = new Map<string, any>([
-        ["SpotifyLyricsCache", { old: [{ time: 1, text: "old" }], newer: [{ time: 0, text: "outdated" }] }],
-        ["SpotifyLyricsCacheNew", { newer: current }]
-    ]);
-    const { migrateOldLyrics } = load("musicControls/spotify/lyrics/api.tsx", "", {
-        "@api/index": { DataStore: {
-            get: async (key: string) => data.get(key),
-            set: async (key: string, value: any) => data.set(key, value),
-            update: async (key: string, updater: any) => data.set(key, updater(data.get(key)))
-        } },
-        "./providers/types": providerTypes
-    });
-    await migrateOldLyrics();
-    assert.equal(data.get("SpotifyLyricsCacheNew").newer, current);
-    assert.equal(data.get("SpotifyLyricsCacheNew").old.lyricsVersions.LRCLIB[0].text, "old");
-    assert.deepEqual(Object.keys(data.get("SpotifyLyricsCache")), []);
+    const fixture = musicApi({ store: { lyricsProvider: "Spotify" } }, async () => null, async () => null,
+        { newer: current }, { old: [{ time: 1, text: "old" }], newer: [{ time: 0, text: "outdated" }] });
+    await fixture.api.migrateOldLyrics();
+    assert.deepEqual(fixture.data().newer, { ...current, lyricsVersions: { ...current.lyricsVersions, LRCLIB: [{ time: 0, text: "outdated" }] } });
+    assert.equal(fixture.data().old.lyricsVersions.LRCLIB[0].text, "old");
+    assert.equal(fixture.stored.has("SpotifyLyricsCache"), false);
 });
 
 test("Spotify lyrics fetch once per track and ignore player events after destruction", async () => {
