@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { followPlaybackPosition } from "@equicordplugins/musicControls/playbackPosition";
 import { settings } from "@equicordplugins/musicControls/settings";
 import { SpotifyLrcStore } from "@equicordplugins/musicControls/spotify/lyrics/providers/store";
 import { SyncedLyric } from "@equicordplugins/musicControls/spotify/lyrics/providers/types";
@@ -78,22 +79,11 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
         ? getIndexes(currentLyrics, position, lyricDelay) : [null, null], [currentLyrics, position, lyricDelay]);
 
     useEffect(() => {
-        setPosition(Math.min(storePosition, duration));
-    }, [duration, storePosition]);
-
-    useEffect(() => {
         const index = currLrcIndex ?? nextLyric;
         if (scroll && index !== null) lyricRefs[index]?.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, [currLrcIndex, nextLyric, scroll, lyricRefs]);
 
-    useEffect(() => {
-        if (!isPlaying) return;
-
-        setPosition(SpotifyStore.position);
-        const interval = setInterval(() => setPosition(p => Math.min(p + 1000, duration)), 1000);
-
-        return () => clearInterval(interval);
-    }, [duration, storePosition, isPlaying]);
+    useEffect(() => followPlaybackPosition(SpotifyStore, duration, setPosition), [duration, storePosition, isPlaying, track?.id]);
 
     return { track, lyricsInfo, lyricRefs, currLrcIndex, nextLyric };
 }
