@@ -27,7 +27,7 @@ import { Span } from "@components/Span";
 import { copyToClipboard } from "@utils/clipboard";
 import { EquicordDevs } from "@utils/constants";
 import { sendMessage } from "@utils/discord";
-import { proxyLazy } from "@utils/lazy";
+import { makeLazy, proxyLazy } from "@utils/lazy";
 import { classes } from "@utils/misc";
 import definePlugin, { PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/discord-types";
@@ -46,6 +46,7 @@ import {
     Modal,
     openModal,
     Parser,
+    React,
     ReactDOM,
     RestAPI,
     SelectedChannelStore,
@@ -3060,7 +3061,25 @@ function SecureMessageAccessory({ message }: { message: Message; }) {
     return null;
 }
 
-const renderSecureMessageAccessory: MessageAccessoryFactory = props => <SecureMessageAccessory message={props.message} />;
+// Pins and other message previews can hide accessories or restrict them to media.
+// Their content slot owns the secure text; the context prevents a second copy below it.
+const getSecureMessagePreviewContext = makeLazy(() => React.createContext(false));
+
+function renderSecurePreviewContent(message: Message): ReactNode | undefined {
+    if (screenCaptureProtectionStatus === "disabled" ||
+        !isEncryptedMessage(message.content) && !isKeyAnnouncement(message.content)) return undefined;
+    return <ErrorBoundary noop><SecureMessageAccessory message={message} /></ErrorBoundary>;
+}
+
+function renderSecurePreviewAccessories(accessories: ReactNode): ReactNode {
+    const { Provider } = getSecureMessagePreviewContext();
+    return <Provider value={true}>{accessories}</Provider>;
+}
+
+const renderSecureMessageAccessory: MessageAccessoryFactory = props => {
+    const preview = React.useContext(getSecureMessagePreviewContext());
+    return preview ? null : <SecureMessageAccessory message={props.message} />;
+};
 
 export default definePlugin({
     name: "SecureMessaging",
@@ -3070,6 +3089,20 @@ export default definePlugin({
     dependencies: ["ChatInputButtonAPI", "MessageAccessoriesAPI", "MessageEventsAPI", "MessageUpdaterAPI"],
 
     patches: [
+        {
+            find: ".hideAccessories",
+            group: true,
+            replacement: [
+                {
+                    match: /childrenAccessories:(\i\.hideAccessories\?void 0:\(0,\i\.\i\)\(\i,\i,\i\)),/,
+                    replace: "childrenAccessories:$self.renderSecurePreviewAccessories($1),",
+                },
+                {
+                    match: /childrenMessageContent:(\i)\?\?/,
+                    replace: "childrenMessageContent:$1??$self.renderSecurePreviewContent(arguments[0].message)??",
+                },
+            ],
+        },
         {
             find: "Missing channel in Channel.renderHeaderToolbar",
             replacement: {
@@ -3511,6 +3544,8 @@ export default definePlugin({
     useSecureReplyPreview,
 
     useSecureMessageRow,
+    renderSecurePreviewContent,
+    renderSecurePreviewAccessories,
 
     shouldBypassMessageLengthLimit,
 
