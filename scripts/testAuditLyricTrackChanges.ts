@@ -41,7 +41,7 @@ function fixture(service: "spotify" | "tidal") {
         compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
     }).outputText;
     const api = runInNewContext(code + "\nexports;", {
-        exports: {}, require: (key: string) => mocks[key] ?? {}
+        exports: {}, AbortController, require: (key: string) => mocks[key] ?? {}
     })[`${name}LrcStore`];
     api.init();
     return {

@@ -47,6 +47,25 @@ async function main() {
     assert.deepEqual(Array.from(policies[2]["base-uri"]), ["'self'"]);
     for (const policy of policies) assert.ok(policy["style-src"].includes("'unsafe-inline'"));
 
+    const badgeSource = await readFile(new URL("../src/plugins/_api/badges/index.tsx", import.meta.url), "utf8");
+    const feedUrl = badgeSource.match(/loadBadges\("(https:\/\/badge\.equicord\.org\/badges\.json)"/)?.[1];
+    assert.ok(feedUrl, "the required badge feed must remain covered by the CSP regression");
+    const feedOrigin = new URL(feedUrl).origin;
+    const contributorUrls = Array.from(badgeSource.matchAll(/const (?:EQUICORD|USERPLUGIN)_CONTRIBUTOR_BADGE = "([^"]+)"/g), match => match[1]);
+    assert.equal(contributorUrls.length, 2);
+    const contributorOrigin = new URL(contributorUrls[0]).origin;
+    for (const policy of policies) {
+        assert.ok(policy["connect-src"].includes(feedOrigin), "the built-in donor feed must be fetchable");
+        assert.ok(policy["img-src"].includes(feedOrigin), "donor images served by the badge feed host must load");
+        for (const url of contributorUrls)
+            assert.ok(policy["img-src"].includes(new URL(url).origin), "built-in contributor images must load");
+        assert.ok(!policy["connect-src"].includes(contributorOrigin), "contributor images do not need API access");
+        for (const directive of ["script-src", "worker-src", "style-src", "font-src", "media-src", "frame-src"])
+            assert.ok(!policy[directive]?.some(source => source === feedOrigin || source === contributorOrigin), `${directive} must not gain badge service access`);
+        for (const sources of Object.values(policy))
+            assert.ok(!sources.some(source => ["*", "https:", "*.equicord.org", "equicord.org", "badge.equicord.org"].includes(source)), "badge access must use exact HTTPS origins");
+    }
+
     const managerSource = await readFile(new URL("../src/main/csp/manager.ts", import.meta.url), "utf8");
     let prompts = 0;
     const { addCspRule } = runInNewContext(`${compile(managerSource)}\n({ addCspRule });`, {
