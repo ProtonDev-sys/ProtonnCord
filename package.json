@@ -96,7 +96,7 @@
         "testInstallerSecurity": "node scripts/testInstallerSecurity.mjs",
         "testUpdaterBranches": "tsx scripts/testUpdaterBranches.ts",
         "testPluginReleaseMarkers": "tsx scripts/testPluginReleaseMarkers.ts",
-        "testSecureMessagingRestGuard": "tsx scripts/testSecureMessagingRestGuard.ts",
+        "testSecureMessagingRestGuard": "tsx scripts/testSecureMessagingRestGuard.ts && tsx --test scripts/testSecureMessagingHardening.ts scripts/testSecureMessagingCaches.ts",
         "testSecureMessagingOptimisticRendering": "tsx scripts/testSecureMessagingOptimisticRendering.ts",
         "testOneKeyIdentity": "tsx scripts/testOneKeyIdentity.ts",
         "testSecureMessagingSecurityKey": "tsx scripts/testSecureMessagingSecurityKey.ts",
