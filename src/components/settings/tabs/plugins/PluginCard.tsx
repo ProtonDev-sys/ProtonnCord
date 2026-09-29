@@ -4,21 +4,25 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { showNotice } from "@api/Notices";
-import { hasAnyVisibleSettings, isPluginEnabled, pluginRequiresRestart, startDependenciesRecursive, startPlugin, stopPlugin } from "@api/PluginManager";
-import { Settings } from "@api/Settings";
-import { CogWheel, InfoIcon } from "@components/Icons";
-import { AddonCard } from "@components/settings/AddonCard";
+import "./PluginCard.css";
+
+import { hasAnyVisibleSettings, isPluginEnabled } from "@api/PluginManager";
+import { Badge } from "@components/Badge";
+import { CogWheel, InfoIcon, StarFilled } from "@components/Icons";
 import { openPluginModal } from "@components/settings/tabs";
+import { Switch } from "@components/Switch";
 import type { PluginManifestEntry } from "@shared/pluginDefinition";
 import { classNameFactory } from "@utils/css";
-import { Logger } from "@utils/Logger";
-import { React, showToast, Toasts } from "@webpack/common";
+import { React } from "@webpack/common";
+import type { MouseEvent } from "react";
 
 import Plugins, { PluginManifest, PluginMeta } from "~plugins";
 
-const logger = new Logger("PluginCard");
-const cl = classNameFactory("vc-plugins-");
+import { togglePlugin } from "./pluginToggle";
+import { getPluginSource } from "./shared";
+
+const cl = classNameFactory("vc-plugin-card-");
+
 interface PluginCardProps extends React.HTMLProps<HTMLDivElement> {
     plugin: Pick<PluginManifestEntry, "name" | "description" | "isModified">;
     disabled?: boolean;
@@ -26,134 +30,69 @@ interface PluginCardProps extends React.HTMLProps<HTMLDivElement> {
     hasVisibleSettings?: boolean;
     onRestartNeeded(name: string, key: string): void;
     isNew?: boolean;
+    isFavorite?: boolean;
+    /** Enabled plugins that keep this one on. Only shown for disabled (required) cards. */
+    requiredBy?: readonly string[];
     onMouseEnter?: React.MouseEventHandler<HTMLDivElement>;
     onMouseLeave?: React.MouseEventHandler<HTMLDivElement>;
 }
 
-export function PluginCard({ plugin, disabled, enabled, hasVisibleSettings, onRestartNeeded, onMouseEnter, onMouseLeave, isNew }: PluginCardProps) {
-    const pluginMeta = PluginMeta[plugin.name];
-    const isEquicordPlugin = pluginMeta.folderName.startsWith("src/equicordplugins/");
-    const isVencordPlugin = pluginMeta.folderName.startsWith("src/plugins/");
-    const isUserPlugin = pluginMeta?.userPlugin ?? false;
-    const isModifiedPlugin = plugin.isModified ?? false;
+const stopPropagation = (event: MouseEvent) => event.stopPropagation();
 
-    const isEnabled = () => isPluginEnabled(plugin.name);
+export function PluginCard({ plugin, disabled, enabled, hasVisibleSettings, onRestartNeeded, onMouseEnter, onMouseLeave, isNew, isFavorite, requiredBy }: PluginCardProps) {
+    const { name } = plugin;
+    const titleId = React.useId();
+    const source = getPluginSource(PluginMeta[name], plugin.isModified);
+    const showCog = hasVisibleSettings ?? PluginManifest[name]?.hasVisibleSettings ?? hasAnyVisibleSettings(Plugins[name]);
+    const isEnabled = enabled ?? isPluginEnabled(name);
 
-    function toggleEnabled() {
-        const settings = Settings.plugins[plugin.name];
-        const definition = Plugins[plugin.name];
-        const wasEnabled = isEnabled();
-
-        // If we're enabling a plugin, make sure all deps are enabled recursively.
-        if (!wasEnabled) {
-            const { restartNeeded, failures } = startDependenciesRecursive(definition);
-
-            if (failures.length) {
-                logger.error(`Failed to start dependencies for ${plugin.name}: ${failures.join(", ")}`);
-                showNotice("Failed to start dependencies: " + failures.join(", "), "Close", () => null);
-                return;
-            }
-
-            if (restartNeeded) {
-                // If any dependencies have patches, don't start the plugin yet.
-                settings.enabled = true;
-                onRestartNeeded(plugin.name, "enabled");
-                return;
-            }
-        }
-
-        // if the plugin requires a restart, don't use stopPlugin/startPlugin. Wait for restart to apply changes.
-        if (pluginRequiresRestart(definition)) {
-            settings.enabled = !wasEnabled;
-            onRestartNeeded(plugin.name, "enabled");
-            return;
-        }
-
-        // If the plugin is enabled, but hasn't been started, then we can just toggle it off.
-        if (wasEnabled && !definition.started) {
-            settings.enabled = !wasEnabled;
-            return;
-        }
-
-        const result = wasEnabled ? stopPlugin(definition) : startPlugin(definition);
-
-        if (!result) {
-            settings.enabled = false;
-
-            const msg = `Error while ${wasEnabled ? "stopping" : "starting"} plugin ${plugin.name}`;
-            showToast(msg, Toasts.Type.FAILURE, {
-                position: Toasts.Position.BOTTOM,
-            });
-
-            return;
-        }
-
-        settings.enabled = !wasEnabled;
-    }
-
-    const pluginInfo = [
-        {
-            condition: isModifiedPlugin,
-            src: "https://raw.githubusercontent.com/ProtonDev-sys/ProtonnCord/refs/heads/main/browser/icon.png",
-            alt: "Modified",
-            title: "Modified Vencord Plugin"
-        },
-        {
-            condition: isEquicordPlugin,
-            src: "https://raw.githubusercontent.com/ProtonDev-sys/ProtonnCord/refs/heads/main/browser/icon.png",
-            alt: "Protonn Cord",
-            title: "Protonn Cord Plugin"
-        },
-        {
-            condition: isVencordPlugin,
-            src: "https://raw.githubusercontent.com/Vendicated/Vencord/main/browser/icon.png",
-            alt: "Vencord",
-            title: "Vencord Plugin"
-        },
-        {
-            condition: isUserPlugin,
-            src: "https://raw.githubusercontent.com/ProtonDev-sys/ProtonnCord/refs/heads/main/browser/icon.png",
-            alt: "User",
-            title: "User Plugin"
-        }
-    ];
-
-    const pluginDetails = pluginInfo.find(p => p.condition);
-
-    const sourceBadge = pluginDetails ? (
-        <img
-            src={pluginDetails.src}
-            alt={pluginDetails.alt}
-            className={cl("source")}
-        />
-    ) : null;
-
-    const tooltip = pluginDetails?.title || "Unknown Plugin";
+    const openDetails = () => openPluginModal(Plugins[name], onRestartNeeded);
 
     return (
-        <AddonCard
-            name={plugin.name}
-            sourceBadge={sourceBadge}
-            tooltip={tooltip}
-            description={plugin.description}
-            isNew={isNew}
-            enabled={enabled ?? isEnabled()}
-            setEnabled={toggleEnabled}
-            disabled={disabled}
+        <div
+            className={cl("root", { enabled: isEnabled, disabled })}
+            onClick={openDetails}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
-            infoButton={
-                <button
-                    type="button"
-                    aria-label={`Open ${plugin.name} settings and information`}
-                    onClick={() => openPluginModal(Plugins[plugin.name], onRestartNeeded)}
-                    className={cl("info-button")}
-                >
-                    {(hasVisibleSettings ?? PluginManifest[plugin.name].hasVisibleSettings ?? hasAnyVisibleSettings(Plugins[plugin.name]))
-                        ? <CogWheel className={cl("info-icon")} />
-                        : <InfoIcon className={cl("info-icon")} />
-                    }
-                </button>
-            } />
+        >
+            <div className={cl("header")}>
+                <span id={titleId} className={cl("name")} title={name}>{name}</span>
+                {isNew && <Badge text="New" variant="danger" />}
+                {isFavorite && <StarFilled aria-label="Favorite" className={cl("favorite")} width={14} height={14} />}
+                <div className={cl("actions")} onClick={stopPropagation}>
+                    <button
+                        type="button"
+                        aria-label={`Open ${name} ${showCog ? "settings" : "information"}`}
+                        title={showCog ? "Settings" : "Information"}
+                        onClick={openDetails}
+                        className={cl("details")}
+                    >
+                        {showCog
+                            ? <CogWheel width={18} height={18} />
+                            : <InfoIcon width={18} height={18} />
+                        }
+                    </button>
+                    <Switch
+                        aria-labelledby={titleId}
+                        checked={isEnabled}
+                        onChange={() => togglePlugin(name, onRestartNeeded)}
+                        disabled={disabled}
+                    />
+                </div>
+            </div>
+
+            <p className={cl("description")} title={plugin.description}>{plugin.description}</p>
+
+            {(source || disabled) && (
+                <div className={cl("footer")}>
+                    {source && <span className={cl("source")} title={source.title}>{source.label}</span>}
+                    {disabled && (
+                        <span className={cl("required")} title={requiredBy?.join(", ")}>
+                            {requiredBy?.length ? `Required by ${requiredBy.join(", ")}` : "Required"}
+                        </span>
+                    )}
+                </div>
+            )}
+        </div>
     );
 }

@@ -301,19 +301,29 @@ export function migratePluginSetting(pluginName: string, newSetting: string, old
 
 export function migratePluginToSettings(deleteOldSettings: boolean, newName: string, oldName: string, ...settingNames: string[]) {
     const { plugins } = SettingsStore.plain;
-    const newPlugin = plugins[newName];
     const oldPlugin = plugins[oldName];
+    if (!oldPlugin?.enabled) return;
 
-    if (newPlugin && oldPlugin?.enabled) {
-        for (const settingName of settingNames) {
-            logger.info(`Migrating plugin to setting from old name ${oldName} to ${newName} as ${settingName}`);
-            newPlugin[settingName] = true;
-        }
-
-        newPlugin.enabled = true;
-        if (deleteOldSettings) delete plugins[oldName];
-        SettingsStore.markAsChanged();
+    let changed = !plugins[newName];
+    const newPlugin = plugins[newName] ??= { enabled: true };
+    for (const settingName of settingNames) {
+        if (Object.hasOwn(newPlugin, settingName)) continue;
+        logger.info(`Migrating plugin to setting from old name ${oldName} to ${newName} as ${settingName}`);
+        newPlugin[settingName] = true;
+        changed = true;
     }
+
+    // Carry favorites and unknown saved fields forward without replacing newer choices.
+    for (const [key, value] of Object.entries(oldPlugin)) {
+        if (Object.hasOwn(newPlugin, key)) continue;
+        newPlugin[key] = value;
+        changed = true;
+    }
+    if (deleteOldSettings) {
+        delete plugins[oldName];
+        changed = true;
+    }
+    if (changed) SettingsStore.markAsChanged();
 }
 
 export function migrateSettingToPlugin(newName: string, oldName: string, settingName: string) {

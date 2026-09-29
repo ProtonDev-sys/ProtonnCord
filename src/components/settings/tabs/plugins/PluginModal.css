@@ -1,62 +1,159 @@
 .vc-plugin-modal-header {
-    align-items: flex-start;
-    position: relative;
-}
-
-.vc-plugin-modal-links {
-    display: flex;
-    gap: 4px;
-    margin-left: auto;
-}
-
-.vc-plugin-modal-confirm [class*="footer"] {
-    flex-direction: row-reverse;
-    gap: var(--space-8, 8px);
-}
-
-.vc-plugin-modal-confirm [class*="footer"] > button {
-    flex: 1;
-    margin: 0;
-    width: 100%;
-}
-
-.vc-plugin-modal-warning {
     display: flex;
     align-items: center;
-    gap: 4px;
-    color: var(--text-feedback-critical);
+    gap: 10px;
+    min-width: 0;
 }
 
-.vc-settings-modal-content {
-    padding-bottom: 24px;
+.vc-plugin-modal-source {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border: 1px solid var(--border-normal, var(--border-subtle));
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 14px;
+    text-transform: uppercase;
 }
 
 .vc-plugin-modal-info {
     display: flex;
-    gap: 1em;
-    justify-content: space-between;
-    align-items: start;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .vc-plugin-modal-tags {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
-    margin-top: 8px;
 }
 
 .vc-plugin-modal-tag {
-    align-items: center;
-    border: 1px solid var(--border-normal);
-    border-radius: 9999px;
-    display: flex;
-    justify-content: center;
-    padding: 6px 12px;
+    padding: 2px 10px;
+    border: 1px solid var(--border-normal, var(--border-subtle));
+    border-radius: 999px;
     color: var(--text-default);
+    font-size: 12px;
+    line-height: 18px;
+}
+
+.vc-plugin-modal-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-bottom: 24px;
+}
+
+.vc-plugin-modal-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.vc-plugin-modal-authors {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.vc-plugin-modal-author-names {
+    overflow: hidden;
+    color: var(--text-subtle, var(--text-muted));
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vc-plugin-modal-links {
+    display: flex;
+    flex-shrink: 0;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.vc-plugin-modal-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md, 8px);
+    background: var(--card-background-default, var(--background-secondary));
+    box-shadow: inset 3px 0 0 var(--border-strong, var(--border-normal));
+}
+
+.vc-plugin-modal-status-enabled {
+    box-shadow: inset 3px 0 0 var(--control-primary-background-default, var(--brand-500));
+}
+
+.vc-plugin-modal-status-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.vc-plugin-modal-status-title {
+    color: var(--text-strong);
+}
+
+.vc-plugin-modal-status-detail {
+    color: var(--text-subtle, var(--text-muted));
 }
 
 .vc-plugin-modal-about-box {
     padding: 16px;
-    border-radius: 8px;
     border: 1px solid var(--border-normal, var(--background-modifier-accent));
+    border-radius: var(--radius-md, 8px);
+}
+
+.vc-plugin-modal-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.vc-plugin-modal-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.vc-plugin-modal-no-settings {
+    color: var(--text-muted);
+}
+
+/* Shared with plugins that render their own settings panels */
+.vc-plugins-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25em;
+}
+
+.vc-plugin-modal-settings-list {
+    gap: 0;
+    padding: 0 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md, 8px);
+}
+
+.vc-plugin-modal-settings-list > * {
+    padding: 14px 0;
+}
+
+.vc-plugin-modal-settings-list > * + * {
+    border-top: 1px solid var(--border-subtle);
+}
+
+.vc-plugin-modal-warning {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 16px;
+    color: var(--text-feedback-critical);
 }

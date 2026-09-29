@@ -6,6 +6,8 @@
 
 import { LyricsData, Provider } from "@equicordplugins/musicControls/spotify/lyrics/providers/types";
 
+import { checkLyricsResponse } from "../response";
+
 interface LyricsAPIResp {
     error: boolean;
     syncType: string;
@@ -30,17 +32,13 @@ function makeSpotifyLyricsApiUrl(trackId: string, customBaseUrl?: string): strin
 
 export async function getLyricsSpotify(trackId: string, customBaseUrl?: string): Promise<LyricsData | null> {
     const resp = await fetch(makeSpotifyLyricsApiUrl(trackId, customBaseUrl), { signal: AbortSignal.timeout(15_000) });
-    if (!resp.ok) return null;
+    if (!checkLyricsResponse(resp)) return null;
 
-    let data: LyricsAPIResp;
-    try {
-        data = await resp.json() as LyricsAPIResp;
-    } catch (e) {
-        return null;
-    }
-
-    if (data?.error || !Array.isArray(data?.lines) || data.lines.length < 2
-        || !data.lines.every(line => line && typeof line.words === "string" && Number.isFinite(Number(line.startTimeMs)) && Number(line.startTimeMs) >= 0)) return null;
+    const data = await resp.json() as LyricsAPIResp;
+    if (data?.error || !Array.isArray(data?.lines)
+        || !data.lines.every(line => line && typeof line.words === "string" && Number.isFinite(Number(line.startTimeMs)) && Number(line.startTimeMs) >= 0))
+        throw new Error("Invalid Spotify lyrics response");
+    if (data.lines.length < 2) return null;
 
     const lyrics = data.lines;
     if (lyrics[0].startTimeMs === "0" && lyrics[lyrics.length - 1].startTimeMs === "0") return null;

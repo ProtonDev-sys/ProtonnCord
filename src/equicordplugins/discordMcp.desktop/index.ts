@@ -131,6 +131,7 @@ const subscriptions = new Map<string, MessageSubscription>();
 const inFlightRequests = new Set<Promise<void>>();
 
 let bridgeGeneration = 0;
+let bridgeSession: { id: string; controller: AbortController; } | undefined;
 
 function requireAccessibleChannel(channelId: unknown): string {
     const normalized = requireSnowflake(channelId, "channel_id");
@@ -207,16 +208,17 @@ async function generateAttachmentWaveformFromBytes(bytes: Uint8Array, contentTyp
 
 function generateAttachmentWaveform(attachment: RawAttachment): Promise<string> {
     if (typeof attachment.url !== "string") throw new Error("Voice attachment is missing its Discord CDN URL");
-    const cached = waveformCache.get(attachment.url);
+    const key = attachment.url;
+    const cached = waveformCache.get(key);
     if (cached) return cached;
 
-    const pending = Native.fetchDiscordAttachment(attachment.url)
+    const pending = Native.fetchDiscordAttachment(key)
         .then(({ contentType, data }) => generateAttachmentWaveformFromBytes(data, contentType))
         .catch(error => {
-            waveformCache.delete(attachment.url as string);
+            if (waveformCache.get(key) === pending) waveformCache.delete(key);
             throw error;
         });
-    waveformCache.set(attachment.url, pending);
+    waveformCache.set(key, pending);
     if (waveformCache.size > MAX_WAVEFORM_CACHE_ENTRIES) waveformCache.delete(waveformCache.keys().next().value!);
     return pending;
 }
@@ -824,7 +826,15 @@ async function sendMessage(args: ToolArguments, generation: number) {
     });
     const message = response.body;
     if (!message?.id || String(message.channel_id) !== channelId) throw new Error("Discord did not return the sent message");
-    await Native.recordSentMessage(channelId, String(message.id));
+    try {
+        await Native.recordSentMessage(channelId, String(message.id));
+    } catch (error) {
+        logger.error("Sent message ledger write failed", error);
+        return {
+            ...serializeMessage(message),
+            trackingWarning: "Message sent successfully. Local deletion tracking could not be saved; the bridge will retry tracking without resending. If Discord exits before recovery, delete_own_message may refuse this message. Do not resend."
+        };
+    }
     return serializeMessage(message);
 }
 
@@ -840,8 +850,17 @@ async function deleteOwnMessage(args: ToolArguments, generation: number) {
     if (generation !== bridgeGeneration) throw new Error("Discord MCP stopped before deleting the message");
 
     await RestAPI.del({ url: Constants.Endpoints.MESSAGE(channelId, messageId) });
-    await Native.forgetSentMessage(channelId, messageId);
-    return { deleted: true, channelId, messageId };
+    const result = { deleted: true, channelId, messageId };
+    try {
+        await Native.forgetSentMessage(channelId, messageId);
+    } catch (error) {
+        logger.error("Deleted message ledger write failed", error);
+        return {
+            ...result,
+            trackingWarning: "Message deleted successfully. Local deletion tracking could not be saved; the bridge will retry tracking without deleting again. Do not retry this deletion."
+        };
+    }
+    return result;
 }
 
 async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Promise<unknown> {
@@ -897,34 +916,41 @@ async function executeTool(tool: DiscordMcpToolName, rawArguments: unknown): Pro
 }
 
 async function handleBridgeRequest(request: Awaited<ReturnType<typeof Native.takeRequests>>[number]): Promise<void> {
+    let response: Parameters<typeof Native.writeResponse>[0];
     try {
         if (!DISCORD_MCP_TOOL_NAMES.includes(request.tool as DiscordMcpToolName))
             throw new Error("Unsupported Discord MCP tool");
         const result = await executeTool(request.tool as DiscordMcpToolName, request.arguments);
-        await Native.writeResponse({ id: request.id, ok: true, result });
+        response = { id: request.id, ok: true, result };
     } catch (error) {
-        await Native.writeResponse({ id: request.id, ok: false, error: errorMessage(error) });
+        response = { id: request.id, ok: false, error: errorMessage(error) };
     }
+    // Persistence failure cannot turn an already completed operation into a failed one.
+    // The native queue retains this exact response for retry without repeating the tool.
+    await Native.writeResponse(response);
 }
 
-async function bridgeLoop(generation: number): Promise<void> {
+async function bridgeLoop(generation: number, session: NonNullable<typeof bridgeSession>): Promise<void> {
+    const stopped = new Promise<void>(resolve => session.controller.signal.addEventListener("abort", () => resolve(), { once: true }));
     while (generation === bridgeGeneration) {
         let requests: Awaited<ReturnType<typeof Native.takeRequests>>;
         try {
-            requests = await Native.takeRequests(LONG_POLL_MS);
+            requests = await Native.takeRequests(LONG_POLL_MS, session.id);
         } catch (error) {
             if (generation !== bridgeGeneration) return;
             logger.error("Bridge wait failed", error);
             await new Promise(resolve => setTimeout(resolve, 1_000));
             continue;
         }
-        if (generation !== bridgeGeneration) return;
-
         for (const request of requests) {
             while (generation === bridgeGeneration && inFlightRequests.size >= MAX_IN_FLIGHT_REQUESTS) {
-                await Promise.race(inFlightRequests);
+                await Promise.race([...inFlightRequests, stopped]);
             }
-            if (generation !== bridgeGeneration) return;
+            if (generation !== bridgeGeneration) {
+                await Native.writeResponse({ id: request.id, ok: false, error: "Discord MCP stopped before executing the request" })
+                    .catch(error => logger.error("Bridge cancellation response failed", error));
+                continue;
+            }
             const task = handleBridgeRequest(request).catch(error => logger.error("Bridge response failed", error));
             inFlightRequests.add(task);
             void task.finally(() => inFlightRequests.delete(task));
@@ -943,13 +969,20 @@ export default definePlugin({
 
     async start() {
         const generation = ++bridgeGeneration;
-        await Native.initializeBridge();
+        bridgeSession?.controller.abort();
+        const session = bridgeSession = { id: crypto.randomUUID(), controller: new AbortController() };
+        await Native.initializeBridge(session.id);
         if (generation !== bridgeGeneration) return;
-        void bridgeLoop(generation);
+        void bridgeLoop(generation, session);
     },
 
     stop() {
         bridgeGeneration++;
+        if (bridgeSession) {
+            bridgeSession.controller.abort();
+            void Native.cancelRequests(bridgeSession.id).catch(error => logger.error("Bridge cancellation failed", error));
+            bridgeSession = undefined;
+        }
         clearSubscriptions();
     },
 });

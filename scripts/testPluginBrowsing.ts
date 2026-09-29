@@ -46,6 +46,7 @@ test("favorite ordering and enable filters update while unrelated settings reuse
     const catalog = f.create();
     const initial = catalog.read(all, null, 36);
     assert.deepEqual(names(initial), ["Bravo", "Alpha", "Charlie"]);
+    assert.deepEqual(initial.cards.map(card => card.isFavorite), [true, false, false], "cards carry the favorite marker they are sorted by");
     f.store.store.plugins.Bravo.privateValue = { retained: true };
     assert.equal(catalog.read(all, null, 36), initial, "private edits do not rebuild an unchanged list");
     f.store.store.plugins.Alpha = { enabled: true, isFavorite: true };
@@ -140,11 +141,13 @@ test("initial browsing reads presentation only for visible cards and reuses each
     t.diagnostic("388-plugin fixture: 36 presentation reads for the first page; 100 private-setting edits reused the complete displayed card list.");
 });
 
-test("the actual settings tab creates one page, reuses it after private edits, and supports keyboard paging and filter reset", () => {
-    const f = fixture(Array.from({ length: 388 }, (_, index) => ({ name: `Plugin${String(index).padStart(3, "0")}` })));
+function loadSettingsTab(f: ReturnType<typeof fixture>, tags: readonly string[] = []) {
     const hooks: { value: any; dependencies?: unknown[]; }[] = [];
     let cursor = 0;
     let cardElements = 0;
+    const effects: (() => void | (() => void))[] = [];
+    const timers: (() => void)[] = [];
+    const disableAllRequests: { count: number; confirm(): void; }[] = [];
     const equal = (a?: unknown[], b?: unknown[]) => !!a && !!b && a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
     const useMemo = (factory: () => unknown, dependencies: unknown[]) => {
         const index = cursor++;
@@ -156,22 +159,26 @@ test("the actual settings tab creates one page, reuses it after private edits, a
             if (type === "catalog-card") cardElements++;
             return { type, props: { ...props as object, children } };
         },
-        memo: () => "catalog-card", useEffect() {}, Fragment: "fragment"
+        memo: () => "catalog-card", Fragment: "fragment",
+        useDeferredValue: (value: unknown) => value,
+        startTransition: (update: () => void) => update(),
+        useEffect: (effect: () => void, dependencies: unknown[]) => useMemo(() => { effects.push(effect); }, dependencies),
     };
     const mocks: Record<string, unknown> = {
         "@api/PluginManager": { isPluginEnabled: f.isEnabled, hasAnyVisibleSettings: () => false, pluginRequiresRestart: () => false,
             stopPlugin: () => assert.fail("A plugin that never started does not need stopping") },
         "@api/Settings": { PlainSettings: f.store.plain, useSettings: () => f.store.store },
-        "@components/settings": { SettingsTab: "tab" },
+        "@components/Button": { Button: "button" },
         "@components/ErrorBoundary": { __esModule: true, default: "boundary" },
+        "@components/Icons": { ChevronSmallDownIcon: "chevron", MagnifyingGlassIcon: "search-icon", RestartIcon: "restart-icon" },
+        "@components/settings": { SettingsTab: "tab" },
         "@shared/pluginDefinition": { getLoadedPluginDefinition: () => undefined },
         "@utils/ChangeList": { ChangeList },
-        "@utils/guards": { isTruthy: Boolean }, "@utils/margins": { Margins: {} },
-        "@utils/misc": { classes: (...values: unknown[]) => values.filter(Boolean).join(" ") }, "@utils/native": {},
-        "@utils/react": { useCleanupEffect() {}, useIntersection: () => [null, false] },
-        "@utils/types": { PluginTags: [] },
+        "@utils/misc": { classes: (...values: unknown[]) => values.filter(Boolean).join(" ") },
+        "@utils/react": { useCleanupEffect() {} },
+        "@utils/types": { PluginTags: tags },
         "@webpack/common": {
-            React, TextInput: "input", Select: "select", SearchableSelect: "tags", Tooltip: "tooltip", useMemo,
+            React, useMemo,
             useCallback: (callback: unknown, deps: unknown[]) => useMemo(() => callback, deps),
             useRef: (initial: unknown) => useMemo(() => ({ current: initial }), []),
             useState(initial: unknown) {
@@ -182,35 +189,91 @@ test("the actual settings tab creates one page, reuses it after private edits, a
         },
         "~plugins": { __esModule: true, default: Object.fromEntries(Object.keys(f.plugins).map(name => [name, { name, started: false }])), PluginManifest: f.plugins, PluginMeta: f.metadata, ExcludedPlugins: {} },
         "./catalogView": catalogView, "./newPluginRelease": { getReleaseNewPlugins: () => null },
-        "./PluginCard": {}, "./PluginModal": {}, "./PluginStatCards": {}, "./UIElements": {},
+        "./PluginCard": {}, "./UIElements": {},
+        "./PluginModal": { openDisableAllModal: (count: number, confirm: () => void) => disableAllRequests.push({ count, confirm }) },
         "./shared": { cl: (name: string) => name, logger: {}, ExcludedReasons: {}, PluginDependencyList: "dependencies" }
     };
-    for (const component of ["BaseText", "Button", "Card", "Divider", "Heading", "Paragraph"]) mocks[`@components/${component}`] = { [component === "Heading" ? "HeadingTertiary" : component]: component.toLowerCase() };
     const code = transpileModule(readFileSync("src/components/settings/tabs/plugins/index.tsx", "utf8"), {
         compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
     }).outputText;
     const module = runInNewContext(`${code}\nexports;`, {
         exports: {}, IS_STANDALONE: false, VERSION: "test",
+        setTimeout: (callback: () => void) => timers.push(callback), clearTimeout() {},
         require(name: string) { if (name.endsWith(".css")) return {}; assert.ok(name in mocks, name); return mocks[name]; }
     });
     const render = () => { cursor = 0; return module.default(); };
-    const find = (tree: any, type: string): any[] => Array.isArray(tree) ? tree.flatMap(child => find(child, type))
-        : !tree || typeof tree !== "object" ? [] : [...(tree.type === type ? [tree] : []), ...find(tree.props?.children, type)];
-    const initial = render();
-    assert.equal(cardElements, 36);
+    /** Runs the effects of the last render and any timers they queued, like the browser would between frames. */
+    const idle = () => { for (const effect of effects.splice(0)) effect(); for (const timer of timers.splice(0)) timer(); };
+    return { render, idle, disableAllRequests, cardElements: () => cardElements };
+}
+
+const find = (tree: any, match: string | ((node: any) => boolean)): any[] => Array.isArray(tree) ? tree.flatMap(child => find(child, match))
+    : !tree || typeof tree !== "object" ? [] : [...((typeof match === "string" ? tree.type === match : match(tree)) ? [tree] : []), ...find(tree.props?.children, match)];
+const byComponent = (tree: unknown, name: string) => find(tree, node => node.type?.name === name);
+const chip = (tree: unknown, label: string) => byComponent(tree, "Chip").find(node => node.props.children.includes(label))!;
+const text = (node: any): string => typeof node === "string" || typeof node === "number" ? String(node) : Array.isArray(node) ? node.map(text).join("") : node?.props ? text(node.props.children) : "";
+
+test("the actual settings tab renders one page first, reuses it after private edits, then fills in the rest in the background", () => {
+    const f = fixture(Array.from({ length: 388 }, (_, index) => ({ name: `Plugin${String(index).padStart(3, "0")}` })));
+    const tab = loadSettingsTab(f);
+    tab.render();
+    assert.equal(tab.cardElements(), 48);
     f.store.store.plugins.Plugin000 = { enabled: false, privateValue: "changed" };
-    render();
-    assert.equal(cardElements, 36, "private edits create no new card elements");
-    find(initial, "button").find(button => button.props.children.join("").startsWith("Show more"))!.props.onClick();
-    const expanded = render();
-    assert.equal(find(expanded, "catalog-card").length, 72);
-    find(expanded, "input")[0].props.onChange("Plugin");
-    assert.equal(find(render(), "catalog-card").length, 36, "a new filter resets the visible page without assuming card heights");
+    tab.render();
+    assert.equal(tab.cardElements(), 48, "private edits create no new card elements");
+    let rendered = tab.render();
+    for (let step = 0; step < 20 && find(rendered, "catalog-card").length < 388; step++) {
+        tab.idle();
+        rendered = tab.render();
+    }
+    assert.equal(find(rendered, "catalog-card").length, 388, "the whole list becomes available without a show-more step");
+    assert.equal(find(rendered, node => node.type === "button" && text(node).startsWith("Show more")).length, 0);
+    byComponent(rendered, "SearchBar")[0].props.onChange("Plugin");
+    assert.equal(find(tab.render(), "catalog-card").length, 48, "a new filter resets the visible page without assuming card heights");
     f.store.store.plugins.Plugin000.enabled = true;
-    render().props.children[0].props.resetCheckAndDo();
+    find(tab.render(), node => node.type === "button" && text(node) === "Disable all")[0].props.onClick();
+    assert.equal(tab.disableAllRequests.length, 1);
+    tab.disableAllRequests[0].confirm();
     assert.equal(f.store.plain.plugins.Plugin000.enabled, false, "bulk disable includes a failed or unstarted enabled plugin");
-    const onRestartNeeded = find(render(), "catalog-card")[0].props.onRestartNeeded;
+    assert.equal(byComponent(tab.render(), "RestartBanner").length, 0);
+    const onRestartNeeded = find(tab.render(), "catalog-card")[0].props.onRestartNeeded;
     onRestartNeeded("Plugin000", "color");
     onRestartNeeded("Plugin000", "color");
-    assert.equal(render().props.children[0].props.required, true, "repeated value edits must not cancel a restart warning");
+    const banner = byComponent(tab.render(), "RestartBanner");
+    assert.equal(banner.length, 1, "repeated value edits must not cancel a restart warning");
+    assert.deepEqual([...banner[0].props.pluginNames], ["Plugin000"]);
+    onRestartNeeded("Plugin001", "enabled");
+    onRestartNeeded("Plugin001", "enabled");
+    assert.deepEqual([...byComponent(tab.render(), "RestartBanner")[0].props.pluginNames], ["Plugin000"], "toggling a plugin back cancels only its own restart");
+});
+
+test("filter chips toggle statuses and tags, and clearing restores the full catalog", () => {
+    const f = fixture([
+        { name: "Alpha", tags: ["Chat"] }, { name: "Bravo", tags: ["Chat", "Fun"] }, { name: "Charlie" },
+        { name: "Core", required: true }
+    ]);
+    f.store.store.plugins.Alpha = { enabled: true };
+    const tab = loadSettingsTab(f, ["Chat", "Fun"]);
+    const cardNames = (tree: unknown) => find(tree, "catalog-card").map(card => card.props.card.plugin.name);
+    let tree = tab.render();
+    assert.deepEqual(cardNames(tree), ["Alpha", "Bravo", "Charlie"], "required plugins start collapsed");
+    assert.equal(find(tree, node => node.props?.className === "section-toggle")[0].props["aria-expanded"], false);
+    chip(tree, "Enabled").props.onClick();
+    tree = tab.render();
+    assert.deepEqual(cardNames(tree), ["Alpha"]);
+    assert.equal(chip(tree, "Enabled").props.active, true);
+    chip(tree, "Enabled").props.onClick();
+    tree = tab.render();
+    assert.equal(chip(tree, "All").props.active, true, "clicking the active status again returns to all plugins");
+    assert.equal(byComponent(tree, "Chip").some(node => node.props.children.includes("Fun")), false, "tag chips stay hidden until requested");
+    chip(tree, "Tags").props.onClick();
+    chip(tab.render(), "Chat").props.onClick();
+    chip(tab.render(), "Fun").props.onClick();
+    tree = tab.render();
+    assert.deepEqual(cardNames(tree), ["Bravo"], "tags intersect");
+    find(tree, node => node.type === "button" && text(node) === "Clear filters")[0].props.onClick();
+    tree = tab.render();
+    assert.deepEqual(cardNames(tree), ["Alpha", "Bravo", "Charlie"]);
+    find(tree, node => node.props?.className === "section-toggle")[0].props.onClick();
+    assert.deepEqual(cardNames(tab.render()), ["Alpha", "Bravo", "Charlie", "Core"], "the required section expands on request");
 });

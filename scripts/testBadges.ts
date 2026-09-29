@@ -98,13 +98,36 @@ test("badge refresh retries after initial failure and installs independent succe
     assert.equal(intervals.size, 0);
 });
 
+test("donor feeds accept badges without tooltips and preserve neighboring descriptions", async () => {
+    const { plugin, refresh, requests, errors } = loadBadges();
+    const pending = refresh();
+    requests[0].resolve(response({ fixture: [
+        { badge: "unnamed.png" },
+        { badge: "named.png", tooltip: "Equicord Donor" },
+        { badge: "empty.png", tooltip: "" }
+    ] }));
+    requests[1].resolve(response({ fixture: [{ badge: "equicord.png" }] }));
+    await pending;
+    assert.equal(errors.length, 0);
+    assert.deepEqual(Array.from(plugin.getDonorBadges("fixture"), ({ iconSrc, description }: { iconSrc: string; description?: string; }) => [iconSrc, description]), [
+        ["unnamed.png", undefined], ["named.png", "Protonn Cord Donor"], ["empty.png", ""]
+    ]);
+    assert.equal(plugin.getEquicordDonorBadges("fixture")[0].iconSrc, "equicord.png");
+    assert.equal(plugin.getEquicordDonorBadges("fixture")[0].description, undefined);
+});
+
 test("malformed and HTTP error responses retain previously validated badges", async () => {
     const { plugin, refresh, requests } = loadBadges();
     let pending = refresh();
     requests[0].resolve(response({ fixture: [{ tooltip: "Good", badge: "good.png" }] }));
     requests[1].resolve(response({ fixture: [{ tooltip: "Good", badge: "good.png" }] }));
     await pending;
-    for (const invalid of [null, [], { fixture: {} }, { fixture: [null] }, { fixture: [{ tooltip: 4, badge: "bad.png" }] }]) {
+    for (const invalid of [
+        null, [], { fixture: {} }, { fixture: [null] },
+        { fixture: [{ tooltip: 4, badge: "bad.png" }] }, { fixture: [{ tooltip: null, badge: "bad.png" }] },
+        { fixture: [{ tooltip: [], badge: "bad.png" }] }, { fixture: [{ tooltip: {}, badge: "bad.png" }] },
+        { fixture: [{ tooltip: "Missing image" }] }, { fixture: [{ badge: 42 }] }
+    ]) {
         const offset = requests.length;
         pending = refresh();
         requests[offset].resolve(response(invalid));

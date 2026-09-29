@@ -81,29 +81,35 @@ function loadPluginModal() {
         lookups.push(keys);
         return { clickableAvatar: "clickable-avatar", avatar: "avatar-image", moreUsers: "more-users" };
     };
+    const toggles: string[] = [];
+    const toggle = { result: "toggled" };
+    const requiredBy = { dependency: false };
     const mocks: Record<string, unknown> = {
         "./PluginModal.css": {},
         "@api/Commands": { generateId: () => "generated-user" },
-        "@api/PluginManager": { hasAnyVisibleSettings: () => true, isSettingHidden: (_settings: unknown, option: { hidden?: boolean; }) => !!option.hidden },
+        "@api/PluginManager": {
+            hasAnyVisibleSettings: () => true,
+            isPluginEnabled: (name: string) => name === "Example" ? settings.plugins.Example.enabled : name === "Consumer",
+            isSettingHidden: (_settings: unknown, option: { hidden?: boolean; }) => !!option.hidden
+        },
         "@api/Settings": { useSettings: (paths: string[]) => { subscriptions.push([...paths]); return settings; } },
         "@components/BaseText": { BaseText: "text" },
         "@components/Button": { Button: "button" },
         "@components/ErrorBoundary": { __esModule: true, default: "boundary" },
-        "@components/Flex": { Flex: "flex" },
+        "@components/Icons": { WarningIcon: "warning-icon" },
         "@components/Paragraph": { Paragraph: "paragraph" },
+        "@components/Switch": { Switch: "switch" },
+        "@shared/pluginDefinition": { getLoadedPluginDefinition: () => undefined },
         "@shared/vencordUserAgent": { gitRemote: "ProtonDev-sys/ProtonnCord" },
         "@utils/css": { classNameFactory: (prefix: string) => (name: string) => prefix + name },
         "@utils/lazy": lazy,
-        "@utils/margins": { Margins: {} },
-        "@utils/misc": { classes: (...names: unknown[]) => names.filter(Boolean).join(" "), isObjectEmpty: (value: object) => !Object.keys(value).length },
         "@utils/types": { OptionType: optionType },
         "@webpack": {
             findCssClasses,
             findCssClassesLazy: (...keys: string[]) => lazy.proxyLazy(() => findCssClasses(...keys)),
-            findComponentByCodeLazy: () => "lazy-component"
         },
         "@webpack/common": {
-            React, Clickable: "clickable", Modal: "modal", Text: "text", Tooltip: "tooltip", UserSummaryItem: "user-summary",
+            React, Clickable: "clickable", ConfirmModal: "confirm-modal", Modal: "modal", Tooltip: "tooltip", UserSummaryItem: "user-summary",
             FluxDispatcher: { dispatch: (event: unknown) => dispatched.push(event) },
             openModal: (opener: (props: object) => any) => modalOpeners.push(opener),
             useEffect: (effect: () => void, dependencies: unknown[]) => useMemo(() => { effects.push(effect); }, dependencies),
@@ -118,11 +124,28 @@ function loadPluginModal() {
             UserStore: { getCurrentUser: () => { currentUserReads++; return currentUser; } },
             UserUtils: { getUser: () => { throw new Error("Author requests must wait for the effect"); } },
         },
-        "~plugins": { PluginMeta: { Example: { folderName: "src/plugins/example", userPlugin: false } } },
+        "~plugins": {
+            PluginMeta: { Example: { folderName: "src/plugins/example", userPlugin: false } },
+            PluginManifest: {
+                Example: {},
+                get Consumer() { return { dependencies: requiredBy.dependency ? ["Example"] : [] }; },
+            },
+        },
         "./components": { OptionComponentMap: { [optionType.BOOLEAN]: "boolean-setting", [optionType.STRING]: "string-setting" } },
         "./ContributorModal": { openContributorModal: (user: unknown) => contributorOpens.push(user) },
         "./PluginModalButtons": { FavoriteButton: "favorite", GithubButton: "github", WebsiteButton: "website" },
+        "./pluginToggle": {
+            togglePlugin(name: string, onRestartNeeded: (name: string, key: string) => void) {
+                toggles.push(name);
+                if (toggle.result === "restart") onRestartNeeded(name, "enabled");
+                return toggle.result;
+            }
+        },
         "./settingUpdates": scheduler,
+        "./shared": {
+            getPluginSource: () => ({ label: "Vencord", title: "Vencord plugin" }),
+            restartAfterSaving() {},
+        },
     };
     const module = runInNewContext(`${compile("src/components/settings/tabs/plugins/PluginModal.tsx")}\nexports;`, {
         exports: {}, structuredClone,
@@ -135,7 +158,7 @@ function loadPluginModal() {
     const render = () => { cursor = 0; return module.default({ plugin, onClose, transitionState: "opening", onRestartNeeded: (key: string) => restartKeys.push(key) }); };
     const flushSettingTimers = () => { const work = [...settingTimers.values()]; settingTimers.clear(); for (const callback of work) callback(); };
     return {
-        module, render, plugin, settings, onClose, UserRecord, lookups, effects, timers, dispatched, subscriptions,
+        module, render, plugin, settings, onClose, UserRecord, lookups, effects, timers, dispatched, subscriptions, toggles, toggle, requiredBy,
         contributorOpens, restartKeys, modalOpeners, optionType, settingTimers, flushSettingTimers, currentUserReads: () => currentUserReads, timersRun: () => timersRun,
     };
 }
@@ -226,7 +249,7 @@ test("reset cancels pending saves, restores selected defaults and isolates mutab
     Object.assign(f.settings.plugins.Example, { selected: "edited", custom: { list: ["edited"] }, enabled: true, isFavorite: true });
     const modal = f.render();
     find(modal, "boolean-setting")[0].props.onChange(true);
-    find(modal, "tooltip").map(tooltip => tooltip.props.children[0]({})).find(node => node.type === "button").props.onClick();
+    find(modal, "button").find(node => node.props.children.includes("Reset to defaults")).props.onClick();
     f.modalOpeners[0]({ onClose() {} }).props.onConfirm();
     f.flushSettingTimers();
     const values = f.settings.plugins.Example as typeof f.settings.plugins.Example & { selected: string; custom: typeof defaults; };
@@ -237,4 +260,41 @@ test("reset cancels pending saves, restores selected defaults and isolates mutab
     values.custom.list.push("new edit");
     assert.deepEqual(defaults.list, ["original"]);
     assert.equal(find(f.render(), "boundary").some(boundary => boundary.props.key === "1:sound"), true, "reset remounts local input drafts");
+});
+
+test("reset restores the false fallback for boolean options without an explicit default", () => {
+    const f = loadPluginModal();
+    delete (f.plugin.settings.def.sound as { default?: boolean; }).default;
+    Object.assign(f.settings.plugins.Example, { sound: true, enabled: true, isFavorite: true, privateValue: "retained" });
+    const modal = f.render();
+    find(modal, "button").find(node => node.props.children.includes("Reset to defaults")).props.onClick();
+    f.modalOpeners[0]({ onClose() {} }).props.onConfirm();
+    assert.equal(f.settings.plugins.Example.sound, false);
+    assert.equal(f.settings.plugins.Example.enabled, true);
+    assert.equal(f.settings.plugins.Example.isFavorite, true);
+    assert.equal((f.settings.plugins.Example as { privateValue?: string; }).privateValue, "retained");
+    assert.deepEqual(f.restartKeys, ["Example"]);
+});
+
+test("the modal enable switch toggles the plugin, reports restarts and locks required plugins", () => {
+    const f = loadPluginModal();
+    const statusSwitch = (tree: unknown) => find(tree, "switch")[0];
+    const statusText = (tree: unknown) => find(tree, "text").map(node => node.props.children.join("")).join(" | ");
+    let modal = f.render();
+    assert.equal(statusSwitch(modal).props.checked, false);
+    assert.equal(statusSwitch(modal).props.disabled, false);
+    statusSwitch(modal).props.onChange(true);
+    assert.deepEqual(f.toggles, ["Example"]);
+    f.toggle.result = "restart";
+    statusSwitch(f.render()).props.onChange(true);
+    assert.deepEqual(f.restartKeys, ["enabled"], "restart-bound toggles reach the settings tab restart list");
+    modal = f.render();
+    assert.match(statusText(modal), /Restart Discord to apply this change/);
+    assert.equal(find(modal, "button").some(node => node.props.children.includes("Restart now")), true);
+    statusSwitch(modal).props.onChange(false);
+    assert.doesNotMatch(statusText(f.render()), /Restart Discord/, "toggling back clears the pending restart notice");
+    f.requiredBy.dependency = true;
+    modal = f.render();
+    assert.equal(statusSwitch(modal).props.disabled, true);
+    assert.match(statusText(modal), /Required by Consumer/);
 });

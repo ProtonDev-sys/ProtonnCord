@@ -19,36 +19,38 @@
 import "./PluginModal.css";
 
 import { generateId } from "@api/Commands";
-import { hasAnyVisibleSettings, isSettingHidden } from "@api/PluginManager";
+import { hasAnyVisibleSettings, isPluginEnabled, isSettingHidden } from "@api/PluginManager";
 import { useSettings } from "@api/Settings";
 import { BaseText } from "@components/BaseText";
 import { Button } from "@components/Button";
 import ErrorBoundary from "@components/ErrorBoundary";
-import { Flex } from "@components/Flex";
+import { WarningIcon } from "@components/Icons";
 import { Paragraph } from "@components/Paragraph";
+import { Switch } from "@components/Switch";
+import { getLoadedPluginDefinition } from "@shared/pluginDefinition";
 import { gitRemote } from "@shared/vencordUserAgent";
 import { classNameFactory } from "@utils/css";
 import { makeLazy } from "@utils/lazy";
-import { Margins } from "@utils/margins";
-import { classes, isObjectEmpty } from "@utils/misc";
 import { OptionType, Plugin, PluginTag } from "@utils/types";
 import { RenderModalProps, User } from "@vencord/discord-types";
-import { findComponentByCodeLazy, findCssClasses } from "@webpack";
-import { Clickable, FluxDispatcher, Modal, openModal, React, Text, Toasts, Tooltip, useEffect, useMemo, useRef, UserStore, UserSummaryItem, UserUtils, useState } from "@webpack/common";
+import { findCssClasses } from "@webpack";
+import { Clickable, ConfirmModal, FluxDispatcher, Modal, openModal, React, Toasts, Tooltip, useEffect, useMemo, useRef, UserStore, UserSummaryItem, UserUtils, useState } from "@webpack/common";
 import { Constructor } from "type-fest";
 
-import { PluginMeta } from "~plugins";
+import { PluginManifest, PluginMeta } from "~plugins";
 
 import { OptionComponentMap } from "./components";
 import { openContributorModal } from "./ContributorModal";
 import { FavoriteButton, GithubButton, WebsiteButton } from "./PluginModalButtons";
+import { togglePlugin } from "./pluginToggle";
 import { createSettingChangeScheduler } from "./settingUpdates";
+import { getPluginSource, restartAfterSaving } from "./shared";
 
 const cl = classNameFactory("vc-plugin-modal-");
 
+const MAX_AUTHOR_AVATARS = 6;
+
 const getAvatarStyles = makeLazy(() => findCssClasses("moreUsers", "avatar", "clickableAvatar"));
-const ConfirmModal = findComponentByCodeLazy('parentComponent:"ConfirmModal"');
-const WarningIcon = findComponentByCodeLazy("3.15H3.29c-1.74");
 const getUserRecord = makeLazy(() => UserStore.getCurrentUser().constructor as Constructor<Partial<User>>);
 
 interface PluginModalProps extends RenderModalProps {
@@ -84,6 +86,21 @@ function PluginTags({ tags }: { tags: PluginTag[]; }) {
     );
 }
 
+/** Enabled plugins that keep this plugin on; an empty list means it is required by Protonn Cord itself. */
+function getRequiredBy(plugin: Plugin): string[] | null {
+    if (plugin.required) return [];
+    const dependants = Object.entries(PluginManifest)
+        .filter(([name, entry]) => entry.dependencies?.includes(plugin.name) && isPluginEnabled(name))
+        .map(([name]) => name);
+    if (dependants.length) return dependants;
+    return getLoadedPluginDefinition(plugin.name)?.isDependency ? [] : null;
+}
+
+function formatAuthors(names: string[]) {
+    if (names.length <= 3) return names.join(", ").replace(/, ([^,]*)$/, " and $1");
+    return `${names.slice(0, 2).join(", ")} and ${names.length - 2} others`;
+}
+
 export default function PluginModal({ plugin, onRestartNeeded, onClose, transitionState }: PluginModalProps) {
     const AvatarStyles = getAvatarStyles();
     const pluginSettings = useSettings([`plugins.${plugin.name}.*`]).plugins[plugin.name];
@@ -93,6 +110,7 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
     const fallbackAuthors = useMemo(() => [makeDummyUser({ username: "Loading...", id: "-1465912127305809920" })], []);
     const [authors, setAuthors] = useState<Partial<User>[]>([]);
     const [settingsVersion, setSettingsVersion] = useState(0);
+    const [restartPending, setRestartPending] = useState(false);
     const restartCallback = useRef(onRestartNeeded);
     restartCallback.current = onRestartNeeded;
     const settingChanges = useMemo(() => createSettingChangeScheduler((key, newValue) => {
@@ -108,7 +126,7 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
         let cancelled = false;
         setAuthors([]);
         (async () => {
-            for (const user of plugin.authors.slice(0, 6)) {
+            for (const user of plugin.authors.slice(0, MAX_AUTHOR_AVATARS)) {
                 if (cancelled) break;
                 try {
                     const author = user.id
@@ -126,16 +144,21 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
     }, [plugin.authors]);
 
     function handleResetClick() {
-        openWarningModal(plugin, onRestartNeeded, true, undefined, () => {
+        openResetModal(plugin, onRestartNeeded, () => {
             settingChanges.cancel();
             setSettingsVersion(version => version + 1);
         });
     }
 
+    function handleToggle() {
+        const result = togglePlugin(plugin.name, (_, key) => restartCallback.current(key));
+        if (result === "restart") setRestartPending(pending => !pending);
+    }
+
     function renderSettings() {
         const { settings } = plugin;
         if (!hasSettings || !settings)
-            return <Paragraph>There are no settings for this plugin.</Paragraph>;
+            return <Paragraph className={cl("no-settings")}>This plugin has no settings.</Paragraph>;
 
         const options = Object.entries(settings.def).map(([key, setting]) => {
             if (setting.type === OptionType.CUSTOM) return null;
@@ -158,14 +181,14 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
         });
 
         return (
-            <div className="vc-plugins-settings">
+            <div className={`vc-plugins-settings ${cl("settings-list")}`}>
                 {options}
             </div>
         );
     }
 
     function renderMoreUsers(_label: string) {
-        const remainingAuthors = plugin.authors.slice(6);
+        const remainingAuthors = plugin.authors.slice(MAX_AUTHOR_AVATARS);
 
         return (
             <Tooltip text={remainingAuthors.map(u => u.name).join(", ")}>
@@ -184,6 +207,14 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
 
     const pluginMeta = PluginMeta[plugin.name];
     const isEquicordPlugin = pluginMeta.folderName.startsWith("src/equicordplugins/");
+    const source = getPluginSource(pluginMeta, plugin.isModified);
+    const enabled = isPluginEnabled(plugin.name);
+    const requiredBy = getRequiredBy(plugin);
+
+    let statusDetail: string;
+    if (requiredBy) statusDetail = requiredBy.length ? `Required by ${requiredBy.join(", ")}.` : "Required for Protonn Cord to work.";
+    else if (restartPending) statusDetail = "Restart Discord to apply this change.";
+    else statusDetail = enabled ? "This plugin is running." : "Turn this on to use the plugin.";
 
     return (
         <Modal
@@ -193,30 +224,19 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
             title={
                 <div className={cl("header")}>
                     <BaseText tag="h1" weight="semibold" size="lg">{plugin.name}</BaseText>
+                    {source && <span className={cl("source")} title={source.title}>{source.label}</span>}
                 </div>
             }
             subtitle={
                 <div className={cl("info")}>
-                    <div>
-                        <Paragraph size="md">{plugin.description}</Paragraph>
-                        {!!plugin.tags?.length && <PluginTags tags={plugin.tags} />}
-                    </div>
+                    <Paragraph size="md">{plugin.description}</Paragraph>
+                    {!!plugin.tags?.length && <PluginTags tags={plugin.tags} />}
                 </div>
             }
         >
-            {!!plugin.settingsAboutComponent && (
-                <div className={classes(Margins.top16, cl("about-box"))}>
-                    <section>
-                        <ErrorBoundary message="An error occurred while rendering this plugin's custom Info Component">
-                            <plugin.settingsAboutComponent />
-                        </ErrorBoundary>
-                    </section>
-                </div>
-            )}
-            <div className={"vc-settings-modal-content"}>
-                <section>
-                    <Text variant="heading-lg/semibold" className={classes(Margins.top8, Margins.bottom8)}>Authors</Text>
-                    <div style={{ width: "fit-content" }}>
+            <div className={cl("content")}>
+                <div className={cl("meta")}>
+                    <div className={cl("authors")}>
                         <ErrorBoundary noop>
                             <UserSummaryItem
                                 users={authors.length ? authors : fallbackAuthors}
@@ -239,53 +259,69 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
                                 )}
                             />
                         </ErrorBoundary>
+                        {plugin.authors.length > 0 && (
+                            <span className={cl("author-names")}>
+                                by {formatAuthors(plugin.authors.map(author => author.name))}
+                            </span>
+                        )}
                     </div>
-                </section>
+                    {!pluginMeta.userPlugin && (
+                        <div className={cl("links")}>
+                            <FavoriteButton
+                                isFavorite={pluginSettings.isFavorite ?? false}
+                                onClick={() => pluginSettings.isFavorite = !pluginSettings.isFavorite}
+                            />
+                            <WebsiteButton
+                                text="Website"
+                                href={isEquicordPlugin ? `https://github.com/ProtonDev-sys/ProtonnCord/tree/main/${pluginMeta.folderName}` : `https://vencord.dev/plugins/${plugin.name}`}
+                            />
+                            <GithubButton
+                                text="Source Code"
+                                href={`https://github.com/${gitRemote}/tree/main/${pluginMeta.folderName}`}
+                            />
+                        </div>
+                    )}
+                </div>
 
-                <section>
-                    <BaseText size="lg" weight="semibold" color="text-strong" className={classes(Margins.top16, Margins.bottom8)}>Settings</BaseText>
+                <div className={cl("status", { "status-enabled": enabled })}>
+                    <div className={cl("status-text")}>
+                        <BaseText size="md" weight="semibold" className={cl("status-title")}>
+                            {enabled ? "Enabled" : "Disabled"}
+                        </BaseText>
+                        <BaseText size="sm" className={cl("status-detail")}>{statusDetail}</BaseText>
+                    </div>
+                    {restartPending && !requiredBy && (
+                        <Button size="small" variant="secondary" onClick={restartAfterSaving}>Restart now</Button>
+                    )}
+                    <Switch
+                        aria-label={`Enable ${plugin.name}`}
+                        checked={enabled}
+                        disabled={!!requiredBy}
+                        onChange={handleToggle}
+                    />
+                </div>
+
+                {!!plugin.settingsAboutComponent && (
+                    <div className={cl("about-box")}>
+                        <ErrorBoundary message="An error occurred while rendering this plugin's custom Info Component">
+                            <plugin.settingsAboutComponent />
+                        </ErrorBoundary>
+                    </div>
+                )}
+
+                <section className={cl("settings")}>
+                    <div className={cl("section-header")}>
+                        <BaseText size="lg" weight="semibold" color="text-strong">Settings</BaseText>
+                        {hasSettings && (
+                            <Button size="small" variant="secondary" onClick={handleResetClick}>
+                                Reset to defaults
+                            </Button>
+                        )}
+                    </div>
                     {renderSettings()}
                 </section>
             </div>
-            <div>
-                <Flex flexDirection="column" style={{ width: "100%" }}>
-                    <Flex style={{ justifyContent: "space-between", alignItems: "center" }}>
-                        {hasSettings ? (
-                            <Tooltip text="Reset to default settings" shouldShow={!isObjectEmpty(pluginSettings)}>
-                                {({ onMouseEnter, onMouseLeave }) => (
-                                    <Button
-                                        className={cl("disable-warning")}
-                                        size="small"
-                                        variant="primary"
-                                        onClick={handleResetClick}
-                                        onMouseEnter={onMouseEnter}
-                                        onMouseLeave={onMouseLeave}
-                                    >
-                                        Reset
-                                    </Button>
-                                )}
-                            </Tooltip>
-                        ) : <div />}
-                        {!pluginMeta.userPlugin && (
-                            <div className={cl("links")}>
-                                <FavoriteButton
-                                    isFavorite={pluginSettings.isFavorite ?? false}
-                                    onClick={() => pluginSettings.isFavorite = !pluginSettings.isFavorite}
-                                />
-                                <WebsiteButton
-                                    text="Website"
-                                    href={isEquicordPlugin ? `https://github.com/ProtonDev-sys/ProtonnCord/tree/main/${pluginMeta.folderName}` : `https://vencord.dev/plugins/${plugin.name}`}
-                                />
-                                <GithubButton
-                                    text="Source Code"
-                                    href={`https://github.com/${gitRemote}/tree/main/${pluginMeta.folderName}`}
-                                />
-                            </div>
-                        )}
-                    </Flex>
-                </Flex>
-            </div>
-        </Modal >
+        </Modal>
     );
 }
 
@@ -299,7 +335,7 @@ export function openPluginModal(plugin: Plugin, onRestartNeeded?: (pluginName: s
     ));
 }
 
-function resetSettings(plugin: Plugin, onRestartNeeded?: (pluginName: string) => void) {
+function resetSettings(plugin: Plugin, onRestartNeeded?: (key: string) => void) {
     const defaultSettings = plugin.settings?.def;
     const pluginName = plugin.name;
 
@@ -317,6 +353,8 @@ function resetSettings(plugin: Plugin, onRestartNeeded?: (pluginName: string) =>
             newSettings[key] = defaultValue !== undefined ? defaultValue : "";
         } else if (defaultValue !== undefined) {
             newSettings[key] = defaultValue;
+        } else if (setting.type === OptionType.BOOLEAN) {
+            newSettings[key] = false;
         } else if (setting.type === OptionType.SELECT) {
             const selected = setting.options.find(option => option.default);
             if (selected) newSettings[key] = selected.value;
@@ -354,34 +392,48 @@ function resetSettings(plugin: Plugin, onRestartNeeded?: (pluginName: string) =>
     });
 }
 
-export function openWarningModal(plugin?: Plugin | null, onRestartNeeded?: (pluginName: string) => void, isPlugin = true, enabledPlugins?: number | null, reset?: () => void) {
+function IrreversibleWarning() {
+    return (
+        <div className={cl("warning")}>
+            <WarningIcon width={16} height={16} />
+            <span>This action cannot be undone.</span>
+        </div>
+    );
+}
+
+export function openResetModal(plugin: Plugin, onRestartNeeded?: (key: string) => void, beforeReset?: () => void) {
     openModal(props => (
         <ConfirmModal
             {...props}
-            className={cl("confirm")}
-            header={isPlugin ? "Reset Settings" : "Disable Plugins"}
-            confirmText={isPlugin ? "Reset" : "Disable All"}
+            title="Reset settings"
+            confirmText="Reset"
             cancelText="Cancel"
+            variant="critical-primary"
             onConfirm={() => {
-                if (isPlugin && plugin) {
-                    reset?.();
-                    resetSettings(plugin, onRestartNeeded);
-                } else {
-                    reset?.();
-                }
+                beforeReset?.();
+                resetSettings(plugin, onRestartNeeded);
             }}
-            onCancel={props.onClose}
         >
             <Paragraph>
-                {isPlugin
-                    ? <>Are you sure you want to reset all settings for <strong>{plugin?.name}</strong> to their default values?</>
-                    : `Are you sure you want to disable ${enabledPlugins} plugins?`
-                }
+                Are you sure you want to reset all settings for <strong>{plugin.name}</strong> to their default values?
             </Paragraph>
-            <div className={classes(Margins.top16, cl("warning"))}>
-                <WarningIcon color="var(--text-feedback-critical)" />
-                <span>This action cannot be undone.</span>
-            </div>
+            <IrreversibleWarning />
+        </ConfirmModal>
+    ));
+}
+
+export function openDisableAllModal(enabledPlugins: number, disableAll: () => void) {
+    openModal(props => (
+        <ConfirmModal
+            {...props}
+            title="Disable all plugins"
+            confirmText="Disable all"
+            cancelText="Cancel"
+            variant="critical-primary"
+            onConfirm={disableAll}
+        >
+            <Paragraph>Are you sure you want to disable {enabledPlugins} plugins?</Paragraph>
+            <IrreversibleWarning />
         </ConfirmModal>
     ));
 }

@@ -348,8 +348,10 @@ test("Discord MCP cannot start polling or send a pending reply after stop", asyn
             }
         }
     }, {
+        crypto, AbortController,
         VencordNative: { pluginHelpers: { DiscordMCP: {
             initializeBridge: () => new Promise<void>(resolve => { releaseInit = resolve; }),
+            cancelRequests: async () => {},
             takeRequests: () => { polls++; }
         } } }
     });

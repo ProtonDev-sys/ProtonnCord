@@ -1,0 +1,36 @@
+name: Promote release channels
+# A newer nightly push restarts the three-hour wait. Nightly needs Test, Release
+# and Mobile nightly; staging needs Test and Release before main can advance.
+# Failed checks require a successful rerun; merge conflicts leave branches intact.
+on:
+    schedule:
+        # First available tick after three hours; GitHub may delay scheduled runs.
+        - cron: "7,17,27,37,47,57 * * * *"
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: promote-release-channels
+    cancel-in-progress: false
+
+jobs:
+    promote:
+        if: github.repository == 'ProtonDev-sys/ProtonnCord' && github.ref == 'refs/heads/main'
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: write
+            actions: write
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+              with:
+                  node-version: 24
+            - name: Promote mature, verified revisions
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: node scripts/promoteChannels.mjs

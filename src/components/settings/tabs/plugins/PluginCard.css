@@ -1,0 +1,118 @@
+.vc-plugin-card-root {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    box-sizing: border-box;
+    height: 100%;
+    min-width: 0;
+    padding: 12px 12px 10px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md, 8px);
+    background-color: var(--card-background-default, var(--background-secondary));
+    color: var(--text-default);
+    cursor: pointer;
+    transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.vc-plugin-card-root:hover {
+    border-color: var(--border-strong, var(--border-normal));
+}
+
+.vc-plugin-card-enabled {
+    box-shadow: inset 3px 0 0 var(--control-primary-background-default, var(--brand-500));
+}
+
+.vc-plugin-card-disabled {
+    box-shadow: inset 3px 0 0 var(--border-strong, var(--border-normal));
+}
+
+.vc-plugin-card-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.vc-plugin-card-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-strong);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vc-plugin-card-favorite {
+    flex-shrink: 0;
+    color: var(--status-warning, #f0b232);
+}
+
+.vc-plugin-card-actions {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    cursor: default;
+}
+
+.vc-plugin-card-details {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: var(--radius-sm, 4px);
+    background: transparent;
+    color: var(--interactive-icon-default, var(--interactive-normal));
+    cursor: pointer;
+}
+
+.vc-plugin-card-details:hover,
+.vc-plugin-card-details:focus-visible {
+    background: var(--control-icon-only-background-hover, var(--background-mod-subtle));
+    color: var(--interactive-icon-hover, var(--interactive-hover));
+}
+
+.vc-plugin-card-description {
+    display: -webkit-box;
+    margin: 0;
+    overflow: hidden;
+    color: var(--text-subtle, var(--text-muted));
+    font-size: 13px;
+    line-height: 18px;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.vc-plugin-card-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin-top: auto;
+    padding-top: 2px;
+    font-size: 11px;
+    line-height: 14px;
+}
+
+.vc-plugin-card-source {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.vc-plugin-card-required {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-feedback-warning, var(--text-muted));
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

@@ -1,5 +1,6 @@
 name: Release
 on:
+    workflow_dispatch:
     push:
         branches:
             - main
@@ -20,6 +21,7 @@ concurrency:
 jobs:
     Build:
         name: Build Protonn Cord
+        if: contains(fromJSON('["refs/heads/main", "refs/heads/staging", "refs/heads/nightly"]'), github.ref)
         runs-on: ubuntu-latest
 
         steps:

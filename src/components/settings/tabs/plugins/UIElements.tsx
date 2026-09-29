@@ -10,7 +10,6 @@ import { ChatBarButtonMap } from "@api/ChatButtons";
 import { MessagePopoverButtonMap } from "@api/MessagePopover";
 import { SettingsPluginUiElements, useSettings } from "@api/Settings";
 import { BaseText } from "@components/BaseText";
-import { Card } from "@components/Card";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { PlaceholderIcon } from "@components/Icons";
 import { Paragraph } from "@components/Paragraph";
@@ -20,32 +19,12 @@ import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
 import { IconComponent } from "@utils/types";
 import { RenderModalProps } from "@vencord/discord-types";
-import { Clickable, Modal, openModal } from "@webpack/common";
+import { Modal, openModal } from "@webpack/common";
 
 const cl = classNameFactory("vc-plugin-ui-elements-");
 
-export function UIElementsButton() {
-    return (
-        <Clickable onClick={() => openModal(modalProps => <UIElementsModal {...modalProps} />)}>
-            <Card className={cl("button")} defaultPadding>
-                <div className={cl("button-description")}>
-                    <Paragraph size="md" weight="semibold">
-                        Manage plugin UI elements
-                    </Paragraph>
-                    <Paragraph size="xs">
-                        Allows you to hide buttons you don't like
-                    </Paragraph>
-                </div>
-                <svg
-                    className={cl("button-arrow")}
-                    aria-hidden="true"
-                    viewBox="0 0 24 24"
-                >
-                    <path fill="currentColor" d="M9.3 5.3a1 1 0 0 0 0 1.4l5.29 5.3-5.3 5.3a1 1 0 1 0 1.42 1.4l6-6a1 1 0 0 0 0-1.4l-6-6a1 1 0 0 0-1.42 0Z" />
-                </svg>
-            </Card>
-        </Clickable >
-    );
+export function openUIElementsModal() {
+    openModal(modalProps => <UIElementsModal {...modalProps} />);
 }
 
 function Section(props: {

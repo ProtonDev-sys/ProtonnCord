@@ -9,7 +9,24 @@ export interface NormalizedGuildIcons {
     needsWrite: boolean;
 }
 
+const IMAGE_MIME_TYPES: Record<string, string> = {
+    apng: "image/apng",
+    avif: "image/avif",
+    gif: "image/gif",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp"
+};
+
+export function normalizeGuildIconFile(file: File): Blob | null {
+    if (file.type.startsWith("image/")) return file;
+    const extension = file.name.match(/\.(apng|avif|gif|jpe?g|png|webp)$/i)?.[1].toLowerCase();
+    return extension ? file.slice(0, file.size, IMAGE_MIME_TYPES[extension]) : null;
+}
+
 export async function normalizeStoredGuildIcon(value: unknown): Promise<Blob | null> {
+    if (value instanceof File) return normalizeGuildIconFile(value);
     if (value instanceof Blob) return value.type.startsWith("image/") ? value : null;
     if (typeof value !== "string" || !value.startsWith("data:image/")) return null;
 
@@ -32,7 +49,7 @@ export async function normalizeStoredGuildIcons(value: unknown): Promise<Normali
     for (const [guildId, storedIcon] of Object.entries(value)) {
         const icon = await normalizeStoredGuildIcon(storedIcon);
         if (icon) icons[guildId] = icon;
-        if (!(storedIcon instanceof Blob) || !icon) needsWrite = true;
+        if (!icon || icon !== storedIcon) needsWrite = true;
     }
 
     return { icons, needsWrite };

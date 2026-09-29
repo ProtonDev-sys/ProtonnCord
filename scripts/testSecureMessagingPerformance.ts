@@ -3,12 +3,6 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { exactArrayBuffer } from "../src/equicordplugins/secureMessaging.desktop/exactArrayBuffer";
 import { KeyReviewGate } from "../src/equicordplugins/secureMessaging.desktop/keyReviewGate";
-import {
-    SecureMessageGroup,
-    secureMessageGroupFlags,
-    type SecureMessageGroupCandidate,
-} from "../src/equicordplugins/secureMessaging.desktop/messageGrouping";
-import { ENCRYPTED_MESSAGE_PREFIX } from "../src/equicordplugins/secureMessaging.desktop/protocol";
 import { createTaskQueue } from "../src/equicordplugins/secureMessaging.desktop/taskQueue";
 
 interface Deferred<T = void> {
@@ -134,44 +128,6 @@ function testKeyReviewGate(): void {
     assert.equal(gate.isBlocked("other-local", "peer"), false);
 }
 
-function groupedMessage(id: string, timestamp: number): SecureMessageGroupCandidate {
-    return {
-        attachments: [],
-        author: { id: "100000000000000001" },
-        components: [],
-        content: `${ENCRYPTED_MESSAGE_PREFIX}{}`,
-        embeds: [],
-        id,
-        reactions: [],
-        stickerItems: [],
-        timestamp: new Date(timestamp),
-    };
-}
-
-function testMessageGroupingIndexCache(): void {
-    const first = groupedMessage("first", 0);
-    const middle = groupedMessage("middle", 0);
-    const last = groupedMessage("last", 0);
-    const messages = [first, middle, last];
-    assert.equal(
-        secureMessageGroupFlags(middle, messages),
-        SecureMessageGroup.Previous | SecureMessageGroup.Next,
-    );
-
-    messages.splice(0, messages.length, middle, first, last);
-    assert.equal(
-        secureMessageGroupFlags(middle, messages),
-        SecureMessageGroup.Next,
-        "same-array message reordering rebuilds the cached ID index",
-    );
-    messages.push(groupedMessage("fourth", 0));
-    assert.equal(
-        secureMessageGroupFlags(last, messages),
-        SecureMessageGroup.Previous | SecureMessageGroup.Next,
-        "same-array length changes rebuilds the cached ID index",
-    );
-}
-
 function testSourceBoundaries(): void {
     const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
     const index = source("src/equicordplugins/secureMessaging.desktop/index.tsx");
@@ -181,7 +137,7 @@ function testSourceBoundaries(): void {
     const crypto = source("src/equicordplugins/secureMessaging.desktop/crypto.ts");
     const attachments = source("src/equicordplugins/secureMessaging.desktop/attachments.ts");
     const reviewCache = source("src/equicordplugins/secureMessaging.desktop/announcementReviewCache.ts");
-    const grouping = source("src/equicordplugins/secureMessaging.desktop/messageGrouping.ts");
+    const styles = source("src/equicordplugins/secureMessaging.desktop/styles.css");
     const gate = source("src/equicordplugins/secureMessaging.desktop/keyReviewGate.ts");
     const packageJson = source("package.json");
     const workflow = source(".github/workflows/test.yml");
@@ -223,8 +179,12 @@ function testSourceBoundaries(): void {
     assert.match(index, /const RENDER_DECRYPT_BATCH_SIZE = 24/);
     assert.doesNotMatch(index, /Promise\.all\(batch\.map\(request => request\.promise\)\)/,
         "one slow decrypt cannot block every visible encrypted row");
-    assert.match(index, /secureMessageGroupingListeners = new Map<string, Map<string, Set<\(\) => void>>>/,
-        "grouping updates are scoped to the affected channel and neighboring rows");
+    assert.match(index, /secureMessageRowListeners = new Map<string, Set<\(\) => void>>/,
+        "a settled decryption refreshes only the rows showing that message");
+    assert.doesNotMatch(index, /getBoundingClientRect|useStateFromStores\(\[MessageStore\]/,
+        "encrypted rows neither measure layout nor subscribe to the whole message store");
+    assert.doesNotMatch(styles, /chat-messages-[^{]*:has\(/,
+        "encrypted rows are styled through their own class instead of document-wide :has() matching");
     assert.doesNotMatch(index, /messageLengthBypassKeys/,
         "message-length bypass state remains bounded to the selected conversation");
     assert.match(index, /announcementReviewOrder/,
@@ -249,8 +209,6 @@ function testSourceBoundaries(): void {
 
     assert.match(crypto, /return exactArrayBuffer\(value\)/);
     assert.match(attachments, /return exactArrayBuffer\(value\)/);
-    assert.doesNotMatch(grouping, /findIndex\(/,
-        "each encrypted accessory no longer scans the full message array for its own ID");
     assert.match(packageJson, /"testSecureMessagingPerformance": "tsx scripts\/testSecureMessagingPerformance\.ts && tsx scripts\/testSecureMessagingReceive\.ts"/);
     assert.match(workflow, /Test Secure Messaging performance boundaries/);
     assert.equal(
@@ -269,7 +227,6 @@ async function main(): Promise<void> {
     await testTaskQueue();
     testExactArrayBuffers();
     testKeyReviewGate();
-    testMessageGroupingIndexCache();
     testSourceBoundaries();
     console.log("Secure Messaging performance boundary tests passed.");
 }

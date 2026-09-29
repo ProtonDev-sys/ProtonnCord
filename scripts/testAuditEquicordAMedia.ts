@@ -10,6 +10,7 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
+import { normalizeGuildIconFile, normalizeStoredGuildIcons } from "../src/equicordplugins/clientsideGuildIcons/iconStorage";
 import { parseSyncedLyrics } from "../src/equicordplugins/musicControls/parseSyncedLyrics";
 
 const react = { createElement: (type: any, props: any, ...children: any[]) => ({ type, props: { ...props, children } }) };
@@ -71,6 +72,9 @@ function hookHarness() {
             if (!previous || dependencies.some((value, index) => !Object.is(value, previous.dependencies[index])))
                 slots[i] = { dependencies, value: factory() };
             return slots[i].value;
+        },
+        useCallback(callback: any, dependencies: any[]) {
+            return hooks.useMemo(() => callback, dependencies);
         },
         useEffect(effect: any, dependencies?: any[]) {
             const i = cursor++;
@@ -287,20 +291,27 @@ test("Moyai stops active audio and queued repetitions when disabled", async () =
 
 const providerTypes = { Provider: { Spotify: "Spotify", Lrclib: "LRCLIB", Translated: "Translated", Romanized: "Romanized", None: "None" } };
 
-function musicApi(settings: any, spotify: any, lrclib: any, initial: any = {}) {
-    let data = structuredClone(initial);
+function musicApi(settings: any, spotify: any, lrclib: any, initial: any = {}, legacy: any = {}) {
+    const data = new Map<string, any>([["SpotifyLyricsCacheNew", structuredClone(initial)], ["SpotifyLyricsCache", structuredClone(legacy)]]);
     const dataStore = {
-        get: async () => structuredClone(data),
-        set: async (_: string, next: any) => { data = structuredClone(next); },
-        update: async (_: string, updater: any) => { data = structuredClone(updater(data)); }
+        get: async (key: string) => structuredClone(data.get(key)),
+        updateMany: async (keys: string[], updater: any) => {
+            const changes = updater(keys.map(key => structuredClone(data.get(key))));
+            for (const [key, value] of changes.set ?? []) data.set(key, structuredClone(value));
+            for (const key of changes.delete ?? []) data.delete(key);
+        }
     };
+    const cache = load("musicControls/spotify/lyrics/cache.ts", "", {
+        "@api/index": { DataStore: dataStore }, "./providers/types": providerTypes
+    }, { TextEncoder });
     return { api: load("musicControls/spotify/lyrics/api.tsx", "", {
-        "@api/index": { DataStore: dataStore },
+        "./cache": cache,
         "@equicordplugins/musicControls/settings": { settings },
         "./providers/SpotifyAPI": { getLyricsSpotify: spotify },
         "./providers/lrclibAPI": { getLyricsLrclib: lrclib },
         "./providers/types": providerTypes
-    }), data: () => data };
+    }), stored: data, data: () => Object.fromEntries([...data].filter(([key]) => key.startsWith(cache.CACHE_PREFIX))
+        .map(([key, value]) => [JSON.parse(key.slice(cache.CACHE_PREFIX.length))[0], value.data])) };
 }
 
 test("MusicControls honors disabled lyric fallback and atomically saves concurrent tracks", async () => {
@@ -333,22 +344,12 @@ test("MusicControls cache clear prevents a pending provider response from repopu
 
 test("MusicControls legacy lyric migration preserves newer entries before clearing the legacy key", async () => {
     const current = { useLyric: "Spotify", lyricsVersions: { Spotify: [{ time: 1, text: "new" }] } };
-    const data = new Map<string, any>([
-        ["SpotifyLyricsCache", { old: [{ time: 1, text: "old" }], newer: [{ time: 0, text: "outdated" }] }],
-        ["SpotifyLyricsCacheNew", { newer: current }]
-    ]);
-    const { migrateOldLyrics } = load("musicControls/spotify/lyrics/api.tsx", "", {
-        "@api/index": { DataStore: {
-            get: async (key: string) => data.get(key),
-            set: async (key: string, value: any) => data.set(key, value),
-            update: async (key: string, updater: any) => data.set(key, updater(data.get(key)))
-        } },
-        "./providers/types": providerTypes
-    });
-    await migrateOldLyrics();
-    assert.equal(data.get("SpotifyLyricsCacheNew").newer, current);
-    assert.equal(data.get("SpotifyLyricsCacheNew").old.lyricsVersions.LRCLIB[0].text, "old");
-    assert.deepEqual(Object.keys(data.get("SpotifyLyricsCache")), []);
+    const fixture = musicApi({ store: { lyricsProvider: "Spotify" } }, async () => null, async () => null,
+        { newer: current }, { old: [{ time: 1, text: "old" }], newer: [{ time: 0, text: "outdated" }] });
+    await fixture.api.migrateOldLyrics();
+    assert.deepEqual(fixture.data().newer, { ...current, lyricsVersions: { ...current.lyricsVersions, LRCLIB: [{ time: 0, text: "outdated" }] } });
+    assert.equal(fixture.data().old.lyricsVersions.LRCLIB[0].text, "old");
+    assert.equal(fixture.stored.has("SpotifyLyricsCache"), false);
 });
 
 test("Spotify lyrics fetch once per track and ignore player events after destruction", async () => {
@@ -993,6 +994,32 @@ test("userplugin install failures reject without starting a build and metadata s
     assert.equal(markup, "<h3>&lt;sample&gt;&amp;</h3><p>$&amp;</p>");
 });
 
+test("guild icon MIME recovery preserves stored files when persistence fails and retries on restart", async () => {
+    const legacy = new File(["fixture image bytes"], "icon.png");
+    let stored: Record<string, Blob> = { guild: legacy };
+    let fail = true;
+    const fixture = load("clientsideGuildIcons/index.tsx", "", {
+        "./iconStorage": { normalizeGuildIconFile, normalizeStoredGuildIcons },
+        "@api/DataStore": {
+            get: async () => stored,
+            set: async (_: string, value: Record<string, Blob>) => {
+                if (fail) throw new Error("fixture storage failure");
+                stored = value;
+            }
+        },
+        "@webpack/common": { GuildStore: { getGuild: () => undefined } }
+    });
+    await assert.rejects(fixture.default.start(), /fixture storage failure/);
+    assert.equal(stored.guild, legacy, "a failed migration retains the recoverable file");
+    assert.equal(Object.keys(fixture.data.icons).length, 0, "runtime state is not published before persistence succeeds");
+    fail = false;
+    await fixture.default.start();
+    assert.equal(stored.guild.type, "image/png");
+    assert.ok(fixture.data.icons.guild.startsWith("blob:"));
+    fixture.default.stop();
+    assert.equal(Object.keys(fixture.data.icons).length, 0);
+});
+
 test("voice-message native download rejects excess streamed data and cancels its reader", async () => {
     let cancelled = 0;
     let requests = 0;
@@ -1011,6 +1038,58 @@ test("voice-message native download rejects excess streamed data and cancels its
     assert.equal(requests, 0);
     await assert.rejects(fixture.fetchAudio(null, "https://cdn.discordapp.com/attachments/fixture"), /25 MB/);
     assert.equal(cancelled, 1);
+});
+
+test("voice translations keep the completed text and language together through cancellation and failure", async () => {
+    const harness = hookHarness();
+    const requests: { resolve: (value: any) => void; reject: (error: Error) => void; }[] = [];
+    const fixture = load("voiceMessageTranscriber.desktop/index.tsx", "\nexport { VoiceMessageTranscriptionAccessory, cacheResult, resultCache };", {
+        "@components/Button": { Button: "button", TextButton: "text-button" },
+        "@plugins/translate/utils": { translateText: () => new Promise((resolve, reject) => requests.push({ resolve, reject })) },
+        "./utils": { LANGUAGES: {}, cl: (value: string) => value },
+        "./transcriptionData": { formatTimestampedTranscript: () => "" },
+        "@webpack/common": {
+            ...harness.hooks,
+            openModal: (render: any) => render({}).props.onSelect({ value: "de", label: "German" })
+        }
+    }, { Error, VencordNative: { pluginHelpers: {} } });
+    const transcript = { text: "Hello", chunks: [] };
+    const french = { text: "Bonjour", sourceLanguage: "English" };
+    fixture.cacheResult("message", { transcript, translation: french, targetLanguage: "fr", targetLanguageLabel: "French" });
+    const render = () => harness.render(() => fixture.VoiceMessageTranscriptionAccessory({ messageId: "message", src: "fixture", needsPlaybackFallback: false }));
+    const textNode = (tree: any, text: string) => findNode(tree, node => node?.props?.children?.includes(text));
+    const changeLanguage = () => textNode(render(), "Change translation…").props.onClick();
+    const assertFrench = () => {
+        const tree = render();
+        assert.ok(textNode(tree, "French"), "the heading still identifies the displayed French translation");
+        assert.ok(textNode(tree, "Bonjour"));
+        assert.equal(textNode(tree, "German"), undefined, "the pending language is not used to label completed text");
+        assert.equal(fixture.resultCache.get("message").translation, french);
+    };
+
+    changeLanguage();
+    assertFrench();
+    assert.ok(textNode(render(), "Translating to German…"));
+    textNode(render(), "Cancel").props.onClick();
+    requests[0].resolve({ text: "obsolete", sourceLanguage: "English" });
+    await new Promise(resolve => setImmediate(resolve));
+    assertFrench();
+
+    changeLanguage();
+    requests[1].reject(new Error("fixture provider failure"));
+    await new Promise(resolve => setImmediate(resolve));
+    assertFrench();
+    assert.ok(textNode(render(), "Translation failed: fixture provider failure"));
+
+    changeLanguage();
+    requests[2].resolve({ text: "Hallo", sourceLanguage: "English" });
+    await new Promise(resolve => setImmediate(resolve));
+    const completed = render();
+    assert.ok(textNode(completed, "German"));
+    assert.ok(textNode(completed, "Hallo"));
+    assert.equal(textNode(completed, "Bonjour"), undefined);
+    assert.equal(fixture.resultCache.get("message").targetLanguage, "de");
+    harness.unmount();
 });
 
 test("speech-worker termination aborts model downloads and prevents late cache writes", async () => {

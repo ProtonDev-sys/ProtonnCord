@@ -8,6 +8,8 @@ import { parseSyncedLyrics } from "@equicordplugins/musicControls/parseSyncedLyr
 import { LyricsData, Provider } from "@equicordplugins/musicControls/spotify/lyrics/providers/types";
 import { Track } from "@equicordplugins/musicControls/spotify/SpotifyStore";
 
+import { checkLyricsResponse } from "../response";
+
 const baseUrlLrclib = "https://lrclib.net/api/get";
 
 interface LrcLibResponse {
@@ -39,10 +41,11 @@ export async function getLyricsLrclib(track: Track): Promise<LyricsData | null> 
         }
     });
 
-    if (!response.ok) return null;
+    if (!checkLyricsResponse(response)) return null;
 
     const data = await response.json() as LrcLibResponse;
-    if (typeof data?.syncedLyrics !== "string") return null;
+    if (data?.syncedLyrics === null) return null;
+    if (typeof data?.syncedLyrics !== "string") throw new Error("Invalid LRCLIB lyrics response");
     const lines = parseSyncedLyrics(data.syncedLyrics);
     if (!lines.length) return null;
 
