@@ -12,10 +12,9 @@ import { chooseFile } from "@utils/web";
 import { Guild } from "@vencord/discord-types";
 import { FluxDispatcher, GuildStore, Menu, Toasts } from "@webpack/common";
 
-import { normalizeStoredGuildIcons } from "./iconStorage";
+import { normalizeGuildIconFile, normalizeStoredGuildIcons } from "./iconStorage";
 
 const KEY_DATASTORE = "protonncord-clientside-guild-icons";
-const IMAGE_EXTENSION_REGEX = /\.(apng|avif|gif|jpe?g|png|webp)$/i;
 const MAX_ICON_FILE_SIZE_BYTES = 2 * 1024 * 1024;
 
 export const data = {
@@ -38,10 +37,6 @@ function showToast(message: string, type: string) {
         message,
         type,
     });
-}
-
-function isImageFile(file: File) {
-    return file.type.startsWith("image/") || IMAGE_EXTENSION_REGEX.test(file.name);
 }
 
 function replaceRuntimeIcon(guildId: string, icon: Blob) {
@@ -97,7 +92,8 @@ async function changeGuildIcon(guild: Guild) {
     const file = await chooseFile("image/*");
     if (!file || generation !== startGeneration) return;
 
-    if (!isImageFile(file)) {
+    const icon = normalizeGuildIconFile(file);
+    if (!icon) {
         showToast("Please select an image file.", Toasts.Type.FAILURE);
         return;
     }
@@ -108,7 +104,7 @@ async function changeGuildIcon(guild: Guild) {
     }
 
     try {
-        await saveGuildIcon(guild, file);
+        await saveGuildIcon(guild, icon);
         showToast(`Changed local icon for ${guild.name}.`, Toasts.Type.SUCCESS);
     } catch (error) {
         showToast("Failed to save that local server icon.", Toasts.Type.FAILURE);

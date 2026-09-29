@@ -143,7 +143,7 @@ function harness(options: { rejectNative?: boolean; } = {}) {
         chatGateReason: () => gate,
         isEncryptedMessage: (content: string) => content.startsWith("PCEM3:"),
         reviewKeyAnnouncementInBackground: (value: Message | undefined) => reviews.push(value),
-        notifySecureMessageGroupingChanged: (channel: string) => notifications.push(channel),
+        notifySecureMessageRow: (messageId: string) => notifications.push(messageId),
     };
     const handlers = runInNewContext(`${compile(receiveSource)}\n({ handleKeyAnnouncementDispatch, handleLoadedKeyAnnouncements })`, context) as {
         handleKeyAnnouncementDispatch(event: Record<string, unknown>): void;
@@ -194,7 +194,7 @@ test("receipt starts native work synchronously without waiting for a render or m
     await h.settle();
     assert.equal(h.cache.getCachedDecryption(localUserId, value)?.status, "decrypted");
     assert.equal(value.content, "PCEM3:fixture");
-    assert.deepEqual(h.notifications, [channelId]);
+    assert.deepEqual(h.notifications, [value.id], "the settled row refreshes its own highlight");
     assert.equal(h.expansions.length, 0);
 });
 
@@ -336,7 +336,7 @@ test("clearing the cache invalidates old results and frees speculative admission
     await h.settle();
     for (const value of values) assert.equal(h.cache.getCachedDecryption(localUserId, value), null);
     assert.equal(h.cache.getCachedDecryption(localUserId, after)?.status, "decrypted");
-    assert.deepEqual(h.notifications, [channelId]);
+    assert.deepEqual(h.notifications, [after.id]);
 });
 
 for (const change of ["generation", "account", "capture", "gate", "cache"] as const) {
