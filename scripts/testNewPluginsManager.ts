@@ -103,55 +103,75 @@ function verifyCatalogCards() {
     let definitionReads = 0;
     let opened: unknown;
     let started: unknown;
-    const source = readFileSync("src/components/settings/tabs/plugins/PluginCard.tsx", "utf8");
-    const code = transpileModule(source, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React } }).outputText;
-    const mocks: Record<string, unknown> = {
-        "@api/Notices": { showNotice() {} },
-        "@api/PluginManager": {
-            hasAnyVisibleSettings: () => true,
-            isPluginEnabled: () => settings.plugins.Example.enabled,
-            pluginRequiresRestart: () => false,
-            startDependenciesRecursive: () => ({ restartNeeded: false, failures: [] }),
-            startPlugin: (plugin: unknown) => { started = plugin; return true; },
-            stopPlugin: () => true,
-        },
-        "@api/Settings": { Settings: settings },
-        "@components/Icons": { CogWheel: "cog", InfoIcon: "info" },
-        "@components/settings/AddonCard": { AddonCard: "card" },
-        "@utils/css": { classNameFactory: () => (name: string) => name },
-        "@utils/Logger": { Logger: class { error() {} } },
-        "@webpack/common": {
-            React: { createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props: { ...props as object, children } }) },
-            showToast() {}, Toasts: {},
-        },
-        "~plugins": {
-            __esModule: true,
-            default: { get Example() { definitionReads++; return definition; } },
-            PluginManifest: { Example: entry },
-            PluginMeta: { Example: { folderName: "src/plugins/example", userPlugin: false } },
-        },
-        "@components/settings/tabs": { openPluginModal: (plugin: unknown) => { opened = plugin; } },
+    const compile = (path: string) => transpileModule(readFileSync(path, "utf8"), { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React } }).outputText;
+    const pluginManager = {
+        hasAnyVisibleSettings: () => true,
+        isPluginEnabled: () => settings.plugins.Example.enabled,
+        pluginRequiresRestart: () => false,
+        startDependenciesRecursive: () => ({ restartNeeded: false, failures: [] }),
+        startPlugin: (plugin: unknown) => { started = plugin; return true; },
+        stopPlugin: () => true,
     };
-    const module = runInNewContext(code + "\nexports;", {
+    const plugins = {
+        __esModule: true,
+        default: { get Example() { definitionReads++; return definition; } },
+        PluginManifest: { Example: entry },
+        PluginMeta: { Example: { folderName: "src/plugins/example", userPlugin: false } },
+    };
+    const React = {
+        createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props: { ...props as object, children } }),
+        useId: () => "title-id",
+    };
+    const load = (path: string, mocks: Record<string, unknown>) => runInNewContext(compile(path) + "\nexports;", {
         exports: {},
-        require(name: string) { assert.ok(name in mocks, `Unexpected card import: ${name}`); return mocks[name]; },
+        require(name: string) { assert.ok(name in mocks, `Unexpected import from ${path}: ${name}`); return mocks[name]; },
     });
+    const toggle = load("src/components/settings/tabs/plugins/pluginToggle.ts", {
+        "@api/Notices": { showNotice() {} },
+        "@api/PluginManager": pluginManager,
+        "@api/Settings": { Settings: settings },
+        "@utils/Logger": { Logger: class { error() {} } },
+        "@webpack/common": { showToast() {}, Toasts: { Type: {}, Position: {} } },
+        "~plugins": plugins,
+    });
+    const module = load("src/components/settings/tabs/plugins/PluginCard.tsx", {
+        "./PluginCard.css": {},
+        "@api/PluginManager": pluginManager,
+        "@components/Badge": { Badge: "badge" },
+        "@components/Icons": { CogWheel: "cog", InfoIcon: "info", StarFilled: "star" },
+        "@components/settings/tabs": { openPluginModal: (plugin: unknown) => { opened = plugin; } },
+        "@components/Switch": { Switch: "switch" },
+        "@utils/css": { classNameFactory: () => (name: string) => name },
+        "@webpack/common": { React },
+        "~plugins": plugins,
+        "./pluginToggle": toggle,
+        "./shared": { getPluginSource: () => ({ label: "Vencord", title: "Vencord plugin" }) },
+    });
+    const find = (tree: any, match: (node: any) => boolean): any[] => Array.isArray(tree)
+        ? tree.flatMap(child => find(child, match))
+        : !tree || typeof tree !== "object" ? [] : [...(match(tree) ? [tree] : []), ...find(tree.props?.children, match)];
+    const byClass = (tree: unknown, className: string) => find(tree, node => node.props?.className === className)[0];
+    const icon = (tree: unknown) => byClass(tree, "details").props.children[0].type;
     const card = module.PluginCard({ plugin: entry, onRestartNeeded() {} });
-    assert.equal(card.props.name, "Example");
-    assert.equal(card.props.enabled, false);
+    assert.equal(byClass(card, "name").props.children[0], "Example");
+    assert.equal(find(card, node => node.type === "switch")[0].props.checked, false);
     assert.equal(definitionReads, 0, "rendering a disabled plugin card must not load its definition");
-    assert.equal(card.props.infoButton.props.children[0].type, "info");
+    assert.equal(icon(card), "info");
     entry.hasVisibleSettings = true;
-    assert.equal(module.PluginCard({ plugin: entry }).props.infoButton.props.children[0].type, "cog");
+    assert.equal(icon(module.PluginCard({ plugin: entry })), "cog");
     assert.equal(definitionReads, 0, "visible-settings metadata selects the cog without loading definitions");
-    card.props.infoButton.props.onClick();
+    byClass(card, "details").props.onClick();
     assert.equal(opened, definition, "information actions resolve the original definition object");
-    card.props.setEnabled();
+    opened = undefined;
+    card.props.onClick();
+    assert.equal(opened, definition, "clicking the card body opens the same details");
+    const setEnabled = () => find(card, node => node.type === "switch")[0].props.onChange(true);
+    setEnabled();
     assert.equal(started, definition, "toggle actions resolve the original definition object");
     assert.equal(settings.plugins.Example.enabled, true);
     const detached = settings.plugins.Example;
     settings.plugins.Example = { enabled: false };
-    card.props.setEnabled();
+    setEnabled();
     assert.equal(settings.plugins.Example.enabled, true, "retained card handlers update replacement settings branches");
     assert.equal(detached.enabled, true);
     const beforeContributorCard = definitionReads;
@@ -159,8 +179,11 @@ function verifyCatalogCards() {
     assert.equal(definitionReads, beforeContributorCard, "real plugins supplied by contributor views remain compatible");
     entry.hasVisibleSettings = undefined;
     const dynamicCard = module.PluginCard({ plugin: entry });
-    assert.equal(dynamicCard.props.infoButton.props.children[0].type, "cog");
+    assert.equal(icon(dynamicCard), "cog");
     assert.equal(definitionReads, beforeContributorCard + 1, "dynamic visibility falls back to the eagerly loaded definition");
+    const required = module.PluginCard({ plugin: entry, disabled: true, requiredBy: ["Consumer"], hasVisibleSettings: false });
+    assert.equal(find(required, node => node.type === "switch")[0].props.disabled, true);
+    assert.equal(byClass(required, "required").props.children[0], "Required by Consumer", "required cards explain why instead of relying on a tooltip");
 }
 
 function verifyCatalogFavorites() {
@@ -187,32 +210,23 @@ function verifyCatalogFavorites() {
     let stateCursor = 0;
     const React = {
         createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props: { ...props as object, children } }),
-        useEffect() {}, Fragment: "fragment", memo: () => "plugin-card",
+        useEffect() {}, useDeferredValue: (value: unknown) => value, Fragment: "fragment", memo: () => "plugin-card",
     };
     const mocks: Record<string, unknown> = {
         "./styles.css": {},
         "@api/PluginManager": { isPluginEnabled: () => false },
         "@api/Settings": { PlainSettings: plainSettings, useSettings: () => store.store },
-        "@components/BaseText": { BaseText: "text" },
         "@components/Button": { Button: "button" },
-        "@components/Card": { Card: "card" },
-        "@components/Divider": { Divider: "divider" },
         "@components/ErrorBoundary": { __esModule: true, default: "boundary" },
-        "@components/Heading": { HeadingTertiary: "heading" },
-        "@components/Paragraph": { Paragraph: "paragraph" },
+        "@components/Icons": { ChevronSmallDownIcon: "chevron", MagnifyingGlassIcon: "search-icon", RestartIcon: "restart-icon" },
         "@components/settings": { SettingsTab: "settings-tab" },
         "@shared/pluginDefinition": { getLoadedPluginDefinition: () => undefined },
         "@utils/ChangeList": { ChangeList: class { hasChanges = false; } },
-        "@utils/css": { classNameFactory: () => (name: string) => name },
-        "@utils/guards": { isTruthy: Boolean },
-        "@utils/Logger": { Logger: class { error() {} } },
-        "@utils/margins": { Margins: {} },
         "@utils/misc": { classes: (...values: unknown[]) => values.filter(Boolean).join(" ") },
-        "@utils/native": {},
-        "@utils/react": { useCleanupEffect() {}, useIntersection: () => [null, false] },
+        "@utils/react": { useCleanupEffect() {} },
         "@utils/types": { PluginTags: [] },
         "@webpack/common": {
-            React, Select: "select", SearchableSelect: "searchable-select", TextInput: "text-input", Tooltip: "tooltip",
+            React,
             useCallback: (callback: unknown) => callback,
             useMemo: (callback: () => unknown) => callback(),
             useRef: (initial: unknown) => ({ current: initial }),
@@ -229,10 +243,9 @@ function verifyCatalogFavorites() {
         "./newPluginRelease": { getReleaseNewPlugins: () => new Set() },
         "./PluginCard": { PluginCard: "plugin-card" },
         "./PluginModal": {},
-        "./PluginStatCards": { StockPluginsCard: "stock-stats", UserPluginsCard: "user-stats" },
         "./catalogView": catalogView,
         "./shared": { cl: (name: string) => name, logger: {}, ExcludedReasons: {}, PluginDependencyList: "dependency-list" },
-        "./UIElements": { UIElementsButton: "ui-elements" },
+        "./UIElements": {},
     };
     const source = readFileSync("src/components/settings/tabs/plugins/index.tsx", "utf8");
     const code = transpileModule(source, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React } }).outputText;
@@ -248,8 +261,10 @@ function verifyCatalogFavorites() {
     const first = render();
     assert.deepEqual(names(first), ["Bravo", "Alpha", "Charlie"], "favorites sort before ordinary plugins, including unsaved entries");
     assert.equal(definitionLoads, 0, "catalog sorting and rendering must not hydrate disabled definitions through missing favorite defaults");
-    const select = find(first, "select")[0];
-    select.props.select(select.props.options.find(option => option.label === "Show Favorites").value);
+    const chips = (tree: any): any[] => Array.isArray(tree)
+        ? tree.flatMap(chips)
+        : !tree || typeof tree !== "object" ? [] : [...(tree.type?.name === "Chip" ? [tree] : []), ...chips(tree.props?.children)];
+    chips(first).find(chip => chip.props.children.includes("Favorites"))!.props.onClick();
     assert.deepEqual(names(render()), ["Bravo"], "the favorites filter uses persisted UI flags");
     store.store.plugins.Alpha.isFavorite = true;
     assert.deepEqual(names(render()), ["Alpha", "Bravo"], "favorite changes through the settings proxy remain visible");
