@@ -61,6 +61,7 @@ function message(overrides: Partial<Message> = {}): Message {
 }
 
 function harness(options: {
+    externalPreviews?: boolean;
     cachedDecrypt?: () => Promise<DecryptIncomingResult>;
     decrypt?: () => Promise<DecryptIncomingResult>;
     expand?: (selection: string, refreshIds?: readonly string[]) => Promise<DecryptIncomingAttachmentsResult>;
@@ -130,8 +131,10 @@ function harness(options: {
     }
     const decryptCache = load("./decryptCache") as DecryptCache;
     if (options.cachedDecrypt) decryptCache.decryptCachedMessage = options.cachedDecrypt;
+    const embeds = load("./embedCache") as EmbedCache;
+    if (options.externalPreviews !== false) embeds.setExternalLinkPreviewsEnabled(true);
     return {
-        embeds: load("./embedCache") as EmbedCache,
+        embeds,
         decrypt: decryptCache,
         reviews: load("./announcementReviewCache") as ReviewCache,
         calls: () => ({ decrypt: decryptCalls, review: reviewCalls, unfurl: unfurlCalls }),
@@ -141,6 +144,22 @@ function harness(options: {
 }
 
 const noop = () => undefined;
+
+test("external previews require explicit opt-in and disabling prevents further URL disclosure", async () => {
+    const initial = harness({ externalPreviews: false });
+    await initial.embeds.prefetchEncryptedMessageEmbeds(previewUrl);
+    initial.embeds.patchEncryptedMessageEmbeds(message(), noop);
+    await setImmediate();
+    assert.equal(initial.calls().unfurl, 0);
+    assert.equal(initial.embeds.encryptedMessageInlineEmbedStatus(message()), "absent");
+    initial.embeds.setExternalLinkPreviewsEnabled(true);
+    await initial.embeds.prefetchEncryptedMessageEmbeds(previewUrl);
+    assert.ok(initial.calls().unfurl > 0);
+    initial.embeds.setExternalLinkPreviewsEnabled(false);
+    const after = initial.calls().unfurl;
+    await initial.embeds.prefetchEncryptedMessageEmbeds("https://example.com/another");
+    assert.equal(initial.calls().unfurl, after);
+});
 
 for (const hasManifest of [false, true]) {
     test(`${hasManifest ? "manifest" : "legacy"} detached text limits refresh to ${hasManifest ? "the text file" : "the authenticated bundle"}`, async () => {
