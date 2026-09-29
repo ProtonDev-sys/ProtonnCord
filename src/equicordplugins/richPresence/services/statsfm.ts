@@ -10,10 +10,11 @@ import { ActivityFlags, ActivityType } from "@vencord/discord-types/enums";
 import { findByPropsLazy } from "@webpack";
 import { FluxDispatcher } from "@webpack/common";
 
-import { settings } from "../settings";
+import type { SettingsStore } from "../settings";
 import { NameFormat } from "../types";
 import { SfmResponse, SfmTrackData } from "../types/statsfm";
 import { getCachedApplicationAsset } from "./assetCache";
+import { createPresencePolling, PresenceUpdate } from "./polling";
 
 const APPLICATION_ID = "1325126169179197500";
 const PLACEHOLDER_ID = "2a96cbd8b46e442fc41c2b86b821562f";
@@ -22,39 +23,38 @@ const API_ERROR_COOLDOWN_MS = 60_000;
 const logger = new Logger("RichPresence:StatsFm");
 const PresenceStore = findByPropsLazy("getLocalPresence");
 
-let updateInterval: NodeJS.Timeout | undefined;
-let isUpdating = false;
 let lastApiErrorAt = 0;
-let updateGeneration = 0;
 
-async function getAsset(key: string): Promise<string> {
-    return getCachedApplicationAsset(APPLICATION_ID, key);
+async function getAsset(key: string, update: PresenceUpdate): Promise<string> {
+    return update.wait(getCachedApplicationAsset(APPLICATION_ID, key, update.signal));
 }
 
 function setActivity(activity: Activity | null) {
     FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity, socketId: SOCKET_ID });
 }
 
-function reportApiError(message: string, details: unknown) {
+function reportApiError(message: string) {
     const now = Date.now();
     if (lastApiErrorAt && now - lastApiErrorAt < API_ERROR_COOLDOWN_MS) return;
 
     lastApiErrorAt = now;
-    logger.error(message, details);
+    logger.error(message);
 }
 
-async function fetchTrackData(): Promise<SfmTrackData | null> {
-    const username = settings.store.sfm_username?.trim();
+async function fetchTrackData(store: SettingsStore, update: PresenceUpdate): Promise<SfmTrackData | null> {
+    const username = store.sfm_username?.trim();
     if (!username) {
         lastApiErrorAt = 0;
         return null;
     }
 
     try {
-        const res = await fetch(`https://api.stats.fm/api/v1/users/${encodeURIComponent(username)}/streams/current`);
+        const res = await update.wait(fetch(`https://api.stats.fm/api/v1/users/${encodeURIComponent(username)}/streams/current`, { signal: update.signal }));
+        if (!update.isCurrent()) return null;
         if (!res.ok) throw `${res.status} ${res.statusText}`;
 
-        const json = await res.json() as Partial<SfmResponse>;
+        const json = await update.wait(res.json()) as Partial<SfmResponse>;
+        if (!update.isCurrent()) return null;
         lastApiErrorAt = 0;
 
         const trackData = json.item?.track;
@@ -75,59 +75,59 @@ async function fetchTrackData(): Promise<SfmTrackData | null> {
             url: `https://stats.fm/track/${trackData.id}`,
             imageUrl: albums[0]?.image,
         };
-    } catch (e) {
-        reportApiError("Failed to query Stats.fm API", e);
+    } catch {
+        if (update.isCurrent()) reportApiError("Failed to query Stats.fm API");
         return null;
     }
 }
 
-function getLargeImage(track: SfmTrackData): string | undefined {
-    if (!settings.store.sfm_alwaysHideArt && track.imageUrl && !track.imageUrl.includes(PLACEHOLDER_ID))
+function getLargeImage(track: SfmTrackData, store: SettingsStore): string | undefined {
+    if (!store.sfm_alwaysHideArt && track.imageUrl && !track.imageUrl.includes(PLACEHOLDER_ID))
         return track.imageUrl;
-    if (settings.store.sfm_missingArt === "placeholder") return "placeholder";
+    if (store.sfm_missingArt === "placeholder") return "placeholder";
 }
 
-async function getActivity(): Promise<Activity | null> {
-    if (settings.store.sfm_hideWithExternalRPC) {
+async function getActivity(store: SettingsStore, update: PresenceUpdate): Promise<Activity | null> {
+    if (store.sfm_hideWithExternalRPC) {
         if (PresenceStore.getActivities().some(a => a.application_id !== APPLICATION_ID)) return null;
     }
 
-    if (settings.store.sfm_hideWithSpotify) {
+    if (store.sfm_hideWithSpotify) {
         if (PresenceStore.getActivities().some(a => a.type === ActivityType.LISTENING && a.application_id !== APPLICATION_ID))
             return null;
     }
 
-    const trackData = await fetchTrackData();
-    if (!trackData) return null;
+    const trackData = await fetchTrackData(store, update);
+    if (!trackData || !update.isCurrent()) return null;
 
-    const largeImage = getLargeImage(trackData);
+    const largeImage = getLargeImage(trackData, store);
     const assets = largeImage
         ? {
-            large_image: await getAsset(largeImage),
+            large_image: await getAsset(largeImage, update),
             large_text: trackData.albums || undefined,
-            ...(settings.store.sfm_showLogo && {
-                small_image: await getAsset("statsfm-large"),
+            ...(store.sfm_showLogo && {
+                small_image: await getAsset("statsfm-large", update),
                 small_text: "Stats.fm",
             }),
         } : {
-            large_image: await getAsset("statsfm-large"),
+            large_image: await getAsset("statsfm-large", update),
             large_text: trackData.albums || undefined,
         };
 
     const buttons: ActivityButton[] = [];
-    if (settings.store.sfm_shareUsername)
-        buttons.push({ label: "Stats.fm Profile", url: `https://stats.fm/${settings.store.sfm_username}` });
-    if (settings.store.sfm_shareSong)
+    if (store.sfm_shareUsername)
+        buttons.push({ label: "Stats.fm Profile", url: `https://stats.fm/${store.sfm_username}` });
+    if (store.sfm_shareSong)
         buttons.push({ label: "View Song", url: trackData.url });
 
     const statusName = (() => {
-        switch (settings.store.sfm_nameFormat) {
+        switch (store.sfm_nameFormat) {
             case NameFormat.ArtistFirst: return trackData.artists + " - " + trackData.name;
             case NameFormat.SongFirst: return trackData.name + " - " + trackData.artists;
             case NameFormat.ArtistOnly: return trackData.artists;
             case NameFormat.SongOnly: return trackData.name;
-            case NameFormat.AlbumName: return trackData.albums || settings.store.sfm_statusName;
-            default: return settings.store.sfm_statusName;
+            case NameFormat.AlbumName: return trackData.albums || store.sfm_statusName;
+            default: return store.sfm_statusName;
         }
     })();
 
@@ -139,41 +139,13 @@ async function getActivity(): Promise<Activity | null> {
         assets,
         buttons: buttons.length ? buttons.map(v => v.label) : undefined,
         metadata: buttons.length ? { button_urls: buttons.map(v => v.url) } : undefined,
-        type: settings.store.sfm_useListeningStatus ? ActivityType.LISTENING : ActivityType.PLAYING,
+        type: store.sfm_useListeningStatus ? ActivityType.LISTENING : ActivityType.PLAYING,
         flags: ActivityFlags.INSTANCE,
     };
 }
 
-async function updatePresence() {
-    if (isUpdating) return;
-
-    const generation = updateGeneration;
-    isUpdating = true;
-    try {
-        const activity = await getActivity();
-        if (generation === updateGeneration) setActivity(activity);
-    } catch (e) {
-        logger.error("Failed to update presence", e);
-        if (generation === updateGeneration) setActivity(null);
-    } finally {
-        if (generation === updateGeneration) isUpdating = false;
-    }
-}
-
-export function start() {
-    if (updateInterval) return;
-
-    updateGeneration++;
+const polling = createPresencePolling("sfm", 16000, getActivity, setActivity, () => {
     lastApiErrorAt = 0;
-    void updatePresence();
-    updateInterval = setInterval(updatePresence, 16000);
-}
+}, () => logger.error("Failed to update presence"));
 
-export function stop() {
-    updateGeneration++;
-    clearInterval(updateInterval);
-    updateInterval = undefined;
-    isUpdating = false;
-    lastApiErrorAt = 0;
-    setActivity(null);
-}
+export const { start, stop } = polling;

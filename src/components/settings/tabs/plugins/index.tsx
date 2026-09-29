@@ -20,131 +20,121 @@ import "./styles.css";
 
 import { hasAnyVisibleSettings, isPluginEnabled, pluginRequiresRestart, stopPlugin } from "@api/PluginManager";
 import { PlainSettings, useSettings } from "@api/Settings";
-import { BaseText } from "@components/BaseText";
 import { Button } from "@components/Button";
-import { Card } from "@components/Card";
-import { Divider } from "@components/Divider";
 import ErrorBoundary from "@components/ErrorBoundary";
-import { HeadingTertiary } from "@components/Heading";
-import { Paragraph } from "@components/Paragraph";
+import { ChevronSmallDownIcon, MagnifyingGlassIcon, RestartIcon } from "@components/Icons";
 import { SettingsTab } from "@components/settings";
 import { getLoadedPluginDefinition } from "@shared/pluginDefinition";
 import { ChangeList } from "@utils/ChangeList";
-import { isTruthy } from "@utils/guards";
-import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
-import { reload } from "@utils/native";
-import { useCleanupEffect, useIntersection } from "@utils/react";
-import { PluginTags } from "@utils/types";
-import { Alerts, ConfirmModal, openModal, Parser, React, SearchableSelect, Select, TextInput, Toasts, Tooltip, useCallback, useMemo, useRef, useState } from "@webpack/common";
+import { useCleanupEffect } from "@utils/react";
+import { PluginTag, PluginTags } from "@utils/types";
+import { Alerts, ConfirmModal, openModal, Parser, React, useCallback, useMemo, useRef, useState } from "@webpack/common";
+import type { PropsWithChildren } from "react";
 
 import Plugins, { ExcludedPlugins, PluginManifest, PluginMeta } from "~plugins";
 
 import { CatalogCard, createPluginCatalogView, PluginFilter, SearchStatus } from "./catalogView";
 import { getReleaseNewPlugins } from "./newPluginRelease";
 import { PluginCard } from "./PluginCard";
-import { openWarningModal } from "./PluginModal";
-import { StockPluginsCard, UserPluginsCard } from "./PluginStatCards";
-import { cl, ExcludedReasons, logger, PluginDependencyList } from "./shared";
-import { UIElementsButton } from "./UIElements";
+import { openDisableAllModal } from "./PluginModal";
+import { cl, ExcludedReasons, logger, restartAfterSaving, showErrorToast } from "./shared";
+import { openUIElementsModal } from "./UIElements";
 
 export { cl, ExcludedReasons, logger, PluginDependencyList } from "./shared";
 
-function showErrorToast(message: string) {
-    Toasts.show({
-        message,
-        type: Toasts.Type.FAILURE,
-        id: Toasts.genId(),
-        options: {
-            position: Toasts.Position.BOTTOM
-        }
-    });
-}
-
-async function restartAfterSaving() {
-    try {
-        await reload();
-    } catch (error) {
-        logger.error("Cannot restart before saving settings", error);
-        showErrorToast("Your settings could not be saved. Try again before restarting.");
-    }
-}
-
-function ReloadRequiredCard({ required, enabledPlugins, openWarningModal, resetCheckAndDo }) {
-    return (
-        <Card className={classes(cl("info-card"), required && "vc-warning-card")}>
-            {required ? (
-                <>
-                    <HeadingTertiary>Restart required!</HeadingTertiary>
-                    <Paragraph className={cl("dep-text")}>
-                        Restart now to apply new plugins and their settings
-                    </Paragraph>
-                    <Button variant="primary" className={cl("restart-button")} onClick={restartAfterSaving}>
-                        Restart
-                    </Button>
-                </>
-            ) : (
-                <>
-                    <HeadingTertiary>Plugin Management</HeadingTertiary>
-                    <Paragraph>Press the cog wheel or info icon to get more info on a plugin</Paragraph>
-                    <Paragraph>Plugins with a cog wheel have settings you can modify!</Paragraph>
-                </>
-            )}
-            {enabledPlugins.length > 0 && !required && (
-                <Button
-                    variant="secondary"
-                    size="small"
-                    className={"vc-plugins-disable-warning vc-modal-align-reset"}
-                    onClick={() => {
-                        return openWarningModal(null, undefined, false, enabledPlugins.length, resetCheckAndDo);
-                    }}
-                >
-                    Disable All Plugins
-                </Button>
-            )}
-        </Card>
-    );
-}
-
-const PAGE_SIZE = 36;
+/** Cards rendered per step; the rest of a list is added in background steps instead of behind a button. */
+const PAGE_SIZE = 48;
+const DEFAULT_FILTER: PluginFilter = { value: "", tags: [], status: SearchStatus.ALL };
 
 const CatalogPluginCard = React.memo(function CatalogPluginCard({ card, onRestartNeeded }: { card: CatalogCard; onRestartNeeded(name: string, key: string): void; }) {
-    if (!card.disabled) return <PluginCard {...card} onRestartNeeded={onRestartNeeded} />;
-
-    const tooltip = card.requiredBy
-        ? <PluginDependencyList deps={card.requiredBy} />
-        : "This plugin is required for Protonn Cord to function.";
-    return (
-        <Tooltip text={tooltip}>
-            {({ onMouseLeave, onMouseEnter }) => (
-                <PluginCard {...card} onRestartNeeded={onRestartNeeded} onMouseLeave={onMouseLeave} onMouseEnter={onMouseEnter} />
-            )}
-        </Tooltip>
-    );
+    return <PluginCard {...card} onRestartNeeded={onRestartNeeded} />;
 });
+
+function RestartBanner({ pluginNames }: { pluginNames: string[]; }) {
+    return (
+        <div className={cl("restart-banner")} role="status">
+            <RestartIcon width={20} height={20} className={cl("restart-icon")} />
+            <div className={cl("restart-text")}>
+                <span className={cl("restart-title")}>Restart required</span>
+                <span className={cl("restart-detail")} title={pluginNames.join(", ")}>
+                    {pluginNames.length === 1
+                        ? `Changes to ${pluginNames[0]} apply after a restart.`
+                        : `Changes to ${pluginNames.length} plugins apply after a restart.`}
+                </span>
+            </div>
+            <Button size="small" onClick={restartAfterSaving}>Restart now</Button>
+        </div>
+    );
+}
+
+function SearchBar({ value, onChange }: { value: string; onChange(value: string): void; }) {
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    return (
+        <div className={cl("search")}>
+            <MagnifyingGlassIcon width={18} height={18} className={cl("search-icon")} aria-hidden />
+            <input
+                ref={inputRef}
+                className={cl("search-input")}
+                type="text"
+                value={value}
+                onChange={e => onChange(e.currentTarget.value)}
+                placeholder="Search plugins by name, description or keyword"
+                aria-label="Search plugins"
+                spellCheck={false}
+                autoFocus
+            />
+            {!!value && (
+                <button
+                    type="button"
+                    className={cl("search-clear")}
+                    aria-label="Clear search"
+                    onClick={() => {
+                        onChange("");
+                        inputRef.current?.focus();
+                    }}
+                >
+                    <svg width={16} height={16} viewBox="0 0 24 24" aria-hidden="true">
+                        <path fill="currentColor" d="M17.3 18.7a1 1 0 0 0 1.4-1.4L13.42 12l5.3-5.3a1 1 0 0 0-1.42-1.4L12 10.58l-5.3-5.3a1 1 0 0 0-1.4 1.42L10.58 12l-5.3 5.3a1 1 0 1 0 1.42 1.4L12 13.42l5.3 5.3Z" />
+                    </svg>
+                </button>
+            )}
+        </div>
+    );
+}
+
+function Chip({ active, onClick, children, className }: PropsWithChildren<{ active: boolean; onClick(): void; className?: string; }>) {
+    return (
+        <button
+            type="button"
+            className={classes(cl("chip", { "chip-active": active }), className)}
+            aria-pressed={active}
+            onClick={onClick}
+        >
+            {children}
+        </button>
+    );
+}
 
 function ExcludedPluginsList({ search }: { search: string; }) {
     const matchingExcludedPlugins = search
-        ? Object.entries(ExcludedPlugins)
-            .filter(([name]) => name.toLowerCase().includes(search))
+        ? Object.entries(ExcludedPlugins).filter(([name]) => name.toLowerCase().includes(search))
         : [];
 
+    if (!matchingExcludedPlugins.length) return null;
+
     return (
-        <BaseText className={Margins.top16}>
-            {matchingExcludedPlugins.length
-                ? <>
-                    <Paragraph>Are you looking for:</Paragraph>
-                    <ul>
-                        {matchingExcludedPlugins.map(([name, reason]) => (
-                            <li key={name}>
-                                <b>{name}</b>: Only available on the {ExcludedReasons[reason]}
-                            </li>
-                        ))}
-                    </ul>
-                </>
-                : "No plugins meet the search criteria."
-            }
-        </BaseText>
+        <div className={cl("excluded")}>
+            <span>Looking for one of these? They aren't available in this client:</span>
+            <ul>
+                {matchingExcludedPlugins.map(([name, reason]) => (
+                    <li key={name}>
+                        <b>{name}</b>: only available on the {ExcludedReasons[reason]}
+                    </li>
+                ))}
+            </ul>
+        </div>
     );
 }
 
@@ -199,19 +189,38 @@ export default function PluginSettings() {
     }), []);
     const hasUserPlugins = useMemo(() => !IS_STANDALONE && Object.values(PluginMeta).some(m => m.userPlugin), []);
     const newPluginsSet = useMemo(() => getReleaseNewPlugins(VERSION, Object.keys(PluginManifest)), []);
-    const [searchValue, setSearchValue] = useState<PluginFilter>({ value: "", tags: [], status: SearchStatus.ALL });
-    const [page, setPage] = useState({ filter: searchValue, count: PAGE_SIZE });
-    const visibleCount = page.filter === searchValue ? page.count : PAGE_SIZE;
-    const view = catalog.read(searchValue, newPluginsSet, visibleCount);
-    const { enabledPlugins, matchingPlugins, counts: { totalStockPlugins, totalUserPlugins, enabledStockPlugins, enabledUserPlugins } } = view;
-    const search = searchValue.value.toLowerCase();
-    const onSearch = (query: string) => setSearchValue(prev => ({ ...prev, value: query }));
+
+    const [filter, setFilter] = useState<PluginFilter>(DEFAULT_FILTER);
+    const [showTags, setShowTags] = useState(false);
+    const [showRequired, setShowRequired] = useState(false);
+    // Typing updates the input immediately; the list follows at a lower priority.
+    const deferredFilter = React.useDeferredValue(filter);
+    const [page, setPage] = useState({ filter: deferredFilter, count: PAGE_SIZE });
+    const visibleCount = page.filter === deferredFilter ? page.count : PAGE_SIZE;
+    const view = catalog.read(deferredFilter, newPluginsSet, visibleCount);
+    const { enabledPlugins, matchingPlugins, counts } = view;
+    const search = deferredFilter.value.toLowerCase();
+    const isFiltering = filter.value !== "" || filter.tags.length > 0 || filter.status !== SearchStatus.ALL;
+
     const handleRestartNeeded = useCallback((name: string, key: string) => {
         if (key === "enabled") changes.handleChange(`${name}:${key}`);
         else changes.add(`${name}:${key}`);
     }, [changes]);
     const plugins = useMemo(() => view.cards.map(card => <CatalogPluginCard key={card.plugin.name} card={card} onRestartNeeded={handleRestartNeeded} />), [view.cards, handleRestartNeeded]);
     const requiredPlugins = useMemo(() => view.requiredCards.map(card => <CatalogPluginCard key={card.plugin.name} card={card} onRestartNeeded={handleRestartNeeded} />), [view.requiredCards, handleRestartNeeded]);
+
+    // Fill in the remaining cards in the background so scrolling never waits on a "show more" step.
+    React.useEffect(() => {
+        if (visibleCount >= matchingPlugins) return;
+        const timer = setTimeout(() => React.startTransition(() => setPage({ filter: deferredFilter, count: visibleCount + PAGE_SIZE })), 0);
+        return () => clearTimeout(timer);
+    }, [deferredFilter, visibleCount, matchingPlugins]);
+
+    const setStatus = (status: SearchStatus) => setFilter(prev => ({ ...prev, status: prev.status === status ? SearchStatus.ALL : status }));
+    const toggleTag = (tag: PluginTag) => setFilter(prev => ({
+        ...prev,
+        tags: prev.tags.includes(tag) ? prev.tags.filter(t => t !== tag) : [...prev.tags, tag]
+    }));
 
     function resetCheckAndDo() {
         let restartNeeded = false;
@@ -254,113 +263,115 @@ export default function PluginSettings() {
         }
     }
 
-    const showMore = useCallback(() => setPage({ filter: searchValue, count: Math.min(visibleCount + PAGE_SIZE, matchingPlugins) }), [searchValue, visibleCount, matchingPlugins]);
-    const [sentinelRef, isSentinelVisible] = useIntersection();
-    React.useEffect(() => {
-        if (isSentinelVisible && visibleCount < matchingPlugins) {
-            const timeout = setTimeout(showMore, 100);
-            return () => clearTimeout(timeout);
-        }
-    }, [isSentinelVisible, visibleCount, matchingPlugins, showMore]);
+    const statusChips: [SearchStatus, string][] = [
+        [SearchStatus.ENABLED, "Enabled"],
+        [SearchStatus.DISABLED, "Disabled"],
+        [SearchStatus.FAVORITES, "Favorites"],
+        ...newPluginsSet ? [[SearchStatus.NEW, "New"] as [SearchStatus, string]] : [],
+    ];
+    const sourceChips: [SearchStatus, string][] = [
+        [SearchStatus.EQUICORD, "Protonn Cord"],
+        [SearchStatus.VENCORD, "Vencord"],
+        ...hasUserPlugins ? [[SearchStatus.USER_PLUGINS, "User plugins"] as [SearchStatus, string]] : [],
+        [SearchStatus.API_PLUGINS, "APIs"],
+    ];
+    const totalEnabled = counts.enabledStockPlugins + counts.enabledUserPlugins;
+    const totalPlugins = counts.totalStockPlugins + counts.totalUserPlugins;
+    const pendingRestart = changes.hasChanges
+        ? [...new Set([...changes.getChanges()].map(change => change.split(":")[0]))]
+        : null;
+    const requiredExpanded = showRequired || (isFiltering && !matchingPlugins && requiredPlugins.length > 0);
 
     return (
         <SettingsTab>
-            <ReloadRequiredCard required={changes.hasChanges} enabledPlugins={enabledPlugins} openWarningModal={openWarningModal} resetCheckAndDo={resetCheckAndDo} />
+            <div className={cl("page")}>
+                <div className={cl("toolbar")}>
+                    {pendingRestart && <RestartBanner pluginNames={pendingRestart} />}
 
-            <div className={cl("stats-container")}>
-                <StockPluginsCard
-                    totalStockPlugins={totalStockPlugins}
-                    enabledStockPlugins={enabledStockPlugins}
-                />
-                <UserPluginsCard
-                    totalUserPlugins={totalUserPlugins}
-                    enabledUserPlugins={enabledUserPlugins}
-                />
-            </div>
+                    <SearchBar value={filter.value} onChange={value => setFilter(prev => ({ ...prev, value }))} />
 
-            <div className={cl("ui-elements")}>
-                <UIElementsButton />
-            </div>
+                    <div className={cl("chips")} role="group" aria-label="Filter plugins">
+                        <Chip active={filter.status === SearchStatus.ALL} onClick={() => setStatus(SearchStatus.ALL)}>All</Chip>
+                        {statusChips.map(([status, label]) => (
+                            <Chip key={status} active={filter.status === status} onClick={() => setStatus(status)}>{label}</Chip>
+                        ))}
+                        <span className={cl("chip-separator")} aria-hidden="true" />
+                        {sourceChips.map(([status, label]) => (
+                            <Chip key={status} active={filter.status === status} onClick={() => setStatus(status)}>{label}</Chip>
+                        ))}
+                        <span className={cl("chip-separator")} aria-hidden="true" />
+                        <Chip active={showTags || filter.tags.length > 0} onClick={() => setShowTags(v => !v)} className={cl("tags-toggle")}>
+                            Tags{filter.tags.length > 0 && <span className={cl("chip-count")}>{filter.tags.length}</span>}
+                            <ChevronSmallDownIcon width={16} height={16} className={cl("chevron", { "chevron-open": showTags })} aria-hidden />
+                        </Chip>
+                    </div>
 
-            <HeadingTertiary className={classes(Margins.top20, Margins.bottom8)}>
-                Filters
-            </HeadingTertiary>
-
-            <ErrorBoundary noop>
-                <TextInput
-                    inputClassName={cl("filter-control")}
-                    placeholder="Search for a plugin..."
-                    value={searchValue.value}
-                    onChange={onSearch}
-                    autoFocus
-                />
-            </ErrorBoundary>
-
-            <ErrorBoundary noop>
-                <div className={classes(Margins.bottom20, Margins.top8, cl("filter-controls"))}>
-                    <Select
-                        options={[
-                            { label: "Show All", value: SearchStatus.ALL, default: true },
-                            { label: "Show Favorites", value: SearchStatus.FAVORITES },
-                            { label: "Show Enabled", value: SearchStatus.ENABLED },
-                            { label: "Show Disabled", value: SearchStatus.DISABLED },
-                            { label: "Show Protonn Cord", value: SearchStatus.EQUICORD },
-                            { label: "Show Vencord", value: SearchStatus.VENCORD },
-                            { label: "Show New", value: SearchStatus.NEW },
-                            hasUserPlugins && { label: "Show UserPlugins", value: SearchStatus.USER_PLUGINS },
-                            { label: "Show API Plugins", value: SearchStatus.API_PLUGINS },
-                        ].filter(isTruthy)}
-                        serialize={String}
-                        select={status => setSearchValue(prev => ({ ...prev, status }))}
-                        isSelected={v => v === searchValue.status}
-                        closeOnSelect={true}
-                        placeholder="Filter by Type"
-                    />
-                    <SearchableSelect
-                        options={PluginTags.map(tag => ({ label: tag, value: tag }))}
-                        value={searchValue.tags}
-                        onChange={tags => setSearchValue(prev => ({ ...prev, tags }))}
-                        closeOnSelect={false}
-                        placeholder="Filter by Tags"
-                        multi
-                    />
-                </div>
-            </ErrorBoundary>
-
-            <HeadingTertiary className={Margins.top20}>Plugins</HeadingTertiary>
-            <Paragraph aria-live="polite">{matchingPlugins} matching plugins{requiredPlugins.length ? ` and ${requiredPlugins.length} required` : ""}</Paragraph>
-
-            {plugins.length || requiredPlugins.length
-                ? (
-                    <>
-                        <div className={cl("grid")}>
-                            {plugins.length
-                                ? plugins
-                                : <Paragraph>No plugins meet the search criteria.</Paragraph>
-                            }
+                    {showTags && (
+                        <div className={cl("chips", "tag-chips")} role="group" aria-label="Filter by tag">
+                            {PluginTags.map(tag => (
+                                <Chip key={tag} active={filter.tags.includes(tag)} onClick={() => toggleTag(tag)}>{tag}</Chip>
+                            ))}
                         </div>
-                        {visibleCount < matchingPlugins && (
-                            <div ref={sentinelRef} className={Margins.top16}>
-                                <Button variant="secondary" onClick={showMore}>Show more plugins ({plugins.length} of {matchingPlugins})</Button>
-                            </div>
+                    )}
+                </div>
+
+                <div className={cl("summary")}>
+                    <span className={cl("summary-text")} aria-live="polite">
+                        {isFiltering
+                            ? <><strong>{matchingPlugins}</strong> matching {matchingPlugins === 1 ? "plugin" : "plugins"}</>
+                            : <><strong>{totalEnabled}</strong> of {totalPlugins} plugins enabled</>}
+                    </span>
+                    {isFiltering && (
+                        <button type="button" className={cl("text-button")} onClick={() => setFilter(DEFAULT_FILTER)}>
+                            Clear filters
+                        </button>
+                    )}
+                    <div className={cl("summary-actions")}>
+                        <Button size="small" variant="secondary" onClick={openUIElementsModal}>
+                            Chat & message buttons
+                        </Button>
+                        {enabledPlugins.length > 0 && (
+                            <Button size="small" variant="dangerSecondary" onClick={() => openDisableAllModal(enabledPlugins.length, resetCheckAndDo)}>
+                                Disable all
+                            </Button>
                         )}
-                    </>
-                )
-                : <ExcludedPluginsList search={search} />
-            }
+                    </div>
+                </div>
 
-            <Divider className={Margins.top20} />
+                <ErrorBoundary noop>
+                    {plugins.length > 0
+                        ? <div className={cl("grid")}>{plugins}</div>
+                        : (
+                            <div className={cl("empty")}>
+                                <span className={cl("empty-title")}>No plugins match your filters</span>
+                                {isFiltering && (
+                                    <button type="button" className={cl("text-button")} onClick={() => setFilter(DEFAULT_FILTER)}>
+                                        Clear filters
+                                    </button>
+                                )}
+                                <ExcludedPluginsList search={search} />
+                            </div>
+                        )
+                    }
+                </ErrorBoundary>
 
-            <HeadingTertiary className={classes(Margins.top20, Margins.bottom8)}>
-                Required Plugins
-            </HeadingTertiary>
-
-            <div className={cl("grid")}>
-                {requiredPlugins.length
-                    ? requiredPlugins
-                    : <Paragraph>No plugins meet the search criteria.</Paragraph>
-                }
+                {requiredPlugins.length > 0 && (
+                    <section className={cl("required")}>
+                        <button
+                            type="button"
+                            className={cl("section-toggle")}
+                            aria-expanded={requiredExpanded}
+                            onClick={() => setShowRequired(!requiredExpanded)}
+                        >
+                            <ChevronSmallDownIcon width={20} height={20} className={cl("chevron", { "chevron-open": requiredExpanded })} aria-hidden />
+                            <span className={cl("section-title")}>Required plugins</span>
+                            <span className={cl("section-count")}>{requiredPlugins.length}</span>
+                            <span className={cl("section-hint")}>Always on, or needed by plugins you enabled</span>
+                        </button>
+                        {requiredExpanded && <div className={cl("grid")}>{requiredPlugins}</div>}
+                    </section>
+                )}
             </div>
-        </SettingsTab >
+        </SettingsTab>
     );
 }

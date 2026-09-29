@@ -110,3 +110,72 @@ test("settings hooks retain subscriptions across equal path arrays and release o
     settings.store.first = 4;
     assert.equal(renders, 4);
 });
+
+function loadPluginMigration(plugins: Record<string, Record<string, any>>) {
+    const source = readFileSync("src/api/Settings.ts", "utf8");
+    const migration = source.slice(source.indexOf("export function migratePluginToSettings("), source.indexOf("export function migrateSettingToPlugin("));
+    const code = transpileModule(migration, {
+        compilerOptions: { target: ScriptTarget.ES2022, module: ModuleKind.CommonJS }
+    }).outputText;
+    const settings = new SettingsStore({ plugins });
+    const migrate = runInNewContext(`${code}\nexports.migratePluginToSettings;`, {
+        exports: {}, SettingsStore: settings, logger: { info() {} }
+    });
+    return { settings, migrate };
+}
+
+test("retired enabled plugins migrate before their replacement has saved settings", () => {
+    const legacy = { enabled: true, isFavorite: true, extra: { retained: "legacy data" } };
+    const f = loadPluginMigration({ AmITyping: legacy });
+    let saves = 0;
+    f.settings.addGlobalChangeListener(() => saves++);
+    f.migrate(true, "TypingTweaks", "AmITyping", "amITyping");
+    assert.deepEqual(structuredClone(f.settings.plain.plugins), { TypingTweaks: { ...legacy, amITyping: true } });
+    assert.equal(saves, 1);
+    f.migrate(true, "TypingTweaks", "AmITyping", "amITyping");
+    assert.equal(saves, 1, "completed migrations must not save again");
+});
+
+test("plugin migration preserves saved destination choices and missing legacy fields", () => {
+    const current = { enabled: false, isFavorite: false, amITyping: false, showAvatars: false };
+    const f = loadPluginMigration({ TypingTweaks: current, AmITyping: { enabled: true, isFavorite: true, extra: "retained" } });
+    f.migrate(true, "TypingTweaks", "AmITyping", "amITyping");
+    assert.equal(f.settings.plain.plugins.TypingTweaks, current);
+    assert.deepEqual(current, { enabled: false, isFavorite: false, amITyping: false, showAvatars: false, extra: "retained" });
+    assert.equal(Object.hasOwn(f.settings.plain.plugins, "AmITyping"), false);
+});
+
+test("retaining a legacy entry does not reapply settings or enable states on later starts", () => {
+    const legacy = { enabled: true, isFavorite: true };
+    const f = loadPluginMigration({ AmITyping: legacy, NoAppsAllowed: { enabled: false } });
+    f.migrate(false, "TypingTweaks", "AmITyping", "amITyping");
+    const current = f.settings.store.plugins.TypingTweaks;
+    current.enabled = current.amITyping = current.isFavorite = false;
+    let saves = 0;
+    f.settings.addGlobalChangeListener(() => saves++);
+    f.migrate(false, "TypingTweaks", "AmITyping", "amITyping");
+    f.migrate(true, "MoreUserTags", "NoAppsAllowed", "noAppsAllowed");
+    f.migrate(true, "ProtonnCordHelper", "NoBulletPoints", "noBulletPoints");
+    assert.deepEqual(structuredClone(f.settings.plain.plugins.TypingTweaks), { enabled: false, isFavorite: false, amITyping: false });
+    assert.equal(f.settings.plain.plugins.AmITyping, legacy);
+    assert.equal(Object.hasOwn(f.settings.plain.plugins, "MoreUserTags"), false);
+    assert.equal(Object.hasOwn(f.settings.plain.plugins, "ProtonnCordHelper"), false);
+    assert.equal(saves, 0);
+});
+
+test("a failed migration save can retry from the unchanged persisted legacy snapshot", t => {
+    const errors = t.mock.method(console, "error", () => {});
+    let persisted = JSON.stringify({ AmITyping: { enabled: true, isFavorite: true, extra: "retained" } });
+    const original = persisted;
+    for (const fail of [true, false]) {
+        const f = loadPluginMigration(JSON.parse(persisted));
+        f.settings.addGlobalChangeListener(({ plugins }) => {
+            if (fail) throw new Error("Disk unavailable");
+            persisted = JSON.stringify(plugins);
+        });
+        f.migrate(true, "TypingTweaks", "AmITyping", "amITyping");
+        if (fail) assert.equal(persisted, original);
+    }
+    assert.equal(errors.mock.callCount(), 1);
+    assert.deepEqual(JSON.parse(persisted), { TypingTweaks: { enabled: true, isFavorite: true, extra: "retained", amITyping: true } });
+});
