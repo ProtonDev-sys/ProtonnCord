@@ -38,6 +38,7 @@ export interface Account {
 	peerIdentityHistory?: Record<string, HistoricalIdentity<PublicIdentity>[]>
 	pairingImportedAt?: number
 	announcementTimes?: Record<string, number>
+	trustedAnnouncementTimes?: Record<string, number>
 	counter: number
 	trusted: Record<string, PublicIdentity>
 	pending: Record<string, PublicIdentity>
@@ -67,6 +68,26 @@ function record(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
+function publicationTime(value: unknown): value is number {
+	return (
+		Number.isSafeInteger(value) &&
+		Number(value) >= 1420070400000 &&
+		Number(value) <= Date.now() + 5 * 60_000
+	)
+}
+
+function validateHistory(value: unknown, peerId?: string): void {
+	if (!Array.isArray(value) || value.length > 4)
+		throw new Error('Invalid identity history')
+	for (const entry of value) {
+		if (!record(entry) || !publicationTime(entry.retiredAt))
+			throw new Error('Invalid identity history cutoff')
+		peerId
+			? parsePublicIdentity(entry.identity, peerId)
+			: parseIdentity(entry.identity)
+	}
+}
+
 function readVault(raw: string): Vault {
 	const parsed: unknown = JSON.parse(raw)
 	if (!record(parsed) || parsed.version !== 1 || !record(parsed.accounts))
@@ -86,6 +107,40 @@ function readVault(raw: string): Vault {
 		)
 			throw new Error('Secure Messaging account is invalid')
 		parseIdentity(account.identity)
+		if (account.identityHistory !== undefined)
+			validateHistory(account.identityHistory)
+		if (account.peerIdentityHistory !== undefined) {
+			if (
+				!record(account.peerIdentityHistory) ||
+				Object.keys(account.peerIdentityHistory).length > 2000
+			)
+				throw new Error('Invalid peer identity history')
+			for (const [peerId, history] of Object.entries(
+				account.peerIdentityHistory,
+			)) {
+				requireSnowflake(peerId, 'historical peer')
+				if (peerId === userId) throw new Error('Invalid historical peer')
+				validateHistory(history, peerId)
+			}
+		}
+		if (
+			account.pairingImportedAt !== undefined &&
+			!publicationTime(account.pairingImportedAt)
+		)
+			throw new Error('Invalid pairing publication time')
+		for (const times of [
+			account.announcementTimes,
+			account.trustedAnnouncementTimes,
+		]) {
+			if (times === undefined) continue
+			if (!record(times) || Object.keys(times).length > 2000)
+				throw new Error('Invalid announcement publication times')
+			for (const [peerId, time] of Object.entries(times)) {
+				requireSnowflake(peerId, 'announcement peer')
+				if (peerId === userId || !publicationTime(time))
+					throw new Error('Invalid announcement publication time')
+			}
+		}
 		for (const collection of [account.trusted, account.pending]) {
 			if (Object.keys(collection).length > 2000)
 				throw new Error('Too many mobile contacts')
@@ -540,7 +595,8 @@ export class MobileVault {
 		userId: string,
 		state: Pick<Account, 'identity' | 'trusted' | 'conversations'>,
 	): Promise<void> {
-		const value = this.account(userId)
+		const current = this.account(userId)
+		const value: Account = JSON.parse(JSON.stringify(current))
 		if (
 			this.root &&
 			publicIdentity(state.identity, userId).fingerprint !==
@@ -550,10 +606,10 @@ export class MobileVault {
 			throw new Error(
 				'The backup identity does not match this OneKey. Use a backup from your current PC OneKey identity',
 			)
-		if (
+		const identityChanged =
 			publicIdentity(value.identity, userId).fingerprint !==
 			publicIdentity(state.identity, userId).fingerprint
-		) {
+		if (identityChanged) {
 			value.retiredIdentities = [
 				...(value.retiredIdentities ?? []),
 				value.identity,
@@ -565,9 +621,66 @@ export class MobileVault {
 		}
 		value.identity = state.identity
 		value.counter = Math.max(value.counter, mobileCounterStart())
-		value.trusted = state.trusted
-		value.pending = {}
-		value.conversations = state.conversations
-		await this.save()
+		const changedPeers = new Set<string>()
+		for (const [peerId, identity] of Object.entries(state.trusted)) {
+			const previous = value.trusted[peerId]
+			if (previous && previous.fingerprint !== identity.fingerprint) {
+				changedPeers.add(peerId)
+				const histories = (value.peerIdentityHistory ??= {})
+				const history = (histories[peerId] ??= [])
+				if (
+					!history.some(
+						item => item.identity.fingerprint === previous.fingerprint,
+					)
+				)
+					history.push({ identity: previous, retiredAt: Date.now() })
+				histories[peerId] = history
+					.sort((left, right) => right.retiredAt - left.retiredAt)
+					.slice(0, 4)
+				if (value.trustedAnnouncementTimes)
+					delete value.trustedAnnouncementTimes[peerId]
+			}
+			value.trusted[peerId] = identity
+			if (value.pending[peerId]?.fingerprint === identity.fingerprint)
+				delete value.pending[peerId]
+		}
+		for (const [channelId, conversation] of Object.entries(
+			value.conversations,
+		)) {
+			const imported = state.conversations[channelId]
+			if (
+				!imported ||
+				JSON.stringify(imported.members) !==
+					JSON.stringify(conversation.members) ||
+				JSON.stringify(imported.recipients) !==
+					JSON.stringify(conversation.recipients)
+			)
+				conversation.needsReview = true
+		}
+		for (const [channelId, conversation] of Object.entries(state.conversations))
+			value.conversations[channelId] = {
+				...conversation,
+				...(value.conversations[channelId]?.needsReview
+					? { needsReview: true }
+					: {}),
+			}
+		for (const conversation of Object.values(value.conversations))
+			if (
+				identityChanged ||
+				conversation.recipients.some(
+					peerId => changedPeers.has(peerId) || value.pending[peerId],
+				)
+			)
+				conversation.needsReview = true
+		readVault(JSON.stringify({ version: 1, accounts: { [userId]: value } }))
+		const previousEnvelope = this.envelope
+		this.value!.accounts[userId] = value
+		try {
+			await this.save()
+		} catch (error) {
+			if (this.value) this.value.accounts[userId] = current
+			this.envelope = previousEnvelope
+			throw error
+		}
 	}
 }
