@@ -24,7 +24,17 @@ function fixture(service: "spotify" | "tidal") {
     };
     const name = service === "spotify" ? "Spotify" : "Tidal";
     const base = `@equicordplugins/musicControls/${service}`;
+    const intervals = {
+        setInterval(callback: () => void, delay: number) { assert.equal(delay, 1000); timers.add(callback); return callback; },
+        clearInterval: (callback: () => void) => timers.delete(callback)
+    };
+    const compile = (file: string) => transpileModule(readFileSync(file, "utf8"), {
+        fileName: file,
+        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
+    }).outputText;
+    const playbackPosition = runInNewContext(compile("src/equicordplugins/musicControls/playbackPosition.ts") + "\nexports;", { exports: {}, ...intervals });
     const mocks: Record<string, unknown> = {
+        "@equicordplugins/musicControls/playbackPosition": playbackPosition,
         "@equicordplugins/musicControls/settings": { settings: { use: () => ({ lyricDelay: 0 }) } },
         [`${base}/${name}Store`]: { [`${name}Store`]: store },
         [`${base}/lyrics/providers/store`]: { [`${name}LrcStore`]: { lyrics: null, lyricsInfo: null } },
@@ -49,14 +59,8 @@ function fixture(service: "spotify" | "tidal") {
         }
     };
     const path = `src/equicordplugins/musicControls/${service}/lyrics/components/util.tsx`;
-    const code = transpileModule(readFileSync(path, "utf8"), {
-        fileName: path,
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    const api = runInNewContext(code + "\nexports;", {
-        exports: {}, require(key: string) { assert.ok(key in mocks, key); return mocks[key]; },
-        setInterval(callback: () => void, delay: number) { assert.equal(delay, 1000); timers.add(callback); return callback; },
-        clearInterval: (callback: () => void) => timers.delete(callback)
+    const api = runInNewContext(compile(path) + "\nexports;", {
+        exports: {}, require(key: string) { assert.ok(key in mocks, key); return mocks[key]; }, ...intervals
     });
     const render = () => { effectIndex = 0; api.useLyrics({ scroll: false }); pending.splice(0).forEach(run => run()); };
     render();
