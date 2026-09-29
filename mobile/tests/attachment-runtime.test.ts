@@ -355,6 +355,42 @@ test('non-streaming runtimes require matching transport lengths and reject unver
 	assert.equal(allocations, 1)
 })
 
+test('transport failures while consuming either body API remain retryable', async () => {
+	const fixtureResult = fixture()
+	let cancelled = 0
+	let released = 0
+	const streaming = {
+		headers: { get: () => '30' },
+		body: {
+			getReader: () => ({
+				read: async () => {
+					throw new Error('connection interrupted')
+				},
+				cancel: async () => {
+					cancelled++
+				},
+				releaseLock: () => {
+					released++
+				},
+			}),
+		},
+	}
+	const buffered = {
+		headers: { get: () => '30' },
+		arrayBuffer: async () => {
+			throw new Error('connection interrupted')
+		},
+	}
+	for (const response of [streaming, buffered])
+		await assert.rejects(
+			fixtureResult.api.readAttachmentResponse(response, 30),
+			(error: unknown) =>
+				error instanceof fixtureResult.api.AttachmentDownloadError,
+		)
+	assert.equal(cancelled, 1)
+	assert.equal(released, 1)
+})
+
 test('failed owned-cache cleanup is contained and retried on the next clear', async () => {
 	let attempts = 0
 	const f = fixture({
