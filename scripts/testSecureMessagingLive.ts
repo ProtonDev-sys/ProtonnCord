@@ -1045,16 +1045,18 @@ async function verifyMentionHighlight(page: Page, message: RawDiscordMessage): P
 }> {
     await page.waitForFunction(({ channelId, messageId }) =>
         Boolean(document.getElementById(`chat-messages-${channelId}-${messageId}`)
-            ?.querySelector(".pc-secure-message-mentioned")),
+            ?.querySelector(".pc-secure-row[class*=\"mentioned_\"]")),
     { timeout: 30_000 }, { channelId: message.channelId, messageId: message.id });
     return page.evaluate(({ channelId, messageId }) => {
         const row = document.getElementById(`chat-messages-${channelId}-${messageId}`);
         if (!row) throw new Error("the mentioned encrypted message row is unavailable");
-        const style = getComputedStyle(row);
+        const article = row.querySelector<HTMLElement>(".pc-secure-row");
+        if (!article) throw new Error("the mentioned encrypted message is not marked as a secure row");
+        const style = getComputedStyle(article);
         return {
             backgroundColor: style.backgroundColor,
             markerBoxShadow: style.boxShadow,
-            mentionedClassApplied: Boolean(row.querySelector(".pc-secure-message-mentioned")),
+            mentionedClassApplied: /mentioned_/u.test(article.className),
         };
     }, { channelId: message.channelId, messageId: message.id });
 }
@@ -1568,13 +1570,13 @@ async function sendThroughRestGuard(page: Page, plaintext: string): Promise<RawD
 async function verifyRenderedMessage(page: Page, message: RawDiscordMessage, plaintext: string) {
     await page.waitForFunction(({ channelId, messageId, plaintext }) => {
         const item = document.getElementById(`chat-messages-${channelId}-${messageId}`);
-        return item?.querySelector(".pc-secure-card-plaintext")?.textContent?.includes(plaintext);
+        return item?.querySelector(".pc-secure-message")?.textContent?.includes(plaintext);
     }, { timeout: 30_000 }, { channelId: message.channelId, messageId: message.id, plaintext });
 
     return page.evaluate(({ channelId, messageId, plaintext }) => {
         const item = document.getElementById(`chat-messages-${channelId}-${messageId}`);
-        const rawContent = item?.querySelector<HTMLElement>("[class*='messageContent']");
-        const plaintextCard = item?.querySelector<HTMLElement>(".pc-secure-card-plaintext");
+        const rawContent = document.getElementById(`message-content-${messageId}`);
+        const plaintextCard = item?.querySelector<HTMLElement>(".pc-secure-message");
         return {
             plaintextVisible: plaintextCard?.textContent?.includes(plaintext) ?? false,
             rawCiphertextHidden: rawContent ? getComputedStyle(rawContent).display === "none" : false,
@@ -1588,7 +1590,7 @@ async function verifyRenderedEncryptedAttachment(page: Page, message: RawDiscord
         await page.waitForFunction(({ channelId, messageId, plaintext }) => {
             const item = document.getElementById(`chat-messages-${channelId}-${messageId}`);
             const image = item?.querySelector<HTMLImageElement>("img[src^='blob:']");
-            return item?.querySelector(".pc-secure-card-plaintext")?.textContent?.includes(plaintext) &&
+            return item?.querySelector(".pc-secure-message")?.textContent?.includes(plaintext) &&
                 image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0;
         }, { timeout: 20_000 }, { channelId: message.channelId, messageId: message.id, plaintext });
     } catch {
@@ -1648,7 +1650,7 @@ async function verifyRenderedEncryptedAttachment(page: Page, message: RawDiscord
             downloadBytesMatch: downloadedBase64 === pngBase64,
             downloadFilename: projectedAttachment?.filename ?? "",
             downloadMimeType: projectedAttachment?.content_type ?? "",
-            plaintextVisible: item?.querySelector(".pc-secure-card-plaintext")?.textContent?.includes(plaintext) ?? false,
+            plaintextVisible: item?.querySelector(".pc-secure-message")?.textContent?.includes(plaintext) ?? false,
             rawEncryptedFilenameHidden: !(item?.textContent ?? "").includes(encryptedFilename),
             signedUrlRefreshCacheStable: refreshedProjection?.attachments?.[0]?.url === projectedAttachment?.url,
             text: item?.textContent?.slice(0, 2_000) ?? "",
@@ -1753,7 +1755,7 @@ async function verifyRenderedEncryptedVideo(page: Page, message: RawDiscordMessa
         await page.waitForFunction(({ channelId, messageId, plaintext }) => {
             const item = document.getElementById(`chat-messages-${channelId}-${messageId}`);
             const video = item?.querySelector<HTMLVideoElement>("video");
-            return item?.querySelector(".pc-secure-card-plaintext")?.textContent?.includes(plaintext) &&
+            return item?.querySelector(".pc-secure-message")?.textContent?.includes(plaintext) &&
                 video && video.readyState >= HTMLMediaElement.HAVE_METADATA && video.videoWidth > 0 && video.videoHeight > 0;
         }, { timeout: 30_000 }, { channelId: message.channelId, messageId: message.id, plaintext });
     } catch (error) {
@@ -1830,7 +1832,7 @@ async function verifyRenderedEncryptedVideo(page: Page, message: RawDiscordMessa
             height: video.videoHeight,
             localContentScanVersion: projectedAttachment?.content_scan_version ?? null,
             playbackTime: video.currentTime,
-            plaintextVisible: item?.querySelector(".pc-secure-card-plaintext")?.textContent?.includes(plaintext) ?? false,
+            plaintextVisible: item?.querySelector(".pc-secure-message")?.textContent?.includes(plaintext) ?? false,
             projectedDuration: projectedAttachment?.duration_secs ?? null,
             projectedHeight: projectedAttachment?.height ?? null,
             projectedMimeType: projectedAttachment?.content_type ?? "",
