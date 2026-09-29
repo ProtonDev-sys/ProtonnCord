@@ -4,22 +4,36 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-[id^="chat-messages-"]:has(.pc-secure-replaces-content) [class*="messageContent"] {
+/* Rows carrying an envelope: the decrypted accessory replaces Discord's rendering of the ciphertext.
+ * Only the row's own content is hidden; reply previews above it keep theirs. */
+.pc-secure-row > [class*="contents"] > [id^="message-content-"] {
     display: none;
 }
 
-[id^="chat-messages-"]:has(.pc-secure-content-hidden) [id^="message-accessories-"] > :not(.pc-secure-card),
-.pc-secure-screenshot-mode [id^="chat-messages-"]:has(.pc-secure-replaces-content) [id^="message-accessories-"] > :not(.pc-secure-card) {
+.pc-secure-row-hidden [id^="message-accessories-"] > :not(.pc-secure-card),
+.pc-secure-screenshot-mode .pc-secure-row [id^="message-accessories-"] > :not(.pc-secure-card) {
     display: none;
 }
 
-[id^="chat-messages-"]:has(.pc-secure-message-mentioned) {
-    background-color: var(--background-mentioned, color-mix(in srgb, var(--status-warning) 10%, transparent));
-    box-shadow: inset 2px 0 var(--info-warning-foreground, var(--status-warning));
+/* One highlight for the whole message: text, images, videos, embeds and stickers. It layers over
+ * Discord's hover, reply and mention backgrounds, and consecutive rows join into one band. */
+.pc-secure-row-encrypted {
+    --pc-secure-accent: var(--status-positive);
 }
 
-[id^="chat-messages-"]:has(.pc-secure-message-mentioned):hover {
-    background-color: var(--background-mentioned-hover, color-mix(in srgb, var(--status-warning) 14%, transparent));
+.pc-secure-row-warning {
+    --pc-secure-accent: var(--status-warning);
+}
+
+.pc-secure-row-danger {
+    --pc-secure-accent: var(--status-danger);
+}
+
+.pc-secure-row-encrypted,
+.pc-secure-row-warning,
+.pc-secure-row-danger {
+    background-image: linear-gradient(color-mix(in oklab, var(--pc-secure-accent) 7%, transparent) 0 0);
+    box-shadow: inset 2px 0 0 var(--pc-secure-accent);
 }
 
 .pc-secure-screenshot-mode .pc-secure-message > * {
@@ -66,69 +80,25 @@
     color: var(--text-muted);
 }
 
+/* Notices (blocked messages, key announcements) that are not message text */
 .pc-secure-card {
-    --pc-secure-card-border: color-mix(in srgb, var(--status-positive) 45%, var(--border-subtle));
-    --pc-secure-card-background: color-mix(in srgb, var(--background-secondary) 92%, var(--status-positive));
-
-    position: relative;
     box-sizing: border-box;
     max-width: min(42rem, 100%);
-    margin-top: 0.25rem;
     padding: 0.65rem 0.75rem;
-    border: 1px solid var(--pc-secure-card-border);
+    border: 1px solid var(--border-subtle);
     border-radius: 0.5rem;
-    background: var(--pc-secure-card-background);
+    background: var(--background-mod-subtle, var(--background-secondary));
 }
 
-.pc-secure-message-joined-above,
-.pc-secure-message-joined-below {
-    width: 42rem;
-}
-
-.pc-secure-message-joined-below {
-    padding-bottom: 0.1rem;
-    border-bottom-width: 0;
-    border-bottom-right-radius: 0;
-    border-bottom-left-radius: 0;
-}
-
-.pc-secure-message-joined-above {
-    margin-top: 0;
-    padding-top: 0.1rem;
-    border-top-width: 0;
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
-}
-
-.pc-secure-message-joined-above::before {
-    position: absolute;
-    right: -1px;
-    bottom: 100%;
-    left: -1px;
-    box-sizing: border-box;
-    height: var(--pc-secure-message-join-gap, 0);
-    border-right: 1px solid var(--pc-secure-card-border);
-    border-left: 1px solid var(--pc-secure-card-border);
-    background: var(--pc-secure-card-background);
-    content: "";
-    pointer-events: none;
-}
-
+/* Holds the decrypted text's line height while decryption finishes, so rows do not jump. */
 .pc-secure-message-placeholder {
     display: block;
     width: 16rem;
     height: 0.75rem;
     max-width: 65%;
-    margin-top: 0.25rem;
+    margin-block: 0.3125rem;
     border-radius: 0.25rem;
-    background: var(--background-modifier-accent);
-    opacity: 0.55;
-}
-
-/* Keep the replacement marker mounted so ciphertext stays hidden. Loading and
- * failure details still occupy a card; native media needs no empty text card. */
-.pc-secure-message-without-text:empty {
-    display: none;
+    background: var(--background-mod-strong, var(--background-modifier-accent));
 }
 
 .pc-secure-card-warning {
@@ -149,14 +119,6 @@
     color: var(--text-muted);
     font-size: 0.75rem;
     font-weight: 600;
-}
-
-.pc-secure-card-plaintext {
-    flex: 1;
-    min-width: 0;
-    overflow-wrap: anywhere;
-    color: var(--text-default);
-    white-space: break-spaces;
 }
 
 .pc-secure-card-actions,
