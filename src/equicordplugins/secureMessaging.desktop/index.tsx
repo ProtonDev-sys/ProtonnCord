@@ -113,6 +113,7 @@ import {
     decryptCacheKey,
     getCachedDecryption,
     invalidateFailedDecryption,
+    invalidateRecoveredDecryption,
     prefetchCachedMessage,
 } from "./decryptCache";
 import { safeDownloadFilename } from "./downloadFilename";
@@ -145,6 +146,7 @@ import type {
 import {
     clearOptimisticOutgoingPlaintexts,
     getOptimisticOutgoingPlaintext,
+    isProvisionalOutgoingMessage,
     rememberOptimisticOutgoingPlaintext,
     settleOptimisticOutgoingPlaintext,
 } from "./optimisticRendering";
@@ -288,6 +290,7 @@ function decryptCachedMessageForRender(
     message: Message,
     apply: (result: DecryptIncomingResult) => void,
 ): void {
+    if (message.author?.id === localUserId && isProvisionalOutgoingMessage(message.id, discordMessageNonce(message))) return;
     const generation = secureOperationGeneration;
     void decryptCachedMessage(localUserId, message).then(
         result => enqueueSettledRenderDecryption({
@@ -2690,11 +2693,13 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
         return cached ? { key, result: cached } : null;
     });
     const [retryRevision, setRetryRevision] = useState(0);
+    const [recovering, setRecovering] = useState(false);
     const captureProtection = useScreenCaptureProtectionStatus();
     const currentResult = state?.key === key ? state.result : null;
     // Another mounted copy may have retried this message. A settled transient
     // failure must not hide the shared attempt's newer authenticated outcome.
-    const result = currentResult && currentResult.status !== "failed" && currentResult.status !== "unavailable"
+    const result = currentResult && currentResult.status !== "failed" && currentResult.status !== "unavailable" &&
+        !(currentResult.status === "replay_detected" && currentResult.recoveryAvailable)
         ? currentResult
         : key && localUserId ? getCachedDecryption(localUserId, message) ?? currentResult : null;
     const optimisticPlaintext = message.author?.id === localUserId
@@ -2763,6 +2768,35 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
         <div className="pc-secure-card pc-secure-card-danger">
             <div className="pc-secure-card-header"><LockIcon color="var(--status-danger)" /> Encrypted message blocked</div>
             <BaseText size="sm">{encryptedStatusText(result)}</BaseText>
+            {result.status === "replay_detected" && result.recoveryAvailable && message.author?.id === localUserId && localUserId && key && (
+                <Button size="xs" disabled={recovering} onClick={() => {
+                    if (recovering || UserStore.getCurrentUser()?.id !== localUserId || screenCaptureProtectionStatus !== "ready" ||
+                        key !== decryptCacheKey(localUserId, message) || chatGateReason({ channelId: message.channel_id }) !== null) return;
+                    setRecovering(true);
+                    void Native.recoverOwnMessage(localUserId, {
+                        channelId: message.channel_id,
+                        content: message.content,
+                        discordAuthorId: localUserId,
+                        discordEditedTimestamp: discordEditedTimestamp(message),
+                        discordMessageId: message.id,
+                        discordNonce: discordMessageNonce(message),
+                    }).then(recovered => {
+                        if (UserStore.getCurrentUser()?.id !== localUserId || screenCaptureProtectionStatus !== "ready" ||
+                            key !== decryptCacheKey(localUserId, message) || chatGateReason({ channelId: message.channel_id }) !== null) return;
+                        if (recovered.status !== "decrypted") {
+                            if (recovered.status !== "replay_detected" || !recovered.recoveryAvailable)
+                                showToast(encryptedStatusText(recovered), Toasts.Type.FAILURE);
+                            return;
+                        }
+                        invalidateRecoveredDecryption(localUserId, message);
+                        invalidateEncryptedMessageEmbeds(message);
+                        setState(null);
+                        setRetryRevision(revision => revision + 1);
+                        updateMessage(message.channel_id, message.id);
+                    }).catch(() => showToast("Secure Messaging could not recover this message. Nothing was reset.", Toasts.Type.FAILURE))
+                        .finally(() => setRecovering(false));
+                }}>Recover my sent message</Button>
+            )}
             {(result.status === "failed" || result.status === "unavailable") && localUserId && key && (
                 <Button size="xs" onClick={() => {
                     if (UserStore.getCurrentUser()?.id !== localUserId || screenCaptureProtectionStatus !== "ready" ||
