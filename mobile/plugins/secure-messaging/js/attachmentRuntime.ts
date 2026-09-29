@@ -524,7 +524,13 @@ async function readAttachmentResponse(
 			throw new Error(
 				'This runtime cannot verify a safe attachment download size',
 			)
-		const bytes = new Uint8Array(await response.arrayBuffer())
+		const bytes = new Uint8Array(
+			await response.arrayBuffer().catch(() => {
+				throw new AttachmentDownloadError(
+					'Discord attachment body download failed',
+				)
+			}),
+		)
 		if (bytes.length !== expected) {
 			bytes.fill(0)
 			throw new Error('Encrypted attachment download length is invalid')
@@ -535,7 +541,11 @@ async function readAttachmentResponse(
 	let total = 0
 	try {
 		while (true) {
-			const { done, value } = await reader.read()
+			const { done, value } = await reader.read().catch(() => {
+				throw new AttachmentDownloadError(
+					'Discord attachment body download failed',
+				)
+			})
 			if (done) break
 			total += value.byteLength
 			if (total > expected || total > MAX_FILE_BYTES) {
