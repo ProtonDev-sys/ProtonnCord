@@ -437,6 +437,21 @@ for (const result of [decrypted(), { status: "untrusted_author" }, { status: "re
     });
 }
 
+test("confirmed recovery invalidates only the selected replay rejection", async () => {
+    let recovered = false;
+    const h = harness({ decrypt: async () => recovered ? decrypted() : { status: "replay_detected", recoveryAvailable: true } });
+    const value = message();
+    const original = h.decrypt.decryptCachedMessage(localUserId, value);
+    await original;
+    recovered = true;
+    h.decrypt.invalidateRecoveredDecryption(localUserId, value);
+    assert.equal((await h.decrypt.decryptCachedMessage(localUserId, value)).status, "decrypted");
+    assert.equal(h.calls().decrypt, 2);
+    const authenticated = h.decrypt.decryptCachedMessage(localUserId, value);
+    h.decrypt.invalidateRecoveredDecryption(localUserId, value);
+    assert.equal(h.decrypt.decryptCachedMessage(localUserId, value), authenticated);
+});
+
 test("retrying a failed message refreshes its derived media before the transient TTL expires", async () => {
     let failed = true;
     const h = harness({ decrypt: async () => failed ? { status: "failed", error: "cryptographic_operation_failed" } : decrypted() });
