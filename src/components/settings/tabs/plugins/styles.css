@@ -16,159 +16,331 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-.vc-plugins-grid {
-    margin-top: 16px;
-    display: grid;
-    gap: 16px;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+.vc-plugins-page {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
-.vc-plugins-info-button {
-    height: 24px;
-    width: 24px;
-    padding: 0;
-    background: transparent;
-    margin-right: 8px;
-    color: var(--icon-muted);
-    transition: background-color .2s ease;
-
-    &:hover {
-        color: var(--interactive-icon-hover)
-    }
-}
-
-.vc-plugins-filter-controls {
-    display: grid;
-    height: 40px;
+/* Search, filters and restart state stay reachable while scrolling a long list. */
+.vc-plugins-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
     gap: 10px;
-    grid-template-columns: 1fr 1fr;
+    margin: 0 -8px;
+    padding: 8px 8px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+
+    /* Matches the settings page so cards scroll underneath cleanly. */
+    background: var(--background-base-low, var(--background-primary));
+}
+
+.vc-plugins-restart-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-feedback-warning, var(--text-feedback-warning));
+    border-radius: var(--radius-md, 8px);
+    background: var(--background-feedback-warning);
+}
+
+.vc-plugins-restart-icon {
+    flex-shrink: 0;
+    color: var(--icon-feedback-warning, var(--text-feedback-warning));
+}
+
+.vc-plugins-restart-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.vc-plugins-restart-title {
+    color: var(--text-strong);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.vc-plugins-restart-detail {
+    overflow: hidden;
+    color: var(--text-default);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vc-plugins-search {
+    position: relative;
+    display: flex;
     align-items: center;
 }
 
-.vc-plugins-filter-control {
-    height: 40px;
+.vc-plugins-search-icon {
+    position: absolute;
+    left: 12px;
+    color: var(--icon-muted, var(--text-muted));
+    pointer-events: none;
 }
 
-.vc-plugins-info-card {
-    padding: 1em;
-    height: fit-content;
-    display: flex;
-    flex-direction: column;
-    background-color: var(--background-base-lower-alt) !important;
-    transition: 0.1s ease-out;
-    transition-property: box-shadow, transform, background, opacity;
-    gap: 0.25em;
-}
-
-.vc-plugins-info-icon:not(:hover, :focus) {
-    color: var(--text-subtle);
-}
-
-.vc-plugins-restart-button {
-    background-color: var(--background-base-low) !important;
-    border: 1px solid var(--text-status-idle) !important;
-    margin-top: 0.5em;
-}
-
-.vc-plugins-restart-button:hover {
-    background-color: var(--text-status-idle) !important;
-}
-
-.vc-plugin-stats {
-    background-color: var(--background-base-lower-alt);
-    border-radius: 8px;
-    padding: 12px;
+.vc-plugins-search-input {
     box-sizing: border-box;
     width: 100%;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-evenly;
-    transition: 0.1s ease-out;
-    transition-property: box-shadow, transform, background, opacity;
+    height: var(--control-input-height-md, 40px);
+    padding: 0 40px 0 38px;
+    border: 1px solid var(--input-border-default, var(--border-subtle));
+    border-radius: var(--radius-sm, 8px);
+    outline: none;
+    background: var(--input-background-default, var(--background-tertiary));
+    color: var(--text-strong);
+    font-family: var(--font-primary);
+    font-size: 15px;
+    transition: border-color 0.12s ease;
 }
 
-.vc-plugins-info-card:hover,
-.vc-plugin-stats:hover {
-    background-color: var(--background-base-low) !important;
-    transform: translateY(-1px);
-    box-shadow: var(--elevation-high);
+.vc-plugins-search-input::placeholder {
+    color: var(--input-placeholder-text-default, var(--text-muted));
 }
 
-.vc-plugin-stats-card-container {
+.vc-plugins-search-input:hover {
+    border-color: var(--input-border-hover, var(--border-normal));
+}
+
+.vc-plugins-search-input:focus {
+    border-color: var(--input-border-active, var(--border-focus));
+}
+
+.vc-plugins-search-clear {
+    position: absolute;
+    right: 8px;
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: var(--radius-sm, 4px);
+    background: transparent;
+    color: var(--icon-muted, var(--text-muted));
+    cursor: pointer;
 }
 
-.vc-plugin-stats-card-section {
+.vc-plugins-search-clear:hover {
+    background: var(--control-icon-only-background-hover, var(--background-mod-subtle));
+    color: var(--icon-strong, var(--text-strong));
+}
+
+.vc-plugins-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.vc-plugins-tag-chips {
+    padding: 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md, 8px);
+}
+
+.vc-plugins-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    padding: 0 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-default);
+    font-family: var(--font-primary);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.vc-plugins-chip:hover {
+    border-color: var(--border-strong, var(--border-normal));
+    background: var(--background-mod-subtle);
+    color: var(--text-strong);
+}
+
+.vc-plugins-chip-active,
+.vc-plugins-chip-active:hover {
+    border-color: var(--control-primary-background-default, var(--brand-500));
+    background: var(--control-primary-background-default, var(--brand-500));
+    color: var(--control-primary-text-default, var(--white));
+}
+
+.vc-plugins-tags-toggle {
+    padding-right: 8px;
+}
+
+.vc-plugins-chip-count {
+    min-width: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--white, #fff);
+    color: var(--control-primary-background-default, var(--brand-500));
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 16px;
     text-align: center;
-    flex: 1;
 }
 
-.vc-plugin-stats-card-divider {
-    border-left: 1px solid #ccc;
-    height: 100%;
-    margin: 0 10px;
+.vc-plugins-chip-separator {
+    width: 1px;
+    height: 18px;
+    margin: 0 2px;
+    background: var(--border-normal, var(--border-subtle));
 }
 
-.vc-plugins-disable-warning,
-.vc-plugin-modal-disable-warning {
-    background-color: color-mix(in srgb, var(--status-danger) 10%, transparent) !important;
-    border-style: solid !important;
-    border-width: .1rem !important;
-    border-color: color-mix(in srgb, var(--status-danger) 80%, transparent) !important;
-    border-radius: 5px !important;
-    color: color-mix(in srgb, var(--status-danger) 100%, transparent) !important;
+.vc-plugins-chevron {
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+    transform: rotate(-90deg);
 }
 
-.vc-plugins-disable-warning:hover,
-.vc-plugin-modal-disable-warning:hover {
-    background-color: color-mix(in srgb, var(--status-danger) 40%, transparent) !important;
+.vc-plugins-chevron-open {
+    transform: none;
 }
 
-.vc-modal-align-reset {
-    align-self: end;
+.vc-plugins-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    color: var(--text-subtle, var(--text-muted));
+    font-size: 14px;
 }
 
-.visual-refresh .vc-plugins-info-card {
-    background-color: var(--background-surface-high) !important;
-    border: 1px solid var(--border-subtle) !important;
-
-    &:hover {
-        background-color: var(--background-surface-high) !important;
-    }
+.vc-plugins-summary-text strong {
+    color: var(--text-strong);
+    font-weight: 600;
 }
 
-.visual-refresh .vc-plugin-stats {
-    background-color: var(--background-surface-high) !important;
-    border: 1px solid var(--border-subtle) !important;
-
-    &:hover {
-        background-color: var(--background-surface-high) !important;
-    }
+.vc-plugins-summary-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
 }
 
-.vc-plugins-settings {
+.vc-plugins-text-button {
+    padding: 0;
+    background: transparent;
+    color: var(--text-link);
+    font-family: var(--font-primary);
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.vc-plugins-text-button:hover {
+    text-decoration: underline;
+}
+
+/* Also used by the in-chat plugin cards of the Protonn Cord helper. */
+.vc-plugins-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+/* Offscreen cards in the tab skip layout and paint; the grid sets their width, so only the height is estimated. */
+.vc-plugins-page .vc-plugin-card-root {
+    content-visibility: auto;
+    contain-intrinsic-height: auto 104px;
+}
+
+.vc-plugins-empty {
     display: flex;
     flex-direction: column;
-    gap: 1.25em;
+    align-items: center;
+    gap: 8px;
+    padding: 40px 16px;
+    border: 1px dashed var(--border-normal, var(--border-subtle));
+    border-radius: var(--radius-md, 8px);
+    color: var(--text-subtle, var(--text-muted));
+    text-align: center;
 }
 
-.vc-plugins-source {
-    width: 22px;
-    height: 22px;
-    margin-top: 2px;
-    margin-right: 8px;
+.vc-plugins-empty-title {
+    color: var(--text-strong);
+    font-size: 16px;
+    font-weight: 600;
 }
 
-.vc-plugins-stats-container {
-    margin-top: 16px;
-    gap: 16px;
+.vc-plugins-excluded {
+    margin-top: 8px;
+    color: var(--text-default);
+    font-size: 14px;
+    text-align: left;
+}
+
+.vc-plugins-excluded ul {
+    margin: 4px 0 0 20px;
+    list-style: disc;
+}
+
+.vc-plugins-required {
     display: flex;
-    flex-direction: row;
-    width: 100%;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-subtle);
 }
 
-.vc-plugins-ui-elements {
-    margin-top: 16px;
+.vc-plugins-section-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px;
+    margin: 0 -4px;
+    border-radius: var(--radius-sm, 4px);
+    background: transparent;
+    color: var(--text-strong);
+    font-family: var(--font-primary);
+    text-align: left;
+    cursor: pointer;
+}
+
+.vc-plugins-section-toggle:hover {
+    background: var(--background-mod-subtle);
+}
+
+.vc-plugins-section-title {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.vc-plugins-section-count {
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--background-mod-strong, var(--background-mod-subtle));
+    color: var(--text-default);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 18px;
+}
+
+.vc-plugins-section-hint {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vc-plugins-chip:focus-visible,
+.vc-plugins-section-toggle:focus-visible,
+.vc-plugins-text-button:focus-visible {
+    outline: 2px solid var(--border-focus, #00a8fc);
+    outline-offset: 1px;
 }

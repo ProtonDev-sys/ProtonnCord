@@ -27,12 +27,12 @@ import { Span } from "@components/Span";
 import { copyToClipboard } from "@utils/clipboard";
 import { EquicordDevs } from "@utils/constants";
 import { sendMessage } from "@utils/discord";
-import { proxyLazy } from "@utils/lazy";
+import { makeLazy, proxyLazy } from "@utils/lazy";
 import { classes } from "@utils/misc";
 import definePlugin, { PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
-import { findByPropsLazy, findComponentByCodeLazy } from "@webpack";
+import { findByPropsLazy, findComponentByCodeLazy, findCssClassesLazy } from "@webpack";
 import {
     ChannelStore,
     Checkbox,
@@ -46,6 +46,7 @@ import {
     Modal,
     openModal,
     Parser,
+    React,
     ReactDOM,
     RestAPI,
     SelectedChannelStore,
@@ -57,7 +58,6 @@ import {
     UploadAttachmentStore,
     useCallback,
     useEffect,
-    useLayoutEffect,
     useMemo,
     useRef,
     UserStore,
@@ -126,7 +126,6 @@ import {
 import { shouldHideSecureEmbedOnlyPlaintext } from "./embedUrls";
 import { KeyReviewGate } from "./keyReviewGate";
 import { encryptedAllowedMentions, encryptedMessageMentionsUser } from "./mentionNotifications";
-import { canGroupSecureMessageContent, SecureMessageGroup, secureMessageGroupFlags, secureMessageGroupNeighborIds } from "./messageGrouping";
 import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
 import type {
     AnnouncementReviewResult,
@@ -144,7 +143,6 @@ import type {
 import {
     clearOptimisticOutgoingPlaintexts,
     getOptimisticOutgoingPlaintext,
-    getOptimisticOutgoingPlaintextForGrouping,
     rememberOptimisticOutgoingPlaintext,
     settleOptimisticOutgoingPlaintext,
 } from "./optimisticRendering";
@@ -193,6 +191,8 @@ const VOICE_MESSAGE_FLAG = 1 << 13;
 const UploadLimits = findByPropsLazy("getUserMaxFileSize") as {
     getUserMaxFileSize(user: unknown): unknown;
 };
+const MarkupClasses = findCssClassesLazy("markup", "codeContainer");
+const MessageContentClasses = findCssClassesLazy("messageContent", "repliedTextContent");
 const NativeAttachmentDownload = findComponentByCodeLazy<{ href: string; mimeType: string[]; }>("getDefaultLinkInterceptor", "MEDIA_DOWNLOAD_BUTTON_TAPPED");
 const NativeImageActions = findByPropsLazy("copyImage", "canCopyImage", "saveImage") as {
     canCopyImage(url: string): boolean;
@@ -218,7 +218,6 @@ interface ReplyPreviewState {
 
 interface SettledRenderDecryption {
     apply(result: DecryptIncomingResult): void;
-    channelId: string;
     messageId: string;
     generation: number;
     result: DecryptIncomingResult;
@@ -231,129 +230,23 @@ let screenCaptureProtectionGeneration = 0;
 let secureOperationGeneration = 0;
 let secureMessageListenersInstalled = false;
 const screenCaptureProtectionListeners = new Set<(status: ScreenCaptureProtectionStatus) => void>();
-const secureMessageGroupingListeners = new Map<string, Map<string, Set<() => void>>>();
-const secureMessageGroupingRevisions = new Map<string, number>();
-const pendingSecureMessageGroupingMessages = new Map<string, Set<string>>();
-const nativeMessageGroupStartObservations = new Map<string, Map<object, boolean>>();
+/** Discord message rows showing an encrypted envelope, keyed by message ID, refreshed when its decryption settles. */
+const secureMessageRowListeners = new Map<string, Set<() => void>>();
 const pendingEncryptedRenderOwners = new Set<{ forceUpdate(): void; }>();
 const encryptedRenderCallbacks = new WeakMap<{ forceUpdate(): void; }, () => void>();
-let secureMessageGroupingNotificationScheduled = false;
 let settledRenderDecryptions: SettledRenderDecryption[] = [];
 let renderDecryptBatchTimer: ReturnType<typeof setTimeout> | null = null;
 
-function groupObservationKey(channelId: string, messageId: string): string {
-    return `${channelId}\0${messageId}`;
-}
-
-function flushSecureMessageGroupingChanges(): void {
-    secureMessageGroupingNotificationScheduled = false;
-    const pending = [...pendingSecureMessageGroupingMessages];
-    pendingSecureMessageGroupingMessages.clear();
-    for (const [channelId, messageIds] of pending) {
-        const listeners = secureMessageGroupingListeners.get(channelId);
-        if (!listeners?.size) continue;
-        const messages = (MessageStore.getMessages(channelId)?._array ?? []) as Message[];
-        const affectedIds = new Set<string>();
-        for (const messageId of messageIds) {
-            const neighbors = secureMessageGroupNeighborIds(messageId, messages);
-            if (!neighbors) {
-                // Removed or uncached rows can change which messages become neighbors.
-                for (const id of listeners.keys()) affectedIds.add(id);
-                break;
-            }
-            for (const id of neighbors) affectedIds.add(id);
-        }
-        for (const messageId of affectedIds) {
-            const rowListeners = listeners.get(messageId);
-            if (!rowListeners?.size) continue;
-            const key = groupObservationKey(channelId, messageId);
-            secureMessageGroupingRevisions.set(key, (secureMessageGroupingRevisions.get(key) ?? 0) + 1);
-            for (const listener of [...rowListeners]) {
-                try {
-                    listener();
-                } catch {
-                    // A stale accessory must not prevent its neighbors from settling.
-                }
-            }
+function notifySecureMessageRow(messageId: string): void {
+    const listeners = secureMessageRowListeners.get(messageId);
+    if (!listeners) return;
+    for (const listener of [...listeners]) {
+        try {
+            listener();
+        } catch {
+            // Discord may dispose a row between decryption and the bounded render batch.
         }
     }
-}
-
-function notifySecureMessageGroupingChanged(channelId: string, messageId: string): void {
-    let messages = pendingSecureMessageGroupingMessages.get(channelId);
-    if (!messages) pendingSecureMessageGroupingMessages.set(channelId, messages = new Set());
-    messages.add(messageId);
-    if (secureMessageGroupingNotificationScheduled) return;
-    secureMessageGroupingNotificationScheduled = true;
-    queueMicrotask(flushSecureMessageGroupingChanges);
-}
-
-function useSecureMessageGroupingRevision(channelId: string, messageId: string): number {
-    const key = groupObservationKey(channelId, messageId);
-    const [revision, setRevision] = useState(() => secureMessageGroupingRevisions.get(key) ?? 0);
-    useLayoutEffect(() => {
-        const listener = () => setRevision(secureMessageGroupingRevisions.get(key) ?? 0);
-        let channelListeners = secureMessageGroupingListeners.get(channelId);
-        if (!channelListeners) {
-            channelListeners = new Map();
-            secureMessageGroupingListeners.set(channelId, channelListeners);
-        }
-        let listeners = channelListeners.get(messageId);
-        if (!listeners) channelListeners.set(messageId, listeners = new Set());
-        listeners.add(listener);
-        listener();
-        return () => {
-            listeners?.delete(listener);
-            if (secureMessageGroupingListeners.get(channelId) !== channelListeners) return;
-            if (!listeners?.size) {
-                channelListeners.delete(messageId);
-                secureMessageGroupingRevisions.delete(key);
-            }
-            if (!channelListeners.size) {
-                secureMessageGroupingListeners.delete(channelId);
-                pendingSecureMessageGroupingMessages.delete(channelId);
-            }
-        };
-    }, [channelId, key, messageId]);
-    return revision;
-}
-
-function observedNativeMessageGroupStart(channelId: string, messageId: string): boolean | null {
-    const observations = nativeMessageGroupStartObservations.get(groupObservationKey(channelId, messageId));
-    if (!observations?.size) return null;
-    for (const groupStart of observations.values()) {
-        if (groupStart) return true;
-    }
-    return false;
-}
-
-function setNativeMessageGroupStartObservation(
-    channelId: string,
-    messageId: string,
-    owner: object,
-    groupStart: boolean,
-): void {
-    const key = groupObservationKey(channelId, messageId);
-    const previous = observedNativeMessageGroupStart(channelId, messageId);
-    let observations = nativeMessageGroupStartObservations.get(key);
-    if (!observations) {
-        observations = new Map();
-        nativeMessageGroupStartObservations.set(key, observations);
-    }
-    observations.set(owner, groupStart);
-    if (previous !== observedNativeMessageGroupStart(channelId, messageId))
-        notifySecureMessageGroupingChanged(channelId, messageId);
-}
-
-function removeNativeMessageGroupStartObservation(channelId: string, messageId: string, owner: object): void {
-    const key = groupObservationKey(channelId, messageId);
-    const observations = nativeMessageGroupStartObservations.get(key);
-    if (!observations?.has(owner)) return;
-    const previous = observedNativeMessageGroupStart(channelId, messageId);
-    observations.delete(owner);
-    if (!observations.size) nativeMessageGroupStartObservations.delete(key);
-    if (previous !== observedNativeMessageGroupStart(channelId, messageId))
-        notifySecureMessageGroupingChanged(channelId, messageId);
 }
 
 function scheduleRenderDecryptBatch(): void {
@@ -371,10 +264,10 @@ function flushRenderDecryptions(): void {
             if (request.generation !== generation) continue;
             try {
                 request.apply(request.result);
-                notifySecureMessageGroupingChanged(request.channelId, request.messageId);
             } catch {
-                // Discord may dispose a row between decryption and the bounded render batch.
+                // Discord may dispose an accessory between decryption and the bounded render batch.
             }
+            notifySecureMessageRow(request.messageId);
         }
     });
     if (settledRenderDecryptions.length > 0) scheduleRenderDecryptBatch();
@@ -395,14 +288,12 @@ function decryptCachedMessageForRender(
     void decryptCachedMessage(localUserId, message).then(
         result => enqueueSettledRenderDecryption({
             apply,
-            channelId: message.channel_id,
             messageId: message.id,
             generation,
             result,
         }),
         () => enqueueSettledRenderDecryption({
             apply,
-            channelId: message.channel_id,
             messageId: message.id,
             generation,
             result: { status: "failed", error: "cryptographic_operation_failed" },
@@ -836,7 +727,7 @@ function prefetchReceivedEncryptedMessage(dispatched: Message | undefined): void
     void prefetchCachedMessage(localUserId, message)?.then(() => {
         if (secureOperationIsCurrent(generation, localUserId) && screenCaptureProtectionStatus === "ready" &&
             key === decryptCacheKey(localUserId, message) && chatGateReason({ channelId }) === null)
-            notifySecureMessageGroupingChanged(channelId, message.id);
+            notifySecureMessageRow(message.id);
     });
 }
 
@@ -1561,7 +1452,7 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
     }
     const scope = conversationAuthorizationScope(context.localUserId, conversation);
     if (!scope) throw new Error("Secure Messaging blocked a programmatic send after its recipient state changed");
-    rememberOptimisticOutgoingPlaintext(encrypted.content, content, true);
+    rememberOptimisticOutgoingPlaintext(encrypted.content, content);
     body.content = encrypted.content;
     applyEncryptedAllowedMentions(body, encrypted.content, endpoint.channelId, context.localUserId);
     requestAuthorizationScopes.set(request, scope);
@@ -2035,7 +1926,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             options.attachmentsToUpload = uploads;
         }
         clearOutgoingStickers(options);
-        rememberOptimisticOutgoingPlaintext(encrypted.content, plaintext, preparedAttachments === null && stickers.length === 0);
+        rememberOptimisticOutgoingPlaintext(encrypted.content, plaintext);
         message.content = encrypted.content;
         preparedOutgoingMessages.set(message, { ciphertext: encrypted.content, plaintext });
         sendPrepared = true;
@@ -2741,7 +2632,61 @@ function EncryptedAttachmentStatus({ expectedCount, message }: { expectedCount: 
     );
 }
 
-function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Message; nativeGroupStart?: boolean; }) {
+interface SecureMessageRow {
+    className: string;
+    mentioned: boolean;
+}
+
+/** Row-level presentation for a Discord message carrying a Secure Messaging envelope, or null for ordinary messages. */
+function secureMessageRow(message: Message): SecureMessageRow | null {
+    if (screenCaptureProtectionStatus === "disabled") return null;
+    if (!isEncryptedMessage(message.content))
+        return isKeyAnnouncement(message.content) ? { className: "pc-secure-row", mentioned: false } : null;
+    const localUserId = UserStore.getCurrentUser()?.id;
+    const result = localUserId && message.author?.id ? getCachedDecryption(localUserId, message) : null;
+    const visiblePlaintext = result?.status === "decrypted"
+        ? result.plaintext
+        : message.author?.id === localUserId ? getOptimisticOutgoingPlaintext(message.content) : undefined;
+    const mentioned = Boolean(localUserId && message.author?.id && encryptedMessageMentionsUser(
+        message.content,
+        { channelId: message.channel_id, discordAuthorId: message.author.id },
+        localUserId,
+        visiblePlaintext,
+    ));
+    const tone = screenCaptureProtectionStatus !== "ready"
+        ? screenCaptureProtectionStatus === "screenshot" ? "pc-secure-row-warning pc-secure-row-hidden" : "pc-secure-row-danger pc-secure-row-hidden"
+        : result && result.status !== "decrypted" ? "pc-secure-row-danger" : "pc-secure-row-encrypted";
+    return { className: `pc-secure-row ${tone}`, mentioned };
+}
+
+/**
+ * Called from Discord's message row for every message, so ordinary messages only pay for two prefix checks.
+ * Returns the row's class-name entries, folding encrypted mentions into Discord's own mention highlight.
+ */
+function useSecureMessageRow(message: Message | undefined, mentionedClassName: string): Record<string, boolean> {
+    const [, refresh] = useState(0);
+    const messageId = message?.id;
+    const envelope = message != null && (isEncryptedMessage(message.content) || isKeyAnnouncement(message.content));
+    useEffect(() => {
+        if (!envelope || !messageId) return;
+        const listener = () => refresh(revision => revision + 1);
+        let listeners = secureMessageRowListeners.get(messageId);
+        if (!listeners) secureMessageRowListeners.set(messageId, listeners = new Set());
+        listeners.add(listener);
+        screenCaptureProtectionListeners.add(listener);
+        return () => {
+            listeners.delete(listener);
+            if (!listeners.size && secureMessageRowListeners.get(messageId) === listeners) secureMessageRowListeners.delete(messageId);
+            screenCaptureProtectionListeners.delete(listener);
+        };
+    }, [envelope, messageId]);
+    const row = envelope ? secureMessageRow(message) : null;
+    const classNames: Record<string, boolean> = { [mentionedClassName]: Boolean(message?.mentioned || row?.mentioned) };
+    if (row) classNames[row.className] = true;
+    return classNames;
+}
+
+function EncryptedMessageAccessory({ message }: { message: Message; }) {
     const localUserId = UserStore.getCurrentUser()?.id;
     const key = localUserId && message.author?.id ? decryptCacheKey(localUserId, message) : null;
     const [state, setState] = useState<ReplyPreviewState | null>(() => {
@@ -2770,59 +2715,6 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
     const renderedPlaintext = captureProtection === "ready" && hasPlaintext && (!result || result.status === "decrypted")
         ? visiblePlaintext : undefined;
     const parsedPlaintext = useMemo(() => renderedPlaintext ? Parser.parse(renderedPlaintext) : null, [renderedPlaintext]);
-    const mentionsLocalUser = Boolean(localUserId && message.author?.id && encryptedMessageMentionsUser(
-        message.content,
-        { channelId: message.channel_id, discordAuthorId: message.author.id },
-        localUserId,
-        visiblePlaintext,
-    ));
-    const cardRef = useRef<HTMLDivElement>(null);
-    const groupStartObservationOwner = useRef<object>({}).current;
-    const groupingRevision = useSecureMessageGroupingRevision(message.channel_id, message.id);
-    const groupFlags = useStateFromStores([MessageStore], () => {
-        if (!localUserId) return 0;
-        const messages = (MessageStore.getMessages(message.channel_id)?._array ?? []) as Message[];
-        return secureMessageGroupFlags(message, messages, (previous, next) => [previous, next].every(candidate => {
-            const cached = getCachedDecryption(localUserId, candidate);
-            return canGroupSecureMessageContent(cached, !cached && candidate.author?.id === localUserId
-                ? getOptimisticOutgoingPlaintextForGrouping(candidate.content)
-                : undefined);
-        }), candidate => candidate.id === message.id && nativeGroupStart !== undefined
-            ? nativeGroupStart
-            : observedNativeMessageGroupStart(message.channel_id, candidate.id));
-    }, [groupingRevision, key, nativeGroupStart, result]);
-    const cardClassName = classes(
-        "pc-secure-card",
-        "pc-secure-message",
-        "pc-secure-replaces-content",
-        mentionsLocalUser ? "pc-secure-message-mentioned" : null,
-        groupFlags & SecureMessageGroup.Previous ? "pc-secure-message-joined-above" : null,
-        groupFlags & SecureMessageGroup.Next ? "pc-secure-message-joined-below" : null,
-    );
-
-    useLayoutEffect(() => {
-        const messageElement = cardRef.current?.closest<HTMLElement>('[id^="chat-messages-"]');
-        if (!messageElement) return;
-        const detectedGroupStart = nativeGroupStart ??
-            Boolean(messageElement.querySelector('[id^="message-username-"]'));
-        setNativeMessageGroupStartObservation(message.channel_id, message.id, groupStartObservationOwner, detectedGroupStart);
-        return () => removeNativeMessageGroupStartObservation(message.channel_id, message.id, groupStartObservationOwner);
-    }, [groupStartObservationOwner, message.channel_id, message.id, nativeGroupStart]);
-
-    useLayoutEffect(() => {
-        const card = cardRef.current;
-        if (!card) return;
-        const row = card.closest('[id^="chat-messages-"]');
-        const previous = row?.previousElementSibling?.querySelector<HTMLElement>(".pc-secure-message-joined-below");
-        const gap = groupFlags & SecureMessageGroup.Previous && previous
-            ? Math.max(0, card.getBoundingClientRect().top - previous.getBoundingClientRect().bottom)
-            : 0;
-        // Discord's row spacing varies with its density settings. Only bridge the
-        // actual space between cards so the preceding message is never painted over.
-        const value = `${gap}px`;
-        if (card.style.getPropertyValue("--pc-secure-message-join-gap") !== value)
-            card.style.setProperty("--pc-secure-message-join-gap", value);
-    });
 
     useEffect(() => {
         let active = true;
@@ -2850,13 +2742,7 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
             ? "Waiting for encrypted-content visibility to update…"
             : "Encrypted content visibility could not be updated safely.";
         return (
-            <div ref={cardRef} className={classes(
-                "pc-secure-card",
-                screenshotMode ? "pc-secure-card-warning" : "pc-secure-card-danger",
-                "pc-secure-content-hidden",
-                "pc-secure-replaces-content",
-                mentionsLocalUser ? "pc-secure-message-mentioned" : null,
-            )}>
+            <div className={classes("pc-secure-card", screenshotMode ? "pc-secure-card-warning" : "pc-secure-card-danger")}>
                 <div className="pc-secure-card-header"><LockIcon color={screenshotMode ? "var(--status-warning)" : "var(--status-danger)"} /> Encrypted message protected</div>
                 <BaseText size="sm">{detail}</BaseText>
             </div>
@@ -2864,23 +2750,22 @@ function EncryptedMessageAccessory({ message, nativeGroupStart }: { message: Mes
     }
 
     if (result?.status === "decrypted" || !result && optimisticPlaintext !== undefined) {
+        const attachmentStatus = !embedOnly && result?.status === "decrypted"
+            ? <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />
+            : null;
+        // Decrypted text uses Discord's own message typography; media keeps rendering natively beside it.
         return (
-            <div ref={cardRef} className={classes(cardClassName, !hasPlaintext && "pc-secure-message-without-text")}>
-                {hasPlaintext && <div className="pc-secure-card-plaintext">{parsedPlaintext}</div>}
-                {!embedOnly && result?.status === "decrypted" &&
-                    <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />}
-            </div>
+            <>
+                {hasPlaintext && <div className={classes(MarkupClasses.markup, MessageContentClasses.messageContent, "pc-secure-message")}>{parsedPlaintext}</div>}
+                {attachmentStatus}
+            </>
         );
     }
     if (!result) {
-        return (
-            <div ref={cardRef} aria-busy="true" aria-label="Decrypting encrypted message" className={cardClassName}>
-                <span aria-hidden="true" className="pc-secure-message-placeholder" />
-            </div>
-        );
+        return <span aria-busy="true" aria-label="Decrypting encrypted message" className="pc-secure-message pc-secure-message-placeholder" />;
     }
     return (
-        <div ref={cardRef} className="pc-secure-card pc-secure-card-danger pc-secure-replaces-content">
+        <div className="pc-secure-card pc-secure-card-danger">
             <div className="pc-secure-card-header"><LockIcon color="var(--status-danger)" /> Encrypted message blocked</div>
             <BaseText size="sm">{encryptedStatusText(result)}</BaseText>
             {(result.status === "failed" || result.status === "unavailable") && localUserId && key && (
@@ -3111,7 +2996,7 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
 
     if (peerUserId === localUserId && localUserId) {
         return (
-            <div className="pc-secure-card pc-secure-replaces-content">
+            <div className="pc-secure-card">
                 <div className="pc-secure-card-header">🔑 Your Secure Messaging public-key announcement</div>
                 <BaseText size="xs" color="text-muted">Recipients must compare its fingerprint with you outside Discord.</BaseText>
             </div>
@@ -3119,7 +3004,7 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
     }
     if (!localUserId || !peerUserId) {
         return (
-            <div className="pc-secure-card pc-secure-card-danger pc-secure-replaces-content">
+            <div className="pc-secure-card pc-secure-card-danger">
                 <div className="pc-secure-card-header">🔑 Secure Messaging key unavailable</div>
                 <BaseText size="xs">Discord's authenticated account or announcement author is unavailable.</BaseText>
             </div>
@@ -3127,14 +3012,14 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
     }
     if (!review) {
         return (
-            <div className="pc-secure-card pc-secure-replaces-content">
+            <div className="pc-secure-card">
                 <div className="pc-secure-card-header">🔑 Verifying public-key announcement…</div>
             </div>
         );
     }
     if (review.status === "invalid_announcement" || isNativeFailure(review)) {
         return (
-            <div className="pc-secure-card pc-secure-card-danger pc-secure-replaces-content">
+            <div className="pc-secure-card pc-secure-card-danger">
                 <div className="pc-secure-card-header">🔑 Invalid Secure Messaging key announcement</div>
                 {isNativeFailure(review) && <BaseText size="xs">{failureMessage(review)}</BaseText>}
             </div>
@@ -3142,7 +3027,7 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
     }
     if (review.status === "stale_announcement") {
         return (
-            <div className="pc-secure-card pc-secure-replaces-content">
+            <div className="pc-secure-card">
                 <div className="pc-secure-card-header">🔑 Older Secure Messaging key announcement ignored</div>
                 <BaseText size="xs" color="text-muted">
                     A newer key is already verified for this person. This historical announcement cannot replace or disable it.
@@ -3154,7 +3039,7 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
 
     const trusted = review.status === "trusted";
     return (
-        <div className={`pc-secure-card pc-secure-replaces-content ${review.status === "key_changed" ? "pc-secure-card-danger" : "pc-secure-card-warning"}`}>
+        <div className={`pc-secure-card ${review.status === "key_changed" ? "pc-secure-card-danger" : "pc-secure-card-warning"}`}>
             <div className="pc-secure-card-header">
                 🔑 {trusted ? "Verified Secure Messaging key" : review.status === "key_changed" ? "Encryption key changed" : "Encryption key needs verification"}
             </div>
@@ -3170,18 +3055,31 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
     );
 }
 
-function SecureMessageAccessory({ message, nativeGroupStart }: { message: Message; nativeGroupStart?: boolean; }) {
-    if (isEncryptedMessage(message.content)) return <EncryptedMessageAccessory message={message} nativeGroupStart={nativeGroupStart} />;
+function SecureMessageAccessory({ message }: { message: Message; }) {
+    if (isEncryptedMessage(message.content)) return <EncryptedMessageAccessory message={message} />;
     if (isKeyAnnouncement(message.content)) return <KeyAnnouncementAccessory message={message} />;
     return null;
 }
 
-const renderSecureMessageAccessory: MessageAccessoryFactory = props => (
-    <SecureMessageAccessory
-        message={props.message}
-        nativeGroupStart={typeof props.isGroupStart === "boolean" ? props.isGroupStart : undefined}
-    />
-);
+// Pins and other message previews can hide accessories or restrict them to media.
+// Their content slot owns the secure text; the context prevents a second copy below it.
+const getSecureMessagePreviewContext = makeLazy(() => React.createContext(false));
+
+function renderSecurePreviewContent(message: Message): ReactNode | undefined {
+    if (screenCaptureProtectionStatus === "disabled" ||
+        !isEncryptedMessage(message.content) && !isKeyAnnouncement(message.content)) return undefined;
+    return <ErrorBoundary noop><SecureMessageAccessory message={message} /></ErrorBoundary>;
+}
+
+function renderSecurePreviewAccessories(accessories: ReactNode): ReactNode {
+    const { Provider } = getSecureMessagePreviewContext();
+    return <Provider value={true}>{accessories}</Provider>;
+}
+
+const renderSecureMessageAccessory: MessageAccessoryFactory = props => {
+    const preview = React.useContext(getSecureMessagePreviewContext());
+    return preview ? null : <SecureMessageAccessory message={props.message} />;
+};
 
 export default definePlugin({
     name: "SecureMessaging",
@@ -3191,6 +3089,20 @@ export default definePlugin({
     dependencies: ["ChatInputButtonAPI", "MessageAccessoriesAPI", "MessageEventsAPI", "MessageUpdaterAPI"],
 
     patches: [
+        {
+            find: ".hideAccessories",
+            group: true,
+            replacement: [
+                {
+                    match: /childrenAccessories:(\i\.hideAccessories\?void 0:\(0,\i\.\i\)\(\i,\i,\i\)),/,
+                    replace: "childrenAccessories:$self.renderSecurePreviewAccessories($1),",
+                },
+                {
+                    match: /childrenMessageContent:(\i)\?\?/,
+                    replace: "childrenMessageContent:$1??$self.renderSecurePreviewContent(arguments[0].message)??",
+                },
+            ],
+        },
         {
             find: "Missing channel in Channel.renderHeaderToolbar",
             replacement: {
@@ -3305,6 +3217,15 @@ export default definePlugin({
             replacement: {
                 match: /(?<="MessageManager"\);)function (\i)\(\i\)\{/,
                 replace: "$&if($self.shouldSuppressChatLoad(arguments[0]))return $self.deferChatLoad(arguments[0],()=>$1.apply(this,arguments));",
+            },
+        },
+        {
+            // Discord's message row: mark envelope rows so their ciphertext is hidden and text, media and
+            // embeds share one encrypted highlight, and let encrypted mentions use Discord's own highlight.
+            find: "Message must not be a thread starter message",
+            replacement: {
+                match: /\[(\i\.\i)\]:(\i)\.mentioned,/g,
+                replace: "...$self.useSecureMessageRow($2,$1),",
             },
         },
         {
@@ -3505,11 +3426,6 @@ export default definePlugin({
         if (renderDecryptBatchTimer !== null) clearTimeout(renderDecryptBatchTimer);
         renderDecryptBatchTimer = null;
         settledRenderDecryptions = [];
-        secureMessageGroupingNotificationScheduled = false;
-        pendingSecureMessageGroupingMessages.clear();
-        secureMessageGroupingListeners.clear();
-        secureMessageGroupingRevisions.clear();
-        nativeMessageGroupStartObservations.clear();
         revokePreparedSecureOperations();
         void Native.lockSecurityKeyVault().catch(() => undefined);
         clearEncryptedAttachmentCache();
@@ -3626,6 +3542,10 @@ export default definePlugin({
     },
 
     useSecureReplyPreview,
+
+    useSecureMessageRow,
+    renderSecurePreviewContent,
+    renderSecurePreviewAccessories,
 
     shouldBypassMessageLengthLimit,
 

@@ -22,6 +22,7 @@ export interface CatalogCard {
     enabled: boolean;
     disabled: boolean;
     isNew: boolean;
+    isFavorite: boolean;
     hasVisibleSettings: boolean;
     requiredBy?: readonly string[];
 }
@@ -145,14 +146,15 @@ export function createPluginCatalogView(source: CatalogSource) {
             const { description, isModified } = plugin;
             const isEnabled = enabled.has(name);
             const isNew = !disabled && !!newPlugins?.has(name);
+            const isFavorite = favorites.has(name);
             const requiredBy = activeDependants.get(name);
             const hasVisibleSettings = plugin.hasVisibleSettings ?? source.hasVisibleSettings(name);
             const old = cardCache.get(name);
             if (old && old.plugin.description === description && old.plugin.isModified === isModified
-                && old.enabled === isEnabled && old.disabled === disabled && old.isNew === isNew
+                && old.enabled === isEnabled && old.disabled === disabled && old.isNew === isNew && old.isFavorite === isFavorite
                 && old.hasVisibleSettings === hasVisibleSettings && sameItems(old.requiredBy, requiredBy)) return old;
             const next: CatalogCard = {
-                plugin: { name, description, isModified }, enabled: isEnabled, disabled, isNew, hasVisibleSettings, requiredBy
+                plugin: { name, description, isModified }, enabled: isEnabled, disabled, isNew, isFavorite, hasVisibleSettings, requiredBy
             };
             cardCache.set(name, next);
             return next;

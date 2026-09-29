@@ -9,42 +9,35 @@ import { formatDurationMs } from "@utils/text";
 import { Activity } from "@vencord/discord-types";
 import { FluxDispatcher, showToast } from "@webpack/common";
 
-import { settings } from "../settings";
+import type { SettingsStore } from "../settings";
 import { JfMediaData, JfSession } from "../types/jellyfin";
 import { getCachedApplicationAsset } from "./assetCache";
+import { createPresencePolling, PresenceUpdate } from "./polling";
 
 const APPLICATION_ID = "1381368130164625469";
 const SOCKET_ID = "RichPresence_JF";
 const API_ERROR_COOLDOWN_MS = 60_000;
 const logger = new Logger("RichPresence:Jellyfin");
 
-let updateInterval: NodeJS.Timeout | undefined;
 let hasShownConfigError = false;
-let isUpdating = false;
 let lastApiErrorAt = 0;
-let updateGeneration = 0;
-
-async function getAsset(key: string): Promise<string> {
-    return getCachedApplicationAsset(APPLICATION_ID, key);
-}
 
 function setActivity(activity: Activity | null) {
     FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity, socketId: SOCKET_ID });
 }
 
-function reportApiError(logMessage: string, toastMessage?: string, details?: unknown) {
+function reportApiError(logMessage: string, toastMessage?: string) {
     const now = Date.now();
     if (lastApiErrorAt && now - lastApiErrorAt < API_ERROR_COOLDOWN_MS) return;
 
     lastApiErrorAt = now;
-    if (details === undefined) logger.error(logMessage);
-    else logger.error(logMessage, details);
+    logger.error(logMessage);
 
     if (toastMessage) showToast(toastMessage, "failure", { duration: 15000 });
 }
 
-async function fetchMediaData(): Promise<JfMediaData | null> {
-    const { jf_serverUrl, jf_apiKey, jf_userId } = settings.store;
+async function fetchMediaData(store: SettingsStore, update: PresenceUpdate): Promise<JfMediaData | null> {
+    const { jf_serverUrl, jf_apiKey, jf_userId } = store;
     if (!jf_serverUrl || !jf_apiKey || !jf_userId) {
         if (!hasShownConfigError) {
             logger.warn("Jellyfin server URL, API key, or user ID is not set.");
@@ -56,7 +49,8 @@ async function fetchMediaData(): Promise<JfMediaData | null> {
 
     try {
         const baseUrl = (jf_serverUrl.startsWith("http") ? jf_serverUrl : `https://${jf_serverUrl}`).replace(/\/$/, "");
-        const res = await fetch(`${baseUrl}/Sessions?api_key=${jf_apiKey}`);
+        const res = await update.wait(fetch(`${baseUrl}/Sessions?api_key=${jf_apiKey}`, { signal: update.signal }));
+        if (!update.isCurrent()) return null;
         if (!res.ok) throw `${res.status} ${res.statusText}`;
 
         const contentType = res.headers.get("content-type") ?? "";
@@ -68,7 +62,8 @@ async function fetchMediaData(): Promise<JfMediaData | null> {
             return null;
         }
 
-        const sessions: JfSession[] = await res.json();
+        const sessions: JfSession[] = await update.wait(res.json());
+        if (!update.isCurrent()) return null;
         hasShownConfigError = false;
         lastApiErrorAt = 0;
 
@@ -78,10 +73,10 @@ async function fetchMediaData(): Promise<JfMediaData | null> {
         const item = userSession.NowPlayingItem;
         const playState = userSession.PlayState;
 
-        if (playState?.IsPaused && !settings.store.jf_showPausedState) return null;
+        if (playState?.IsPaused && !store.jf_showPausedState) return null;
 
         const imageUrl = item.ImageTags?.Primary
-            ? `${baseUrl}/Items/${item.Type === "Episode" && item.SeriesId && settings.store.jf_coverType === "series"
+            ? `${baseUrl}/Items/${item.Type === "Episode" && item.SeriesId && store.jf_coverType === "series"
                 ? item.SeriesId : item.Id}/Images/Primary`
             : undefined;
 
@@ -100,16 +95,15 @@ async function fetchMediaData(): Promise<JfMediaData | null> {
             position: playState?.PositionTicks != null ? Math.floor(playState.PositionTicks / 10000000) : undefined,
             isPaused: !!playState?.IsPaused,
         };
-    } catch (e) {
-        reportApiError("Failed to query Jellyfin API", undefined, e);
+    } catch {
+        if (update.isCurrent()) reportApiError("Failed to query Jellyfin API");
         return null;
     }
 }
 
-async function getActivity(): Promise<Activity | null> {
-    const { store } = settings;
-    const mediaData = await fetchMediaData();
-    if (!mediaData) return null;
+async function getActivity(store: SettingsStore, update: PresenceUpdate): Promise<Activity | null> {
+    const mediaData = await fetchMediaData(store, update);
+    if (!mediaData || !update.isCurrent()) return null;
 
     let richPresenceType: number;
     if (store.jf_overrideType !== "off") {
@@ -118,15 +112,19 @@ async function getActivity(): Promise<Activity | null> {
         richPresenceType = mediaData.type === "Audio" ? 2 : 3;
     }
 
-    const templateReplace = (template: string) =>
-        template
-            .replace(/\{name\}/g, mediaData.name || "")
-            .replace(/\{series\}/g, mediaData.seriesName || "")
-            .replace(/\{season\}/g, mediaData.seasonNumber?.toString() || "")
-            .replace(/\{episode\}/g, mediaData.episodeNumber?.toString() || "")
-            .replace(/\{artist\}/g, mediaData.artist || "")
-            .replace(/\{album\}/g, mediaData.album || "")
-            .replace(/\{year\}/g, mediaData.year?.toString() || "");
+    const templateValues = {
+        name: mediaData.name || "",
+        series: mediaData.seriesName || "",
+        season: mediaData.seasonNumber?.toString() || "",
+        episode: mediaData.episodeNumber?.toString() || "",
+        artist: mediaData.artist || "",
+        album: mediaData.album || "",
+        year: mediaData.year?.toString() || "",
+    };
+    const templateReplace = (template: string) => template.replace(
+        /\{(name|series|season|episode|artist|album|year)\}/g,
+        (_, field: keyof typeof templateValues) => templateValues[field]
+    );
 
     let appName: string;
     const nameSetting = store.jf_nameDisplay || "default";
@@ -168,7 +166,7 @@ async function getActivity(): Promise<Activity | null> {
 
     const assets = {
         large_image: !store.jf_privacyMode && mediaData.imageUrl
-            ? await getAsset(mediaData.imageUrl) : undefined,
+            ? await update.wait(getCachedApplicationAsset(APPLICATION_ID, mediaData.imageUrl, update.signal)) : undefined,
         large_text: !store.jf_privacyMode ? mediaData.seriesName || mediaData.album || undefined : undefined,
     };
 
@@ -246,37 +244,9 @@ async function getActivity(): Promise<Activity | null> {
     };
 }
 
-async function updatePresence() {
-    if (isUpdating) return;
-
-    const generation = updateGeneration;
-    isUpdating = true;
-    try {
-        const activity = await getActivity();
-        if (generation === updateGeneration) setActivity(activity);
-    } catch (e) {
-        logger.error("Failed to update presence", e);
-        if (generation === updateGeneration) setActivity(null);
-    } finally {
-        if (generation === updateGeneration) isUpdating = false;
-    }
-}
-
-export function start() {
-    if (updateInterval) return;
-
-    updateGeneration++;
+const polling = createPresencePolling("jf", 10000, getActivity, setActivity, () => {
     hasShownConfigError = false;
     lastApiErrorAt = 0;
-    void updatePresence();
-    updateInterval = setInterval(updatePresence, 10000);
-}
+}, () => logger.error("Failed to update presence"));
 
-export function stop() {
-    updateGeneration++;
-    clearInterval(updateInterval);
-    updateInterval = undefined;
-    isUpdating = false;
-    lastApiErrorAt = 0;
-    setActivity(null);
-}
+export const { start, stop } = polling;

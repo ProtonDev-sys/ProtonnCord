@@ -12,13 +12,12 @@ import { runInNewContext } from "node:vm";
 import { createSourceFile, isFunctionDeclaration, JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import type { DecryptIncomingResult } from "../src/equicordplugins/secureMessaging.desktop/native";
-import { secureMessageGroupNeighborIds } from "../src/equicordplugins/secureMessaging.desktop/messageGrouping";
 
 const sourcePath = "src/equicordplugins/secureMessaging.desktop/index.tsx";
 const source = readFileSync(sourcePath, "utf8");
 const functionNames = new Set([
-    "EncryptedAttachmentStatus", "EncryptedMessageAccessory", "flushSecureMessageGroupingChanges", "notifySecureMessageGroupingChanged",
-    "flushRenderDecryptions", "scheduleRenderDecryptBatch", "enqueueSettledRenderDecryption", "groupObservationKey",
+    "EncryptedAttachmentStatus", "EncryptedMessageAccessory", "notifySecureMessageRow",
+    "flushRenderDecryptions", "scheduleRenderDecryptBatch", "enqueueSettledRenderDecryption",
 ]);
 
 function decrypted(plaintext: string): Extract<DecryptIncomingResult, { status: "decrypted"; }> {
@@ -26,7 +25,6 @@ function decrypted(plaintext: string): Extract<DecryptIncomingResult, { status: 
 }
 
 function fixture(count: number, implementation = source) {
-    const targetedGrouping = implementation.includes("pendingSecureMessageGroupingMessages");
     const parsed = createSourceFile("index.tsx", implementation, ScriptTarget.Latest, true);
     const functions = parsed.statements.filter(statement =>
         isFunctionDeclaration(statement) && statement.name && functionNames.has(statement.name.text)
@@ -42,7 +40,7 @@ function fixture(count: number, implementation = source) {
     const memos = new Map<string, { dependencies: unknown[]; value: unknown; }>();
     const timers: Array<() => void> = [];
     const microtasks: Array<() => void> = [];
-    const metrics = { rows: count, parserCalls: 0, rowRenders: 0, groupingCallbacks: 0, flushes: 0, retries: 0, stateUpdates: 0, refreshes: 0 };
+    const metrics = { rows: count, parserCalls: 0, rowRenders: 0, rowCallbacks: 0, flushes: 0, retries: 0, stateUpdates: 0, refreshes: 0 };
     let activeRowId = "";
     let protection = "ready";
     let userId = "synthetic-self";
@@ -53,29 +51,10 @@ function fixture(count: number, implementation = source) {
     let optimistic: string | undefined;
     let embedOnly = false;
     let attachmentStatus = { status: "ready", reason: "synthetic attachment failure" };
-    let groupFlags = 0;
-    let layout: { cardTop: number; previousBottom: number | null; } | null = null;
-    let layoutEffects: Array<() => void> = [];
-    const styles = new Map<string, string>();
-    const card = {
-        closest: () => ({
-            querySelector: () => null,
-            previousElementSibling: { querySelector: () => layout?.previousBottom == null
-                ? null : { getBoundingClientRect: () => ({ bottom: layout?.previousBottom }) } },
-        }),
-        getBoundingClientRect: () => ({ top: layout?.cardTop }),
-        style: {
-            getPropertyValue: (name: string) => styles.get(name),
-            setProperty: (name: string, value: string) => styles.set(name, value),
-        },
-    };
-    const groupingListeners = new Map<string, Set<() => void> | Map<string, Set<() => void>>>();
+    const rowListeners = new Map<string, Set<() => void>>();
     const runtime = runInNewContext(`${compiled}\n({ EncryptedMessageAccessory, enqueueSettledRenderDecryption })`, {
         RENDER_DECRYPT_BATCH_SIZE: 24, secureOperationGeneration: 1,
-        secureMessageGroupingNotificationScheduled: false,
-        pendingSecureMessageGroupingChannels: new Set(), secureMessageGroupingRevisions: new Map(),
-        pendingSecureMessageGroupingMessages: new Map(), secureMessageGroupNeighborIds,
-        secureMessageGroupingListeners: groupingListeners, settledRenderDecryptions: [], renderDecryptBatchTimer: null,
+        secureMessageRowListeners: rowListeners, settledRenderDecryptions: [], renderDecryptBatchTimer: null,
         setTimeout: (callback: () => void) => { timers.push(callback); return timers.length; },
         queueMicrotask: (callback: () => void) => microtasks.push(callback),
         ReactDOM: { flushSync: (callback: () => void) => { metrics.flushes++; callback(); } },
@@ -100,35 +79,27 @@ function fixture(count: number, implementation = source) {
         useScreenCaptureProtectionStatus: () => protection,
         getCachedDecryption: (_user: string, message: { id: string; }) => results.get(message.id) ?? null,
         getOptimisticOutgoingPlaintext: () => optimistic, encryptedMessageInlineEmbedStatus: () => "absent",
-        encryptedMessageMentionsUser: () => false, useRef: (value: unknown) => ({ current: value === null && layout ? card : value }),
-        useSecureMessageGroupingRevision: () => 0, useStateFromStores: () => groupFlags,
-        MessageStore: { getMessages: () => ({ _array: rows }) },
-        classes: (...values: unknown[]) => values.filter(Boolean).join(" "), SecureMessageGroup: { Previous: 1, Next: 2 },
-        useLayoutEffect: (callback: () => void) => layoutEffects.push(callback), useEffect: () => undefined,
-        setNativeMessageGroupStartObservation: () => undefined, removeNativeMessageGroupStartObservation: () => undefined,
+        classes: (...values: unknown[]) => values.filter(Boolean).join(" "), useEffect: () => undefined,
+        MarkupClasses: { markup: "markup" }, MessageContentClasses: { messageContent: "messageContent" },
         shouldHideSecureEmbedOnlyPlaintext: () => embedOnly,
         Parser: { parse: (text: string) => { metrics.parserCalls++; return { parsed: text }; } },
         encryptedAttachmentCacheKey: () => "synthetic-attachment", encryptedAttachmentStatus: () => attachmentStatus,
         LockIcon: "LockIcon", BaseText: "BaseText", Button: "Button", encryptedStatusText: () => "blocked",
-        React: { createElement: (type: unknown, props: unknown, ...children: unknown[]) => typeof type === "function"
+        React: { Fragment: "Fragment", createElement: (type: unknown, props: unknown, ...children: unknown[]) => typeof type === "function"
             ? type({ ...props as object, children }) : { type, props, children } },
     }) as {
-        EncryptedMessageAccessory(props: { message: typeof rows[number]; nativeGroupStart: boolean; }): unknown;
+        EncryptedMessageAccessory(props: { message: typeof rows[number]; }): unknown;
         enqueueSettledRenderDecryption(request: { channelId: string; messageId: string; generation: number; result: DecryptIncomingResult; apply(): void; }): void;
     };
     function render(index: number) {
         metrics.rowRenders++;
         activeRowId = rows[index].id;
-        layoutEffects = [];
-        return runtime.EncryptedMessageAccessory({ message: rows[index], nativeGroupStart: false });
+        return runtime.EncryptedMessageAccessory({ message: rows[index] });
     }
-    const rowListeners = rows.map((_, index) => () => {
-        metrics.groupingCallbacks++;
+    rows.forEach((row, index) => rowListeners.set(row.id, new Set([() => {
+        metrics.rowCallbacks++;
         render(index);
-    });
-    groupingListeners.set("synthetic-channel", targetedGrouping
-        ? new Map(rows.map((row, index) => [row.id, new Set([rowListeners[index]])]))
-        : new Set(rowListeners));
+    }])));
     function drain() {
         while (timers.length) {
             timers.shift()?.();
@@ -157,13 +128,6 @@ function fixture(count: number, implementation = source) {
         setResult: (value: DecryptIncomingResult) => { results.set(rows[0].id, value); },
         setLocalResult: (value: DecryptIncomingResult) => { localResult = value; },
         setEmbedOnly: (value: boolean) => { embedOnly = value; },
-        measureJoin: (cardTop: number, previousBottom: number | null, joined = true) => {
-            layout = { cardTop, previousBottom };
-            groupFlags = joined ? 1 : 0;
-            render(0);
-            layoutEffects.forEach(effect => effect());
-            return styles.get("--pc-secure-message-join-gap");
-        },
         setAttachments: (count: number, status = "ready") => {
             rows[0].attachments = Array.from({ length: count }, () => ({})) as never[];
             attachmentStatus = { ...attachmentStatus, status };
@@ -179,55 +143,6 @@ function fixture(count: number, implementation = source) {
                 if (staggered) drain();
             });
             drain();
-        },
-    };
-}
-
-function groupingFixture() {
-    const names = new Set([
-        "groupObservationKey", "flushSecureMessageGroupingChanges", "notifySecureMessageGroupingChanged",
-        "useSecureMessageGroupingRevision", "observedNativeMessageGroupStart",
-        "setNativeMessageGroupStartObservation", "removeNativeMessageGroupStartObservation",
-    ]);
-    const parsed = createSourceFile("index.tsx", source, ScriptTarget.Latest, true);
-    const functions = parsed.statements.filter(statement =>
-        isFunctionDeclaration(statement) && statement.name && names.has(statement.name.text)
-    ).map(statement => statement.getText(parsed)).join("\n");
-    const compiled = transpileModule(functions, { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText;
-    const rows = new Map<string, { id: string; }[]>();
-    const listeners = new Map<string, Map<string, Set<() => void>>>();
-    const revisions = new Map<string, number>();
-    const pending = new Map<string, Set<string>>();
-    const microtasks: (() => void)[] = [];
-    let subscriber: { calls: number; cleanup(): void; };
-    const runtime = runInNewContext(`${compiled}\n({ notifySecureMessageGroupingChanged, useSecureMessageGroupingRevision, setNativeMessageGroupStartObservation, removeNativeMessageGroupStartObservation })`, {
-        secureMessageGroupingNotificationScheduled: false,
-        secureMessageGroupingListeners: listeners, secureMessageGroupingRevisions: revisions,
-        pendingSecureMessageGroupingMessages: pending, nativeMessageGroupStartObservations: new Map(),
-        secureMessageGroupNeighborIds, MessageStore: { getMessages: (channel: string) => ({ _array: rows.get(channel) }) },
-        queueMicrotask: (callback: () => void) => microtasks.push(callback),
-        useState: (initial: () => number) => {
-            const current = subscriber;
-            return [initial(), () => current.calls++];
-        },
-        useLayoutEffect: (effect: () => () => void) => { subscriber.cleanup = effect(); },
-    }) as {
-        notifySecureMessageGroupingChanged(channel: string, id: string): void;
-        useSecureMessageGroupingRevision(channel: string, id: string): number;
-        setNativeMessageGroupStartObservation(channel: string, id: string, owner: object, start: boolean): void;
-        removeNativeMessageGroupStartObservation(channel: string, id: string, owner: object): void;
-    };
-    return {
-        rows, listeners, revisions, pending,
-        notify: runtime.notifySecureMessageGroupingChanged,
-        observe: runtime.setNativeMessageGroupStartObservation,
-        unobserve: runtime.removeNativeMessageGroupStartObservation,
-        flush() { while (microtasks.length) microtasks.shift()?.(); },
-        mount(channel: string, id: string) {
-            subscriber = { calls: 0, cleanup() {} };
-            runtime.useSecureMessageGroupingRevision(channel, id);
-            subscriber.calls = 0;
-            return subscriber;
         },
     };
 }
@@ -250,7 +165,7 @@ if (process.argv.includes("--benchmark")) {
             const h = fixture(100);
             h.settleHistory(staggered);
             assert.equal(h.metrics.parserCalls, 100);
-            assert.equal(h.metrics.groupingCallbacks, staggered ? 298 : 108, "grouping refreshes only affected rows and their neighbors");
+            assert.equal(h.metrics.rowCallbacks, 100, "each settled decryption refreshes only its own row");
         });
     }
 
@@ -294,16 +209,21 @@ if (process.argv.includes("--benchmark")) {
         assert.equal(h.metrics.parserCalls, 1);
     });
 
-    test("media-only rows keep their replacement marker without an empty plaintext element", () => {
+    test("media-only rows render no empty plaintext element beside native media", () => {
         const h = fixture(1);
         for (const plaintext of ["", " \n\t"]) {
             h.setResult({ ...decrypted(plaintext), stickers: [{ id: "1", name: "fixture", formatType: 1 }] });
-            const rendered = JSON.stringify(h.render(0));
-            assert.match(rendered, /pc-secure-replaces-content/u, "ciphertext stays hidden while native media is visible");
-            assert.match(rendered, /pc-secure-message-without-text/u);
-            assert.doesNotMatch(rendered, /pc-secure-card-plaintext/u);
+            assert.doesNotMatch(JSON.stringify(h.render(0)), /pc-secure-message|messageContent/u);
         }
-        assert.equal(h.metrics.parserCalls, 0, "whitespace does not create a plaintext node that prevents :empty matching");
+        assert.equal(h.metrics.parserCalls, 0);
+    });
+
+    test("decrypted text renders with Discord's own message typography instead of a custom card", () => {
+        const h = fixture(1);
+        h.setResult(decrypted("styled fixture"));
+        const rendered = JSON.stringify(h.render(0));
+        assert.match(rendered, /"className":"markup messageContent pc-secure-message"/u);
+        assert.doesNotMatch(rendered, /pc-secure-card/u);
     });
 
     test("media-only attachment cards retain loading, retry and integrity failures", () => {
@@ -380,80 +300,91 @@ if (process.argv.includes("--benchmark")) {
         }
     });
 
-    test("joined cards bridge the actual row gap without covering preceding text", () => {
-        const h = fixture(1);
-        h.setResult(decrypted("fixture"));
-        assert.equal(h.measureJoin(106, 100), "6px");
-        assert.equal(h.measureJoin(102, 100), "2px", "density changes replace the previous measurement");
-        assert.equal(h.measureJoin(98, 100), "0px", "overlapping rows must not create a negative connector");
-        assert.equal(h.measureJoin(106, null), "0px", "a missing previous row cannot leave a stale connector");
-        assert.equal(h.measureJoin(106, 100, false), "0px", "splitting a group clears its connector");
+    test("envelope rows share one highlight whose tone follows decryption and capture protection", () => {
+        const h = rowFixture();
+        assert.deepEqual(h.classes({ content: "ordinary", mentioned: true }), { mentioned: true }, "ordinary messages only keep Discord's own flags");
+        assert.deepEqual(h.classes({ content: "PCKA1:announcement" }), { "mentioned": false, "pc-secure-row": true },
+            "key announcements hide their payload without an encrypted highlight");
+        assert.deepEqual(h.classes(), { "mentioned": false, "pc-secure-row pc-secure-row-encrypted": true }, "pending envelopes are already highlighted");
+        h.result = decrypted("hello");
+        assert.deepEqual(h.classes(), { "mentioned": false, "pc-secure-row pc-secure-row-encrypted": true });
+        h.result = { status: "untrusted_author" };
+        assert.deepEqual(h.classes(), { "mentioned": false, "pc-secure-row pc-secure-row-danger": true });
+        h.protection = "screenshot";
+        assert.deepEqual(h.classes(), { "mentioned": false, "pc-secure-row pc-secure-row-warning pc-secure-row-hidden": true });
+        h.protection = "failed";
+        assert.deepEqual(h.classes(), { "mentioned": false, "pc-secure-row pc-secure-row-danger pc-secure-row-hidden": true });
+        h.protection = "disabled";
+        assert.deepEqual(h.classes(), { mentioned: false }, "a stopped plugin leaves rows untouched");
     });
 
-    test("group updates deduplicate neighboring rows and stay inside their channel", () => {
-        const h = groupingFixture();
-        h.rows.set("a", ["0", "1", "2", "3", "4"].map(id => ({ id })));
-        h.rows.set("b", [{ id: "2" }]);
-        const rows = ["0", "1", "2", "3", "4"].map(id => h.mount("a", id));
-        const otherChannel = h.mount("b", "2");
-        const secondCopy = h.mount("a", "2");
-        h.notify("a", "2"); h.notify("a", "2"); h.notify("a", "3");
-        h.flush();
-        assert.deepEqual(rows.map(row => row.calls), [0, 1, 1, 1, 1]);
-        assert.equal(secondCopy.calls, 1);
-        assert.equal(otherChannel.calls, 0);
-        secondCopy.cleanup();
-        h.notify("a", "0"); h.flush();
-        assert.deepEqual(rows.map(row => row.calls), [1, 2, 1, 1, 1]);
-        assert.equal(secondCopy.calls, 1);
+    test("encrypted mentions use Discord's own mention highlight", () => {
+        const h = rowFixture();
+        h.result = decrypted("<@local>");
+        h.mentions = true;
+        assert.deepEqual(h.classes(), { "mentioned": true, "pc-secure-row pc-secure-row-encrypted": true });
     });
 
-    test("inserted rows use their current neighbors and removed rows refresh the channel", () => {
-        const h = groupingFixture();
-        const messages = ["first", "middle", "last"].map(id => ({ id }));
-        h.rows.set("channel", messages);
-        const rows = messages.map(row => h.mount("channel", row.id));
-        h.notify("channel", "first"); h.flush();
-        messages.splice(1, 0, { id: "inserted" });
-        const inserted = h.mount("channel", "inserted");
-        h.notify("channel", "inserted"); h.flush();
-        assert.deepEqual(rows.map(row => row.calls), [2, 2, 0]);
-        assert.equal(inserted.calls, 1);
-        messages.splice(1, 1);
-        inserted.cleanup();
-        h.notify("channel", "inserted"); h.flush();
-        assert.deepEqual(rows.map(row => row.calls), [3, 3, 1]);
-        assert.equal(inserted.calls, 1);
+    test("rows subscribe only for envelopes and refresh when their own decryption settles", () => {
+        const h = rowFixture();
+        h.classes({ content: "ordinary" });
+        assert.equal(h.effects.length, 1);
+        assert.equal(h.effects[0](), undefined, "ordinary messages never subscribe");
+        assert.equal(h.rowListeners.size, 0);
+        h.effects.length = 0;
+        h.classes({ id: "a" });
+        h.classes({ id: "b" });
+        const cleanups = h.effects.map(effect => effect());
+        assert.equal(h.captureListeners.size, 2);
+        h.runtime.notifySecureMessageRow("a");
+        assert.deepEqual(h.refreshes, ["a"], "a settled decryption refreshes only the row showing it");
+        for (const listener of h.captureListeners) listener("screenshot");
+        assert.deepEqual(h.refreshes, ["a", "a", "b"], "capture protection changes refresh every envelope row");
+        cleanups.forEach(cleanup => (cleanup as () => void)());
+        assert.equal(h.rowListeners.size, 0);
+        assert.equal(h.captureListeners.size, 0);
     });
+}
 
-    test("native group boundary changes and disposed observations refresh affected neighbors", () => {
-        const h = groupingFixture();
-        h.rows.set("channel", ["0", "1", "2", "3"].map(id => ({ id })));
-        const rows = ["0", "1", "2", "3"].map(id => h.mount("channel", id));
-        const owner = {};
-        h.observe("channel", "1", owner, false); h.flush();
-        h.observe("channel", "1", owner, false); h.flush();
-        assert.deepEqual(rows.map(row => row.calls), [1, 1, 1, 0]);
-        h.observe("channel", "1", owner, true); h.flush();
-        h.unobserve("channel", "1", owner); h.flush();
-        assert.deepEqual(rows.map(row => row.calls), [3, 3, 3, 0]);
-    });
-
-    test("subscription cleanup removes revisions and cannot delete subscribers created after a reset", () => {
-        const h = groupingFixture();
-        h.rows.set("channel", [{ id: "row" }]);
-        const old = h.mount("channel", "row");
-        h.listeners.clear(); h.revisions.clear(); h.pending.clear();
-        const current = h.mount("channel", "row");
-        old.cleanup();
-        h.notify("channel", "row"); h.flush();
-        assert.equal(current.calls, 1);
-        assert.equal(old.calls, 0);
-        current.cleanup();
-        assert.equal(h.listeners.size, 0);
-        assert.equal(h.revisions.size, 0);
-        h.notify("channel", "row"); h.flush();
-        assert.equal(current.calls, 1);
-        assert.equal(h.pending.size, 0);
+function rowFixture() {
+    const names = new Set(["secureMessageRow", "useSecureMessageRow", "notifySecureMessageRow"]);
+    const parsed = createSourceFile("index.tsx", source, ScriptTarget.Latest, true);
+    const functions = parsed.statements.filter(statement =>
+        isFunctionDeclaration(statement) && statement.name && names.has(statement.name.text)
+    ).map(statement => statement.getText(parsed)).join("\n");
+    const compiled = transpileModule(functions, { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText;
+    const rowListeners = new Map<string, Set<() => void>>();
+    const captureListeners = new Set<(status: string) => void>();
+    const effects: (() => (() => void) | undefined)[] = [];
+    const refreshes: string[] = [];
+    let currentId = "";
+    const state = {
+        result: null as DecryptIncomingResult | null, protection: "ready", mentions: false,
+        rowListeners, captureListeners, effects, refreshes,
+    };
+    const runtime = runInNewContext(`${compiled}\n({ useSecureMessageRow, notifySecureMessageRow })`, {
+        secureMessageRowListeners: rowListeners, screenCaptureProtectionListeners: captureListeners,
+        get screenCaptureProtectionStatus() { return state.protection; },
+        isEncryptedMessage: (content: string) => content.startsWith("PCEM3:"),
+        isKeyAnnouncement: (content: string) => content.startsWith("PCKA1:"),
+        UserStore: { getCurrentUser: () => ({ id: "local" }) },
+        getCachedDecryption: () => state.result, getOptimisticOutgoingPlaintext: () => undefined,
+        encryptedMessageMentionsUser: () => state.mentions,
+        useState: () => {
+            const id = currentId;
+            return [0, () => refreshes.push(id)];
+        },
+        useEffect: (effect: () => (() => void) | undefined) => effects.push(effect),
+    }) as {
+        useSecureMessageRow(message: object, mentionedClassName: string): Record<string, boolean>;
+        notifySecureMessageRow(id: string): void;
+    };
+    return Object.assign(state, {
+        runtime,
+        classes(overrides: { id?: string; content?: string; mentioned?: boolean; } = {}) {
+            const message = { id: "row", channel_id: "channel", content: "PCEM3:envelope", author: { id: "peer" }, mentioned: false, ...overrides };
+            currentId = message.id;
+            return { ...runtime.useSecureMessageRow(message, "mentioned") };
+        },
     });
 }
