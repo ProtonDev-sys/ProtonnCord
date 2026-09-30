@@ -12,6 +12,54 @@ import { buildTargetLanguageOptions, getVoiceMessageMedia, resolveTargetLanguage
 import { formatTimestampedTranscript, normalizeTranscriptionResult, parsePhononResult, PHONON_MODEL } from "../src/equicordplugins/voiceMessageTranscriber.desktop/transcriptionData";
 import { generateWaveform } from "../src/plugins/voiceMessages/waveform";
 
+{
+    let now = 0;
+    let nextTimer = 0;
+    const timers = new Map<number, { callback: () => void; due: number; }>();
+    const cacheExports: any = {};
+    const code = transpileModule(readFileSync("src/equicordplugins/voiceMessageTranscriber.desktop/transcriptionData.ts", "utf8"), {
+        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
+    }).outputText;
+    runInNewContext(code, {
+        exports: cacheExports,
+        Date: { now: () => now },
+        setTimeout: (callback: () => void, delay: number) => { timers.set(++nextTimer, { callback, due: now + delay }); return nextTimer; },
+        clearTimeout: (timer: number) => timers.delete(timer)
+    });
+    const cache = new cacheExports.IdleResultCache((value: string) => value.length);
+    const advance = (milliseconds: number) => {
+        now += milliseconds;
+        for (const [timer, entry] of [...timers]) {
+            if (entry.due <= now) { timers.delete(timer); entry.callback(); }
+        }
+    };
+    let expired = 0;
+    const unsubscribe = cache.subscribe("message", () => { expired++; });
+    cache.set("message", "translated text");
+    const release = cache.retain("message");
+    advance(600_000);
+    assert.equal(cache.get("message"), "translated text", "visible results remain available without polling");
+    assert.equal(timers.size, 0, "visible-only caches need no timers");
+    release();
+    advance(299_999);
+    assert.equal(cache.get("message"), "translated text");
+    const releaseAgain = cache.retain("message");
+    releaseAgain();
+    advance(299_999);
+    assert.equal(cache.get("message"), "translated text", "show/hide resets the inactivity deadline");
+    advance(1);
+    assert.equal(cache.get("message"), undefined);
+    assert.equal(expired, 1, "expiry notifies mounted hidden views to release their state references");
+    unsubscribe();
+    for (let index = 0; index < 101; index++) cache.set(String(index), "text");
+    assert.equal(cache.get("0"), undefined, "entry count is bounded");
+    assert.equal(timers.size, 1, "all inactive entries share one expiry timer");
+    cache.set("oversized", "x".repeat(1_000_001));
+    assert.equal(cache.get("oversized"), undefined, "retained text has an aggregate memory bound");
+    cache.clear();
+    assert.equal(timers.size, 0, "stop removes expiry timers");
+}
+
 const attachment = {
     content_type: "audio/ogg",
     duration_secs: 3.5,
