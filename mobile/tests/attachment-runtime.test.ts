@@ -24,6 +24,10 @@ function fixture(
 		write?: () => Promise<string>
 		remove?: () => Promise<unknown>
 		cleanup?: boolean
+		fetch?: typeof fetch
+		time?: () => number
+		setTimeout?: typeof setTimeout
+		clearTimeout?: typeof clearTimeout
 	} = {},
 ) {
 	const metadata: any[] = []
@@ -35,7 +39,7 @@ function fixture(
 			import.meta.url,
 		),
 		'utf8',
-	)}\nexport { readAttachmentResponse, files, cacheReady };`
+	)}\nexport { readAttachmentResponse, download, files, cacheReady, cache, cacheKey, AttachmentDownloadError };`
 	const code = transpileModule(source, {
 		compilerOptions: {
 			module: ModuleKind.CommonJS,
@@ -89,7 +93,11 @@ function fixture(
 		exports: {},
 		URL,
 		Promise,
+		Date: options.time ? { now: options.time } : Date,
 		AbortController,
+		fetch: options.fetch,
+		setTimeout: options.setTimeout ?? setTimeout,
+		clearTimeout: options.clearTimeout ?? clearTimeout,
 		Uint8Array,
 		console: { warn: (value: unknown) => warnings.push(value) },
 		require: (name: string) => {
@@ -120,6 +128,88 @@ function upload(size = 3) {
 		},
 	}
 }
+
+test('attachment deadline covers response bodies and cleans its timer without confusing lock cancellation', async () => {
+	let timeout!: () => void
+	let cleared = 0
+	let aborted = false
+	const f = fixture({
+		fetch: async (_input, init) => {
+			init?.signal?.addEventListener('abort', () => {
+				aborted = true
+			})
+			return {
+				ok: true,
+				headers: { get: () => '30' },
+				arrayBuffer: () => new Promise(() => {}),
+			} as unknown as Response
+		},
+		setTimeout: ((callback: () => void) => {
+			timeout = callback
+			return 1
+		}) as unknown as typeof setTimeout,
+		clearTimeout: (() => {
+			cleared++
+		}) as typeof clearTimeout,
+	})
+	const attachment = {
+		id: 'attachment',
+		size: 30,
+		url: 'https://cdn.discordapp.com/attachments/channel/attachment/file.pcaf',
+		proxy_url:
+			'https://media.discordapp.net/attachments/channel/attachment/file.pcaf',
+	}
+	const pending = f.api.download(attachment, 'channel')
+	await tick()
+	timeout()
+	await assert.rejects(pending, /timed out/)
+	assert.equal(aborted, true)
+	assert.equal(cleared, 1)
+	const locked = f.api.download(attachment, 'channel')
+	await tick()
+	f.api.clearAttachmentCache()
+	await assert.rejects(locked, /locked/)
+	assert.equal(cleared, 2)
+})
+
+test('transient attachment failures expire or retry on refreshed URLs; authentication failures stay blocked', async () => {
+	let now = Date.now()
+	const f = fixture({ time: () => now })
+	await f.api.cleanupStoredAttachments()
+	f.api.setAttachmentPatcher(() => {})
+	const message = {
+		id: 'message',
+		channel_id: 'channel',
+		content: 'encrypted',
+		attachments: [{ url: 'old', proxy_url: 'old' }],
+	}
+	const secure = {
+		text: '',
+		stickers: [],
+		attachments: { id: 'test', count: 1 },
+	}
+	const key = f.api.cacheKey(message)
+	const insert = (retryAt: number) =>
+		f.api.cache.set(key, {
+			status: 'failed',
+			reason: 'download unavailable',
+			retryAt,
+			sourceUrls: JSON.stringify([['old', 'old']]),
+		})
+	insert(now + 30_000)
+	assert.match(f.api.renderAttachments(message, secure).plaintext, /blocked/)
+	now += 30_001
+	assert.match(f.api.renderAttachments(message, secure).plaintext, /Decrypting/)
+	await tick()
+	insert(now + 30_000)
+	message.attachments[0].url = 'refreshed'
+	assert.match(f.api.renderAttachments(message, secure).plaintext, /Decrypting/)
+	await tick()
+	insert(Infinity)
+	now += 60_000
+	assert.match(f.api.renderAttachments(message, secure).plaintext, /blocked/)
+	f.api.clearAttachmentCache()
+})
 
 test('prepared uploads retain encrypted metadata and clear its outer plaintext copies only when applied', async () => {
 	const f = fixture()
@@ -263,6 +353,42 @@ test('non-streaming runtimes require matching transport lengths and reject unver
 	)
 	assert.equal(bytes.length, 30)
 	assert.equal(allocations, 1)
+})
+
+test('transport failures while consuming either body API remain retryable', async () => {
+	const fixtureResult = fixture()
+	let cancelled = 0
+	let released = 0
+	const streaming = {
+		headers: { get: () => '30' },
+		body: {
+			getReader: () => ({
+				read: async () => {
+					throw new Error('connection interrupted')
+				},
+				cancel: async () => {
+					cancelled++
+				},
+				releaseLock: () => {
+					released++
+				},
+			}),
+		},
+	}
+	const buffered = {
+		headers: { get: () => '30' },
+		arrayBuffer: async () => {
+			throw new Error('connection interrupted')
+		},
+	}
+	for (const response of [streaming, buffered])
+		await assert.rejects(
+			fixtureResult.api.readAttachmentResponse(response, 30),
+			(error: unknown) =>
+				error instanceof fixtureResult.api.AttachmentDownloadError,
+		)
+	assert.equal(cancelled, 1)
+	assert.equal(released, 1)
 })
 
 test('failed owned-cache cleanup is contained and retried on the next clear', async () => {

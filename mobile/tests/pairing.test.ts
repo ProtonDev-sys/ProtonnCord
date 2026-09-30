@@ -8,13 +8,17 @@ import {
 	publicIdentity,
 	setRandomSource,
 } from '../plugins/secure-messaging/js/crypto'
-import { observeAnnouncement } from '../plugins/secure-messaging/js/history'
+import {
+	approveAnnouncement,
+	observeAnnouncement,
+} from '../plugins/secure-messaging/js/history'
 import { openMobilePairing } from '../plugins/secure-messaging/js/mobilePairing'
 import {
 	deriveOneKeyIdentity,
 	deriveOneKeyRoot,
 } from '../plugins/secure-messaging/js/oneKey'
 import { MessageReceiver } from '../plugins/secure-messaging/js/receive'
+import { captureSendPolicy } from '../plugins/secure-messaging/js/sendPolicy'
 import { MobileVault } from '../plugins/secure-messaging/js/vaultState'
 import type { Account } from '../plugins/secure-messaging/js/vaultState'
 
@@ -198,6 +202,74 @@ test('announcement order is based on Discord publication metadata and key change
 	)
 	assert.equal(state.pending[PEER].fingerprint, replacement.fingerprint)
 	assert.equal(state.peerIdentityHistory?.[PEER][0].retiredAt, NOW)
+})
+
+test('same-key repeats cannot hide a replacement encountered later in reverse history', () => {
+	const state: Account = {
+		identity,
+		counter: 0,
+		trusted: { ...payload.trusted },
+		pending: {},
+		announcementTimes: { [PEER]: NOW },
+		conversations: structuredClone(payload.conversations),
+	}
+	assert.equal(
+		observeAnnouncement(state, payload.trusted[PEER], messageIdAt(NOW)),
+		false,
+	)
+	const replacement = publicIdentity(generateIdentity(), PEER)
+	assert.equal(
+		observeAnnouncement(state, replacement, messageIdAt(NOW - 1000)),
+		true,
+	)
+	assert.equal(state.pending[PEER].fingerprint, replacement.fingerprint)
+	assert.equal(state.conversations[CHANNEL].needsReview, true)
+})
+
+test('edited announcements use publication time and approval retains durable protection', async () => {
+	let saved: string | null = null
+	const backing = {
+		read: async () => saved,
+		write: async (value: string) => {
+			saved = value
+		},
+	}
+	const vault = new MobileVault(backing)
+	await vault.load()
+	const state = vault.account(USER)
+	state.trusted = { ...payload.trusted }
+	state.conversations = structuredClone(payload.conversations)
+	state.trustedAnnouncementTimes = { [PEER]: NOW - 2000 }
+	const replacement = publicIdentity(generateIdentity(), PEER)
+	const messageId = messageIdAt(NOW - 3000)
+	assert.equal(observeAnnouncement(state, replacement, messageId), false)
+	assert.equal(
+		observeAnnouncement(state, replacement, messageId, NOW - 1000),
+		true,
+	)
+	assert.equal(state.peerIdentityHistory?.[PEER][0].retiredAt, NOW - 1000)
+	approveAnnouncement(state, PEER)
+	await vault.save()
+	const restarted = new MobileVault(backing)
+	await restarted.load()
+	assert.equal(restarted.protectedChannel(USER, CHANNEL), true)
+	assert.throws(
+		() => captureSendPolicy(restarted.account(USER), CHANNEL, [PEER]),
+		/Review/,
+	)
+	assert.equal(
+		observeAnnouncement(state, payload.trusted[PEER], messageIdAt(NOW - 2000)),
+		false,
+	)
+	assert.throws(
+		() => observeAnnouncement(state, payload.trusted[PEER], messageId, NaN),
+		/timestamp/,
+	)
+	assert.throws(
+		() =>
+			observeAnnouncement(state, payload.trusted[PEER], messageId, NOW - 4000),
+		/timestamp/,
+	)
 })
 
 test('pairing keeps phone-only contacts and retired keys readable after a changed PC peer and restart', async () => {
