@@ -19,7 +19,88 @@ import { encodePhononAudio, isRecognizedAudioContainer } from "./audioValidation
 import { parsePhononResult } from "./transcriptionData";
 
 const execute = promisify(execFile);
-const transcriptionJobs = new Map<number, { id: string; controller: AbortController; }>();
+
+const phononStreamingScript = String.raw`
+import ast
+import inspect
+import json
+import sys
+import textwrap
+import time
+import types
+
+from fermion._speech import backends, fetch
+from fermion.transcribe import _resolve
+
+repo, key, pin, local_dir = _resolve("phonon-2")
+engine = backends.resolve("Phonon-2 word previews")
+speech = backends.load(engine, local_dir if local_dir is not None else fetch.ensure(repo, key, pin),
+                       profile=key, backend=pin["backend"], quiet=True)
+completed = []
+pieces = []
+last_text = ""
+last_emit = 0.0
+
+def emit(text, force=False):
+    global last_text, last_emit
+    now = time.monotonic()
+    if text and text != last_text and (force or now - last_emit >= 0.075):
+        if not text.startswith(last_text):
+            raise RuntimeError("Phonon-2 preview changed a completed word")
+        print(json.dumps({"type": "partial", "delta": text[len(last_text):]}, ensure_ascii=False), flush=True)
+        last_text, last_emit = text, now
+
+def preview(piece):
+    pieces.append(piece.replace("\u2581", " "))
+    text = "".join(pieces).lstrip()
+    if " " in text:
+        emit(" ".join(completed + [text.rsplit(" ", 1)[0]]).strip())
+
+def instrument(function, target, expression):
+    tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+    matches = 0
+    class InsertPreview(ast.NodeTransformer):
+        def visit_Expr(self, node):
+            nonlocal matches
+            self.generic_visit(node)
+            if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute)
+                    and isinstance(node.value.func.value, ast.Name)
+                    and node.value.func.value.id == target and node.value.func.attr == "append"):
+                matches += 1
+                return [node, ast.parse(expression).body[0]]
+            return node
+    tree = InsertPreview().visit(tree)
+    if matches != 1:
+        raise RuntimeError("Unsupported pinned Phonon-2 decoder")
+    namespace = dict(function.__globals__, _preview=preview)
+    exec(compile(ast.fix_missing_locations(tree), "phonon_word_preview", "exec"), namespace)
+    return namespace[function.__name__]
+
+if engine == "cpu":
+    from fermion._speech.engine_phonon2_cpu import Phonon2CpuSpeechModel
+    speech._ctdt = None
+    speech._decode_single = types.MethodType(instrument(Phonon2CpuSpeechModel._decode_single, "ids",
+        "if tok < len(self._vocab) and not _special(self._vocab[tok]): _preview(self._vocab[tok])"), speech)
+else:
+    from fermion._speech._engine_phonon2.fast_decode import _decode_fast, install_fast_tdt
+    if not hasattr(speech.model, "_fast_step"):
+        install_fast_tdt(speech.model)
+    speech.model.decode = types.MethodType(instrument(_decode_fast, "hyp", "_preview(hyp[-1].text)"), speech.model)
+
+decode = speech._decode_single
+def decode_window(audio, repetition_penalty):
+    pieces.clear()
+    text, generated, budget = decode(audio, repetition_penalty)
+    if text.strip():
+        completed.append(text.strip())
+        emit(" ".join(completed), force=True)
+    return text, generated, budget
+speech._decode_single = decode_window
+result = speech.transcribe_detailed(sys.argv[1])
+print(json.dumps({"model": repo, "text": result.text, "segments": result.segments,
+                  "truncated": result.truncated}, ensure_ascii=False), flush=True)
+`;
+const transcriptionJobs = new Map<number, { id: string; controller: AbortController; text: string; }>();
 const UV_VERSION = "0.12.21";
 const RUNTIME_VERSION = "fermion-0.2.4-python312-v1";
 const uvDownloads: Record<string, { name: string; sha256: string; }> = {
@@ -140,17 +221,23 @@ export async function transcribe(event: IpcMainInvokeEvent, id: string, audio: F
     if (transcriptionJobs.has(owner)) throw new Error("A transcription is already running; please try again shortly");
     const wav = encodePhononAudio(audio);
     const controller = new AbortController();
-    transcriptionJobs.set(owner, { id, controller });
+    const job = { id, controller, text: "" };
+    transcriptionJobs.set(owner, job);
     const cancel = () => controller.abort();
     event.sender.once("destroyed", cancel);
     let directory: string | undefined;
+    let streamError: unknown;
     try {
         const executable = await ensureRuntime(controller.signal);
         controller.signal.throwIfAborted();
         directory = await mkdtemp(join(tmpdir(), "protonn-phonon-"));
         const filename = join(directory, "audio.wav");
         await writeFile(filename, wav, { mode: 0o600, signal: controller.signal });
-        const { stdout } = await execute(executable, ["transcribe", "phonon-2", filename, "--json"], {
+        const script = join(directory, "stream.py");
+        await writeFile(script, phononStreamingScript, { mode: 0o600, signal: controller.signal });
+        const python = join(executable, "..", process.platform === "win32" ? "python.exe" : "python");
+        let pendingLine = "";
+        const pending = execute(python, ["-u", script, filename], {
             windowsHide: true,
             shell: false,
             signal: controller.signal,
@@ -159,9 +246,40 @@ export async function transcribe(event: IpcMainInvokeEvent, id: string, audio: F
             maxBuffer: 1024 * 1024,
             env: runtimeEnvironment()
         });
-        return parsePhononResult(stdout);
+        const output = pending.child?.stdout;
+        output?.setEncoding("utf8");
+        const receive = (chunk: string) => {
+            if (controller.signal.aborted) return;
+            try {
+                pendingLine += chunk;
+                if (pendingLine.length > 1024 * 1024) throw new Error("Transcription output exceeds its limit");
+                let newline: number;
+                while ((newline = pendingLine.indexOf("\n")) !== -1) {
+                    const line = pendingLine.slice(0, newline).trim();
+                    pendingLine = pendingLine.slice(newline + 1);
+                    if (!line) continue;
+                    const record = JSON.parse(line);
+                    if (record.type !== "partial") continue;
+                    if (typeof record.delta !== "string" || job.text.length + record.delta.length > 64 * 1024)
+                        throw new Error("Invalid transcription preview");
+                    job.text += record.delta;
+                }
+            } catch (error) {
+                streamError = error;
+                controller.abort();
+            }
+        };
+        output?.on("data", receive);
+        let stdout: string;
+        try {
+            ({ stdout } = await pending);
+        } finally {
+            output?.removeListener("data", receive);
+        }
+        if (streamError) throw streamError;
+        return parsePhononResult(stdout.trim().split("\n").at(-1)!);
     } catch (error) {
-        if (controller.signal.aborted) throw new Error("Transcription cancelled");
+        if (controller.signal.aborted && !streamError) throw new Error("Transcription cancelled");
         if ((error as NodeJS.ErrnoException).code === "ENOENT") runtimeInstallation = undefined;
         throw new Error("Phonon-2 setup or transcription failed. Check your connection and available disk space, then retry. Unsupported devices or missing system libraries may require an OS update.");
     } finally {
@@ -172,6 +290,11 @@ export async function transcribe(event: IpcMainInvokeEvent, id: string, audio: F
             transcriptionJobs.delete(owner);
         }
     }
+}
+
+export function getTranscriptionProgress(event: IpcMainInvokeEvent, id: string): string | null {
+    const job = transcriptionJobs.get(event.sender.id);
+    return job?.id === id && !job.controller.signal.aborted ? job.text : null;
 }
 
 export function cancelTranscription(event: IpcMainInvokeEvent, id: string) {

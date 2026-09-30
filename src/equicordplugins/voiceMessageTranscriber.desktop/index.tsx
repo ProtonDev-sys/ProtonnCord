@@ -230,6 +230,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     const initial = resultCache.get(messageId);
     const [status, setStatus] = useState<ProcessingStatus>(initial ? "complete" : "idle");
     const [transcript, setTranscript] = useState<TranscriptionResult | null>(initial?.transcript ?? null);
+    const [partialTranscript, setPartialTranscript] = useState("");
     const [translation, setTranslation] = useState<TranslationValue | null>(initial?.translation ?? null);
     const [targetLanguage, setTargetLanguage] = useState(initial?.targetLanguage);
     const [targetLanguageLabel, setTargetLanguageLabel] = useState(initial?.targetLanguageLabel);
@@ -249,6 +250,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     const autoStartedRef = useRef(false);
 
     const stopWorker = useCallback(() => {
+        setPartialTranscript("");
         workerRef.current?.terminate();
         workerRef.current = null;
     }, []);
@@ -311,7 +313,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
 
                 workerRef.current = new TranscriptionWorker(
                     nextStatus => {
-                        if (jobIdRef.current === jobId) setStatus(nextStatus as ProcessingStatus);
+                        if (jobIdRef.current === jobId && currentGeneration === generation) setStatus(nextStatus as ProcessingStatus);
                     },
                     output => {
                         if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
@@ -338,6 +340,9 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                         stopWorker();
                         setError(caught instanceof Error ? caught.message : String(caught));
                         setStatus("idle");
+                    },
+                    text => {
+                        if (jobIdRef.current === jobId && currentGeneration === generation) setPartialTranscript(text);
                     }
                 );
 
@@ -473,11 +478,20 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                     <Span size="sm" color="text-muted">
                         {status === "downloading_audio" && "Downloading voice message…"}
                         {status === "processing_audio" && "Preparing audio…"}
-                        {status === "transcribing" && "Preparing and transcribing with Phonon-2 (first use installs the runtime and model; text appears when decoding finishes)…"}
+                        {status === "transcribing" && "Transcribing with Phonon-2 (first use installs the runtime and model; words appear as decoding progresses)…"}
                         {status === "translating" && `Translating to ${pendingLanguageLabel ?? "selected language"}…`}
                     </Span>
                     <TextButton variant="secondary" onClick={cancel}>Cancel</TextButton>
                 </Flex>
+            )}
+
+            {busy && partialTranscript && (
+                <section>
+                    <Heading tag="h5">Transcript preview</Heading>
+                    <ScrollerAuto className={cl("result")}>
+                        <BaseText>{partialTranscript}</BaseText>
+                    </ScrollerAuto>
+                </section>
             )}
 
             {transcript && (

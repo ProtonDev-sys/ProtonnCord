@@ -149,6 +149,7 @@ async function testNativeTranscription() {
     let runtimeReady = true;
     let fetchCount = 0;
     let publishedReady = 0;
+    let previewStream: (EventEmitter & { setEncoding: (encoding: string) => void; }) | undefined;
     const archive = zipSync({ "uv.exe": new Uint8Array([1, 2, 3]) });
     let downloadedArchive = archive;
     const archiveHash = createHash("sha256").update(archive).digest("hex");
@@ -172,9 +173,9 @@ async function testNativeTranscription() {
             if (name === "fflate") return { gunzipSync, unzipSync };
             if (name === "@main/utils/constants") return { DATA_DIR: "test-data" };
             if (name === "node:child_process") return { execFile: () => undefined };
-            if (name === "node:util") return { promisify: () => async (command: string, args: string[], options: any) => {
+            if (name === "node:util") return { promisify: () => (command: string, args: string[], options: any) => {
                 calls.push({ command, args, options });
-                return execute(command, args, options);
+                return Object.assign(execute(command, args, options), { child: { stdout: previewStream } });
             } };
             if (name === "node:fs/promises") return {
                 access: async () => undefined,
@@ -190,7 +191,7 @@ async function testNativeTranscription() {
                 mkdtemp: async () => "private-test-directory",
                 writeFile: async (_filename: string, bytes: Uint8Array, options: any) => {
                     options.signal.throwIfAborted();
-                    written = bytes;
+                    if (_filename.endsWith("audio.wav")) written = bytes;
                 },
                 rm: async (directory: string) => { removed.push(directory); }
             };
@@ -205,9 +206,9 @@ async function testNativeTranscription() {
     const event = { sender };
     assert.deepEqual(await nativeExports.transcribe(event, "test-job", new Float32Array([0])), parsePhononResult(JSON.stringify(phononResult)));
     const executable = join("test-data", "VoiceMessageTranscriber", "fermion-0.2.4-python312-v1", "venv", "Scripts", "fermion.exe");
-    assert.equal(calls[0].command, executable);
+    assert.equal(calls[0].command, join(executable, "..", "python.exe"));
     assert.equal(fetchCount, 0, "ready installations do not download again");
-    assert.deepEqual(Array.from(calls[0].args), ["transcribe", "phonon-2", join("private-test-directory", "audio.wav"), "--json"]);
+    assert.deepEqual(Array.from(calls[0].args), ["-u", join("private-test-directory", "stream.py"), join("private-test-directory", "audio.wav")]);
     assert.equal(calls[0].options.shell, false);
     assert.equal(calls[0].options.windowsHide, true);
     assert.equal(calls[0].options.timeout, 600_000);
@@ -248,6 +249,34 @@ async function testNativeTranscription() {
     execute = async () => ({ stdout: JSON.stringify(phononResult) });
     await nativeExports.transcribe(event, "retry", new Float32Array([0]));
     assert.equal(removed.length, 5, "a subsequent job can run after failure or cancellation");
+
+    previewStream = Object.assign(new EventEmitter(), { setEncoding: (encoding: string) => assert.equal(encoding, "utf8") });
+    let finishStreaming!: (result: { stdout: string; }) => void;
+    execute = () => new Promise(resolve => { finishStreaming = resolve; });
+    const streaming = nativeExports.transcribe(event, "streaming", new Float32Array([0]));
+    for (let attempts = 0; attempts < 20 && !previewStream.listenerCount("data"); attempts++) await Promise.resolve();
+    assert.equal(previewStream.listenerCount("data"), 1);
+    previewStream.emit("data", '{"type":"partial","delta":"Hello');
+    assert.equal(nativeExports.getTranscriptionProgress(event, "streaming"), "", "incomplete records never leak into the preview");
+    previewStream.emit("data", '"}\n{"type":"partial","delta":" world"}\n');
+    assert.equal(nativeExports.getTranscriptionProgress(event, "streaming"), "Hello world", "words are available before the process completes");
+    assert.equal(nativeExports.getTranscriptionProgress({ sender: { id: 8 } }, "streaming"), null);
+    assert.equal(nativeExports.getTranscriptionProgress(event, "stale-job"), null);
+    finishStreaming({ stdout: '{"type":"partial","delta":"Hello world"}\n' + JSON.stringify(phononResult) + '\n' });
+    assert.deepEqual(await streaming, parsePhononResult(JSON.stringify(phononResult)), "final result supersedes the preview");
+    assert.equal(previewStream.listenerCount("data"), 0);
+    assert.equal(nativeExports.getTranscriptionProgress(event, "streaming"), null, "completed jobs release preview memory");
+
+    const invalidStreaming = nativeExports.transcribe(event, "invalid-preview", new Float32Array([0]));
+    for (let attempts = 0; attempts < 20 && !previewStream.listenerCount("data"); attempts++) await Promise.resolve();
+    previewStream.emit("data", JSON.stringify({ type: "partial", delta: "x".repeat(65537) }) + '\n');
+    assert.equal(calls.at(-1)!.options.signal.aborted, true, "oversized previews abort inference");
+    assert.equal(nativeExports.getTranscriptionProgress(event, "invalid-preview"), null);
+    finishStreaming({ stdout: JSON.stringify(phononResult) });
+    await assert.rejects(invalidStreaming, /setup or transcription failed/);
+    assert.equal(previewStream.listenerCount("data"), 0);
+    previewStream = undefined;
+    execute = async () => ({ stdout: "" });
 
     runtimeReady = false;
     const beforeInstall = calls.length;
