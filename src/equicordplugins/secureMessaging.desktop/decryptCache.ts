@@ -165,6 +165,11 @@ export function invalidateFailedDecryption(localUserId: string, message: Message
     if (entry?.result && isTransientFailure(entry.result)) cache.delete(key);
 }
 
+export function invalidateRecoveredDecryption(localUserId: string, message: Message): void {
+    const key = decryptCacheKey(localUserId, message);
+    if (cache.get(key)?.result?.status === "replay_detected") cache.delete(key);
+}
+
 export function prefetchCachedMessage(localUserId: string, message: Message): Promise<DecryptIncomingResult> | null {
     if (prefetches.size >= MAX_PREFETCH_ENTRIES || getCachedDecryption(localUserId, message)) return null;
     const promise = decryptCachedMessage(localUserId, message);

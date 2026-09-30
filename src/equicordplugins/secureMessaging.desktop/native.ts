@@ -6,7 +6,7 @@
 
 import { DATA_DIR } from "@main/utils/constants";
 import { createHash, randomUUID } from "crypto";
-import { app, BrowserWindow, type IpcMainInvokeEvent, safeStorage } from "electron";
+import { app, BrowserWindow, dialog, type IpcMainInvokeEvent, type MessageBoxOptions, safeStorage } from "electron";
 import { renameSync } from "fs";
 import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "fs/promises";
 import { createServer, type Server } from "net";
@@ -216,7 +216,8 @@ export type DecryptIncomingResult =
         counter: number;
         envelopeId: string;
     }
-    | { status: "invalid_message" | "replay_detected" | "untrusted_author"; }
+    | { status: "invalid_message" | "untrusted_author"; }
+    | { status: "replay_detected"; recoveryAvailable?: true; }
     | NativeFailure;
 
 export type DecryptIncomingAttachmentsResult =
@@ -2724,6 +2725,23 @@ export async function decryptIncoming(
     localUserId: string,
     input: DecryptIncomingInput
 ): Promise<DecryptIncomingResult> {
+    return decryptIncomingInternal(event, localUserId, input, false);
+}
+
+export async function recoverOwnMessage(
+    event: IpcMainInvokeEvent,
+    localUserId: string,
+    input: DecryptIncomingInput,
+): Promise<DecryptIncomingResult> {
+    return decryptIncomingInternal(event, localUserId, input, true);
+}
+
+async function decryptIncomingInternal(
+    event: IpcMainInvokeEvent,
+    localUserId: string,
+    input: DecryptIncomingInput,
+    requestRecovery: boolean,
+): Promise<DecryptIncomingResult> {
     const callerFailure = validateIpcCaller(event);
     if (callerFailure) return callerFailure;
     const user = validateLocalUserId(localUserId);
@@ -2861,7 +2879,34 @@ export async function decryptIncoming(
         }
         const sameDiscordMessage = collisions.filter(replay => replay.discordMessageId === checkedInput.value.discordMessageId);
         const reusedEnvelope = collisions.some(replay => replay.discordMessageId !== checkedInput.value.discordMessageId);
-        if (reusedEnvelope) return { status: "replay_detected" };
+        if (reusedEnvelope) {
+            const recoverable = collisions.length === 1 && checkedInput.value.discordAuthorId === user.value &&
+                checkedInput.value.discordEditedTimestamp === null && checkedInput.value.discordNonce === null &&
+                !collisions[0].discordMessageIdReplacementUsed &&
+                replayEnvelopeMatches(collisions[0], checkedInput.value, envelope, contentDigest);
+            if (!recoverable) return { status: "replay_detected" };
+            if (!requestRecovery) return { status: "replay_detected", recoveryAvailable: true };
+            const sessionEpoch = securityKeySessionEpoch;
+            const options: MessageBoxOptions = {
+                type: "warning",
+                title: "Recover your sent encrypted message",
+                message: "Confirm this is your original sent message, not a copy of an encrypted message.",
+                detail: `Discord omitted the send nonce, so this message cannot be rebound automatically.\n\nChannel: ${checkedInput.value.channelId}\nMessage: ${checkedInput.value.discordMessageId}\nPrevious local ID: ${collisions[0].discordMessageId}\n\nRecovery binds this exact authenticated envelope to the selected message once. Other copies remain blocked. No keys or replay history are deleted.`,
+                buttons: ["Cancel", "Recover this message"],
+                defaultId: 0,
+                cancelId: 0,
+                noLink: true,
+            };
+            const owner = BrowserWindow.fromWebContents(event.sender);
+            const confirmation = await (owner ? dialog.showMessageBox(owner, options) : dialog.showMessageBox(options));
+            if (confirmation.response !== 1) return { status: "replay_detected", recoveryAvailable: true };
+            if (sessionEpoch !== securityKeySessionEpoch) return cryptoFailure();
+            collisions[0].discordMessageId = checkedInput.value.discordMessageId;
+            collisions[0].discordMessageIdReplacementUsed = true;
+            collisions[0].seenAt = Date.now();
+            await saveVault(context.vault);
+            return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, counter: envelope.q, envelopeId: envelope.i };
+        }
         if (sameDiscordMessage.length > 0) {
             // A Discord edit must carry a freshly signed, monotonically newer envelope. Retaining the
             // superseded record as a tombstone makes an older edit a rollback and blocks copying it later.
@@ -2870,12 +2915,15 @@ export async function decryptIncoming(
                 return { status: "replay_detected" };
         }
 
+        if (isOptimisticLocalMessage(checkedInput.value, user.value))
+            return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, counter: envelope.q, envelopeId: envelope.i };
+
         context.account.replayCache.push({
             channelId: checkedInput.value.channelId,
             contentDigest,
             counter: envelope.q,
             discordMessageId: checkedInput.value.discordMessageId,
-            discordMessageIdReplacementUsed: !isOptimisticLocalMessage(checkedInput.value, user.value),
+            discordMessageIdReplacementUsed: true,
             envelopeId: envelope.i,
             seenAt: Date.now(),
             senderFingerprint: envelope.k,

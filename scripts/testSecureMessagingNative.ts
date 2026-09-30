@@ -84,6 +84,9 @@ class AuthenticatedProtector {
 }
 
 interface HarnessRuntime {
+    recoveryConfirmationResponse?: number;
+    recoveryConfirmationError?: boolean;
+    recoveryConfirmations?: Array<{ detail: string; defaultId: number; cancelId: number; }>;
     appListeners?: Array<[string, (event: unknown, window: HarnessWindow) => void]>;
     browserWindows?: HarnessWindow[];
     dataDir: string;
@@ -145,6 +148,26 @@ function messageIdAt(timestamp: number): string {
     return ((BigInt(timestamp) - 1_420_070_400_000n) << 22n).toString();
 }
 
+async function seedLegacyOptimisticReplay(dataDir: string, localUserId: string, input: {
+    channelId: string; content: string; discordAuthorId: string; discordMessageId: string;
+}): Promise<void> {
+    const envelope = parseEncryptedEnvelope(input.content, { channelId: input.channelId, discordAuthorId: input.discordAuthorId });
+    const vaultPath = join(dataDir, "secure-messaging", "vault.bin");
+    const vault = JSON.parse(protector.decryptString(await readFile(vaultPath)));
+    vault.accounts[localUserId].replayCache.push({
+        channelId: input.channelId,
+        contentDigest: createHash("sha256").update(input.content, "utf8").digest("base64url"),
+        counter: envelope.q,
+        discordMessageId: input.discordMessageId,
+        discordMessageIdReplacementUsed: false,
+        envelopeId: envelope.i,
+        seenAt: envelope.d,
+        senderFingerprint: envelope.k,
+        senderUserId: input.discordAuthorId,
+    });
+    await writeFile(vaultPath, protector.encryptString(JSON.stringify(vault)));
+}
+
 function lastNumber(values: number[], label: string): number {
     const value = values.at(-1);
     if (value === undefined) assert.fail(`${label} must not be empty`);
@@ -193,6 +216,13 @@ const runtimeStubs: Plugin = {
                 export const BrowserWindow = {
                     fromWebContents: () => null,
                     getAllWindows: () => runtime.browserWindows ?? [],
+                };
+                export const dialog = {
+                    async showMessageBox(options) {
+                        (runtime.recoveryConfirmations ??= []).push(options);
+                        if (runtime.recoveryConfirmationError) throw new Error("Injected recovery dialog failure");
+                        return { response: runtime.recoveryConfirmationResponse ?? 0 };
+                    },
                 };
                 export const session = {
                     fromPartition: () => ({
@@ -876,6 +906,7 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     await writeFile(staleVaultTemporary, "interrupted vault write");
     await writeFile(staleQuarantineTemporary, "interrupted quarantine write");
     const native = await loadNative(bundlePath, dataDir);
+    const lifecycleRuntime = harnessGlobal.__secureMessagingNativeHarness;
     await testInvalidInputs(native);
     await testScreenCaptureProtection(native);
 
@@ -1019,9 +1050,11 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         discordMessageId: messageId(11),
         discordNonce: messageId(11),
     };
+    const vaultBeforeProvisionalRender = await readFile(vaultPath);
     decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, aliceOwnDmInput);
     expectStatus(decrypted, "decrypted", "sender decrypts own message");
     assert.equal(decrypted.plaintext, dmPlaintext);
+    assert.deepEqual(await readFile(vaultPath), vaultBeforeProvisionalRender, "provisional native decryption never commits its temporary ID to replay history");
     decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
         ...aliceOwnDmInput,
         discordMessageId: messageId(13),
@@ -1517,6 +1550,11 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         discordMessageId: messageId(12),
     });
     expectStatus(copiedReplay, "replay_detected", "copied ciphertext under another Discord message");
+    for (const localUserId of [ALICE_ID, BOB_ID]) {
+        expectStatus(await native.decryptIncoming(DISCORD_EVENT, localUserId, {
+            ...bobDmInput, discordMessageId: messageId(199), discordNonce: messageId(199),
+        }), "replay_detected", "a copied canonical envelope cannot masquerade as a provisional row");
+    }
 
     const secondDm = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, { plaintext: "second native secret", snapshot: aliceDm });
     expectStatus(secondDm, "encrypted", "second Alice DM encryption");
@@ -1563,6 +1601,9 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         discordNonce: optimisticHistoryId,
     });
     expectStatus(decrypted, "decrypted", "sender decrypts the optimistic history row");
+    await seedLegacyOptimisticReplay(dataDir, ALICE_ID, {
+        ...aliceOwnDmInput, content: encryptedHistory.content, discordMessageId: optimisticHistoryId,
+    });
     decrypted = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
         ...aliceOwnDmInput,
         content: encryptedHistory.content,
@@ -1578,6 +1619,90 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         discordNonce: null,
     });
     expectStatus(copiedHistory, "replay_detected", "a later copy cannot use the nonce-less history compatibility path");
+
+    const lateHistory = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+        plaintext: "own history whose server ID is later than its signed envelope",
+        snapshot: aliceDm,
+    });
+    expectStatus(lateHistory, "encrypted", "Alice encrypts the late canonical ID regression fixture");
+    const lateHistoryTimestamp = parseEncryptedEnvelope(lateHistory.content, {
+        channelId: DM_CHANNEL_ID, discordAuthorId: ALICE_ID,
+    }).d;
+    const lateHistoryOptimisticId = messageIdAt(lateHistoryTimestamp + 5);
+    const lateHistoryInput = {
+        ...aliceOwnDmInput,
+        content: lateHistory.content,
+        discordMessageId: messageIdAt(lateHistoryTimestamp + 1_608),
+        discordNonce: null,
+    };
+    expectStatus(await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, {
+        ...lateHistoryInput,
+        discordMessageId: lateHistoryOptimisticId,
+        discordNonce: lateHistoryOptimisticId,
+    }), "decrypted", "sender can authenticate the optimistic late-history row without persisting it");
+    expectStatus(await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, lateHistoryInput), "decrypted", "a new canonical ID later than its envelope decrypts even after Discord drops the nonce");
+    const lateFreshVault = JSON.parse(protector.decryptString(await readFile(vaultPath)));
+    lateFreshVault.accounts[ALICE_ID].replayCache = lateFreshVault.accounts[ALICE_ID].replayCache.filter((record: Record<string, unknown>) =>
+        record.discordMessageId !== lateHistoryInput.discordMessageId);
+    await writeFile(vaultPath, protector.encryptString(JSON.stringify(lateFreshVault)));
+    await seedLegacyOptimisticReplay(dataDir, ALICE_ID, {
+        ...lateHistoryInput, discordMessageId: lateHistoryOptimisticId,
+    });
+    const legacyRecoveryVault = JSON.parse(protector.decryptString(await readFile(vaultPath)));
+    const legacyRecoveryRecord = legacyRecoveryVault.accounts[ALICE_ID].replayCache.find((record: Record<string, unknown>) =>
+        record.discordMessageId === lateHistoryOptimisticId);
+    assert.ok(legacyRecoveryRecord);
+    delete legacyRecoveryRecord.discordMessageIdReplacementUsed;
+    await writeFile(vaultPath, protector.encryptString(JSON.stringify(legacyRecoveryVault)));
+    const lateHistoryBlocked = await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, lateHistoryInput);
+    expectStatus(lateHistoryBlocked, "replay_detected", "late canonical history is not automatically accepted without nonce proof");
+    assert.equal(lateHistoryBlocked.recoveryAvailable, true, "only an exact own provisional conflict offers recovery");
+    assert.equal(lifecycleRuntime.recoveryConfirmations?.length ?? 0, 0, "ordinary decrypt never opens a recovery prompt");
+    const vaultBeforeCancelledRecovery = await readFile(vaultPath);
+    expectStatus(await native.recoverOwnMessage(DISCORD_EVENT, ALICE_ID, lateHistoryInput), "replay_detected", "recovery defaults to cancellation");
+    assert.deepEqual(await readFile(vaultPath), vaultBeforeCancelledRecovery, "cancellation leaves replay history unchanged");
+    assert.equal(lifecycleRuntime.recoveryConfirmations?.at(-1)?.defaultId, 0);
+    assert.equal(lifecycleRuntime.recoveryConfirmations?.at(-1)?.cancelId, 0);
+    assert.ok(!lifecycleRuntime.recoveryConfirmations?.at(-1)?.detail.includes("own history whose"), "recovery prompt does not expose plaintext");
+    lifecycleRuntime.recoveryConfirmationError = true;
+    expectStatus(await native.recoverOwnMessage(DISCORD_EVENT, ALICE_ID, lateHistoryInput), "failed", "a failed native dialog does not authorize recovery");
+    assert.deepEqual(await readFile(vaultPath), vaultBeforeCancelledRecovery, "dialog failure leaves replay history unchanged");
+    lifecycleRuntime.recoveryConfirmationError = false;
+    lifecycleRuntime.recoveryConfirmationResponse = 1;
+    const confirmationCount = lifecycleRuntime.recoveryConfirmations?.length ?? 0;
+    expectStatus(await native.recoverOwnMessage(discordEvent("https://example.com"), ALICE_ID, lateHistoryInput), "invalid_input", "untrusted IPC origins cannot request recovery");
+    expectStatus(await native.recoverOwnMessage(DISCORD_EVENT, BOB_ID, {
+        ...bobDmInput, discordMessageId: messageId(199), discordNonce: null,
+    }), "replay_detected", "received-message replays cannot enter recovery");
+    expectStatus(await native.recoverOwnMessage(DISCORD_EVENT, ALICE_ID, {
+        ...lateHistoryInput, channelId: OUTSIDER_CHANNEL_ID,
+    }), "invalid_message", "a channel mismatch cannot enter recovery");
+    expectStatus(await native.recoverOwnMessage(DISCORD_EVENT, ALICE_ID, {
+        ...lateHistoryInput, discordEditedTimestamp: "2026-01-01T00:00:01.000Z",
+    }), "replay_detected", "edited envelopes cannot enter legacy sent-message recovery");
+    expectStatus(await native.recoverOwnMessage(DISCORD_EVENT, ALICE_ID, {
+        ...lateHistoryInput, discordNonce: messageId(199),
+    }), "replay_detected", "a conflicting nonce cannot enter recovery");
+    expectStatus(await native.recoverOwnMessage(DISCORD_EVENT, ALICE_ID, {
+        ...aliceOwnDmInput, discordMessageId: messageId(199), discordNonce: null,
+    }), "replay_detected", "a previously canonical sender record cannot be rebound by recovery");
+    assert.equal(lifecycleRuntime.recoveryConfirmations?.length, confirmationCount, "ineligible conflicts never prompt");
+    const recoveredLateHistory = await native.recoverOwnMessage(DISCORD_EVENT, ALICE_ID, lateHistoryInput);
+    expectStatus(recoveredLateHistory, "decrypted", "native confirmation recovers the exact older sent envelope");
+    assert.equal(recoveredLateHistory.plaintext, "own history whose server ID is later than its signed envelope");
+    const recoveredVault = JSON.parse(protector.decryptString(await readFile(vaultPath)));
+    assert.equal(recoveredVault.accounts[ALICE_ID].replayCache.length, legacyRecoveryVault.accounts[ALICE_ID].replayCache.length, "recovery preserves all replay entries");
+    for (const field of ["identity", "identityHistory", "peerIdentityHistory", "trustedPeers", "conversations", "sendCounter"]) {
+        assert.deepEqual(recoveredVault.accounts[ALICE_ID][field], legacyRecoveryVault.accounts[ALICE_ID][field], `recovery preserves ${field}`);
+    }
+    assert.deepEqual(recoveredVault.accounts[BOB_ID], legacyRecoveryVault.accounts[BOB_ID], "recovery does not touch another account");
+    expectStatus(await native.decryptIncoming(DISCORD_EVENT, ALICE_ID, lateHistoryInput), "decrypted", "recovered canonical rerenders are idempotent");
+    const promptsAfterRecovery = lifecycleRuntime.recoveryConfirmations?.length;
+    expectStatus(await native.recoverOwnMessage(DISCORD_EVENT, ALICE_ID, {
+        ...lateHistoryInput, discordMessageId: messageIdAt(lateHistoryTimestamp + 2_000),
+    }), "replay_detected", "recovery cannot rebind the envelope a second time");
+    assert.equal(lifecycleRuntime.recoveryConfirmations?.length, promptsAfterRecovery, "copies stay blocked without another prompt");
+    lifecycleRuntime.recoveryConfirmationResponse = 0;
 
     const editableDm = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
         plaintext: "native secret before edit",
@@ -1803,6 +1928,10 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         discordMessageId: messageId(13),
     });
     expectStatus(persistedReplay, "replay_detected", "replay cache survives a freshly loaded native bundle");
+    expectStatus(await freshlyLoaded.decryptIncoming(DISCORD_EVENT, ALICE_ID, lateHistoryInput), "decrypted", "manual canonical recovery survives a native reload");
+    expectStatus(await freshlyLoaded.recoverOwnMessage(DISCORD_EVENT, ALICE_ID, {
+        ...lateHistoryInput, discordMessageId: messageIdAt(lateHistoryTimestamp + 2_000),
+    }), "replay_detected", "persisted recovery never permits a later copy");
 
     const preRetirementEditTimestamp = new Date().toISOString();
     const bobRotated = await native.rotateIdentity(DISCORD_EVENT, BOB_ID, bobIdentity.identity.fingerprint);

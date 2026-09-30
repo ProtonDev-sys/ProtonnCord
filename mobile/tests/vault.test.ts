@@ -12,7 +12,9 @@ import {
 	publicIdentity,
 	setRandomSource,
 } from '../plugins/secure-messaging/js/crypto'
+import { captureSendPolicy } from '../plugins/secure-messaging/js/sendPolicy'
 import { MobileVault } from '../plugins/secure-messaging/js/vaultState'
+import type { Account } from '../plugins/secure-messaging/js/vaultState'
 
 setRandomSource(size => Uint8Array.from(randomBytes(size)))
 const USER = '100000000000000001'
@@ -40,6 +42,112 @@ function storage() {
 		},
 	}
 }
+
+test('legacy and incomplete identity backups preserve protected chats through restart and failed saves', async () => {
+	const backing = storage()
+	const vault = new MobileVault(backing)
+	await vault.load()
+	const initial = vault.account(USER)
+	const peer = publicIdentity(generateIdentity(), PEER)
+	initial.trusted[PEER] = peer
+	initial.conversations[CHANNEL] = { members: [PEER], recipients: [PEER] }
+	await vault.save()
+	await vault.replace(USER, {
+		identity: initial.identity,
+		trusted: initial.trusted,
+		conversations: {},
+	})
+	assert.equal(vault.protectedChannel(USER, CHANNEL), true)
+	assert.throws(
+		() => captureSendPolicy(vault.account(USER), CHANNEL, [PEER]),
+		/Review/,
+	)
+	const restarted = new MobileVault(backing)
+	await restarted.load()
+	assert.equal(restarted.protectedChannel(USER, CHANNEL), true)
+	const replacement = publicIdentity(generateIdentity(), PEER)
+	await restarted.replace(USER, {
+		identity: restarted.account(USER).identity,
+		trusted: { [PEER]: replacement },
+		conversations: {},
+	})
+	assert.equal(
+		restarted.account(USER).peerIdentityHistory?.[PEER][0].identity.fingerprint,
+		peer.fingerprint,
+	)
+	assert.equal(restarted.account(USER).conversations[CHANNEL].needsReview, true)
+	backing.fail = true
+	await assert.rejects(
+		restarted.replace(USER, {
+			identity: restarted.account(USER).identity,
+			trusted: {},
+			conversations: {},
+		}),
+		/storage/,
+	)
+	assert.equal(restarted.ready, false)
+	assert.throws(
+		() => restarted.protectedChannel(USER, CHANNEL),
+		/could not be saved/,
+	)
+})
+
+test('historical identities and publication metadata are validated before a loaded vault is ready', async () => {
+	const identity = generateIdentity()
+	const valid: Account = {
+		identity,
+		counter: 1,
+		trusted: {},
+		pending: {},
+		conversations: {},
+		identityHistory: [{ identity, retiredAt: Date.now() }],
+		peerIdentityHistory: {
+			[PEER]: [
+				{
+					identity: publicIdentity(generateIdentity(), PEER),
+					retiredAt: Date.now(),
+				},
+			],
+		},
+		announcementTimes: { [PEER]: Date.now() },
+		trustedAnnouncementTimes: { [PEER]: Date.now() },
+		pairingImportedAt: Date.now(),
+	}
+	for (const patch of [
+		{ identityHistory: 'invalid' },
+		{ identityHistory: [{ identity, retiredAt: 'invalid' }] },
+		{ identityHistory: Array(5).fill({ identity, retiredAt: Date.now() }) },
+		{ peerIdentityHistory: [] },
+		{
+			peerIdentityHistory: {
+				[PEER]: [
+					{ identity: publicIdentity(identity, USER), retiredAt: Date.now() },
+				],
+			},
+		},
+		{ announcementTimes: { [PEER]: 'future' } },
+		{ trustedAnnouncementTimes: { [USER]: Date.now() } },
+		{ pairingImportedAt: -1 },
+	]) {
+		const backing = storage()
+		backing.raw = JSON.stringify({
+			version: 1,
+			accounts: { [USER]: { ...valid, ...patch } },
+		})
+		const vault = new MobileVault(backing)
+		await assert.rejects(vault.load())
+		assert.equal(vault.ready, false)
+	}
+	const backing = storage()
+	backing.raw = JSON.stringify({ version: 1, accounts: { [USER]: valid } })
+	const vault = new MobileVault(backing)
+	await vault.load()
+	assert.deepEqual(vault.account(USER), valid)
+	await vault.useOneKey(randomBytes(32), USER)
+	const restarted = new MobileVault(backing)
+	await restarted.load()
+	assert.equal(restarted.locked, true)
+})
 
 test('OneKey vault survives restart locked, retains history, and hides identity material from storage', async () => {
 	const backing = storage()

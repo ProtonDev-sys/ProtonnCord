@@ -19,6 +19,7 @@ import {
     removeMessagePreSendListener,
 } from "@api/MessageEvents";
 import { updateMessage } from "@api/MessageUpdater";
+import { definePluginSettings } from "@api/Settings";
 import { BaseText } from "@components/BaseText";
 import { Button } from "@components/Button";
 import ErrorBoundary from "@components/ErrorBoundary";
@@ -29,7 +30,7 @@ import { EquicordDevs } from "@utils/constants";
 import { sendMessage } from "@utils/discord";
 import { makeLazy, proxyLazy } from "@utils/lazy";
 import { classes } from "@utils/misc";
-import definePlugin, { PluginNative } from "@utils/types";
+import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 import { findByPropsLazy, findComponentByCodeLazy, findCssClassesLazy } from "@webpack";
@@ -112,6 +113,7 @@ import {
     decryptCacheKey,
     getCachedDecryption,
     invalidateFailedDecryption,
+    invalidateRecoveredDecryption,
     prefetchCachedMessage,
 } from "./decryptCache";
 import { safeDownloadFilename } from "./downloadFilename";
@@ -122,6 +124,7 @@ import {
     patchEncryptedMessageEmbeds,
     patchEncryptedMessageStickers,
     prefetchEncryptedMessageEmbeds,
+    setExternalLinkPreviewsEnabled,
 } from "./embedCache";
 import { shouldHideSecureEmbedOnlyPlaintext } from "./embedUrls";
 import { KeyReviewGate } from "./keyReviewGate";
@@ -143,6 +146,7 @@ import type {
 import {
     clearOptimisticOutgoingPlaintexts,
     getOptimisticOutgoingPlaintext,
+    isProvisionalOutgoingMessage,
     rememberOptimisticOutgoingPlaintext,
     settleOptimisticOutgoingPlaintext,
 } from "./optimisticRendering";
@@ -153,7 +157,7 @@ import {
     MAX_DISCORD_MESSAGE_LENGTH,
     parseEncryptedEnvelope,
 } from "./protocol";
-import { settleGuardedRestFailure } from "./restGuardFailure";
+import { attachmentReservationEndpoint, installStartupRestGuard, messageEndpoint, settleGuardedRestFailure } from "./restGuardFailure";
 import {
     authorizeScopedAttachmentUploadReservations,
     authorizeScopedWireEdit,
@@ -226,6 +230,8 @@ interface SettledRenderDecryption {
 const RENDER_DECRYPT_BATCH_SIZE = 24;
 
 let screenCaptureProtectionStatus: ScreenCaptureProtectionStatus = "disabled";
+let applicationGuardsBlocked = true;
+let disposeStartupRestGuard: (() => void) | null = null;
 let screenCaptureProtectionGeneration = 0;
 let secureOperationGeneration = 0;
 let secureMessageListenersInstalled = false;
@@ -284,6 +290,7 @@ function decryptCachedMessageForRender(
     message: Message,
     apply: (result: DecryptIncomingResult) => void,
 ): void {
+    if (message.author?.id === localUserId && isProvisionalOutgoingMessage(message.id, discordMessageNonce(message))) return;
     const generation = secureOperationGeneration;
     void decryptCachedMessage(localUserId, message).then(
         result => enqueueSettledRenderDecryption({
@@ -339,6 +346,7 @@ function handleEncryptedAttachmentDownload(event: MouseEvent): void {
 }
 
 function setScreenCaptureProtectionStatus(status: ScreenCaptureProtectionStatus): void {
+    if (applicationGuardsBlocked && status === "ready") status = "failed";
     screenCaptureProtectionStatus = status;
     for (const listener of screenCaptureProtectionListeners) {
         try {
@@ -1236,33 +1244,6 @@ function forwardedMessageReference(body: unknown): { channelId: string; messageI
         : null;
 }
 
-function messageEndpoint(url: unknown, edit: boolean): { channelId: string; messageId: string | null; } | null {
-    if (typeof url !== "string" || url.length > 500) return null;
-    let pathname: string;
-    try {
-        pathname = new URL(url, "https://discord.invalid").pathname;
-    } catch {
-        return null;
-    }
-    const pattern = edit
-        ? /^\/channels\/(\d{17,20})\/messages\/(\d{17,20})$/u
-        : /^\/channels\/(\d{17,20})\/messages$/u;
-    const match = pattern.exec(pathname);
-    return match ? { channelId: match[1], messageId: match[2] ?? null } : null;
-}
-
-function attachmentReservationEndpoint(url: unknown): { channelId: string; } | null {
-    if (typeof url !== "string" || url.length > 500) return null;
-    let pathname: string;
-    try {
-        pathname = new URL(url, "https://discord.invalid").pathname;
-    } catch {
-        return null;
-    }
-    const match = /^\/channels\/(\d{17,20})\/attachments$/u.exec(pathname);
-    return match ? { channelId: match[1] } : null;
-}
-
 type ConversationProtection =
     | { kind: "unprotected"; }
     | { kind: "persisted_protected"; }
@@ -1595,6 +1576,19 @@ function restorePatchAuthorization(request: Record<string, any>): void {
         authorizeScopedWireEdit(endpoint.channelId, endpoint.messageId, content, scope);
 }
 
+async function assertRequestProtectionCurrent(request: Record<string, any>, edit: boolean): Promise<void> {
+    const endpoint = messageEndpoint(request?.url, edit) ?? (!edit ? attachmentReservationEndpoint(request?.url) : null);
+    if (!endpoint) return;
+    const expectedScope = requestAuthorizationScopes.get(request);
+    const protection = await resolveConversationProtection(endpoint.channelId);
+    if (!expectedScope && !requiresProtectedNetworkGuard(protection)) return;
+    if (!expectedScope && isKeyAnnouncement(request.body?.content) && screenCaptureProtectionStatus === "ready") return;
+    if (screenCaptureProtectionStatus !== "ready" || protection.kind !== "snapshot" ||
+        conversationAuthorizationScope(protection.context.localUserId, protection.conversation) !== expectedScope ||
+        !expectedScope || hasSelectedKeyReviewBlock(protection.context.localUserId, protection.conversation))
+        throw new Error("Secure Messaging cancelled a request after its protection policy changed");
+}
+
 function installNetworkGuard(): void {
     const rest = RestAPI as unknown as Record<string, any>;
     const { post } = rest;
@@ -1612,6 +1606,7 @@ function installNetworkGuard(): void {
         let guardedRequest: Record<string, any>;
         try {
             guardedRequest = await protectProgrammaticPost(request);
+            await assertRequestProtectionCurrent(guardedRequest, false);
         } catch (error) {
             return settleGuardedRestFailure(error, args);
         }
@@ -1635,6 +1630,7 @@ function installNetworkGuard(): void {
         let guardedRequest: Record<string, any>;
         try {
             guardedRequest = await protectProgrammaticPatch(request);
+            await assertRequestProtectionCurrent(guardedRequest, true);
         } catch (error) {
             return settleGuardedRestFailure(error, args);
         }
@@ -1742,6 +1738,7 @@ function uninstallNetworkGuard(): void {
 }
 
 const outgoingListener: MessageSendListener = async (channelId, message, options, props) => {
+    if (applicationGuardsBlocked) return { cancel: true };
     const generation = secureOperationGeneration;
     const sendId = Symbol();
     const setAttachmentStatus = (stage: PendingEncryptedSend["stage"]) => {
@@ -1955,6 +1952,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
 };
 
 const editListener: MessageEditListener = async (channelId, messageId, message) => {
+    if (applicationGuardsBlocked) return { cancel: true };
     const generation = secureOperationGeneration;
     try {
         const channel = ChannelStore.getChannel(channelId);
@@ -2695,11 +2693,13 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
         return cached ? { key, result: cached } : null;
     });
     const [retryRevision, setRetryRevision] = useState(0);
+    const [recovering, setRecovering] = useState(false);
     const captureProtection = useScreenCaptureProtectionStatus();
     const currentResult = state?.key === key ? state.result : null;
     // Another mounted copy may have retried this message. A settled transient
     // failure must not hide the shared attempt's newer authenticated outcome.
-    const result = currentResult && currentResult.status !== "failed" && currentResult.status !== "unavailable"
+    const result = currentResult && currentResult.status !== "failed" && currentResult.status !== "unavailable" &&
+        !(currentResult.status === "replay_detected" && currentResult.recoveryAvailable)
         ? currentResult
         : key && localUserId ? getCachedDecryption(localUserId, message) ?? currentResult : null;
     const optimisticPlaintext = message.author?.id === localUserId
@@ -2768,6 +2768,35 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
         <div className="pc-secure-card pc-secure-card-danger">
             <div className="pc-secure-card-header"><LockIcon color="var(--status-danger)" /> Encrypted message blocked</div>
             <BaseText size="sm">{encryptedStatusText(result)}</BaseText>
+            {result.status === "replay_detected" && result.recoveryAvailable && message.author?.id === localUserId && localUserId && key && (
+                <Button size="xs" disabled={recovering} onClick={() => {
+                    if (recovering || UserStore.getCurrentUser()?.id !== localUserId || screenCaptureProtectionStatus !== "ready" ||
+                        key !== decryptCacheKey(localUserId, message) || chatGateReason({ channelId: message.channel_id }) !== null) return;
+                    setRecovering(true);
+                    void Native.recoverOwnMessage(localUserId, {
+                        channelId: message.channel_id,
+                        content: message.content,
+                        discordAuthorId: localUserId,
+                        discordEditedTimestamp: discordEditedTimestamp(message),
+                        discordMessageId: message.id,
+                        discordNonce: discordMessageNonce(message),
+                    }).then(recovered => {
+                        if (UserStore.getCurrentUser()?.id !== localUserId || screenCaptureProtectionStatus !== "ready" ||
+                            key !== decryptCacheKey(localUserId, message) || chatGateReason({ channelId: message.channel_id }) !== null) return;
+                        if (recovered.status !== "decrypted") {
+                            if (recovered.status !== "replay_detected" || !recovered.recoveryAvailable)
+                                showToast(encryptedStatusText(recovered), Toasts.Type.FAILURE);
+                            return;
+                        }
+                        invalidateRecoveredDecryption(localUserId, message);
+                        invalidateEncryptedMessageEmbeds(message);
+                        setState(null);
+                        setRetryRevision(revision => revision + 1);
+                        updateMessage(message.channel_id, message.id);
+                    }).catch(() => showToast("Secure Messaging could not recover this message. Nothing was reset.", Toasts.Type.FAILURE))
+                        .finally(() => setRecovering(false));
+                }}>Recover my sent message</Button>
+            )}
             {(result.status === "failed" || result.status === "unavailable") && localUserId && key && (
                 <Button size="xs" onClick={() => {
                     if (UserStore.getCurrentUser()?.id !== localUserId || screenCaptureProtectionStatus !== "ready" ||
@@ -3081,12 +3110,22 @@ const renderSecureMessageAccessory: MessageAccessoryFactory = props => {
     return preview ? null : <SecureMessageAccessory message={props.message} />;
 };
 
+const settings = definePluginSettings({
+    externalLinkPreviews: {
+        type: OptionType.BOOLEAN,
+        description: "Allow link previews by sending decrypted URLs to Discord and preview providers, including while preparing a send.",
+        default: false,
+        onChange: (enabled: boolean) => setExternalLinkPreviewsEnabled(enabled),
+    },
+});
+
 export default definePlugin({
     name: "SecureMessaging",
     description: "Non-ratcheting end-to-end encrypted messages, voice messages, stickers, GIF links, and file attachments for explicitly verified people in DMs and group DMs.",
     tags: ["Chat", "Privacy", "Utility"],
     authors: [EquicordDevs.creations],
     dependencies: ["ChatInputButtonAPI", "MessageAccessoriesAPI", "MessageEventsAPI", "MessageUpdaterAPI"],
+    settings,
 
     patches: [
         {
@@ -3329,6 +3368,9 @@ export default definePlugin({
     },
 
     start() {
+        setExternalLinkPreviewsEnabled(settings.store.externalLinkPreviews);
+        applicationGuardsBlocked = true;
+        disposeStartupRestGuard ??= installStartupRestGuard(RestAPI, () => applicationGuardsBlocked);
         secureOperationGeneration++;
         if (secureMessageListenersInstalled) {
             removeMessagePreSendListener(outgoingListener);
@@ -3342,30 +3384,22 @@ export default definePlugin({
         const generation = ++screenCaptureProtectionGeneration;
         setScreenCaptureProtectionStatus("pending");
         try {
-            installAttachmentUploadGuard();
+            secureMessageListenersInstalled = true;
+            addMessagePreSendListener(outgoingListener, { priority: SECURE_LISTENER_PRIORITY, cancelOnError: true });
+            addMessagePreEditListener(editListener, { priority: SECURE_LISTENER_PRIORITY, cancelOnError: true });
             installNetworkGuard();
+            installAttachmentUploadGuard();
             installEncryptedEditStarter();
             installChatLoadGuard();
             installMessageLengthBypass();
             document.addEventListener("click", handleEncryptedAttachmentDownload, true);
             addMessageAccessory("SecureMessaging", renderSecureMessageAccessory, 0);
+            applicationGuardsBlocked = false;
         } catch {
-            chatAccessGateEnabled = false;
             chatAccessGeneration++;
             refreshChatGateRenderers();
-            document.removeEventListener("click", handleEncryptedAttachmentDownload, true);
-            try {
-                removeMessageAccessory("SecureMessaging");
-            } catch {
-                // The accessory API may not have completed registration.
-            }
-            uninstallMessageLengthBypass();
-            uninstallChatLoadGuard();
-            uninstallEncryptedEditStarter();
-            uninstallNetworkGuard();
-            uninstallAttachmentUploadGuard();
             setScreenCaptureProtectionStatus("failed");
-            showToast("Secure Messaging could not install its application guards.", Toasts.Type.FAILURE);
+            showToast("Secure Messaging could not install its application guards. Sends remain blocked until restart.", Toasts.Type.FAILURE);
             return;
         }
         void refreshChatAccessState(secureRuntimeUserId);
@@ -3376,16 +3410,6 @@ export default definePlugin({
                 return;
             }
             setScreenCaptureProtectionStatus("ready");
-            try {
-                addMessagePreSendListener(outgoingListener, { priority: SECURE_LISTENER_PRIORITY, cancelOnError: true });
-                addMessagePreEditListener(editListener, { priority: SECURE_LISTENER_PRIORITY, cancelOnError: true });
-                secureMessageListenersInstalled = true;
-            } catch {
-                removeMessagePreSendListener(outgoingListener);
-                removeMessagePreEditListener(editListener);
-                setScreenCaptureProtectionStatus("failed");
-                showToast("Secure Messaging could not install its protected message listeners.", Toasts.Type.FAILURE);
-            }
         }).catch(() => {
             if (generation !== screenCaptureProtectionGeneration) return;
             setScreenCaptureProtectionStatus("failed");
@@ -3394,6 +3418,8 @@ export default definePlugin({
     },
 
     stop() {
+        setExternalLinkPreviewsEnabled(false);
+        applicationGuardsBlocked = true;
         try {
             removeMessageAccessory("SecureMessaging");
         } catch {
@@ -3416,6 +3442,8 @@ export default definePlugin({
         uninstallEncryptedEditStarter();
         uninstallAttachmentUploadGuard();
         uninstallNetworkGuard();
+        disposeStartupRestGuard?.();
+        disposeStartupRestGuard = null;
         void Native.setScreenCaptureProtection(true).catch(() => undefined);
         if (secureMessageListenersInstalled) {
             removeMessagePreSendListener(outgoingListener);

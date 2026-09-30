@@ -24,6 +24,30 @@ function decrypted(plaintext: string): Extract<DecryptIncomingResult, { status: 
     return { status: "decrypted", plaintext, attachmentBundle: null, stickers: [], detachedTextIndex: null, counter: 1, envelopeId: "synthetic" };
 }
 
+test("provisional own rows never start persistent native replay processing", async () => {
+    const parsed = createSourceFile("index.tsx", source, ScriptTarget.Latest, true);
+    const declaration = parsed.statements.find(statement => isFunctionDeclaration(statement) && statement.name?.text === "decryptCachedMessageForRender");
+    assert.ok(declaration);
+    const calls: string[] = [];
+    const compiled = transpileModule(declaration.getText(parsed), {
+        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ESNext },
+    }).outputText;
+    const render = runInNewContext(`${compiled}\n decryptCachedMessageForRender`, {
+        secureOperationGeneration: 1,
+        discordMessageNonce: (message: { nonce: string | null; }) => message.nonce,
+        isProvisionalOutgoingMessage: (messageId: string, nonce: string | null) => messageId === nonce,
+        decryptCachedMessage: async (_userId: string, message: { id: string; }) => { calls.push(message.id); return decrypted("fixture"); },
+        enqueueSettledRenderDecryption: () => undefined,
+    }) as (userId: string, message: unknown, apply: () => void) => void;
+    const provisional = { id: "1554579244301541376", nonce: "1554579244301541376", author: { id: "self" } };
+    render("self", provisional, () => undefined);
+    assert.deepEqual(calls, []);
+    render("self", { ...provisional, id: "1554579251049529437", nonce: null }, () => undefined);
+    render("self", { ...provisional, author: { id: "peer" } }, () => undefined);
+    await Promise.resolve();
+    assert.deepEqual(calls, ["1554579251049529437", provisional.id]);
+});
+
 function fixture(count: number, implementation = source) {
     const parsed = createSourceFile("index.tsx", implementation, ScriptTarget.Latest, true);
     const functions = parsed.statements.filter(statement =>
@@ -49,6 +73,8 @@ function fixture(count: number, implementation = source) {
     let attachmentRetry = false;
     let localResult: DecryptIncomingResult | undefined;
     let optimistic: string | undefined;
+    let recoveryResult: DecryptIncomingResult = decrypted("recovered fixture");
+    const recoveryCalls: unknown[] = [];
     let embedOnly = false;
     let attachmentStatus = { status: "ready", reason: "synthetic attachment failure" };
     const rowListeners = new Map<string, Set<() => void>>();
@@ -65,6 +91,10 @@ function fixture(count: number, implementation = source) {
             : initial, () => { metrics.stateUpdates++; }],
         get screenCaptureProtectionStatus() { return protection; }, chatGateReason: () => gate,
         invalidateFailedDecryption: (_user: string, message: { id: string; }) => { metrics.retries++; results.delete(message.id); },
+        invalidateRecoveredDecryption: (_user: string, message: { id: string; }) => { results.delete(message.id); },
+        discordEditedTimestamp: () => null, discordMessageNonce: () => null,
+        Native: { recoverOwnMessage: async (...args: unknown[]) => { recoveryCalls.push(args); return recoveryResult; } },
+        showToast: () => undefined, Toasts: { Type: { FAILURE: "failure" } },
         decryptCachedMessage: async () => undefined, invalidateEncryptedMessageEmbeds: () => undefined,
         retryEncryptedAttachmentLoad: () => { if (attachmentRetry) metrics.refreshes++; return attachmentRetry; },
         updateMessage: () => { metrics.refreshes++; },
@@ -107,16 +137,17 @@ function fixture(count: number, implementation = source) {
         }
     }
     return {
-        metrics, render, drain,
+        metrics, render, drain, recoveryCalls,
+        setRecoveryResult: (value: DecryptIncomingResult) => { recoveryResult = value; },
         setProtection: (value: string) => { protection = value; },
         setAccount: (value: string) => { userId = value; },
         setGate: (value: string) => { gate = value; },
         setAttachmentRetry: () => { attachmentRetry = true; },
         changeCacheGeneration: () => { keySuffix += "generation"; },
-        retryAction(): (() => void) | null {
+        retryAction(label = "Retry message"): (() => void) | null {
             function find(node: any): (() => void) | null {
                 if (!node || typeof node !== "object") return null;
-                if (node.type === "Button" && node.children?.includes("Retry message")) return node.props.onClick;
+                if (node.type === "Button" && node.children?.includes(label)) return node.props.onClick;
                 for (const child of Array.isArray(node) ? node : node.children ?? []) {
                     const action = find(child);
                     if (action) return action;
@@ -282,6 +313,42 @@ if (process.argv.includes("--benchmark")) {
         }
     });
 
+    test("only an eligible own replay offers recovery and refreshes after native confirmation", async () => {
+        const h = fixture(1);
+        h.setResult({ status: "replay_detected", recoveryAvailable: true });
+        assert.equal(h.retryAction("Recover my sent message"), null, "received messages never offer recovery");
+        h.setOptimistic("own fixture");
+        h.setResult({ status: "replay_detected" });
+        assert.equal(h.retryAction("Recover my sent message"), null, "canonical conflicts never offer recovery");
+        h.setResult({ status: "replay_detected", recoveryAvailable: true });
+        const recover = h.retryAction("Recover my sent message");
+        assert.ok(recover);
+        recover();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(h.recoveryCalls.length, 1);
+        assert.equal(h.metrics.refreshes, 1);
+        assert.match(JSON.stringify(h.render(0)), /own fixture/u);
+    });
+
+    test("cancelled recovery preserves the blocked row and stale recovery actions cannot start", async () => {
+        for (const change of ["cancel", "account", "generation", "gate", "capture"]) {
+            const h = fixture(1);
+            h.setOptimistic("own fixture");
+            h.setResult({ status: "replay_detected", recoveryAvailable: true });
+            h.setRecoveryResult({ status: "replay_detected", recoveryAvailable: true });
+            const recover = h.retryAction("Recover my sent message");
+            assert.ok(recover);
+            if (change === "account") h.setAccount("other-account");
+            if (change === "generation") h.changeCacheGeneration();
+            if (change === "gate") h.setGate("locked");
+            if (change === "capture") h.setProtection("screenshot");
+            recover();
+            await new Promise(resolve => setImmediate(resolve));
+            assert.equal(h.recoveryCalls.length, change === "cancel" ? 1 : 0);
+            assert.equal(h.metrics.refreshes, 0);
+        }
+    });
+
     test("a duplicate mounted copy's transient state yields to the shared retry result", () => {
         for (const initial of [
             { status: "failed", error: "cryptographic_operation_failed" },
@@ -298,6 +365,15 @@ if (process.argv.includes("--benchmark")) {
             assert.doesNotMatch(JSON.stringify(h.render(0)), /recovered in another view/);
             assert.equal(h.retryAction(), null);
         }
+    });
+
+    test("a duplicate mounted copy's recoverable replay state yields to authenticated recovery", () => {
+        const h = fixture(1);
+        h.setLocalResult({ status: "replay_detected", recoveryAvailable: true });
+        h.setResult(decrypted("confirmed recovered message"));
+        const rendered = JSON.stringify(h.render(0));
+        assert.match(rendered, /confirmed recovered message/u);
+        assert.doesNotMatch(rendered, /Encrypted message blocked/u);
     });
 
     test("envelope rows share one highlight whose tone follows decryption and capture protection", () => {
