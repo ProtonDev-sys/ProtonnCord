@@ -6,6 +6,20 @@
 
 export type TranscriptionTimestamp = [number, number | null];
 
+export const PHONON_MODEL = "FermionResearch/Phonon-2";
+
+export function parsePhononResult(stdout: string): TranscriptionResult {
+    const result = JSON.parse(stdout);
+    if (result?.model !== PHONON_MODEL || typeof result.text !== "string" || !Array.isArray(result.segments))
+        throw new Error("The local runtime did not return a Phonon-2 transcript");
+    if (result.truncated !== false)
+        throw new Error("Phonon-2 returned an incomplete transcript; try a shorter recording");
+    return normalizeTranscriptionResult({
+        text: result.text,
+        chunks: result.segments.map(segment => ({ text: segment?.text, timestamp: [segment?.start, segment?.end] }))
+    });
+}
+
 export interface TranscriptionChunk {
     timestamp: TranscriptionTimestamp;
     text: string;

@@ -24,8 +24,8 @@ import { lodash, Modal, openModal, ScrollerAuto, SearchableSelect, useCallback, 
 
 import { detectAudioMimeType } from "./audioValidation";
 import { buildTargetLanguageOptions, getVoiceMessageMedia, LanguageOption, resolveTargetLanguage } from "./options";
-import { formatTimestampedTranscript, normalizeTranscriptionResult, TranscriptionProgress, TranscriptionResult } from "./transcriptionData";
-import { cl, decodeAudio, LANGUAGES, terminateTranscriptionWorkers, TranscriptionWorker } from "./utils";
+import { formatTimestampedTranscript, normalizeTranscriptionResult, TranscriptionResult } from "./transcriptionData";
+import { cl, decodeAudio, terminateTranscriptionWorkers, TranscriptionWorker } from "./utils";
 
 const Native = VencordNative.pluginHelpers.VoiceMessageTranscriber as PluginNative<typeof import("./native")>;
 const MAX_RESULT_CACHE_ENTRIES = 100;
@@ -39,7 +39,7 @@ function clearTranscriptionState() {
     resultCache.clear();
 }
 
-type ProcessingStatus = "idle" | "downloading_audio" | "processing_audio" | "loading" | "transcribing" | "translating" | "complete";
+type ProcessingStatus = "idle" | "downloading_audio" | "processing_audio" | "transcribing" | "translating" | "complete";
 type CopyTarget = "transcript" | "translation" | null;
 
 interface CachedResult {
@@ -96,14 +96,6 @@ function cacheResult(messageId: string, result: CachedResult): void {
     }
 }
 
-const whisperLanguageOptions = [
-    { label: "Auto Detect", value: "auto", default: true },
-    ...Object.entries(LANGUAGES).map(([value, name]) => ({
-        label: name.charAt(0).toUpperCase() + name.slice(1),
-        value
-    }))
-];
-
 const settings = definePluginSettings({
     autoTranscribe: {
         type: OptionType.BOOLEAN,
@@ -111,28 +103,33 @@ const settings = definePluginSettings({
         default: false,
         restartNeeded: false
     },
+    engine: {
+        type: OptionType.COMPONENT,
+        component: () => (
+            <BaseText>
+                Phonon-2 only (English speech). First use automatically downloads Python, the speech runtime,
+                and the model into private app storage. This can take several minutes and more space than the model alone.
+                Audio stays on this device; no manual Python or model installation is needed.
+            </BaseText>
+        )
+    },
     audioLanguage: {
-        type: OptionType.SELECT,
-        description: "Spoken language in received voice messages. Auto Detect is recommended.",
-        options: whisperLanguageOptions,
-        restartNeeded: false
+        type: OptionType.STRING,
+        description: "Legacy speech-language preference (unused by Phonon-2)",
+        default: "auto",
+        hidden: true
     },
     selectedModel: {
-        type: OptionType.SELECT,
-        description: "On-device Whisper model size",
-        options: [
-            { label: "Tiny (fastest, lowest accuracy)", value: "Xenova/whisper-tiny" },
-            { label: "Base (recommended)", value: "Xenova/whisper-base", default: true },
-            { label: "Small", value: "Xenova/whisper-small" },
-            { label: "Medium (slowest, best accuracy)", value: "Xenova/whisper-medium" }
-        ],
-        restartNeeded: false
+        type: OptionType.STRING,
+        description: "Legacy speech-model preference (unused by Phonon-2)",
+        default: "FermionResearch/Phonon-2",
+        hidden: true
     },
     quantized: {
         type: OptionType.BOOLEAN,
-        description: "Use a smaller, faster quantized model with slightly lower accuracy",
+        description: "Legacy quantization preference (unused by Phonon-2)",
         default: true,
-        restartNeeded: false
+        hidden: true
     },
     targetLanguage: {
         type: OptionType.STRING,
@@ -173,7 +170,7 @@ const settings = definePluginSettings({
                         });
                     }}
                 >
-                    Delete downloaded speech models ({(size / 1024 / 1024).toFixed(2)} MB)
+                    Delete legacy Whisper downloads ({(size / 1024 / 1024).toFixed(2)} MB)
                 </Button>
             );
         }
@@ -229,14 +226,6 @@ function chooseTargetLanguage(onSelect: (language: LanguageOption) => void): voi
     openModal(modalProps => <LanguageSelectionModal modalProps={modalProps} onSelect={onSelect} />);
 }
 
-function progressPercent(progress: TranscriptionProgress | null): number | null {
-    if (!progress) return null;
-    if (typeof progress.progress === "number") return Math.round(progress.progress);
-    if (typeof progress.loaded === "number" && typeof progress.total === "number" && progress.total > 0)
-        return Math.round(progress.loaded / progress.total * 100);
-    return null;
-}
-
 interface VoiceMessageTranscriptionAccessoryProps {
     duration?: number;
     messageId: string;
@@ -256,7 +245,6 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     const [pendingLanguageLabel, setPendingLanguageLabel] = useState<string>();
     const [showTimestamps, setShowTimestamps] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
     const [copied, setCopied] = useState<CopyTarget>(null);
     const [playbackSrc, setPlaybackSrc] = useState(src);
     const [resolvedWaveform, setResolvedWaveform] = useState(waveform || DEFAULT_WAVEFORM);
@@ -303,7 +291,6 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
         stopWorker();
         setStatus("downloading_audio");
         setError(null);
-        setProgress(null);
         setTranslation(null);
 
         void (async () => {
@@ -342,24 +329,10 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                         stopWorker();
                         setError(caught instanceof Error ? caught.message : String(caught));
                         setStatus("idle");
-                    },
-                    partial => {
-                        if (jobIdRef.current !== jobId) return;
-                        const value = normalizeTranscriptionResult(partial);
-                        if (value.text) setTranscript(value);
-                    },
-                    nextProgress => {
-                        if (jobIdRef.current === jobId) setProgress(nextProgress);
                     }
                 );
 
-                const { audioLanguage, quantized, selectedModel } = settings.store;
-                workerRef.current.run(
-                    audio,
-                    selectedModel,
-                    quantized,
-                    audioLanguage === "auto" ? undefined : audioLanguage
-                );
+                workerRef.current.run(audio);
             } catch (caught) {
                 if (jobIdRef.current !== jobId) return;
                 stopWorker();
@@ -382,7 +355,6 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     const cancel = useCallback(() => {
         ++jobIdRef.current;
         stopWorker();
-        setProgress(null);
         setStatus(transcript ? "complete" : "idle");
     }, [stopWorker, transcript]);
 
@@ -431,7 +403,6 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     const timestampedTranscript = transcript ? formatTimestampedTranscript(transcript) : "";
     const transcriptText = showTimestamps && timestampedTranscript ? timestampedTranscript : transcript?.text ?? "";
     const busy = status !== "idle" && status !== "complete";
-    const percent = progressPercent(progress);
 
     if (!transcript && !busy) {
         return (
@@ -463,8 +434,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                     <Span size="sm" color="text-muted">
                         {status === "downloading_audio" && "Downloading voice message…"}
                         {status === "processing_audio" && "Preparing audio…"}
-                        {status === "loading" && `Loading speech model${percent == null ? "…" : `… ${percent}%`}`}
-                        {status === "transcribing" && "Transcribing on device…"}
+                        {status === "transcribing" && "Preparing and transcribing with Phonon-2 (first use automatically installs the runtime and model)…"}
                         {status === "translating" && `Translating to ${pendingLanguageLabel ?? "selected language"}…`}
                     </Span>
                     <TextButton variant="secondary" onClick={cancel}>Cancel</TextButton>
@@ -552,7 +522,7 @@ function VoiceMessageAccessory({ message }: { message: Message; }) {
 export default definePlugin({
     name: "VoiceMessageTranscriber",
     authors: [Devs.TheSun],
-    description: "Transcribes Discord voice messages on-device and optionally translates the transcript into a selected language.",
+    description: "Transcribes English Discord voice messages on-device with Phonon-2 and optionally translates the transcript.",
     tags: ["Chat", "Media", "Utility", "Voice"],
     dependencies: ["MessageAccessoriesAPI", "VoiceMessages"],
     settings,
