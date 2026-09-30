@@ -20,15 +20,14 @@ import { copyToClipboard } from "@utils/clipboard";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { Message, RenderModalProps } from "@vencord/discord-types";
-import { lodash, Modal, openModal, ScrollerAuto, SearchableSelect, useCallback, useEffect, useRef, UserStore, useState, useStateFromStores } from "@webpack/common";
+import { lodash, Modal, openModal, ScrollerAuto, SearchableSelect, useCallback, useEffect, useMemo, useRef, UserStore, useState, useStateFromStores } from "@webpack/common";
 
 import { detectAudioMimeType } from "./audioValidation";
 import { buildTargetLanguageOptions, getVoiceMessageMedia, LanguageOption, resolveTargetLanguage } from "./options";
-import { formatTimestampedTranscript, normalizeTranscriptionResult, TranscriptionResult } from "./transcriptionData";
+import { formatTimestampedTranscript, IdleResultCache, normalizeTranscriptionResult, TranscriptionResult } from "./transcriptionData";
 import { cl, decodeAudio, terminateTranscriptionWorkers, TranscriptionWorker } from "./utils";
 
 const Native = VencordNative.pluginHelpers.VoiceMessageTranscriber as PluginNative<typeof import("./native")>;
-const MAX_RESULT_CACHE_ENTRIES = 100;
 const MAX_PREPARED_AUDIO_CACHE_ENTRIES = 3;
 let generation = 0;
 
@@ -49,7 +48,9 @@ interface CachedResult {
     translation?: TranslationValue;
 }
 
-const resultCache = new Map<string, CachedResult>();
+const resultCache = new IdleResultCache<CachedResult>(value => value.transcript.text.length
+    + value.transcript.chunks.reduce((size, chunk) => size + chunk.text.length, 0)
+    + (value.translation?.text.length ?? 0));
 interface PreparedAudio {
     blob: Blob;
     samples: Float32Array;
@@ -61,6 +62,8 @@ const preparedAudioCache = new Map<string, Promise<PreparedAudio>>();
 function prepareAudio(src: string): Promise<PreparedAudio> {
     const cached = preparedAudioCache.get(src);
     if (cached) return cached;
+    if (preparedAudioCache.size >= MAX_PREPARED_AUDIO_CACHE_ENTRIES)
+        return Promise.reject(new Error("Audio preparation is busy; please retry shortly"));
 
     const pending = Native.fetchAudio(src)
         .then(async bytes => {
@@ -72,28 +75,16 @@ function prepareAudio(src: string): Promise<PreparedAudio> {
                 waveform: generateWaveform(samples, 16_000)
             };
         })
-        .catch(error => {
+        .finally(() => {
             if (preparedAudioCache.get(src) === pending) preparedAudioCache.delete(src);
-            throw error;
         });
 
     preparedAudioCache.set(src, pending);
-    if (preparedAudioCache.size > MAX_PREPARED_AUDIO_CACHE_ENTRIES) {
-        const oldest = preparedAudioCache.keys().next().value;
-        if (oldest) preparedAudioCache.delete(oldest);
-    }
-
     return pending;
 }
 
 function cacheResult(messageId: string, result: CachedResult): void {
-    resultCache.delete(messageId);
     resultCache.set(messageId, result);
-
-    if (resultCache.size > MAX_RESULT_CACHE_ENTRIES) {
-        const oldest = resultCache.keys().next().value;
-        if (oldest) resultCache.delete(oldest);
-    }
 }
 
 const settings = definePluginSettings({
@@ -244,6 +235,10 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     const [targetLanguageLabel, setTargetLanguageLabel] = useState(initial?.targetLanguageLabel);
     const [pendingLanguageLabel, setPendingLanguageLabel] = useState<string>();
     const [showTimestamps, setShowTimestamps] = useState(false);
+    const [hidden, setHidden] = useState(false);
+    const [inView, setInView] = useState(typeof IntersectionObserver === "undefined");
+    const [documentVisible, setDocumentVisible] = useState(typeof document === "undefined" || document.visibilityState !== "hidden");
+    const containerRef = useRef<HTMLDivElement | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [copied, setCopied] = useState<CopyTarget>(null);
     const [playbackSrc, setPlaybackSrc] = useState(src);
@@ -265,7 +260,9 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
         setPendingLanguageLabel(language.label);
 
         try {
-            const translated = await translateText(value.text, "auto", language.value);
+            const cached = resultCache.get(messageId);
+            const translated = cached?.transcript.text === value.text && cached.targetLanguage === language.value && cached.translation
+                ? cached.translation : await translateText(value.text, "auto", language.value);
             if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
 
             setTranslation(translated);
@@ -286,6 +283,18 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     }, [messageId]);
 
     const startTranscription = useCallback((language?: LanguageOption) => {
+        const cached = resultCache.get(messageId);
+        setHidden(false);
+        if (cached) {
+            setTranscript(cached.transcript);
+            setTranslation(cached.translation ?? null);
+            setTargetLanguage(cached.targetLanguage);
+            setTargetLanguageLabel(cached.targetLanguageLabel);
+            setStatus("complete");
+            setError(null);
+            if (language) void translateTranscript(cached.transcript, language, ++jobIdRef.current);
+            return;
+        }
         const currentGeneration = generation;
         const jobId = ++jobIdRef.current;
         stopWorker();
@@ -298,14 +307,14 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                 const prepared = await prepareAudio(src);
                 if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
                 setStatus("processing_audio");
-                const audio = new Float32Array(prepared.samples);
+                const audio = prepared.samples;
 
                 workerRef.current = new TranscriptionWorker(
                     nextStatus => {
                         if (jobIdRef.current === jobId) setStatus(nextStatus as ProcessingStatus);
                     },
                     output => {
-                        if (jobIdRef.current !== jobId) return;
+                        if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
                         const value = normalizeTranscriptionResult(output);
                         stopWorker();
 
@@ -325,7 +334,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                         }
                     },
                     caught => {
-                        if (jobIdRef.current !== jobId) return;
+                        if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
                         stopWorker();
                         setError(caught instanceof Error ? caught.message : String(caught));
                         setStatus("idle");
@@ -334,7 +343,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
 
                 workerRef.current.run(audio);
             } catch (caught) {
-                if (jobIdRef.current !== jobId) return;
+                if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
                 stopWorker();
                 setError(caught instanceof Error ? caught.message : String(caught));
                 setStatus("idle");
@@ -343,6 +352,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     }, [messageId, src, stopWorker, translateTranscript]);
 
     const startTranslation = useCallback((language: LanguageOption) => {
+        setHidden(false);
         if (!transcript) {
             startTranscription(language);
             return;
@@ -374,6 +384,35 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
         if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
     }, [stopWorker]);
 
+    useEffect(() => resultCache.subscribe(messageId, () => {
+        ++jobIdRef.current;
+        stopWorker();
+        setTranscript(null);
+        setTranslation(null);
+        setTargetLanguage(undefined);
+        setTargetLanguageLabel(undefined);
+        setError(null);
+        setStatus("idle");
+        setHidden(false);
+    }), [messageId, stopWorker]);
+
+    useEffect(() => {
+        if (transcript && !hidden && inView && documentVisible) return resultCache.retain(messageId);
+    }, [messageId, transcript, hidden, inView, documentVisible]);
+
+    useEffect(() => {
+        if (typeof document === "undefined") return;
+        const update = () => setDocumentVisible(document.visibilityState !== "hidden");
+        document.addEventListener("visibilitychange", update);
+        const observer = typeof IntersectionObserver === "undefined" ? undefined
+            : new IntersectionObserver(entries => setInView(entries.some(entry => entry.isIntersecting)));
+        if (containerRef.current) observer?.observe(containerRef.current);
+        return () => {
+            document.removeEventListener("visibilitychange", update);
+            observer?.disconnect();
+        };
+    }, []);
+
     useEffect(() => {
         setPlaybackSrc(src);
         setResolvedWaveform(waveform || DEFAULT_WAVEFORM);
@@ -395,25 +434,25 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     }, [needsPlaybackFallback, src, waveform]);
 
     useEffect(() => {
-        if (!autoTranscribe || transcript || autoStartedRef.current) return;
+        if (!autoTranscribe || transcript || autoStartedRef.current || !inView || !documentVisible) return;
         autoStartedRef.current = true;
         startTranscription();
-    }, [autoTranscribe, startTranscription, transcript]);
+    }, [autoTranscribe, startTranscription, transcript, inView, documentVisible]);
 
-    const timestampedTranscript = transcript ? formatTimestampedTranscript(transcript) : "";
+    const timestampedTranscript = useMemo(() => showTimestamps && transcript ? formatTimestampedTranscript(transcript) : "", [showTimestamps, transcript]);
     const transcriptText = showTimestamps && timestampedTranscript ? timestampedTranscript : transcript?.text ?? "";
     const busy = status !== "idle" && status !== "complete";
 
-    if (!transcript && !busy) {
+    if ((!transcript || hidden) && !busy) {
         return (
-            <div className={cl("accessory")}>
+            <div ref={containerRef} className={cl("accessory")}>
                 {needsPlaybackFallback && (
                     <div className={cl("playback-fallback")}>
                         <VoiceMessage key={playbackSrc} duration={duration} src={playbackSrc} waveform={resolvedWaveform} />
                     </div>
                 )}
                 <Flex gap={8} alignItems="center" flexWrap="wrap">
-                    <Button size="xs" onClick={() => startTranscription()}>Transcribe</Button>
+                    <Button size="xs" onClick={() => startTranscription()}>{transcript ? "Show transcript" : "Transcribe"}</Button>
                     <Button size="xs" variant="secondary" onClick={() => chooseTargetLanguage(startTranslation)}>Translate…</Button>
                     <Span size="xs" color="text-muted">Voice message · on-device speech recognition</Span>
                 </Flex>
@@ -423,7 +462,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     }
 
     return (
-        <div className={cl("accessory")}>
+        <div ref={containerRef} className={cl("accessory")}>
             {needsPlaybackFallback && (
                 <div className={cl("playback-fallback")}>
                     <VoiceMessage key={playbackSrc} duration={duration} src={playbackSrc} waveform={resolvedWaveform} />
@@ -434,7 +473,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                     <Span size="sm" color="text-muted">
                         {status === "downloading_audio" && "Downloading voice message…"}
                         {status === "processing_audio" && "Preparing audio…"}
-                        {status === "transcribing" && "Preparing and transcribing with Phonon-2 (first use automatically installs the runtime and model)…"}
+                        {status === "transcribing" && "Preparing and transcribing with Phonon-2 (first use installs the runtime and model; text appears when decoding finishes)…"}
                         {status === "translating" && `Translating to ${pendingLanguageLabel ?? "selected language"}…`}
                     </Span>
                     <TextButton variant="secondary" onClick={cancel}>Cancel</TextButton>
@@ -453,7 +492,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                         <ScrollerAuto className={cl("result")}>
                             <BaseText>{transcriptText}</BaseText>
                         </ScrollerAuto>
-                        {timestampedTranscript && (
+                        {!!transcript.chunks.length && (
                             <TextButton variant="secondary" onClick={() => setShowTimestamps(value => !value)}>
                                 {showTimestamps ? "Hide timestamps" : "Show timestamps"}
                             </TextButton>
@@ -485,9 +524,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                             <TextButton
                                 variant="secondary"
                                 onClick={() => {
-                                    resultCache.delete(messageId);
-                                    setTranscript(null);
-                                    setTranslation(null);
+                                    setHidden(true);
                                     setError(null);
                                     setStatus("idle");
                                 }}
