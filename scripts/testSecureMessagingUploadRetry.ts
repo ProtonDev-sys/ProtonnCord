@@ -109,6 +109,7 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
         AbortController, CloudUploader: Shadow, CloudUploadPlatform: { WEB: CloudUploadPlatform.WEB }, createEncryptedUploadDraft, prepareEncryptedAttachments, uploadEncryptedAttachment,
         DraftType: { ChannelMessage: 0 }, UploadAttachmentStore: { getUploads: () => storedDrafts },
         EncryptedAttachmentUploadLimitError, serializeSecurePlaintext, parseSecurePlaintext,
+        applicationGuardsBlocked: false,
         secureOperationGeneration: 1, secureOperationIsCurrent: () => current, currentSnapshot: () => ({ localUserId: "100000000000000001", snapshot: { channelId: originals[0]?.channelId ?? "200000000000000001" } }),
         takePermittedAnnouncement: () => false, resolveConversationProtection: async () => { await protectionGate; return { kind: "snapshot", conversation: { status: "enabled" } }; },
         updateMessageLengthBypass() {}, requiresFailClosedSend: () => true, isNativeFailure: () => false, hasSelectedKeyReviewBlock: () => false,

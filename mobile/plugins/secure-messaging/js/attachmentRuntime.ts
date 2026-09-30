@@ -87,7 +87,7 @@ interface ReadyState {
 
 type CacheState =
 	| { status: 'pending' }
-	| { reason: string; status: 'failed' }
+	| { reason: string; status: 'failed'; retryAt: number; sourceUrls: string }
 	| ReadyState
 
 type PatchAttachments = (
@@ -100,6 +100,9 @@ type PatchAttachments = (
 // Discord raises ordinary mobile upload limits beyond these bounds.
 const MAX_FILE_BYTES = 64 * 1024 * 1024
 const MAX_TOTAL_BYTES = 128 * 1024 * 1024
+const DOWNLOAD_TIMEOUT_MS = 60_000
+const DOWNLOAD_RETRY_MS = 30_000
+class AttachmentDownloadError extends Error {}
 const cache = new Map<string, CacheState>()
 const files = new Set<string>()
 const renderedMessages = new Map<string, MessageLike>()
@@ -419,22 +422,71 @@ async function download(
 	channelId: string,
 ): Promise<Uint8Array> {
 	let lastError: unknown
+	const deadline = Date.now() + DOWNLOAD_TIMEOUT_MS
 	for (const candidate of [attachment.url, attachment.proxy_url]) {
 		const controller = new AbortController()
+		let timedOut = false
+		let timer: ReturnType<typeof setTimeout> | undefined
+		let cancel: (() => void) | undefined
 		downloads.add(controller)
 		try {
 			const url = validatedAttachmentUrl(candidate, channelId, attachment.id)
-			const response = await fetch(url, { signal: controller.signal })
-			if (!response.ok)
-				throw new Error(
-					`Discord attachment download failed (${response.status})`,
+			const timeout = new Promise<never>((_, reject) => {
+				timer = setTimeout(
+					() => {
+						timedOut = true
+						controller.abort()
+						reject(
+							new AttachmentDownloadError(
+								'Discord attachment download timed out',
+							),
+						)
+					},
+					Math.max(0, deadline - Date.now()),
 				)
-			return await readAttachmentResponse(response, attachment.size)
+			})
+			const operation = (async () => {
+				const response = await fetch(url, { signal: controller.signal }).catch(
+					error => {
+						throw new AttachmentDownloadError(
+							error instanceof Error
+								? error.message
+								: 'Discord attachment download failed',
+						)
+					},
+				)
+				if (!response.ok) {
+					const message = `Discord attachment download failed (${response.status})`
+					if (
+						[403, 404, 408, 429].includes(response.status) ||
+						response.status >= 500
+					)
+						throw new AttachmentDownloadError(message)
+					throw new Error(message)
+				}
+				const bytes = await readAttachmentResponse(response, attachment.size)
+				if (controller.signal.aborted) {
+					bytes.fill(0)
+					throw new Error('Secure Messaging was locked')
+				}
+				return bytes
+			})()
+			const cancellation = new Promise<never>((_, reject) => {
+				cancel = () => reject(new Error('Secure Messaging was locked'))
+				controller.signal.addEventListener('abort', cancel, { once: true })
+			})
+			return await Promise.race([operation, timeout, cancellation])
 		} catch (error) {
-			if (controller.signal.aborted)
+			if (controller.signal.aborted && !timedOut)
 				throw new Error('Secure Messaging was locked')
+			if (timedOut)
+				throw new AttachmentDownloadError(
+					'Discord attachment download timed out',
+				)
 			lastError = error
 		} finally {
+			clearTimeout(timer)
+			if (cancel) controller.signal.removeEventListener('abort', cancel)
 			downloads.delete(controller)
 		}
 	}
@@ -472,7 +524,13 @@ async function readAttachmentResponse(
 			throw new Error(
 				'This runtime cannot verify a safe attachment download size',
 			)
-		const bytes = new Uint8Array(await response.arrayBuffer())
+		const bytes = new Uint8Array(
+			await response.arrayBuffer().catch(() => {
+				throw new AttachmentDownloadError(
+					'Discord attachment body download failed',
+				)
+			}),
+		)
 		if (bytes.length !== expected) {
 			bytes.fill(0)
 			throw new Error('Encrypted attachment download length is invalid')
@@ -483,7 +541,11 @@ async function readAttachmentResponse(
 	let total = 0
 	try {
 		while (true) {
-			const { done, value } = await reader.read()
+			const { done, value } = await reader.read().catch(() => {
+				throw new AttachmentDownloadError(
+					'Discord attachment body download failed',
+				)
+			})
 			if (done) break
 			total += value.byteLength
 			if (total > expected || total > MAX_FILE_BYTES) {
@@ -635,6 +697,7 @@ function start(message: MessageLike, secure: SecurePlaintext): void {
 	if (cache.size >= 128) clearAttachmentCache()
 	const key = cacheKey(message)
 	const generation = cacheGeneration
+	const sourceUrls = attachmentSourceUrls(message)
 	renderedMessages.set(key, message)
 	cache.set(key, { status: 'pending' })
 	void decryptAttachments(message, secure, generation)
@@ -650,11 +713,25 @@ function start(message: MessageLike, secure: SecurePlaintext): void {
 			cache.set(key, {
 				status: 'failed',
 				reason: error instanceof Error ? error.message : String(error),
+				retryAt:
+					error instanceof AttachmentDownloadError
+						? Date.now() + DOWNLOAD_RETRY_MS
+						: Infinity,
+				sourceUrls,
 			})
 			patchAttachments?.(message.channel_id ?? message.channelId!, message.id, [
 				...(message.attachments ?? []),
 			])
 		})
+}
+
+function attachmentSourceUrls(message: MessageLike): string {
+	return JSON.stringify(
+		message.attachments?.map(attachment => [
+			attachment.url,
+			attachment.proxy_url,
+		]),
+	)
 }
 
 export function renderAttachments(
@@ -668,7 +745,16 @@ export function renderAttachments(
 	}
 	if (!message.id) throw new Error('Encrypted attachment message has no ID')
 	const key = cacheKey(message)
-	const state = cache.get(key)
+	let state = cache.get(key)
+	if (
+		state?.status === 'failed' &&
+		state.retryAt !== Infinity &&
+		(state.retryAt <= Date.now() ||
+			state.sourceUrls !== attachmentSourceUrls(message))
+	) {
+		cache.delete(key)
+		state = undefined
+	}
 	if (!state && patchAttachments && cacheReady) start(message, secure)
 	if (state?.status === 'ready')
 		return {
