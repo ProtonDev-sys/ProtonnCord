@@ -14,6 +14,7 @@ import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { normalizeGuildIconFile, normalizeStoredGuildIcons } from "../src/equicordplugins/clientsideGuildIcons/iconStorage";
 import { parseSyncedLyrics } from "../src/equicordplugins/musicControls/parseSyncedLyrics";
+import { IdleResultCache } from "../src/equicordplugins/voiceMessageTranscriber.desktop/transcriptionData";
 
 const react = { createElement: (type: any, props: any, ...children: any[]) => ({ type, props: { ...props, children } }) };
 
@@ -1051,7 +1052,9 @@ test("voice translations keep the completed text and language together through c
         "@components/Button": { Button: "button", TextButton: "text-button" },
         "@plugins/translate/utils": { translateText: () => new Promise((resolve, reject) => requests.push({ resolve, reject })) },
         "./utils": { LANGUAGES: {}, cl: (value: string) => value },
-        "./transcriptionData": { formatTimestampedTranscript: () => "" },
+        "./transcriptionData": { formatTimestampedTranscript: () => "", IdleResultCache: class extends IdleResultCache<any> {
+            constructor(measure: (value: any) => number) { super(measure, 25); }
+        } },
         "@webpack/common": {
             ...harness.hooks,
             openModal: (render: any) => render({}).props.onSelect({ value: "de", label: "German" })
@@ -1093,7 +1096,22 @@ test("voice translations keep the completed text and language together through c
     assert.ok(textNode(completed, "Hallo"));
     assert.equal(textNode(completed, "Bonjour"), undefined);
     assert.equal(fixture.resultCache.get("message").targetLanguage, "de");
+    textNode(render(), "Hide").props.onClick();
+    assert.equal(textNode(render(), "Hallo"), undefined);
+    assert.equal(fixture.resultCache.get("message").translation.text, "Hallo");
+    textNode(render(), "Show transcript").props.onClick();
+    assert.ok(textNode(render(), "Hallo"));
+    changeLanguage();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests.length, 3, "showing and selecting the cached language do not call the provider again");
+    textNode(render(), "Hide").props.onClick();
+    render();
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.equal(fixture.resultCache.get("message"), undefined);
+    assert.equal(textNode(render(), "Show transcript"), undefined, "expiry releases the hidden component's text references");
+    assert.ok(textNode(render(), "Transcribe"));
     harness.unmount();
+    fixture.resultCache.clear();
 });
 
 test("speech-worker termination cancels native setup and prevents late transcript callbacks", async () => {
