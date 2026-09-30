@@ -18,6 +18,10 @@ Decoded audio is converted to 16 kHz mono PCM WAV in a temporary directory and r
 
 The CLI loads the model per invocation. This integration does not promise streaming partial results or persistent warm-model latency. Segment timestamps and optional Translate-plugin text translation are preserved. Translation still sends text to the selected translation provider.
 
+Hide keeps the transcript and latest translation available for Show transcript, without rerunning recognition or translation. Selecting the already-cached target language also reuses its translation. Results expire after five minutes without a visible viewer: hiding the result, scrolling it offscreen, hiding the document, or unmounting the message starts the inactivity window. Expiry also clears hidden mounted component state. Visible results remain available; there is one shared expiry timer, a 100-entry limit, and a one-million-character aggregate text bound. Plugin stop and connection changes clear results immediately.
+
+Audio preparation only coalesces up to three in-flight downloads/decodes; completed PCM arrays and audio blobs are not retained in the preparation cache. Transcription reuses decoded samples without an extra renderer-side copy, and timestamp formatting runs only while timestamps are shown. File decoding is one-shot, not word-by-word streaming; the status explicitly says text appears after decoding finishes.
+
 The settings button deletes legacy Whisper browser downloads; it does not delete the new managed runtime or model cache.
 
 ## Platform and model limitations
