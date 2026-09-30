@@ -1137,6 +1137,48 @@ test("speech-worker termination cancels native setup and prevents late transcrip
     assert.equal(failures, 0);
 });
 
+test("speech previews arrive before completion and discard late polls after cancellation", async () => {
+    const response = deferred<any>();
+    const progress = deferred<string>();
+    const timers = new Map<number, () => void>();
+    const previews: string[] = [];
+    let nextTimer = 0;
+    let polls = 0;
+    let completions = 0;
+    const fixture = load("voiceMessageTranscriber.desktop/utils.ts", "", {}, {
+        crypto: { randomUUID: () => "preview-job" },
+        setTimeout: (callback: () => void) => { timers.set(++nextTimer, callback); return nextTimer; },
+        clearTimeout: (id: number) => timers.delete(id),
+        VencordNative: { pluginHelpers: { VoiceMessageTranscriber: {
+            transcribe: () => response.promise,
+            getTranscriptionProgress: () => { polls++; return polls === 1 ? Promise.resolve("Hello") : progress.promise; },
+            cancelTranscription: async () => undefined
+        } } }
+    });
+    const worker = new fixture.TranscriptionWorker(() => {}, () => { completions++; }, () => {}, (text: string) => previews.push(text));
+    worker.run(new Float32Array(16000));
+    const tick = () => { const [id, callback] = [...timers][0]; timers.delete(id); callback(); };
+    tick();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(previews, ["Hello"]);
+    assert.equal(completions, 0, "previews do not wait for the final transcript");
+    tick();
+    assert.equal(timers.size, 0, "pending polls never overlap");
+    worker.terminate();
+    progress.resolve("late words");
+    response.resolve({ text: "late final", chunks: [] });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(previews, ["Hello"]);
+    assert.equal(completions, 0);
+    assert.equal(timers.size, 0);
+    const completedWorker = new fixture.TranscriptionWorker(() => {}, () => { completions++; }, () => {}, (text: string) => previews.push(text));
+    completedWorker.run(new Float32Array(16000));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(completions, 1);
+    assert.equal(timers.size, 0, "successful completion disposes the scheduled preview poll");
+    completedWorker.terminate();
+});
+
 test("VoiceStats preserves unsaved totals after a storage failure and retries them", async () => {
     let fail = true;
     const writes: any[] = [];
