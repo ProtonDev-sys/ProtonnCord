@@ -5,8 +5,10 @@
  */
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
@@ -1024,6 +1026,8 @@ test("voice-message native download rejects excess streamed data and cancels its
     let cancelled = 0;
     let requests = 0;
     const fixture = load("voiceMessageTranscriber.desktop/native.ts", "", {
+        "node:child_process": { execFile },
+        "node:util": { promisify },
         "./audioValidation": { isRecognizedAudioContainer: () => true }
     }, { fetch: async (_: string, options: any) => {
         requests++;
@@ -1092,31 +1096,27 @@ test("voice translations keep the completed text and language together through c
     harness.unmount();
 });
 
-test("speech-worker termination aborts model downloads and prevents late cache writes", async () => {
-    const started = deferred<void>();
-    const response = deferred<Response>();
-    let signal: AbortSignal | undefined;
-    let writes = 0;
-    let terminated = 0;
-    let revoked = 0;
-    class FixtureURL extends URL {
-        static createObjectURL() { return "blob:fixture"; }
-        static revokeObjectURL() { revoked++; }
-    }
-    const fixture = load("voiceMessageTranscriber.desktop/utils.ts", "", {
-        "@api/index": { DataStore: { get: async () => undefined, set: async () => { writes++; } } },
-        "@webpack/common": { lodash: { isArrayBuffer: () => false } }
-    }, { Blob, URL: FixtureURL, Worker: class { postMessage() {} terminate() { terminated++; } }, fetch: (_: string, options: any) => { signal = options.signal; started.resolve(); return response.promise; } });
-    const worker = new fixture.TranscriptionWorker(() => {}, () => {}, () => {}, () => {});
-    const pending = worker.handleMessage({ data: { type: "fetch_request", id: "fixture", url: "https://huggingface.co/fixture" } });
-    await started.promise;
+test("speech-worker termination cancels native setup and prevents late transcript callbacks", async () => {
+    const response = deferred<any>();
+    const cancellations: string[] = [];
+    let completions = 0;
+    let failures = 0;
+    const fixture = load("voiceMessageTranscriber.desktop/utils.ts", "", {}, {
+        crypto: { randomUUID: () => "fixture-job" },
+        VencordNative: { pluginHelpers: { VoiceMessageTranscriber: {
+            transcribe: (id: string) => { assert.equal(id, "fixture-job"); return response.promise; },
+            cancelTranscription: async (id: string) => { cancellations.push(id); }
+        } } }
+    });
+    const worker = new fixture.TranscriptionWorker(() => {}, () => { completions++; }, () => { failures++; });
+    worker.run(new Float32Array(16000));
     fixture.terminateTranscriptionWorkers();
-    assert.equal(signal?.aborted, true);
-    response.resolve(new Response("fixture model"));
-    await pending;
-    assert.equal(writes, 0);
-    assert.equal(terminated, 1);
-    assert.equal(revoked, 1);
+    fixture.terminateTranscriptionWorkers();
+    assert.deepEqual(cancellations, ["fixture-job"]);
+    response.resolve({ text: "late transcript", chunks: [] });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(completions, 0);
+    assert.equal(failures, 0);
 });
 
 test("VoiceStats preserves unsaved totals after a storage failure and retries them", async () => {
