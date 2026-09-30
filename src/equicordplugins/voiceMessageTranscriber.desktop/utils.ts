@@ -49,11 +49,14 @@ export class TranscriptionWorker {
     private readonly id = crypto.randomUUID();
     private terminated = false;
     private running = false;
+    private progressTimer: ReturnType<typeof setTimeout> | undefined;
+    private preview = "";
 
     constructor(
         private readonly onStatus: (status: string) => void,
         private readonly onComplete: (output: TranscriptionResult) => void,
-        private readonly onError: (error: unknown) => void
+        private readonly onError: (error: unknown) => void,
+        private readonly onPartial?: (text: string) => void
     ) {
         activeWorkers.add(this);
     }
@@ -62,18 +65,35 @@ export class TranscriptionWorker {
         if (this.terminated || this.running) return;
         this.running = true;
         this.onStatus("transcribing");
+        if (this.onPartial) this.progressTimer = setTimeout(() => void this.pollProgress(), 100);
         void Native.transcribe(this.id, audio).then(output => {
             this.running = false;
+            clearTimeout(this.progressTimer);
             if (!this.terminated) this.onComplete(output);
         }, error => {
             this.running = false;
+            clearTimeout(this.progressTimer);
             if (!this.terminated) this.onError(error);
         });
+    }
+
+    private async pollProgress() {
+        try {
+            const text = await Native.getTranscriptionProgress(this.id);
+            if (!this.terminated && this.running && text && text !== this.preview) {
+                this.preview = text;
+                this.onPartial?.(text);
+            }
+        } catch { }
+        if (!this.terminated && this.running)
+            this.progressTimer = setTimeout(() => void this.pollProgress(), 100);
     }
 
     public terminate() {
         if (this.terminated) return;
         this.terminated = true;
+        clearTimeout(this.progressTimer);
+        this.preview = "";
         activeWorkers.delete(this);
         if (this.running) void Native.cancelTranscription(this.id).catch(() => undefined);
     }
