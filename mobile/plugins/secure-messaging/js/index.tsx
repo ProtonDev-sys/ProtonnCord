@@ -29,7 +29,7 @@ import {
 	setRandomSource,
 	verifyAnnouncement,
 } from './crypto'
-import { observeAnnouncement } from './history'
+import { approveAnnouncement, observeAnnouncement } from './history'
 import { openIdentityBackup } from './identityBackup'
 import { withMessageContent } from './message'
 import {
@@ -126,16 +126,8 @@ async function localCommand(
 			)
 			if (supplied.replace(/[^a-f\d]/gi, '').toUpperCase() !== expected)
 				throw new Error('The full fingerprint does not match')
-			const old = state.trusted[peerId]
-			state.trusted[peerId] = candidate
+			approveAnnouncement(state, peerId)
 			clearDecryptedContent()
-			delete state.pending[peerId]
-			if (old && old.fingerprint !== candidate.fingerprint) {
-				for (const [id, conversation] of Object.entries(state.conversations)) {
-					if (conversation.recipients.includes(peerId))
-						delete state.conversations[id]
-				}
-			}
 			await saveVault()
 			notice(
 				'Key trusted',
@@ -226,7 +218,18 @@ function patchMessageRenderer(
 								const candidate = verifyAnnouncement(content, authorId)
 								if (authorId !== userId) {
 									const state = account(userId)
-									if (observeAnnouncement(state, candidate, message.id)) {
+									const editedTimestamp =
+										message.edited_timestamp ?? message.editedTimestamp
+									if (
+										observeAnnouncement(
+											state,
+											candidate,
+											message.id,
+											editedTimestamp == null
+												? undefined
+												: new Date(editedTimestamp).getTime(),
+										)
+									) {
 										receiver.clear()
 										void saveVault().catch(() =>
 											notice(
@@ -349,7 +352,7 @@ function SettingsComponent() {
 				'PC identity imported',
 				imported.version === 2
 					? `Mobile now has the PC identity, ${Object.keys(imported.trusted).length} trusted peer keys, and ${Object.keys(imported.conversations).length} protected conversations.`
-					: 'Mobile now uses the same identity as your PC. Protected conversations were disabled until you review and re-enable them.',
+					: 'Mobile now uses the same identity as your PC. Existing protected conversations stay blocked until you review them with /pc on.',
 			)
 		} catch (error) {
 			notice(

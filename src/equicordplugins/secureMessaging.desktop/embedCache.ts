@@ -55,6 +55,13 @@ const cache = new Map<string, EmbedCacheEntry>();
 const unfurlCache = new Map<string, UnfurlCacheEntry>();
 const runUnfurlTask = createTaskQueue(4);
 let cacheGeneration = 0;
+let externalLinkPreviewsEnabled = false;
+
+export function setExternalLinkPreviewsEnabled(enabled: boolean): void {
+    if (externalLinkPreviewsEnabled === enabled) return;
+    externalLinkPreviewsEnabled = enabled;
+    clearEncryptedEmbedCache();
+}
 
 function cacheKey(message: Message): string {
     return `${decryptCacheKey(UserStore.getCurrentUser()?.id ?? "", message)}\0${message.flags & EMBED_SUPPRESSED}`;
@@ -123,11 +130,11 @@ async function requestUnfurl(
     isCurrent: () => boolean,
 ): Promise<Record<string, unknown>[]> {
     for (const retryDelay of UNFURL_RETRY_DELAYS) {
-        if (generation !== cacheGeneration || !isCurrent()) break;
+        if (!externalLinkPreviewsEnabled || generation !== cacheGeneration || !isCurrent()) break;
         if (retryDelay > 0) await sleep(retryDelay);
-        if (generation !== cacheGeneration || !isCurrent()) break;
+        if (!externalLinkPreviewsEnabled || generation !== cacheGeneration || !isCurrent()) break;
         const embeds = await runUnfurlTask(async () => {
-            if (generation !== cacheGeneration || !isCurrent()) return [];
+            if (!externalLinkPreviewsEnabled || generation !== cacheGeneration || !isCurrent()) return [];
             try {
                 const response = await RestAPI.post({
                     url: Constants.Endpoints.UNFURL_EMBED_URLS,
@@ -146,6 +153,7 @@ async function requestUnfurl(
 }
 
 function unfurlUrl(url: string): Promise<Record<string, unknown>[]> {
+    if (!externalLinkPreviewsEnabled) return Promise.resolve([]);
     const now = Date.now();
     const existing = unfurlCache.get(url);
     if (existing && (!existing.settled || existing.expiresAt > now)) {
@@ -223,7 +231,7 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
         return;
     }
     entry.stickers = decrypted.stickers ?? [];
-    const urls = (message.flags & EMBED_SUPPRESSED) !== 0 ? [] : extractSecureEmbedUrls(decrypted.plaintext);
+    const urls = !externalLinkPreviewsEnabled || (message.flags & EMBED_SUPPRESSED) !== 0 ? [] : extractSecureEmbedUrls(decrypted.plaintext);
     if (urls.length === 0) {
         finishEntry(message, key, entry);
         return;
@@ -297,6 +305,7 @@ export function patchEncryptedMessageEmbeds(message: Message, onReady: () => voi
 }
 
 export function encryptedMessageInlineEmbedStatus(message: Message): SecureInlineEmbedStatus {
+    if (!externalLinkPreviewsEnabled) return "absent";
     if (!isEncryptedMessage(message.content) || (message.flags & EMBED_SUPPRESSED) !== 0) return "absent";
     const entry = cache.get(cacheKey(message));
     if (!entry || entry.expiresAt <= Date.now()) return "pending";
@@ -323,6 +332,7 @@ export function invalidateEncryptedMessageEmbeds(message: Message): void {
 }
 
 export async function prefetchEncryptedMessageEmbeds(plaintext: string): Promise<void> {
+    if (!externalLinkPreviewsEnabled) return;
     const urls = extractSecureEmbedUrls(plaintext);
     if (urls.length > 0) await unfurlEmbeds(urls);
 }

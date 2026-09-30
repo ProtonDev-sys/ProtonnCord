@@ -73,7 +73,7 @@ async function main(): Promise<void> {
         "../src/equicordplugins/secureMessaging.desktop/index.tsx",
         import.meta.url,
     ), "utf8");
-    assert.match(pluginSource, /import \{ settleGuardedRestFailure \} from "\.\/restGuardFailure";/u);
+    assert.match(pluginSource, /import \{ [^}]*settleGuardedRestFailure[^}]* \} from "\.\/restGuardFailure";/u);
     assert.equal(
         pluginSource.match(/return settleGuardedRestFailure\(error, args\);/gu)?.length,
         4,
