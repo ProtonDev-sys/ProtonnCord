@@ -20,15 +20,14 @@ import { copyToClipboard } from "@utils/clipboard";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { Message, RenderModalProps } from "@vencord/discord-types";
-import { lodash, Modal, openModal, ScrollerAuto, SearchableSelect, useCallback, useEffect, useRef, UserStore, useState, useStateFromStores } from "@webpack/common";
+import { lodash, Modal, openModal, ScrollerAuto, SearchableSelect, useCallback, useEffect, useMemo, useRef, UserStore, useState, useStateFromStores } from "@webpack/common";
 
 import { detectAudioMimeType } from "./audioValidation";
 import { buildTargetLanguageOptions, getVoiceMessageMedia, LanguageOption, resolveTargetLanguage } from "./options";
-import { formatTimestampedTranscript, normalizeTranscriptionResult, TranscriptionProgress, TranscriptionResult } from "./transcriptionData";
-import { cl, decodeAudio, LANGUAGES, terminateTranscriptionWorkers, TranscriptionWorker } from "./utils";
+import { formatTimestampedTranscript, IdleResultCache, normalizeTranscriptionResult, TranscriptionResult } from "./transcriptionData";
+import { cl, decodeAudio, terminateTranscriptionWorkers, TranscriptionWorker } from "./utils";
 
 const Native = VencordNative.pluginHelpers.VoiceMessageTranscriber as PluginNative<typeof import("./native")>;
-const MAX_RESULT_CACHE_ENTRIES = 100;
 const MAX_PREPARED_AUDIO_CACHE_ENTRIES = 3;
 let generation = 0;
 
@@ -39,7 +38,7 @@ function clearTranscriptionState() {
     resultCache.clear();
 }
 
-type ProcessingStatus = "idle" | "downloading_audio" | "processing_audio" | "loading" | "transcribing" | "translating" | "complete";
+type ProcessingStatus = "idle" | "downloading_audio" | "processing_audio" | "transcribing" | "translating" | "complete";
 type CopyTarget = "transcript" | "translation" | null;
 
 interface CachedResult {
@@ -49,7 +48,9 @@ interface CachedResult {
     translation?: TranslationValue;
 }
 
-const resultCache = new Map<string, CachedResult>();
+const resultCache = new IdleResultCache<CachedResult>(value => value.transcript.text.length
+    + value.transcript.chunks.reduce((size, chunk) => size + chunk.text.length, 0)
+    + (value.translation?.text.length ?? 0));
 interface PreparedAudio {
     blob: Blob;
     samples: Float32Array;
@@ -61,6 +62,8 @@ const preparedAudioCache = new Map<string, Promise<PreparedAudio>>();
 function prepareAudio(src: string): Promise<PreparedAudio> {
     const cached = preparedAudioCache.get(src);
     if (cached) return cached;
+    if (preparedAudioCache.size >= MAX_PREPARED_AUDIO_CACHE_ENTRIES)
+        return Promise.reject(new Error("Audio preparation is busy; please retry shortly"));
 
     const pending = Native.fetchAudio(src)
         .then(async bytes => {
@@ -72,37 +75,17 @@ function prepareAudio(src: string): Promise<PreparedAudio> {
                 waveform: generateWaveform(samples, 16_000)
             };
         })
-        .catch(error => {
+        .finally(() => {
             if (preparedAudioCache.get(src) === pending) preparedAudioCache.delete(src);
-            throw error;
         });
 
     preparedAudioCache.set(src, pending);
-    if (preparedAudioCache.size > MAX_PREPARED_AUDIO_CACHE_ENTRIES) {
-        const oldest = preparedAudioCache.keys().next().value;
-        if (oldest) preparedAudioCache.delete(oldest);
-    }
-
     return pending;
 }
 
 function cacheResult(messageId: string, result: CachedResult): void {
-    resultCache.delete(messageId);
     resultCache.set(messageId, result);
-
-    if (resultCache.size > MAX_RESULT_CACHE_ENTRIES) {
-        const oldest = resultCache.keys().next().value;
-        if (oldest) resultCache.delete(oldest);
-    }
 }
-
-const whisperLanguageOptions = [
-    { label: "Auto Detect", value: "auto", default: true },
-    ...Object.entries(LANGUAGES).map(([value, name]) => ({
-        label: name.charAt(0).toUpperCase() + name.slice(1),
-        value
-    }))
-];
 
 const settings = definePluginSettings({
     autoTranscribe: {
@@ -111,28 +94,33 @@ const settings = definePluginSettings({
         default: false,
         restartNeeded: false
     },
+    engine: {
+        type: OptionType.COMPONENT,
+        component: () => (
+            <BaseText>
+                Phonon-2 only (English speech). First use automatically downloads Python, the speech runtime,
+                and the model into private app storage. This can take several minutes and more space than the model alone.
+                Audio stays on this device; no manual Python or model installation is needed.
+            </BaseText>
+        )
+    },
     audioLanguage: {
-        type: OptionType.SELECT,
-        description: "Spoken language in received voice messages. Auto Detect is recommended.",
-        options: whisperLanguageOptions,
-        restartNeeded: false
+        type: OptionType.STRING,
+        description: "Legacy speech-language preference (unused by Phonon-2)",
+        default: "auto",
+        hidden: true
     },
     selectedModel: {
-        type: OptionType.SELECT,
-        description: "On-device Whisper model size",
-        options: [
-            { label: "Tiny (fastest, lowest accuracy)", value: "Xenova/whisper-tiny" },
-            { label: "Base (recommended)", value: "Xenova/whisper-base", default: true },
-            { label: "Small", value: "Xenova/whisper-small" },
-            { label: "Medium (slowest, best accuracy)", value: "Xenova/whisper-medium" }
-        ],
-        restartNeeded: false
+        type: OptionType.STRING,
+        description: "Legacy speech-model preference (unused by Phonon-2)",
+        default: "FermionResearch/Phonon-2",
+        hidden: true
     },
     quantized: {
         type: OptionType.BOOLEAN,
-        description: "Use a smaller, faster quantized model with slightly lower accuracy",
+        description: "Legacy quantization preference (unused by Phonon-2)",
         default: true,
-        restartNeeded: false
+        hidden: true
     },
     targetLanguage: {
         type: OptionType.STRING,
@@ -173,7 +161,7 @@ const settings = definePluginSettings({
                         });
                     }}
                 >
-                    Delete downloaded speech models ({(size / 1024 / 1024).toFixed(2)} MB)
+                    Delete legacy Whisper downloads ({(size / 1024 / 1024).toFixed(2)} MB)
                 </Button>
             );
         }
@@ -229,14 +217,6 @@ function chooseTargetLanguage(onSelect: (language: LanguageOption) => void): voi
     openModal(modalProps => <LanguageSelectionModal modalProps={modalProps} onSelect={onSelect} />);
 }
 
-function progressPercent(progress: TranscriptionProgress | null): number | null {
-    if (!progress) return null;
-    if (typeof progress.progress === "number") return Math.round(progress.progress);
-    if (typeof progress.loaded === "number" && typeof progress.total === "number" && progress.total > 0)
-        return Math.round(progress.loaded / progress.total * 100);
-    return null;
-}
-
 interface VoiceMessageTranscriptionAccessoryProps {
     duration?: number;
     messageId: string;
@@ -250,13 +230,17 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     const initial = resultCache.get(messageId);
     const [status, setStatus] = useState<ProcessingStatus>(initial ? "complete" : "idle");
     const [transcript, setTranscript] = useState<TranscriptionResult | null>(initial?.transcript ?? null);
+    const [partialTranscript, setPartialTranscript] = useState("");
     const [translation, setTranslation] = useState<TranslationValue | null>(initial?.translation ?? null);
     const [targetLanguage, setTargetLanguage] = useState(initial?.targetLanguage);
     const [targetLanguageLabel, setTargetLanguageLabel] = useState(initial?.targetLanguageLabel);
     const [pendingLanguageLabel, setPendingLanguageLabel] = useState<string>();
     const [showTimestamps, setShowTimestamps] = useState(false);
+    const [hidden, setHidden] = useState(false);
+    const [inView, setInView] = useState(typeof IntersectionObserver === "undefined");
+    const [documentVisible, setDocumentVisible] = useState(typeof document === "undefined" || document.visibilityState !== "hidden");
+    const containerRef = useRef<HTMLDivElement | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
     const [copied, setCopied] = useState<CopyTarget>(null);
     const [playbackSrc, setPlaybackSrc] = useState(src);
     const [resolvedWaveform, setResolvedWaveform] = useState(waveform || DEFAULT_WAVEFORM);
@@ -266,6 +250,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     const autoStartedRef = useRef(false);
 
     const stopWorker = useCallback(() => {
+        setPartialTranscript("");
         workerRef.current?.terminate();
         workerRef.current = null;
     }, []);
@@ -277,7 +262,9 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
         setPendingLanguageLabel(language.label);
 
         try {
-            const translated = await translateText(value.text, "auto", language.value);
+            const cached = resultCache.get(messageId);
+            const translated = cached?.transcript.text === value.text && cached.targetLanguage === language.value && cached.translation
+                ? cached.translation : await translateText(value.text, "auto", language.value);
             if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
 
             setTranslation(translated);
@@ -298,12 +285,23 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     }, [messageId]);
 
     const startTranscription = useCallback((language?: LanguageOption) => {
+        const cached = resultCache.get(messageId);
+        setHidden(false);
+        if (cached) {
+            setTranscript(cached.transcript);
+            setTranslation(cached.translation ?? null);
+            setTargetLanguage(cached.targetLanguage);
+            setTargetLanguageLabel(cached.targetLanguageLabel);
+            setStatus("complete");
+            setError(null);
+            if (language) void translateTranscript(cached.transcript, language, ++jobIdRef.current);
+            return;
+        }
         const currentGeneration = generation;
         const jobId = ++jobIdRef.current;
         stopWorker();
         setStatus("downloading_audio");
         setError(null);
-        setProgress(null);
         setTranslation(null);
 
         void (async () => {
@@ -311,14 +309,14 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                 const prepared = await prepareAudio(src);
                 if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
                 setStatus("processing_audio");
-                const audio = new Float32Array(prepared.samples);
+                const audio = prepared.samples;
 
                 workerRef.current = new TranscriptionWorker(
                     nextStatus => {
-                        if (jobIdRef.current === jobId) setStatus(nextStatus as ProcessingStatus);
+                        if (jobIdRef.current === jobId && currentGeneration === generation) setStatus(nextStatus as ProcessingStatus);
                     },
                     output => {
-                        if (jobIdRef.current !== jobId) return;
+                        if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
                         const value = normalizeTranscriptionResult(output);
                         stopWorker();
 
@@ -338,30 +336,19 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                         }
                     },
                     caught => {
-                        if (jobIdRef.current !== jobId) return;
+                        if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
                         stopWorker();
                         setError(caught instanceof Error ? caught.message : String(caught));
                         setStatus("idle");
                     },
-                    partial => {
-                        if (jobIdRef.current !== jobId) return;
-                        const value = normalizeTranscriptionResult(partial);
-                        if (value.text) setTranscript(value);
-                    },
-                    nextProgress => {
-                        if (jobIdRef.current === jobId) setProgress(nextProgress);
+                    text => {
+                        if (jobIdRef.current === jobId && currentGeneration === generation) setPartialTranscript(text);
                     }
                 );
 
-                const { audioLanguage, quantized, selectedModel } = settings.store;
-                workerRef.current.run(
-                    audio,
-                    selectedModel,
-                    quantized,
-                    audioLanguage === "auto" ? undefined : audioLanguage
-                );
+                workerRef.current.run(audio);
             } catch (caught) {
-                if (jobIdRef.current !== jobId) return;
+                if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
                 stopWorker();
                 setError(caught instanceof Error ? caught.message : String(caught));
                 setStatus("idle");
@@ -370,6 +357,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     }, [messageId, src, stopWorker, translateTranscript]);
 
     const startTranslation = useCallback((language: LanguageOption) => {
+        setHidden(false);
         if (!transcript) {
             startTranscription(language);
             return;
@@ -382,7 +370,6 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     const cancel = useCallback(() => {
         ++jobIdRef.current;
         stopWorker();
-        setProgress(null);
         setStatus(transcript ? "complete" : "idle");
     }, [stopWorker, transcript]);
 
@@ -401,6 +388,35 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
         stopWorker();
         if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
     }, [stopWorker]);
+
+    useEffect(() => resultCache.subscribe(messageId, () => {
+        ++jobIdRef.current;
+        stopWorker();
+        setTranscript(null);
+        setTranslation(null);
+        setTargetLanguage(undefined);
+        setTargetLanguageLabel(undefined);
+        setError(null);
+        setStatus("idle");
+        setHidden(false);
+    }), [messageId, stopWorker]);
+
+    useEffect(() => {
+        if (transcript && !hidden && inView && documentVisible) return resultCache.retain(messageId);
+    }, [messageId, transcript, hidden, inView, documentVisible]);
+
+    useEffect(() => {
+        if (typeof document === "undefined") return;
+        const update = () => setDocumentVisible(document.visibilityState !== "hidden");
+        document.addEventListener("visibilitychange", update);
+        const observer = typeof IntersectionObserver === "undefined" ? undefined
+            : new IntersectionObserver(entries => setInView(entries.some(entry => entry.isIntersecting)));
+        if (containerRef.current) observer?.observe(containerRef.current);
+        return () => {
+            document.removeEventListener("visibilitychange", update);
+            observer?.disconnect();
+        };
+    }, []);
 
     useEffect(() => {
         setPlaybackSrc(src);
@@ -423,26 +439,25 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     }, [needsPlaybackFallback, src, waveform]);
 
     useEffect(() => {
-        if (!autoTranscribe || transcript || autoStartedRef.current) return;
+        if (!autoTranscribe || transcript || autoStartedRef.current || !inView || !documentVisible) return;
         autoStartedRef.current = true;
         startTranscription();
-    }, [autoTranscribe, startTranscription, transcript]);
+    }, [autoTranscribe, startTranscription, transcript, inView, documentVisible]);
 
-    const timestampedTranscript = transcript ? formatTimestampedTranscript(transcript) : "";
+    const timestampedTranscript = useMemo(() => showTimestamps && transcript ? formatTimestampedTranscript(transcript) : "", [showTimestamps, transcript]);
     const transcriptText = showTimestamps && timestampedTranscript ? timestampedTranscript : transcript?.text ?? "";
     const busy = status !== "idle" && status !== "complete";
-    const percent = progressPercent(progress);
 
-    if (!transcript && !busy) {
+    if ((!transcript || hidden) && !busy) {
         return (
-            <div className={cl("accessory")}>
+            <div ref={containerRef} className={cl("accessory")}>
                 {needsPlaybackFallback && (
                     <div className={cl("playback-fallback")}>
                         <VoiceMessage key={playbackSrc} duration={duration} src={playbackSrc} waveform={resolvedWaveform} />
                     </div>
                 )}
                 <Flex gap={8} alignItems="center" flexWrap="wrap">
-                    <Button size="xs" onClick={() => startTranscription()}>Transcribe</Button>
+                    <Button size="xs" onClick={() => startTranscription()}>{transcript ? "Show transcript" : "Transcribe"}</Button>
                     <Button size="xs" variant="secondary" onClick={() => chooseTargetLanguage(startTranslation)}>Translate…</Button>
                     <Span size="xs" color="text-muted">Voice message · on-device speech recognition</Span>
                 </Flex>
@@ -452,7 +467,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     }
 
     return (
-        <div className={cl("accessory")}>
+        <div ref={containerRef} className={cl("accessory")}>
             {needsPlaybackFallback && (
                 <div className={cl("playback-fallback")}>
                     <VoiceMessage key={playbackSrc} duration={duration} src={playbackSrc} waveform={resolvedWaveform} />
@@ -463,12 +478,20 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                     <Span size="sm" color="text-muted">
                         {status === "downloading_audio" && "Downloading voice message…"}
                         {status === "processing_audio" && "Preparing audio…"}
-                        {status === "loading" && `Loading speech model${percent == null ? "…" : `… ${percent}%`}`}
-                        {status === "transcribing" && "Transcribing on device…"}
+                        {status === "transcribing" && "Transcribing with Phonon-2 (first use installs the runtime and model; words appear as decoding progresses)…"}
                         {status === "translating" && `Translating to ${pendingLanguageLabel ?? "selected language"}…`}
                     </Span>
                     <TextButton variant="secondary" onClick={cancel}>Cancel</TextButton>
                 </Flex>
+            )}
+
+            {busy && partialTranscript && (
+                <section>
+                    <Heading tag="h5">Transcript preview</Heading>
+                    <ScrollerAuto className={cl("result")}>
+                        <BaseText>{partialTranscript}</BaseText>
+                    </ScrollerAuto>
+                </section>
             )}
 
             {transcript && (
@@ -483,7 +506,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                         <ScrollerAuto className={cl("result")}>
                             <BaseText>{transcriptText}</BaseText>
                         </ScrollerAuto>
-                        {timestampedTranscript && (
+                        {!!transcript.chunks.length && (
                             <TextButton variant="secondary" onClick={() => setShowTimestamps(value => !value)}>
                                 {showTimestamps ? "Hide timestamps" : "Show timestamps"}
                             </TextButton>
@@ -515,9 +538,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
                             <TextButton
                                 variant="secondary"
                                 onClick={() => {
-                                    resultCache.delete(messageId);
-                                    setTranscript(null);
-                                    setTranslation(null);
+                                    setHidden(true);
                                     setError(null);
                                     setStatus("idle");
                                 }}
@@ -552,7 +573,7 @@ function VoiceMessageAccessory({ message }: { message: Message; }) {
 export default definePlugin({
     name: "VoiceMessageTranscriber",
     authors: [Devs.TheSun],
-    description: "Transcribes Discord voice messages on-device and optionally translates the transcript into a selected language.",
+    description: "Transcribes English Discord voice messages on-device with Phonon-2 and optionally translates the transcript.",
     tags: ["Chat", "Media", "Utility", "Voice"],
     dependencies: ["MessageAccessoriesAPI", "VoiceMessages"],
     settings,
