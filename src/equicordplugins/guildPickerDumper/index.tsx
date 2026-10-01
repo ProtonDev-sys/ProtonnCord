@@ -80,10 +80,23 @@ async function zipGuildAssets(guild: Guild, type: "emojis" | "stickers") {
         return { file: new Uint8Array(arrayBuffer), filename };
     };
 
-    const assetPromises = items.map(e => fetchAsset(e));
+    const results = new Array<Awaited<ReturnType<typeof fetchAsset>>>(items.length);
+    let nextIndex = 0;
+    let failed = false;
+    const downloadNext = async () => {
+        while (!failed && nextIndex < items.length) {
+            const index = nextIndex++;
+            try {
+                results[index] = await fetchAsset(items[index]);
+            } catch (error) {
+                failed = true;
+                throw error;
+            }
+        }
+    };
 
-    return Promise.all(assetPromises)
-        .then(results => {
+    return Promise.all(Array.from({ length: Math.min(4, items.length) }, downloadNext))
+        .then(() => {
             const zipped = zipSync(Object.fromEntries(results.map(({ file, filename }) => [filename, file])));
             saveFile(new File([new Uint8Array(zipped)], `${guild.name}-${type}.zip`, { type: "application/zip" }));
         })
