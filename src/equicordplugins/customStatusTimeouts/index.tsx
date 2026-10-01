@@ -113,7 +113,10 @@ export default definePlugin({
         }
     ],
     buildTimeouts(existing: TimeoutOption[]) {
-        const extra = getExtraTimeouts();
+        const now = Date.now();
+        const extra = getExtraTimeouts().filter(option =>
+            Number.isFinite(option.duration) && Number.isFinite(new Date(now + option.duration!).getTime())
+        );
 
         return [...existing, ...extra].sort((a, b) => {
             if (a.duration === undefined) return settings.store.showForeverOnTop ? -1 : 1;
