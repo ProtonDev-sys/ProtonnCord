@@ -176,7 +176,7 @@ test("manual badge refresh shares in-flight work and reports failure without rej
 
 function loadGlobalBadges() {
     const store: Record<string, string | boolean> = { apiUrl: "https://fixture.invalid", showModStyle: "none", showAero: true };
-    const requests: { url: string; resolve(response: Response): void; reject(error: Error): void; }[] = [];
+    const requests: { url: string; signal: AbortSignal; resolve(response: Response): void; reject(error: Error): void; }[] = [];
     const errors: unknown[][] = [];
     const intervals = new Map<number, () => Promise<void>>();
     const toasts: { type: string; }[] = [];
@@ -187,7 +187,8 @@ function loadGlobalBadges() {
         "@utils/Logger": { Logger: class { error(...args: unknown[]) { errors.push(args); } } }
     };
     const utils = loadSource("src/equicordplugins/globalBadges/utils.ts", mocks, {
-        fetch: (url: string) => new Promise<Response>((resolve, reject) => requests.push({ url, resolve, reject }))
+        AbortController,
+        fetch: (url: string, options: { signal: AbortSignal; }) => new Promise<Response>((resolve, reject) => requests.push({ url, signal: options.signal, resolve, reject }))
     });
     const { default: plugin } = loadSource("src/equicordplugins/globalBadges/index.tsx", {
         ...mocks,
@@ -271,6 +272,65 @@ test("global badge refresh retries failures, rejects malformed data and reports 
     await manual;
     assert.equal(toasts.at(-1)?.type, "failure");
     plugin.stop();
+});
+
+test("global badge refresh aborts superseded and stopped requests without parsing stale bodies", async () => {
+    const { utils, plugin, requests } = loadGlobalBadges();
+    const first = utils.loadBadges();
+    const second = utils.loadBadges();
+    assert.equal(requests[0].signal.aborted, true);
+    assert.equal(requests[1].signal.aborted, false);
+    requests[0].resolve({ ok: true, json: () => assert.fail("stale body was parsed") } as unknown as Response);
+    assert.equal(await first, false);
+    requests[1].resolve(response({ users: { current: [] } }));
+    assert.equal(await second, true);
+    const stopped = utils.loadBadges();
+    plugin.stop();
+    assert.equal(requests[2].signal.aborted, true);
+    requests[2].resolve({ ok: true, json: () => assert.fail("stopped body was parsed") } as unknown as Response);
+    assert.equal(await stopped, false);
+    assert.equal(plugin.getGlobalBadges("current")?.length, 0);
+});
+
+test("global badge cancellation during JSON decoding cannot commit or show a success toast", async () => {
+    for (const rejectBody of [false, true]) {
+        const { plugin, requests, errors, toasts } = loadGlobalBadges();
+        const pending = plugin.toolboxActions["Refetch Global Badges"]();
+        let resolve!: (value: unknown) => void;
+        let reject!: (error: Error) => void;
+        const body = new Promise((done, fail) => { resolve = done; reject = fail; });
+        requests[0].resolve({ ok: true, json: () => body } as unknown as Response);
+        await setImmediate();
+        plugin.stop();
+        if (rejectBody) reject(new Error("body decoding aborted"));
+        else resolve({ users: { stale: [] } });
+        await pending;
+        assert.equal(plugin.getGlobalBadges("stale"), undefined);
+        assert.equal(errors.length, 0);
+        assert.equal(toasts.length, 0);
+    }
+});
+
+test("global badge cancellation is silent and a later refresh still reports genuine failures", async () => {
+    const { utils, plugin, requests, errors, toasts } = loadGlobalBadges();
+    const cancelled = plugin.toolboxActions["Refetch Global Badges"]();
+    const current = utils.refreshBadges();
+    requests[0].reject(new Error("request aborted"));
+    await cancelled;
+    assert.equal(errors.length, 0);
+    assert.equal(toasts.length, 0);
+    requests[1].reject(new Error("offline"));
+    await current;
+    assert.equal(errors.length, 1);
+    const successful = plugin.toolboxActions["Refetch Global Badges"]();
+    requests[2].resolve(response({ users: {} }));
+    await successful;
+    assert.equal(toasts.at(-1)?.type, "success");
+    const failed = plugin.toolboxActions["Refetch Global Badges"]();
+    requests[3].resolve(response({}, 503));
+    await failed;
+    assert.equal(errors.length, 2);
+    assert.equal(toasts.at(-1)?.type, "failure");
 });
 
 test("friendship badges cover milestone days and unregister the objects that were registered", () => {
