@@ -141,7 +141,7 @@ test("MediaPlaybackSpeed applies voice defaults to already playing media and bou
     let effect!: () => (() => void) | undefined;
     const listeners = new Map<string, Function>();
     const plugin = load("src/equicordplugins/mediaPlaybackSpeed/index.tsx", {
-        "./components/SpeedIcon": {}, "@webpack/common": { React, Tooltip: "tooltip", useEffect: (fn: typeof effect) => { effect = fn; } }
+        "./components/SpeedIcon": {}, "@webpack/common": { React, Tooltip: "tooltip", useEffect: (fn: typeof effect) => { effect = fn; }, useRef: (current: unknown) => ({ current }) }
     }).default;
     const media = { tagName: "AUDIO", className: "audioElement", paused: false, playbackRate: 1, addEventListener: (type: string, fn: Function) => listeners.set(type, fn), removeEventListener: (type: string) => listeners.delete(type) };
     plugin.settings.store.defaultVoiceMessageSpeed = 2;

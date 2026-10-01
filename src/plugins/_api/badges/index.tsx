@@ -84,15 +84,17 @@ type DonorBadgeMap = Record<string, Array<{ badge: string; tooltip?: string; }>>
 
 let DonorBadges: DonorBadgeMap = {};
 let EquicordDonorBadges: DonorBadgeMap = {};
-let loadAllBadgesPromise: Promise<void> | undefined;
+let loadAllBadgesPromise: Promise<boolean> | undefined;
 let intervalId: ReturnType<typeof setInterval> | undefined;
-let badgeLoadGeneration = 0;
+let badgeLoadController: AbortController | undefined;
 const logger = new Logger("BadgeAPI");
 
-async function loadBadges(url: string, noCache = false) {
-    const response = await fetch(url, { cache: noCache ? "no-cache" : "default" });
+async function loadBadges(url: string, signal: AbortSignal, noCache = false) {
+    const response = await fetch(url, { cache: noCache ? "no-cache" : "default", signal });
+    signal.throwIfAborted();
     if (!response.ok) throw new Error(`Badge request failed: ${response.status}`);
     const data: unknown = await response.json();
+    signal.throwIfAborted();
     if (!isObject(data) || !Object.values(data).every(badges =>
         Array.isArray(badges) && badges.every(badge => isObject(badge)
             && (!("tooltip" in badge) || typeof badge.tooltip === "string")
@@ -105,20 +107,26 @@ async function loadBadges(url: string, noCache = false) {
 function loadAllBadges(noCache = false) {
     if (loadAllBadgesPromise) return loadAllBadgesPromise;
 
-    const generation = badgeLoadGeneration;
+    const controller = new AbortController();
+    badgeLoadController = controller;
     loadAllBadgesPromise = (async () => {
         const results = await Promise.allSettled([
-            loadBadges("https://badges.vencord.dev/badges.json", noCache).then(badges => {
-                if (generation === badgeLoadGeneration) DonorBadges = badges;
+            loadBadges("https://badges.vencord.dev/badges.json", controller.signal, noCache).then(badges => {
+                if (!controller.signal.aborted) DonorBadges = badges;
             }),
-            loadBadges("https://badge.equicord.org/badges.json", noCache).then(badges => {
-                if (generation === badgeLoadGeneration) EquicordDonorBadges = badges;
+            loadBadges("https://badge.equicord.org/badges.json", controller.signal, noCache).then(badges => {
+                if (!controller.signal.aborted) EquicordDonorBadges = badges;
             })
         ]);
+        if (controller.signal.aborted) return false;
         const errors = results.filter(r => r.status === "rejected").map(r => r.reason);
         if (errors.length) throw new AggregateError(errors, "Could not refresh all badge services");
+        return true;
     })().finally(() => {
-        if (generation === badgeLoadGeneration) loadAllBadgesPromise = undefined;
+        if (badgeLoadController === controller) {
+            badgeLoadController = undefined;
+            loadAllBadgesPromise = undefined;
+        }
     });
     return loadAllBadgesPromise;
 }
@@ -203,7 +211,7 @@ export default definePlugin({
     toolboxActions: {
         async "Refetch Badges"() {
             try {
-                await loadAllBadges(true);
+                if (!await loadAllBadges(true)) return;
                 Toasts.show({ id: Toasts.genId(), message: "Successfully refetched badges!", type: Toasts.Type.SUCCESS });
             } catch (error) {
                 logger.error("Failed to refresh badges", error);
@@ -215,7 +223,8 @@ export default definePlugin({
     userProfileBadges: [ContributorBadge, EquicordContributorBadge, UserPluginContributorBadge],
 
     start() {
-        badgeLoadGeneration++;
+        badgeLoadController?.abort();
+        badgeLoadController = undefined;
         loadAllBadgesPromise = undefined;
         clearInterval(intervalId);
         intervalId = setInterval(refreshBadges, 1000 * 60 * 30); // 30 minutes
@@ -223,7 +232,8 @@ export default definePlugin({
     },
 
     stop() {
-        badgeLoadGeneration++;
+        badgeLoadController?.abort();
+        badgeLoadController = undefined;
         loadAllBadgesPromise = undefined;
         clearInterval(intervalId);
         intervalId = undefined;

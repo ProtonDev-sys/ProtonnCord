@@ -4,114 +4,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { DataStore } from "@api/index";
 import { classNameFactory } from "@utils/css";
-import { lodash } from "@webpack/common";
+import { PluginNative } from "@utils/types";
 
-import { TranscriptionProgress } from "./transcriptionData";
+import { TranscriptionResult } from "./transcriptionData";
 
-export const LANGUAGES = {
-    en: "english",
-    zh: "chinese",
-    de: "german",
-    es: "spanish/castilian",
-    ru: "russian",
-    ko: "korean",
-    fr: "french",
-    ja: "japanese",
-    pt: "portuguese",
-    tr: "turkish",
-    pl: "polish",
-    ca: "catalan/valencian",
-    nl: "dutch/flemish",
-    ar: "arabic",
-    sv: "swedish",
-    it: "italian",
-    id: "indonesian",
-    hi: "hindi",
-    fi: "finnish",
-    vi: "vietnamese",
-    he: "hebrew",
-    uk: "ukrainian",
-    el: "greek",
-    ms: "malay",
-    cs: "czech",
-    ro: "romanian/moldavian/moldovan",
-    da: "danish",
-    hu: "hungarian",
-    ta: "tamil",
-    no: "norwegian",
-    th: "thai",
-    ur: "urdu",
-    hr: "croatian",
-    bg: "bulgarian",
-    lt: "lithuanian",
-    la: "latin",
-    mi: "maori",
-    ml: "malayalam",
-    cy: "welsh",
-    sk: "slovak",
-    te: "telugu",
-    fa: "persian",
-    lv: "latvian",
-    bn: "bengali",
-    sr: "serbian",
-    az: "azerbaijani",
-    sl: "slovenian",
-    kn: "kannada",
-    et: "estonian",
-    mk: "macedonian",
-    br: "breton",
-    eu: "basque",
-    is: "icelandic",
-    hy: "armenian",
-    ne: "nepali",
-    mn: "mongolian",
-    bs: "bosnian",
-    kk: "kazakh",
-    sq: "albanian",
-    sw: "swahili",
-    gl: "galician",
-    mr: "marathi",
-    pa: "punjabi/panjabi",
-    si: "sinhala/sinhalese",
-    km: "khmer",
-    sn: "shona",
-    yo: "yoruba",
-    so: "somali",
-    af: "afrikaans",
-    oc: "occitan",
-    ka: "georgian",
-    be: "belarusian",
-    tg: "tajik",
-    sd: "sindhi",
-    gu: "gujarati",
-    am: "amharic",
-    yi: "yiddish",
-    lo: "lao",
-    uz: "uzbek",
-    fo: "faroese",
-    ht: "haitian creole/haitian",
-    ps: "pashto/pushto",
-    tk: "turkmen",
-    nn: "nynorsk",
-    mt: "maltese",
-    sa: "sanskrit",
-    lb: "luxembourgish/letzeburgesch",
-    my: "myanmar/burmese",
-    bo: "tibetan",
-    tl: "tagalog",
-    mg: "malagasy",
-    as: "assamese",
-    tt: "tatar",
-    haw: "hawaiian",
-    ln: "lingala",
-    ha: "hausa",
-    ba: "bashkir",
-    jw: "javanese",
-    su: "sundanese",
-};
-
+const Native = VencordNative.pluginHelpers.VoiceMessageTranscriber as PluginNative<typeof import("./native")>;
 export const cl = classNameFactory("vc-transcription-");
 
 const getAudioContext = () => new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -141,128 +39,6 @@ export async function decodeAudio(blob: Blob): Promise<Float32Array> {
     }
 }
 
-const workerCode = `
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
-
-env.allowLocalModels = false;
-env.useBrowserCache = false;
-
-const pendingRequests = new Map();
-
-self.addEventListener('message', (event) => {
-    const { type, id, response, error, headers } = event.data;
-
-    if (type === 'fetch_response') {
-        const resolver = pendingRequests.get(id);
-        if (resolver) {
-            pendingRequests.delete(id);
-            if (error) {
-                resolver.reject(new Error(error));
-            } else {
-                const res = new Response(response, {
-                    headers: headers || { 'Content-Type': 'application/octet-stream' }
-                });
-                resolver.resolve(res);
-            }
-        }
-    } else if (type === 'run') {
-        runTranscription(event.data);
-    }
-});
-
-const originalFetch = globalThis.fetch;
-globalThis.fetch = async (input, init) => {
-    const url = input.toString();
-    if (url.includes('huggingface.co') || url.includes('cdn.jsdelivr.net')) {
-         const id = Math.random().toString(36).substring(7);
-         return new Promise((resolve, reject) => {
-             pendingRequests.set(id, { resolve, reject });
-             self.postMessage({ type: 'fetch_request', url, id });
-         });
-    }
-    return originalFetch(input, init);
-};
-
-let transcriber = null;
-
-async function runTranscription({ audio, model, quantized, language }) {
-    try {
-        if (!transcriber) {
-            self.postMessage({ type: 'status', status: 'loading' });
-            transcriber = await pipeline('automatic-speech-recognition', model, {
-                quantized: quantized,
-                progress_callback: (data) => {
-                    self.postMessage({ type: 'progress', data });
-                }
-            });
-        }
-
-        self.postMessage({ type: 'status', status: 'transcribing' });
-
-        const time_precision =
-            transcriber.processor.feature_extractor.config.chunk_length /
-            transcriber.model.config.max_source_positions;
-
-        let chunks_to_process = [
-            {
-                tokens: [],
-                finalised: false,
-            },
-        ];
-
-        function chunk_callback(chunk) {
-            let last = chunks_to_process[chunks_to_process.length - 1];
-
-            Object.assign(last, chunk);
-            last.finalised = true;
-
-            if (!chunk.is_last) {
-                chunks_to_process.push({
-                    tokens: [],
-                    finalised: false,
-                });
-            }
-        }
-
-        function callback_function(item) {
-            let last = chunks_to_process[chunks_to_process.length - 1];
-
-            last.tokens = [...item[0].output_token_ids];
-
-            let data = transcriber.tokenizer._decode_asr(chunks_to_process, {
-                time_precision: time_precision,
-                return_timestamps: true,
-                force_full_sequences: false,
-            });
-
-            self.postMessage({
-                type: 'partial',
-                output: {
-                    text: data[0],
-                    chunks: data[1].chunks
-                }
-            });
-        }
-
-        const output = await transcriber(audio, {
-            top_k: 0,
-            do_sample: false,
-            chunk_length_s: 30,
-            stride_length_s: 5,
-            return_timestamps: true,
-            callback_function,
-            chunk_callback,
-            language
-        });
-
-        self.postMessage({ type: 'complete', output });
-
-    } catch (e) {
-        self.postMessage({ type: 'error', error: e.toString() });
-    }
-}
-`;
-
 const activeWorkers = new Set<TranscriptionWorker>();
 
 export function terminateTranscriptionWorkers() {
@@ -270,139 +46,55 @@ export function terminateTranscriptionWorkers() {
 }
 
 export class TranscriptionWorker {
-    private worker: Worker;
-    private workerUrl: string;
-    private onStatus: (status: string) => void;
-    private onComplete: (output: any) => void;
-    private onError: (error: any) => void;
-    private onPartial: (output: any) => void;
-    private onProgress: (progress: TranscriptionProgress) => void;
+    private readonly id = crypto.randomUUID();
     private terminated = false;
-    private abort = new AbortController();
+    private running = false;
+    private progressTimer: ReturnType<typeof setTimeout> | undefined;
+    private preview = "";
 
     constructor(
-        onStatus: (status: string) => void,
-        onComplete: (output: any) => void,
-        onError: (error: any) => void,
-        onPartial: (output: any) => void,
-        onProgress: (progress: TranscriptionProgress) => void = () => { }
+        private readonly onStatus: (status: string) => void,
+        private readonly onComplete: (output: TranscriptionResult) => void,
+        private readonly onError: (error: unknown) => void,
+        private readonly onPartial?: (text: string) => void
     ) {
-        this.onStatus = onStatus;
-        this.onComplete = onComplete;
-        this.onError = onError;
-        this.onPartial = onPartial;
-        this.onProgress = onProgress;
-
-        const blob = new Blob([workerCode], { type: "text/javascript" });
-        this.workerUrl = URL.createObjectURL(blob);
-        try { this.worker = new Worker(this.workerUrl, { type: "module" }); }
-        catch (error) { URL.revokeObjectURL(this.workerUrl); throw error; }
         activeWorkers.add(this);
-        this.worker.onmessage = this.handleMessage.bind(this);
-        this.worker.onerror = event => {
-            if (this.terminated) return;
-            this.onError(new Error(event.message || "Speech worker could not start"));
-            this.terminate();
-        };
     }
 
-    private getMimeType(url: string): string {
-        const { pathname } = new URL(url);
-        if (pathname.endsWith(".wasm")) return "application/wasm";
-        if (pathname.endsWith(".json")) return "application/json";
-        return "application/octet-stream";
+    public run(audio: Float32Array) {
+        if (this.terminated || this.running) return;
+        this.running = true;
+        this.onStatus("transcribing");
+        if (this.onPartial) this.progressTimer = setTimeout(() => void this.pollProgress(), 100);
+        void Native.transcribe(this.id, audio).then(output => {
+            this.running = false;
+            clearTimeout(this.progressTimer);
+            if (!this.terminated) this.onComplete(output);
+        }, error => {
+            this.running = false;
+            clearTimeout(this.progressTimer);
+            if (!this.terminated) this.onError(error);
+        });
     }
 
-    private validateModelUrl(url: string): void {
-        const { hostname, protocol, username, password, port } = new URL(url);
-        if (protocol !== "https:" || username || password || port || (hostname !== "huggingface.co" && hostname !== "cdn.jsdelivr.net"))
-            throw new Error(`Blocked unexpected model host: ${hostname}`);
-    }
-
-    private async handleMessage(event: MessageEvent) {
-        if (this.terminated) return;
-        const { type, id, url, status, output, error } = event.data;
-
-        switch (type) {
-            case "fetch_request":
-                try {
-                    this.validateModelUrl(url);
-                    const cachedData = await DataStore.get(`VoiceMessageTranscriber_${url}`);
-                    if (this.terminated) return;
-
-                    if (cachedData && lodash.isArrayBuffer(cachedData)) {
-                        this.worker.postMessage({
-                            type: "fetch_response",
-                            id,
-                            response: cachedData,
-                            headers: {
-                                "Content-Length": cachedData.byteLength.toString(),
-                                "Content-Type": this.getMimeType(url)
-                            }
-                        }, [cachedData]);
-                    } else {
-                        const res = await fetch(url, { signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(300_000)]) });
-                        if (!res.ok) throw new Error("Failed to fetch " + url);
-
-                        const buffer = await res.arrayBuffer();
-                        if (this.terminated) return;
-                        await DataStore.set(`VoiceMessageTranscriber_${url}`, buffer);
-                        if (this.terminated) return;
-
-                        this.worker.postMessage({
-                            type: "fetch_response",
-                            id,
-                            response: buffer,
-                            headers: {
-                                "Content-Length": res.headers.get("Content-Length") || buffer.byteLength.toString(),
-                                "Content-Type": this.getMimeType(url)
-                            }
-                        }, [buffer]);
-                    }
-                } catch (err) {
-                    if (this.terminated) return;
-                    this.worker.postMessage({
-                        type: "fetch_response",
-                        id,
-                        error: String(err)
-                    });
-                }
-                break;
-            case "status":
-                this.onStatus(status);
-                break;
-            case "complete":
-                this.onComplete(output);
-                break;
-            case "partial":
-                this.onPartial(output);
-                break;
-            case "progress":
-                this.onProgress(event.data.data);
-                break;
-            case "error":
-                this.onError(error);
-                break;
-        }
-    }
-
-    public run(audio: Float32Array, model: string, quantized: boolean = true, language?: string) {
-        if (this.terminated) return;
-        this.worker.postMessage({
-            type: "run",
-            audio,
-            model,
-            quantized,
-            language
-        }, [audio.buffer]);
+    private async pollProgress() {
+        try {
+            const text = await Native.getTranscriptionProgress(this.id);
+            if (!this.terminated && this.running && text && text !== this.preview) {
+                this.preview = text;
+                this.onPartial?.(text);
+            }
+        } catch { }
+        if (!this.terminated && this.running)
+            this.progressTimer = setTimeout(() => void this.pollProgress(), 100);
     }
 
     public terminate() {
         if (this.terminated) return;
         this.terminated = true;
-        this.abort.abort();
+        clearTimeout(this.progressTimer);
+        this.preview = "";
         activeWorkers.delete(this);
-        this.worker.terminate();
-        URL.revokeObjectURL(this.workerUrl);
+        if (this.running) void Native.cancelTranscription(this.id).catch(() => undefined);
     }
 }

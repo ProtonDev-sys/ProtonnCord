@@ -48,7 +48,7 @@ export default definePlugin({
     toolboxActions: {
         async "Refetch Global Badges"() {
             try {
-                await loadBadges();
+                if (!await loadBadges()) return;
                 Toasts.show({ id: Toasts.genId(), message: "Successfully refetched global badges!", type: Toasts.Type.SUCCESS });
             } catch (error) {
                 new Logger("GlobalBadges").error("Failed to refresh badges", error);
