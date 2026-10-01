@@ -55,11 +55,7 @@ export default definePlugin({
         if (query.offset > 5000) {
             query.sort_order = query.sort_order === "asc" ? "desc" : "asc";
 
-            if (query.offset > 5000 - 5000) {
-                query.offset = 0;
-            } else {
-                query.offset -= 5000;
-            }
+            query.offset = 0;
         }
     }
 });
