@@ -29,8 +29,8 @@ function loadSource(path: string, mocks: Record<string, object>, globals: Record
 const boundary = { __esModule: true, default: { wrap: (component: (props: object) => unknown) => (props: object) => component(props) } };
 
 function loadBadges() {
-    const requests: { url: string; resolve(response: Response): void; reject(error: Error): void; }[] = [];
-    const intervals = new Map<number, () => Promise<void>>();
+    const requests: { url: string; signal?: AbortSignal; resolve(response: Response): void; reject(error: Error): void; }[] = [];
+    const intervals = new Map<number, () => Promise<unknown>>();
     const errors: unknown[][] = [];
     const toasts: { type: string; }[] = [];
     let nextInterval = 0;
@@ -47,8 +47,9 @@ function loadBadges() {
         "~plugins": {},
         "./modals": {}
     }, {
-        fetch: (url: string) => new Promise<Response>((resolve, reject) => requests.push({ url, resolve, reject })),
-        setInterval: (callback: () => Promise<void>) => { intervals.set(++nextInterval, callback); return nextInterval; },
+        AbortController,
+        fetch: (url: string, options: RequestInit) => new Promise<Response>((resolve, reject) => requests.push({ url, signal: options.signal ?? undefined, resolve, reject })),
+        setInterval: (callback: () => Promise<unknown>) => { intervals.set(++nextInterval, callback); return nextInterval; },
         clearInterval: (id: number) => intervals.delete(id)
     }, "({ plugin: exports.default, refresh: refreshBadges })");
     return { plugin, refresh, requests, intervals, errors, toasts };
@@ -57,6 +58,35 @@ function loadBadges() {
 function response(value: unknown, status = 200) {
     return new Response(JSON.stringify(value), { status });
 }
+
+test("BadgeAPI stop aborts both feeds and avoids stale decoding and notifications", async () => {
+    const { plugin, requests, errors, toasts } = loadBadges();
+    plugin.start();
+    const pending = plugin.toolboxActions["Refetch Badges"]();
+    plugin.stop();
+    assert.ok(requests.every(request => request.signal?.aborted));
+    let decoded = 0;
+    for (const request of requests) request.resolve({ ok: true, json: async () => { decoded++; return {}; } } as Response);
+    await pending;
+    assert.equal(decoded, 0);
+    assert.equal(errors.length, 0);
+    assert.equal(toasts.length, 0);
+});
+
+test("BadgeAPI cancellation during decoding does not commit data or notify failure", async () => {
+    const { plugin, requests, errors, toasts } = loadBadges();
+    const pending = plugin.toolboxActions["Refetch Badges"]();
+    let finishDecode!: (value: unknown) => void;
+    requests[0].resolve({ ok: true, json: () => new Promise(resolve => { finishDecode = resolve; }) } as Response);
+    requests[1].resolve(response({}));
+    await setImmediate();
+    plugin.stop();
+    finishDecode({ stale: [{ badge: "stale.png" }] });
+    await pending;
+    assert.equal(plugin.getDonorBadges("stale"), undefined);
+    assert.equal(errors.length, 0);
+    assert.equal(toasts.length, 0);
+});
 
 test("badge registration preserves caller objects and dynamic component identity", () => {
     const api = loadSource("src/api/Badges.ts", {
