@@ -13,7 +13,7 @@ import { settings } from "./settings";
 type GlobalBadge = Record<"mod" | "tooltip" | "badge", string>;
 
 let GlobalBadges: Record<string, GlobalBadge[]> = {};
-let loadGeneration = 0;
+let badgeLoadController: AbortController | undefined;
 export const INVITE_LINK = "kwHCJPxp8t";
 export const cl = classNameFactory("vc-global-badges-");
 export const serviceMap: Record<string, string> = {
@@ -40,24 +40,36 @@ export const serviceMap: Record<string, string> = {
 const blockedMods = ["vencord", "equicord"];
 
 export function cancelBadgeLoad() {
-    loadGeneration++;
+    badgeLoadController?.abort();
+    badgeLoadController = undefined;
 }
 
 export async function loadBadges() {
-    const generation = ++loadGeneration;
+    cancelBadgeLoad();
+    const controller = badgeLoadController = new AbortController();
     const url = settings.store.apiUrl.endsWith("/") ? settings.store.apiUrl + "users" : settings.store.apiUrl + "/users";
-    const response = await fetch(url, { cache: "no-cache" });
-    if (!response.ok) throw new Error(`Badge request failed: ${response.status}`);
-    const data: unknown = await response.json();
-    if (!isObject(data) || !("users" in data) || !isObject(data.users)
-        || !Object.values(data.users).every(badges => Array.isArray(badges)
-            && badges.every(badge => isObject(badge)
-                && "mod" in badge && typeof badge.mod === "string"
-                && "tooltip" in badge && typeof badge.tooltip === "string"
-                && "badge" in badge && typeof badge.badge === "string")
-        )) throw new Error("Invalid global badge response");
+    try {
+        const response = await fetch(url, { cache: "no-cache", signal: controller.signal });
+        if (controller.signal.aborted) return false;
+        if (!response.ok) throw new Error(`Badge request failed: ${response.status}`);
+        const data: unknown = await response.json();
+        if (controller.signal.aborted) return false;
+        if (!isObject(data) || !("users" in data) || !isObject(data.users)
+            || !Object.values(data.users).every(badges => Array.isArray(badges)
+                && badges.every(badge => isObject(badge)
+                    && "mod" in badge && typeof badge.mod === "string"
+                    && "tooltip" in badge && typeof badge.tooltip === "string"
+                    && "badge" in badge && typeof badge.badge === "string")
+            )) throw new Error("Invalid global badge response");
 
-    if (generation === loadGeneration) GlobalBadges = data.users as Record<string, GlobalBadge[]>;
+        GlobalBadges = data.users as Record<string, GlobalBadge[]>;
+        return true;
+    } catch (error) {
+        if (controller.signal.aborted) return false;
+        throw error;
+    } finally {
+        if (badgeLoadController === controller) badgeLoadController = undefined;
+    }
 }
 
 export function refreshBadges() {

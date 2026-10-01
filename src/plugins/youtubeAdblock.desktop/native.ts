@@ -8,14 +8,24 @@ import { RendererSettings } from "@main/settings";
 import { app } from "electron";
 import adguard from "file://adguard.js?minify";
 
+function isYoutubeEmbed(url: string) {
+    try {
+        const parsed = new URL(url);
+        return (parsed.origin === "https://youtube.com" || parsed.origin === "https://www.youtube.com")
+            && parsed.pathname.startsWith("/embed/");
+    } catch {
+        return false;
+    }
+}
+
 app.on("browser-window-created", (_, win) => {
     win.webContents.on("frame-created", (_, { frame }) => {
         frame?.once("dom-ready", () => {
             if (!RendererSettings.store.plugins?.YoutubeAdblock?.enabled) return;
 
-            if (frame.url.includes("youtube.com/embed/")) {
+            if (isYoutubeEmbed(frame.url)) {
                 frame.executeJavaScript(adguard);
-            } else if (frame.parent?.url.includes("youtube.com/embed/")) {
+            } else if (frame.parent && isYoutubeEmbed(frame.parent.url)) {
                 frame.parent.executeJavaScript(adguard);
             }
         });

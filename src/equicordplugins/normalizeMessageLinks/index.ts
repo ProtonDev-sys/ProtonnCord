@@ -22,6 +22,6 @@ export default definePlugin({
         },
     ],
     normalizeHost(host: string) {
-        return host.replace(/(^|\b)(canary\.|ptb\.)(discord.com)$/, "$1$3");
+        return host.replace(/^(?:canary|ptb)\.discord\.com$/, "discord.com");
     },
 });

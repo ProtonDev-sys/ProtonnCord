@@ -5,13 +5,16 @@
  */
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { normalizeGuildIconFile, normalizeStoredGuildIcons } from "../src/equicordplugins/clientsideGuildIcons/iconStorage";
 import { parseSyncedLyrics } from "../src/equicordplugins/musicControls/parseSyncedLyrics";
+import { IdleResultCache } from "../src/equicordplugins/voiceMessageTranscriber.desktop/transcriptionData";
 
 const react = { createElement: (type: any, props: any, ...children: any[]) => ({ type, props: { ...props, children } }) };
 
@@ -1024,6 +1027,8 @@ test("voice-message native download rejects excess streamed data and cancels its
     let cancelled = 0;
     let requests = 0;
     const fixture = load("voiceMessageTranscriber.desktop/native.ts", "", {
+        "node:child_process": { execFile },
+        "node:util": { promisify },
         "./audioValidation": { isRecognizedAudioContainer: () => true }
     }, { fetch: async (_: string, options: any) => {
         requests++;
@@ -1047,7 +1052,9 @@ test("voice translations keep the completed text and language together through c
         "@components/Button": { Button: "button", TextButton: "text-button" },
         "@plugins/translate/utils": { translateText: () => new Promise((resolve, reject) => requests.push({ resolve, reject })) },
         "./utils": { LANGUAGES: {}, cl: (value: string) => value },
-        "./transcriptionData": { formatTimestampedTranscript: () => "" },
+        "./transcriptionData": { formatTimestampedTranscript: () => "", IdleResultCache: class extends IdleResultCache<any> {
+            constructor(measure: (value: any) => number) { super(measure, 25); }
+        } },
         "@webpack/common": {
             ...harness.hooks,
             openModal: (render: any) => render({}).props.onSelect({ value: "de", label: "German" })
@@ -1089,34 +1096,87 @@ test("voice translations keep the completed text and language together through c
     assert.ok(textNode(completed, "Hallo"));
     assert.equal(textNode(completed, "Bonjour"), undefined);
     assert.equal(fixture.resultCache.get("message").targetLanguage, "de");
+    textNode(render(), "Hide").props.onClick();
+    assert.equal(textNode(render(), "Hallo"), undefined);
+    assert.equal(fixture.resultCache.get("message").translation.text, "Hallo");
+    textNode(render(), "Show transcript").props.onClick();
+    assert.ok(textNode(render(), "Hallo"));
+    changeLanguage();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests.length, 3, "showing and selecting the cached language do not call the provider again");
+    textNode(render(), "Hide").props.onClick();
+    render();
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.equal(fixture.resultCache.get("message"), undefined);
+    assert.equal(textNode(render(), "Show transcript"), undefined, "expiry releases the hidden component's text references");
+    assert.ok(textNode(render(), "Transcribe"));
     harness.unmount();
+    fixture.resultCache.clear();
 });
 
-test("speech-worker termination aborts model downloads and prevents late cache writes", async () => {
-    const started = deferred<void>();
-    const response = deferred<Response>();
-    let signal: AbortSignal | undefined;
-    let writes = 0;
-    let terminated = 0;
-    let revoked = 0;
-    class FixtureURL extends URL {
-        static createObjectURL() { return "blob:fixture"; }
-        static revokeObjectURL() { revoked++; }
-    }
-    const fixture = load("voiceMessageTranscriber.desktop/utils.ts", "", {
-        "@api/index": { DataStore: { get: async () => undefined, set: async () => { writes++; } } },
-        "@webpack/common": { lodash: { isArrayBuffer: () => false } }
-    }, { Blob, URL: FixtureURL, Worker: class { postMessage() {} terminate() { terminated++; } }, fetch: (_: string, options: any) => { signal = options.signal; started.resolve(); return response.promise; } });
-    const worker = new fixture.TranscriptionWorker(() => {}, () => {}, () => {}, () => {});
-    const pending = worker.handleMessage({ data: { type: "fetch_request", id: "fixture", url: "https://huggingface.co/fixture" } });
-    await started.promise;
+test("speech-worker termination cancels native setup and prevents late transcript callbacks", async () => {
+    const response = deferred<any>();
+    const cancellations: string[] = [];
+    let completions = 0;
+    let failures = 0;
+    const fixture = load("voiceMessageTranscriber.desktop/utils.ts", "", {}, {
+        crypto: { randomUUID: () => "fixture-job" },
+        VencordNative: { pluginHelpers: { VoiceMessageTranscriber: {
+            transcribe: (id: string) => { assert.equal(id, "fixture-job"); return response.promise; },
+            cancelTranscription: async (id: string) => { cancellations.push(id); }
+        } } }
+    });
+    const worker = new fixture.TranscriptionWorker(() => {}, () => { completions++; }, () => { failures++; });
+    worker.run(new Float32Array(16000));
     fixture.terminateTranscriptionWorkers();
-    assert.equal(signal?.aborted, true);
-    response.resolve(new Response("fixture model"));
-    await pending;
-    assert.equal(writes, 0);
-    assert.equal(terminated, 1);
-    assert.equal(revoked, 1);
+    fixture.terminateTranscriptionWorkers();
+    assert.deepEqual(cancellations, ["fixture-job"]);
+    response.resolve({ text: "late transcript", chunks: [] });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(completions, 0);
+    assert.equal(failures, 0);
+});
+
+test("speech previews arrive before completion and discard late polls after cancellation", async () => {
+    const response = deferred<any>();
+    const progress = deferred<string>();
+    const timers = new Map<number, () => void>();
+    const previews: string[] = [];
+    let nextTimer = 0;
+    let polls = 0;
+    let completions = 0;
+    const fixture = load("voiceMessageTranscriber.desktop/utils.ts", "", {}, {
+        crypto: { randomUUID: () => "preview-job" },
+        setTimeout: (callback: () => void) => { timers.set(++nextTimer, callback); return nextTimer; },
+        clearTimeout: (id: number) => timers.delete(id),
+        VencordNative: { pluginHelpers: { VoiceMessageTranscriber: {
+            transcribe: () => response.promise,
+            getTranscriptionProgress: () => { polls++; return polls === 1 ? Promise.resolve("Hello") : progress.promise; },
+            cancelTranscription: async () => undefined
+        } } }
+    });
+    const worker = new fixture.TranscriptionWorker(() => {}, () => { completions++; }, () => {}, (text: string) => previews.push(text));
+    worker.run(new Float32Array(16000));
+    const tick = () => { const [id, callback] = [...timers][0]; timers.delete(id); callback(); };
+    tick();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(previews, ["Hello"]);
+    assert.equal(completions, 0, "previews do not wait for the final transcript");
+    tick();
+    assert.equal(timers.size, 0, "pending polls never overlap");
+    worker.terminate();
+    progress.resolve("late words");
+    response.resolve({ text: "late final", chunks: [] });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(previews, ["Hello"]);
+    assert.equal(completions, 0);
+    assert.equal(timers.size, 0);
+    const completedWorker = new fixture.TranscriptionWorker(() => {}, () => { completions++; }, () => {}, (text: string) => previews.push(text));
+    completedWorker.run(new Float32Array(16000));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(completions, 1);
+    assert.equal(timers.size, 0, "successful completion disposes the scheduled preview poll");
+    completedWorker.terminate();
 });
 
 test("VoiceStats preserves unsaved totals after a storage failure and retries them", async () => {

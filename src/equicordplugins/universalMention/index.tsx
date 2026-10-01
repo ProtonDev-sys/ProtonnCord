@@ -28,6 +28,10 @@ const settings = definePluginSettings({
 
 let cachedUsers: User[] | null = null;
 
+function invalidateCachedUsers() {
+    cachedUsers = null;
+}
+
 function getCachedUsers(): User[] {
     if (!cachedUsers) {
         cachedUsers = Object.values(UserStore.getUsers());
@@ -41,6 +45,14 @@ export default definePlugin({
     description: "Mention any user, regardless of channel access.",
     tags: ["Chat", "Servers", "Utility"],
     settings,
+    start() {
+        invalidateCachedUsers();
+        UserStore.addChangeListener(invalidateCachedUsers);
+    },
+    stop() {
+        UserStore.removeChangeListener(invalidateCachedUsers);
+        invalidateCachedUsers();
+    },
     settingsAboutComponent: () => (
         <Notice.Warning>
             Using Global Mention can cause performance issues and show an absurd amount of users in the autocomplete.
