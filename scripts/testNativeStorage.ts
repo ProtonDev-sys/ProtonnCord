@@ -67,8 +67,12 @@ test("extension installation awaits loading and removes failed extraction before
                     if (outcome === "load-failed") throw error;
                 }
             } } } },
-            fflate: { unzip(_data: Buffer, callback: (error: null, files: Record<string, Uint8Array>) => void) {
+            fflate: { unzipSync(_data: Buffer, options: { filter(file: { name: string; originalSize: number; size: number; compression: number; }): boolean; }) {
+                for (const name of ["_metadata/ignored", "nested/file.js", "later.js"])
+                    assert.equal(options.filter({ name, originalSize: 0, size: 0, compression: 0 }), false);
+            }, unzip(_data: Buffer, callback: (error: null, files: Record<string, Uint8Array>) => void) {
                 callback(null, { "_metadata/ignored": new Uint8Array(), "nested/file.js": new Uint8Array(), "later.js": new Uint8Array() });
+                return () => undefined;
             } },
             fs: { constants: { F_OK: 0 } },
             "fs/promises": {
@@ -81,7 +85,7 @@ test("extension installation awaits loading and removes failed extraction before
             "./crxToZip": { crxToZip: (data: Buffer) => data }, "./http": { fetchBuffer: async () => Buffer.alloc(0) }
         };
         const { installExt } = runInNewContext(`${code}\nexports;`, {
-            exports: {}, process, require: (name: string) => {
+            exports: {}, process, setTimeout, clearTimeout, require: (name: string) => {
                 assert.ok(Object.hasOwn(dependencies, name), `unexpected dependency ${name}`);
                 return dependencies[name];
             }

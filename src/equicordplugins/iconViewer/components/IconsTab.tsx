@@ -8,28 +8,23 @@ import { Button } from "@components/Button";
 import { Heading } from "@components/Heading";
 import { SettingsTab, wrapTab } from "@components/settings";
 import { TooltipContainer } from "@components/TooltipContainer";
-import { iconsModule } from "@equicordplugins/_core/concatenatedModules";
+import { iconsModule, subscribeIconsModule } from "@equicordplugins/_core/concatenatedModules";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
 import { useIntersection } from "@utils/react";
 import { Icon } from "@vencord/discord-types";
-import { Clickable, TextInput, useCallback, useEffect, useMemo, useState } from "@webpack/common";
+import { Clickable, React, TextInput, useCallback, useEffect, useMemo, useState } from "@webpack/common";
 
 import { IconsDef } from "../types";
 import { openIconModal } from "./Modals";
 
-let cachedIcons: IconsDef | null = null;
-
-function getIcons(): IconsDef {
-    if (cachedIcons) return cachedIcons;
-
-    cachedIcons = Object.fromEntries(
-        Object.entries(iconsModule).filter(([name, fn]) =>
+function getIcons(module: IconsDef | undefined): IconsDef {
+    return Object.fromEntries(
+        Object.entries(module ?? {}).filter(([name, fn]) =>
             typeof fn === "function" && name.endsWith("Icon")
         )
     );
 
-    return cachedIcons;
 }
 
 function searchMatch(search: string, name: string, Icon: Icon, searchByFunction: boolean): boolean {
@@ -64,7 +59,8 @@ function IconsTab() {
     const [search, setSearch] = useState("");
     const [searchByFunction, setSearchByFunction] = useState(false);
 
-    const icons = useMemo(() => getIcons(), []);
+    const module = React.useSyncExternalStore(subscribeIconsModule, () => iconsModule);
+    const icons = useMemo(() => getIcons(module), [module]);
 
     useEffect(() => {
         const timer = setTimeout(() => setSearch(searchInput), 150);

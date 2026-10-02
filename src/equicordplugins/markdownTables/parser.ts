@@ -221,7 +221,7 @@ function parseTableAtLine(lines: string[], lineIndex: number, fenced?: boolean[]
     if (headerCells.length < 2) return null;
 
     const separator = parseSeparator(lines[lineIndex + 1]);
-    if (!separator) return null;
+    if (!separator || headerCells.length !== separator.alignments.length) return null;
 
     const width = separator.alignments.length;
     const rows: string[][] = [];

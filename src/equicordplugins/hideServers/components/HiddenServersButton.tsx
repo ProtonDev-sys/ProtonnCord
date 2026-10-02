@@ -8,20 +8,14 @@ import "./style.css";
 
 import { HiddenServersStore } from "@equicordplugins/hideServers/HiddenServersStore";
 import { classNameFactory } from "@utils/css";
-import { Button, GuildStore, useStateFromStores } from "@webpack/common";
+import { Button, GuildStore, SortedGuildStore, useStateFromStores } from "@webpack/common";
 
 import { openHiddenServersModal } from "./HiddenServersMenu";
 
 const cl = classNameFactory("vc-hideservers-");
 
 function HiddenServersButton() {
-    const actuallyHidden = useStateFromStores([HiddenServersStore, GuildStore], () => {
-        let count = 0;
-        for (const guildId of HiddenServersStore.hiddenGuilds) {
-            if (GuildStore.getGuild(guildId)) count++;
-        }
-        return count;
-    });
+    const actuallyHidden = useStateFromStores([HiddenServersStore, GuildStore, SortedGuildStore], () => HiddenServersStore.hiddenGuildsDetail().length);
 
     return (
         <div className={cl("button-wrapper")}>

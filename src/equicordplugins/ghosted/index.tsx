@@ -14,9 +14,9 @@ import { Devs, EquicordDevs } from "@utils/constants";
 import { classNameFactory } from "@utils/css";
 import definePlugin, { OptionType } from "@utils/types";
 import { Channel } from "@vencord/discord-types";
-import { Menu, openModal, Tooltip, useEffect, useState } from "@webpack/common";
+import { Menu, openModal, Tooltip, useEffect, UserStore, useState } from "@webpack/common";
 
-import { Boo, clearChannelFromGhost, getBooCount, getGhostedChannels, onBooCountChange } from "./Boo";
+import { Boo, clearChannelFromGhost, getBooCount, getGhostedChannels, onBooCountChange, startGhostTracking, stopGhostTracking, syncGhostAccount } from "./Boo";
 import { getChannelDisplayName, GhostedUsersModal } from "./GhostedUsersModal";
 import { IconGhost } from "./IconGhost";
 
@@ -187,10 +187,14 @@ export default definePlugin({
     },
 
     start() {
+        startGhostTracking();
+        UserStore.addChangeListener(syncGhostAccount);
         addServerListElement(ServerListRenderPosition.Above, this.renderIndicator);
     },
 
     stop() {
+        UserStore.removeChangeListener(syncGhostAccount);
+        stopGhostTracking();
         removeServerListElement(ServerListRenderPosition.Above, this.renderIndicator);
     },
 });

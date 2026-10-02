@@ -13,7 +13,7 @@ import { Activity } from "@vencord/discord-types";
 import { ActivityType } from "@vencord/discord-types/enums";
 import { React } from "@webpack/common";
 
-import { ReplaceSettings, ReplaceTutorial } from "./ReplaceSettings";
+import { isValidStreamUrl, ReplaceSettings, ReplaceTutorial } from "./ReplaceSettings";
 
 const APP_IDS_KEY = "ReplaceActivityType_appids";
 
@@ -108,7 +108,7 @@ export default definePlugin({
                 const oldActivity = { ...activity };
                 activity.type = app.newActivityType;
                 if (app.newName) activity.name = this.parseField(app.newName, oldActivity);
-                if (app.newActivityType === ActivityType.STREAMING && app.newStreamUrl) activity.url = app.newStreamUrl;
+                if (app.newActivityType === ActivityType.STREAMING && isValidStreamUrl(app.newStreamUrl)) activity.url = app.newStreamUrl;
                 if (app.newDetails) activity.details = this.parseField(app.newDetails, oldActivity);
                 if (app.newState) activity.state = this.parseField(app.newState, oldActivity);
                 if (!activity.assets) activity.assets = {};

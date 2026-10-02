@@ -133,6 +133,7 @@ export async function getData(): Promise<UserData | undefined> {
     });
 }
 export async function listData(userId: string): Promise<UserData | undefined> {
+    const accountId = UserStore.getCurrentUser()?.id;
     if (userId === UserStore.getCurrentUser()?.id) return await getData();
 
     return await authFetch(new URL(`api/data/${userId}`, apiConstants.api), {
@@ -143,6 +144,7 @@ export async function listData(userId: string): Promise<UserData | undefined> {
         if (!res) return useSongStore.getState().users[userId]?.data;
 
         const data = UserDataSchema.max(apiConstants.songLimit).parse(await res.json());
+        requireCurrentAccount(accountId);
         useSongStore.getState().update({
             userId,
             data,

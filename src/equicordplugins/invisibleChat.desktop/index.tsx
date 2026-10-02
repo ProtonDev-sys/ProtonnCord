@@ -228,8 +228,9 @@ export function encrypt(secret: string, password: string, cover: string): string
 }
 
 export function decrypt(encrypted: string, password: string, removeIndicator: boolean): string {
-    const decrypted = steggo.reveal(encrypted, password);
-    return removeIndicator ? decrypted.replace("\u200b", "") : decrypted;
+    const content = /^\W/.test(encrypted) ? `d ${encrypted}d` : encrypted;
+    const decrypted = steggo.reveal(content, password);
+    return removeIndicator && isCorrectPassword(decrypted) ? decrypted.slice(0, -1) : decrypted;
 }
 
 export function isCorrectPassword(result: string): boolean {
@@ -241,13 +242,8 @@ export async function iteratePasswords(message: Message): Promise<string | false
 
     if (!message?.content || !passwords?.length) return false;
 
-    let { content } = message;
-
-    // we use an extra variable so we dont have to edit the message content directly
-    if (/^\W/.test(message.content)) content = `d ${message.content}d`;
-
     for (let i = 0; i < passwords.length; i++) {
-        const result = decrypt(content, passwords[i], false);
+        const result = decrypt(message.content, passwords[i], false);
         if (isCorrectPassword(result)) {
             return result;
         }

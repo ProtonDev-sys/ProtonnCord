@@ -49,6 +49,7 @@ interface PluginRun {
 const pluginRuns = new WeakMap<Plugin, PluginRun>();
 const startedPluginNames = new Set<string>();
 const failedPluginNames = new Set<string>();
+const dependencyRollbacks = new WeakMap<Plugin, () => void>();
 
 export function getPluginRuntimeStatus() {
     return {
@@ -156,38 +157,77 @@ export const startAllPlugins = traceFunction("startAllPlugins", function startAl
 
 export function startDependenciesRecursive(p: Plugin, visiting = new Set<string>()): { restartNeeded: boolean; failures: string[]; } {
     const settings = Settings.plugins;
-    let restartNeeded = false;
     const failures: string[] = [];
-
-    if (visiting.has(p.name)) return { restartNeeded, failures: [p.name] };
-    visiting.add(p.name);
-
-    p.dependencies?.forEach(d => {
-        const dep = Plugins[d];
-        if (!dep) {
-            failures.push(d);
-            return;
+    const plan = new Map<Plugin, boolean>();
+    const active = new Set(visiting);
+    function visit(plugin: Plugin): boolean {
+        if (active.has(plugin.name)) {
+            failures.push(plugin.name);
+            return false;
         }
-        if (!dep.started) {
-            const nested = startDependenciesRecursive(dep, visiting);
-            restartNeeded ||= nested.restartNeeded;
-            failures.push(...nested.failures);
-            if (nested.failures.length) return;
-
-            // If the plugin has patches, don't start the plugin, just enable it.
-            if (nested.restartNeeded || pluginRequiresRestart(dep)) {
-                logger.warn(`Enabling dependency ${d} requires restart.`);
-                restartNeeded = true;
-            } else if (!startPlugin(dep)) {
-                failures.push(d);
-                return;
+        active.add(plugin.name);
+        let restart = false;
+        for (const name of plugin.dependencies ?? []) {
+            const dependency = Plugins[name];
+            if (!dependency) {
+                failures.push(name);
+                continue;
             }
+            if (!plan.has(dependency)) plan.set(dependency, !dependency.started && (visit(dependency) || pluginRequiresRestart(dependency)));
+            restart ||= plan.get(dependency)!;
         }
-        settings[d].enabled = true;
-        dep.isDependency = true;
-    });
+        active.delete(plugin.name);
+        return restart;
+    }
+    const restartNeeded = visit(p);
+    if (failures.length) return { restartNeeded: false, failures: [...new Set(failures)] };
 
-    visiting.delete(p.name);
+    const previous = new Map<Plugin, { enabled: boolean; isDependency: boolean | undefined; started: boolean; run?: PluginRun; }>();
+    const rollback = () => {
+        dependencyRollbacks.delete(p);
+        const retained = new Set<string>();
+        const retainDependencies = (name: string) => {
+            const pending = [name];
+            while (pending.length) {
+                const currentName = pending.pop()!;
+                if (retained.has(currentName)) continue;
+                retained.add(currentName);
+                pending.push(...(getLoadedPluginDefinition(currentName)?.dependencies ?? PluginManifest[currentName]?.dependencies ?? []));
+            }
+        };
+        for (const candidate of Object.values(PluginManifest)) {
+            const loaded = getLoadedPluginDefinition(candidate.name);
+            const original = loaded && previous.get(loaded);
+            if (candidate.name !== p.name
+                && (!original || original.enabled || original.isDependency || original.started)
+                && (isPluginEnabled(candidate.name) || loaded?.started)) retainDependencies(candidate.name);
+        }
+        for (const [dependency, before] of previous) {
+            if (dependency.required || (dependency.started && pluginRuns.get(dependency) !== before.run))
+                retainDependencies(dependency.name);
+        }
+        for (const [dependency, before] of [...previous].reverse()) {
+            if (retained.has(dependency.name) && (!before.started || dependency.required
+                || (dependency.started && pluginRuns.get(dependency) !== before.run))) continue;
+            if (!before.started && dependency.started) stopPlugin(dependency);
+            if (settings[dependency.name].enabled === true) settings[dependency.name].enabled = before.enabled;
+            if (dependency.isDependency === true) dependency.isDependency = before.isDependency;
+        }
+    };
+
+    for (const [dependency, restart] of plan) {
+        const before = { enabled: settings[dependency.name].enabled, isDependency: dependency.isDependency, started: !!dependency.started, run: pluginRuns.get(dependency) };
+        previous.set(dependency, before);
+        if (!dependency.started && !restart && !startPlugin(dependency)) {
+            rollback();
+            return { restartNeeded: false, failures: [dependency.name] };
+        }
+        before.run = pluginRuns.get(dependency);
+        settings[dependency.name].enabled = true;
+        dependency.isDependency = true;
+    }
+
+    if (!restartNeeded && !pluginRequiresRestart(p)) dependencyRollbacks.set(p, rollback);
     return { restartNeeded, failures };
 }
 
@@ -283,12 +323,15 @@ export const startPlugin = traceFunction("startPlugin", function startPlugin(p: 
     logger.info("Starting plugin", p.name);
 
     try {
-        observeAsyncHook(p.start?.(), error => {
+        const dependencyRollback = dependencyRollbacks.get(p);
+        const startResult = p.start?.();
+        observeAsyncHook(startResult, error => {
             logger.error(`Failed to start ${p.name}\n`, error);
             // A late rejection from an earlier run must not stop a newer one.
             if (pluginRuns.get(p) === run && !run.stopping) {
                 failedPluginNames.add(p.name);
                 releasePlugin(p, run);
+                dependencyRollback?.();
             }
         });
 
@@ -298,11 +341,17 @@ export const startPlugin = traceFunction("startPlugin", function startPlugin(p: 
         });
         startedPluginNames.add(p.name);
         failedPluginNames.delete(p.name);
+        if (startResult != null && typeof (startResult as PromiseLike<unknown>).then === "function") {
+            Promise.resolve(startResult).then(() => {
+                if (dependencyRollbacks.get(p) === dependencyRollback) dependencyRollbacks.delete(p);
+            }, () => {});
+        } else dependencyRollbacks.delete(p);
         return true;
     } catch (error) {
         logger.error(`Failed to start ${p.name}\n`, error);
         failedPluginNames.add(p.name);
         releasePlugin(p, run);
+        dependencyRollbacks.get(p)?.();
         return false;
     }
 }, p => `startPlugin ${p.name}`);

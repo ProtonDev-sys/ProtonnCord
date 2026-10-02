@@ -40,7 +40,8 @@ export function makeLinksOpenExternally(win: BrowserWindow) {
             case "mailto:":
             case "steam:":
             case "spotify:":
-                shell.openExternal(url);
+                shell.openExternal(url)
+                    .catch(error => console.error("[Protonn Cord] Failed to open external link", error));
         }
 
         return { action: "deny" };

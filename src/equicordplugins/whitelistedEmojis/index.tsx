@@ -21,7 +21,7 @@ import { ContextMenuEmoji, SavedEmoji, Target } from "./types";
 const DATA_COLLECTION_NAME = "whitelisted-emojis";
 
 let cache_allowedList: ContextMenuEmoji[] = [];
-const allowedEmojiNames = new Set<string>();
+const allowedEmojiKeys = new Set<string>();
 const cacheListeners = new Set<() => void>();
 let writeChain: Promise<unknown> = Promise.resolve();
 let generation = 0;
@@ -41,11 +41,16 @@ const getAllowedList = async (): Promise<ContextMenuEmoji[]> => {
     return value;
 };
 
+function emojiKey(emoji: ContextMenuEmoji | CustomEmoji | UnicodeEmoji): string {
+    // Existing saved records already contain these identities; keep their names and other fields intact.
+    return "surrogates" in emoji && emoji.surrogates ? `unicode:${emoji.surrogates}` : `custom:${emoji.id}`;
+}
+
 function setCachedAllowedList(list: ContextMenuEmoji[]) {
     cache_allowedList = list;
-    allowedEmojiNames.clear();
+    allowedEmojiKeys.clear();
     for (const emoji of list) {
-        if (emoji.name) allowedEmojiNames.add(emoji.name);
+        allowedEmojiKeys.add(emojiKey(emoji));
     }
 }
 
@@ -66,11 +71,11 @@ async function setAllowedList(newList: ContextMenuEmoji[]) {
 }
 
 function isItemAllowed(item: (CustomEmoji | UnicodeEmoji)) {
-    return allowedEmojiNames.has("uniqueName" in item ? item.uniqueName : item.name);
+    return allowedEmojiKeys.has(emojiKey(item));
 }
 
 function itemAlreadyInList(item: ContextMenuEmoji) {
-    return allowedEmojiNames.has(item.name);
+    return allowedEmojiKeys.has(emojiKey(item));
 }
 
 function buildSaveData(item: ContextMenuEmoji): SavedEmoji {
@@ -106,10 +111,11 @@ function showToast(message: string, type = Toasts.Type.SUCCESS) {
 function addBulkToAllowedList(items: ContextMenuEmoji[]) {
     return withWriteLock(async () => {
         const validItemsToAdd: SavedEmoji[] = [];
-        const names = new Set(allowedEmojiNames);
+        const keys = new Set(allowedEmojiKeys);
         for (const item of items) {
-            if (!names.has(item.name)) {
-                names.add(item.name);
+            const key = emojiKey(item);
+            if (!keys.has(key)) {
+                keys.add(key);
                 validItemsToAdd.push(buildSaveData(item));
             }
         }
@@ -117,24 +123,24 @@ function addBulkToAllowedList(items: ContextMenuEmoji[]) {
         await setAllowedList([...cache_allowedList, ...validItemsToAdd]);
 
         showToast(`Added ${validItemsToAdd.length} emojis to the list, ${items.length - validItemsToAdd.length} already in the list`);
-    });
+    }).catch(() => showToast("Failed to add emojis to the list", Toasts.Type.FAILURE));
 }
 
 function removeBulkFromAllowedList(items: ContextMenuEmoji[]) {
     return withWriteLock(async () => {
-        const namesToRemove = new Set<string>();
+        const keysToRemove = new Set<string>();
         let removedCount = 0;
         for (const item of items) {
             if (itemAlreadyInList(item)) {
-                namesToRemove.add(item.name);
+                keysToRemove.add(emojiKey(item));
                 removedCount++;
             }
         }
 
-        await setAllowedList(cache_allowedList.filter(emoji => !namesToRemove.has(emoji.name)));
+        await setAllowedList(cache_allowedList.filter(emoji => !keysToRemove.has(emojiKey(emoji))));
 
         showToast(`Removed ${removedCount} emojis from the list`);
-    });
+    }).catch(() => showToast("Failed to remove emojis from the list", Toasts.Type.FAILURE));
 }
 
 function addToAllowedList(item: ContextMenuEmoji) {
@@ -156,7 +162,7 @@ function removeFromAllowedList(item: ContextMenuEmoji) {
             return;
         }
 
-        await setAllowedList(cache_allowedList.filter(emoji => emoji.name !== item.name));
+        await setAllowedList(cache_allowedList.filter(emoji => emojiKey(emoji) !== emojiKey(item)));
         showToast(`Removed "${item.name}" from the list`);
     });
 }

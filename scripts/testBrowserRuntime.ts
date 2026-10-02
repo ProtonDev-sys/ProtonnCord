@@ -38,6 +38,10 @@ test("userscript fetch preserves caller options and exposes native blob readers"
     assert.deepEqual(await response.arrayBuffer(), await blob.arrayBuffer());
     assert.equal((await response.json()).value, "hello");
     assert.deepEqual(options, { method: "POST", body: "request" });
+    headers = " \r\n\t ";
+    assert.equal([...(await fetch("https://example.com/fixture", options)).headers].length, 0);
+    headers = "Content-Type: application/json\r\n\r\nX-Fixture: yes\r\n";
+    assert.equal((await fetch("https://example.com/fixture", options)).headers.get("x-fixture"), "yes");
     headers = "Invalid Header: value";
     await assert.rejects(fetch("https://example.com/fixture", options), TypeError);
 });

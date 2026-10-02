@@ -50,9 +50,9 @@ const settings = definePluginSettings({
     },
     preventDownscale: {
         type: OptionType.BOOLEAN,
-        description: "Prevent Discord from downscaling stream resolution",
+        description: "Unavailable: no compatible Discord downscale hook is integrated. This setting has no effect; its saved value is retained.",
         default: true,
-        restartNeeded: true,
+        restartNeeded: false,
     },
     keyframeInterval: {
         type: OptionType.NUMBER,
@@ -84,6 +84,8 @@ const settings = definePluginSettings({
         default: 8,
         restartNeeded: false,
     },
+}, {
+    preventDownscale: { disabled: true }
 });
 
 export default definePlugin({

@@ -5,6 +5,9 @@
  */
 
 import { MessageAttachment } from "@vencord/discord-types";
+import type { IpcMainInvokeEvent } from "electron";
+
+import { fetchNativeMedia } from "../fileUpload/nativeNetwork";
 
 const allowedHosts = new Set([
     "cdn.discordapp.com",
@@ -15,17 +18,13 @@ const allowedHosts = new Set([
 
 // Discord has very strict CORS rules for which types of assets can be fetched from where (CDN/Media proxy),
 // and most binary file types are prohibited by both. This function serves as a simple bypass.
-export async function fetchAttachment(_: unknown, attachment: MessageAttachment) {
+export async function fetchAttachment(event: IpcMainInvokeEvent, attachment: MessageAttachment) {
+    if (!attachment || typeof attachment.filename !== "string" || attachment.filename.length > 255
+        || (attachment.content_type != null && typeof attachment.content_type !== "string"))
+        throw new Error("Invalid attachment");
     const { content_type, filename } = attachment;
-    const url = URL.parse(attachment.url);
-    if (!url || url.protocol !== "https:" || url.username || url.password || url.port || !allowedHosts.has(url.hostname)) throw new Error("Invalid URL");
-
-    const res = await fetch(url, { headers: { Accept: "*/*" }, redirect: "error", signal: AbortSignal.timeout(120_000) });
-    if (!res.ok) throw new Error("Server error");
-
-    const blob = await res.blob();
-    const type = blob.type || content_type || "application/octet-stream";
-    const data = await blob.arrayBuffer();
+    const { data, type: mediaType } = await fetchNativeMedia(event, attachment.url, allowedHosts, 128 * 1024 * 1024);
+    const type = mediaType || content_type || "application/octet-stream";
 
     return { type, data, filename };
 }

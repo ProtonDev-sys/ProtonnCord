@@ -667,7 +667,10 @@ async function startCeremonyServer(title: string, oneKeyUsb: boolean): Promise<{
 }
 
 function closeServer(server: Server): Promise<void> {
-    return new Promise(resolve => server.close(() => resolve()));
+    return new Promise(resolve => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+    });
 }
 
 async function runCeremony<T>(
@@ -677,38 +680,9 @@ async function runCeremony<T>(
     oneKeyUsb = false,
 ): Promise<T> {
     const { server, url } = await startCeremonyServer(title, oneKeyUsb);
-    const parent = BrowserWindow.fromWebContents(event.sender);
-    const isolatedSession = session.fromPartition(`pc-secure-vault-${randomUUID()}`, { cache: false });
-    const window = new BrowserWindow({
-        width: 560,
-        height: 300,
-        maximizable: false,
-        minimizable: false,
-        resizable: false,
-        show: false,
-        title,
-        ...(parent && !parent.isDestroyed() ? { modal: true, parent } : {}),
-        webPreferences: {
-            contextIsolation: true,
-            devTools: false,
-            nodeIntegration: false,
-            sandbox: true,
-            session: isolatedSession,
-            webSecurity: true,
-        },
-    });
-    const isExpectedPage = (contents: Electron.WebContents | null) =>
-        contents === window.webContents && !contents.isDestroyed() && contents.getURL() === url;
-    // This random, non-persistent partition belongs only to this CSP-locked modal. Electron may omit
-    // WebContents and origin metadata for USB checks, so the live modal URL is the stable boundary.
-    const isExpectedSessionPage = () =>
-        !window.webContents.isDestroyed() && window.webContents.getURL() === url;
-    isolatedSession.setPermissionRequestHandler((contents, permission, callback, details) => {
-        const exactFrame = isExpectedPage(contents) && details.isMainFrame &&
-            (!details.requestingUrl || details.requestingUrl === url);
-        callback(exactFrame && (String(permission).startsWith("publickey-credentials") ||
-            (oneKeyUsb && String(permission) === "usb")));
-    });
+    const timeoutController = new AbortController();
+    let ceremonySession: Electron.Session | undefined;
+    let ceremonyWindow: BrowserWindow | undefined;
     const selectOneKey = (
         selectionEvent: Electron.Event,
         details: Electron.SelectUsbDeviceDetails,
@@ -718,43 +692,74 @@ async function runCeremony<T>(
         const matches = details.deviceList.filter(isOneKeyClassicDevice);
         callback(matches.length === 1 ? matches[0].deviceId : undefined);
     };
-    if (oneKeyUsb) {
-        isolatedSession.setPermissionCheckHandler((_contents, permission) =>
-            isExpectedSessionPage() && permission === "usb");
-        isolatedSession.setDevicePermissionHandler(details => {
-            const { device } = details;
-            const matches = details.deviceType === "usb" &&
-                typeof device.vendorId === "number" && typeof device.productId === "number" &&
-                isOneKeyClassicDevice({
-                    manufacturerName: "manufacturerName" in device && typeof device.manufacturerName === "string"
-                        ? device.manufacturerName
-                        : undefined,
-                    productId: device.productId,
-                    vendorId: device.vendorId,
-                });
-            return matches && isExpectedSessionPage();
-        });
-        isolatedSession.on("select-usb-device", selectOneKey);
-    }
-    window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    const stopNavigation = (navigationEvent: Electron.Event, target: string) => {
-        if (target !== url) navigationEvent.preventDefault();
-    };
-    window.webContents.on("will-navigate", stopNavigation);
-    window.webContents.on("will-redirect", stopNavigation);
-
-    const timeoutController = new AbortController();
     try {
-        await window.loadURL(url);
-        await closeServer(server);
-        if (window.isDestroyed()) throw new SecurityKeyVaultError("cancelled");
-        window.show();
+        const parent = BrowserWindow.fromWebContents(event.sender);
+        const isolatedSession = ceremonySession = session.fromPartition(`pc-secure-vault-${randomUUID()}`, { cache: false });
+        const window = ceremonyWindow = new BrowserWindow({
+            width: 560,
+            height: 300,
+            maximizable: false,
+            minimizable: false,
+            resizable: false,
+            show: false,
+            title,
+            ...(parent && !parent.isDestroyed() ? { modal: true, parent } : {}),
+            webPreferences: {
+                contextIsolation: true,
+                devTools: false,
+                nodeIntegration: false,
+                sandbox: true,
+                session: isolatedSession,
+                webSecurity: true,
+            },
+        });
+        const isExpectedPage = (contents: Electron.WebContents | null) =>
+            contents === window.webContents && !contents.isDestroyed() && contents.getURL() === url;
+        // This random, non-persistent partition belongs only to this CSP-locked modal. Electron may omit
+        // WebContents and origin metadata for USB checks, so the live modal URL is the stable boundary.
+        const isExpectedSessionPage = () =>
+            !window.webContents.isDestroyed() && window.webContents.getURL() === url;
+        isolatedSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+            const exactFrame = isExpectedPage(contents) && details.isMainFrame &&
+                (!details.requestingUrl || details.requestingUrl === url);
+            callback(exactFrame && (String(permission).startsWith("publickey-credentials") ||
+                (oneKeyUsb && String(permission) === "usb")));
+        });
+        if (oneKeyUsb) {
+            isolatedSession.setPermissionCheckHandler((_contents, permission) =>
+                isExpectedSessionPage() && permission === "usb");
+            isolatedSession.setDevicePermissionHandler(details => {
+                const { device } = details;
+                const matches = details.deviceType === "usb" &&
+                    typeof device.vendorId === "number" && typeof device.productId === "number" &&
+                    isOneKeyClassicDevice({
+                        manufacturerName: "manufacturerName" in device && typeof device.manufacturerName === "string"
+                            ? device.manufacturerName
+                            : undefined,
+                        productId: device.productId,
+                        vendorId: device.vendorId,
+                    });
+                return matches && isExpectedSessionPage();
+            });
+            isolatedSession.on("select-usb-device", selectOneKey);
+        }
+        window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+        const stopNavigation = (navigationEvent: Electron.Event, target: string) => {
+            if (target !== url) navigationEvent.preventDefault();
+        };
+        window.webContents.on("will-navigate", stopNavigation);
+        window.webContents.on("will-redirect", stopNavigation);
+
         const closed = new Promise<never>((_resolve, reject) => {
             window.once("closed", () => reject(new SecurityKeyVaultError("cancelled")));
         });
         const timeout = delay(CEREMONY_TIMEOUT_MS, undefined, { signal: timeoutController.signal }).then(() => {
             throw new SecurityKeyVaultError("cancelled");
         });
+        await Promise.race([window.loadURL(url), closed, timeout]);
+        await Promise.race([closeServer(server), closed, timeout]);
+        if (window.isDestroyed()) throw new SecurityKeyVaultError("cancelled");
+        window.show();
         const result = await Promise.race([
             window.webContents.executeJavaScript(script, true),
             closed,
@@ -781,12 +786,16 @@ async function runCeremony<T>(
     } finally {
         timeoutController.abort();
         await closeServer(server).catch(() => undefined);
-        isolatedSession.off("select-usb-device", selectOneKey);
-        isolatedSession.setPermissionRequestHandler(null);
-        isolatedSession.setPermissionCheckHandler(null);
-        isolatedSession.setDevicePermissionHandler(null);
-        if (!window.isDestroyed()) window.destroy();
-        await isolatedSession.clearStorageData().catch(() => undefined);
+        for (const cleanup of [
+            () => { if (ceremonyWindow && !ceremonyWindow.isDestroyed()) ceremonyWindow.destroy(); },
+            () => ceremonySession?.off("select-usb-device", selectOneKey),
+            () => ceremonySession?.setPermissionRequestHandler(null),
+            () => ceremonySession?.setPermissionCheckHandler(null),
+            () => ceremonySession?.setDevicePermissionHandler(null),
+        ]) {
+            try { cleanup(); } catch { }
+        }
+        await ceremonySession?.clearStorageData().catch(() => undefined);
     }
 }
 

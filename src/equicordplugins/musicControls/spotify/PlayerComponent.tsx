@@ -222,7 +222,10 @@ function AlbumContextMenu({ track }: { track: Track; }) {
     return (
         <Menu.Menu
             navId="spotify-album-menu"
-            onClose={() => FluxDispatcher.dispatch({ type: "CONTEXT_MENU_CLOSE" })}
+            onClose={() => {
+                setVolume.flush();
+                FluxDispatcher.dispatch({ type: "CONTEXT_MENU_CLOSE" });
+            }}
             aria-label="Spotify Album Menu"
         >
             <Menu.MenuItem

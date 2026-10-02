@@ -41,6 +41,11 @@ function fixture() {
             if (!(index in hooks)) hooks[index] = typeof initial === "function" ? initial() : initial;
             return [hooks[index], (value: unknown) => hooks[index] = value];
         },
+        useRef(initial: unknown) {
+            const index = hookIndex++;
+            if (!(index in hooks)) hooks[index] = { current: initial };
+            return hooks[index];
+        },
         useSyncExternalStore(subscribe: (listener: () => void) => () => void, snapshot: () => unknown) {
             subscriptions.push(subscribe(() => changes++));
             return snapshot();

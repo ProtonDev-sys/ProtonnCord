@@ -204,8 +204,8 @@ const settings = definePluginSettings({
     }
 });
 
-function UserToTagID(user, tag, remove) {
-    const dataTag = SavedData.find(e => e.tagName === tag);
+function UserToTagID(user, tag: UserTagData, remove) {
+    const dataTag = SavedData.find(entry => entry === tag);
     if (!dataTag) return;
 
     if (remove) {
@@ -231,9 +231,9 @@ const userPatch: NavContextMenuPatchCallback = (children, { user }) => {
                 return (
                     <Menu.MenuItem
                         label={`${isTagged ? "Remove from" : "Add to"} ${tag.tagName}`}
-                        key={`vc-tag-${tag.tagName}`}
-                        id={`vc-tag-${tag.tagName}`}
-                        action={() => { UserToTagID(user.id, tag.tagName, isTagged); }}
+                        key={`vc-tag-${tagKey(tag)}`}
+                        id={`vc-tag-${tagKey(tag)}`}
+                        action={() => { UserToTagID(user.id, tag, isTagged); }}
                     />
                 );
             })}

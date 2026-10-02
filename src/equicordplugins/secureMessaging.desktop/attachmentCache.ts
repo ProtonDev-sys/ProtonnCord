@@ -287,16 +287,25 @@ export function decryptIncomingAttachmentsCached(
     const key = `${selection}\0${attachmentDecryptKey(localUserId, message)}`;
     const existing = attachmentDecryptions.get(key);
     if (existing) return existing;
+    if (attachmentDecryptions.size >= MAX_CACHE_ENTRIES)
+        return Promise.resolve({ status: "failed", error: "cryptographic_operation_failed" });
 
     const generation = attachmentDecryptGeneration;
+    const isCurrent = () => generation === attachmentDecryptGeneration && UserStore.getCurrentUser()?.id === localUserId &&
+        `${selection}\0${attachmentDecryptKey(localUserId, message)}` === key;
     const promise = runAttachmentDecrypt(async (): Promise<DecryptIncomingAttachmentsResult> => {
-        if (generation !== attachmentDecryptGeneration || UserStore.getCurrentUser()?.id !== localUserId ||
-            !message.author?.id) return { status: "failed", error: "cryptographic_operation_failed" };
+        if (!isCurrent() || !message.author?.id) return { status: "failed", error: "cryptographic_operation_failed" };
         try {
             const input = await encryptedAttachmentInput(message, refreshIds);
-            if (generation !== attachmentDecryptGeneration || UserStore.getCurrentUser()?.id !== localUserId)
+            if (!isCurrent())
                 return { status: "failed", error: "cryptographic_operation_failed" };
-            return await Native.decryptIncomingAttachments(localUserId, input, selection);
+            const result = await Native.decryptIncomingAttachments(localUserId, input, selection);
+            if (!isCurrent()) {
+                if (result.status === "decrypted")
+                    for (const attachment of result.attachments) attachment.data.fill(0);
+                return { status: "failed", error: "cryptographic_operation_failed" };
+            }
+            return result;
         } catch {
             return { status: "failed", error: "attachment_download_failed" };
         }
@@ -671,6 +680,8 @@ function ensureEntry(message: Message): AttachmentCacheEntry | null {
         status: localUserId ? { status: "loading" } : { status: "failed", reason: "Discord has no authenticated user." },
         statusListeners: new Set(),
     };
+    if (cache.size >= MAX_CACHE_ENTRIES)
+        return { ...entry, status: { status: "failed", reason: "Encrypted attachment previews are busy. Try again later." } };
     cache.set(key, entry);
     if (localUserId) startEntryLoad(message, key, entry, localUserId);
     return entry;
