@@ -124,7 +124,12 @@ const settings = definePluginSettings({
         markers: [0, 25, 50, 75, 100],
         stickToMarkers: false,
         default: 100,
-        onChange: value => { assignSounds(value, settings.store.soundPack); }
+        onChange: value => {
+            if (!active) return;
+            for (const soundsArray of Object.values(allSounds)) {
+                for (const sound of soundsArray) sound.player.volume = value;
+            }
+        }
     },
     soundPack: {
         description: "Sound pack to use.",

@@ -84,10 +84,17 @@ async function zipGuildAssets(guild: Guild, type: "emojis" | "stickers") {
 
     const results: Awaited<ReturnType<typeof fetchAsset>>[] = new Array(items.length);
     let nextIndex = 0;
+    let failed = false;
     const worker = async () => {
-        while (!controller.signal.aborted && nextIndex < items.length) {
+        while (!failed && !controller.signal.aborted && nextIndex < items.length) {
             const index = nextIndex++;
-            results[index] = await fetchAsset(items[index]);
+            try {
+                results[index] = await fetchAsset(items[index]);
+            } catch (error) {
+                failed = true;
+                controller.abort();
+                throw error;
+            }
         }
     };
 
