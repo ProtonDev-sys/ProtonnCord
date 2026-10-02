@@ -16,6 +16,12 @@ const TENOR_KEY = "3Z0688EVWYKH";
 const GIFPickerViewStore = findStoreLazy("GIFPickerViewStore");
 
 let cachedCategories: TrendingCategories | null = null;
+let active = false;
+let generation = 0;
+
+function isCurrent(requestGeneration: number) {
+    return active && requestGeneration === generation;
+}
 
 interface TenorMedia {
     url: string;
@@ -82,7 +88,7 @@ async function tenorFetch<TResult>(path: string, params: Record<string, string>)
         ...params
     });
 
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok)
         throw new Error(`GET ${path}: Tenor API request failed with status ${res.status}`);
 
@@ -200,13 +206,24 @@ export default definePlugin({
     ],
 
     async start() {
-        cachedCategories = await fetchCategories() ?? cachedCategories;
+        active = true;
+        const requestGeneration = ++generation;
+        const categories = await fetchCategories();
+        if (isCurrent(requestGeneration)) cachedCategories = categories ?? cachedCategories;
+    },
+
+    stop() {
+        active = false;
+        generation++;
     },
 
     handleSearchFetch(query: string) {
+        if (!active) return;
+        const requestGeneration = generation;
         // Discord has a 100 result limit for normal search
         fetchTenorResults("/search", 100, { q: query })
             .then(results => {
+                if (!isCurrent(requestGeneration)) return;
                 const items = mapToDiscordGifs(results);
                 FluxDispatcher.dispatch(
                     items.length
@@ -215,21 +232,29 @@ export default definePlugin({
                 );
             })
             .catch(() => {
+                if (!isCurrent(requestGeneration)) return;
                 FluxDispatcher.dispatch({ type: "GIF_PICKER_QUERY_FAILURE", query });
             });
     },
 
     async handleSuggestionsFetch(query: string) {
-        if (!query) return;
+        if (!active || !query) return;
+        const requestGeneration = generation;
 
-        const { results } = await tenorFetch<{ results?: string[]; }>("/search_suggestions", { q: query, limit: "5" });
+        const { results } = await tenorFetch<{ results?: string[]; }>("/search_suggestions", { q: query, limit: "5" })
+            .catch(() => ({ results: [] }));
 
+        if (!isCurrent(requestGeneration)) return;
         FluxDispatcher.dispatch({ type: "GIF_PICKER_SUGGESTIONS_SUCCESS", query, items: results });
     },
 
     async handleTrendingFetch() {
+        if (!active) return;
+        const requestGeneration = generation;
         if (!cachedCategories) {
-            cachedCategories = await fetchCategories();
+            const categories = await fetchCategories();
+            if (!isCurrent(requestGeneration)) return;
+            cachedCategories = categories;
 
             if (!cachedCategories) return;
         }
@@ -238,12 +263,16 @@ export default definePlugin({
     },
 
     handleGifSelect(id: string, query: string) {
-        tenorFetch("/registershare", { id, q: query });
+        if (!active) return;
+        void tenorFetch("/registershare", { id, q: query }).catch(() => {});
     },
 
     handleTrendingGifsFetch() {
+        if (!active) return;
+        const requestGeneration = generation;
         fetchTenorResults("/trending", 50)
             .then(results => {
+                if (!isCurrent(requestGeneration)) return;
                 const items = mapToDiscordGifs(results);
                 FluxDispatcher.dispatch(
                     items.length
@@ -252,15 +281,19 @@ export default definePlugin({
                 );
             })
             .catch(() => {
+                if (!isCurrent(requestGeneration)) return;
                 FluxDispatcher.dispatch({ type: "GIF_PICKER_QUERY_FAILURE" });
             });
     },
 
     tenorIntegrationSearch(integration: string, query: string) {
+        if (!active) return;
+        const requestGeneration = generation;
         FluxDispatcher.dispatch({ type: "INTEGRATION_QUERY", integration, query });
 
         fetchTenorResults("/search", 20, { q: query })
             .then(results => {
+                if (!isCurrent(requestGeneration)) return;
                 const items = mapToDiscordGifs(results);
                 FluxDispatcher.dispatch(
                     items.length
@@ -269,6 +302,7 @@ export default definePlugin({
                 );
             })
             .catch(() => {
+                if (!isCurrent(requestGeneration)) return;
                 FluxDispatcher.dispatch({ type: "INTEGRATION_QUERY_FAILURE", integration, query, results: [] });
             });
     }

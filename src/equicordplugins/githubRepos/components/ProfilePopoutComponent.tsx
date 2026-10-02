@@ -29,13 +29,14 @@ export function ProfilePopoutComponent({ id, isSideBar = false }: { id: string, 
     const [userInfo, setUserInfo] = useState<GitHubUserInfo | null>(null);
 
     const openReposModal = () => {
-        if (!userInfo) return;
+        const username = userInfo?.username ?? githubConnection?.name;
+        if (!username) return;
 
         openModal(props => (
             <ReposModal
-                groups={groups.length ? groups : [{ key: PERSONAL_GROUP_KEY, label: userInfo?.username ?? "Personal", avatarUrl: userInfo?.avatarUrl, repos }]}
+                groups={groups.length ? groups : [{ key: PERSONAL_GROUP_KEY, label: username, avatarUrl: userInfo?.avatarUrl, repos }]}
                 initialActiveKey={PERSONAL_GROUP_KEY}
-                username={userInfo.username}
+                username={username}
                 rootProps={props}
             />
         ));

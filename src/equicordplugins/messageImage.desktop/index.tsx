@@ -49,8 +49,9 @@ async function select(message: Message, open = false) {
     captureController = controller;
     account = owner;
     const cancel = () => controller.abort();
+    const cancelKey = (event: KeyboardEvent) => controller.abort(event.key === "Escape" ? "restore-scroll" : undefined);
     window.addEventListener("wheel", cancel, { passive: true });
-    window.addEventListener("keydown", cancel);
+    window.addEventListener("keydown", cancelKey);
     window.addEventListener("pointerdown", cancel);
     try {
         const captured = await captureMessage(message.channel_id, message.id, controller.signal);
@@ -67,7 +68,7 @@ async function select(message: Message, open = false) {
         if (!controller.signal.aborted && active(owner)) showToast(error instanceof Error ? error.message : "Could not capture the message.", Toasts.Type.FAILURE);
     } finally {
         window.removeEventListener("wheel", cancel);
-        window.removeEventListener("keydown", cancel);
+        window.removeEventListener("keydown", cancelKey);
         window.removeEventListener("pointerdown", cancel);
         if (captureController === controller) captureController = undefined;
     }

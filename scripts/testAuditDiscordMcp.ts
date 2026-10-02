@@ -6,6 +6,7 @@
 
 import assert from "node:assert/strict";
 import * as crypto from "node:crypto";
+import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import { readFileSync } from "node:fs";
 import * as fsp from "node:fs/promises";
@@ -16,6 +17,13 @@ import { runInNewContext } from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import * as policy from "../src/equicordplugins/discordMcp.desktop/policy";
+
+import { loadTestModule } from "./utils/loadTestModule";
+
+const nativeMedia = loadTestModule("src/equicordplugins/fileUpload/nativeNetwork.ts", {
+    "@main/settings": { RendererSettings: { store: { plugins: { FileUpload: { enabled: false } } } } },
+    "node:dns/promises": {}, "node:http": {}, "node:https": {}, "node:net": {}
+}, { URL, Blob, Uint8Array, AbortController, AbortSignal });
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
@@ -55,7 +63,7 @@ async function nativeFixture(t: { after(fn: () => Promise<void>): void; }, overr
         const output = transpileModule(readFileSync("src/equicordplugins/discordMcp.desktop/native.ts", "utf8"), {
             compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, esModuleInterop: false }
         }).outputText;
-        const modules = { "@main/utils/constants": { DATA_DIR: root }, "./policy": policy, crypto, fs: { ...fs, watch(...args: any[]) {
+        const modules = { "@main/utils/constants": { DATA_DIR: root }, "./policy": policy, "../fileUpload/nativeNetwork": nativeMedia, crypto, fs: { ...fs, watch(...args: any[]) {
             const watcher = (fs.watch as any)(...args) as fs.FSWatcher;
             watchers.add(watcher);
             watcher.on("close", () => watchers.delete(watcher));
@@ -68,11 +76,13 @@ async function nativeFixture(t: { after(fn: () => Promise<void>): void; }, overr
     };
     const native = load();
     const session = crypto.randomUUID();
-    await native.initializeBridge({}, session);
+    const frame = { url: "https://discord.com/channels/@me" };
+    const event = { senderFrame: frame, sender: Object.assign(new EventEmitter(), { mainFrame: frame, isDestroyed: () => false }) };
+    await native.initializeBridge(event, session);
     const directory = path.join(root, "discord-mcp");
     const config = JSON.parse(await fsp.readFile(path.join(directory, "config.json"), "utf8"));
     return {
-        native, session, directory, load, watchers,
+        native, session, directory, load, watchers, event,
         async request(id: string) {
             await fsp.writeFile(path.join(directory, "requests", `${id}.json`), JSON.stringify({ id, secret: config.secret, tool: "list_subscriptions", createdAt: Date.now() }));
         },
@@ -82,19 +92,19 @@ async function nativeFixture(t: { after(fn: () => Promise<void>): void; }, overr
 
 test("Discord MCP stop wakes native polling and an old session cannot claim or cancel its replacement", async t => {
     const f = await nativeFixture(t);
-    const pending = f.native.takeRequests({}, 30_000, f.session);
-    f.native.cancelRequests({}, f.session);
+    const pending = f.native.takeRequests(f.event, 30_000, f.session);
+    f.native.cancelRequests(f.event, f.session);
     assert.equal((await pending).length, 0);
     const next = crypto.randomUUID();
-    await f.native.initializeBridge({}, next);
+    await f.native.initializeBridge(f.event, next);
     await f.request("replacement-request");
-    f.native.cancelRequests({}, f.session);
-    assert.equal((await f.native.takeRequests({}, 0, f.session)).length, 0);
-    const requests = await f.native.takeRequests({}, 0, next);
+    f.native.cancelRequests(f.event, f.session);
+    assert.equal((await f.native.takeRequests(f.event, 0, f.session)).length, 0);
+    const requests = await f.native.takeRequests(f.event, 0, next);
     assert.equal(requests[0].id, "replacement-request");
     const files = await fsp.readdir(path.join(f.directory, "requests"));
     assert.equal(files.filter(name => name.endsWith(".processing")).length, 1, "claimed work remains durable until its response commits");
-    await f.native.writeResponse({}, { id: requests[0].id, ok: true, result: "done" });
+    await f.native.writeResponse(f.event, { id: requests[0].id, ok: true, result: "done" });
     assert.equal((await fsp.readdir(path.join(f.directory, "requests"))).length, 0);
 });
 
@@ -108,9 +118,9 @@ async function until(predicate: () => boolean) {
 
 test("Discord MCP native stop closes an active empty directory watcher promptly", async t => {
     const f = await nativeFixture(t);
-    const pending = f.native.takeRequests({}, 30_000, f.session);
+    const pending = f.native.takeRequests(f.event, 30_000, f.session);
     await until(() => f.watchers.size === 1);
-    f.native.cancelRequests({}, f.session);
+    f.native.cancelRequests(f.event, f.session);
     assert.equal((await pending).length, 0);
     await until(() => f.watchers.size === 0);
 });
@@ -158,25 +168,25 @@ test("Discord MCP retries only a completed response after a write failure and ne
         await fsp.rename(from, to);
     } });
     await f.request("finished-request");
-    await f.native.takeRequests({}, 0, f.session);
-    await assert.rejects(f.native.writeResponse({}, { id: "finished-request", ok: true, result: { id: "confirmed" } }), /unavailable/);
+    await f.native.takeRequests(f.event, 0, f.session);
+    await assert.rejects(f.native.writeResponse(f.event, { id: "finished-request", ok: true, result: { id: "confirmed" } }), /unavailable/);
     fail = false;
-    assert.equal((await f.native.takeRequests({}, 0, f.session)).length, 0, "completed work cannot reappear in the request queue");
+    assert.equal((await f.native.takeRequests(f.event, 0, f.session)).length, 0, "completed work cannot reappear in the request queue");
     assert.equal((await f.response("finished-request")).result.id, "confirmed");
     const restarted = f.load();
-    await restarted.initializeBridge({}, crypto.randomUUID());
+    await restarted.initializeBridge(f.event, crypto.randomUUID());
     assert.equal((await f.response("finished-request")).ok, true);
 });
 
 test("Discord MCP restart gives abandoned claims an explicit unknown outcome without replay", async t => {
     const f = await nativeFixture(t);
     await f.request("abandoned-request");
-    await f.native.takeRequests({}, 0, f.session);
+    await f.native.takeRequests(f.event, 0, f.session);
     const restarted = f.load();
     const session = crypto.randomUUID();
-    await restarted.initializeBridge({}, session);
+    await restarted.initializeBridge(f.event, session);
     assert.match((await f.response("abandoned-request")).error, /outcome is unknown/);
-    assert.equal((await restarted.takeRequests({}, 0, session)).length, 0);
+    assert.equal((await restarted.takeRequests(f.event, 0, session)).length, 0);
 });
 
 test("Discord MCP retries interrupted-claim recovery on a later writable poll without replay", async t => {
@@ -189,20 +199,20 @@ test("Discord MCP retries interrupted-claim recovery on a later writable poll wi
         if (response) committedResponses++;
     } });
     await f.request("recovery-request");
-    await f.native.takeRequests({}, 0, f.session);
+    await f.native.takeRequests(f.event, 0, f.session);
     fail = true;
     const restarted = f.load();
     const session = crypto.randomUUID();
-    await restarted.initializeBridge({}, session);
+    await restarted.initializeBridge(f.event, session);
     await assert.rejects(f.response("recovery-request"), { code: "ENOENT" });
     assert.equal((await fsp.readdir(path.join(f.directory, "requests"))).filter(name => name.endsWith(".processing")).length, 1);
     fail = false;
-    assert.equal((await restarted.takeRequests({}, 0, session)).length, 0);
+    assert.equal((await restarted.takeRequests(f.event, 0, session)).length, 0);
     const response = await f.response("recovery-request");
     assert.equal(response.ok, false);
     assert.match(response.error, /outcome is unknown/);
     assert.equal((await fsp.readdir(path.join(f.directory, "requests"))).length, 0);
-    assert.equal((await restarted.takeRequests({}, 0, session)).length, 0);
+    assert.equal((await restarted.takeRequests(f.event, 0, session)).length, 0);
     assert.equal(committedResponses, 1, "recovery must commit exactly one terminal response and never replay the tool");
 });
 
@@ -227,7 +237,7 @@ test("Discord MCP confirms a sent message despite ledger failure and recovers tr
     let posts = 0;
     const responses: any[] = [];
     const renderer = loadRenderer({
-        recordSentMessage: (channel: string, message: string) => f.native.recordSentMessage({}, channel, message),
+        recordSentMessage: (channel: string, message: string) => f.native.recordSentMessage(f.event, channel, message),
         writeResponse: async (response: any) => responses.push(response)
     }, messageCommon(async () => { posts++; return { body: sent }; }));
     await renderer.handleBridgeRequest({ id: "send-request", tool: "send_message", arguments: { channel_id: channelId, content: sent.content } });
@@ -235,18 +245,18 @@ test("Discord MCP confirms a sent message despite ledger failure and recovers tr
     assert.equal(responses[0].result.id, messageId);
     assert.equal(responses[0].result.content, sent.content);
     assert.match(responses[0].result.trackingWarning, /sent successfully/);
-    assert.equal(await f.native.isSentMessage({}, channelId, messageId), true, "failed persistence retains authorization in memory");
-    assert.equal(await f.native.isSentMessage({}, channelId, "999999999999999999"), false);
+    assert.equal(await f.native.isSentMessage(f.event, channelId, messageId), true, "failed persistence retains authorization in memory");
+    assert.equal(await f.native.isSentMessage(f.event, channelId, "999999999999999999"), false);
 
     const beforeRecovery = f.load();
-    await beforeRecovery.initializeBridge({}, crypto.randomUUID());
-    assert.equal(await beforeRecovery.isSentMessage({}, channelId, messageId), false, "a process restart before persistence must fail closed as the warning says");
+    await beforeRecovery.initializeBridge(f.event, crypto.randomUUID());
+    assert.equal(await beforeRecovery.isSentMessage(f.event, channelId, messageId), false, "a process restart before persistence must fail closed as the warning says");
     fail = false;
-    await f.native.takeRequests({}, 0, f.session);
+    await f.native.takeRequests(f.event, 0, f.session);
     const afterRecovery = f.load();
-    await afterRecovery.initializeBridge({}, crypto.randomUUID());
-    assert.equal(await afterRecovery.isSentMessage({}, channelId, messageId), true, "ledger-only recovery survives process restart");
-    assert.equal(await afterRecovery.isSentMessage({}, channelId, "999999999999999999"), false);
+    await afterRecovery.initializeBridge(f.event, crypto.randomUUID());
+    assert.equal(await afterRecovery.isSentMessage(f.event, channelId, messageId), true, "ledger-only recovery survives process restart");
+    assert.equal(await afterRecovery.isSentMessage(f.event, channelId, "999999999999999999"), false);
     assert.equal(posts, 1, "tracking recovery never sends the message again");
 });
 
@@ -287,13 +297,13 @@ test("Discord MCP tracking retry persists later deletions instead of restoring t
         if (fail && to.endsWith("sent-messages.json")) throw new Error("ledger unavailable");
         await fsp.rename(from, to);
     } });
-    await assert.rejects(f.native.recordSentMessage({}, channelId, messageId), /ledger unavailable/);
-    await assert.rejects(f.native.forgetSentMessage({}, channelId, messageId), /ledger unavailable/);
+    await assert.rejects(f.native.recordSentMessage(f.event, channelId, messageId), /ledger unavailable/);
+    await assert.rejects(f.native.forgetSentMessage(f.event, channelId, messageId), /ledger unavailable/);
     fail = false;
-    await f.native.initializeBridge({}, crypto.randomUUID());
+    await f.native.initializeBridge(f.event, crypto.randomUUID());
     const restarted = f.load();
-    await restarted.initializeBridge({}, crypto.randomUUID());
-    assert.equal(await restarted.isSentMessage({}, channelId, messageId), false);
+    await restarted.initializeBridge(f.event, crypto.randomUUID());
+    assert.equal(await restarted.isSentMessage(f.event, channelId, messageId), false);
 });
 
 test("Discord MCP confirms deletion despite ledger failure and retries only tracking", async t => {
@@ -302,13 +312,13 @@ test("Discord MCP confirms deletion despite ledger failure and retries only trac
         if (fail && to.endsWith("sent-messages.json")) throw new Error("ledger unavailable");
         await fsp.rename(from, to);
     } });
-    await f.native.recordSentMessage({}, channelId, messageId);
+    await f.native.recordSentMessage(f.event, channelId, messageId);
     fail = true;
     let deletes = 0;
     const responses: any[] = [];
     const renderer = loadRenderer({
-        isSentMessage: (channel: string, message: string) => f.native.isSentMessage({}, channel, message),
-        forgetSentMessage: (channel: string, message: string) => f.native.forgetSentMessage({}, channel, message),
+        isSentMessage: (channel: string, message: string) => f.native.isSentMessage(f.event, channel, message),
+        forgetSentMessage: (channel: string, message: string) => f.native.forgetSentMessage(f.event, channel, message),
         writeResponse: async (response: any) => responses.push(response)
     }, {
         ChannelStore: { getChannel: () => ({ id: channelId }) },
@@ -322,12 +332,12 @@ test("Discord MCP confirms deletion despite ledger failure and retries only trac
     assert.equal(responses[0].result.channelId, channelId);
     assert.equal(responses[0].result.messageId, messageId);
     assert.match(responses[0].result.trackingWarning, /deleted successfully/);
-    assert.equal(await f.native.isSentMessage({}, channelId, messageId), false);
+    assert.equal(await f.native.isSentMessage(f.event, channelId, messageId), false);
     fail = false;
-    await f.native.takeRequests({}, 0, f.session);
+    await f.native.takeRequests(f.event, 0, f.session);
     const restarted = f.load();
-    await restarted.initializeBridge({}, crypto.randomUUID());
-    assert.equal(await restarted.isSentMessage({}, channelId, messageId), false);
+    await restarted.initializeBridge(f.event, crypto.randomUUID());
+    assert.equal(await restarted.isSentMessage(f.event, channelId, messageId), false);
     assert.equal(deletes, 1, "tracking recovery cannot repeat the Discord deletion");
 });
 

@@ -54,9 +54,18 @@ export const ThemeCard: React.FC<ThemeCardProps> = ({ theme, themeLinks, likedTh
 
     const handleAddRemoveTheme = () => {
         const currentLinks = Settings.themeLinks;
-        const onlineThemeLinks = currentLinks.includes(`${apiUrl}/${theme.id}`)
-            ? currentLinks.filter(link => link !== `${apiUrl}/${theme.id}`)
-            : [...currentLinks, `${apiUrl}/${theme.id}`];
+        const themeUrl = `${apiUrl}/${theme.id}`;
+        if (currentLinks.includes(themeUrl)) {
+            Settings.enabledThemeLinks = Settings.enabledThemeLinks.filter(link => link !== themeUrl);
+            Settings.pinnedThemes = Settings.pinnedThemes.filter(link => link !== themeUrl);
+            Settings.themeNames = Object.fromEntries(Object.entries(Settings.themeNames).filter(([key]) => key !== themeUrl));
+            const modes = { ...Settings.themeActivationModes };
+            delete modes[themeUrl];
+            Settings.themeActivationModes = modes;
+        }
+        const onlineThemeLinks = currentLinks.includes(themeUrl)
+            ? currentLinks.filter(link => link !== themeUrl)
+            : [...currentLinks, themeUrl];
 
         setThemeLinks(onlineThemeLinks);
         Settings.themeLinks = onlineThemeLinks;
@@ -158,7 +167,7 @@ export const ThemeCard: React.FC<ThemeCardProps> = ({ theme, themeLinks, likedTh
                             >
                                 Theme Info
                             </Button>
-                            <LikesComponent themeId={theme.id} likedThemes={likedThemes} />
+                            <LikesComponent themeId={theme.id} likedThemes={likedThemes} fallbackLikes={theme.likes} />
                             <Button
                                 onClick={handleViewSource}
                                 size="medium"

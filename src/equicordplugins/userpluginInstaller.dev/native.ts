@@ -86,7 +86,7 @@ export async function isUpdateAvailableForPlugin(_, name: string): Promise<boole
             proc.once("close", code => code === 0 ? resolveFetch() : rejectFetch(new Error("Git fetch failed")));
         });
         const plan = await getUpdateReviewPlan(pluginDir);
-        return plan.localRevision !== plan.targetRevision;
+        return (await getUpdateCommits(pluginDir, plan.logRange)).length > 0;
     } catch {
         return false;
     }
@@ -469,6 +469,7 @@ export async function updatePlugin(_, directory: string) {
                 const pluginMeta = await getPluginMeta(pluginDir);
                 const reviewPlan = await getUpdateReviewPlan(pluginDir);
                 const commits = await getUpdateCommits(pluginDir, reviewPlan.logRange);
+                if (!commits.length) return reject("No incoming plugin updates are available.");
                 if (!await reviewPluginUpdate(pluginMeta, commits)) return reject("Rejected by user");
 
                 const currentRevision = await getGitRevision(pluginDir, "HEAD");

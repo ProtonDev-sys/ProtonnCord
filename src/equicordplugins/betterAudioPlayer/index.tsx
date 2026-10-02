@@ -128,25 +128,63 @@ function drawSpectrograph(ctx: CanvasRenderingContext2D, w: number, h: number, f
 
 async function fetchAudioBlobData(src: string): Promise<Blob | null> {
     const url = new URL(src);
-    url.searchParams.set("t", Date.now().toString());
-
-    const response = await fetch(CORS_PROXY + encodeURIComponent(url.href));
-    if (!response.ok) return null;
-
-    const contentLength = response.headers.get("content-length");
-    if (contentLength && Number(contentLength) > MAX_FILE_SIZE) return null;
-
-    const blob = await response.blob();
-    if (blob.size > MAX_FILE_SIZE) return null;
-    return blob;
+    if (url.protocol !== "https:" || url.username || url.password) return null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+        const request = (target: string) => fetch(target, { signal: controller.signal, credentials: "omit" });
+        let response = await request(url.href).catch(error => {
+            if (!settings.store.allowExternalProxy || controller.signal.aborted) throw error;
+            return request(CORS_PROXY + encodeURIComponent(url.href));
+        });
+        if (!response.ok && settings.store.allowExternalProxy && !response.url.startsWith(CORS_PROXY)) {
+            await response.body?.cancel();
+            response = await request(CORS_PROXY + encodeURIComponent(url.href));
+        }
+        if (!response.ok) {
+            await response.body?.cancel();
+            return null;
+        }
+        const contentLength = response.headers.get("content-length");
+        if (contentLength && Number(contentLength) > MAX_FILE_SIZE) {
+            await response.body?.cancel();
+            return null;
+        }
+        const reader = response.body?.getReader();
+        if (!reader) return null;
+        const chunks: Uint8Array<ArrayBuffer>[] = [];
+        let size = 0;
+        let completed = false;
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    completed = true;
+                    return new Blob(chunks, { type: response.headers.get("content-type") ?? "" });
+                }
+                size += value.byteLength;
+                if (size > MAX_FILE_SIZE) return null;
+                chunks.push(new Uint8Array(value));
+            }
+        } finally {
+            if (!completed) await reader.cancel().catch(() => { });
+            reader.releaseLock();
+        }
+    } finally {
+        clearTimeout(timeout);
+        controller.abort();
+    }
 }
 
 async function getAudioBlob(src: string): Promise<Blob | null> {
     const cachedBlob = audioBlobCache.get(src);
     if (cachedBlob) return cachedBlob;
 
-    const blobPromise = fetchAudioBlobData(src).catch(error => {
-        audioBlobCache.delete(src);
+    const blobPromise = fetchAudioBlobData(src).then(blob => {
+        if (!blob && audioBlobCache.get(src) === blobPromise) audioBlobCache.delete(src);
+        return blob;
+    }).catch(error => {
+        if (audioBlobCache.get(src) === blobPromise) audioBlobCache.delete(src);
         throw error;
     });
 
@@ -174,6 +212,7 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
     const setupDoneRef = React.useRef(false);
     const blobUrlRef = React.useRef<string | null>(null);
     const canvasSizeRef = React.useRef({ width: 0, height: 0 });
+    const requestDrawRef = React.useRef<(() => void) | null>(null);
 
     React.useEffect(() => {
         const audio = playerRef.current;
@@ -181,6 +220,7 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
         if (!audio || !canvas) return () => { };
 
         let cancelled = false;
+        let analysisAudio: HTMLAudioElement | null = null;
 
         const init = async () => {
             const blobUrl = await fetchAudioBlob(src).catch(() => null);
@@ -192,24 +232,21 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
 
             blobUrlRef.current = blobUrl;
 
-            const wasPlaying = !audio.paused;
-            const { currentTime } = audio;
-            audio.src = blobUrl;
-            audio.currentTime = currentTime;
-
             const audioCtx = new AudioContext();
+            audioCtxRef.current = audioCtx;
             const analyser = audioCtx.createAnalyser();
             analyser.fftSize = 2048;
-            const source = audioCtx.createMediaElementSource(audio);
+            analysisAudio = new Audio(blobUrl);
+            const source = audioCtx.createMediaElementSource(analysisAudio);
+            const silentOutput = audioCtx.createGain();
+            silentOutput.gain.value = 0;
             source.connect(analyser);
-            analyser.connect(audioCtx.destination);
-            audioCtxRef.current = audioCtx;
+            analyser.connect(silentOutput);
+            silentOutput.connect(audioCtx.destination);
             analyserRef.current = analyser;
             setupDoneRef.current = true;
 
-            if (wasPlaying) {
-                audio.play().catch(() => { });
-            }
+            if (!audio.paused) onPlay();
         };
 
         const canvasCtx = canvas.getContext("2d");
@@ -221,6 +258,7 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
 
             animFrameRef.current = requestAnimationFrame(draw);
         };
+        requestDrawRef.current = requestDraw;
 
         const draw = () => {
             animFrameRef.current = 0;
@@ -250,28 +288,55 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
         const onPlay = () => {
             if (!setupDoneRef.current) return;
             if (audioCtxRef.current?.state === "suspended") {
-                audioCtxRef.current.resume();
+                audioCtxRef.current.resume().catch(() => { });
+            }
+            if (analysisAudio) {
+                analysisAudio.currentTime = audio.currentTime;
+                analysisAudio.playbackRate = audio.playbackRate;
+                analysisAudio.play().catch(() => { });
             }
             requestDraw();
         };
 
         const onPause = () => {
-            audioCtxRef.current?.suspend();
+            analysisAudio?.pause();
+            audioCtxRef.current?.suspend().catch(() => { });
             cancelAnimationFrame(animFrameRef.current);
             animFrameRef.current = 0;
         };
 
         audio.addEventListener("play", onPlay);
         audio.addEventListener("pause", onPause);
-        init();
+        const onSeek = () => {
+            if (!analysisAudio) return;
+            analysisAudio.currentTime = audio.currentTime;
+            analysisAudio.playbackRate = audio.playbackRate;
+        };
+        audio.addEventListener("seeked", onSeek);
+        audio.addEventListener("ratechange", onSeek);
+        init().catch(() => {
+            analysisAudio?.pause();
+            audioCtxRef.current?.close().catch(() => { });
+            audioCtxRef.current = null;
+            analyserRef.current = null;
+            setupDoneRef.current = false;
+        });
 
         return () => {
             cancelled = true;
             audio.removeEventListener("play", onPlay);
             audio.removeEventListener("pause", onPause);
+            audio.removeEventListener("seeked", onSeek);
+            audio.removeEventListener("ratechange", onSeek);
             cancelAnimationFrame(animFrameRef.current);
             animFrameRef.current = 0;
-            audioCtxRef.current?.close();
+            requestDrawRef.current = null;
+            analysisAudio?.pause();
+            if (analysisAudio) {
+                analysisAudio.removeAttribute("src");
+                analysisAudio.load();
+            }
+            audioCtxRef.current?.close().catch(() => { });
             audioCtxRef.current = null;
             analyserRef.current = null;
             setupDoneRef.current = false;
@@ -296,6 +361,7 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
 
             const ctx = canvas.getContext("2d");
             ctx?.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+            if (rect.width > 0 && rect.height > 0) requestDrawRef.current?.();
         };
 
         resize();
@@ -313,6 +379,11 @@ function Visualizer({ playerRef, src }: { playerRef: React.RefObject<HTMLAudioEl
 }
 
 const settings = definePluginSettings({
+    allowExternalProxy: {
+        type: OptionType.BOOLEAN,
+        description: "Allow the external cors.keiran0.workers.dev proxy if direct audio fetching fails. This shares the complete attachment URL, including private access parameters, with that service.",
+        default: false,
+    },
     oscilloscope: {
         type: OptionType.BOOLEAN,
         description: "Enable oscilloscope visualizer.",

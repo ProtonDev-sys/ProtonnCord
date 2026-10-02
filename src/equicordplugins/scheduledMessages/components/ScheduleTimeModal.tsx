@@ -10,7 +10,7 @@ import { Heading } from "@components/Heading";
 import { classNameFactory } from "@utils/css";
 import { RenderModalProps } from "@vencord/discord-types";
 import { findByPropsLazy } from "@webpack";
-import { ChannelStore, closeModal, DraftType, Modal, openModal, showToast, TextInput, Toasts, UploadManager, useState } from "@webpack/common";
+import { ChannelStore, closeModal, DraftType, Modal, openModal, showToast, TextInput, Toasts, UploadManager, useRef, UserStore, useState } from "@webpack/common";
 
 import { ScheduledAttachment } from "../types";
 import { addScheduledMessage, getChannelDisplayInfo } from "../utils";
@@ -30,6 +30,7 @@ function ScheduleTimeModalInner({ channelId, content, attachments, rootProps, cl
     const [delayMinutes, setDelayMinutes] = useState("5");
     const [scheduledDateTime, setScheduledDateTime] = useState("");
     const [error, setError] = useState("");
+    const ownerUserId = useRef(UserStore.getCurrentUser()?.id).current;
 
     const { name, avatar } = getChannelDisplayInfo(channelId);
     const channel = ChannelStore.getChannel(channelId);
@@ -38,6 +39,10 @@ function ScheduleTimeModalInner({ channelId, content, attachments, rootProps, cl
     const isDM = channel.isPrivate();
 
     const handleSchedule = async () => {
+        if (!ownerUserId || UserStore.getCurrentUser()?.id !== ownerUserId) {
+            setError("Account changed. Close this form and schedule again from the intended account.");
+            return;
+        }
         let scheduledTime: number;
 
         if (scheduleType === "delay") {
@@ -57,6 +62,7 @@ function ScheduleTimeModalInner({ channelId, content, attachments, rootProps, cl
         }
 
         const result = await addScheduledMessage(channelId, content, scheduledTime, attachments);
+        if (UserStore.getCurrentUser()?.id !== ownerUserId) return;
 
         if (result.success) {
             ComponentDispatch.dispatchToLastSubscribed("CLEAR_TEXT");

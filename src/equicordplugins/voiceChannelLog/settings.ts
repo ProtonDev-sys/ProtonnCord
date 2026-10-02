@@ -45,11 +45,9 @@ const settings = definePluginSettings({
     },
     soundboardFileType: {
         type: OptionType.SELECT,
-        description: "File format for downloading soundboard sounds.",
+        description: "Soundboard sounds are downloaded in their original OGG format.",
         options: [
             { label: ".ogg", value: ".ogg", default: true },
-            { label: ".mp3", value: ".mp3" },
-            { label: ".wav", value: ".wav" },
         ],
     },
     soundboardVolume: {

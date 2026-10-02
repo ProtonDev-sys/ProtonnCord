@@ -44,4 +44,10 @@ export type UseBookmarkMethods = {
     editBookmark: (index: number, bookmark: Partial<Bookmark | BookmarkFolder>, modalKey?) => void;
     moveDraggedBookmarks: (index1: number, index2: number) => void;
 };
-export type UseBookmark = [Bookmarks | undefined, UseBookmarkMethods];
+export type UseBookmark = [Bookmarks | undefined, UseBookmarkMethods, {
+    loadError: boolean;
+    saveError: boolean;
+    saving: boolean;
+    retryLoad: () => void;
+    retrySave: () => void;
+}];

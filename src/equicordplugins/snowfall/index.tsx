@@ -227,7 +227,7 @@ class CopleSnow {
         this.visibilityHandler = () => {
             if (this.disposed) return;
 
-            if (document.hidden) this.stop();
+            if (document.hidden || !document.hasFocus()) this.stop();
             else this.play();
         };
         document.addEventListener("visibilitychange", this.visibilityHandler);

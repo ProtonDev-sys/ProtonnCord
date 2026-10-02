@@ -107,7 +107,7 @@ export const settings = definePluginSettings({
     },
     notifyFor: {
         type: OptionType.STRING,
-        description: "A list of channel IDs (separate by commas) to always receive notifications from.",
+        description: "Channel IDs (separate by commas) that bypass channel toggles and mutes. Global notification restrictions still apply.",
         onChange: () => { notifyFor = parseIdSet(settings.store.notifyFor); },
         default: "",
         placeholder: "000000000000000000,111111111111111111,222222222222222222"
@@ -159,7 +159,7 @@ export default definePlugin({
             // Channel type checks.
             if (channel.guild_id) {
                 if (!shouldNotifyForGuildMessage(message, channel, currentUserId, authorId)) return;
-            } else {
+            } else if (!notifyFor.has(channel.id)) {
                 if (
                     (!directMessages && channel.isDM()) // If DM notifications are disabled.
                     || (!groupMessages && channel.isGroupDM()) // If group DM notifications are disabled.
@@ -252,7 +252,9 @@ function shouldNotifyForGuildMessage(message: Message, channel: Channel, current
     if (level === NotificationLevel.ALL_MESSAGES) return true;
 
     // Otherwise we only notify if the user was mentioned.
-    return message.content.includes(`<@${currentUserId}>`) || message.content.includes(`<@!${currentUserId}>`);
+    const resolvedMessage = getMockedMessage(message);
+    return resolvedMessage?.mentioned ?? message.mentioned
+        ?? (message.mentionEveryone || message.content.includes(`<@${currentUserId}>`) || message.content.includes(`<@!${currentUserId}>`));
 }
 
 function showExampleNotification(): Promise<void> {

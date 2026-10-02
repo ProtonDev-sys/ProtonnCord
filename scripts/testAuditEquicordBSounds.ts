@@ -182,7 +182,7 @@ test("sound preview Stop and component unmount cancel pending playback and stop 
         "@components/FormSwitch": {}, "@components/Heading": {}, "@utils/margins": { Margins: {} },
         "@utils/react": { useForceUpdater: () => () => {} },
         "@webpack/common": { React: { ...React, useEffect: (effect: () => unknown) => effects.push(effect) }, showToast() {} },
-        "./audioStore": { getAllAudio: async () => ({}) },
+        "./audioStore": { getAllAudio: async () => ({}), subscribeAudioFiles: () => () => {} },
         "./index": { ensureDataURICached: () => { const load = deferred<string>(); pending.push(load); return load.promise; } }
     }).SoundOverrideComponent;
     const view = component({ type: { id: "call_calling" }, override: { enabled: true, selectedSound: "custom", selectedFileId: "file", volume: 20 }, onChange: async () => {} });

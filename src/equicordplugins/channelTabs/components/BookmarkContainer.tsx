@@ -479,7 +479,7 @@ export function HorizontalScroller({ children, className, customRef }: React.Pro
 
 export default function BookmarkContainer(props: BasicChannelTabsProps & { userId: string; }) {
     const { guildId, channelId, userId } = props;
-    const [bookmarks, methods] = useBookmarks(userId);
+    const [bookmarks, methods, persistence] = useBookmarks(userId);
     const [expandedFolders, setExpandedFolders] = useState<Set<number>>(new Set());
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
@@ -572,7 +572,14 @@ export default function BookmarkContainer(props: BasicChannelTabsProps & { userI
     return (
         <div className={cl("bookmark-container")}>
             <HorizontalScroller className={classes(cl("bookmarks"), isOver && cl("bookmarks-drop-target"))} customRef={dropRef}>
-                {!bookmarks && <BaseText className={cl("bookmark-placeholder-text")} size="xs">
+                {persistence.loadError && <BaseText className={cl("bookmark-placeholder-text")} size="xs">
+                    Failed to load bookmarks. <button onClick={persistence.retryLoad}>Retry</button>
+                </BaseText>}
+                {persistence.saveError && <BaseText className={cl("bookmark-placeholder-text")} size="xs">
+                    Bookmark changes are not saved. <button onClick={persistence.retrySave}>Retry save</button>
+                </BaseText>}
+                {persistence.saving && <BaseText className={cl("bookmark-placeholder-text")} size="xs">Saving bookmarks...</BaseText>}
+                {!bookmarks && !persistence.loadError && <BaseText className={cl("bookmark-placeholder-text")} size="xs">
                     Loading bookmarks...
                 </BaseText>}
                 {bookmarks && !bookmarks.length && <BaseText className={cl("bookmark-placeholder-text")} size="xs">

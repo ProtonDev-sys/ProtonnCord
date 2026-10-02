@@ -24,7 +24,7 @@ function withCdnSize(url: string | null | undefined) {
     return url.replace(SIZE_QUERY_REGEX, `?size=${CDN_SIZE}`);
 }
 
-function copyUrl(label: string, url: string | null) {
+async function copyUrl(label: string, url: string | null) {
     if (!url) {
         Toasts.show({
             id: Toasts.genId(),
@@ -34,12 +34,20 @@ function copyUrl(label: string, url: string | null) {
         return;
     }
 
-    copyToClipboard(url);
-    Toasts.show({
-        id: Toasts.genId(),
-        message: `${label} copied.`,
-        type: Toasts.Type.SUCCESS
-    });
+    try {
+        await copyToClipboard(url);
+        Toasts.show({
+            id: Toasts.genId(),
+            message: `${label} copied.`,
+            type: Toasts.Type.SUCCESS
+        });
+    } catch {
+        Toasts.show({
+            id: Toasts.genId(),
+            message: `Failed to copy ${label}.`,
+            type: Toasts.Type.FAILURE
+        });
+    }
 }
 
 function getAvatarUrl(user: User, guildId?: string) {

@@ -27,10 +27,10 @@ import { encrypt } from "../index";
 function EncModal(props: RenderModalProps) {
     const [secret, setSecret] = React.useState("");
     const [cover, setCover] = React.useState("");
-    const [password, setPassword] = React.useState("password");
+    const [password, setPassword] = React.useState("");
     const [noCover, setNoCover] = React.useState(false);
 
-    const isValid = secret && (noCover || (cover && cover.trim().split(" ").length > 1));
+    const isValid = password && secret && (noCover || (cover && cover.trim().split(" ").length > 1));
 
     const onSend = () => {
         if (!isValid) return;

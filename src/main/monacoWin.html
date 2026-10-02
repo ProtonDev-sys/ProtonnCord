@@ -46,6 +46,7 @@
                         theme: getTheme(),
                     }
                 );
+                onCssClosing(closing => editor.updateOptions({ readOnly: closing }));
                 editor.onDidChangeModelContent(() =>
                     setCss(editor.getValue())
                 );
