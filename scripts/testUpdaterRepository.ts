@@ -67,7 +67,9 @@ assert.match(releasePipeline, /const title = `Protonn Cord \$\{branch\} \$\{sha\
 assert.match(releasePipeline, /draft: true, prerelease: branch !== "main", make_latest: "false"/u);
 assert.match(releasePipeline, /draft: false, make_latest: branch === "main" \? "true" : "false"/u);
 assert.doesNotMatch(workflow, /gh release upload[^\n]+--clobber/u);
-assert.ok(releasePipeline.indexOf("await verifyAssets(staged.id, staged.tag_name)") < releasePipeline.indexOf("await edit(old.id, { tag_name: backupTag, draft: true })"),
+const verification = releasePipeline.indexOf("await verifyAssets(staged.id, staged.tag_name, true)");
+const replacement = releasePipeline.indexOf("await edit(old.id, { tag_name: backupTag, draft: true })");
+assert.ok(verification >= 0 && replacement > verification,
     "staged assets must be verified before replacing the public release");
 assert.match(workflow, /cp ProtonnCord\.user\.\{js,js\.LEGAL\.txt\} release/u);
 assert.doesNotMatch(workflow, /cp Equicord\.user/u);
