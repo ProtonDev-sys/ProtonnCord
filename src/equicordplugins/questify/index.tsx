@@ -634,6 +634,7 @@ export default definePlugin({
         },
 
         LOGOUT(data: { isSwitchingAccount?: boolean; }): void {
+            stopAutoFetchingQuests();
             if (!data.isSwitchingAccount) {
                 return;
             } else {

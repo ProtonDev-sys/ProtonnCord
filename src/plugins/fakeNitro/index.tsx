@@ -27,7 +27,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import type { Emoji, Message, RenderModalProps, Sticker } from "@vencord/discord-types";
 import { StickerFormatType } from "@vencord/discord-types/enums";
 import { findByCodeLazy, findByPropsLazy, proxyLazyWebpack } from "@webpack";
-import { ChannelStore, ConfirmModal, DraftType, EmojiStore, FluxDispatcher, GuildMemberStore, IconUtils, lodash, openModal, OverridePremiumTypeStore, Parser, PermissionsBits, PermissionStore, StickersStore, UploadHandler, UserSettingsActionCreators, UserSettingsProtoStore } from "@webpack/common";
+import { ChannelStore, ConfirmModal, DraftType, EmojiStore, FluxDispatcher, GuildMemberStore, IconUtils, lodash, openModal, OverridePremiumTypeStore, Parser, PermissionsBits, PermissionStore, StickersStore, Toasts, UploadHandler, UserSettingsActionCreators, UserSettingsProtoStore } from "@webpack/common";
 import { applyPalette, GIFEncoder, quantize } from "gifenc";
 import type { ReactElement, ReactNode } from "react";
 
@@ -817,7 +817,7 @@ export default definePlugin({
         gif.finish();
 
         const file = new File([gif.bytesView() as Uint8Array<ArrayBuffer>], `${stickerId}.gif`, { type: "image/gif" });
-        UploadHandler.promptToUpload([file], ChannelStore.getChannel(channelId), DraftType.ChannelMessage);
+        await UploadHandler.promptToUpload([file], ChannelStore.getChannel(channelId), DraftType.ChannelMessage);
     },
 
     canUseEmote(e: Emoji, channelId: string) {
@@ -886,7 +886,12 @@ export default definePlugin({
                             </ConfirmModal>
                         ));
                     } else {
-                        this.sendAnimatedSticker(link, sticker.id, channelId);
+                        try {
+                            await this.sendAnimatedSticker(link, sticker.id, channelId);
+                        } catch (error) {
+                            new Logger("FakeNitro").error("Failed to prepare animated sticker", error);
+                            Toasts.show({ id: Toasts.genId(), type: Toasts.Type.FAILURE, message: "Could not prepare the animated sticker. Please try again." });
+                        }
                     }
 
                     return { cancel: true };

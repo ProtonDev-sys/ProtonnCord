@@ -291,6 +291,7 @@ function ensureEntry(message: Message): EmbedCacheEntry | null {
         status: "loading",
         stickers: [],
     };
+    if (cache.size >= MAX_CACHE_ENTRIES) return { ...entry, status: "ready", expiresAt: Date.now() };
     cache.set(key, entry);
     void loadEntry(message, key, entry);
     return entry;

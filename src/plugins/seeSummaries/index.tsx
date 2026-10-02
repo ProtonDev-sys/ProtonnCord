@@ -13,6 +13,7 @@ import { findByPropsLazy } from "@webpack";
 import { ChannelStore, GuildStore } from "@webpack/common";
 
 const SummaryStore = findByPropsLazy("allSummaries", "findSummary");
+let generation = 0;
 
 const settings = definePluginSettings({
     summaryExpiryThresholdDays: {
@@ -96,7 +97,7 @@ export default definePlugin({
                 time: now
             }));
 
-            DataStore.update("summaries-data", summaries => {
+            return DataStore.update("summaries-data", summaries => {
                 summaries ??= {};
                 const channelSummaries = summaries[data.channel_id];
 
@@ -113,6 +114,8 @@ export default definePlugin({
     },
 
     async start() {
+        const currentGeneration = ++generation;
+        let restoredSummaries: Record<string, ChannelSummary[]> | undefined;
         await DataStore.update("summaries-data", summaries => {
             summaries ??= {};
             const expireBefore = Date.now() - 1000 * 60 * 60 * 24 * settings.store.summaryExpiryThresholdDays;
@@ -134,9 +137,15 @@ export default definePlugin({
                 }
             }
 
-            Object.assign(SummaryStore.allSummaries(), summaries);
+            restoredSummaries = summaries;
             return summaries;
         });
+        if (currentGeneration === generation && restoredSummaries)
+            Object.assign(SummaryStore.allSummaries(), restoredSummaries);
+    },
+
+    stop() {
+        generation++;
     },
 
     shouldFetch(channelId: string) {

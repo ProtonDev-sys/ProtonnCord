@@ -1313,6 +1313,7 @@ function validateDecryptAttachmentsInput(value: unknown): ValidationResult<Decry
     if (value.attachments.length < 1 || value.attachments.length > MAX_ATTACHMENT_COUNT)
         return { ok: false, error: `attachments must contain 1 to ${MAX_ATTACHMENT_COUNT} Discord attachments` };
     const attachments: EncryptedAttachmentReference[] = [];
+    const attachmentIds = new Set<string>();
     let totalSize = 0;
     for (const attachment of value.attachments) {
         if (!isRecord(attachment) || !hasExactKeys(attachment, ["id", "proxyUrl", "size", "url"]) ||
@@ -1322,6 +1323,9 @@ function validateDecryptAttachmentsInput(value: unknown): ValidationResult<Decry
             !validateAttachmentUrl(attachment.url, message.value.channelId, attachment.id) ||
             !validateAttachmentUrl(attachment.proxyUrl, message.value.channelId, attachment.id))
             return { ok: false, error: "Invalid encrypted Discord attachment reference" };
+        if (attachmentIds.has(attachment.id))
+            return { ok: false, error: "Encrypted Discord attachment IDs must be unique" };
+        attachmentIds.add(attachment.id);
         totalSize += attachment.size as number;
         if (totalSize > MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES)
             return { ok: false, error: "Encrypted Discord attachments exceed the total size limit" };
@@ -2536,6 +2540,17 @@ export async function configureConversation(
     if (!checkedInput.ok) return invalidInput(checkedInput.error);
     return runSerialized(async (): Promise<ConversationResult> => {
         const context = await loadAccount(user.value);
+        const existing = context.account.conversations[checkedInput.value.snapshot.channelId];
+        if (!checkedInput.value.enabled && existing) {
+            existing.enabled = false;
+            existing.reviewRequired = null;
+            existing.updatedAt = Date.now();
+            await saveVault(context.vault);
+            return {
+                status: "disabled",
+                ...conversationDetails(context.account, checkedInput.value.snapshot, existing.selectedRecipients.map(recipient => recipient.userId)),
+            };
+        }
         if (!context.account.conversations[checkedInput.value.snapshot.channelId] &&
             Object.keys(context.account.conversations).length >= MAX_CONVERSATIONS)
             throw new VaultOperationError("capacity_exceeded");
@@ -3108,6 +3123,11 @@ export async function decryptIncomingAttachments(
                 for (const outcome of authenticated) outcome.value.data.fill(0);
                 return { status: "invalid_message" };
             }
+            const current = await decryptIncoming(event, user.value, message);
+            if (current.status !== "decrypted") {
+                clearAuthenticatedOutcomes();
+                return current;
+            }
             if (sessionEpoch !== securityKeySessionEpoch) {
                 clearAuthenticatedOutcomes();
                 return unavailableFailure("security_key_locked");
@@ -3157,6 +3177,11 @@ export async function downloadIncomingAttachment(
     if (cached) {
         try {
             if (!cached.downloadable) return { status: "invalid_message" };
+            const sessionEpoch = securityKeySessionEpoch;
+            const { attachments: _attachments, ...message } = checkedInput.value;
+            const current = await decryptIncoming(event, user.value, message);
+            if (current.status !== "decrypted") return current;
+            if (sessionEpoch !== securityKeySessionEpoch) return unavailableFailure("security_key_locked");
             return {
                 status: "saved",
                 filename: await saveAuthenticatedAttachment(cached.metadata.name, cached.data),
@@ -3187,6 +3212,7 @@ export async function downloadIncomingAttachment(
 // Discord remains capturable at all times. Screenshot mode only hides decrypted DOM content.
 const SCREENSHOT_MODE_CLASS = "pc-secure-screenshot-mode";
 let screenCaptureProtectionEnabled = false;
+let screenCaptureProtectionTransitioning = false;
 let screenCaptureProtectionHealthy = false;
 let newWindowHookInstalled = false;
 let screenCaptureProtectionOperation: Promise<void> = Promise.resolve();
@@ -3225,10 +3251,22 @@ function markProtectionUnhealthyAfterWindowFailure(): void {
 function installNewWindowProtectionHook(): void {
     if (newWindowHookInstalled) return;
     app.on("browser-window-created", (_event, window) => {
+        const queueReconciliation = () => {
+            const reconcile = async () => {
+                try {
+                    await setEncryptedContentHidden([window], !screenCaptureProtectionEnabled || !screenCaptureProtectionHealthy);
+                } catch {
+                    markProtectionUnhealthyAfterWindowFailure();
+                }
+            };
+            screenCaptureProtectionOperation = screenCaptureProtectionOperation.then(reconcile, reconcile);
+        };
         try {
+            window.webContents.on?.("did-finish-load", queueReconciliation);
             window.setContentProtection(false);
-            void setEncryptedContentHidden([window], !screenCaptureProtectionEnabled || !screenCaptureProtectionHealthy)
+            void setEncryptedContentHidden([window], screenCaptureProtectionTransitioning || !screenCaptureProtectionEnabled || !screenCaptureProtectionHealthy)
                 .catch(markProtectionUnhealthyAfterWindowFailure);
+            if (screenCaptureProtectionTransitioning) queueReconciliation();
         } catch {
             markProtectionUnhealthyAfterWindowFailure();
         }
@@ -3240,6 +3278,7 @@ async function applyScreenCaptureProtection(enabled: boolean): Promise<ScreenCap
     const previousEnabled = screenCaptureProtectionEnabled;
     const previousHealthy = screenCaptureProtectionHealthy;
     let windows: BrowserWindow[] = [];
+    screenCaptureProtectionTransitioning = true;
     try {
         installNewWindowProtectionHook();
         windows = BrowserWindow.getAllWindows();
@@ -3266,6 +3305,8 @@ async function applyScreenCaptureProtection(enabled: boolean): Promise<ScreenCap
         screenCaptureProtectionEnabled = rollbackSucceeded ? previousEnabled : false;
         screenCaptureProtectionHealthy = rollbackSucceeded ? previousHealthy : false;
         return { status: "failed", error: "screen_capture_protection_failed" };
+    } finally {
+        screenCaptureProtectionTransitioning = false;
     }
 }
 

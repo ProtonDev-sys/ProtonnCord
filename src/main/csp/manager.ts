@@ -18,19 +18,19 @@ export function registerCspIpcHandlers() {
     ipcMain.handle(IpcEvents.CSP_IS_DOMAIN_ALLOWED, isDomainAllowed);
 }
 
-function validate(url: string, directives: string[]) {
+function validate(url: string, directives: string[], restrictDirectives = true) {
     if (typeof url !== "string" || !Array.isArray(directives)) return false;
 
     try {
-        const { host } = new URL(url);
+        const { host, hostname } = new URL(url);
 
-        if (!host || /[;'"\\]/.test(host)) return false;
+        if (!host || hostname.includes("*") || /[;'"\\]/.test(host)) return false;
     } catch {
         return false;
     }
 
     if (directives.length === 0) return false;
-    if (directives.some(d => !ImageAndCssSrc.includes(d))) return false;
+    if (directives.some(d => typeof d !== "string" || (restrictDirectives && !ImageAndCssSrc.includes(d)))) return false;
 
     return true;
 }
@@ -100,6 +100,8 @@ async function addCspRule(_: IpcMainInvokeEvent, url: string, directives: string
         return "unchecked";
     }
 
+    if (domain in NativeSettings.store.customCspRules) return "conflict";
+
     NativeSettings.store.customCspRules[domain] = directives;
     return "ok";
 }
@@ -114,10 +116,11 @@ function removeCspRule(_: IpcMainInvokeEvent, domain: string) {
 }
 
 function isDomainAllowed(_: IpcMainInvokeEvent, url: string, directives: string[]) {
+    if (!validate(url, directives, false)) return false;
     try {
-        const domain = new URL(url).host;
+        const { host: domain, origin } = new URL(url);
 
-        const ruleForDomain = CspPolicies[domain] ?? NativeSettings.store.customCspRules[domain];
+        const ruleForDomain = CspPolicies[origin] ?? CspPolicies[domain] ?? NativeSettings.store.customCspRules[domain];
         if (!ruleForDomain) return false;
 
         return directives.every(d => ruleForDomain.includes(d));

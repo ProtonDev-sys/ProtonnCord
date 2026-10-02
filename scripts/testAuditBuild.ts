@@ -6,9 +6,10 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
+import { unzipSync, zip } from "fflate";
 import ts from "typescript";
 
 function loadFunction(path: string, name: string, globals: Record<string, unknown>) {
@@ -47,24 +48,32 @@ test("watch packaging waits for initial outputs and disposes all opened contexts
 });
 
 test("extension packaging propagates archive-read and save failures and waits for completion", async () => {
-    let callback!: (error: unknown, archive?: unknown) => void;
     const packed: string[] = [];
-    const pack = loadFunction("scripts/build/buildWeb.mjs", "packExtension", {
-        join, console: { info() {} }, Zip: { zip: (_path: string, onZip: typeof callback) => { callback = onZip; } },
+    const file = { name: "renderer.js", parentPath: join("dist/browser", "fixture", "dist"), isDirectory: () => false, isFile: () => true };
+    const fixture = (overrides: Record<string, unknown> = {}) => loadFunction("scripts/build/buildWeb.mjs", "packExtension", {
+        join, relative, sep, zip, console: { info() {} },
+        readdir: async () => [file], readFile: async () => Buffer.from("renderer"), writeFile: async () => {},
+        ...overrides,
     });
-    const failure = pack("fixture", "fixture.zip");
-    callback(new Error("Fixture read failure"));
-    await assert.rejects(failure, /Fixture read failure/u);
-    const saveFailure = pack("fixture", "fixture.zip");
-    callback(null, { compress: () => ({ save(_path: string, saved: (error: Error) => void) { saved(new Error("Fixture save failure")); } }) });
-    await assert.rejects(saveFailure, /Fixture save failure/u);
+    await assert.rejects(fixture({ readFile: async () => { throw new Error("Fixture read failure"); } })("fixture", "fixture.zip"), /Fixture read failure/u);
+    await assert.rejects(fixture({
+        zip: (_entries: unknown, _options: unknown, callback: (error: Error) => void) => callback(new Error("Fixture compress failure")),
+    })("fixture", "fixture.zip"), /Fixture compress failure/u);
+    await assert.rejects(fixture({ writeFile: async () => { throw new Error("Fixture save failure"); } })("fixture", "fixture.zip"), /Fixture save failure/u);
+    await assert.rejects(fixture({ readdir: async () => [{ ...file, isFile: () => false }] })("fixture", "fixture.zip"), /regular files/u);
     let complete = false;
-    const success = pack("fixture", "fixture.zip").then(() => { complete = true; });
-    await Promise.resolve();
-    assert.equal(complete, false);
-    let finishSave!: (error?: unknown) => void;
-    callback(null, { compress: () => ({ save: (path: string, saved: typeof finishSave) => { packed.push(path); finishSave = saved; } }) });
-    await Promise.resolve();
+    let finishSave!: () => void;
+    let saveStarted!: () => void;
+    const writing = new Promise<void>(resolve => { saveStarted = resolve; });
+    const success = fixture({ writeFile: (path: string, data: Uint8Array) => {
+        packed.push(path);
+        const entries = unzipSync(data);
+        assert.deepEqual(Object.keys(entries), ["dist/renderer.js"]);
+        assert.equal(Buffer.from(entries["dist/renderer.js"]).toString(), "renderer");
+        saveStarted();
+        return new Promise<void>(resolve => { finishSave = resolve; });
+    } })("fixture", "fixture.zip").then(() => { complete = true; });
+    await writing;
     assert.equal(complete, false, "creating an archive does not finish its asynchronous file write");
     finishSave();
     await success;

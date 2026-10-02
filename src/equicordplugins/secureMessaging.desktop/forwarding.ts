@@ -184,7 +184,7 @@ export function composeSecureForwardText({
         .filter(line => line && !body.includes(line))
         .join("\n");
 
-    return [header, body, additionalEmbedText]
+    return sanitizeForwardMentions([header, body, additionalEmbedText]
         .filter(part => part.length > 0)
-        .join("\n\n");
+        .join("\n\n"));
 }

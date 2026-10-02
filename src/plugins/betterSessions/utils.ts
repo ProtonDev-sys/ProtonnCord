@@ -34,7 +34,7 @@ let cacheDataKey: string | undefined;
 let cacheVersion = 0;
 const listeners = new Set<() => void>();
 
-function notifySessionNames() {
+export function notifySessionNames() {
     cacheVersion++;
     listeners.forEach(listener => listener());
 }

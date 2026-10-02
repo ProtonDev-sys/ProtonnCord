@@ -7,8 +7,15 @@
 import type { GrTrackData } from "./types/gensokyoRadio";
 
 export async function fetchTrackData(): Promise<GrTrackData | null> {
-    const response = await fetch("https://gensokyoradio.net/api/station/playing/");
-    if (!response.ok) throw `${response.status} ${response.statusText}`;
+    const response = await fetch("https://gensokyoradio.net/api/station/playing/", {
+        signal: AbortSignal.timeout(15_000),
+        redirect: "error",
+        credentials: "omit"
+    });
+    if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new Error(`Gensokyo Radio lookup failed (${response.status})`);
+    }
 
     const song = await response.json();
     const songInfo = song?.SONGINFO;

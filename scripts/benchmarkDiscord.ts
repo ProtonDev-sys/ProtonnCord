@@ -41,36 +41,72 @@ async function getDiscordPage(browser: Browser): Promise<Page> {
 
 async function collectRuntimeMetrics(page: Page, collectGarbage: boolean): Promise<RuntimeMetrics> {
     const session = await page.createCDPSession();
-    await session.send("Performance.enable");
-    if (collectGarbage) await session.send("HeapProfiler.collectGarbage");
+    try {
+        await session.send("Performance.enable");
+        if (collectGarbage) await session.send("HeapProfiler.collectGarbage");
 
-    const [performance, dom] = await Promise.all([
-        session.send("Performance.getMetrics"),
-        session.send("Memory.getDOMCounters"),
-    ]);
-    await session.detach();
+        const [performance, dom] = await Promise.all([
+            session.send("Performance.getMetrics"),
+            session.send("Memory.getDOMCounters"),
+        ]);
 
-    const metric = (name: string) => performance.metrics.find(entry => entry.name === name)?.value ?? 0;
+        const metric = (name: string) => performance.metrics.find(entry => entry.name === name)?.value ?? 0;
 
-    return {
-        documents: dom.documents,
-        domNodes: dom.nodes,
-        jsEventListeners: dom.jsEventListeners,
-        jsHeapTotalBytes: metric("JSHeapTotalSize"),
-        jsHeapUsedBytes: metric("JSHeapUsedSize"),
-        layoutObjects: metric("LayoutCount"),
-    };
+        return {
+            documents: dom.documents,
+            domNodes: dom.nodes,
+            jsEventListeners: dom.jsEventListeners,
+            jsHeapTotalBytes: metric("JSHeapTotalSize"),
+            jsHeapUsedBytes: metric("JSHeapUsedSize"),
+            layoutObjects: metric("LayoutCount"),
+        };
+    } finally {
+        await session.detach();
+    }
 }
 
 async function collectProcessCpu(browser: Browser): Promise<{ processCount: number; totalCpuSeconds: number; }> {
     const session = await browser.target().createCDPSession();
-    const processInfo = await session.send("SystemInfo.getProcessInfo");
-    await session.detach();
+    try {
+        const processInfo = await session.send("SystemInfo.getProcessInfo");
 
-    return {
-        processCount: processInfo.processInfo.length,
-        totalCpuSeconds: processInfo.processInfo.reduce((total, process) => total + process.cpuTime, 0),
-    };
+        return {
+            processCount: processInfo.processInfo.length,
+            totalCpuSeconds: processInfo.processInfo.reduce((total, process) => total + process.cpuTime, 0),
+        };
+    } finally {
+        await session.detach();
+    }
+}
+
+async function collectNavigationSamples(page: Page, targets: string[], iterations: number, shouldProfile: boolean) {
+    const profileSession = shouldProfile ? await page.createCDPSession() : null;
+    let profiling = false;
+    try {
+        if (profileSession) {
+            await profileSession.send("Profiler.enable");
+            await profileSession.send("Profiler.start");
+            profiling = true;
+        }
+
+        const samples: NavigationSample[] = [];
+        for (let index = 0; index < iterations; index++) {
+            samples.push(await measureNavigation(page, targets[index % targets.length]));
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        profiling = false;
+        const profile = profileSession ? (await profileSession.send("Profiler.stop")).profile : null;
+        return { samples, profile };
+    } finally {
+        if (profileSession) {
+            try {
+                if (profiling) await profileSession.send("Profiler.stop");
+            } finally {
+                await profileSession.detach();
+            }
+        }
+    }
 }
 
 async function getChannelPaths(page: Page): Promise<string[]> {
@@ -234,20 +270,7 @@ async function main(): Promise<void> {
             await measureNavigation(page, targets[index % targets.length]);
         }
 
-        const profileSession = shouldProfile ? await page.createCDPSession() : null;
-        if (profileSession) {
-            await profileSession.send("Profiler.enable");
-            await profileSession.send("Profiler.start");
-        }
-
-        const samples: NavigationSample[] = [];
-        for (let index = 0; index < iterations; index++) {
-            samples.push(await measureNavigation(page, targets[index % targets.length]));
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-
-        const profile = profileSession ? (await profileSession.send("Profiler.stop")).profile : null;
-        if (profileSession) await profileSession.detach();
+        const { samples, profile } = await collectNavigationSamples(page, targets, iterations, shouldProfile);
 
         const afterMetrics = await collectRuntimeMetrics(page, true);
         const afterCpu = await collectProcessCpu(browser);

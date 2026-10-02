@@ -23,7 +23,7 @@ function loadDumper(count: number, stickers = false) {
         },
         "fflate": { zipSync: (archive: Record<string, Uint8Array>) => { archives.push(archive); return new Uint8Array([1]); } }
     }, {
-        window: { GLOBAL_ENV: { MEDIA_PROXY_ENDPOINT: "//media.discordapp.net" } }, File, Uint8Array,
+        window: { GLOBAL_ENV: { MEDIA_PROXY_ENDPOINT: "//media.discordapp.net" } }, AbortController, File, Uint8Array,
         console: { error() {} },
         fetch: (url: string) => {
             peak = Math.max(peak, ++active);

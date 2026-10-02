@@ -39,6 +39,8 @@ async function zipGuildAssets(guild: Guild, type: "emojis" | "stickers") {
         return;
     }
 
+    const controller = new AbortController();
+
     const getProxyEndpoint = () => {
         const rawEndpoint = window.GLOBAL_ENV.MEDIA_PROXY_ENDPOINT;
         return rawEndpoint.startsWith("//") ? rawEndpoint.slice(2) : rawEndpoint;
@@ -61,11 +63,11 @@ async function zipGuildAssets(guild: Guild, type: "emojis" | "stickers") {
         const sanitizedName = e.name.replace(/[<>:"/\\|?*]/g, "_");
         let filename = `${sanitizedName}_${e.id}${ext}`;
 
-        let response = await fetch(url);
+        let response = await fetch(url, { signal: controller.signal });
 
         if (!isEmojis && e.format_type === 2 && (!response.ok || response.headers.get("content-type")?.includes("text"))) {
             const gifUrl = `https://${endpoint}/stickers/${e.id}.gif?size=4096&lossless=true`;
-            const gifResponse = await fetch(gifUrl);
+            const gifResponse = await fetch(gifUrl, { signal: controller.signal });
 
             if (gifResponse.ok && !gifResponse.headers.get("content-type")?.includes("text")) {
                 response = gifResponse;
@@ -80,27 +82,29 @@ async function zipGuildAssets(guild: Guild, type: "emojis" | "stickers") {
         return { file: new Uint8Array(arrayBuffer), filename };
     };
 
-    const results = new Array<Awaited<ReturnType<typeof fetchAsset>>>(items.length);
+    const results: Awaited<ReturnType<typeof fetchAsset>>[] = new Array(items.length);
     let nextIndex = 0;
     let failed = false;
-    const downloadNext = async () => {
-        while (!failed && nextIndex < items.length) {
+    const worker = async () => {
+        while (!failed && !controller.signal.aborted && nextIndex < items.length) {
             const index = nextIndex++;
             try {
                 results[index] = await fetchAsset(items[index]);
             } catch (error) {
                 failed = true;
+                controller.abort();
                 throw error;
             }
         }
     };
 
-    return Promise.all(Array.from({ length: Math.min(4, items.length) }, downloadNext))
+    return Promise.all(Array.from({ length: Math.min(4, items.length) }, worker))
         .then(() => {
             const zipped = zipSync(Object.fromEntries(results.map(({ file, filename }) => [filename, file])));
             saveFile(new File([new Uint8Array(zipped)], `${guild.name}-${type}.zip`, { type: "application/zip" }));
         })
         .catch(error => {
+            controller.abort();
             console.error(error);
             showToast("Could not download the server assets. Please try again.", Toasts.Type.FAILURE);
         });

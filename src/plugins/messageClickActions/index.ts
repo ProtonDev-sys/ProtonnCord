@@ -555,7 +555,7 @@ async function executeAction(
                 channel,
                 message: msg,
                 shouldMention,
-                showMentionToggle: channel.guild_id !== null
+                showMentionToggle: !!channel.guild_id
             });
             event.preventDefault();
             break;
@@ -577,7 +577,7 @@ async function executeAction(
                     channel,
                     message: msg,
                     shouldMention: shouldMentionReply,
-                    showMentionToggle: channel.guild_id !== null
+                    showMentionToggle: !!channel.guild_id
                 });
             }
             event.preventDefault();

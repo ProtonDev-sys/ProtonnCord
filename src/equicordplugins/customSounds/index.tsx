@@ -15,8 +15,8 @@ import { classNameFactory } from "@utils/css";
 import definePlugin, { OptionType, StartAt } from "@utils/types";
 import { React, showToast, TextInput } from "@webpack/common";
 
-import { getAllAudio, getAudioDataURI } from "./audioStore";
-import { parseImportedOverrides } from "./settingsImport";
+import { deleteAudio, getAllAudio, getAudioDataURI } from "./audioStore";
+import { clearAudioReferences, exportOverrides, parseImportedOverrides } from "./settingsImport";
 import { SoundOverrideComponent } from "./SoundOverrideComponent";
 import { makeEmptyOverride, seasonalSounds, SoundOverride, soundTypes } from "./types";
 
@@ -295,16 +295,7 @@ const settings = definePluginSettings({
             };
 
             const downloadSettings = async () => {
-                const overrides = allSoundTypes.map(type => {
-                    const override = getOverride(type.id);
-                    return {
-                        id: type.id,
-                        enabled: override.enabled,
-                        selectedSound: override.selectedSound,
-                        selectedFileId: override.selectedFileId ?? undefined,
-                        volume: override.volume
-                    };
-                }).filter(o => o.enabled || o.selectedSound !== "default");
+                const overrides = exportOverrides(settings.store, allSoundTypes.map(type => type.id));
 
                 const exportPayload = {
                     overrides,
@@ -361,6 +352,12 @@ const settings = definePluginSettings({
                                     key={`${type.id}-${resetTrigger}`}
                                     type={type}
                                     override={currentOverride}
+                                    onDelete={async id => {
+                                        await deleteAudio(id);
+                                        clearAudioReferences(settings.store, id);
+                                        forgetDataURI(id);
+                                        setResetTrigger(prev => prev + 1);
+                                    }}
                                     onChange={async () => {
 
                                         setOverride(type.id, currentOverride);

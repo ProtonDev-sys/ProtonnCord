@@ -17,7 +17,7 @@
 */
 
 import { session } from "electron";
-import { unzip, type Unzipped } from "fflate";
+import { unzip, type Unzipped, unzipSync } from "fflate";
 import { constants as fsConstants } from "fs";
 import { access, mkdir, rm, writeFile } from "fs/promises";
 import { dirname, join } from "path";
@@ -28,12 +28,57 @@ import { ensureSafePath } from "./ensureSafePath";
 import { fetchBuffer } from "./http";
 
 const extensionCacheDir = join(DATA_DIR, "ExtensionCache");
+const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
+const MAX_EXTRACTED_BYTES = 256 * 1024 * 1024;
+const MAX_ENTRIES = 10000;
+const INSTALL_TIMEOUT_MS = 60000;
 
 async function extract(data: Buffer, outDir: string) {
-    const files = await new Promise<Unzipped>((resolve, reject) => {
-        unzip(data, (error, files) => error ? reject(error) : resolve(files));
-    });
     try {
+        const sizes = new Map<string, number>();
+        let declaredTotal = 0;
+        let compressedTotal = 0;
+        unzipSync(data, { filter(file) {
+            declaredTotal += file.originalSize;
+            compressedTotal += file.size;
+            if (!Number.isSafeInteger(file.originalSize) || file.originalSize < 0
+                || !Number.isSafeInteger(file.size) || file.size < 0 || compressedTotal > data.byteLength
+                || (file.compression !== 0 && file.compression !== 8)
+                || (file.compression === 0 && file.size !== file.originalSize)
+                || file.originalSize > MAX_ENTRY_BYTES || declaredTotal > MAX_EXTRACTED_BYTES
+                || sizes.size >= MAX_ENTRIES || sizes.has(file.name))
+                throw new Error("Extension archive exceeds declared limits or has duplicate entries");
+            if (file.name.includes("\0") || !ensureSafePath(outDir, file.name))
+                throw new Error("Invalid extension archive path");
+            sizes.set(file.name, file.originalSize);
+            return false;
+        } });
+        const files = await new Promise<Unzipped>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                terminate();
+                reject(new Error("Extension extraction timed out"));
+            }, INSTALL_TIMEOUT_MS);
+            let terminate: () => void = () => undefined;
+            try {
+                terminate = unzip(data, (error, files) => {
+                    clearTimeout(timer);
+                    error ? reject(error) : resolve(files);
+                });
+            } catch (error) {
+                clearTimeout(timer);
+                reject(error);
+            }
+        });
+        if (Object.keys(files).length !== sizes.size)
+            throw new Error("Extension archive entry count changed during extraction");
+        let actualTotal = 0;
+        for (const [name, contents] of Object.entries(files)) {
+            actualTotal += contents.byteLength;
+            if (contents.byteLength > MAX_ENTRY_BYTES || actualTotal > MAX_EXTRACTED_BYTES
+                || contents.byteLength !== sizes.get(name))
+                throw new Error("Extension archive exceeds extracted limits or declared size");
+        }
         await mkdir(outDir, { recursive: true });
         for (const [name, contents] of Object.entries(files)) {
             // Signature stuff
@@ -71,7 +116,7 @@ export async function installExt(id: string) {
             headers: {
                 "User-Agent": `Electron ${process.versions.electron} ~ ProtonnCord (https://github.com/ProtonDev-sys/ProtonnCord)`
             }
-        });
+        }, { maxBytes: MAX_DOWNLOAD_BYTES, timeoutMs: INSTALL_TIMEOUT_MS });
 
         await extract(crxToZip(buf), extDir);
     }

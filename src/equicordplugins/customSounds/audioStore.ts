@@ -24,6 +24,12 @@ export interface StoredAudioFile {
 let cachedAudioFiles: Record<string, StoredAudioFile> | null = null;
 let audioFilesLoadPromise: Promise<Record<string, StoredAudioFile>> | null = null;
 let audioFilesMutationQueue = Promise.resolve();
+const audioFilesListeners = new Set<(files: Record<string, StoredAudioFile>) => void>();
+
+export function subscribeAudioFiles(listener: (files: Record<string, StoredAudioFile>) => void) {
+    audioFilesListeners.add(listener);
+    return () => { audioFilesListeners.delete(listener); };
+}
 
 async function loadAudioFiles(): Promise<Record<string, StoredAudioFile>> {
     if (cachedAudioFiles) return cachedAudioFiles;
@@ -46,6 +52,13 @@ function updateAudioFiles(update: (files: Record<string, StoredAudioFile>) => vo
         update(files);
         await set(STORAGE_KEY, files);
         cachedAudioFiles = files;
+        for (const listener of audioFilesListeners) {
+            try {
+                listener({ ...files });
+            } catch (error) {
+                logger.error("Error updating audio file choices:", error);
+            }
+        }
     });
     audioFilesMutationQueue = mutation.catch(() => void 0);
     return mutation;

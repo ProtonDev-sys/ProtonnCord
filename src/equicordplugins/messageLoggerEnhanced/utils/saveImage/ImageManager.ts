@@ -33,7 +33,7 @@ const ImageStore = createStore("MessageLoggerImageData", "MessageLoggerImageStor
 
 interface IDBSavedImage { attachmentId: string, path: string; }
 const idbSavedImages = new Map<string, IDBSavedImage>();
-(async () => {
+const idbImagesReady = (async () => {
     try {
 
         const paths = await keys(ImageStore);
@@ -49,6 +49,7 @@ const idbSavedImages = new Map<string, IDBSavedImage>();
 })();
 
 export async function getImage(attachmentId: string, fileExt?: string | null): Promise<any> {
+    await idbImagesReady;
     // for people who have access to native api but some images are still in idb
     // also for people who dont have native api
     const idbPath = idbSavedImages.get(attachmentId)?.path;
@@ -76,9 +77,13 @@ export async function downloadAttachment(attachemnt: LoggedAttachment): Promise<
 }
 
 export async function deleteImage(attachmentId: string): Promise<void> {
+    await idbImagesReady;
     const idbPath = idbSavedImages.get(attachmentId)?.path;
-    if (idbPath)
-        return await del(idbPath, ImageStore);
+    if (idbPath) {
+        await del(idbPath, ImageStore);
+        idbSavedImages.delete(attachmentId);
+        return;
+    }
 
     if (IS_WEB) return;
 
@@ -91,6 +96,7 @@ async function downloadAttachmentWeb(attachemnt: LoggedAttachment, attempts = 0)
         return;
     }
 
+    await idbImagesReady;
     const res = await fetch(attachemnt.url);
     if (res.status !== 200) {
         if (res.status === 404 || res.status === 403) return;
@@ -104,7 +110,8 @@ async function downloadAttachmentWeb(attachemnt: LoggedAttachment, attempts = 0)
         return downloadAttachmentWeb(attachemnt, attempts);
     }
     const ab = await res.arrayBuffer();
-    const path = `${DEFAULT_IMAGE_CACHE_DIR}/${attachemnt.id}${attachemnt.fileExtension}`;
+    const extension = attachemnt.fileExtension.replace(/^\./, "");
+    const path = `${DEFAULT_IMAGE_CACHE_DIR}/${attachemnt.id}.${extension}`;
 
     await set(path, new Uint8Array(ab), ImageStore);
     idbSavedImages.set(attachemnt.id, { attachmentId: attachemnt.id, path });

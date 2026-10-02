@@ -281,21 +281,20 @@ export function useListScroller() {
     return [rowHeights.current, handleResize] as const;
 }
 
-// Wrapper class for Queue which allows batching multiple requests into one.
-// A request is fired immediately if at least `maxCount` items are in this queue,
-// or if enough time (`timeout`) has passed since the last item was added.
-// Subsequent requests are fired in sequence.
 export class BatchedRequestQueue<T> {
     private items: T[] = [];
     private timer: NodeJS.Timeout | null = null;
-    private readonly queue: Queue = new Queue();
     private generation = 0;
+    private readonly queue = new Queue();
+    private queued = 0;
+    private retries = 0;
 
     public clear() {
         this.generation++;
         if (this.timer) clearTimeout(this.timer);
         this.timer = null;
         this.items = [];
+        this.retries = 0;
     }
 
     constructor(
@@ -304,31 +303,45 @@ export class BatchedRequestQueue<T> {
     ) { }
 
     public add(item: T) {
-        if (this.items.indexOf(item) !== -1) return;
-        this.items.push(item);
+        if (!this.items.includes(item)) this.items.push(item);
+        if (!this.timer && this.queued === 0) this.retries = 0;
+        if (this.retries > 0) return;
 
         if (this.items.length >= this.options.maxCount) {
             this.flush();
         } else {
-            if (this.timer) clearTimeout(this.timer);
-            this.timer = setTimeout(() => this.flush(), this.options.timeout);
+            this.schedule(this.options.timeout ?? 1000);
         }
+    }
+
+    private schedule(delay: number) {
+        if (this.timer) clearTimeout(this.timer);
+        this.timer = setTimeout(() => this.flush(), delay);
     }
 
     private flush() {
         if (this.timer) clearTimeout(this.timer);
         this.timer = null;
-
-        if (this.items.length === 0) return;
+        if (this.queued >= 2 || this.items.length === 0) return;
 
         const batch = this.items.splice(0, this.options.maxCount);
         const { generation } = this;
+        this.queued++;
         this.queue.push(async () => {
-            if (generation !== this.generation) return;
             try {
+                if (generation !== this.generation) return;
                 await this.cb(batch);
+                if (generation === this.generation) this.retries = 0;
             } catch {
-                if (generation === this.generation) this.items.push(...batch.filter(item => !this.items.includes(item)));
+                if (generation === this.generation) {
+                    this.items = [...batch.filter(item => !this.items.includes(item)), ...this.items];
+                    this.retries++;
+                }
+            } finally {
+                this.queued--;
+                if (this.items.length > 0 && this.retries <= 3) {
+                    this.schedule(this.retries > 0 ? Math.min(30000, Math.max(1000, this.options.timeout ?? 1000) * 2 ** (this.retries - 1)) : this.options.timeout ?? 1000);
+                }
             }
         });
     }

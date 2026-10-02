@@ -162,8 +162,9 @@ export async function translate(text: string): Promise<any> {
 
     const output = { src: "", text: "" };
 
-    if ((isTokiPona(text) || isSitelen(text)) && (toki || sitelen)) {
-        if (isSitelen(text) && sitelen) text = await translateSitelen(text);
+    const hasSitelen = isSitelen(text);
+    if (hasSitelen ? sitelen : toki && isTokiPona(text)) {
+        if (hasSitelen) text = await translateSitelen(text);
 
         const translate = await (await fetch("https://aiapi.serversmp.xyz/toki", {
             method: "POST",

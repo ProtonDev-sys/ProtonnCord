@@ -534,7 +534,13 @@ export default plugin({
 				size,
 			),
 		)
-		cleanup(() => clearDecryptedContent())
+		cleanup(() => {
+			try {
+				clearDecryptedContent()
+			} finally {
+				setAttachmentPatcher(undefined)
+			}
+		})
 		cleanup(() => mobileVault.lock())
 		patchMessageRenderer(cleanup)
 		cleanup(

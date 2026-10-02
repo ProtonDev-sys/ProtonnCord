@@ -57,9 +57,9 @@ export default function fathorse(cfg) {
             if (shakeUntil >= Date.now()) {
                 const x = Math.floor(Math.random() * 4 - 2);
                 const y = Math.floor(Math.random() * 4 - 2);
-                document.body.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+                document.body.style.transform = `translate3d(${x}px, ${y}px, 0)${originalTransform && originalTransform !== "none" ? ` ${originalTransform}` : ""}`;
             } else {
-                document.body.style.transform = "";
+                document.body.style.transform = originalTransform;
             }
         }
 

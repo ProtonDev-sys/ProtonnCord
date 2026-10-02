@@ -377,7 +377,7 @@ test("Discord MCP attachment fetches forbid redirects and apply a timeout", asyn
         URL, Buffer, AbortSignal,
         fetch: async (_: any, options: any) => {
             request = options;
-            return { ok: true, headers: { get: () => null }, body: { getReader: () => ({ read: async () => ({ done: true }) }) } };
+            return new Response(new Uint8Array());
         }
     });
     await fetchAttachmentData("https://cdn.discordapp.com/attachments/fixture");

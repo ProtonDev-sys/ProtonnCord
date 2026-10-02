@@ -17,6 +17,11 @@ let userIdsToBlock = new Set<string>();
 let guildBlacklistIds = new Set<string>();
 let guildWhitelistIds = new Set<string>();
 let idCachesInitialized = false;
+const roleVisibilityByGuild = new Map<string, Map<string, boolean>>();
+
+function clearRoleVisibility() {
+    roleVisibilityByGuild.clear();
+}
 
 function parseIdSet(value: string | undefined): Set<string> {
     const ids = new Set<string>();
@@ -42,6 +47,7 @@ function validateIdList(value: string) {
 }
 
 function refreshIdCaches() {
+    clearRoleVisibility();
     userIdsToBlock = parseIdSet(settings.store.usersToBlock);
     guildBlacklistIds = parseIdSet(settings.store.guildBlackList);
     guildWhitelistIds = parseIdSet(settings.store.guildWhiteList);
@@ -64,6 +70,7 @@ const settings = definePluginSettings({
         description: "User IDs separated by commas.",
         onChange: value => {
             userIdsToBlock = parseIdSet(value);
+            clearRoleVisibility();
             idCachesInitialized = true;
         },
         isValid: validateIdList,
@@ -73,6 +80,7 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         description: "Should blocked users should also be hidden everywhere",
         default: true,
+        onChange: clearRoleVisibility,
         restartNeeded: true
     },
     hideBlockedMessages: {
@@ -146,16 +154,21 @@ function isRoleAllBlockedMembers(roleId, guildId) {
     if (!role) return false;
     if (isPluginDisabledForGuild(guildId, true)) return false;
 
-    let hasMembersWithRole = false;
-    for (const member of GuildMemberStore.getMembers(guildId) as GuildMember[]) {
-        if (!member.roles.includes(roleId)) continue;
-
-        hasMembersWithRole = true;
-        const user = UserStore.getUser(member.userId);
-        if (!shouldHideUser(member.userId) || user?.desktop || user?.mobile) return false;
+    ensureIdCaches();
+    let roleVisibility = roleVisibilityByGuild.get(guildId);
+    if (!roleVisibility) {
+        roleVisibility = new Map<string, boolean>();
+        for (const member of GuildMemberStore.getMembers(guildId) as GuildMember[]) {
+            const user = UserStore.getUser(member.userId);
+            const hidden = shouldHideUser(member.userId) && !user?.desktop && !user?.mobile;
+            for (const memberRoleId of member.roles) {
+                roleVisibility.set(memberRoleId, (roleVisibility.get(memberRoleId) ?? true) && hidden);
+            }
+        }
+        if (roleVisibilityByGuild.size >= 20) roleVisibilityByGuild.delete(roleVisibilityByGuild.keys().next().value!);
+        roleVisibilityByGuild.set(guildId, roleVisibility);
     }
-
-    return hasMembersWithRole;
+    return roleVisibility.get(roleId) ?? false;
 }
 
 function hiddenReplyComponent() {
@@ -211,8 +224,15 @@ export default definePlugin({
     settings,
     start() {
         refreshIdCaches();
+        GuildMemberStore.addChangeListener(clearRoleVisibility);
+        RelationshipStore.addChangeListener(clearRoleVisibility);
+        UserStore.addChangeListener(clearRoleVisibility);
     },
     stop() {
+        GuildMemberStore.removeChangeListener(clearRoleVisibility);
+        RelationshipStore.removeChangeListener(clearRoleVisibility);
+        UserStore.removeChangeListener(clearRoleVisibility);
+        clearRoleVisibility();
         userIdsToBlock = new Set();
         guildBlacklistIds = new Set();
         guildWhitelistIds = new Set();
