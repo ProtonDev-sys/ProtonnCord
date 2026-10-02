@@ -30,6 +30,7 @@ class GithubFixture {
     after: (call: Call) => void = () => {};
     nextId = 10;
     latest = 1;
+    releaseList: (() => Release[]) | undefined;
 
     constructor(branch = "nightly", previous = true) {
         this.branch = branch;
@@ -56,6 +57,10 @@ class GithubFixture {
 
     download(tag: string, name: string) {
         return `https://github.com/${repository}/releases/download/${tag}/${name}`;
+    }
+
+    assetDownload(release: Release, name: string) {
+        return this.download(release.draft ? `untagged-${release.id.toString(16).padStart(20, "0")}` : release.tag_name, name);
     }
 
     publicRelease() {
@@ -105,7 +110,7 @@ class GithubFixture {
             this.refs.set(path.slice("/git/refs/".length), fields.sha);
             return {};
         }
-        if (method === "GET" && path.startsWith("/releases?")) return [...this.releases.values()];
+        if (method === "GET" && path.startsWith("/releases?")) return this.releaseList ? this.releaseList() : [...this.releases.values()];
         if (method === "GET" && path === "/releases/latest") return [...this.releases.values()].find(release => release.id === this.latest && !release.draft && !release.prerelease) ?? null;
         if (method === "GET" && path.startsWith("/releases/tags/")) return [...this.releases.values()].find(release => release.tag_name === path.slice("/releases/tags/".length) && !release.draft) ?? null;
         if (method === "POST" && path === "/releases") {
@@ -125,14 +130,14 @@ class GithubFixture {
                 const name = new URL(`https://fixture${path}`).searchParams.get("name")!;
                 assert.equal(release.assets.some(asset => asset.name === name), false, "no clobber uploads");
                 const data = body as Buffer;
-                const asset = { id: this.nextId++, name, size: data.length, digest: hash(data), state: "uploaded", browser_download_url: this.download(release.tag_name, name) };
+                const asset = { id: this.nextId++, name, size: data.length, digest: hash(data), state: "uploaded", browser_download_url: this.assetDownload(release, name) };
                 release.assets.push(asset);
                 return asset;
             }
             if (method === "PATCH") {
                 const { make_latest, ...fields } = body as Record<string, unknown>;
                 Object.assign(release, fields);
-                for (const asset of release.assets) asset.browser_download_url = this.download(release.tag_name, asset.name);
+                for (const asset of release.assets) asset.browser_download_url = this.assetDownload(release, asset.name);
                 if (make_latest === "true") this.latest = release.id;
                 return release;
             }
@@ -180,6 +185,91 @@ test("first channel release also stages every asset before publication", async (
     fixture.assertAtomic();
 });
 
+test("successful draft POST uses its returned ID despite a persistently cached release listing", async () => {
+    const fixture = new GithubFixture();
+    const cached = structuredClone([...fixture.releases.values()]);
+    fixture.releaseList = () => cached;
+    fixture.after = call => {
+        if (isPromotion(call)) {
+            const staged = fixture.releases.get(10)!;
+            assert.equal(staged.assets.length, files.length);
+        }
+        if (call.upload) {
+            const staged = fixture.releases.get(10)!;
+            assert.ok(staged.assets.every(asset => asset.browser_download_url === fixture.assetDownload(staged, asset.name)));
+            assert.ok(staged.assets.every(asset => asset.browser_download_url.includes("/untagged-")));
+        }
+    };
+    const result = await fixture.run();
+    assert.equal(result.releaseId, 10);
+    assert.equal(fixture.calls.filter(call => call.method === "POST" && call.path === "/releases").length, 1);
+    assert.equal(fixture.releases.size, 3);
+    assert.equal(fixture.publicRelease()?.id, 10);
+    fixture.assertAtomic();
+});
+
+test("lost draft POST response with cached listing fails closed without blind duplicate creation", async () => {
+    const fixture = new GithubFixture();
+    const cached = structuredClone([...fixture.releases.values()]);
+    fixture.releaseList = () => cached;
+    fixture.after = call => {
+        if (call.method === "POST" && call.path === "/releases") throw unavailable();
+    };
+    await assert.rejects(fixture.run());
+    assert.equal(fixture.calls.filter(call => call.method === "POST" && call.path === "/releases").length, 1);
+    assert.equal(fixture.releases.size, 3);
+    assert.equal(fixture.releases.get(10)?.draft, true);
+    assert.equal(fixture.publicRelease()?.id, 1);
+    assert.equal(fixture.refs.get("tags/nightly"), oldSha);
+    assert.ok(!fixture.calls.some(call => call.upload || call.method === "PATCH" || call.method === "DELETE"));
+    const retryStart = fixture.calls.length;
+    await assert.rejects(fixture.run(), /refusing duplicate creation/u);
+    assert.ok(fixture.calls.slice(retryStart).every(call => call.method === "GET"));
+    assert.equal(fixture.calls.filter(call => call.method === "POST" && call.path === "/releases").length, 1);
+    fixture.releaseList = undefined;
+    fixture.after = () => {};
+    await fixture.run();
+    assert.equal(fixture.calls.filter(call => call.method === "POST" && call.path === "/releases").length, 1);
+    assert.equal(fixture.publicRelease()?.id, 10);
+    fixture.assertAtomic();
+});
+
+test("published assets require exact channel download URLs, never draft or foreign endpoints", async () => {
+    for (const branch of ["main", "nightly", "staging"]) {
+        const channel = branch === "main" ? "latest" : branch;
+        const name = files[0].name;
+        const exact = `https://github.com/${repository}/releases/download/${channel}/${name}`;
+        const invalid = [
+            exact.replace(`/${channel}/`, "/untagged-043767bd3625763ef320/"),
+            exact.replace(`/${channel}/`, "/another-tag/"),
+            exact.replace(repository, "foreign/repository"),
+            exact.replace("github.com", "github.com.attacker.invalid"),
+            exact.replace("https:", "http:"),
+            exact.replace("github.com", "user@github.com"),
+            exact.replace(name, "wrong.asar"),
+            `${exact}?download=1`,
+            `${exact}#fragment`,
+            `${exact}/extra`,
+        ];
+        for (const endpoint of invalid) {
+            const fixture = new GithubFixture(branch);
+            const api = async (...args: Parameters<typeof fixture.api>) => {
+                const result = await fixture.api(...args);
+                const release = fixture.publicRelease();
+                if (release?.id === 10 && args[0] === "GET" && args[1] === "/releases/10/assets?per_page=100") {
+                    (result as Asset[])[0].browser_download_url = endpoint;
+                }
+                return result;
+            };
+            await assert.rejects(releaseUpdateChannel({ api, branch, sha: newSha, runId: "1234", files }), /Invalid asset download endpoint/u);
+            assert.equal(fixture.publicRelease()?.id, 10);
+            assert.equal(fixture.refs.get(`tags/${channel}`), newSha);
+            assert.equal(fixture.releases.get(1)?.draft, true);
+            fixture.assertAtomic();
+        }
+    }
+});
+
 for (const phase of ["create", "upload", "archive", "tag", "promote"]) {
     test(`lost response after ${phase} reconciles without duplicate or public piecemeal writes`, async () => {
         const fixture = new GithubFixture("main");
@@ -217,7 +307,7 @@ test("GitHub starter asset after 502 is removed only from staging and retried", 
     fixture.before = call => { if (call.upload) throw unavailable(); };
     await assert.rejects(fixture.run());
     const staged = fixture.releases.get(10)!;
-    staged.assets.push({ id: 999, name: files[0].name, size: 0, digest: "", state: "starter", browser_download_url: fixture.download(staged.tag_name, files[0].name) });
+    staged.assets.push({ id: 999, name: files[0].name, size: 0, digest: "", state: "starter", browser_download_url: fixture.assetDownload(staged, files[0].name) });
     fixture.before = () => {};
     await fixture.run();
     assert.deepEqual(fixture.calls.filter(call => call.method === "DELETE").map(call => call.path), ["/releases/assets/999"]);
@@ -233,7 +323,7 @@ test("corrupt staged digest and unexpected assets fail closed before channel mut
         if (corruption === "sha") staged.target_commitish = oldSha;
         else if (corruption === "stage-ref") fixture.refs.set(`tags/${staged.tag_name}`, oldSha);
         else if (corruption === "manifest") staged.body = staged.body.replace(newSha, oldSha);
-        else staged.assets.push({ id: 999, name: corruption === "extra" ? "unexpected.asar" : files[0].name, size: files[0].size, digest: hash(Buffer.from("bad")), state: "uploaded", browser_download_url: fixture.download(staged.tag_name, files[0].name) });
+        else staged.assets.push({ id: 999, name: corruption === "extra" ? "unexpected.asar" : files[0].name, size: files[0].size, digest: hash(Buffer.from("bad")), state: "uploaded", browser_download_url: fixture.assetDownload(staged, files[0].name) });
         await assert.rejects(fixture.run());
         assert.equal(fixture.publicRelease()?.id, 1);
         assert.equal(fixture.refs.get("tags/nightly"), oldSha);
@@ -344,7 +434,7 @@ test("failed rollback keeps the channel unavailable rather than exposing old ass
 test("conflicting staging tags and pagination exhaustion never modify a public channel", async () => {
     const collision = new GithubFixture();
     collision.refs.set(`tags/protonn-channel-nightly-1234-${newSha}`, oldSha);
-    await assert.rejects(collision.run(), /Unexpected tag/u);
+    await assert.rejects(collision.run(), /refusing duplicate creation/u);
     assert.ok(collision.calls.every(call => call.method === "GET"));
     const fixture = new GithubFixture();
     const requests: string[] = [];
