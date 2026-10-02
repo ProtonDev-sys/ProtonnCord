@@ -58,6 +58,7 @@ export function createGithubApi(token, fetcher = fetch, { timeoutMs = 60_000, bu
                         Authorization: `Bearer ${token}`,
                         "User-Agent": "ProtonnCord-channel-release",
                         "X-GitHub-Api-Version": "2026-03-10",
+                        ...(method === "GET" ? { "Cache-Control": "no-cache" } : {}),
                         ...(body === undefined ? {} : { "Content-Type": upload ? "application/octet-stream" : "application/json" }),
                     },
                     body: body === undefined ? undefined : upload ? body : JSON.stringify(body),
@@ -125,10 +126,17 @@ export async function releaseUpdateChannel({ api, branch, sha, runId, files }) {
         return result;
     };
     const matches = (asset, file) => asset.name === file.name && asset.size === file.size && asset.digest === file.digest && asset.state === "uploaded";
-    const verifyAssets = async (id, tag) => {
+    const verifyAssets = async (id, tag, draft = false) => {
         const result = await assets(id);
         requireState(result.length === files.length && files.every(file => result.some(asset => matches(asset, file))), "Release asset verification failed");
-        requireState(result.every(asset => asset.browser_download_url === `https://github.com/${REPOSITORY}/releases/download/${tag}/${asset.name}`), "Invalid asset download endpoint");
+        requireState(result.every(asset => {
+            const url = new URL(asset.browser_download_url);
+            const prefix = `/${REPOSITORY}/releases/download/`;
+            const parts = url.pathname.slice(prefix.length).split("/");
+            return url.origin === "https://github.com" && !url.username && !url.password && !url.search && !url.hash
+                && url.pathname.startsWith(prefix) && parts.length === 2 && parts[1] === asset.name
+                && (parts[0] === tag || (draft && /^untagged-[a-f0-9]{1,64}$/u.test(parts[0])));
+        }), "Invalid asset download endpoint");
     };
     const reconcile = async (write, check) => {
         let failure;
@@ -174,6 +182,7 @@ export async function releaseUpdateChannel({ api, branch, sha, runId, files }) {
     let staged = await findStage();
     if (!staged && !await currentHead()) return { skipped: true };
     if (!staged) {
+        requireState(!await getRef(stageTag), "Staging tag exists without a discoverable release; refusing duplicate creation");
         const previous = await getPublic();
         const previousRef = await getRef(channel);
         requireState(!previous || (!previous.draft && previous.tag_name === channel && !previous.immutable && previousRef), "Channel release cannot be safely replaced");
@@ -185,10 +194,14 @@ export async function releaseUpdateChannel({ api, branch, sha, runId, files }) {
         };
         const body = JSON.stringify(journal);
         await setRef(stageTag, sha, [sha]);
-        await reconcile(
-            () => api("POST", "/releases", { tag_name: stageTag, target_commitish: sha, name: title, body, draft: true, prerelease: branch !== "main", make_latest: "false" }),
-            async () => { staged = await findStage(); return staged?.body === body; },
-        );
+        let creationFailure;
+        try {
+            staged = await api("POST", "/releases", { tag_name: stageTag, target_commitish: sha, name: title, body, draft: true, prerelease: branch !== "main", make_latest: "false" });
+        } catch (error) {
+            creationFailure = error;
+        }
+        for (let attempt = 0; !staged && attempt < 3; attempt++) staged = await findStage();
+        requireState(staged && Number.isSafeInteger(staged.id) && staged.body === body, creationFailure?.message ?? "Release creation outcome is uncertain");
     }
     const journal = JSON.parse(staged.body);
     requireState(journal.stageTag === stageTag && journal.branch === branch && journal.sha === sha && journal.runId === runId && JSON.stringify(journal.manifest) === JSON.stringify(manifest), "Staging release identity mismatch");
@@ -227,7 +240,7 @@ export async function releaseUpdateChannel({ api, branch, sha, runId, files }) {
             async () => (await assets(staged.id)).some(asset => matches(asset, file)),
         );
     }
-    await verifyAssets(staged.id, staged.tag_name);
+    await verifyAssets(staged.id, staged.tag_name, true);
     const old = journal.previous ? await getRelease(journal.previous.id) : null;
     requireState(!journal.previous || (old && old.name === journal.previous.name && old.prerelease === journal.previous.prerelease && !old.immutable && ((old.tag_name === channel && !old.draft) || (old.tag_name === backupTag && old.draft))), "Recovery release changed");
     if (old) requireState((await assets(old.id)).every(asset => names.has(asset.name)), "Would drop an existing client asset");
