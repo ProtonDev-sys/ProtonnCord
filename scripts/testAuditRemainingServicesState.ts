@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { composeSecureForwardText, secureForwardRoute } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
+import { composeSecureForwardText, secureForwardEmbedText, secureForwardRoute } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
 import { loadTestModule } from "./utils/loadTestModule";
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -125,7 +125,7 @@ function forwardingFixture() {
         "../secureMessaging.desktop/attachmentCache": {},
         "../secureMessaging.desktop/attachments": { MAX_ATTACHMENT_BYTES: 500 * 1024 * 1024, MAX_ATTACHMENT_COUNT: 10 },
         "../secureMessaging.desktop/decryptCache": { decryptCachedMessage: async () => state.delayDecrypt ? new Promise(resolve => { resumeDecrypt = resolve; }) : { status: "decrypted", plaintext: "private fixture text", stickers: [] } },
-        "../secureMessaging.desktop/forwarding": { composeSecureForwardText, secureForwardRoute },
+        "../secureMessaging.desktop/forwarding": { composeSecureForwardText, secureForwardEmbedText, secureForwardRoute },
         "../secureMessaging.desktop/protocol": { isEncryptedMessage: (content: string) => content === "encrypted-fixture" }
     }, {
         VencordNative: { pluginHelpers: { SecureMessaging: { getConversation: async () => state.delayProtection ? new Promise(resolve => { resumeProtection = resolve; }) : { status: state.protection } } } }

@@ -188,19 +188,26 @@ export async function requestBytes(
             throw new Error(`GET ${url} returned an empty response body`);
         }
 
-        const chunks: Buffer[] = [];
-        let total = 0;
-        while (true) {
-            const result = await Promise.race([reader.read(), timeout]);
-            if (result.done) break;
-            total += result.value.byteLength;
-            if (total > maximumBytes) {
-                await Promise.race([reader.cancel(), timeout]);
-                throw new Error(`GET ${url} exceeded the ${maximumBytes} byte limit`);
+        try {
+            const chunks: Buffer[] = [];
+            let total = 0;
+            while (true) {
+                const result = await Promise.race([reader.read(), timeout]);
+                if (result.done) break;
+                total += result.value.byteLength;
+                if (total > maximumBytes)
+                    throw new Error(`GET ${url} exceeded the ${maximumBytes} byte limit`);
+                chunks.push(Buffer.from(result.value));
             }
-            chunks.push(Buffer.from(result.value));
+            return Buffer.concat(chunks, total);
+        } catch (error) {
+            try {
+                await Promise.race([reader.cancel(), timeout]);
+            } catch { }
+            throw error;
+        } finally {
+            reader.releaseLock();
         }
-        return Buffer.concat(chunks, total);
     } finally {
         signal.removeEventListener("abort", onTimeout);
     }

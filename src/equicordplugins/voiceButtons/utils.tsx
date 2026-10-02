@@ -8,7 +8,7 @@ import "./styles.css";
 
 import { Icon, User } from "@vencord/discord-types";
 import { findComponentByCodeLazy } from "@webpack";
-import { Button, ChannelActionCreators, ChannelStore, GuildActions, MediaEngineStore, NavigationRouter, PermissionsBits, PermissionStore, SoundboardStore, Tooltip, UserStore, VoiceActions, VoiceStateStore } from "@webpack/common";
+import { Button, ChannelActionCreators, ChannelStore, GuildActions, GuildMemberStore, MediaEngineStore, NavigationRouter, PermissionsBits, PermissionStore, RelationshipStore, SoundboardStore, Tooltip, UserStore, VoiceActions, VoiceStateStore } from "@webpack/common";
 import { JSX } from "react";
 
 import { settings } from "./settings";
@@ -53,7 +53,9 @@ function getUserName(user: User) {
     if (settings.store.whichNameToShow === "global") {
         return user.globalName ?? username;
     } else if (settings.store.whichNameToShow === "nickname") {
-        return username;
+        const voiceState = VoiceStateStore.getVoiceStateForUser(user.id);
+        const channel = voiceState?.channelId ? ChannelStore.getChannel(voiceState.channelId) : null;
+        return (channel?.guild_id ? GuildMemberStore.getMember(channel.guild_id, user.id)?.nick : RelationshipStore.getNickname(user.id)) || user.globalName || username;
     } else if (settings.store.whichNameToShow === "both" && user.globalName) {
         return `${user.globalName} / ${username}`;
     }
@@ -154,7 +156,9 @@ export function UserDeafenButton({ user }: { user: User; }) {
     const isMuted = MediaEngineStore.isLocalMute(user.id);
     const isSoundboardMuted = SoundboardStore.isLocalSoundboardMuted(user.id);
     const isVideoDisabled = MediaEngineStore.isLocalVideoDisabled(user.id);
-    const isLocalDeafened = isCurrent && MediaEngineStore.isSelfDeaf() || isMuted && isSoundboardMuted && isVideoDisabled;
+    const isLocalDeafened = isCurrent ? MediaEngineStore.isSelfDeaf() : isMuted
+        && (!settings.store.muteSoundboard || isSoundboardMuted)
+        && (!settings.store.disableVideo || isVideoDisabled);
 
     const isDeafened = canServerDeafen && (useServerDeafenForSelf || !isCurrent) ? isServerDeafened : isLocalDeafened;
     const color = isDeafened ? "var(--status-danger)" : "var(--channels-default)";
@@ -184,12 +188,18 @@ export function UserDeafenButton({ user }: { user: User; }) {
                         VoiceActions.toggleSelfDeaf();
                         return;
                     }
-                    if (isMuted) {
-                        VoiceActions.toggleLocalMute(user.id);
-                        if (settings.store.muteSoundboard && isSoundboardMuted) {
+                    const locallyMuted = MediaEngineStore.isLocalMute(user.id);
+                    const soundboardMuted = SoundboardStore.isLocalSoundboardMuted(user.id);
+                    const videoDisabled = MediaEngineStore.isLocalVideoDisabled(user.id);
+                    const locallyDeafened = locallyMuted
+                        && (!settings.store.muteSoundboard || soundboardMuted)
+                        && (!settings.store.disableVideo || videoDisabled);
+                    if (locallyDeafened) {
+                        if (locallyMuted) VoiceActions.toggleLocalMute(user.id);
+                        if (settings.store.muteSoundboard && soundboardMuted) {
                             VoiceActions.toggleLocalSoundboardMute(user.id);
                         }
-                        if (settings.store.disableVideo && isVideoDisabled) {
+                        if (settings.store.disableVideo && videoDisabled) {
                             VoiceActions.setDisableLocalVideo(
                                 user.id,
                                 "ENABLED",
@@ -197,11 +207,11 @@ export function UserDeafenButton({ user }: { user: User; }) {
                             );
                         }
                     } else {
-                        VoiceActions.toggleLocalMute(user.id);
-                        if (settings.store.muteSoundboard && !isSoundboardMuted) {
+                        if (!locallyMuted) VoiceActions.toggleLocalMute(user.id);
+                        if (settings.store.muteSoundboard && !soundboardMuted) {
                             VoiceActions.toggleLocalSoundboardMute(user.id);
                         }
-                        if (settings.store.disableVideo && !isVideoDisabled) {
+                        if (settings.store.disableVideo && !videoDisabled) {
                             VoiceActions.setDisableLocalVideo(
                                 user.id,
                                 "DISABLED",

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { DataStore } from "@api/index";
 import { definePluginSettings } from "@api/Settings";
 import { Divider } from "@components/Divider";
 import { Heading } from "@components/Heading";
@@ -12,7 +11,7 @@ import { Paragraph } from "@components/Paragraph";
 import { OptionType } from "@utils/types";
 import { Alerts, Button, useState } from "@webpack/common";
 
-import { DATA_COLLECTION_NAME, getCollections, refreshCacheCollection } from "./utils/collectionManager";
+import { getCollections, resetCollections } from "./utils/collectionManager";
 import { cl } from "./utils/misc";
 import { downloadCollections, uploadGifCollections } from "./utils/settingsUtils";
 
@@ -114,8 +113,7 @@ export const settings = definePluginSettings({
                     confirmColor: Button.Colors.RED,
                     cancelText: "Nevermind",
                     onConfirm: async () => {
-                        await DataStore.set(DATA_COLLECTION_NAME, []);
-                        refreshCacheCollection();
+                        await resetCollections();
                     },
                 })}>
                 Reset Collections

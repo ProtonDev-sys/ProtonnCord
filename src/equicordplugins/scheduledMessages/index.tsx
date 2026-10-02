@@ -10,6 +10,7 @@ import { MessageObject, SendMessageOptions } from "@api/MessageEvents";
 import { definePluginSettings } from "@api/Settings";
 import { Devs, EquicordDevs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
+import { UserStore } from "@webpack/common";
 
 import { isScheduleModeEnabled, ScheduledMessagesButton, setScheduleModeEnabled } from "./components/ChatBarButton";
 import { CalendarIcon } from "./components/Icons";
@@ -29,6 +30,10 @@ import {
     stopScheduler
 } from "./utils";
 
+let startGeneration = 0;
+let active = false;
+const reactionTimeouts = new Set<ReturnType<typeof setTimeout>>();
+
 export const settings = definePluginSettings({
     maxMessagesPerMinute: {
         type: OptionType.SLIDER,
@@ -44,6 +49,7 @@ export const settings = definePluginSettings({
         default: 10,
         stickToMarkers: true,
         onChange: () => {
+            if (!active) return;
             stopScheduler();
             startScheduler();
         }
@@ -77,9 +83,12 @@ function handleReactionEvent(event: FluxReactionEvent): void {
             handleReactionRemove(messageId, channelId, emoji);
         }
     } else {
-        setTimeout(() => {
-            resyncPhantomReactions(messageId, channelId);
+        const generation = startGeneration;
+        const timeout = setTimeout(() => {
+            reactionTimeouts.delete(timeout);
+            if (generation === startGeneration) resyncPhantomReactions(messageId, channelId);
         }, 50);
+        reactionTimeouts.add(timeout);
     }
 }
 
@@ -124,6 +133,8 @@ export default definePlugin({
         if (!messageObj.content.trim() && !options.uploads?.length) return;
 
         setScheduleModeEnabled(false);
+        const generation = startGeneration;
+        const ownerUserId = UserStore.getCurrentUser()?.id;
 
         let attachments: ScheduledAttachment[] | undefined;
 
@@ -155,17 +166,26 @@ export default definePlugin({
             }
         }
 
-        openScheduleTimeModal(channelId, messageObj.content, attachments);
+        if (generation === startGeneration && ownerUserId && UserStore.getCurrentUser()?.id === ownerUserId)
+            openScheduleTimeModal(channelId, messageObj.content, attachments);
         return { cancel: true };
     },
 
     async start() {
-        await loadScheduledMessages();
+        const generation = ++startGeneration;
+        await loadScheduledMessages(() => generation === startGeneration);
+        if (generation !== startGeneration) return;
+        active = true;
         startScheduler();
         recreatePhantomMessages();
     },
 
     stop() {
+        active = false;
+        startGeneration++;
+        for (const timeout of reactionTimeouts) clearTimeout(timeout);
+        reactionTimeouts.clear();
+        setScheduleModeEnabled(false);
         stopScheduler();
         cleanupAllPhantomMessages();
     }

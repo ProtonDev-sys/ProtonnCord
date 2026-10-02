@@ -172,10 +172,15 @@ async function unfurlEmbed(url: string, message: Message) {
         }
     }
 
-    const newEmbeds = [...message.embeds, ...convertedEmbeds];
+    const currentMessage = MessageStore.getMessage(message.channel_id, message.id);
+    if (!currentMessage) return;
+    const newEmbeds = [...currentMessage.embeds];
+    for (const embed of convertedEmbeds) {
+        if (!newEmbeds.some(existing => existing.url === embed.url)) newEmbeds.push(embed);
+    }
 
     newEmbeds.sort((a: any, b: any) => {
-        return message.content.indexOf(a.url) - message.content.indexOf(b.url);
+        return currentMessage.content.indexOf(a.url) - currentMessage.content.indexOf(b.url);
     });
 
     updateMessage(message.channel_id, message.id, { embeds: newEmbeds });

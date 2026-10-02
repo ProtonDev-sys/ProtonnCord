@@ -35,12 +35,12 @@ interface EditableSongProps {
     song: Song;
     insert?: "top" | "bottom";
     setSongRef(index: number, div: HTMLAnchorElement | null): void;
-    onDrag(index: number, event: DragEvent<HTMLAnchorElement>): void;
-    onDrop(song: Song): void;
+    onDrag(index: number, event: DragEvent<HTMLElement>): void;
+    onDragEnd(): void;
     onRemove(song: Song): void;
 }
 
-function EditableSong({ index, song, insert, setSongRef, onDrag, onDrop, onRemove }: EditableSongProps) {
+function EditableSong({ index, song, insert, setSongRef, onDrag, onDragEnd, onRemove }: EditableSongProps) {
     const { render, failed } = useRender(song);
     const [dragging, setDragging] = useState(false);
 
@@ -51,8 +51,8 @@ function EditableSong({ index, song, insert, setSongRef, onDrag, onDrop, onRemov
     }, [index, onDrag]);
     const dragEndCallback = useCallback(() => {
         setDragging(false);
-        onDrop(song);
-    }, [song, onDrop]);
+        onDragEnd();
+    }, [onDragEnd]);
 
     return (
         <Link
@@ -143,6 +143,7 @@ export default function SongList({ localData, setLocalData }: SongListProps) {
     );
 
     const songs = useRef(new Map<number, HTMLAnchorElement>());
+    const dragged = useRef<number | undefined>(undefined);
     const [insert, setInsert] = useState<number>();
 
     const handleRef = useCallback((index: number, element: HTMLAnchorElement | null) => {
@@ -150,7 +151,8 @@ export default function SongList({ localData, setLocalData }: SongListProps) {
         else songs.current.delete(index);
     }, []);
 
-    const handleDrag = useCallback((index: number, event: DragEvent<HTMLAnchorElement>) => {
+    const handleDrag = useCallback((index: number, event: DragEvent<HTMLElement>) => {
+        dragged.current = index;
         const mapped = songs.current.entries().map(([index, element]) => {
             const rect = element.getBoundingClientRect();
             return {
@@ -211,7 +213,19 @@ export default function SongList({ localData, setLocalData }: SongListProps) {
     }, [localData]);
 
     return (
-        <Flex flexDirection="column" gap="6px">
+        <Flex flexDirection="column" gap="6px"
+            onDragOver={event => {
+                if (dragged.current === undefined) return;
+                event.preventDefault();
+                handleDrag(dragged.current, event);
+            }}
+            onDrop={event => {
+                if (dragged.current === undefined) return;
+                event.preventDefault();
+                handleDrop(localData[dragged.current]);
+                dragged.current = undefined;
+            }}
+        >
             {editable.map(({ slot, song, last }, i) => {
                 if (slot === "song") {
                     return (
@@ -221,7 +235,7 @@ export default function SongList({ localData, setLocalData }: SongListProps) {
                             insert={last && insert === i + 1 ? "bottom" : insert === i ? "top" : undefined}
                             setSongRef={handleRef}
                             onDrag={handleDrag}
-                            onDrop={handleDrop}
+                            onDragEnd={() => { dragged.current = undefined; setInsert(undefined); }}
                             onRemove={handleRemove}
                             key={sid(song)}
                         />

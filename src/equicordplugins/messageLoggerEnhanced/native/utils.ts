@@ -16,8 +16,7 @@ export async function exists(filename: string) {
 }
 
 export async function ensureDirectoryExists(cacheDir: string) {
-    if (!await exists(cacheDir))
-        await mkdir(cacheDir);
+    await mkdir(cacheDir, { recursive: true });
 }
 
 export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

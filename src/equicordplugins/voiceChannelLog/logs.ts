@@ -7,6 +7,8 @@
 import { VoiceChannelLogEntry } from "./types";
 
 const vcLogs = new Map<string, VoiceChannelLogEntry[]>();
+const MAX_CHANNELS = 100;
+const MAX_ENTRIES_PER_CHANNEL = 1000;
 let vcLogSubscriptions: (() => void)[] = [];
 
 let callStartTime: Date | null = null;
@@ -28,13 +30,15 @@ export function getVcLogs(channelId?: string): VoiceChannelLogEntry[] {
 
 export function addLogEntry(entry: VoiceChannelLogEntry) {
     const existing = vcLogs.get(entry.channelId) ?? [];
-    vcLogs.set(entry.channelId, [...existing, entry]);
+    vcLogs.delete(entry.channelId);
+    vcLogs.set(entry.channelId, [...existing.slice(-(MAX_ENTRIES_PER_CHANNEL - 1)), entry]);
+    if (vcLogs.size > MAX_CHANNELS) vcLogs.delete(vcLogs.keys().next().value!);
     vcLogSubscriptions.forEach(fn => fn());
 }
 
 export function clearLogs(channelId?: string) {
     if (!channelId) return;
-    vcLogs.set(channelId, []);
+    vcLogs.delete(channelId);
     vcLogSubscriptions.forEach(fn => fn());
 }
 

@@ -167,7 +167,12 @@ export default definePlugin({
             if (oldestKey) this.pngCache.delete(oldestKey);
         }
 
-        return promise;
+        try {
+            return await promise;
+        } catch (error) {
+            if (this.pngCache.get(url) === promise) this.pngCache.delete(url);
+            throw error;
+        }
     },
 
     getBanner(userId: string): string | undefined {

@@ -25,6 +25,10 @@ export const ActivityView = findComponentByCodeLazy<ActivityViewProps>('location
 
 export const cl = classNameFactory("vc-bactivities-");
 
+export function getActivityKey(activity: Activity) {
+    return activity.id ?? JSON.stringify([activity.type, activity.application_id, activity.name, activity.details, activity.state]);
+}
+
 export function clearFetchedApplications() {
     fetchGeneration++;
     fetchedApplications.clear();
@@ -101,8 +105,12 @@ export function getApplicationIcons(activities: Activity[], preferSmall = false)
                     fetchedApplications.set(application_id, null);
                     fetchApplication(application_id).then(app => {
                         if (generation !== fetchGeneration) return;
-                        fetchedApplications.set(application_id, app);
-                    }).catch(console.error);
+                        if (app) fetchedApplications.set(application_id, app);
+                        else fetchedApplications.delete(application_id);
+                    }).catch(error => {
+                        if (generation === fetchGeneration) fetchedApplications.delete(application_id);
+                        console.error(error);
+                    });
                 }
             }
 

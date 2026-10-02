@@ -210,6 +210,7 @@ export async function chooseDir(event: IpcMainInvokeEvent, logKey: "logsDir" | "
     const defaultPath = settings[logKey] || await getDefaultNativeDataDir();
 
     const res = await dialog.showOpenDialog({ properties: ["openDirectory"], defaultPath: defaultPath });
+    if (res.canceled) return;
     const dir = res.filePaths[0];
 
     if (!dir) throw Error("Invalid Directory");
@@ -262,7 +263,13 @@ async function performAttachmentDownload(
     const existingImage = await runCacheOperation(async () => {
         const imagePath = nativeSavedImages.get(attachmentId);
         if (!imagePath) return null;
-        if (await readValidatedCachedImage(attachmentId, true)) return imagePath;
+        const content = await readValidatedCachedImage(attachmentId, true);
+        if (content) {
+            const cachedExtension = parseImageCacheFilename(path.basename(imagePath))!.extension;
+            if (!allowedExtensions.includes(cachedExtension) || content.byteLength > maxBytes)
+                throw new Error("Cached attachment is blocked by current download settings");
+            return imagePath;
+        }
         nativeSavedImages.delete(attachmentId);
         await unlink(imagePath).catch(() => undefined);
         return null;

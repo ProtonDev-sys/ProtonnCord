@@ -34,7 +34,7 @@ function DecodeIcon() {
 }
 
 function findBase64Strings(content: string): string[] {
-    const base64Regex = /\b[A-Za-z0-9+/]{4,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\b/g;
+    const base64Regex = /(?<![A-Za-z0-9+/=])(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)(?![A-Za-z0-9+/=])/g;
     const matches = content.match(base64Regex);
     return matches || [];
 }

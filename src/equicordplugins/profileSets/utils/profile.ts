@@ -397,15 +397,15 @@ export async function loadPresetAsPending(preset: ProfilePreset, guildId?: strin
             }
         }
 
-        if (!options.skipBio && preset?.bio !== current?.bio) {
+        if (!options.skipBio && "bio" in preset && preset.bio !== current.bio) {
             setPending({ pendingBio: preset.bio ?? "" });
         }
 
-        if (!options.skipPronouns && preset?.pronouns !== current?.pronouns) {
+        if (!options.skipPronouns && "pronouns" in preset && preset.pronouns !== current.pronouns) {
             setPending({ pendingPronouns: preset.pronouns ?? "" });
         }
 
-        if (!options.skipGlobalName && preset?.globalName !== current?.globalName) {
+        if (!options.skipGlobalName && "globalName" in preset && preset.globalName !== current.globalName) {
             setPending(isGuild ? { pendingNickname: preset.globalName } : { pendingGlobalName: preset.globalName });
         }
 

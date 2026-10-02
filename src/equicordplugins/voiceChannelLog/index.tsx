@@ -111,7 +111,7 @@ const patchChannelContextMenu: NavContextMenuPatchCallback = (children, { channe
 
 export default definePlugin({
     name: "VoiceChannelLog",
-    description: "Logs voice channel activity including joins, leaves, soundboard, mute, camera, screenshare, and more.",
+    description: "Logs voice channel activity, retaining the latest 1,000 events in each of the 100 most recently active channels.",
     tags: ["Servers", "Utility", "Voice"],
     authors: [Devs.Sqaaakoi, Devs.thororen, EquicordDevs.nyx, Devs.Moxxie, EquicordDevs.Fres, Devs.amy],
     dependencies: ["AudioPlayerAPI", "HeaderBarAPI"],
@@ -192,15 +192,18 @@ export default definePlugin({
 
                 if (oldChannelId !== channelId) {
                     if (!oldChannelId && channelId) {
-                        const skipJoin = suppressJoins || existingUsers.delete(userId);
+                        const wasExisting = existingUsers.delete(userId);
+                        const skipJoin = suppressJoins || wasExisting;
                         if (!skipJoin && logJoinLeave && isSelectedChannel(channelId)) {
                             log({ type: "join", userId, channelId });
                         }
                     } else if (oldChannelId && !channelId) {
+                        existingUsers.delete(userId);
                         if (logJoinLeave && isSelectedChannel(oldChannelId)) {
                             log({ type: "leave", userId, channelId: oldChannelId });
                         }
                     } else if (oldChannelId && channelId) {
+                        existingUsers.delete(userId);
                         if (logJoinLeave) {
                             if (isSelectedChannel(oldChannelId)) {
                                 log({ type: "move", userId, channelId: oldChannelId, oldChannelId, newChannelId: channelId });

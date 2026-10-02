@@ -69,14 +69,31 @@ function FriendInviteCard({ invite }: { invite: FriendInvite; }) {
 export default function FriendCodesPanel() {
     const [invites, setInvites] = useState<FriendInvite[]>([]);
     const [loading, setLoading] = useState(true);
+    const [mutating, setMutating] = useState(false);
+    const mutationPending = useRef(false);
+    const active = useRef(true);
+
+    const mutate = async (operation: () => Promise<void>, failure: string) => {
+        if (mutationPending.current || loading || !active.current) return;
+        mutationPending.current = true;
+        setMutating(true);
+        try {
+            await operation();
+        } catch {
+            if (active.current) showToast(failure, Toasts.Type.FAILURE);
+        } finally {
+            mutationPending.current = false;
+            if (active.current) setMutating(false);
+        }
+    };
 
     useEffect(() => {
-        let active = true;
+        active.current = true;
         getAllFriendInvites()
-            .then(value => { if (active) setInvites(value); })
-            .catch(() => { if (active) showToast("Failed to load friend codes.", Toasts.Type.FAILURE); })
-            .finally(() => { if (active) setLoading(false); });
-        return () => { active = false; };
+            .then(value => { if (active.current) setInvites(value); })
+            .catch(() => { if (active.current) showToast("Failed to load friend codes.", Toasts.Type.FAILURE); })
+            .finally(() => { if (active.current) setLoading(false); });
+        return () => { active.current = false; };
     }, []);
 
     return (
@@ -98,10 +115,11 @@ export default function FriendCodesPanel() {
                         <Button
                             color={Button.Colors.GREEN}
                             look={Button.Looks.FILLED}
-                            disabled={loading}
-                            onClick={() => createFriendInvite()
-                                .then((invite: FriendInvite) => setInvites(current => [...current, invite]))
-                                .catch(() => showToast("Failed to create a friend code.", Toasts.Type.FAILURE))}
+                            disabled={loading || mutating}
+                            onClick={() => mutate(async () => {
+                                const invite: FriendInvite = await createFriendInvite();
+                                if (active.current) setInvites(current => [...current, invite]);
+                            }, "Failed to create a friend code.")}
                         >
                             Create Friend Code
                         </Button>
@@ -109,10 +127,11 @@ export default function FriendCodesPanel() {
                             style={{ marginLeft: "8px" }}
                             color={Button.Colors.RED}
                             look={Button.Looks.FILLED}
-                            disabled={loading || !invites.length}
-                            onClick={() => revokeFriendInvites()
-                                .then(() => setInvites([]))
-                                .catch(() => showToast("Failed to revoke friend codes.", Toasts.Type.FAILURE))}
+                            disabled={loading || mutating || !invites.length}
+                            onClick={() => mutate(async () => {
+                                await revokeFriendInvites();
+                                if (active.current) setInvites([]);
+                            }, "Failed to revoke friend codes.")}
                         >
                             Revoke all Friend Codes
                         </Button>

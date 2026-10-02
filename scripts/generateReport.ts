@@ -21,7 +21,7 @@
 
 import { createHmac } from "crypto";
 import { readFileSync, writeFileSync } from "fs";
-import pup, { JSHandle } from "puppeteer-core";
+import pup, { Browser, ConsoleMessage, JSHandle, Page } from "puppeteer-core";
 
 const CANARY = process.env.USE_CANARY === "true";
 const logStderr = (...data: any[]) => console.error(`${CANARY ? "CANARY" : "STABLE"} ---`, ...data);
@@ -38,15 +38,8 @@ let metaData = {
     buildHash: "Unknown Build Hash"
 };
 
-const browser = await pup.launch({
-    headless: true,
-    executablePath: process.env.CHROMIUM_BIN,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-});
-
-const page = await browser.newPage();
-await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36");
-await page.setBypassCSP(true);
+let browser: Browser | undefined;
+let page: Page;
 
 async function maybeGetError(handle: JSHandle): Promise<string | undefined> {
     return await (handle as JSHandle<Error>)?.getProperty("message")
@@ -229,20 +222,38 @@ async function printReport() {
         await fetch(process.env.WEBHOOK_URL, {
             method: "POST",
             headers,
-            body
-        }).then(res => {
+            body,
+            signal: AbortSignal.timeout(30_000)
+        }).then(async res => {
             if (!res.ok) logStderr(`Webhook failed with status ${res.status}`);
             else logStderr("Posted to Webhook successfully");
+            await res.body?.cancel();
         });
     }
 }
 
 const reporterTimeoutMs = Number(process.env.REPORTER_TIMEOUT_MS ?? 180_000);
+if (!Number.isInteger(reporterTimeoutMs) || reporterTimeoutMs < 1_000 || reporterTimeoutMs > 900_000)
+    throw new Error("REPORTER_TIMEOUT_MS must be an integer between 1000 and 900000");
 let isFinishing = false;
-let reporterTimeout: ReturnType<typeof setTimeout>;
+let reporterTimeout: ReturnType<typeof setTimeout> | undefined;
+let finishing: Promise<void> | undefined;
 
-async function finishReporter(timedOut = false) {
-    if (isFinishing) return;
+function waitForReporterCleanup<Value>(promise: Promise<Value>, timeoutMs: number): Promise<Value> {
+    let timeout: ReturnType<typeof setTimeout>;
+    return Promise.race([
+        promise,
+        new Promise<never>((_resolve, reject) => { timeout = setTimeout(() => reject(new Error("Reporter browser cleanup timed out")), timeoutMs); }),
+    ]).finally(() => clearTimeout(timeout));
+}
+
+function terminateReporterBrowser() {
+    try { browser?.process()?.kill(); }
+    catch (error) { logStderr("Reporter browser termination failed", error); }
+}
+
+function finishReporter(timedOut = false, closeTimeoutMs = 10_000, finalTimeoutMs = 45_000) {
+    if (finishing) return finishing;
     isFinishing = true;
     clearTimeout(reporterTimeout);
 
@@ -253,14 +264,45 @@ async function finishReporter(timedOut = false) {
         process.exitCode = 1;
     }
 
-    await browser.close();
-    await printReport();
-    process.exit();
+    finishing = (async () => {
+        const finalTimeout = setTimeout(() => {
+            terminateReporterBrowser();
+            logStderr("Reporter finalization timed out");
+            process.exit(1);
+        }, finalTimeoutMs);
+        try {
+            try {
+                if (browser) await waitForReporterCleanup(browser.close(), closeTimeoutMs);
+            } catch (error) {
+                report.otherErrors.push(`Browser cleanup failed: ${String(error)}`);
+                logStderr("Browser cleanup failed", error);
+                process.exitCode = 1;
+                terminateReporterBrowser();
+            }
+            try { await printReport(); }
+            catch (error) {
+                logStderr("Report publication failed", error);
+                process.exitCode = 1;
+            }
+        } finally {
+            clearTimeout(finalTimeout);
+            process.exit();
+        }
+    })();
+    return finishing;
 }
 
-reporterTimeout = setTimeout(() => void finishReporter(true), reporterTimeoutMs);
+async function failReporter(error: unknown) {
+    if (!isFinishing) {
+        const message = error instanceof Error ? error.message : String(error);
+        logStderr("Reporter failed", message);
+        report.otherErrors.push(message);
+        process.exitCode = 1;
+    }
+    await finishReporter();
+}
 
-page.on("console", async e => {
+async function handleConsole(e: ConsoleMessage) {
     const level = e.type();
     const rawArgs = e.args();
 
@@ -340,7 +382,8 @@ page.on("console", async e => {
 
                 switch (message) {
                     case "A fatal error occurred:":
-                        process.exit(1);
+                        await failReporter(new Error(await getText()));
+                        return;
                 }
 
                 break;
@@ -349,7 +392,8 @@ page.on("console", async e => {
 
                 switch (message) {
                     case "A fatal error occurred:":
-                        process.exit(1);
+                        await failReporter(new Error(await getText()));
+                        return;
                     case "Webpack Find Fail:":
                         process.exitCode = 1;
                         report.badWebpackFinds.push(otherMessage);
@@ -374,10 +418,9 @@ page.on("console", async e => {
             }
         }
     }
-});
+}
 
-page.on("error", e => logStderr("[Error]", e.message));
-page.on("pageerror", (e: any) => {
+function handlePageError(e: any) {
     if (e.message.includes("Sentry successfully disabled")) return;
 
     if (!e.message.startsWith("Object") && !e.message.includes("Cannot find module") && !/^.{1,2}$/.test(e.message)) {
@@ -386,12 +429,32 @@ page.on("pageerror", (e: any) => {
     } else {
         report.ignoredErrors.push(e.message);
     }
-});
+}
 
-await page.evaluateOnNewDocument(`
+async function main() {
+    try {
+        browser = await pup.launch({
+            headless: true,
+            executablePath: process.env.CHROMIUM_BIN,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        reporterTimeout = setTimeout(() => void finishReporter(true), reporterTimeoutMs);
+        page = await browser.newPage();
+        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36");
+        await page.setBypassCSP(true);
+        page.on("console", e => { void handleConsole(e).catch(failReporter); });
+        page.on("error", e => { void failReporter(e); });
+        page.on("pageerror", handlePageError);
+        await page.evaluateOnNewDocument(`
     if (location.host.endsWith("discord.com")) {
         ${readFileSync("./dist/browser/browser.js", "utf-8")};
     }
 `);
 
-await page.goto(CANARY ? "https://canary.discord.com/login" : "https://discord.com/login", { timeout: 120000 });
+        await page.goto(CANARY ? "https://canary.discord.com/login" : "https://discord.com/login", { timeout: 120000 });
+    } catch (error) {
+        await failReporter(error);
+    }
+}
+
+void main();

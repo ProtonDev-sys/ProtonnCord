@@ -61,6 +61,10 @@ export function clearAvatarUrlCache(_userId?: string) {
     // This merged UserPFP variant resolves avatars directly, so there is no cache to clear.
 }
 
+export function hasLocalAvatar(userId: string): boolean {
+    return !!localAvatars[userId];
+}
+
 const settings = definePluginSettings({
     overrideServerAvatars: {
         type: OptionType.BOOLEAN,

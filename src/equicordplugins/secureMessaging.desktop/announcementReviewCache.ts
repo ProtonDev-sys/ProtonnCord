@@ -72,6 +72,7 @@ export function reviewAnnouncementCached(localUserId: string, message: Message):
     if (existing) cache.delete(key);
 
     pruneCache("", MAX_CACHE_ENTRIES - 1);
+    if (cache.size >= MAX_CACHE_ENTRIES) return Promise.resolve(cancelledReview());
     const entry: ReviewCacheEntry = {
         expiresAt: Number.POSITIVE_INFINITY,
         lastAccess: now,
@@ -80,8 +81,9 @@ export function reviewAnnouncementCached(localUserId: string, message: Message):
     };
     const generation = cacheGeneration;
     cache.set(key, entry);
+    const isCurrent = () => generation === cacheGeneration && cache.get(key) === entry && announcementReviewCacheKey(localUserId, message) === key;
     entry.promise = runReviewTask(() => {
-        if (generation !== cacheGeneration || cache.get(key) !== entry || !message.author?.id)
+        if (!isCurrent() || !message.author?.id)
             return Promise.resolve(cancelledReview());
         return Native.reviewAnnouncement(
             localUserId,
@@ -91,7 +93,10 @@ export function reviewAnnouncementCached(localUserId: string, message: Message):
             discordEditedTimestamp(message),
         );
     }).then(result => {
-        if (generation !== cacheGeneration || cache.get(key) !== entry) return cancelledReview();
+        if (!isCurrent()) {
+            if (cache.get(key) === entry) cache.delete(key);
+            return cancelledReview();
+        }
         if (isNativeFailure(result)) {
             cache.delete(key);
         } else {
@@ -103,7 +108,10 @@ export function reviewAnnouncementCached(localUserId: string, message: Message):
         }
         return result;
     }, error => {
-        if (generation !== cacheGeneration || cache.get(key) !== entry) return cancelledReview();
+        if (!isCurrent()) {
+            if (cache.get(key) === entry) cache.delete(key);
+            return cancelledReview();
+        }
         cache.delete(key);
         throw error;
     });

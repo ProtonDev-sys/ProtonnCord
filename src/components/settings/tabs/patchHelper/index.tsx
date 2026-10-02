@@ -24,30 +24,16 @@ import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { SettingsTab, wrapTab } from "@components/settings/tabs/BaseTab";
 import { Span } from "@components/Span";
-import { debounce } from "@shared/debounce";
 import { copyWithToast } from "@utils/discord";
 import { Margins } from "@utils/margins";
 import { stripIndent } from "@utils/text";
 import { ReplaceFn } from "@utils/types";
 import { search } from "@webpack";
-import { React, TextInput, useMemo, useState } from "@webpack/common";
+import { React, TextInput, useEffect, useMemo, useState } from "@webpack/common";
 
 import { FullPatchInput } from "./FullPatchInput";
 import { PatchPreview } from "./PatchPreview";
 import { ReplacementInput } from "./ReplacementInput";
-
-const findCandidates = debounce(function ({ find, setModule, setError }) {
-    const candidates = search(find);
-    const keys = Object.keys(candidates);
-    const len = keys.length;
-
-    if (len === 0)
-        setError("No match. Perhaps that module is lazy loaded?");
-    else if (len !== 1)
-        setError("Multiple matches. Please refine your filter");
-    else
-        setModule([keys[0], candidates[keys[0]]]);
-});
 
 function PatchHelper() {
     const [find, setFind] = useState("");
@@ -60,7 +46,28 @@ function PatchHelper() {
     const [matchError, setMatchError] = useState<string>();
     const [replacementError, setReplacementError] = useState<string>();
 
-    const [module, setModule] = useState<[number, Function]>();
+    const [module, setModule] = useState<[string, Function]>();
+
+    useEffect(() => {
+        setModule(void 0);
+        if (!parsedFind) return;
+
+        const timeout = setTimeout(() => {
+            const candidates = search(parsedFind);
+            const keys = Object.keys(candidates);
+
+            if (keys.length === 0)
+                setFindError("No match. Perhaps that module is lazy loaded?");
+            else if (keys.length !== 1)
+                setFindError("Multiple matches. Please refine your filter");
+            else {
+                setFindError(void 0);
+                setModule([keys[0], candidates[keys[0]]]);
+            }
+        }, 300);
+
+        return () => clearTimeout(timeout);
+    }, [parsedFind]);
 
     const code = useMemo(() => {
         const find = parsedFind instanceof RegExp ? parsedFind.toString() : JSON.stringify(parsedFind);
@@ -86,11 +93,8 @@ function PatchHelper() {
 
             setFindError(void 0);
             setParsedFind(parsedFind);
-
-            if (v.length) {
-                findCandidates({ find: parsedFind, setModule, setError: setFindError });
-            }
         } catch (e: any) {
+            setParsedFind("");
             setFindError((e as Error).message);
         }
     }

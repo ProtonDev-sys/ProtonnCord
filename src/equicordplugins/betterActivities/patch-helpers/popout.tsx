@@ -12,7 +12,7 @@ import { JSX } from "react";
 import { CarouselControls } from "../components/CarouselControls";
 import { settings } from "../settings";
 import { AllActivitiesProps } from "../types";
-import { ActivityView, getActivityApplication } from "../utils";
+import { ActivityView, getActivityApplication, getActivityKey } from "../utils";
 
 export function showAllActivitiesComponent({ activity, user, ...props }: Readonly<AllActivitiesProps>): JSX.Element | null {
     const currentUser = UserStore.getCurrentUser();
@@ -33,7 +33,7 @@ export function showAllActivitiesComponent({ activity, user, ...props }: Readonl
             return;
         }
 
-        const existing = currentActivity && activities.find(a => a.id === currentActivity.id);
+        const existing = currentActivity && activities.find(activity => getActivityKey(activity) === getActivityKey(currentActivity));
         if (!existing) {
             setCurrentActivity(activities[0]);
         } else if (existing !== currentActivity) {

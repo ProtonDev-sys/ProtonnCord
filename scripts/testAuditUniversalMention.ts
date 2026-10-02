@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { loadTestModule } from "./utils/loadTestModule";
 
 function loadMention() {
+    let accountId: string | undefined = "current-account";
     let users: Record<string, { id: string; }> = { first: { id: "first" } };
     let reads = 0;
     const listeners = new Set<() => void>();
@@ -16,6 +17,7 @@ function loadMention() {
         "@utils/types": { __esModule: true, default: (value: unknown) => value, OptionType: { BOOLEAN: 1 } },
         "@webpack/common": {
             UserStore: {
+                getCurrentUser: () => accountId ? { id: accountId } : undefined,
                 getUsers: () => { reads++; return users; },
                 addChangeListener: (listener: () => void) => listeners.add(listener),
                 removeChangeListener: (listener: () => void) => listeners.delete(listener)
@@ -25,6 +27,7 @@ function loadMention() {
     }, {}).default;
     return {
         plugin, listeners, dmUsers, settings,
+        switchAccount(id: string | undefined) { accountId = id; },
         get reads() { return reads; },
         addUser(id: string) { users[id] = { id }; for (const listener of listeners) listener(); },
         replaceUsers(id: string) { users = { [id]: { id } }; for (const listener of listeners) listener(); }
@@ -42,6 +45,20 @@ test("UniversalMention invalidates changed users without rebuilding unchanged qu
     assert.equal(fixture.reads, 2);
     fixture.replaceUsers("another-account");
     assert.equal(fixture.plugin.useFilter().map(user => user.id).join(","), "another-account");
+});
+
+test("UniversalMention isolates cached users across account changes and logout", () => {
+    const fixture = loadMention();
+    fixture.plugin.start?.();
+    fixture.plugin.useFilter();
+    fixture.switchAccount("next-account");
+    fixture.plugin.useFilter();
+    assert.equal(fixture.reads, 2);
+    fixture.switchAccount(undefined);
+    assert.equal(fixture.plugin.useFilter().length, 0);
+    assert.equal(fixture.reads, 2);
+    fixture.plugin.stop?.();
+    assert.equal(fixture.listeners.size, 0);
 });
 
 test("UniversalMention clears cache on stop and preserves dynamic DM filtering", () => {

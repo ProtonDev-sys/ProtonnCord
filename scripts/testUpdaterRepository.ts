@@ -7,6 +7,7 @@ const patcher = readFileSync("dist/desktop/patcher.js", "utf8");
 const gitUpdater = readFileSync("src/main/updater/git.ts", "utf8");
 const gitOperations = readFileSync("src/main/updater/gitOperations.ts", "utf8");
 const workflow = readFileSync(".github/workflows/build.yml", "utf8");
+const releasePipeline = readFileSync("scripts/releaseUpdateChannel.mjs", "utf8");
 
 assert.match(patcher, /\/\/ Development: false/u, "the repository test must inspect a production build");
 assert.match(patcher, /\/\/ Updater Disabled: false/u, "the repository test must inspect an updater-enabled build");
@@ -59,13 +60,17 @@ assert.doesNotMatch(workflow, /git fetch --no-tags origin "\$branch"/u,
     "release freshness checks must not resolve a same-named channel tag");
 assert.match(workflow, /git rev-parse HEAD[^\n]+git rev-parse FETCH_HEAD/u);
 assert.doesNotMatch(workflow, /git rev-parse origin\/main/u);
-assert.match(workflow, /if \[\[ "\$branch" == "main" \]\]; then\s+tag="latest"\s+release_flags=\(--latest\)/u);
-assert.match(workflow, /else\s+tag="\$branch"\s+release_flags=\(--prerelease\)/u);
-assert.match(workflow, /title="Protonn Cord \$branch \$GITHUB_SHA"/u);
-assert.match(workflow, /git push origin "refs\/tags\/\$tag" --force/u);
-assert.match(workflow, /gh release edit "\$tag" --target "\$GITHUB_SHA" --title "\$title" "\$\{release_flags\[@\]\}"/u);
-assert.match(workflow, /gh release create "\$tag" --target "\$GITHUB_SHA" --title "\$title"/u);
-assert.match(workflow, /gh release upload "\$tag" --clobber dist\/release\/\*/u);
+assert.match(workflow, /node scripts\/releaseUpdateChannel\.mjs/u);
+assert.match(workflow, /tsx --test scripts\/testAuditReleaseAtomicityDeep\.ts/u);
+assert.match(releasePipeline, /const channel = branch === "main" \? "latest" : branch/u);
+assert.match(releasePipeline, /const title = `Protonn Cord \$\{branch\} \$\{sha\}`/u);
+assert.match(releasePipeline, /draft: true, prerelease: branch !== "main", make_latest: "false"/u);
+assert.match(releasePipeline, /draft: false, make_latest: branch === "main" \? "true" : "false"/u);
+assert.doesNotMatch(workflow, /gh release upload[^\n]+--clobber/u);
+const verification = releasePipeline.indexOf("await verifyAssets(staged.id, staged.tag_name, true)");
+const replacement = releasePipeline.indexOf("await edit(old.id, { tag_name: backupTag, draft: true })");
+assert.ok(verification >= 0 && replacement > verification,
+    "staged assets must be verified before replacing the public release");
 assert.match(workflow, /cp ProtonnCord\.user\.\{js,js\.LEGAL\.txt\} release/u);
 assert.doesNotMatch(workflow, /cp Equicord\.user/u);
 assert.match(workflow, /shopt -s nullglob/u);

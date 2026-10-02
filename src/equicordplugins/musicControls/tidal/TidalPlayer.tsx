@@ -214,7 +214,10 @@ function AlbumContextMenu({ track }: { track: PlayerState["track"]; }) {
     return (
         <Menu.Menu
             navId="tdl-album-menu"
-            onClose={() => FluxDispatcher.dispatch({ type: "CONTEXT_MENU_CLOSE" })}
+            onClose={() => {
+                setVolume.flush();
+                FluxDispatcher.dispatch({ type: "CONTEXT_MENU_CLOSE" });
+            }}
             aria-label="Tidal Album Menu"
         >
             <Menu.MenuItem

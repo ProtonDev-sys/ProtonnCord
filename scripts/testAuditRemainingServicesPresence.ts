@@ -37,6 +37,7 @@ function serviceFixture(file: string, store: Record<string, unknown>, extraImpor
         "@api/Settings": { SettingsStore: settingsStore }, "../settings": serviceSettings
     }, globals);
     const imports = {
+        "@api/Settings": { SettingsStore: settingsStore },
         "../settings": serviceSettings,
         "./polling": polling,
         "@utils/Logger": logger,

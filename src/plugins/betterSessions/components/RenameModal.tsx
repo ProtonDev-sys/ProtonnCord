@@ -19,7 +19,7 @@
 import { TextButton } from "@components/Button";
 import { Heading } from "@components/Heading";
 import { SessionInfo } from "@plugins/betterSessions/types";
-import { getDataKey, getDefaultName, isSessionCacheCurrent, savedSessionsCache, saveSessionsToDataStore } from "@plugins/betterSessions/utils";
+import { getDataKey, getDefaultName, isSessionCacheCurrent, notifySessionNames, savedSessionsCache, saveSessionsToDataStore } from "@plugins/betterSessions/utils";
 import { Logger } from "@utils/Logger";
 import { RenderModalProps } from "@vencord/discord-types";
 import { Modal, React, TextInput, Toasts } from "@webpack/common";
@@ -28,19 +28,31 @@ import { KeyboardEvent } from "react";
 export function RenameModal({ props, session }: { props: RenderModalProps; session: SessionInfo["session"]; }) {
     const [accountKey] = React.useState(getDataKey);
     const [value, setValue] = React.useState(savedSessionsCache.get(session.id_hash)?.name ?? "");
+    const saving = React.useRef(false);
 
     async function onSaveClick() {
+        if (saving.current) return;
         if (accountKey !== getDataKey() || !isSessionCacheCurrent()) {
             Toasts.show({ id: Toasts.genId(), type: Toasts.Type.FAILURE, message: "The account changed. Reopen the device settings to rename this session." });
             return;
         }
+        const previous = savedSessionsCache.get(session.id_hash);
+        const renamed = { name: value, isNew: false };
+        saving.current = true;
         try {
-            savedSessionsCache.set(session.id_hash, { name: value, isNew: false });
+            savedSessionsCache.set(session.id_hash, renamed);
             await saveSessionsToDataStore();
             props.onClose();
         } catch (error) {
+            if (accountKey === getDataKey() && isSessionCacheCurrent() && savedSessionsCache.get(session.id_hash) === renamed) {
+                if (previous) savedSessionsCache.set(session.id_hash, previous);
+                else savedSessionsCache.delete(session.id_hash);
+                notifySessionNames();
+            }
             new Logger("BetterSessions").error("Failed to save session name", error);
             Toasts.show({ id: Toasts.genId(), type: Toasts.Type.FAILURE, message: "Could not save the session name. Try again." });
+        } finally {
+            saving.current = false;
         }
     }
 

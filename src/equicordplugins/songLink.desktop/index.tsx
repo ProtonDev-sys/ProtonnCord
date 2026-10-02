@@ -9,7 +9,7 @@ import { definePluginSettings } from "@api/Settings";
 import { Devs, EquicordDevs } from "@utils/constants";
 import { sendMessage } from "@utils/discord";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
-import { useEffect, useState } from "@webpack/common";
+import { useEffect, UserStore, useState } from "@webpack/common";
 
 import { Providers } from "./Providers";
 import { Settings } from "./Settings";
@@ -57,19 +57,35 @@ export type SongLinkResult = {
 export const Native = VencordNative.pluginHelpers.SongLink as PluginNative<typeof import("./native")>;
 const MUSIC_LINK_REGEX = /https:\/\/(?:open|play)\.spotify\.com\/track\/[a-zA-Z0-9]+|https:\/\/(?:music|itunes)\.apple\.com\/[a-z]{2}\/album\/\S+|https:\/\/music\.youtube\.com\/watch\?v=[0-9A-Za-z_-]+|https:\/\/(?:listen\.)?tidal\.com\/(?:browse\/)?track\/[0-9]+/g;
 const MAX_SONG_LINK_CACHE_ENTRIES = 100;
+let active = false;
+let generation = 0;
 
 function extractMusicLinks(content: string) {
     MUSIC_LINK_REGEX.lastIndex = 0;
-    const links = content.match(MUSIC_LINK_REGEX);
+    const links = content.match(MUSIC_LINK_REGEX)?.map(link => link.replace(/[.,;:!?)\]}]+$/g, ""));
 
     return links?.length ? Array.from(new Set(links)) : null;
+}
+
+export function getServiceSettings(service: string, configured = settings.store.servicesSettings) {
+    const saved = configured[service];
+    return { ...saved, enabled: saved?.enabled ?? true, openInNative: saved?.openInNative ?? !!Providers[service]?.native };
+}
+
+function escapeMetadata(text: string) {
+    return text.replace(/[\r\n]+/g, " ").replace(/([\\`*_{}[\]()<>|~#])/g, "\\$1").replace(/@/g, "@\u200b");
+}
+
+function getTrackKey(data: SongLinkResult, fallback: string) {
+    const links = Object.entries(data.links).filter(([, value]) => value?.url).sort(([left], [right]) => left.localeCompare(right));
+    return links.length ? JSON.stringify(links.map(([service, value]) => [service, value.url])) : fallback;
 }
 
 function formatMessage(data: SongLinkResult): string | null {
     const lines: string[] = [];
 
-    for (const [serviceKey, service] of Object.entries(settings.store.servicesSettings)) {
-        if (!service.enabled) continue;
+    for (const serviceKey of Object.keys(Providers)) {
+        if (!getServiceSettings(serviceKey).enabled) continue;
 
         const platformData = data.links[serviceKey];
         if (!platformData?.url) continue;
@@ -85,7 +101,7 @@ function formatMessage(data: SongLinkResult): string | null {
     const parts: string[] = [];
 
     if (settings.store.includeMetadata && data.info?.title && data.info?.artist) {
-        parts.push(`### **${data.info.title}** — *${data.info.artist}*`);
+        parts.push(`### **${escapeMetadata(data.info.title)}** — *${escapeMetadata(data.info.artist)}*`);
     }
 
     parts.push(lines.join("\n"));
@@ -103,9 +119,7 @@ function SongLinkerList({ urls }: { urls: string[]; }) {
     }, [urls.join("\n")]);
 
     function onResolved(url: string, result: SongLinkResult) {
-        const key = result.info
-            ? `${result.info.title}\0${result.info.artist}`
-            : url;
+        const key = getTrackKey(result, url);
         setResolvedKeys(prev => prev[url] === key ? prev : { ...prev, [url]: key });
     }
 
@@ -189,6 +203,10 @@ export default definePlugin({
                 },
             ],
             execute: async (opts, ctx) => {
+                const ownerUserId = UserStore.getCurrentUser()?.id;
+                const currentGeneration = generation;
+                const isCurrent = () => active && generation === currentGeneration && !!ownerUserId && UserStore.getCurrentUser()?.id === ownerUserId;
+                if (!isCurrent()) return;
                 const url = findOption<string>(opts, "url", "");
 
                 if (!url) {
@@ -204,6 +222,7 @@ export default definePlugin({
 
                 try {
                     const data = await Native.getTrackData(url);
+                    if (!isCurrent()) return;
                     const formatted = formatMessage(data);
 
                     if (!formatted) {
@@ -216,6 +235,7 @@ export default definePlugin({
 
                     await sendMessage(ctx.channel.id, { content: formatted });
                 } catch (e: any) {
+                    if (!isCurrent()) return;
                     sendBotMessage(ctx.channel.id, {
                         content: "Failed to resolve music link",
                     });
@@ -223,7 +243,13 @@ export default definePlugin({
             },
         },
     ],
+    start() {
+        active = true;
+        generation++;
+    },
     stop() {
+        active = false;
+        generation++;
         this.cache = {};
         this.cacheKeys = [];
     },

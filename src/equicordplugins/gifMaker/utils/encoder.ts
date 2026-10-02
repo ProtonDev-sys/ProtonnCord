@@ -7,7 +7,7 @@
 import { sleep } from "@utils/misc";
 import type { PluginNative } from "@utils/types";
 import { applyPalette, GIFEncoder, quantize } from "gifenc";
-import { decompressFrames, parseGIF } from "gifuct-js";
+import { decompressFrame, parseGIF } from "gifuct-js";
 
 import { CAPTIONS } from "../captions";
 import { measureTextLines } from "../captions/caption";
@@ -17,6 +17,15 @@ import type { GifMakerOptions } from "../types";
 const MAX_FRAMES = 200;
 const INTERNAL_FPS = 30;
 const PALETTE_COLORS = 255;
+const MAX_RGBA_BYTES = 64 * 1024 * 1024;
+const MAX_PALETTE_PIXELS = 256 * 1024;
+
+function rgbaBytes(width: number, height: number) {
+    if (![width, height].every(value => Number.isSafeInteger(value) && value > 0 && value <= 8192)) {
+        throw new Error("GIF dimensions must be whole numbers between 1 and 8192.");
+    }
+    return width * height * 4;
+}
 
 const ALLOWED_MEDIA_HOSTS = new Set([
     "cdn.discordapp.com",
@@ -175,12 +184,22 @@ async function encodeFrames(
     frameCount: number,
     drawFrame: (ctx: CanvasRenderingContext2D, i: number) => void | Promise<void>,
     delays?: number[],
+    reservedBytes = 0,
 ): Promise<Blob> {
+    rgbaBytes(width, height);
+    if (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount > MAX_FRAMES) {
+        throw new Error(`GIF animations must contain between 1 and ${MAX_FRAMES} frames.`);
+    }
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) throw new Error("Failed to get canvas context for GIF encoding.");
     const captionHeight = getCaptionHeight(ctx, width, options);
     const gifHeight = height + captionHeight;
+    const frameBytes = rgbaBytes(width, gifHeight);
+    const palettePixels = Math.min(frameBytes / 4 * frameCount, MAX_PALETTE_PIXELS);
+    if (frameBytes * (frameCount + 1) + palettePixels * 4 + reservedBytes > MAX_RGBA_BYTES) {
+        throw new Error("GIF decoded pixels exceed the 64 MiB memory budget. Reduce dimensions or frame count.");
+    }
     canvas.width = width;
     canvas.height = gifHeight;
 
@@ -205,15 +224,16 @@ async function encodeFrames(
         frameData.push(ctx.getImageData(0, 0, width, gifHeight).data);
     }
 
-    const totalLength = frameData.reduce((sum, data) => sum + data.length, 0);
-    const combined = new Uint8ClampedArray(totalLength);
-    let offset = 0;
-    for (const data of frameData) {
-        combined.set(data, offset);
-        offset += data.length;
+    const samples = new Uint8ClampedArray(palettePixels * 4);
+    const pixelsPerFrame = frameBytes / 4;
+    for (let sample = 0; sample < palettePixels; sample++) {
+        const pixel = Math.floor(sample * pixelsPerFrame * frameCount / palettePixels);
+        const data = frameData[Math.floor(pixel / pixelsPerFrame)];
+        const offset = pixel % pixelsPerFrame * 4;
+        samples.set(data.subarray(offset, offset + 4), sample * 4);
     }
 
-    const palette = quantize(combined, PALETTE_COLORS);
+    const palette = quantize(samples, PALETTE_COLORS);
     const gif = GIFEncoder();
 
     for (let i = 0; i < frameCount; i++) {
@@ -277,9 +297,7 @@ function hasExt(url: string, ext: string): boolean {
 }
 
 export async function createGif(url: string, isVideo: boolean, options: GifMakerOptions): Promise<Blob> {
-    if (![options.width, options.height].every(value => Number.isSafeInteger(value) && value > 0 && value <= 8192)) {
-        throw new Error("GIF dimensions must be whole numbers between 1 and 8192.");
-    }
+    rgbaBytes(options.width, options.height);
     if (options.captionMode === "caption") await loadGoogleFont(options.fontFamily);
     if (isVideo) return createGifFromVideo(url, options);
     if (hasExt(url, ".gif")) {
@@ -297,12 +315,24 @@ export async function createGif(url: string, isVideo: boolean, options: GifMaker
 async function createGifFromAnimatedImage(url: string, options: GifMakerOptions): Promise<Blob> {
     const bytes = await fetchFullGifBytes(url);
     const parsedGif = parseGIF(bytes.buffer as ArrayBuffer);
-    const frames = decompressFrames(parsedGif, true);
+    const frames = parsedGif.frames.filter(frame => "image" in frame);
 
     if (frames.length <= 1) throw new Error("No animated frames found");
 
     const gifW = parsedGif.lsd.width;
     const gifH = parsedGif.lsd.height;
+    const sourceBytes = rgbaBytes(gifW, gifH);
+    if (frames.length > MAX_FRAMES) throw new Error(`GIF animations must contain at most ${MAX_FRAMES} frames.`);
+    let patchBytes = 0;
+    for (const frame of frames) {
+        const { width, height, left, top } = frame.image.descriptor;
+        patchBytes = Math.max(patchBytes, rgbaBytes(width, height));
+        if (![left, top].every(value => Number.isSafeInteger(value) && value >= 0) || left + width > gifW || top + height > gifH) {
+            throw new Error("GIF frame lies outside its canvas.");
+        }
+    }
+    const reservedBytes = sourceBytes * 2 + patchBytes * 7;
+    if (reservedBytes > MAX_RGBA_BYTES) throw new Error("GIF source decode exceeds the 64 MiB memory budget.");
 
     const composite = document.createElement("canvas");
     composite.width = gifW;
@@ -313,56 +343,32 @@ async function createGifFromAnimatedImage(url: string, options: GifMakerOptions)
     const patchCanvas = document.createElement("canvas");
 
     const totalFrames = frames.length;
-    const rendered: HTMLCanvasElement[] = [];
-    const delays: number[] = [];
-
-    for (let i = 0; i < totalFrames; i++) {
-        const frame = frames[i];
-        delays.push(frame.delay);
-
-        if (i > 0) {
-            const prev = frames[i - 1];
-            if (prev.disposalType === 2) {
-                ctx.clearRect(prev.dims.left, prev.dims.top, prev.dims.width, prev.dims.height);
-            } else if (prev.disposalType === 3 && i > 1) {
-                const prevCtx = rendered[i - 2].getContext("2d");
-                if (prevCtx) {
-                    const prevState = prevCtx.getImageData(0, 0, gifW, gifH);
-                    ctx.putImageData(prevState, 0, 0);
-                }
-            }
-        }
-
-        const patchData = new ImageData(
-            new Uint8ClampedArray(frame.patch),
-            frame.dims.width,
-            frame.dims.height
-        );
-        patchCanvas.width = frame.dims.width;
-        patchCanvas.height = frame.dims.height;
-        const patchCtx = patchCanvas.getContext("2d");
-        if (!patchCtx) throw new Error("Failed to get canvas context for patch rendering.");
-        patchCtx.putImageData(patchData, 0, 0);
-        ctx.drawImage(patchCanvas, frame.dims.left, frame.dims.top);
-
-        const snap = document.createElement("canvas");
-        snap.width = gifW;
-        snap.height = gifH;
-        const snapCtx = snap.getContext("2d");
-        if (!snapCtx) throw new Error("Failed to get canvas context for frame snapshot.");
-        snapCtx.drawImage(composite, 0, 0);
-        rendered.push(snap);
-
-        if (i % 20 === 19) {
-            await sleep(0);
-        }
-    }
+    const delays = frames.map(frame => (frame.gce?.delay || 10) * 10);
+    let previous: Pick<ReturnType<typeof decompressFrame>, "dims" | "disposalType"> | undefined;
+    let previousCanvas: ImageData | null = null;
 
     return await encodeFrames(
         options.width, options.height, options, totalFrames,
-        (encodeCtx, i) => {
-            encodeCtx.drawImage(rendered[i], 0, 0, options.width, options.height);
+        async (encodeCtx, index) => {
+            if (previous?.disposalType === 2) {
+                ctx.clearRect(previous.dims.left, previous.dims.top, previous.dims.width, previous.dims.height);
+            } else if (previous?.disposalType === 3 && previousCanvas) {
+                ctx.putImageData(previousCanvas, 0, 0);
+            }
+            previous = undefined;
+            previousCanvas = null;
+            const frame = decompressFrame(frames[index], parsedGif.gct, true);
+            if (frame.disposalType === 3) previousCanvas = ctx.getImageData(0, 0, gifW, gifH);
+            patchCanvas.width = frame.dims.width;
+            patchCanvas.height = frame.dims.height;
+            const patchCtx = patchCanvas.getContext("2d");
+            if (!patchCtx) throw new Error("Failed to get canvas context for patch rendering.");
+            patchCtx.putImageData(new ImageData(new Uint8ClampedArray(frame.patch), frame.dims.width, frame.dims.height), 0, 0);
+            ctx.drawImage(patchCanvas, frame.dims.left, frame.dims.top);
+            encodeCtx.drawImage(composite, 0, 0, options.width, options.height);
+            previous = { dims: frame.dims, disposalType: frame.disposalType };
+            if (index % 20 === 19) await sleep(0);
         },
-        delays
+        delays, reservedBytes
     );
 }

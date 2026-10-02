@@ -13,7 +13,7 @@ import { findByCodeLazy } from "@webpack";
 import { QuestStore, RestAPI } from "@webpack/common";
 import { NavigationRouter } from "@webpack/common/utils";
 
-import { getQuestifySettings } from "../settings/access";
+import { getCurrentUserId, getQuestifySettings } from "../settings/access";
 import { questIsIgnored } from "../settings/ignoredQuests";
 import { getNewQuests, normalizeQuestName, type QuestIncludedTypes, questMatchesIncludedTypes } from "./filtering";
 import { QL } from "./logging";
@@ -42,6 +42,12 @@ export const fetchAndDispatchQuests = findByCodeLazy("QUESTS_FETCH_CURRENT_QUEST
 const parseQuestConfig = findByCodeLazy("config).with({config_version:");
 const formatQuestData = findByCodeLazy("config),userStatus:null==");
 let fetchAndAlertQuestsPromise: Promise<Quest[] | null> | undefined;
+let fetchGeneration = 0;
+
+export function invalidateQuestFetchAlerts(): void {
+    fetchGeneration++;
+    fetchAndAlertQuestsPromise = undefined;
+}
 
 async function fetchQuestById(questId: string): Promise<Quest | null> {
     try {
@@ -62,15 +68,20 @@ async function fetchQuestById(questId: string): Promise<Quest | null> {
     }
 }
 
-async function fetchExcludedQuestConfigs(questIds: string[]): Promise<Quest[]> {
+async function fetchExcludedQuestConfigs(questIds: string[], isCurrent: () => boolean): Promise<Quest[]> {
     const quests: Quest[] = [];
 
     for (const [index, questId] of questIds.entries()) {
+        if (!isCurrent()) break;
         if (index > 0) {
             await sleep(1000);
         }
 
+        if (!isCurrent()) break;
+
         const quest = await fetchQuestById(questId);
+
+        if (!isCurrent()) break;
 
         if (quest) {
             quests.push(quest);
@@ -135,19 +146,17 @@ function notifyNewQuests(quests: Quest[], excluded: boolean): void {
     });
 }
 
-async function doFetchAndAlertQuests(): Promise<Quest[] | null> {
+async function doFetchAndAlertQuests(isCurrent: () => boolean): Promise<Quest[] | null> {
+    if (!isCurrent()) return null;
     const settings = getQuestifySettings();
-    const alertSound = settings.newQuestAlertSound;
-    const alertVolume = settings.newQuestAlertVolume;
-    const excludedAlertSound = settings.newExcludedQuestAlertSound;
-    const excludedAlertVolume = settings.newExcludedQuestAlertVolume;
-    const shouldFetchExcludedQuests = settings.notifyOnNewExcludedQuests || Boolean(excludedAlertSound);
+    const shouldFetchExcludedQuests = settings.notifyOnNewExcludedQuests || Boolean(settings.newExcludedQuestAlertSound);
     const currentQuests = Array.from(QuestStore.quests.values());
     const currentExcludedQuestIds = new Set(Array.from(QuestStore.excludedQuests.values()).map(quest => quest.id));
-    const includedTypes = settings.questButtonIncludedTypes as QuestIncludedTypes;
 
     await fetchAndDispatchQuests();
+    if (!isCurrent()) return null;
     await sleep(1000);
+    if (!isCurrent()) return null;
 
     const nextQuests = Array.from(QuestStore.quests.values());
 
@@ -166,13 +175,20 @@ async function doFetchAndAlertQuests(): Promise<Quest[] | null> {
         return nextQuests;
     }
 
-    const newExcludedQuests = newExcludedQuestIds.length > 0 ? await fetchExcludedQuestConfigs(newExcludedQuestIds) : [];
+    const newExcludedQuests = newExcludedQuestIds.length > 0 ? await fetchExcludedQuestConfigs(newExcludedQuestIds, isCurrent) : [];
+    if (!isCurrent()) return null;
+    const currentSettings = getQuestifySettings();
+    const includedTypes = currentSettings.questButtonIncludedTypes as QuestIncludedTypes;
+    const alertSound = currentSettings.newQuestAlertSound;
+    const alertVolume = currentSettings.newQuestAlertVolume;
+    const excludedAlertSound = currentSettings.newExcludedQuestAlertSound;
+    const excludedAlertVolume = currentSettings.newExcludedQuestAlertVolume;
     const newIncludedQuests = newQuests.filter(quest => questMatchesIncludedTypes(quest, includedTypes) && !questIsIgnored(quest.id));
     const newIncludedExcludedQuests = newExcludedQuests.filter(quest => questMatchesIncludedTypes(quest, includedTypes) && !questIsIgnored(quest.id));
     const shouldAlert = Boolean(alertSound) && newIncludedQuests.length > 0;
     const shouldAlertExcluded = Boolean(excludedAlertSound) && newIncludedExcludedQuests.length > 0;
-    const shouldNotify = settings.notifyOnNewQuests && newIncludedQuests.length > 0;
-    const shouldNotifyExcluded = settings.notifyOnNewExcludedQuests && newIncludedExcludedQuests.length > 0;
+    const shouldNotify = currentSettings.notifyOnNewQuests && newIncludedQuests.length > 0;
+    const shouldNotifyExcluded = currentSettings.notifyOnNewExcludedQuests && newIncludedExcludedQuests.length > 0;
 
     if (shouldAlert) {
         playAudio(
@@ -204,11 +220,18 @@ export async function fetchAndAlertQuests(_source: string): Promise<Quest[] | nu
         return fetchAndAlertQuestsPromise;
     }
 
-    fetchAndAlertQuestsPromise = doFetchAndAlertQuests();
+    const generation = fetchGeneration;
+    const accountId = getCurrentUserId();
+    const isCurrent = () => generation === fetchGeneration && !!accountId && getCurrentUserId() === accountId && !getQuestifySettings().disableQuestsEverything;
+    const pending = doFetchAndAlertQuests(isCurrent);
+    fetchAndAlertQuestsPromise = pending;
 
     try {
-        return await fetchAndAlertQuestsPromise;
+        return await pending;
+    } catch {
+        if (isCurrent()) QL.warn("FETCH_AND_ALERT_QUESTS_FAILED");
+        return null;
     } finally {
-        fetchAndAlertQuestsPromise = undefined;
+        if (fetchAndAlertQuestsPromise === pending) fetchAndAlertQuestsPromise = undefined;
     }
 }

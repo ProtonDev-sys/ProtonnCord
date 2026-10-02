@@ -74,7 +74,7 @@ function HotkeyRecorder() {
             event.preventDefault();
             event.stopPropagation();
             keys.add(event.key.toLowerCase());
-            if (keys.size > longestKeys.length) longestKeys = [...keys];
+            if (keys.size > longestKeys.length && [...keys].filter(key => !isModifierKey(key)).length <= 1) longestKeys = [...keys];
         };
         const keyup = (event: KeyboardEvent) => {
             event.preventDefault();

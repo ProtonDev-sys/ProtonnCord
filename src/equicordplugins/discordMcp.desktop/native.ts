@@ -11,6 +11,7 @@ import { watch } from "fs";
 import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "fs/promises";
 import { basename, extname, join } from "path";
 
+import { assertTrustedNativeEvent } from "../fileUpload/nativeNetwork";
 import { DISCORD_MCP_TOOL_NAMES, isDiscordSnowflake, sentMessageKey } from "./policy";
 
 interface BridgeRequest {
@@ -196,11 +197,12 @@ async function ensureInitialized(): Promise<void> {
     return initialization;
 }
 
-export async function initializeBridge(_: IpcMainInvokeEvent, sessionId?: string): Promise<{
+export async function initializeBridge(event: IpcMainInvokeEvent, sessionId?: string): Promise<{
     queueDirectory: string;
     allowedTools: readonly string[];
     sentMessageCount: number;
 }> {
+    assertTrustedNativeEvent(event);
     if (sessionId !== undefined) {
         if (typeof sessionId !== "string" || !REQUEST_ID.test(sessionId)) throw new Error("Invalid Discord MCP session ID");
         requestSession?.controller.abort();
@@ -216,7 +218,8 @@ export async function initializeBridge(_: IpcMainInvokeEvent, sessionId?: string
     };
 }
 
-export function cancelRequests(_: IpcMainInvokeEvent, sessionId: string): void {
+export function cancelRequests(event: IpcMainInvokeEvent, sessionId: string): void {
+    assertTrustedNativeEvent(event);
     if (requestSession?.id === sessionId) requestSession.controller.abort();
 }
 
@@ -278,7 +281,8 @@ function waitForRequestSignal(timeoutMs: number, signal: AbortSignal): Promise<v
     });
 }
 
-export async function takeRequests(_: IpcMainInvokeEvent, waitMs = 10_000, sessionId?: string): Promise<BridgeRequest[]> {
+export async function takeRequests(event: IpcMainInvokeEvent, waitMs = 10_000, sessionId?: string): Promise<BridgeRequest[]> {
+    assertTrustedNativeEvent(event);
     const session = requestSession;
     if (!session || session.id !== sessionId || session.controller.signal.aborted) return [];
     const { signal } = session.controller;
@@ -307,14 +311,16 @@ async function retryResponses(): Promise<void> {
     for (const response of pendingResponses.values()) await persistResponse(response).catch(() => { });
 }
 
-export async function writeResponse(_: IpcMainInvokeEvent, response: BridgeResponse): Promise<void> {
+export async function writeResponse(event: IpcMainInvokeEvent, response: BridgeResponse): Promise<void> {
+    assertTrustedNativeEvent(event);
     await ensureInitialized();
     if (!response || !REQUEST_ID.test(response.id)) throw new Error("Invalid Discord MCP response ID");
     pendingResponses.set(response.id, response);
     await persistResponse(response);
 }
 
-export async function recordSentMessage(_: IpcMainInvokeEvent, channelId: string, messageId: string): Promise<void> {
+export async function recordSentMessage(event: IpcMainInvokeEvent, channelId: string, messageId: string): Promise<void> {
+    assertTrustedNativeEvent(event);
     await ensureInitialized();
     if (!isDiscordSnowflake(channelId) || !isDiscordSnowflake(messageId)) throw new Error("Invalid message identity");
     sentMessages.add(sentMessageKey(channelId, messageId));
@@ -323,13 +329,15 @@ export async function recordSentMessage(_: IpcMainInvokeEvent, channelId: string
     await persistSentLedger();
 }
 
-export async function isSentMessage(_: IpcMainInvokeEvent, channelId: string, messageId: string): Promise<boolean> {
+export async function isSentMessage(event: IpcMainInvokeEvent, channelId: string, messageId: string): Promise<boolean> {
+    assertTrustedNativeEvent(event);
     await ensureInitialized();
     if (!isDiscordSnowflake(channelId) || !isDiscordSnowflake(messageId)) return false;
     return sentMessages.has(sentMessageKey(channelId, messageId));
 }
 
-export async function forgetSentMessage(_: IpcMainInvokeEvent, channelId: string, messageId: string): Promise<void> {
+export async function forgetSentMessage(event: IpcMainInvokeEvent, channelId: string, messageId: string): Promise<void> {
+    assertTrustedNativeEvent(event);
     await ensureInitialized();
     if (!isDiscordSnowflake(channelId) || !isDiscordSnowflake(messageId)) return;
     sentMessages.delete(sentMessageKey(channelId, messageId));
@@ -366,15 +374,22 @@ async function fetchAttachmentData(url: string): Promise<AttachmentData> {
     const chunks: Uint8Array[] = [];
     let size = 0;
     const reader = response.body.getReader();
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.byteLength;
-        if (size > MAX_ATTACHMENT_SIZE) {
-            await reader.cancel();
-            throw new Error("Attachment exceeds the 25 MB Discord MCP limit");
+    let completed = false;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+                completed = true;
+                break;
+            }
+            size += value.byteLength;
+            if (size > MAX_ATTACHMENT_SIZE)
+                throw new Error("Attachment exceeds the 25 MB Discord MCP limit");
+            chunks.push(value);
         }
-        chunks.push(value);
+    } finally {
+        if (!completed) await reader.cancel().catch(() => { });
+        reader.releaseLock();
     }
 
     return {
@@ -383,10 +398,11 @@ async function fetchAttachmentData(url: string): Promise<AttachmentData> {
     };
 }
 
-export async function fetchDiscordAttachment(_: IpcMainInvokeEvent, url: string): Promise<{
+export async function fetchDiscordAttachment(event: IpcMainInvokeEvent, url: string): Promise<{
     contentType: string;
     data: Uint8Array;
 }> {
+    assertTrustedNativeEvent(event);
     await ensureInitialized();
     if (typeof url !== "string") throw new Error("Invalid attachment URL");
     const result = await fetchAttachmentData(url);
@@ -394,10 +410,11 @@ export async function fetchDiscordAttachment(_: IpcMainInvokeEvent, url: string)
 }
 
 export async function downloadDiscordAttachment(
-    _: IpcMainInvokeEvent,
+    event: IpcMainInvokeEvent,
     url: string,
     filename: string
 ): Promise<DownloadResult> {
+    assertTrustedNativeEvent(event);
     await ensureInitialized();
     if (typeof url !== "string" || typeof filename !== "string") throw new Error("Invalid attachment");
 

@@ -89,7 +89,7 @@ export default definePlugin({
             CustomRange(isResolution ? {
                 onChange: (value: number) => changeStream(value * rounder),
                 initialValue: initialValue / rounder,
-                minMax: [MIN_RESOLUTION / rounder, maxResolution / rounder],
+                minMax: [Math.ceil(MIN_RESOLUTION / rounder), maxResolution / rounder],
                 group: "resolution",
                 id: "stream-option-resolution",
                 suffix: roundResolution ? "0p" : "p"
@@ -121,7 +121,7 @@ export default definePlugin({
             CustomRange(isResolution ? {
                 onChange: (value: number) => changeStream(p1, value * rounder, getFPS(), p2),
                 initialValue: getResolution() / rounder,
-                minMax: [MIN_RESOLUTION / rounder, maxResolution / rounder],
+                minMax: [Math.ceil(MIN_RESOLUTION / rounder), maxResolution / rounder],
                 group: "stream-settings-resolution",
                 id: "stream-settings-resolution",
                 suffix: roundResolution ? "0p" : "p"

@@ -556,13 +556,13 @@ export function TabContextMenu({ tab }: { tab: ChannelTabsProps; }) {
                 <Menu.MenuItem
                     id="close-right-tabs"
                     label="Close Tabs to the Right"
-                    disabled={openedTabs.indexOf(tab) === openedTabs.length - 1}
+                    disabled={openedTabs.findIndex(openedTab => openedTab.id === tab.id) === openedTabs.length - 1}
                     action={() => closeTabsToTheRight(tab.id)}
                 />
                 <Menu.MenuItem
                     id="close-left-tabs"
                     label="Close Tabs to the Left"
-                    disabled={openedTabs.indexOf(tab) === 0}
+                    disabled={openedTabs.findIndex(openedTab => openedTab.id === tab.id) === 0}
                     action={() => closeTabsToTheLeft(tab.id)}
                 />
                 <Menu.MenuItem

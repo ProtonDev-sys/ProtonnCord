@@ -144,7 +144,7 @@ export function createRendererRuntime(options: RuntimeOptions) {
             for (const service of options.services) {
                 run(`${service.name}:setup`, () => {
                     const instance = service.start();
-                    cleanups.push({ name: `${service.name}:setup`, dispose: instance.dispose });
+                    cleanups.push({ name: `${service.name}:setup`, dispose: () => instance.dispose() });
                     if (instance.runInitial) {
                         stages.set(service.name, { name: service.name, phase: "scheduled", startedMs: null, durationMs: null, errors: 0 });
                         const cancel = host.defer(() => run(service.name, () => instance.runInitial!()));

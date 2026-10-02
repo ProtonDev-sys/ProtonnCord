@@ -46,7 +46,11 @@ export function cleanupMessage(message: any, removeDetails: boolean = true): Log
     ret.guildId = ret.guild_id ?? getGuildIdByChannel(ret.channel_id);
     ret.embeds = (ret.embeds ?? []).map(cleanupEmbed);
     ret.deleted = ret.deleted ?? false;
-    ret.deletedTimestamp = ret.deleted ? (new Date()).toISOString() : undefined;
+    ret.deletedTimestamp = ret.deleted
+        ? typeof ret.deletedTimestamp === "string" && Number.isFinite(Date.parse(ret.deletedTimestamp))
+            ? ret.deletedTimestamp
+            : (new Date()).toISOString()
+        : undefined;
     ret.editHistory = ret.editHistory ?? [];
     if (ret.type === 19) {
         ret.message_reference = message.message_reference || message.messageReference;
@@ -82,7 +86,7 @@ export function cleanupEmbed(embed) {
     if (typeof embed.provider === "object") retEmbed.provider = { name: embed.provider.name, url: embed.provider.url };
     if (typeof embed.footer === "object") retEmbed.footer = { text: embed.footer.text, icon_url: embed.footer.iconURL, proxy_icon_url: embed.footer.iconProxyURL };
     if (typeof embed.author === "object") retEmbed.author = { name: embed.author.name, url: embed.author.url, icon_url: embed.author.iconURL, proxy_icon_url: embed.author.iconProxyURL };
-    if (typeof embed.timestamp === "object" && embed.timestamp._isAMomentObject) retEmbed.timestamp = embed.timestamp.milliseconds();
+    if (embed.timestamp?._isAMomentObject) retEmbed.timestamp = embed.timestamp.valueOf();
     if (typeof embed.thumbnail === "object") {
         if (typeof embed.thumbnail.proxyURL === "string" || (typeof embed.thumbnail.url === "string" && !embed.thumbnail.url.endsWith("?format=jpeg"))) {
             retEmbed.thumbnail = {

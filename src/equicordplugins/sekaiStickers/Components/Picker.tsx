@@ -16,7 +16,7 @@ export default function CharSelectModal({ modalProps, setCharacter }: { modalPro
         const s = search.toLowerCase();
         return characters.map((c, index) => {
             if (
-                s === c.id ||
+                s === (c.searchId ?? c.id) ||
                 c.name.toLowerCase().includes(s) ||
                 c.character.toLowerCase().includes(s)
             ) {

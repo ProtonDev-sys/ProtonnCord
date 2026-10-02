@@ -34,6 +34,7 @@ import {
     composeSecureForwardText,
     type ForwardEmbed,
     type ForwardProtection,
+    secureForwardEmbedText,
     secureForwardRoute,
     validatedDiscordAttachmentUrl,
 } from "../secureMessaging.desktop/forwarding";
@@ -497,10 +498,9 @@ async function preparePlainSource(
 }
 
 function selectedEmbedCount(embeds: readonly ForwardEmbed[], selection: number[] | undefined): number {
-    if (selection === undefined) return embeds.length;
-    if (selection.some(index => index >= embeds.length))
+    if (selection?.some(index => index >= embeds.length))
         throw new Error("One or more selected embeds are no longer available.");
-    return selection.length;
+    return secureForwardEmbedText(embeds, selection).length > 0 ? 1 : 0;
 }
 
 async function secureForward(message: Message, destinationChannelId: string, options: ForwardOptions = {}): Promise<void> {
@@ -512,9 +512,12 @@ async function secureForward(message: Message, destinationChannelId: string, opt
     const selective = options.onlyAttachmentIds !== undefined || options.onlyEmbedIndices !== undefined;
     const attachmentSelection = selective ? rawAttachmentSelection ?? new Set<string>() : null;
     const embedSelection = selective ? rawEmbedSelection ?? [] : undefined;
-    const embeds = (message.embeds ?? []) as unknown as ForwardEmbed[];
+    const encryptedSource = isEncryptedMessage(message.content);
+    if (encryptedSource && rawEmbedSelection && rawEmbedSelection.length > 0)
+        throw new Error("Forward the whole encrypted message to include links from its authenticated text.");
+    const embeds = (encryptedSource ? [] : message.embeds ?? []) as unknown as ForwardEmbed[];
     const embedCount = selectedEmbedCount(embeds, embedSelection);
-    const prepared = isEncryptedMessage(message.content)
+    const prepared = encryptedSource
         ? await prepareEncryptedSource(message, attachmentSelection, selective)
         : await preparePlainSource(message, attachmentSelection, selective);
     assertForwardStillActive(expectedGeneration, localUserId);

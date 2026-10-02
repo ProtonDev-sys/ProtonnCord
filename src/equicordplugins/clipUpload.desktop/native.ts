@@ -11,6 +11,8 @@ import { dialog, type IpcMainInvokeEvent } from "electron";
 import { mkdir, open, rm, writeFile } from "fs/promises";
 import { basename, extname, join, resolve } from "path";
 
+import { assertTrustedNativeEvent } from "../fileUpload/nativeNetwork";
+
 interface TempEntry {
     tmpDir: string;
     tmpPath: string;
@@ -52,7 +54,7 @@ async function readClipFile(filePath: string): Promise<Buffer> {
             if (bytesRead === 0) break;
             offset += bytesRead;
         }
-        if (offset > info.size) throw new Error("Clip file changed while reading.");
+        if (offset !== info.size) throw new Error("Clip file changed while reading.");
         return data.subarray(0, offset);
     } finally {
         await file.close();
@@ -78,14 +80,26 @@ async function parseClipMetadata(filePath: string): Promise<RawClipAttachment[] 
 
         const jsonStr = buf.subarray(footerIdx + CLIP_FOOTER_SIZE).toString("utf-8");
         const parsed = JSON.parse(jsonStr);
-        if (parsed && typeof parsed === "object") return Array.isArray(parsed) ? parsed : [parsed];
+        if (parsed && typeof parsed === "object") {
+            const records: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+            return records.filter((record): record is Record<string, unknown> => record !== null && typeof record === "object" && !Array.isArray(record))
+                .map(record => ({
+                    ...record,
+                    id: typeof record.id === "string" ? record.id : undefined,
+                    applicationId: typeof record.applicationId === "string" ? record.applicationId : undefined,
+                    applicationName: typeof record.applicationName === "string" ? record.applicationName : undefined,
+                    users: Array.isArray(record.users) && record.users.every(user => typeof user === "string") ? record.users : undefined,
+                    version: typeof record.version === "number" && Number.isFinite(record.version) ? record.version : undefined
+                }));
+        }
         return null;
     } catch {
         return null;
     }
 }
 
-export async function chooseVideoFile(_: IpcMainInvokeEvent): Promise<{ token: string; name: string; type: string; } | null> {
+export async function chooseVideoFile(event: IpcMainInvokeEvent): Promise<{ token: string; name: string; type: string; } | null> {
+    assertTrustedNativeEvent(event);
     try {
         const { filePaths, canceled } = await dialog.showOpenDialog({
             title: "Select clip file",
@@ -107,7 +121,8 @@ export async function chooseVideoFile(_: IpcMainInvokeEvent): Promise<{ token: s
     }
 }
 
-export async function createTempVideoFile(_: IpcMainInvokeEvent, token: string): Promise<string | null> {
+export async function createTempVideoFile(event: IpcMainInvokeEvent, token: string): Promise<string | null> {
+    assertTrustedNativeEvent(event);
     const originalPath = pendingTokens.get(token);
     if (!originalPath) return null;
     pendingTokens.delete(token);
@@ -131,7 +146,8 @@ export async function createTempVideoFile(_: IpcMainInvokeEvent, token: string):
     }
 }
 
-export async function createTempVideoFileFromBytes(_: IpcMainInvokeEvent, name: string, data: Uint8Array): Promise<string | null> {
+export async function createTempVideoFileFromBytes(event: IpcMainInvokeEvent, name: string, data: Uint8Array): Promise<string | null> {
+    assertTrustedNativeEvent(event);
     if (typeof name !== "string" || !(data instanceof Uint8Array) || data.byteLength === 0 || data.byteLength > MAX_CLIP_SIZE) return null;
 
     const fileName = basename(name);
@@ -158,11 +174,13 @@ export async function createTempVideoFileFromBytes(_: IpcMainInvokeEvent, name: 
 // Note: Exposing the absolute path to the renderer is unavoidable here.
 // Discord's MediaEngineStore is a renderer-only module, and its
 // updateClipMetadata method requires an absolute filesystem path.
-export function getTempVideoFilePath(_: IpcMainInvokeEvent, token: string): string | null {
+export function getTempVideoFilePath(event: IpcMainInvokeEvent, token: string): string | null {
+    assertTrustedNativeEvent(event);
     return tempEntries.get(token)?.tmpPath ?? null;
 }
 
-export async function readVideoFile(_: IpcMainInvokeEvent, token: string): Promise<Uint8Array | null> {
+export async function readVideoFile(event: IpcMainInvokeEvent, token: string): Promise<Uint8Array | null> {
+    assertTrustedNativeEvent(event);
     const entry = tempEntries.get(token);
     if (!entry) return null;
 
@@ -174,7 +192,8 @@ export async function readVideoFile(_: IpcMainInvokeEvent, token: string): Promi
     }
 }
 
-export async function deleteTempVideoFile(_: IpcMainInvokeEvent, token: string): Promise<void> {
+export async function deleteTempVideoFile(event: IpcMainInvokeEvent, token: string): Promise<void> {
+    assertTrustedNativeEvent(event);
     const entry = tempEntries.get(token);
     if (!entry) return;
 
@@ -187,7 +206,8 @@ export async function deleteTempVideoFile(_: IpcMainInvokeEvent, token: string):
     } catch { }
 }
 
-export async function parseClipFileMetadata(_: IpcMainInvokeEvent, token: string): Promise<RawClipAttachment[] | null> {
+export async function parseClipFileMetadata(event: IpcMainInvokeEvent, token: string): Promise<RawClipAttachment[] | null> {
+    assertTrustedNativeEvent(event);
     const originalPath = pendingTokens.get(token);
     if (!originalPath) return null;
 

@@ -639,10 +639,14 @@ async function joinRandomVoice() {
 
     const postJoinActions: PostJoinAction[] = [];
     if (store.selfMute && !MediaEngineStore.isSelfMute()) {
-        postJoinActions.push(() => VoiceActions.toggleSelfMute());
+        postJoinActions.push(() => {
+            if (settings.store.selfMute && !MediaEngineStore.isSelfMute()) VoiceActions.toggleSelfMute();
+        });
     }
     if (store.selfDeafen && !MediaEngineStore.isSelfDeaf()) {
-        postJoinActions.push(() => VoiceActions.toggleSelfDeaf());
+        postJoinActions.push(() => {
+            if (settings.store.selfDeafen && !MediaEngineStore.isSelfDeaf()) VoiceActions.toggleSelfDeaf();
+        });
     }
     if (store.autoCamera) {
         postJoinActions.push(enableCamera);

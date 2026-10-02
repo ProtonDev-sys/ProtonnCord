@@ -5,6 +5,7 @@
  */
 
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { test } from "node:test";
 
 import { loadTestModule } from "./utils/loadTestModule";
@@ -120,12 +121,21 @@ test("FrequentQuickSwitcher tolerates unhydrated preferences and matches channel
 
 test("GifMaker native media requests reject unsafe destinations before fetch and disable redirects", async () => {
     const calls: any[] = [];
-    const api = load("src/equicordplugins/gifMaker/native.ts", {}, { fetch: async (...args: unknown[]) => { calls.push(args); return { ok: true, blob: async () => new Blob(["gif"], { type: "image/gif" }) }; } });
+    const helper = load("src/equicordplugins/fileUpload/nativeNetwork.ts", {
+        "@main/settings": { RendererSettings: { store: { plugins: { FileUpload: { enabled: false } } } } },
+        "node:dns/promises": {}, "node:http": {}, "node:https": {}, "node:net": {}
+    }, {
+        AbortController, Uint8Array,
+        fetch: async (...args: unknown[]) => { calls.push(args); return new Response("gif", { headers: { "content-type": "image/gif" } }); }
+    });
+    const api = load("src/equicordplugins/gifMaker/native.ts", { "../fileUpload/nativeNetwork": helper });
+    const frame = { url: "https://discord.com/channels/@me" };
+    const event = { senderFrame: frame, sender: Object.assign(new EventEmitter(), { mainFrame: frame, isDestroyed: () => false }) };
     for (const url of [null, "http://cdn.discordapp.com/a", "https://user:pass@cdn.discordapp.com/a", "https://cdn.discordapp.com:8443/a", "https://example.org/a"]) {
-        await assert.rejects(api.fetchMedia(null, url), /Invalid URL/);
+        await assert.rejects(api.fetchMedia(event, url), /Invalid URL/);
     }
     assert.equal(calls.length, 0);
-    const result = await api.fetchMedia(null, "https://cdn.discordapp.com/a");
+    const result = await api.fetchMedia(event, "https://cdn.discordapp.com/a");
     assert.equal(result.type, "image/gif");
     assert.equal(calls[0][1].redirect, "error");
     assert.ok(calls[0][1].signal instanceof AbortSignal);

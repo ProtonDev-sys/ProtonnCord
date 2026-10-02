@@ -22,6 +22,7 @@ function fixture(
 		read?: (uri: string) => Promise<string>
 		decode?: (value: string) => any
 		write?: () => Promise<string>
+		share?: (path: string) => Promise<string>
 		remove?: () => Promise<unknown>
 		cleanup?: boolean
 		fetch?: typeof fetch
@@ -39,7 +40,7 @@ function fixture(
 			import.meta.url,
 		),
 		'utf8',
-	)}\nexport { readAttachmentResponse, download, files, cacheReady, cache, cacheKey, AttachmentDownloadError };`
+	)}\nexport { readAttachmentResponse, download, decryptAttachments, files, cacheReady, cache, cacheKey, AttachmentDownloadError };`
 	const code = transpileModule(source, {
 		compilerOptions: {
 			module: ModuleKind.CommonJS,
@@ -62,6 +63,8 @@ function fixture(
 				if (method.endsWith('.cleanup')) return options.cleanup ?? true
 				if (method.endsWith('.read'))
 					return options.read ? options.read(args[0]) : 'file'
+				if (method.endsWith('.share'))
+					return options.share ? options.share(args[0]) : 'content://cache/file'
 				throw new Error(`Unexpected native call: ${method}`)
 			},
 		},
@@ -86,8 +89,26 @@ function fixture(
 			},
 			attachmentBundleRoot: () => 'root',
 			serializeSecurePlaintext: () => 'encrypted descriptor',
+			authenticateAttachmentBundle: () => {},
+			decryptAttachmentBytes: () => ({
+				data: new Uint8Array([1, 2, 3]),
+				metadata: {
+					name: 'private.png',
+					mimeType: 'image/png',
+					size: 3,
+					spoiler: false,
+					description: null,
+					width: null,
+					height: null,
+					duration: null,
+					waveform: null,
+				},
+			}),
 		},
-		'./protocol': { requireSnowflake: (value: string) => value },
+		'./protocol': {
+			requireSnowflake: (value: string) => value,
+			decode64: () => new Uint8Array(32),
+		},
 	}
 	const api = runInNewContext(`${code}\nexports;`, {
 		exports: {},
@@ -420,4 +441,106 @@ test('startup cache cleanup must finish successfully before attachment rendering
 	const ready = fixture()
 	await ready.api.cleanupStoredAttachments()
 	assert.equal(ready.api.cacheReady, true)
+})
+
+test('a later upload write failure removes earlier files without changing the uploads', async () => {
+	let writes = 0
+	const fixtureResult = fixture({
+		write: async () => {
+			if (++writes === 2) throw new Error('cache write failed')
+			return '/cache/protonn-cord/uploads/pc-test-0.pcaf'
+		},
+	})
+	const uploads = [upload(), upload()]
+	await assert.rejects(
+		fixtureResult.api.prepareEncryptedUploads(uploads, '', 'channel', 'user'),
+		/cache write failed/,
+	)
+	assert.deepEqual(fixtureResult.removed, [
+		'protonn-cord/uploads/pc-test-0.pcaf',
+	])
+	assert.equal(fixtureResult.api.files.size, 0)
+	assert.ok(uploads.every(value => value.filename === 'private.png'))
+})
+
+test('a later share failure removes all plaintext files from the failed batch', async () => {
+	let shares = 0
+	const fixtureResult = fixture({
+		fetch: async () => new Response(new Uint8Array(30)),
+		share: async () => {
+			if (++shares === 2) throw new Error('share unavailable')
+			return 'content://cache/file'
+		},
+	})
+	await assert.rejects(
+		fixtureResult.api.decryptAttachments(
+			{
+				id: 'message',
+				channel_id: 'channel',
+				author: { id: 'user' },
+				content: 'encrypted',
+				attachments: [0, 1].map(index => ({
+					id: `attachment${index}`,
+					filename: `pc-test-${index}.pcaf`,
+					size: 30,
+					url: `https://cdn.discordapp.com/attachments/channel/attachment${index}/file.pcaf`,
+				})),
+			},
+			{
+				text: '',
+				stickers: [],
+				detachedTextIndex: null,
+				attachments: { id: 'test', count: 2, key: 'key' },
+			},
+			0,
+		),
+		/share unavailable/,
+	)
+	assert.deepEqual(fixtureResult.removed, [
+		'share-media/protonn-cord/message-0-0-private.png',
+		'share-media/protonn-cord/message-1-0-private.png',
+	])
+	assert.equal(fixtureResult.api.files.size, 0)
+})
+
+test('streaming downloads copy chunks in order and wipe each consumed chunk', async () => {
+	const fixtureResult = fixture()
+	const chunks = [new Uint8Array(12).fill(7), new Uint8Array(18).fill(9)]
+	let reads = 0
+	let released = false
+	const bytes = await fixtureResult.api.readAttachmentResponse(
+		{
+			headers: { get: () => null },
+			body: {
+				getReader: () => ({
+					read: async () => {
+						if (reads > 0)
+							assert.ok(chunks[reads - 1].every(byte => byte === 0))
+						return reads < chunks.length
+							? { done: false, value: chunks[reads++] }
+							: { done: true }
+					},
+					releaseLock: () => {
+						released = true
+					},
+				}),
+			},
+		},
+		30,
+	)
+	assert.deepEqual([...bytes], [...Array(12).fill(7), ...Array(18).fill(9)])
+	assert.equal(released, true)
+})
+
+test('clearing the attachment patcher releases the callback', () => {
+	const fixtureResult = fixture()
+	let calls = 0
+	const message = { id: 'message', channel_id: 'channel', content: 'encrypted' }
+	fixtureResult.api.setAttachmentPatcher(() => {
+		calls++
+	})
+	fixtureResult.api.refreshEncryptedMessage(message)
+	fixtureResult.api.setAttachmentPatcher(undefined)
+	fixtureResult.api.refreshEncryptedMessage(message)
+	assert.equal(calls, 1)
 })
