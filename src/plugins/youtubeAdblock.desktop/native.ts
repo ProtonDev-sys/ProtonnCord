@@ -12,7 +12,7 @@ function isYoutubeEmbed(value: string) {
     try {
         const url = new URL(value);
         return url.protocol === "https:" && !url.username && !url.password && !url.port
-            && (url.hostname === "youtube.com" || url.hostname.endsWith(".youtube.com"))
+            && (url.origin === "https://youtube.com" || url.origin === "https://www.youtube.com")
             && url.pathname.startsWith("/embed/");
     } catch {
         return false;
@@ -26,7 +26,7 @@ app.on("browser-window-created", (_, win) => {
 
             const target = isYoutubeEmbed(frame.url) ? frame
                 : frame.parent && isYoutubeEmbed(frame.parent.url) ? frame.parent : undefined;
-            void target?.executeJavaScript(adguard).catch(error => console.error("Could not inject YouTube ad blocker", error));
+            void Promise.resolve(target?.executeJavaScript(adguard)).catch(error => console.error("Could not inject YouTube ad blocker", error));
         });
     });
 });
