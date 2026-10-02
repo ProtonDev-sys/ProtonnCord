@@ -1021,7 +1021,7 @@ test("universal mention cache does not survive account switches, logout or stop"
         "@utils/constants": { EquicordDevs: {} },
         "@utils/types": { __esModule: true, default: (value: unknown) => value, OptionType: {} },
         "@webpack/common": {
-            UserStore: { getCurrentUser: () => accountId ? { id: accountId } : undefined, getUsers: () => users },
+            UserStore: { getCurrentUser: () => accountId ? { id: accountId } : undefined, getUsers: () => users, removeChangeListener() {} },
             ChannelStore: {}
         }
     });

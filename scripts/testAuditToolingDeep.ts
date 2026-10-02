@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { createInterface } from "node:readline";
@@ -97,20 +97,37 @@ test("release gate skips stale builds before creating tags or publishing", () =>
     const workflow = read(".github/workflows/publish.yml");
     assert.match(workflow, /release: \$\{\{ steps\.release\.outputs\.release \}\}/u);
     assert.match(workflow, /git archive --format=zip --output=dist\/extension-sources\.zip "\$GITHUB_SHA"/u);
-    const command = workflow.slice(workflow.indexOf("current_sha=$(gh api"), workflow.indexOf("\n    publish-chrome:"))
-        .replace(/^ {18}/gmu, "").replace(/\$\{\{ steps\.pkg\.outputs\.version \}\}/gu, "v1.0.0");
+    const persistenceStart = workflow.indexOf("current_sha=$(gh api", workflow.indexOf("- name: Persist durable release archives"));
+    const tagStart = workflow.indexOf("current_sha=$(gh api", workflow.indexOf("- name: Create Tag"));
+    assert.ok(persistenceStart >= 0 && tagStart > persistenceStart);
+    const gates = [
+        { name: "archives", command: workflow.slice(persistenceStart, workflow.indexOf("\n            - name: Store release archives", persistenceStart)), staleStatus: 1 },
+        { name: "tag", command: workflow.slice(tagStart, workflow.indexOf("\n    publish-chrome:", tagStart)), staleStatus: 0 },
+    ];
     const directory = mkdtempSync(path.join(tmpdir(), "tooling-release-test-"));
     try {
-        for (const current of ["stale", "expected"]) {
-            const output = path.join(directory, `${current}.txt`).replaceAll("\\", "/");
+        for (const gate of gates) for (const current of ["stale", "expected"]) {
+            const output = path.join(directory, `${gate.name}-${current}.txt`).replaceAll("\\", "/");
+            writeFileSync(output, "");
             const mock = `gh() { if [[ "$*" == *branches/main* ]]; then echo "$CURRENT_SHA"; else echo mutation; fi; }\n`;
-            const result = execFileSync(process.platform === "win32" ? "C:/Program Files/Git/bin/bash.exe" : "bash", ["-s"], {
-                input: `set -euo pipefail\n${mock}${command}`,
-                encoding: "utf8",
-                timeout: 10_000,
-                env: { ...process.env, CURRENT_SHA: current, GITHUB_SHA: "expected", GITHUB_REPOSITORY: "fixture/repository", GITHUB_OUTPUT: output },
-            });
-            assert.equal(readFileSync(output, "utf8").trim(), `release=${current === "expected"}`);
+            let result = "";
+            let status = 0;
+            try {
+                result = execFileSync(process.platform === "win32" ? "C:/Program Files/Git/bin/bash.exe" : "bash", ["-s"], {
+                    input: `set -euo pipefail\n${mock}${gate.command.replace(/^ {18}/gmu, "")}`,
+                    encoding: "utf8",
+                    timeout: 10_000,
+                    stdio: "pipe",
+                    env: { ...process.env, CURRENT_SHA: current, GITHUB_SHA: "expected", GITHUB_REPOSITORY: "fixture/repository", GITHUB_OUTPUT: output, ARTIFACT_TAG: "fixture-archives", PACKAGE_VERSION: "v1.0.0" },
+                });
+            } catch (error) {
+                const failure = error as { status: number; stdout: string; stderr: string; };
+                status = failure.status;
+                result = failure.stdout;
+                assert.match(failure.stderr, /Superseded release build/u);
+            }
+            assert.equal(status, current === "stale" ? gate.staleStatus : 0);
+            assert.equal(readFileSync(output, "utf8").trim(), gate.name === "tag" ? `release=${current === "expected"}` : "");
             assert.equal(result.includes("mutation"), current === "expected");
         }
     } finally {

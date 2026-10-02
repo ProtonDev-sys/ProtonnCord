@@ -1,6 +1,16 @@
 name: Release Browser Extension
 on:
     workflow_dispatch:
+        inputs:
+            retry:
+                description: Retry this exact commit's existing version using durable archives
+                type: boolean
+                default: false
+            store:
+                description: Store to publish (select only the failed store on retry)
+                type: choice
+                options: [all, chrome, firefox, edge]
+                default: all
     push:
         branches:
             - main
@@ -15,6 +25,10 @@ env:
 permissions:
     contents: read
 
+defaults:
+    run:
+        shell: bash
+
 jobs:
     prepare:
         if: github.ref == 'refs/heads/main'
@@ -23,17 +37,21 @@ jobs:
         permissions:
             contents: write
         outputs:
-            release: ${{ steps.check.outputs.release }}
+            release: ${{ steps.release.outputs.release }}
 
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   fetch-depth: 0
                   persist-credentials: false
+                  ref: ${{ github.sha }}
 
             - name: Get package.json version
               id: pkg
-              run: echo "version=v$(jq -r .version < package.json)" >> "$GITHUB_OUTPUT"
+              run: |
+                  version=$(jq -er '.version | select(type == "string")' package.json)
+                  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+                  echo "version=v$version" >> "$GITHUB_OUTPUT"
 
             - name: Get latest Git tag
               id: tag
@@ -43,45 +61,116 @@ jobs:
 
             - name: Check if package.json version is newer
               id: check
+              env:
+                  PACKAGE_VERSION: ${{ steps.pkg.outputs.version }}
+                  LATEST_VERSION: ${{ steps.tag.outputs.latest }}
+                  RETRY: ${{ inputs.retry || false }}
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  pkg="${{ steps.pkg.outputs.version }}"
-                  latest="${{ steps.tag.outputs.latest }}"
+                  pkg="$PACKAGE_VERSION"
+                  latest="$LATEST_VERSION"
 
                   echo "Latest tag: $latest"
                   echo "Package version: $pkg"
 
-                  if [ "$pkg" != "$latest" ] && [ "$(sort -V <<<"$latest"$'\n'"$pkg" | tail -n1)" = "$pkg" ]; then
-                    echo "release=true" >> "$GITHUB_OUTPUT"
-                  else
-                    echo "release=false" >> "$GITHUB_OUTPUT"
+                  if git show-ref --verify --quiet "refs/tags/$pkg"; then
+                    test "$(git rev-parse "refs/tags/$pkg^{commit}")" = "$GITHUB_SHA" || {
+                      echo "Existing version tag does not match this commit." >&2
+                      exit 1
+                    }
+                    if [ "$RETRY" != true ]; then
+                      echo "release=false" >> "$GITHUB_OUTPUT"
+                      exit 0
+                    fi
                   fi
+                  if [ "$(sort -V <<<"$latest"$'\n'"$pkg" | tail -n1)" != "$pkg" ]; then
+                    echo "release=false" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
+                  artifact_tag="browser-extension-$pkg"
+                  durable_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                    --jq ".[] | select(.tag_name == \"$artifact_tag\") | .id")
+                  if [ -n "$durable_id" ]; then
+                    [[ "$durable_id" =~ ^[0-9]+$ ]] || exit 1
+                    echo "build=false" >> "$GITHUB_OUTPUT"
+                  elif git show-ref --verify --quiet "refs/tags/$pkg"; then
+                    echo "Existing version has no durable archives; refusing to rebuild." >&2
+                    exit 1
+                  elif [ "$RETRY" = true ]; then
+                    echo "Retry requires existing durable archives." >&2
+                    exit 1
+                  else
+                    echo "build=true" >> "$GITHUB_OUTPUT"
+                  fi
+                  echo "release=true" >> "$GITHUB_OUTPUT"
+
+            - name: Restore durable release archives
+              if: steps.check.outputs.release == 'true' && steps.check.outputs.build == 'false'
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  ARTIFACT_TAG: browser-extension-${{ steps.pkg.outputs.version }}
+              run: |
+                  test "$(gh release view "$ARTIFACT_TAG" --json targetCommitish --jq .targetCommitish)" = "$GITHUB_SHA"
+                  gh release download "$ARTIFACT_TAG" --dir dist \
+                    --pattern extension-chrome.zip --pattern extension-firefox.zip \
+                    --pattern extension-sources.zip --pattern archives.sha256 --pattern release-sha.txt
 
             - name: Stop if not newer
               if: steps.check.outputs.release == 'false'
               run: echo "No new version to release (package.json ${{ steps.pkg.outputs.version }} <= latest tag ${{ steps.tag.outputs.latest }})"
 
             - name: Setup PNPM
-              if: steps.check.outputs.release == 'true'
+              if: steps.check.outputs.build == 'true'
               uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
             - name: Use Node.js 24
-              if: steps.check.outputs.release == 'true'
+              if: steps.check.outputs.build == 'true'
               uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
               with:
                   node-version: 24
                   cache: "pnpm"
 
             - name: Install dependencies
-              if: steps.check.outputs.release == 'true'
+              if: steps.check.outputs.build == 'true'
               run: pnpm install --frozen-lockfile
 
             - name: Build web
-              if: steps.check.outputs.release == 'true'
+              if: steps.check.outputs.build == 'true'
               run: pnpm buildWebStandalone
 
             - name: Create sources zip
+              if: steps.check.outputs.build == 'true'
+              run: git archive --format=zip --output=dist/extension-sources.zip "$GITHUB_SHA"
+
+            - name: Record archive identity
+              if: steps.check.outputs.build == 'true'
+              run: |
+                  printf '%s\n' "$GITHUB_SHA" > dist/release-sha.txt
+                  (cd dist && sha256sum --text extension-chrome.zip extension-firefox.zip extension-sources.zip > archives.sha256)
+
+            - name: Verify release archives
               if: steps.check.outputs.release == 'true'
-              run: zip -r dist/extension-sources.zip . -x "node_modules/*" -x "dist/*" -x ".git/*"
+              run: |
+                  for file in extension-chrome.zip extension-firefox.zip extension-sources.zip archives.sha256 release-sha.txt; do
+                    test -f "dist/$file" && test ! -L "dist/$file" || exit 1
+                  done
+                  test "$(cat dist/release-sha.txt)" = "$GITHUB_SHA"
+                  test "$(cut -c67- dist/archives.sha256)" = "$(printf '%s\n' extension-chrome.zip extension-firefox.zip extension-sources.zip)"
+                  test "$(grep -Ec '^[a-f0-9]{64}  extension-(chrome|firefox|sources)\.zip$' dist/archives.sha256)" = 3
+                  (cd dist && sha256sum --check --strict archives.sha256)
+
+            - name: Persist durable release archives
+              if: steps.check.outputs.build == 'true'
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  ARTIFACT_TAG: browser-extension-${{ steps.pkg.outputs.version }}
+              run: |
+                  current_sha=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+                  test "$current_sha" = "$GITHUB_SHA" || { echo "Superseded release build." >&2; exit 1; }
+                  gh release create "$ARTIFACT_TAG" --draft --target "$GITHUB_SHA" \
+                    --title "$ARTIFACT_TAG" --notes "Exact browser extension archives; do not replace assets." \
+                    dist/extension-chrome.zip dist/extension-firefox.zip dist/extension-sources.zip \
+                    dist/archives.sha256 dist/release-sha.txt
 
             - name: Store release archives
               if: steps.check.outputs.release == 'true'
@@ -92,28 +181,44 @@ jobs:
                       dist/extension-chrome.zip
                       dist/extension-firefox.zip
                       dist/extension-sources.zip
+                      dist/archives.sha256
+                      dist/release-sha.txt
                   if-no-files-found: error
-                  retention-days: 1
+                  retention-days: 90
 
             # A failed build/upload must remain retryable without deleting a tag.
             - name: Create Tag
+              id: release
               if: steps.check.outputs.release == 'true'
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  PACKAGE_VERSION: ${{ steps.pkg.outputs.version }}
               run: |
+                  if git show-ref --verify --quiet "refs/tags/$PACKAGE_VERSION"; then
+                    test "$(git rev-parse "refs/tags/$PACKAGE_VERSION^{commit}")" = "$GITHUB_SHA" || exit 1
+                    echo "release=true" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
+                  current_sha=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+                  if [ "$current_sha" != "$GITHUB_SHA" ]; then
+                    echo "Skipping superseded release build."
+                    echo "release=false" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
                   tag_sha=$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
-                    -f tag="${{ steps.pkg.outputs.version }}" \
-                    -f message="Version ${{ steps.pkg.outputs.version }}" \
+                    -f tag="$PACKAGE_VERSION" \
+                    -f message="Version $PACKAGE_VERSION" \
                     -f object="$GITHUB_SHA" \
                     -f type=commit \
                     --jq .sha)
                   gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-                    -f ref="refs/tags/${{ steps.pkg.outputs.version }}" \
+                    -f ref="refs/tags/$PACKAGE_VERSION" \
                     -f sha="$tag_sha"
+                  echo "release=true" >> "$GITHUB_OUTPUT"
 
     publish-chrome:
         needs: prepare
-        if: needs.prepare.outputs.release == 'true' && vars.ACT == 'false'
+        if: needs.prepare.outputs.release == 'true' && vars.ACT == 'false' && (github.event_name != 'workflow_dispatch' || inputs.store == 'all' || inputs.store == 'chrome')
         runs-on: ubuntu-latest
         timeout-minutes: 15
         environment: browser-extension-release-chrome
@@ -124,6 +229,7 @@ jobs:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
+                  ref: ${{ github.sha }}
 
             - name: Setup PNPM
               uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -142,6 +248,16 @@ jobs:
               with:
                   name: browser-extension-release
                   path: dist
+
+            - name: Verify release archives
+              run: |
+                  for file in extension-chrome.zip extension-firefox.zip extension-sources.zip archives.sha256 release-sha.txt; do
+                    test -f "dist/$file" && test ! -L "dist/$file" || exit 1
+                  done
+                  test "$(cat dist/release-sha.txt)" = "$GITHUB_SHA"
+                  test "$(cut -c67- dist/archives.sha256)" = "$(printf '%s\n' extension-chrome.zip extension-firefox.zip extension-sources.zip)"
+                  test "$(grep -Ec '^[a-f0-9]{64}  extension-(chrome|firefox|sources)\.zip$' dist/archives.sha256)" = 3
+                  (cd dist && sha256sum --check --strict archives.sha256)
 
             - name: Publish Chrome extension
               run: pnpm --config.offline=true exec publish-extension --chrome-zip dist/extension-chrome.zip
@@ -154,7 +270,7 @@ jobs:
 
     publish-firefox:
         needs: prepare
-        if: needs.prepare.outputs.release == 'true' && vars.ACT == 'false'
+        if: needs.prepare.outputs.release == 'true' && vars.ACT == 'false' && (github.event_name != 'workflow_dispatch' || inputs.store == 'all' || inputs.store == 'firefox')
         runs-on: ubuntu-latest
         timeout-minutes: 15
         environment: browser-extension-release-firefox
@@ -165,6 +281,7 @@ jobs:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
+                  ref: ${{ github.sha }}
 
             - name: Setup PNPM
               uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -183,6 +300,16 @@ jobs:
               with:
                   name: browser-extension-release
                   path: dist
+
+            - name: Verify release archives
+              run: |
+                  for file in extension-chrome.zip extension-firefox.zip extension-sources.zip archives.sha256 release-sha.txt; do
+                    test -f "dist/$file" && test ! -L "dist/$file" || exit 1
+                  done
+                  test "$(cat dist/release-sha.txt)" = "$GITHUB_SHA"
+                  test "$(cut -c67- dist/archives.sha256)" = "$(printf '%s\n' extension-chrome.zip extension-firefox.zip extension-sources.zip)"
+                  test "$(grep -Ec '^[a-f0-9]{64}  extension-(chrome|firefox|sources)\.zip$' dist/archives.sha256)" = 3
+                  (cd dist && sha256sum --check --strict archives.sha256)
 
             - name: Publish Firefox extension
               run: pnpm --config.offline=true exec publish-extension --firefox-zip dist/extension-firefox.zip --firefox-sources-zip dist/extension-sources.zip
@@ -193,7 +320,7 @@ jobs:
 
     publish-edge:
         needs: prepare
-        if: needs.prepare.outputs.release == 'true' && vars.ACT == 'false'
+        if: needs.prepare.outputs.release == 'true' && vars.ACT == 'false' && (github.event_name != 'workflow_dispatch' || inputs.store == 'all' || inputs.store == 'edge')
         runs-on: ubuntu-latest
         timeout-minutes: 15
         environment: browser-extension-release-edge
@@ -204,6 +331,7 @@ jobs:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
+                  ref: ${{ github.sha }}
 
             - name: Setup PNPM
               uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -222,6 +350,16 @@ jobs:
               with:
                   name: browser-extension-release
                   path: dist
+
+            - name: Verify release archives
+              run: |
+                  for file in extension-chrome.zip extension-firefox.zip extension-sources.zip archives.sha256 release-sha.txt; do
+                    test -f "dist/$file" && test ! -L "dist/$file" || exit 1
+                  done
+                  test "$(cat dist/release-sha.txt)" = "$GITHUB_SHA"
+                  test "$(cut -c67- dist/archives.sha256)" = "$(printf '%s\n' extension-chrome.zip extension-firefox.zip extension-sources.zip)"
+                  test "$(grep -Ec '^[a-f0-9]{64}  extension-(chrome|firefox|sources)\.zip$' dist/archives.sha256)" = 3
+                  (cd dist && sha256sum --check --strict archives.sha256)
 
             - name: Publish Edge extension
               run: pnpm --config.offline=true exec publish-extension --edge-zip dist/extension-chrome.zip

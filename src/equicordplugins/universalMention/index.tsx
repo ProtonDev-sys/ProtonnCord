@@ -55,6 +55,7 @@ export default definePlugin({
     stop() {
         UserStore.removeChangeListener(invalidateCachedUsers);
         invalidateCachedUsers();
+        cachedAccountId = undefined;
     },
     settingsAboutComponent: () => (
         <Notice.Warning>
@@ -86,9 +87,5 @@ export default definePlugin({
         const foundUsers = getCachedUsers();
         const users = settings.store.onlyDMUsers ? foundUsers.filter(user => ChannelStore.getDMFromUserId(user.id)) : foundUsers;
         return map ? users.map(user => ({ userId: user.id, nick: null })) : users;
-    },
-    stop() {
-        cachedUsers = null;
-        cachedAccountId = undefined;
     }
 });
