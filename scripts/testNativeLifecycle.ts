@@ -59,27 +59,28 @@ test("reinitializing native CSS watchers closes old watchers and cancels pending
 test("quitting waits for the hidden QuickCSS editor decision", async () => {
     const code = source.slice(source.indexOf("let quitPromptPending"), source.indexOf("ipcMain.handle(IpcEvents.GET_RENDERER_CSS"));
     for (const response of [0, 1]) {
-        const app = new EventEmitter() as EventEmitter & { exit(): void; };
-        let exited = false;
-        app.exit = () => { exited = true; };
+        const app = new EventEmitter() as EventEmitter & { quit(): void; };
+        let closeRequested = false;
+        app.quit = () => assert.fail("The quit decision must request editor close, not bypass its acknowledgement");
         let complete: ((value: { response: number; }) => void) | undefined;
         const decision = new Promise(resolve => { complete = resolve; });
         let prompts = 0;
         runInNewContext(compile(code), {
             app,
-            monacoWin: { isDestroyed: () => false, isVisible: () => false },
+            pendingEditorClose: undefined, quitAfterEditorClose: false,
+            monacoWin: { isDestroyed: () => false, isVisible: () => false, close: () => { closeRequested = true; } },
             dialog: { showMessageBox: () => { prompts++; return decision; } }
         });
         let prevented = false;
         app.emit("before-quit", { preventDefault() { prevented = true; } });
         assert.equal(prevented, true, "quit must pause before awaiting the dialog");
-        assert.equal(exited, false);
+        assert.equal(closeRequested, false);
         app.emit("before-quit", { preventDefault() {} });
         assert.equal(prompts, 1, "repeated quit requests share the current editor decision");
         complete?.({ response });
         await decision;
         await setImmediate();
-        assert.equal(exited, response === 1);
+        assert.equal(closeRequested, response === 1);
     }
 });
 
@@ -90,7 +91,8 @@ test("a failed editor quit prompt stays contained and allows another quit attemp
     let logs = 0;
     runInNewContext(compile(code), {
         app: { on: (event: string, callback: (event: { preventDefault(): void; }) => Promise<void>) => callbacks.set(event, callback),
-            exit: () => assert.fail("A failed prompt cannot exit the client") },
+            quit: () => assert.fail("A failed prompt cannot quit the client") },
+        pendingEditorClose: undefined, quitAfterEditorClose: false,
         monacoWin: { isDestroyed: () => false, isVisible: () => false },
         dialog: { showMessageBox: async () => { prompts++; throw new Error("Fixture dialog failure"); } },
         console: { error: () => { logs++; } },

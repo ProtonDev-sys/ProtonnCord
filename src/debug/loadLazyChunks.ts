@@ -30,8 +30,11 @@ function getWebpackChunkMap() {
         configurable: true
     });
 
-    wreq.u(sym);
-    delete Object.prototype[sym];
+    try {
+        wreq.u(sym);
+    } finally {
+        delete Object.prototype[sym];
+    }
 
     return chunksMap as Record<PropertyKey, string> | null;
 }
@@ -125,33 +128,31 @@ export async function loadLazyChunks() {
                 }
             }
 
-            // setImmediate to only check if all chunks were loaded after this function resolves
-            // We check if all chunks were loaded every time a factory is loaded
-            // If we are still looking for chunks in the other factories, the array will have that factory's chunk search promise not resolved
-            // But, if all chunk search promises are resolved, this means we found every lazy chunk loaded by Discord code and manually loaded them
-            setTimeout(() => {
-                let allResolved = true;
-
-                for (let i = 0; i < chunksSearchPromises.length; i++) {
-                    const isResolved = chunksSearchPromises[i]();
-
-                    if (isResolved) {
-                        // Remove finished promises to avoid having to iterate through a huge array everytime
-                        chunksSearchPromises.splice(i--, 1);
-                    } else {
-                        allResolved = false;
-                    }
-                }
-
-                if (allResolved) chunksSearchingResolve();
-            }, 0);
         }
 
         function factoryListener(factory: AnyModuleFactory | ModuleFactory) {
             let isResolved = false;
             searchAndLoadLazyChunks(String(factory))
-                .then(() => isResolved = true)
-                .catch(() => isResolved = true);
+                .catch(() => {})
+                .finally(() => {
+                    isResolved = true;
+                    setTimeout(() => {
+                        let allResolved = true;
+
+                        for (let i = 0; i < chunksSearchPromises.length; i++) {
+                            const isResolved = chunksSearchPromises[i]();
+
+                            if (isResolved) {
+                                // Remove finished promises to avoid having to iterate through a huge array everytime
+                                chunksSearchPromises.splice(i--, 1);
+                            } else {
+                                allResolved = false;
+                            }
+                        }
+
+                        if (allResolved) chunksSearchingResolve();
+                    }, 0);
+                });
 
             chunksSearchPromises.push(() => isResolved);
         }
@@ -160,6 +161,7 @@ export async function loadLazyChunks() {
         for (const moduleId in wreq.m) {
             factoryListener(wreq.m[moduleId]);
         }
+        if (chunksSearchPromises.length === 0) chunksSearchingResolve();
 
         try {
             await withTimeout(

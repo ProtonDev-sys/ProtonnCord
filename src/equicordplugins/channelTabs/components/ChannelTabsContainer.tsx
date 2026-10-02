@@ -176,7 +176,7 @@ export default function ChannelsTabsContainer(props: BasicChannelTabsProps) {
             }
 
             // 1. number key switching (1-9)
-            if (enableNumberKeySwitching) {
+            if (enableNumberKeySwitching && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
                 const keyNumber = parseInt(event.key, 10);
                 if (!isNaN(keyNumber) && keyNumber >= 1 && keyNumber <= numberKeySwitchCount) {
                     const tabIndex = keyNumber - 1;

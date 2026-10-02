@@ -8,7 +8,7 @@ import { EquicordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { ChannelRTCStore, SelectedChannelStore } from "@webpack/common";
 
-import { getEffectiveVolume, MIN_VIDEO_AREA, type PrimaryStreamAudioStores, type StreamAudioData, UPDATE_INTERVAL_MS } from "./logic";
+import { type DomStreamAudioState, getEffectiveVolume, MIN_VIDEO_AREA, type PrimaryStreamAudioStores, type StreamAudioData, UPDATE_INTERVAL_MS } from "./logic";
 
 let updateInterval: number | undefined;
 const trackedAudio = new Set<StreamAudioData>();
@@ -78,8 +78,8 @@ function pruneTrackedAudio() {
     }
 }
 
-function applyAudioState(data: StreamAudioData) {
-    const volume = getEffectiveVolume(data, trackedAudio, stores, getDomStreamAudioState());
+function applyAudioState(data: StreamAudioData, domState: DomStreamAudioState) {
+    const volume = getEffectiveVolume(data, trackedAudio, stores, domState);
 
     if (data.gainNode) {
         if (data.audioElement) data.audioElement.volume = 0;
@@ -92,7 +92,9 @@ function applyAudioState(data: StreamAudioData) {
 
 function updateTrackedAudio() {
     pruneTrackedAudio();
-    for (const data of trackedAudio) applyAudioState(data);
+    if (!trackedAudio.size) return;
+    const domState = getDomStreamAudioState();
+    for (const data of trackedAudio) applyAudioState(data, domState);
 }
 
 function scheduleUpdateTrackedAudio() {

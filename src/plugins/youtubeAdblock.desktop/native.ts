@@ -8,16 +8,25 @@ import { RendererSettings } from "@main/settings";
 import { app } from "electron";
 import adguard from "file://adguard.js?minify";
 
+function isYoutubeEmbed(value: string) {
+    try {
+        const url = new URL(value);
+        return url.protocol === "https:" && !url.username && !url.password && !url.port
+            && (url.hostname === "youtube.com" || url.hostname.endsWith(".youtube.com"))
+            && url.pathname.startsWith("/embed/");
+    } catch {
+        return false;
+    }
+}
+
 app.on("browser-window-created", (_, win) => {
     win.webContents.on("frame-created", (_, { frame }) => {
         frame?.once("dom-ready", () => {
             if (!RendererSettings.store.plugins?.YoutubeAdblock?.enabled) return;
 
-            if (frame.url.includes("youtube.com/embed/")) {
-                frame.executeJavaScript(adguard);
-            } else if (frame.parent?.url.includes("youtube.com/embed/")) {
-                frame.parent.executeJavaScript(adguard);
-            }
+            const target = isYoutubeEmbed(frame.url) ? frame
+                : frame.parent && isYoutubeEmbed(frame.parent.url) ? frame.parent : undefined;
+            void target?.executeJavaScript(adguard).catch(error => console.error("Could not inject YouTube ad blocker", error));
         });
     });
 });

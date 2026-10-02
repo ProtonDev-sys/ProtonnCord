@@ -38,6 +38,7 @@ export function PresetList({
 }: PresetListProps) {
     const [renaming, setRenaming] = React.useState<number>(-1);
     const [renameText, setRenameText] = React.useState("");
+    const completedRenameRef = React.useRef(false);
 
     return (
         <div className={cl("list-container")}>
@@ -57,6 +58,8 @@ export function PresetList({
                 });
 
                 const commitRename = () => {
+                    if (completedRenameRef.current) return;
+                    completedRenameRef.current = true;
                     const nextName = renameText.trim();
                     if (!nextName) return;
                     renamePreset(actualIndex, nextName, section, guildId);
@@ -106,6 +109,7 @@ export function PresetList({
                                                 commitRename();
                                                 setRenaming(-1);
                                             } else if (e.key === "Escape") {
+                                                completedRenameRef.current = true;
                                                 setRenaming(-1);
                                             }
                                             e.stopPropagation();
@@ -139,6 +143,7 @@ export function PresetList({
                                                 id="rename"
                                                 label="Rename"
                                                 action={() => {
+                                                    completedRenameRef.current = false;
                                                     setRenaming(actualIndex);
                                                     setRenameText(preset.name);
                                                 }}

@@ -43,6 +43,7 @@ const enum ReplaceElements {
 
 const embedUrlRe = /https:\/\/www\.youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/;
 const pendingRequests = new Set<AbortController>();
+const componentRequests = new WeakMap<Component<Props>, Set<AbortController>>();
 let active = false;
 let generation = 0;
 
@@ -60,6 +61,19 @@ async function embedDidMount(this: Component<Props>) {
 
         request = new AbortController();
         pendingRequests.add(request);
+        let requests = componentRequests.get(this);
+        if (!requests) {
+            requests = new Set();
+            componentRequests.set(this, requests);
+            const requestsOnUnmount = requests;
+            const originalUnmount = this.componentWillUnmount;
+            this.componentWillUnmount = () => {
+                for (const pending of requestsOnUnmount) pending.abort();
+                requestsOnUnmount.clear();
+                originalUnmount?.call(this);
+            };
+        }
+        requests.add(request);
         const res = await fetch(`https://sponsor.ajay.app/api/branding?videoID=${videoId}`, {
             signal: AbortSignal.any([request.signal, AbortSignal.timeout(10_000)])
         });
@@ -99,7 +113,10 @@ async function embedDidMount(this: Component<Props>) {
     } catch (err) {
         if (!request?.signal.aborted) new Logger("Dearrow").error("Failed to dearrow embed", err);
     } finally {
-        if (request) pendingRequests.delete(request);
+        if (request) {
+            pendingRequests.delete(request);
+            componentRequests.get(this)?.delete(request);
+        }
     }
 }
 

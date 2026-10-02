@@ -27,10 +27,13 @@ const settings = definePluginSettings({
 });
 
 let cachedUsers: User[] | null = null;
+let cachedAccountId: string | undefined;
 
 function getCachedUsers(): User[] {
-    if (!cachedUsers) {
-        cachedUsers = Object.values(UserStore.getUsers());
+    const accountId = UserStore.getCurrentUser()?.id;
+    if (!cachedUsers || accountId !== cachedAccountId) {
+        cachedAccountId = accountId;
+        cachedUsers = accountId ? Object.values(UserStore.getUsers()) : [];
     }
     return cachedUsers;
 }
@@ -71,5 +74,9 @@ export default definePlugin({
         const foundUsers = getCachedUsers();
         const users = settings.store.onlyDMUsers ? foundUsers.filter(user => ChannelStore.getDMFromUserId(user.id)) : foundUsers;
         return map ? users.map(user => ({ userId: user.id, nick: null })) : users;
+    },
+    stop() {
+        cachedUsers = null;
+        cachedAccountId = undefined;
     }
 });

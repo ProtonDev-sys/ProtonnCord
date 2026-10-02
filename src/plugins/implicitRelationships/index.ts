@@ -37,6 +37,7 @@ const logger = new Logger("ImplicitRelationships");
 let fetchGeneration = 0;
 let memberChunkCallback: ((event: { chunks?: Array<{ nonce?: string; }>; }) => void) | null = null;
 let memberRequestTimeout: ReturnType<typeof setTimeout> | null = null;
+const ownedRelationships = new Map<Map<string, number>, Set<string>>();
 
 function clearPendingMemberRequest() {
     if (memberChunkCallback) {
@@ -156,6 +157,12 @@ export default definePlugin({
             if (!userId || RelationshipStore.getRelationshipType(userId)) continue;
 
             relationships.set(userId, 5);
+            let ownedIds = ownedRelationships.get(relationships);
+            if (!ownedIds) {
+                ownedIds = new Set();
+                ownedRelationships.set(relationships, ownedIds);
+            }
+            ownedIds.add(userId);
             addedImplicitRelationships = true;
 
             if (!UserStore.getUser(userId)) toRequest.push(userId);
@@ -220,5 +227,15 @@ export default definePlugin({
     stop() {
         fetchGeneration++;
         clearPendingMemberRequest();
+        let changed = false;
+        for (const [relationships, ownedIds] of ownedRelationships) {
+            for (const userId of ownedIds) {
+                if (relationships.get(userId) !== 5) continue;
+                relationships.delete(userId);
+                changed = true;
+            }
+        }
+        ownedRelationships.clear();
+        if (changed) RelationshipStore.emitChange();
     }
 });

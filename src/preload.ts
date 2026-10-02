@@ -16,26 +16,68 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { debounce } from "@shared/debounce";
 import { IpcEvents } from "@shared/IpcEvents";
-import { contextBridge, webFrame } from "electron/renderer";
+import { contextBridge, ipcRenderer, webFrame } from "electron/renderer";
 
 import VencordNative, { invoke, sendSync } from "./VencordNative";
 
-contextBridge.exposeInMainWorld("VencordNative", VencordNative);
-
 // Discord
 if (location.protocol !== "data:") {
-    invoke(IpcEvents.INIT_FILE_WATCHERS);
+    contextBridge.exposeInMainWorld("VencordNative", VencordNative);
+    invoke(IpcEvents.INIT_FILE_WATCHERS)
+        .catch(error => console.error("[Protonn Cord] Failed to initialize file watchers", error));
 
     if (IS_DISCORD_DESKTOP) {
-        webFrame.executeJavaScript(sendSync<string>(IpcEvents.PRELOAD_GET_RENDERER_JS));
+        webFrame.executeJavaScript(sendSync<string>(IpcEvents.PRELOAD_GET_RENDERER_JS))
+            .catch(error => console.error("[Protonn Cord] Failed to initialize renderer", error));
         // Not supported in sandboxed preload scripts but Discord doesn't support it either so who cares
         require(process.env.DISCORD_PRELOAD!);
     }
 } // Monaco popout
 else {
-    contextBridge.exposeInMainWorld("setCss", debounce(VencordNative.quickCss.set));
+    let pendingCss: string | undefined;
+    let revision = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let saves = Promise.resolve();
+    let closing = false;
+    let onClosing: ((closing: boolean) => void) | undefined;
+    const flush = () => {
+        clearTimeout(timer);
+        const css = pendingCss;
+        const savedRevision = revision;
+        if (css === undefined) return saves;
+        const save = saves.catch(() => undefined).then(() => VencordNative.quickCss.set(css));
+        saves = save.then(() => {
+            if (revision === savedRevision) pendingCss = undefined;
+        });
+        return saves;
+    };
+    ipcRenderer.on(IpcEvents.MONACO_CLOSE, async (_, requestId: number | null) => {
+        closing = requestId !== null;
+        onClosing?.(closing);
+        if (!closing) return;
+        let errorMessage: string | undefined;
+        try {
+            await flush();
+        } catch (error) {
+            errorMessage = String(error);
+        }
+        invoke(IpcEvents.MONACO_CLOSE_ACK, requestId, errorMessage)
+            .catch(error => console.error("[Protonn Cord] Failed to acknowledge QuickCSS close", error));
+    });
+    contextBridge.exposeInMainWorld("setCss", (css: string) => {
+        if (closing) return;
+        pendingCss = css;
+        revision++;
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+            flush().catch(error => console.error("[Protonn Cord] Failed to save QuickCSS", error));
+        }, 300);
+    });
+    contextBridge.exposeInMainWorld("onCssClosing", (callback: (closing: boolean) => void) => {
+        onClosing = callback;
+        callback(closing);
+    });
     contextBridge.exposeInMainWorld("getCurrentCss", VencordNative.quickCss.get);
     contextBridge.exposeInMainWorld("getTheme", VencordNative.quickCss.getEditorTheme);
 }

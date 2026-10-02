@@ -145,7 +145,9 @@ export async function cleanupStoredAttachments(): Promise<void> {
 	cacheReady = true
 }
 
-export function setAttachmentPatcher(patcher: PatchAttachments): void {
+export function setAttachmentPatcher(
+	patcher: PatchAttachments | undefined,
+): void {
 	patchAttachments = patcher
 }
 
@@ -261,6 +263,7 @@ export async function prepareEncryptedUploads(
 	const sources = await readUploadSources(uploads)
 	let keyBytes: Uint8Array | undefined
 	const ciphertexts: Uint8Array[] = []
+	const createdPaths: string[] = []
 	const replacements: Array<{
 		filename: string
 		id: string
@@ -298,8 +301,8 @@ export async function prepareEncryptedUploads(
 				'base64',
 			)
 			files.add(relativePath)
+			createdPaths.push(relativePath)
 			if (generation !== cacheGeneration) {
-				await removeCachedFile(relativePath)
 				throw new Error('Secure Messaging was locked')
 			}
 			const uri = path.startsWith('file:') ? path : `file://${path}`
@@ -345,6 +348,9 @@ export async function prepareEncryptedUploads(
 				}
 			},
 		}
+	} catch (error) {
+		await Promise.all(createdPaths.map(removeCachedFile))
+		throw error
 	} finally {
 		keyBytes?.fill(0)
 		for (const source of sources) source.data.fill(0)
@@ -537,7 +543,7 @@ async function readAttachmentResponse(
 		}
 		return bytes
 	}
-	const chunks: Uint8Array[] = []
+	const bytes = new Uint8Array(expected)
 	let total = 0
 	try {
 		while (true) {
@@ -547,29 +553,26 @@ async function readAttachmentResponse(
 				)
 			})
 			if (done) break
-			total += value.byteLength
-			if (total > expected || total > MAX_FILE_BYTES) {
+			try {
+				if (total + value.byteLength > expected) {
+					throw new Error(
+						'Encrypted attachment download exceeds its expected size',
+					)
+				}
+				bytes.set(value, total)
+				total += value.byteLength
+			} finally {
 				value.fill(0)
-				throw new Error(
-					'Encrypted attachment download exceeds its expected size',
-				)
 			}
-			chunks.push(value)
 		}
 		if (total !== expected)
 			throw new Error('Encrypted attachment download length is invalid')
-		const bytes = new Uint8Array(total)
-		let offset = 0
-		for (const chunk of chunks) {
-			bytes.set(chunk, offset)
-			offset += chunk.byteLength
-		}
 		return bytes
 	} catch (error) {
+		bytes.fill(0)
 		await reader.cancel().catch(() => {})
 		throw error
 	} finally {
-		for (const chunk of chunks) chunk.fill(0)
 		reader.releaseLock()
 	}
 }
@@ -612,6 +615,7 @@ async function decryptAttachments(
 	const raw = orderedAttachments(message.attachments ?? [], secure.attachments)
 	const key = decode64(secure.attachments.key, 32)
 	const ciphertexts: Uint8Array[] = []
+	const createdPaths: string[] = []
 	const decrypted: Array<{
 		data: Uint8Array
 		metadata: AttachmentMetadata
@@ -671,8 +675,8 @@ async function decryptAttachments(
 				'base64',
 			)
 			files.add(relativePath)
+			createdPaths.push(relativePath)
 			if (generation !== cacheGeneration) {
-				await removeCachedFile(relativePath)
 				throw new Error('Secure Messaging was locked')
 			}
 			const uri = await callNativeMethod(
@@ -686,6 +690,9 @@ async function decryptAttachments(
 			visible.push(localAttachment(item.raw, item.metadata, uri))
 		}
 		return { status: 'ready', attachments: visible, plaintext }
+	} catch (error) {
+		await Promise.all(createdPaths.map(removeCachedFile))
+		throw error
 	} finally {
 		key.fill(0)
 		for (const ciphertext of ciphertexts) ciphertext.fill(0)

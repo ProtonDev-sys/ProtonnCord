@@ -63,6 +63,7 @@ export function SelectFolderInput({ settingsKey, successMessage }: Props) {
     async function onFolderSelect() {
         try {
             const res = await Native.chooseDir(settingsKey);
+            if (res == null) return;
             settings.store[settingsKey] = res;
 
             return Toasts.show({
@@ -81,9 +82,9 @@ export function SelectFolderInput({ settingsKey, successMessage }: Props) {
 
     return (
         <div className={classes(cl("folder-upload-container"), inputClasses.input)}>
-            <div onClick={() => copyWithToast(path)} className={cl("folder-upload-input")}>
+            <Button variant="none" onClick={() => copyWithToast(path)} className={cl("folder-upload-input")}>
                 {path == null || path === DEFAULT_IMAGE_CACHE_DIR ? "Choose Folder" : getDirName(path)}
-            </div>
+            </Button>
             <Button
                 className={cl("folder-upload-button")}
                 size="small"

@@ -90,7 +90,7 @@ export default definePlugin({
                 const folder = SortedGuildStore.getGuildFolderById(folderId);
                 if (!folder) return;
                 const { guildIds } = folder;
-                const isHidden = guildIds.every(id => HiddenServersStore.hiddenGuilds.has(id));
+                const isHidden = HiddenServersStore.hiddenGuilds.has(`folder-${folderId}`);
 
                 menuItems.push(
                     <Menu.MenuItem
@@ -147,8 +147,8 @@ export default definePlugin({
 
     useFilteredGuilds(guilds: guildsNode[]): guildsNode[] {
         const hiddenGuilds = useStateFromStores(
-            [HiddenServersStore],
-            () => HiddenServersStore.hiddenGuilds
+            [HiddenServersStore, SortedGuildStore],
+            () => HiddenServersStore.effectiveHiddenGuilds
         );
 
         if (hiddenGuilds.size === 0) return guilds;
@@ -174,7 +174,7 @@ export default definePlugin({
     },
 
     filteredGuildResults(results: qsResult[]): qsResult[] {
-        const { hiddenGuilds } = HiddenServersStore;
+        const hiddenGuilds = HiddenServersStore.effectiveHiddenGuilds;
         return results.filter(result => {
             if (result?.record?.guild_id && hiddenGuilds.has(result.record.guild_id)) {
                 return false;

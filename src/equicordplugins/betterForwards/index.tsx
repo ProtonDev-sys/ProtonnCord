@@ -159,35 +159,44 @@ export default definePlugin({
     ],
 
     async sendForward(additionalMessage: string | null, channels: { id: string; type: string; }[], message: Message, options: ForwardOptions) {
-        const contentMessage = message.messageSnapshots[0]?.message ?? message;
+        const contentMessage = message.messageSnapshots?.[0]?.message ?? message;
 
         const newLine = `\n${settings.store.forwardPreface} `;
-        const prefix = `${newLine}*Forwarded from <#${message.channel_id}>*${newLine}${contentMessage.content.trim().replaceAll("\n", newLine)}`;
+        const hasSelection = options.onlyAttachmentIds !== undefined || options.onlyEmbedIndices !== undefined;
+        const content = hasSelection ? "" : contentMessage.content.trim().replaceAll("\n", newLine);
+        const embedUrls = contentMessage.embeds
+            .filter((_, index) => options.onlyEmbedIndices ? options.onlyEmbedIndices.includes(index) : !hasSelection)
+            .flatMap(embed => embed.images?.length ? embed.images.map(image => image.url)
+                : [embed.url ?? embed.image?.url ?? embed.video?.url ?? embed.thumbnail?.url]);
+        if (hasSelection && embedUrls.some(url => !url))
+            throw new Error("Selected embeds cannot be resent safely. Forward them without fallback instead.");
+        const prefix = `${newLine}*Forwarded from <#${message.channel_id}>*${newLine}${content}`;
         const suffix = additionalMessage ? `\n${additionalMessage.trim()}` : "";
 
-        const attIds = options.onlyAttachmentIds;
+        const attIds = options.onlyAttachmentIds ?? (hasSelection ? [] : undefined);
         const attachments = attIds
             ? contentMessage.attachments.filter(a => attIds.includes(a.id))
             : contentMessage.attachments;
 
         const ids = (await Promise.all(channels.map(getId))).filter(Boolean) as string[];
 
+        const mediaUrls = [...attachments.map(attachment => attachment.url), ...embedUrls.filter(Boolean)];
         const chunkSize = 5;
-        ids.forEach(id => {
-            if (attachments.length > 0) {
-                for (let i = 0; i < attachments.length; i += chunkSize) {
-                    const group = attachments.slice(i, i + chunkSize);
+        await Promise.all(ids.map(async id => {
+            if (mediaUrls.length > 0) {
+                for (let i = 0; i < mediaUrls.length; i += chunkSize) {
+                    const group = mediaUrls.slice(i, i + chunkSize);
 
                     let text = i === 0 ? `${prefix}${newLine}Attachments:${newLine}` : newLine;
-                    text += `${group.map(a => a.url).join(newLine)}`;
-                    if (i + chunkSize >= attachments.length) text += suffix;
+                    text += group.join(newLine);
+                    if (i + chunkSize >= mediaUrls.length) text += suffix;
 
-                    sendMessage(id, { content: text });
+                    await sendMessage(id, { content: text });
                 }
             } else {
-                sendMessage(id, { content: prefix + suffix });
+                await sendMessage(id, { content: prefix + suffix });
             }
-        });
+        }));
     },
 
     shouldTransition(origCond: boolean): boolean {

@@ -47,8 +47,14 @@ export default definePlugin({
         const [value, setValue] = React.useState(lastSearch);
 
         React.useEffect(() => {
-            const searchResults = this.getFilteredUsers(lastSearch);
-            updateFunc(searchResults);
+            const update = updateFunc;
+            const refresh = () => update(this.getFilteredUsers(lastSearch));
+            refresh();
+            RelationshipStore.addChangeListener(refresh);
+            return () => {
+                RelationshipStore.removeChangeListener(refresh);
+                if (updateFunc === update) updateFunc = () => { };
+            };
         }, []);
 
         return <div className="vc-bbu-search">

@@ -4,20 +4,29 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+let protectionDepth = 0;
+let originalDescriptor: PropertyDescriptor | undefined;
+
 export async function protectWebpack<T>(webpack: any[], body: () => Promise<T>): Promise<T> {
-    const prev_m = Object.getOwnPropertyDescriptor(Function.prototype, "m")!;
-    Object.defineProperty(Function.prototype, "m", {
-        get() { throw "get require.m"; },
-        set() { throw "set require.m"; },
-        enumerable: true,
-        configurable: true,
-    });
+    if (!protectionDepth) {
+        originalDescriptor = Object.getOwnPropertyDescriptor(Function.prototype, "m");
+        Object.defineProperty(Function.prototype, "m", {
+            get() { throw "get require.m"; },
+            set() { throw "set require.m"; },
+            enumerable: true,
+            configurable: true,
+        });
+    }
+    protectionDepth++;
 
     try {
         return await body();
     } finally {
-        if (prev_m) Object.defineProperty(Function.prototype, "m", prev_m);
-        else Reflect.deleteProperty(Function.prototype, "m");
+        if (!--protectionDepth) {
+            if (originalDescriptor) Object.defineProperty(Function.prototype, "m", originalDescriptor);
+            else Reflect.deleteProperty(Function.prototype, "m");
+            originalDescriptor = undefined;
+        }
     }
 }
 

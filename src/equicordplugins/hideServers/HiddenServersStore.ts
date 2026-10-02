@@ -25,6 +25,16 @@ export const HiddenServersStore = proxyLazyWebpack(() => {
 
         public get hiddenGuilds() { return this._hiddenGuilds; }
 
+        public get effectiveHiddenGuilds() {
+            const hidden = new Set(this._hiddenGuilds);
+            for (const folder of SortedGuildStore.getGuildFolders()) {
+                if (hidden.has(`folder-${folder.folderId}`)) {
+                    for (const guildId of folder.guildIds) hidden.add(guildId);
+                }
+            }
+            return hidden;
+        }
+
         public async load() {
             const generation = ++this.loadGeneration;
             await this.saveQueue;
@@ -90,17 +100,15 @@ export const HiddenServersStore = proxyLazyWebpack(() => {
             this.replaceHiddenGuilds(next);
         }
 
-        public addHiddenFolder(id: string, guildIds: string[]) {
+        public addHiddenFolder(id: string, _guildIds: string[]) {
             const next = new Set(this._hiddenGuilds);
             next.add(`folder-${id}`);
-            guildIds.forEach(gid => next.add(gid));
             this.replaceHiddenGuilds(next);
         }
 
-        public removeHiddenFolder(id: string, guildIds: string[]) {
+        public removeHiddenFolder(id: string, _guildIds: string[]) {
             const next = new Set(this._hiddenGuilds);
             next.delete(`folder-${id}`);
-            guildIds.forEach(gid => next.delete(gid));
             this.replaceHiddenGuilds(next);
         }
 
@@ -120,9 +128,10 @@ export const HiddenServersStore = proxyLazyWebpack(() => {
 
         public hiddenGuildsDetail(): Guild[] {
             const sortedGuildIds = SortedGuildStore.getFlattenedGuildIds() as string[];
+            const hidden = this.effectiveHiddenGuilds;
             // otherwise the list is in order of increasing id number which is confusing
             return sortedGuildIds
-                .filter(id => this._hiddenGuilds.has(id))
+                .filter(id => hidden.has(id))
                 .map(id => GuildStore.getGuild(id))
                 .filter((guild): guild is Guild => Boolean(guild));
         }

@@ -40,39 +40,25 @@ const isLegal = (word: string): boolean => {
 };
 
 const getWords = (string: string): WordMatch[] => {
-    const linkRegex = /https?:\/\/[^\s]+\.[^\s]+/g;
-    const linkRanges = new Set<number>();
-
-    for (const match of string.matchAll(linkRegex)) {
-        const start = match.index!;
-        const end = start + match[0].length;
-        for (let i = start; i < end; i++) {
-            linkRanges.add(i);
-        }
-    }
+    const linkRegex = /https?:\/\/[^\s]+|(?:[\p{L}\p{N}_-]+\.)+[\p{L}]{2,}(?:[/?#][^\s]*)?/giu;
+    const linkRanges = Array.from(string.matchAll(linkRegex), match => ({
+        start: match.index!,
+        end: match.index! + match[0].length
+    }));
+    let linkIndex = 0;
 
     return Array.from(string.matchAll(/[\p{L}]+/gu), match => ({
         word: match[0],
         startIndex: match.index!
-    })).filter(match => !linkRanges.has(match.startIndex));
+    })).filter(match => {
+        while (linkIndex < linkRanges.length && linkRanges[linkIndex].end <= match.startIndex) linkIndex++;
+        return linkIndex >= linkRanges.length || match.startIndex + match.word.length <= linkRanges[linkIndex].start;
+    });
 };
 
 const chooseRandomWord = (message: string): WordMatch | null => {
-    const words: WordMatch[] = getWords(message);
-
-    while (words.length > 0) {
-        const index: number = Math.floor(Math.random() * words.length);
-        const wordMatch: WordMatch = words[index];
-
-        if (!isLegal(wordMatch.word)) {
-            words.splice(index, 1);
-            continue;
-        }
-
-        return wordMatch;
-    }
-
-    return null;
+    const words = getWords(message).filter(({ word }) => isLegal(word) && ington(word.toUpperCase()) !== "");
+    return words.length ? words[Math.floor(Math.random() * words.length)] : null;
 };
 
 const ington = (word: string): string => {

@@ -161,6 +161,74 @@ test("external previews require explicit opt-in and disabling prevents further U
     assert.equal(initial.calls().unfurl, after);
 });
 
+test("changing link-preview consent refreshes displayed encrypted messages without changing their stored content", async () => {
+    const source = readFileSync("src/equicordplugins/secureMessaging.desktop/index.tsx", "utf8");
+    const parsed = createSourceFile("index.tsx", source, ScriptTarget.ES2022, true);
+    const helper = parsed.statements.find(statement => isFunctionDeclaration(statement) && statement.name?.text === "setEncryptedLinkPreviewsEnabled");
+    assert.ok(helper);
+    const compiled = transpileModule(helper.getText(parsed), { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText;
+    const h = harness({
+        externalPreviews: false,
+        decrypt: async () => ({ ...decrypted(), stickers: [] }),
+        unfurl: async () => ({ body: { embeds: [{ ...rawEmbed, type: "link", title: "Preview fixture" }] } }),
+    });
+    const original = message();
+    const ordinary = message({ id: "200000000000000003", content: previewUrl });
+    const stored = [original, ordinary];
+    let selectedChannel: string | undefined = original.channel_id;
+    let reads = 0;
+    const events: string[] = [];
+    let displayed: Message;
+    const renderVisible = () => { displayed = h.embeds.patchEncryptedMessageEmbeds(stored[0], renderVisible); };
+    const createPolicy = runInThisContext(`(function(setExternalLinkPreviewsEnabled,SelectedChannelStore,MessageStore,updateMessage,isEncryptedMessage){${compiled};return setEncryptedLinkPreviewsEnabled;})`) as (
+        apply: (enabled: boolean) => void,
+        selection: { getChannelId(): string | undefined; },
+        store: { getMessages(channelId: string): { _array: Message[]; }; },
+        update: (channelId: string, messageId: string) => void,
+        encrypted: (content: string) => boolean,
+    ) => (enabled: boolean) => void;
+    const setPolicy = createPolicy(
+        enabled => { h.embeds.setExternalLinkPreviewsEnabled(enabled); events.push(`policy:${enabled}`); },
+        { getChannelId: () => selectedChannel },
+        { getMessages(channelId) { reads++; assert.equal(channelId, original.channel_id); return { _array: stored }; } },
+        (channelId, messageId) => {
+            assert.equal(channelId, original.channel_id);
+            assert.equal(messageId, original.id, "ordinary messages do not need a preview refresh");
+            events.push(`update:${messageId}`);
+            // Discord's memoized rows need a new stored message reference to render again.
+            stored[0] = Object.assign(Object.create(Object.getPrototypeOf(stored[0])), stored[0]) as Message;
+            renderVisible();
+        },
+        content => content.startsWith("PCEM3:"),
+    );
+
+    renderVisible();
+    await setImmediate();
+    assert.equal(h.calls().unfurl, 0);
+    assert.equal(displayed!.embeds.length, 0);
+    setPolicy(true);
+    await setImmediate();
+    assert.equal(h.calls().unfurl, 1);
+    assert.equal(displayed!.embeds[0]?.type, "link");
+    assert.equal(displayed!.embeds[0]?.url, previewUrl);
+    assert.notEqual(stored[0], original);
+    setPolicy(false);
+    assert.equal(displayed!.embeds.length, 0, "revoking consent removes the visible preview immediately");
+    await setImmediate();
+    assert.equal(h.calls().unfurl, 1, "revoking consent cannot request another preview");
+    assert.equal(stored[0].content, original.content);
+    assert.deepEqual(stored[0].embeds, [], "locally decrypted previews stay outside the message store");
+    assert.equal(stored[1], ordinary);
+    assert.deepEqual(events, ["policy:true", `update:${original.id}`, "policy:false", `update:${original.id}`]);
+
+    selectedChannel = undefined;
+    setPolicy(true);
+    await setImmediate();
+    assert.equal(reads, 2, "an absent selected channel cannot read or refresh channel messages");
+    assert.equal(h.calls().unfurl, 1);
+    assert.equal(events.at(-1), "policy:true");
+});
+
 for (const hasManifest of [false, true]) {
     test(`${hasManifest ? "manifest" : "legacy"} detached text limits refresh to ${hasManifest ? "the text file" : "the authenticated bundle"}`, async () => {
         const value = message({ attachments: [1, 2].map(index => ({

@@ -7,12 +7,12 @@
 import { Button } from "@components/Button";
 import { Heading } from "@components/Heading";
 import { classes } from "@utils/misc";
-import { openModal, React, SelectedGuildStore, showToast, TextInput, Toasts, useStateFromStores } from "@webpack/common";
+import { openModal, React, SelectedGuildStore, showToast, TextInput, Toasts, UserStore, useStateFromStores } from "@webpack/common";
 
 import { cl, settings } from "../index";
 import { exportPresets, ImportDecision, importPresets, savePreset } from "../utils/actions";
 import { cancelPendingPresetLoad, loadPresetAsPending } from "../utils/profile";
-import { loadPresets, presets, PresetSection, setCurrentPresetIndex } from "../utils/storage";
+import { getPresetScope, loadPresets, presets, PresetSection, setCurrentPresetIndex } from "../utils/storage";
 import { ImportProfilesModal } from "./confirmModal";
 import { PresetList } from "./presetList";
 
@@ -28,6 +28,9 @@ export function PresetManager({ section, guildId }: PresetManagerProps) {
     const [, forceUpdate] = React.useReducer(x => x + 1, 0);
     const [isSaving, setIsSaving] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState(true);
+    const [loadFailed, setLoadFailed] = React.useState(false);
+    const [loadAttempt, retryLoad] = React.useReducer(value => value + 1, 0);
+    const loadGenerationRef = React.useRef(0);
     const [currentPage, setCurrentPage] = React.useState(1);
     const [pageInput, setPageInput] = React.useState("1");
     const [selectedPreset, setSelectedPreset] = React.useState<number>(-1);
@@ -35,30 +38,36 @@ export function PresetManager({ section, guildId }: PresetManagerProps) {
     const lastRandomIndexRef = React.useRef<number>(-1);
     const resolvedSection: PresetSection = section ?? "main";
     const isServerSection = resolvedSection === "server";
+    const userId = useStateFromStores([UserStore], () => UserStore.getCurrentUser()?.id);
     const lastSelectedGuildId = useStateFromStores(
         [SelectedGuildStore],
         () => SelectedGuildStore.getLastSelectedGuildId() ?? SelectedGuildStore.getGuildId()
     );
     const resolvedGuildId = isServerSection ? (guildId ?? lastSelectedGuildId ?? undefined) : undefined;
-    const canUseGuild = !isLoading && (!isServerSection || Boolean(resolvedGuildId));
+    const canUseGuild = !isLoading && !loadFailed && Boolean(userId) && (!isServerSection || Boolean(resolvedGuildId));
 
     React.useEffect(() => {
         let isActive = true;
+        loadGenerationRef.current++;
         setIsLoading(true);
+        setLoadFailed(false);
+        setIsSaving(false);
         (async () => {
             await loadPresets(resolvedSection);
             if (!isActive) return;
             setSelectedPreset(-1);
             setCurrentPage(1);
             setPageInput("1");
+            setLoadFailed(Boolean(userId) && !getPresetScope(resolvedSection));
             forceUpdate();
             setIsLoading(false);
         })();
         return () => {
             isActive = false;
+            loadGenerationRef.current++;
             cancelPendingPresetLoad();
         };
-    }, [resolvedGuildId, resolvedSection]);
+    }, [resolvedGuildId, resolvedSection, userId, loadAttempt]);
 
     const filteredPresets = !searchMode
         ? presets
@@ -87,17 +96,20 @@ export function PresetManager({ section, guildId }: PresetManagerProps) {
         const trimmedName = presetName.trim();
         if (!trimmedName) return;
         setIsSaving(true);
+        const generation = loadGenerationRef.current;
         try {
             if (!await savePreset(trimmedName, resolvedSection, resolvedGuildId)) return;
+            if (generation !== loadGenerationRef.current) return;
             setPresetName("");
             const newTotalPages = Math.max(1, Math.ceil(presets.length / PRESETS_PER_PAGE));
             setCurrentPage(newTotalPages);
             setPageInput(String(newTotalPages));
             forceUpdate();
         } catch {
-            showToast("Could not save the profile preset. Try again.", Toasts.Type.FAILURE);
+            if (generation === loadGenerationRef.current)
+                showToast("Could not save the profile preset. Try again.", Toasts.Type.FAILURE);
         } finally {
-            setIsSaving(false);
+            if (generation === loadGenerationRef.current) setIsSaving(false);
         }
     };
 
@@ -163,6 +175,12 @@ export function PresetManager({ section, guildId }: PresetManagerProps) {
             <Heading tag="h3" className={cl("heading")}>
                 Saved Profiles
             </Heading>
+            {loadFailed && (
+                <div role="alert">
+                    Could not load saved profiles. Existing data has not been changed.
+                    <Button size="small" onClick={retryLoad}>Retry</Button>
+                </div>
+            )}
 
             <div className={cl("text")}>
                 <TextInput

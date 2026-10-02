@@ -44,6 +44,8 @@ async function authenticate(store: SettingsStore, update: PresenceUpdate): Promi
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ username: abs_username, password: abs_password }),
+            credentials: "omit",
+            redirect: "error",
             signal: update.signal,
         }));
         if (!update.isCurrent()) return false;
@@ -76,6 +78,8 @@ async function fetchMediaData(store: SettingsStore, update: PresenceUpdate, allo
         const baseUrl = store.abs_serverUrl!.replace(/\/$/, "");
         const res = await update.wait(fetch(`${baseUrl}/api/me/listening-sessions`, {
             headers: { "Authorization": `Bearer ${authToken}` },
+            credentials: "omit",
+            redirect: "error",
             signal: update.signal,
         }));
         if (!update.isCurrent()) return null;

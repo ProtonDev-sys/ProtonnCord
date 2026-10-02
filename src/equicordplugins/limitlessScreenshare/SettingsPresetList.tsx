@@ -30,8 +30,9 @@ export function SettingsPresetList(isResolution: boolean) {
     }, [value]);
 
     function handleAddPreset() {
-        if (!value) return;
+        if (!value || errorString || !Number.isSafeInteger(value)) return;
         const list = (isResolution ? resolutions : fpss);
+        if (list.some(preset => preset.value === value)) return;
         list.push({ label: `${value}${(isResolution ? "p" : "fps")}`, value });
         list.sort((a, b) => (Number(!a.value) - Number(!b.value)) || (a.value - b.value));
     }

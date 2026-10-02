@@ -122,7 +122,9 @@ export default definePlugin({
         if (notificationCallback !== undefined) this.pluginsWithUpdates.deregisterCallback(notificationCallback);
         notificationCallback = this.pluginsWithUpdates.registerCallback((value, id) => {
             if (value.plugins.length === 0) return;
-            if (shouldSkipUpdateNotification(value.plugins[value.plugins.length - 1]))
+            const directory = value.plugins[value.plugins.length - 1];
+            const pluginName = this.plugins.value().find(plugin => plugin.directory === directory)?.name;
+            if (shouldSkipUpdateNotification(directory) || (pluginName && shouldSkipUpdateNotification(pluginName)))
                 return;
             this.pluginsWithUpdates.deregisterCallback(id);
             notificationCallback = undefined;

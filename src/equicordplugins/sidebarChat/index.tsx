@@ -44,7 +44,7 @@ import {
     useStateFromStores,
 } from "@webpack/common";
 
-import { getOpenPopoutWindowKeys, getPersistedPopoutChannelIds, getPopoutWindowKey, isPopoutWindowOpen, settings, SidebarStore, syncPersistedPopoutWindows } from "./store";
+import { getOpenPopoutWindowKeys, getPersistedPopoutChannelIds, getPopoutWindowKey, isPopoutWindowOpen, setSidebarActive, settings, SidebarStore, syncPersistedPopoutWindows } from "./store";
 import style from "./styles.css?managed";
 
 const cl = classNameFactory("vc-sidebar-chat-");
@@ -136,6 +136,13 @@ function getPopoutMenuLabel(channelId: string) {
 
 let restorePersistedPopoutsInterval: number | null = null;
 let restoringPersistedPopouts = false;
+let popoutGeneration = 0;
+let popoutsActive = false;
+let popoutOwnerId: string | undefined;
+
+function isCurrentPopoutOperation(generation = popoutGeneration, userId = popoutOwnerId) {
+    return popoutsActive && Boolean(userId) && generation === popoutGeneration && userId === UserStore.getCurrentUser()?.id;
+}
 
 function clearPersistedPopoutRestoreLoop() {
     restoringPersistedPopouts = false;
@@ -145,9 +152,9 @@ function clearPersistedPopoutRestoreLoop() {
     }
 }
 
-async function waitForChannel(channelId: string, timeoutMs = 2500) {
+async function waitForChannel(channelId: string, isCurrent: () => boolean, timeoutMs = 2500) {
     const startedAt = Date.now();
-    while (Date.now() - startedAt <= timeoutMs) {
+    while (isCurrent() && Date.now() - startedAt <= timeoutMs) {
         const channel = ChannelStore.getChannel(channelId);
         if (channel) return channel;
 
@@ -157,9 +164,9 @@ async function waitForChannel(channelId: string, timeoutMs = 2500) {
     return null;
 }
 
-async function waitForDmChannel(userId: string, timeoutMs = 2500) {
+async function waitForDmChannel(userId: string, isCurrent: () => boolean, timeoutMs = 2500) {
     const startedAt = Date.now();
-    while (Date.now() - startedAt <= timeoutMs) {
+    while (isCurrent() && Date.now() - startedAt <= timeoutMs) {
         const channelId = ChannelStore.getDMFromUserId?.(userId);
         if (channelId) return channelId;
 
@@ -170,19 +177,24 @@ async function waitForDmChannel(userId: string, timeoutMs = 2500) {
 }
 
 async function openPopoutFromUserMenu(userId: string) {
+    const generation = popoutGeneration;
+    const ownerId = popoutOwnerId;
+    const isCurrent = () => isCurrentPopoutOperation(generation, ownerId);
+    if (!isCurrent()) return;
     try {
         const channelId = await Promise.resolve(ChannelActionCreators.getOrEnsurePrivateChannel(userId));
-        if (!channelId) return;
+        if (!isCurrent() || !channelId) return;
 
-        const channel = await waitForChannel(channelId);
-        if (channel) openPopout(channel.id);
+        const channel = await waitForChannel(channelId, isCurrent);
+        if (isCurrent() && channel) openPopout(channel.id);
         return;
     } catch {
-        const fallbackChannelId = await waitForDmChannel(userId);
+        if (!isCurrent()) return;
+        const fallbackChannelId = await waitForDmChannel(userId, isCurrent);
         if (!fallbackChannelId) return;
 
-        const channel = await waitForChannel(fallbackChannelId);
-        if (channel) openPopout(channel.id);
+        const channel = await waitForChannel(fallbackChannelId, isCurrent);
+        if (isCurrent() && channel) openPopout(channel.id);
     }
 }
 
@@ -195,6 +207,7 @@ function closePopout(channelId: string, syncPersistence = true) {
 }
 
 function openPopout(channelId: string, syncPersistence = true) {
+    if (!isCurrentPopoutOperation()) return;
     const channel = ChannelStore.getChannel(channelId);
     if (!channel || !canOpenPopout(channel)) return;
 
@@ -231,17 +244,24 @@ function restorePersistedPopouts() {
     if (pendingRestoreIds.size === 0) return;
 
     restoringPersistedPopouts = true;
+    const startedAt = Date.now();
+    const generation = popoutGeneration;
+    const ownerId = popoutOwnerId;
 
     const attemptRestore = () => {
+        if (!isCurrentPopoutOperation(generation, ownerId) || !settings.store.persistPopoutWindows) {
+            clearPersistedPopoutRestoreLoop();
+            return;
+        }
         for (const channelId of pendingRestoreIds) {
             const channel = ChannelStore.getChannel(channelId);
             if (!channel || !canOpenPopout(channel)) continue;
 
             pendingRestoreIds.delete(channelId);
-            openPopout(channelId, false);
+            if (!isPopoutWindowOpen(channelId)) openPopout(channelId, false);
         }
 
-        if (pendingRestoreIds.size === 0) {
+        if (pendingRestoreIds.size === 0 || Date.now() - startedAt >= 10_000) {
             clearPersistedPopoutRestoreLoop();
             syncPersistedPopoutWindows();
         }
@@ -249,7 +269,7 @@ function restorePersistedPopouts() {
 
     attemptRestore();
 
-    if (pendingRestoreIds.size > 0) {
+    if (pendingRestoreIds.size > 0 && restoringPersistedPopouts) {
         restorePersistedPopoutsInterval = window.setInterval(attemptRestore, 250);
     }
 }
@@ -324,6 +344,24 @@ const ChannelContextPatch: NavContextMenuPatchCallback = (children, args: { chan
     ));
 };
 
+function stopPopouts() {
+    popoutsActive = false;
+    popoutGeneration++;
+    setSidebarActive(false);
+    if (popoutOwnerId && !restoringPersistedPopouts) syncPersistedPopoutWindows(popoutOwnerId);
+    clearPersistedPopoutRestoreLoop();
+    for (const windowKey of getOpenPopoutWindowKeys()) PopoutActions.close(windowKey);
+    popoutOwnerId = undefined;
+}
+
+function startPopouts() {
+    popoutGeneration++;
+    popoutsActive = true;
+    popoutOwnerId = UserStore.getCurrentUser()?.id;
+    setSidebarActive(true);
+    restorePersistedPopouts();
+}
+
 export default definePlugin({
     name: "SidebarChat",
     authors: [Devs.Joona, EquicordDevs.justjxke],
@@ -374,16 +412,15 @@ export default definePlugin({
         )
     },
 
-    stop() {
-        clearPersistedPopoutRestoreLoop();
-        syncPersistedPopoutWindows();
-        for (const windowKey of getOpenPopoutWindowKeys()) {
-            PopoutActions.close(windowKey);
+    stop: stopPopouts,
+    start: startPopouts,
+    flux: {
+        LOGOUT: stopPopouts,
+        CONNECTION_OPEN() {
+            if (popoutOwnerId === UserStore.getCurrentUser()?.id && popoutsActive) return;
+            stopPopouts();
+            startPopouts();
         }
-    },
-
-    async start() {
-        restorePersistedPopouts();
     },
 
     renderSidebar() {
@@ -605,7 +642,7 @@ function PopoutPersistenceSync() {
     );
 
     useEffect(() => {
-        if (restoringPersistedPopouts) return;
+        if (restoringPersistedPopouts || !isCurrentPopoutOperation()) return;
         syncPersistedPopoutWindows();
     }, [openWindowKeySignature]);
 
