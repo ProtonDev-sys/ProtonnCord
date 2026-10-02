@@ -7,7 +7,7 @@
 import { FormSwitch } from "@components/FormSwitch";
 import { HeadingTertiary } from "@components/Heading";
 
-import { settings } from ".";
+import { getServiceSettings, settings } from ".";
 import { Providers } from "./Providers";
 
 export function Settings() {
@@ -42,8 +42,8 @@ export function Settings() {
                         title="Show if available"
                         hideBorder={true}
                         key={`${provider[0]}-visible`}
-                        value={blazinglyFastSettings.servicesSettings[provider[0]].enabled}
-                        onChange={v => settings.store.servicesSettings[provider[0]].enabled = v}
+                        value={getServiceSettings(provider[0], blazinglyFastSettings.servicesSettings).enabled}
+                        onChange={v => settings.store.servicesSettings[provider[0]] = { ...getServiceSettings(provider[0]), enabled: v }}
                     />
                     {
                         /* @ts-ignore */
@@ -51,8 +51,8 @@ export function Settings() {
                             title="Open in desktop app"
                             hideBorder={true}
                             key={`${provider[0]}-native`}
-                            value={blazinglyFastSettings.servicesSettings[provider[0]].openInNative}
-                            onChange={v => settings.store.servicesSettings[provider[0]].openInNative = v}
+                            value={getServiceSettings(provider[0], blazinglyFastSettings.servicesSettings).openInNative}
+                            onChange={v => settings.store.servicesSettings[provider[0]] = { ...getServiceSettings(provider[0]), openInNative: v }}
                         />
                     }
                 </div>

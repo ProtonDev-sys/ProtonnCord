@@ -126,11 +126,14 @@ export function QuestButtonSetting(): JSX.Element {
 
     function updateIncludedTypes(options: readonly QuestButtonIncludedTypeOption[], value: string | string[] | null) {
         const selectedValues = new Set(Array.isArray(value) ? value : value ? [value] : []);
-        const nextIncludedTypes = { ...getQuestifySettings().questButtonIncludedTypes };
+        const currentIncludedTypes = getQuestifySettings().questButtonIncludedTypes;
+        const nextIncludedTypes = { ...currentIncludedTypes };
 
         for (const option of options) {
             nextIncludedTypes[option.value] = selectedValues.has(String(option.value));
         }
+
+        if (options.every(option => nextIncludedTypes[option.value] === currentIncludedTypes[option.value])) return;
 
         getQuestifySettings().questButtonIncludedTypes = nextIncludedTypes;
         validateIgnoredQuests();

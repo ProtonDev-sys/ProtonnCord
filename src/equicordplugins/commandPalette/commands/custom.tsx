@@ -54,6 +54,7 @@ async function runCustomCommand(data: CustomCommandData) {
 }
 
 function commandForm(existing: CustomCommandData | null): PageEntry {
+    const commandId = existing?.id ?? crypto.randomUUID();
     const spec: FormPageSpec = {
         type: "form",
         submitLabel: existing ? "Save Command" : "Create Command",
@@ -89,24 +90,31 @@ function commandForm(existing: CustomCommandData | null): PageEntry {
         validate(values) {
             if (!values.name.trim()) return "Name is required.";
             const kind = values.kind as CustomCommandKind;
-            if (kind === "url" && !parseUrl(values.url)) return "Enter a valid URL.";
+            const url = kind === "url" ? parseUrl(values.url) : null;
+            if (kind === "url" && (!url || !["https:", "http:"].includes(url.protocol))) return "Enter a valid HTTP or HTTPS URL.";
             if (kind === "settings" && !DISCORD_SETTINGS_ROUTES.some(entry => entry.route === values.route)) return "Pick a settings page from the suggestions.";
             if (kind === "message" && !values.text.trim()) return "Text is required.";
             return null;
         },
-        submit(values, ctx) {
+        async submit(values, ctx) {
             const kind = values.kind as CustomCommandKind;
             const value = kind === "url" ? values.url.trim() : kind === "settings" ? values.route : values.text;
             const next: CustomCommandData = {
-                id: existing?.id ?? crypto.randomUUID(),
+                ...existing,
+                id: commandId,
                 name: values.name.trim(),
                 kind,
                 value
             };
 
-            store.set(existing
-                ? store.get().map(entry => entry.id === existing.id ? next : entry)
-                : [...store.get(), next]);
+            try {
+                await store.set(existing
+                    ? store.get().map(entry => entry.id === existing.id ? next : entry)
+                    : [...store.get().filter(entry => entry.id !== next.id), next]);
+            } catch {
+                showToast("Failed to save command. Try again.", Toasts.Type.FAILURE);
+                return;
+            }
             registerCustomCommands();
 
             showToast(existing ? "Command saved." : "Command created.", Toasts.Type.SUCCESS);
@@ -135,8 +143,13 @@ function toCommand(data: CustomCommandData): PaletteCommand {
             label: "Delete Command",
             icon: TrashIcon,
             keepOpen: true,
-            run() {
-                store.set(store.get().filter(entry => entry.id !== data.id));
+            async run() {
+                try {
+                    await store.set(store.get().filter(entry => entry.id !== data.id));
+                } catch {
+                    showToast("Failed to delete command. Try again.", Toasts.Type.FAILURE);
+                    return;
+                }
                 registerCustomCommands();
                 showToast("Command deleted.", Toasts.Type.SUCCESS);
             }

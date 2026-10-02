@@ -24,7 +24,7 @@ function computeClean(name: string, type: number): string {
     const cleaned = name
         .normalize("NFKC")
         .replace(/[ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢ]/g, m => SMALL_CAPS[m])
-        .replace(/[^ -~]?\p{Extended_Pictographic}[^ -~]?/ug, "")
+        .replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}]|\u200d|\ufe0f/ug, "")
         .replace(/-?\|-?/g, separator)
         .replace(/-?[^\p{Letter} -~]-?/ug, separator)
         .replace(/-+/g, "-")

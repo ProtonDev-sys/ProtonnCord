@@ -256,9 +256,11 @@ test("SidebarChat ignores stale DM resolutions and uses existing private channel
         "@webpack/common": {
             Flux: { PersistedStore: Store },
             ChannelActionCreators: { getOrEnsurePrivateChannel: () => { calls++; return pending.promise; } },
+            UserStore: { getCurrentUser: () => ({ id: "fixture-owner" }) },
             ChannelStore: { getChannel: (id: string) => id === "group" ? { isPrivate: () => true } : undefined }
         }
     });
+    api.setSidebarActive(true);
     const opening = handlers.VC_SIDEBAR_CHAT_NEW({ guildId: null, id: "user" });
     handlers.VC_SIDEBAR_CHAT_CLOSE();
     pending.resolve("dm");
@@ -267,6 +269,7 @@ test("SidebarChat ignores stale DM resolutions and uses existing private channel
     await handlers.VC_SIDEBAR_CHAT_NEW({ guildId: null, id: "group" });
     assert.equal(api.SidebarStore.getState().channelId, "group");
     assert.equal(calls, 1);
+    api.setSidebarActive(false);
 });
 
 test("ToneIndicators preserves frozen React input and empty custom descriptions", () => {
@@ -416,7 +419,7 @@ test("SaveFavoriteGIFs does not report export success after a save failure", asy
         "@api/Commands": { ApplicationCommandInputType: {} }, "@api/Notifications": { showNotification: (notice: any) => notices.push(notice) },
         "@api/PluginManager": {}, "@equicordplugins/equicordToolbox": {}, "@utils/web": {},
         "@webpack/common": { UserSettingsActionCreators: { FrecencyUserSettingsActionCreators: { getCurrentValue: () => ({ favoriteGifs: { gifs: { "https://example.invalid/gif": {} } } }) } } }
-    }, { IS_DISCORD_DESKTOP: true, DiscordNative: { fileManager: { saveWithDialog: async () => { throw new Error("disk unavailable"); } } }, fetch: async () => ({ ok: true }) }).default;
+    }, { IS_DISCORD_DESKTOP: true, AbortSignal, DiscordNative: { fileManager: { saveWithDialog: async () => { throw new Error("disk unavailable"); } } }, fetch: async () => new Response(null, { status: 200 }) }).default;
     await plugin.commands[1].execute();
     assert.equal(notices.at(-1).body, "Failed to save GIFs");
     assert.equal(notices.some(notice => notice.color === "var(--text-positive)"), false);

@@ -1182,17 +1182,29 @@ test("speech previews arrive before completion and discard late polls after canc
 test("VoiceStats preserves unsaved totals after a storage failure and retries them", async () => {
     let fail = true;
     const writes: any[] = [];
+    const writeKeys: string[] = [];
     const fixture = load("voiceStats/index.tsx", "\nexport { totalsByUser, persistTotals }; export function markDirty() { totalsDirty = true; }", {
-        "@api/DataStore": { set: async (_: string, value: any) => { if (fail) throw Error("fixture"); writes.push(value); } },
+        "@api/DataStore": {
+            get: async () => undefined,
+            set: async (key: string, value: any) => { if (fail) throw Error("fixture"); writeKeys.push(key); writes.push(value); }
+        },
+        "@webpack/common": {
+            UserStore: { getCurrentUser: () => ({ id: "owner" }) },
+            SelectedChannelStore: { getVoiceChannelId: () => null }
+        },
         "@webpack": { findCssClassesLazy: () => ({}), findComponentByCodeLazy: () => "section" }
     });
+    await fixture.default.start();
     fixture.totalsByUser.set("fixture", 5);
     fixture.markDirty();
     await fixture.persistTotals();
+    assert.equal(writes.length, 0);
     fail = false;
     await fixture.persistTotals();
     assert.equal(writes.length, 1);
     assert.equal(writes[0].fixture, 5);
+    assert.deepEqual(writeKeys, ["VoiceStats_totals:owner"]);
+    fixture.default.stop();
 });
 
 test("webpack inspection restores an absent prototype descriptor after failure", async () => {

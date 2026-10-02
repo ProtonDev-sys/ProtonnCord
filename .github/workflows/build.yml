@@ -23,6 +23,7 @@ jobs:
         name: Build Protonn Cord
         if: contains(fromJSON('["refs/heads/main", "refs/heads/staging", "refs/heads/nightly"]'), github.ref)
         runs-on: ubuntu-latest
+        timeout-minutes: 35
 
         steps:
             - uses: actions/checkout@v7
@@ -39,6 +40,9 @@ jobs:
 
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
+
+            - name: Verify update channel atomicity offline
+              run: pnpm exec tsx --test scripts/testAuditReleaseAtomicityDeep.ts
 
             - name: Build web
               run: pnpm buildWebStandalone
@@ -82,7 +86,8 @@ jobs:
               run: |
                   set -euo pipefail
                   branch="$GITHUB_REF_NAME"
-                  git fetch --no-tags origin "refs/heads/$branch"
+                  [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+                  timeout 60s git fetch --no-tags origin "refs/heads/$branch"
                   if [[ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]]; then
                       echo "Skipping stale release build for $GITHUB_SHA; origin/$branch has advanced."
                       exit 0
@@ -90,19 +95,8 @@ jobs:
 
                   if [[ "$branch" == "main" ]]; then
                       tag="latest"
-                      release_flags=(--latest)
                   else
                       tag="$branch"
-                      release_flags=(--prerelease)
                   fi
-                  title="Protonn Cord $branch $GITHUB_SHA"
-
-                  if gh release view "$tag" >/dev/null 2>&1; then
-                      git tag --force "$tag" "$GITHUB_SHA"
-                      git push origin "refs/tags/$tag" --force
-                      gh release edit "$tag" --target "$GITHUB_SHA" --title "$title" "${release_flags[@]}"
-                  else
-                      gh release create "$tag" --target "$GITHUB_SHA" --title "$title" \
-                          --notes "Automatically built from Protonn Cord $branch." "${release_flags[@]}"
-                  fi
-                  gh release upload "$tag" --clobber dist/release/*
+                  echo "Preparing complete draft for $tag (--prerelease on nightly/staging)."
+                  node scripts/releaseUpdateChannel.mjs

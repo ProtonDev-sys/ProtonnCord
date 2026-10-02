@@ -18,12 +18,13 @@
 
 function parseHeaders(headers) {
     const result = new Headers();
-    if (!headers)
+    if (!headers?.trim())
         return result;
 
     const headersArr = headers.trim().split("\n");
     for (var i = 0; i < headersArr.length; i++) {
         var row = headersArr[i];
+        if (!row.trim()) continue;
         var index = row.indexOf(":")
             , key = row.slice(0, index).trim().toLowerCase()
             , value = row.slice(index + 1).trim();

@@ -130,8 +130,10 @@ async function mediaMetadata(file: File, mimeType: string): Promise<UploadMediaM
             media.removeEventListener("loadedmetadata", onLoadedMetadata);
             media.removeEventListener("seeked", onMetadataAvailable);
             media.removeEventListener("error", onError);
-            media.removeAttribute("src");
-            media.load();
+            try {
+                media.removeAttribute("src");
+                media.load();
+            } catch { }
             URL.revokeObjectURL(url);
             resolve(result);
         };
@@ -240,9 +242,16 @@ export function createEncryptedUploadDraft(uploads: CloudUpload[], createUpload:
 export function uploadEncryptedAttachment(upload: CloudUpload, signal?: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
         let settled = false;
+        const deadline = setTimeout(() => {
+            finish(new Error("Encrypted attachment upload timed out"));
+            try {
+                upload.cancel();
+            } catch { }
+        }, 60 * 60 * 1_000);
         const finish = (error?: unknown) => {
             if (settled) return;
             settled = true;
+            clearTimeout(deadline);
             upload.removeListener("complete", onComplete);
             upload.removeListener("error", onError);
             signal?.removeEventListener("abort", onError);
@@ -308,6 +317,13 @@ export async function prepareEncryptedAttachments(
     for (const upload of uploads) assertUpload(upload);
     const inputFiles = uploads.map(upload => upload.item.file);
     const sources = uploads.map(sourceForUpload);
+    for (const source of sources) {
+        const minimumSize = source.file.size + 20;
+        if (minimumSize > maxEncryptedFileBytes)
+            throw new EncryptedAttachmentUploadLimitError(source.filename, minimumSize, maxEncryptedFileBytes);
+    }
+    if (sources.reduce((total, source) => total + source.file.size + 20, 0) > MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES)
+        throw new Error("Encrypted attachments exceed the total size limit");
 
     if (detachedTextIndex !== null && (!Number.isInteger(detachedTextIndex) ||
         detachedTextIndex < 0 || detachedTextIndex >= uploads.length || sources[detachedTextIndex].file.size > MAX_DETACHED_TEXT_BYTES))

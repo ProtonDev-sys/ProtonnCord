@@ -19,7 +19,7 @@ if (!IS_STANDALONE) {
 }
 
 interface PatchPreviewProps {
-    module: [id: number, factory: Function];
+    module: [id: string | number, factory: Function];
     match: string;
     replacement: string | ReplaceFn;
     setReplacementError(error: any): void;

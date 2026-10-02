@@ -9,6 +9,12 @@ import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 
 export let iconsModule: IconsDef;
+const iconListeners = new Set<() => void>();
+
+export function subscribeIconsModule(listener: () => void) {
+    iconListeners.add(listener);
+    return () => { iconListeners.delete(listener); };
+}
 
 export default definePlugin({
     name: "ConcatenatedModules",
@@ -29,5 +35,6 @@ export default definePlugin({
         // incase you dont want to use iconviewer you can do
         // Vencord.Plugins.plugins.ConcatenatedModules.iconsModule instead for icons and viewing paths
         this.iconsModule = value;
+        for (const listener of iconListeners) listener();
     },
 });

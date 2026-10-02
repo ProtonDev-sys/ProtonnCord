@@ -24,6 +24,8 @@ let ws: WebSocket | undefined;
 let wsReconnect: ReturnType<typeof setTimeout> | undefined;
 let shouldReconnect = false;
 let connectionGeneration = 0;
+let messageSequence = 0;
+let coverController: AbortController | undefined;
 let inMessageThrottle = false;
 let messageThrottleTimeout: ReturnType<typeof setTimeout> | undefined;
 let clearActivityTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -63,8 +65,9 @@ function clearRuntimeTimeouts() {
 function throttledOnMessage(data: string, generation: number) {
     if (!shouldReconnect || generation !== connectionGeneration || inMessageThrottle) return;
 
-    void onMessage(data, generation).catch(() => {
-        if (shouldReconnect && generation === connectionGeneration) clearActivity();
+    const sequence = ++messageSequence;
+    void onMessage(data, generation, sequence).catch(() => {
+        if (shouldReconnect && generation === connectionGeneration && sequence === messageSequence) clearActivity();
     });
     inMessageThrottle = true;
 
@@ -76,6 +79,7 @@ function throttledOnMessage(data: string, generation: number) {
     if (clearActivityTimeout) clearTimeout(clearActivityTimeout);
     clearActivityTimeout = setTimeout(() => {
         clearActivityTimeout = undefined;
+        messageSequence++;
         if (shouldReconnect && generation === connectionGeneration) clearActivity();
     }, MESSAGE_THROTTLE_MS * 2);
 }
@@ -92,6 +96,8 @@ function pruneOldestBeatmapCover() {
 }
 
 function getBeatmapCover(setId: number): Promise<string | undefined> {
+    const signal = coverController?.signal;
+    if (!signal || signal.aborted) return Promise.resolve(undefined);
     const cachedCover = beatmapCoverCache.get(setId);
     if (cachedCover) return cachedCover;
 
@@ -99,17 +105,14 @@ function getBeatmapCover(setId: number): Promise<string | undefined> {
 
     const coverPromise = (async () => {
         const mapBg = await getAsset(`https://assets.ppy.sh/beatmaps/${setId}/covers/list@2x.jpg`);
-        if (!mapBg) return undefined;
+        if (!mapBg || signal.aborted) return undefined;
 
-        const res = await fetch(mapBg.replace(/^mp:/, "https://media.discordapp.net/"), { method: "HEAD" });
-        if (!res.ok) {
-            beatmapCoverCache.delete(setId);
-            return undefined;
-        }
+        const res = await fetch(mapBg.replace(/^mp:/, "https://media.discordapp.net/"), { method: "HEAD", signal });
+        if (!res.ok) throw new Error("Beatmap cover request failed.");
 
         return mapBg;
     })().catch(() => {
-        beatmapCoverCache.delete(setId);
+        if (beatmapCoverCache.get(setId) === coverPromise) beatmapCoverCache.delete(setId);
         return undefined;
     });
 
@@ -117,7 +120,7 @@ function getBeatmapCover(setId: number): Promise<string | undefined> {
     return coverPromise;
 }
 
-async function onMessage(data: string, generation: number) {
+async function onMessage(data: string, generation: number, sequence: number) {
     if (!shouldReconnect || generation !== connectionGeneration) return;
 
     const json: TosuApi = JSON.parse(data);
@@ -264,13 +267,14 @@ async function onMessage(data: string, generation: number) {
         }
     }
 
+    if (!shouldReconnect || generation !== connectionGeneration || sequence !== messageSequence) return;
     if (beatmap.set > 0) {
         const mapBg = await getBeatmapCover(beatmap.set);
         if (!shouldReconnect || generation !== connectionGeneration) return;
         if (mapBg) assets.large_image = mapBg;
     }
 
-    if (shouldReconnect && generation === connectionGeneration) {
+    if (shouldReconnect && generation === connectionGeneration && sequence === messageSequence) {
         FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity, socketId: SOCKET_ID });
     }
 }
@@ -282,20 +286,32 @@ export function start() {
 
     (function connect() {
         if (!shouldReconnect || generation !== connectionGeneration) return;
+        clearRuntimeTimeouts();
+        coverController?.abort();
+        coverController = new AbortController();
+        messageSequence++;
+        beatmapCoverCache.clear();
 
         const socket = new WebSocket("ws://127.0.0.1:24050/websocket/v2");
         ws = socket;
 
         socket.addEventListener("error", () => socket.close());
         socket.addEventListener("close", () => {
-            if (!shouldReconnect || generation !== connectionGeneration) return;
+            if (!shouldReconnect || generation !== connectionGeneration || ws !== socket) return;
+            coverController?.abort();
+            messageSequence++;
             wsReconnect = setTimeout(connect, 5000);
         });
-        socket.addEventListener("message", ({ data }) => throttledOnMessage(data, generation));
+        socket.addEventListener("message", ({ data }) => {
+            if (ws === socket) throttledOnMessage(data, generation);
+        });
     })();
 }
 
 export function stop() {
+    coverController?.abort();
+    coverController = undefined;
+    messageSequence++;
     shouldReconnect = false;
     connectionGeneration++;
     clearRuntimeTimeouts();

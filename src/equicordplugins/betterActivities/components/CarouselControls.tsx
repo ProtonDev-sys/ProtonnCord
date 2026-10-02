@@ -7,11 +7,11 @@
 import { React, Tooltip } from "@webpack/common";
 
 import { CarouselControlsProps } from "../types";
-import { cl } from "../utils";
+import { cl, getActivityKey } from "../utils";
 import { Caret } from "./Caret";
 
 export function CarouselControls({ activities, currentActivity, onActivityChange }: CarouselControlsProps) {
-    const currentIndex = activities.findIndex(a => a.id === currentActivity.id);
+    const currentIndex = activities.findIndex(activity => getActivityKey(activity) === getActivityKey(currentActivity));
 
     return (
         <div
@@ -48,7 +48,7 @@ export function CarouselControls({ activities, currentActivity, onActivityChange
                     <div
                         key={"dot--" + index}
                         onClick={() => onActivityChange(activity)}
-                        className={cl("controls-dot", currentActivity.id === activity.id && "controls-selected")} />
+                        className={cl("controls-dot", currentIndex === index && "controls-selected")} />
                 ))}
             </div>
 

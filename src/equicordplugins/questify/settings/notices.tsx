@@ -10,7 +10,7 @@ import type { JSX } from "react";
 
 import { getQuestifySettings } from "./access";
 import { resetDangerousSettings } from "./dangerous";
-import { promptToRestartIfDirty } from "./restartTracking";
+import { deferSettingsCallback, promptToRestartIfDirty } from "./restartTracking";
 
 interface NoticeAction {
     text: string;
@@ -24,7 +24,6 @@ interface OneTimeNotice {
     title: string;
     renderBody: () => JSX.Element;
     condition: () => boolean;
-    autoAcknowledgeCondition?: () => boolean;
     actions: readonly NoticeAction[];
 }
 
@@ -50,7 +49,6 @@ const oneTimeNotices = [
 
             return settings.enabled && settings.allowChangingDangerousSettings;
         },
-        autoAcknowledgeCondition: () => !getQuestifySettings().allowChangingDangerousSettings,
         actions: [
             {
                 text: "Keep Using Dangerous Questify Settings",
@@ -80,11 +78,11 @@ function runNoticeAction(notice: OneTimeNotice, action: NoticeAction, onClose: (
     action.run?.();
     onClose();
 
-    setTimeout(() => {
+    deferSettingsCallback(() => {
         if (!action.promptForRestart || !promptToRestartIfDirty({ onDecline: showPendingQuestifyNotice })) {
             showPendingQuestifyNotice();
         }
-    }, 0);
+    });
 }
 
 function OneTimeNoticeModal({ notice, ...modalProps }: RenderModalProps & { notice: OneTimeNotice; }): JSX.Element {
@@ -111,13 +109,7 @@ export function showPendingQuestifyNotice(): void {
             continue;
         }
 
-        if (!notice.condition()) {
-            if (notice.autoAcknowledgeCondition?.()) {
-                acknowledgeNotice(notice.id);
-            }
-
-            continue;
-        }
+        if (!notice.condition()) continue;
 
         openModal(modalProps => <OneTimeNoticeModal {...modalProps} notice={notice} />);
         return;

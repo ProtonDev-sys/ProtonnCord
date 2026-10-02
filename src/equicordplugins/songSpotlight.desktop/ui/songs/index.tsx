@@ -8,7 +8,7 @@ import { BaseText } from "@components/BaseText";
 import { Flex } from "@components/Flex";
 import { LinkIcon } from "@components/Icons";
 import { Link } from "@components/Link";
-import { apiConstants } from "@equicordplugins/songSpotlight.desktop/lib/api";
+import { apiConstants, getData } from "@equicordplugins/songSpotlight.desktop/lib/api";
 import { useSongStore } from "@equicordplugins/songSpotlight.desktop/lib/stores/SongStore";
 import { cl, formatCoverTooltip, formatDurationMs } from "@equicordplugins/songSpotlight.desktop/lib/utils";
 import { Native, useRender } from "@equicordplugins/songSpotlight.desktop/service";
@@ -43,8 +43,26 @@ import {
     useCallback,
     useMemo,
     useRef,
+    UserStore,
     useState
 } from "@webpack/common";
+
+async function stealSong(songOrLink: SongType | string) {
+    const userId = UserStore.getCurrentUser()?.id;
+    if (!userId) return;
+    try {
+        const song = typeof songOrLink === "string" ? await Native.parseLink(songOrLink) : songOrLink;
+        if (UserStore.getCurrentUser()?.id !== userId) return;
+        if (!song) return showToast("Uh oh, this song doesn't exist!", Toasts.Type.FAILURE);
+        const self = useSongStore.getState().users[userId]?.data ?? await getData();
+        if (UserStore.getCurrentUser()?.id !== userId || !self) return;
+        if (self.length >= apiConstants.songLimit) return showToast("You don't have enough space!");
+        if (self.some(x => sid(x) === sid(song))) return showToast("You already have this song added!");
+        openSettingsModal([...self, song]);
+    } catch {
+        showToast("Failed to add this song. Please try again.", Toasts.Type.FAILURE);
+    }
+}
 
 interface SongEntryProps {
     entry: RenderInfoEntryBased;
@@ -78,23 +96,7 @@ function SongEntry({ entry, number, isLoaded, isPlaying, big, onClick }: SongEnt
                             id="steal-song"
                             label="Steal song"
                             icon={PuzzlePieceIcon}
-                            action={async () => {
-                                const self = useSongStore.getState().self?.data ?? [];
-                                if (self.length >= apiConstants.songLimit) {
-                                    return showToast("You don't have enough space!");
-                                }
-
-                                const song = await Native.parseLink(entry.link);
-                                if (!song) {
-                                    return showToast("Uh oh, this song doesn't exist!", Toasts.Type.FAILURE);
-                                }
-
-                                if (self.find(x => sid(x) === sid(song))) {
-                                    return showToast("You already have this song added!");
-                                }
-
-                                openSettingsModal([...self, song]);
-                            }}
+                            action={() => stealSong(entry.link)}
                         />
                     </Menu.Menu>
                 ))}
@@ -197,17 +199,7 @@ function SongInfo({ owned, song, render, big }: SongInfoProps) {
                                                         id="steal-song"
                                                         label="Steal song"
                                                         icon={PuzzlePieceIcon}
-                                                        action={() => {
-                                                            const self = useSongStore.getState().self?.data ?? [];
-                                                            if (self.length >= apiConstants.songLimit) {
-                                                                return showToast("You don't have enough space!");
-                                                            }
-                                                            if (self.find(x => sid(x) === sid(song))) {
-                                                                return showToast("You already have this song added!");
-                                                            }
-
-                                                            openSettingsModal([...self, song]);
-                                                        }}
+                                                        action={() => stealSong(song)}
                                                     />
                                                 )
                                                 : (

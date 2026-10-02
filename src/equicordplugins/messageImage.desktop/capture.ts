@@ -89,6 +89,6 @@ export async function captureMessage(channelId: string, messageId: string, signa
         }
         return result;
     } finally {
-        if (scroller.isConnected && !signal.aborted) scroller.scrollTop = originalScroll;
+        if (scroller.isConnected && (!signal.aborted || signal.reason === "restore-scroll")) scroller.scrollTop = originalScroll;
     }
 }

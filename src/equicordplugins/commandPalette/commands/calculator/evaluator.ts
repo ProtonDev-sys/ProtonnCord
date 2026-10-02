@@ -196,9 +196,10 @@ export function evaluateExpression(input: string): CalculationResult | null {
     if (!Number.isFinite(value)) return null;
 
     const clean = parseFloat(value.toPrecision(12));
+    const formatted = clean.toLocaleString("en-US", { maximumFractionDigits: 8 });
     return {
         value: clean,
-        formatted: clean.toLocaleString("en-US", { maximumFractionDigits: 8 }),
+        formatted: clean !== 0 && Number(formatted.replaceAll(",", "")) === 0 ? clean.toExponential() : formatted,
         plain: String(clean)
     };
 }
