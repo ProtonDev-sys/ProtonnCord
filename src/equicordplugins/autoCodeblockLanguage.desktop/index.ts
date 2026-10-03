@@ -248,7 +248,7 @@ function hasStrongSignal(content: string) {
 }
 
 function getSupportedLanguages(): string[] {
-    return hljs?.listLanguages?.() ?? [...PRIMARY_AUTO_LANGUAGES].filter(language => hljs?.getLanguage?.(language));
+    return hljs?.listLanguages?.() ?? getPrimaryDetectableLanguages();
 }
 
 function getPrimaryDetectableLanguages(): string[] {
@@ -263,6 +263,10 @@ function getSecondaryDetectableLanguages(): string[] {
     return secondaryDetectableLanguagesCache;
 }
 
+function emptyDetection(confidenceGap = 0): DetectionResult {
+    return { language: null, source: null, relevance: 0, confidenceGap };
+}
+
 function runAutoDetection(content: string, languages: string[]): DetectionResult {
     try {
         const result = languages.length
@@ -270,14 +274,7 @@ function runAutoDetection(content: string, languages: string[]): DetectionResult
             : hljs.highlightAuto(content);
 
         const language = normalizeLanguage(result.language);
-        if (!language) {
-            return {
-                language: null,
-                source: null,
-                relevance: 0,
-                confidenceGap: 0,
-            };
-        }
+        if (!language) return emptyDetection();
 
         const relevance = result.relevance ?? 0;
         const secondBest = "secondBest" in result ? result.secondBest : void 0;
@@ -290,25 +287,13 @@ function runAutoDetection(content: string, languages: string[]): DetectionResult
             confidenceGap,
         };
     } catch {
-        return {
-            language: null,
-            source: null,
-            relevance: 0,
-            confidenceGap: 0,
-        };
+        return emptyDetection();
     }
 }
 
 function detectLanguageResult(content: string): DetectionResult {
     const trimmed = content.trim();
-    if (!trimmed) {
-        return {
-            language: null,
-            source: null,
-            relevance: 0,
-            confidenceGap: 0,
-        };
-    }
+    if (!trimmed) return emptyDetection();
 
     const cached = detectionCache.get(trimmed);
     if (cached) {
@@ -330,17 +315,13 @@ function detectLanguageResult(content: string): DetectionResult {
     }
 
     const strongSignal = hasStrongSignal(trimmed);
+    const lineCount = getLineCount(trimmed);
     const meetsLengthThreshold =
-        getLineCount(trimmed) >= MINIMUM_LINES ||
+        lineCount >= MINIMUM_LINES ||
         trimmed.length >= MINIMUM_CHARACTERS;
 
     if (!strongSignal && !meetsLengthThreshold) {
-        const result: DetectionResult = {
-            language: null,
-            source: null,
-            relevance: 0,
-            confidenceGap: 0,
-        };
+        const result = emptyDetection();
         setDetectionCache(trimmed, result);
         return result;
     }
@@ -362,16 +343,11 @@ function detectLanguageResult(content: string): DetectionResult {
     }
 
     const shouldTrySecondaryDetection =
-        getLineCount(trimmed) >= SECONDARY_MINIMUM_LINES ||
+        lineCount >= SECONDARY_MINIMUM_LINES ||
         trimmed.length >= SECONDARY_MINIMUM_CHARACTERS;
 
     if (!shouldTrySecondaryDetection) {
-        const result: DetectionResult = {
-            language: null,
-            source: null,
-            relevance: 0,
-            confidenceGap: primaryResult.confidenceGap,
-        };
+        const result = emptyDetection(primaryResult.confidenceGap);
         setDetectionCache(trimmed, result);
         return result;
     }
@@ -386,12 +362,7 @@ function detectLanguageResult(content: string): DetectionResult {
         return secondaryResult;
     }
 
-    const result: DetectionResult = {
-        language: null,
-        source: null,
-        relevance: 0,
-        confidenceGap: Math.max(primaryResult.confidenceGap, secondaryResult.confidenceGap),
-    };
+    const result = emptyDetection(Math.max(primaryResult.confidenceGap, secondaryResult.confidenceGap));
     setDetectionCache(trimmed, result);
     return result;
 }

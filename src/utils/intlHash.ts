@@ -19,13 +19,12 @@ const IS_BIG_ENDIAN = (() => {
 
 function numberToBytes(number: number | bigint) {
     number = BigInt(number);
-    const array: number[] = [];
-    const byteCount = Math.ceil(Math.floor(Math.log2(Number(number)) + 1) / 8);
-    for (let i = 0; i < byteCount; i++) {
-        array.unshift(Number((number >> BigInt(8 * i)) & BigInt(255)));
+    const byteCount = Math.max(0, Math.ceil(Math.floor(Math.log2(Number(number)) + 1) / 8));
+    const bytes = new Uint8Array(byteCount);
+    for (let index = 0; index < byteCount; index++) {
+        bytes[byteCount - index - 1] = Number((number >> BigInt(8 * index)) & 255n);
     }
 
-    const bytes = new Uint8Array(array);
     // The native `hashToMessageKey` always works in Big/Network Endian bytes, so this array
     // needs to be converted to the same endianness to get the same base64 result.
     return IS_BIG_ENDIAN ? bytes : bytes.reverse();

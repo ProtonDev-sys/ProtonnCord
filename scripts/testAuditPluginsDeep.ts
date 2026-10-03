@@ -3,22 +3,20 @@ import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { createSourceFile, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { createSourceFile, JsxEmit, ScriptTarget } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 function loadModule<T>(path: string, imports: Record<string, unknown>, globals: Record<string, unknown> = {}, extraSource = ""): T {
-    const source = readFileSync(new URL(`../${path}`, import.meta.url), "utf8") + extraSource;
     const exports = {};
-    runInNewContext(transpileModule(source, {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: 4 }
-    }).outputText, {
+    loadTestModule(new URL(`../${path}`, import.meta.url), imports, {
         exports, URL, URLSearchParams, AbortSignal, console,
         require(name: string) {
             assert.ok(Object.hasOwn(imports, name), `Unexpected import ${name} in ${path}`);
             return imports[name];
         },
         ...globals
-    });
+    }, extraSource, { compilerOptions: { jsx: JsxEmit.ReactJSX }, mockImports: false });
     return exports as T;
 }
 

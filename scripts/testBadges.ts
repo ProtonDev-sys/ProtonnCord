@@ -28,6 +28,35 @@ function loadSource(path: string, mocks: Record<string, object>, globals: Record
 
 const boundary = { __esModule: true, default: { wrap: (component: (props: object) => unknown) => (props: object) => component(props) } };
 
+test("donor modals preserve service-specific content, buttons and failure links", () => {
+    const opened: string[] = [];
+    const modals: ((props: object) => any)[] = [];
+    const components = Object.fromEntries(["Flex", "Heading", "Heart", "Paragraph", "DonateButton", "TranslateButton"].map(name => [name, name]));
+    const api = loadSource("src/plugins/_api/badges/modals.tsx", {
+        "@components/ErrorBoundary": { __esModule: true, default: "boundary" },
+        ...Object.fromEntries(["Flex", "Heading", "Heart", "Paragraph"].map(name => [`@components/${name}`, components])),
+        "@components/settings": components, "@utils/margins": { Margins: {} },
+        "@webpack/common": { Modal: "modal", openModal: (render: (props: object) => any) => modals.push(render) }
+    }, {
+        React: { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) },
+        VencordNative: { native: { openExternal: (url: string) => opened.push(url) } }
+    });
+    let closed = 0;
+    for (const [name, title, sponsor, equicord] of [
+        ["VencordDonorModal", "Vencord", "Vendicated", undefined],
+        ["EquicordDonorModal", "Protonn Cord", "thororen1234", true]
+    ] as const) {
+        api[name]();
+        const tree = modals.pop()!({ onClose: () => closed++ });
+        const modal = tree.props.children[0];
+        assert.ok(JSON.stringify(modal.props.title).includes(title));
+        assert.equal(modal.props.children[1].props.children[0].props.children[0].props.equicord, equicord);
+        tree.props.onError();
+        assert.equal(opened.at(-1), `https://github.com/sponsors/${sponsor}`);
+    }
+    assert.equal(closed, 2);
+});
+
 function loadBadges() {
     const requests: { url: string; signal?: AbortSignal; resolve(response: Response): void; reject(error: Error): void; }[] = [];
     const intervals = new Map<number, () => Promise<unknown>>();
