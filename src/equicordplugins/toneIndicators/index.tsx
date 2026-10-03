@@ -172,13 +172,13 @@ function patchChildrenTree(children: any): any {
 
         if (React.isValidElement<{ children?: ReactNode; }>(node) && node.props.children != null) {
             const c = node.props.children;
-            return React.cloneElement(node, undefined, Array.isArray(c) ? c.map(transform).flat() : transform(c));
+            return React.cloneElement(node, undefined, Array.isArray(c) ? c.flatMap(transform) : transform(c));
         }
 
         return node;
     };
 
-    if (Array.isArray(children)) return children.map(transform).flat();
+    if (Array.isArray(children)) return children.flatMap(transform);
     return transform(children);
 }
 

@@ -50,9 +50,7 @@ export function buildRepoGroups(username: string, personalRepos: GitHubRepo[], o
 
 export function sortGroups(groups: RepoGroup[], mode: RepoSortMode): RepoGroup[] {
     const personal = groups.find(g => g.key === PERSONAL_GROUP_KEY);
-    const rest = groups.filter(g => g.key !== PERSONAL_GROUP_KEY);
-
-    const sorted = [...rest].sort((a, b) => {
+    const sorted = groups.filter(g => g.key !== PERSONAL_GROUP_KEY).sort((a, b) => {
         return mode === "alpha"
             ? a.label.localeCompare(b.label)
             : b.repos.length - a.repos.length;

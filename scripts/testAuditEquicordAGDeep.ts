@@ -1,24 +1,20 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
 import type { OnLoadArgs, OnLoadResult, PluginBuild } from "esbuild";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 function loadModule(path: string, imports: Record<string, unknown>, globals: Record<string, unknown>, extraSource = "") {
-    const source = readFileSync(new URL(`../${path}`, import.meta.url), "utf8") + extraSource;
     const exports: Record<string, any> = {};
-    runInNewContext(transpileModule(source, {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText, {
+    loadTestModule(new URL(`../${path}`, import.meta.url), imports, {
         exports, URL, AbortController, AbortSignal, Blob, Uint8Array,
         require(name: string) {
             assert.ok(Object.hasOwn(imports, name), `Unexpected import ${name}`);
             return imports[name];
         },
         ...globals
-    });
+    }, extraSource, { mockImports: false });
     return exports;
 }
 

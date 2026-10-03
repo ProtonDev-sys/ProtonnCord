@@ -100,8 +100,7 @@ export function hasAnyVisibleSettings({ settings }: Plugin) {
 
 export function addPatch(newPatch: Omit<Patch, "plugin">, pluginName: string, pluginPath = `Vencord.Plugins.plugins[${JSON.stringify(pluginName)}]`) {
     // TODO: this causes crashes
-    if (pluginName === "Vesktop" && newPatch.find === ".STREAMING_AUTO_STREAMER_MODE,") return;
-    if (pluginName === "Equibop" && newPatch.find === ".STREAMING_AUTO_STREAMER_MODE,") return;
+    if ((pluginName === "Vesktop" || pluginName === "Equibop") && newPatch.find === ".STREAMING_AUTO_STREAMER_MODE,") return;
 
     const patch = newPatch as Patch;
     patch.plugin = pluginName;
@@ -150,7 +149,7 @@ export const startAllPlugins = traceFunction("startAllPlugins", function startAl
             const startAt = p.startAt ?? StartAt.WebpackReady;
             if (startAt !== target) continue;
 
-            startPlugin(Plugins[name]);
+            startPlugin(p);
         }
     }
 });
@@ -325,7 +324,11 @@ export const startPlugin = traceFunction("startPlugin", function startPlugin(p: 
     try {
         const dependencyRollback = dependencyRollbacks.get(p);
         const startResult = p.start?.();
-        observeAsyncHook(startResult, error => {
+        const startPromise = startResult != null && typeof (startResult as PromiseLike<unknown>).then === "function"
+            ? Promise.resolve(startResult) : undefined;
+        startPromise?.then(() => {
+            if (dependencyRollbacks.get(p) === dependencyRollback) dependencyRollbacks.delete(p);
+        }, error => {
             logger.error(`Failed to start ${p.name}\n`, error);
             // A late rejection from an earlier run must not stop a newer one.
             if (pluginRuns.get(p) === run && !run.stopping) {
@@ -341,11 +344,7 @@ export const startPlugin = traceFunction("startPlugin", function startPlugin(p: 
         });
         startedPluginNames.add(p.name);
         failedPluginNames.delete(p.name);
-        if (startResult != null && typeof (startResult as PromiseLike<unknown>).then === "function") {
-            Promise.resolve(startResult).then(() => {
-                if (dependencyRollbacks.get(p) === dependencyRollback) dependencyRollbacks.delete(p);
-            }, () => {});
-        } else dependencyRollbacks.delete(p);
+        if (!startPromise) dependencyRollbacks.delete(p);
         return true;
     } catch (error) {
         logger.error(`Failed to start ${p.name}\n`, error);

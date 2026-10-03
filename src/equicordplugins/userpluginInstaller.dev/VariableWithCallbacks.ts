@@ -34,8 +34,7 @@ export class VariableWithCallbacks<T> {
     }
 
     deregisterCallback(id: number) {
-        const possibleFallback = this.#callbacks.find(cb => cb.id === id);
-        if (!possibleFallback) return;
-        this.#callbacks.splice(this.#callbacks.indexOf(possibleFallback), 1);
+        const index = this.#callbacks.findIndex(callback => callback.id === id);
+        if (index !== -1) this.#callbacks.splice(index, 1);
     }
 }

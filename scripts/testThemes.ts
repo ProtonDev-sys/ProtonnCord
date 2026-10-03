@@ -293,6 +293,25 @@ function readFunction(path: string, name: string) {
     return declaration.replace(/^export /, "");
 }
 
+test("theme pin sorting preserves first duplicate ranks and unpinned input order", () => {
+    const code = readFunction("src/components/settings/tabs/themes/index.tsx", "sortThemes");
+    const sort = runInNewContext(transpileModule(code + "\nsortThemes;", { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText);
+    const themes = ["unlisted", "second", "other", "first"].map(link => ({ type: "online", link }));
+    assert.equal(sort(themes, ["missing", "first", "second", "first"]), themes);
+    assert.deepEqual(themes.map(theme => theme.link), ["first", "second", "unlisted", "other"]);
+    assert.deepEqual(sort([{ type: "local", header: { fileName: "local" } }, ...themes], []).map((theme: any) => theme.link ?? theme.header.fileName), ["local", "first", "second", "unlisted", "other"]);
+});
+
+test("theme enable updates stay idempotent and isolated between local and online lists", () => {
+    const settings = { enabledThemes: ["local"], enabledThemeLinks: ["online", "online"] };
+    const code = readFunction("src/components/settings/tabs/themes/index.tsx", "setThemeEnabled");
+    const enable = runInNewContext(transpileModule(code + "\nsetThemeEnabled;", { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText, { settings });
+    const previous = settings.enabledThemes;
+    enable("enabledThemes", "local", true); assert.equal(settings.enabledThemes, previous);
+    enable("enabledThemeLinks", "online", false); assert.deepEqual([...settings.enabledThemeLinks], []);
+    enable("enabledThemes", "added", true); assert.deepEqual([...settings.enabledThemes], ["local", "added"]);
+});
+
 test("theme URL validation follows edits and ignores obsolete responses", async () => {
     const code = readFunction("src/utils/react.tsx", "useAwaiter")
         + readFunction("src/components/settings/tabs/themes/OnlineThemes.tsx", "Validator");

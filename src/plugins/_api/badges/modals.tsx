@@ -13,11 +13,11 @@ import { DonateButton, TranslateButton } from "@components/settings";
 import { Margins } from "@utils/margins";
 import { Modal, openModal } from "@webpack/common";
 
-export function VencordDonorModal() {
+function openDonorModal(equicord: boolean) {
     openModal(props => (
         <ErrorBoundary noop onError={() => {
             props.onClose();
-            VencordNative.native.openExternal("https://github.com/sponsors/Vendicated");
+            VencordNative.native.openExternal(`https://github.com/sponsors/${equicord ? "thororen1234" : "Vendicated"}`);
         }}>
             <Modal
                 {...props}
@@ -32,7 +32,7 @@ export function VencordDonorModal() {
                     >
                         <Flex justifyContent="center" alignItems="center" gap="0.5em">
                             <Heart />
-                            Vencord Donor
+                            {equicord ? "Protonn Cord" : "Vencord"} Donor
                         </Flex>
                     </Heading>
                 }
@@ -54,16 +54,16 @@ export function VencordDonorModal() {
                     </Flex>
                     <div style={{ padding: "1em" }}>
                         <Paragraph>
-                            This Badge is a special perk for Vencord Donors
+                            This Badge is a special perk for {equicord ? "Protonn Cord (Not Vencord)" : "Vencord"} Donors
                         </Paragraph>
                         <Paragraph className={Margins.top20}>
-                            Please consider supporting the development of Vencord by becoming a donor. It would mean a lot!!
+                            Please consider supporting the development of {equicord ? "Protonn Cord" : "Vencord"} by becoming a donor. It would mean a lot{equicord ? "! :3" : "!!"}
                         </Paragraph>
                     </div>
                 </div>
                 <div>
                     <Flex justifyContent="center" style={{ width: "100%" }}>
-                        <DonateButton />
+                        {equicord ? <DonateButton equicord /> : <DonateButton />}
                     </Flex>
                 </div>
             </Modal>
@@ -71,62 +71,12 @@ export function VencordDonorModal() {
     ));
 }
 
+export function VencordDonorModal() {
+    openDonorModal(false);
+}
+
 export function EquicordDonorModal() {
-    openModal(props => (
-        <ErrorBoundary noop onError={() => {
-            props.onClose();
-            VencordNative.native.openExternal("https://github.com/sponsors/thororen1234");
-        }}>
-            <Modal
-                {...props}
-                title={
-                    <Heading
-                        tag="h2"
-                        style={{
-                            width: "100%",
-                            textAlign: "center",
-                            margin: 0
-                        }}
-                    >
-                        <Flex justifyContent="center" alignItems="center" gap="0.5em">
-                            <Heart />
-                            Protonn Cord Donor
-                        </Flex>
-                    </Heading>
-                }
-            >
-                <div>
-                    <Flex>
-                        <img
-                            role="presentation"
-                            src="https://cdn.discordapp.com/emojis/1026533070955872337.png"
-                            alt=""
-                            style={{ margin: "auto" }}
-                        />
-                        <img
-                            role="presentation"
-                            src="https://cdn.discordapp.com/emojis/1026533090627174460.png"
-                            alt=""
-                            style={{ margin: "auto" }}
-                        />
-                    </Flex>
-                    <div style={{ padding: "1em" }}>
-                        <Paragraph>
-                            This Badge is a special perk for Protonn Cord (Not Vencord) Donors
-                        </Paragraph>
-                        <Paragraph className={Margins.top20}>
-                            Please consider supporting the development of Protonn Cord by becoming a donor. It would mean a lot! :3
-                        </Paragraph>
-                    </div>
-                </div>
-                <div>
-                    <Flex justifyContent="center" style={{ width: "100%" }}>
-                        <DonateButton equicord={true} />
-                    </Flex>
-                </div>
-            </Modal>
-        </ErrorBoundary >
-    ));
+    openDonorModal(true);
 }
 
 export function EquicordTranslatorModal() {

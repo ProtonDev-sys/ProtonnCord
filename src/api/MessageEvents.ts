@@ -86,19 +86,17 @@ type MessageEventListener = (...args: any[]) => Promisable<void | MessageEventLi
 interface ListenerRegistration<Listener extends MessageEventListener> {
     listener: Listener;
     priority: number;
-    order: number;
     cancelOnError: boolean;
 }
 
 interface ListenerStore<Listener extends MessageEventListener> {
     registrations: Map<Listener, ListenerRegistration<Listener>>;
-    nextOrder: number;
+    sorted?: ListenerRegistration<Listener>[];
 }
 
 function createListenerStore<Listener extends MessageEventListener>(): ListenerStore<Listener> {
     return {
         registrations: new Map(),
-        nextOrder: 0,
     };
 }
 
@@ -114,9 +112,9 @@ function addListener<Listener extends MessageEventListener>(
         store.registrations.set(listener, {
             listener,
             priority: normalizedPriority,
-            order: store.nextOrder++,
             cancelOnError: typeof options === "object" && options?.cancelOnError === true,
         });
+        store.sorted = undefined;
     }
 
     return listener;
@@ -127,8 +125,8 @@ async function runListeners<Listener extends MessageEventListener>(
     invoke: (listener: Listener) => Promisable<void | MessageEventListenerResult>,
     errorMessage: string,
 ): Promise<boolean> {
-    const registrations = Array.from(store.registrations.values())
-        .sort((a, b) => b.priority - a.priority || a.order - b.order);
+    const registrations = store.sorted ??= Array.from(store.registrations.values())
+        .sort((first, second) => second.priority - first.priority);
 
     for (const registration of registrations) {
         if (store.registrations.get(registration.listener) !== registration) continue;
@@ -199,9 +197,11 @@ export function addMessagePreEditListener(listener: MessageEditListener, options
     return addListener(editListeners, listener, options);
 }
 export function removeMessagePreSendListener(listener: MessageSendListener) {
+    sendListeners.sorted = undefined;
     return sendListeners.registrations.delete(listener);
 }
 export function removeMessagePreEditListener(listener: MessageEditListener) {
+    editListeners.sorted = undefined;
     return editListeners.registrations.delete(listener);
 }
 export function addMessageLengthBypassListener(listener: MessageLengthBypassListener) {
