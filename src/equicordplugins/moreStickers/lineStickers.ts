@@ -96,30 +96,33 @@ export function convert(sp: LineStickerPack): StickerPack {
   * @return {Promise<LineStickerPack>} The sticker pack.
   */
 export function parseHtml(html: string): LineStickerPack {
+    return parseLinePackHtml(html, '[data-test="sticker-item"]', "sticker");
+}
+
+export function parseLinePackHtml(html: string, itemSelector: string, kind: "sticker" | "emoji"): LineStickerPack {
     const doc = new DOMParser().parseFromString(html, "text/html");
     const mainImage = JSON.parse((doc.querySelector("[ref=mainImage]") as HTMLElement)?.dataset?.preview ?? "null") as LineSticker;
     if (!mainImage || typeof mainImage.id !== "string") throw new Error("Could not find sticker pack metadata");
     const { id } = mainImage;
     mainImage.stickerPackId = id;
 
-    const stickers =
-        [...doc.querySelectorAll('[data-test="sticker-item"]')]
-            .map(x => JSON.parse((x as HTMLElement).dataset.preview ?? "null"))
-            .filter(x => x !== null)
-            .map(x => ({ ...x, stickerPackId: id })) as LineSticker[];
+    const stickers: LineSticker[] = [];
+    for (const item of doc.querySelectorAll(itemSelector)) {
+        const sticker = JSON.parse((item as HTMLElement).dataset.preview ?? "null");
+        if (sticker !== null) stickers.push({ ...sticker, stickerPackId: id });
+    }
+    const author = doc.querySelector(`[data-test="${kind}-author"]`);
 
-    const stickerPack = {
-        title: doc.querySelector("[data-test=\"sticker-name-title\"]")?.textContent ?? "null",
+    return {
+        title: doc.querySelector(`[data-test="${kind}-name-title"]`)?.textContent ?? "null",
         author: {
-            name: doc.querySelector("[data-test=\"sticker-author\"]")?.textContent ?? "null",
-            url: "https://store.line.me/" + (doc.querySelector("[data-test=\"sticker-author\"]")?.getAttribute("href") ?? "null")
+            name: author?.textContent ?? "null",
+            url: "https://store.line.me/" + (author?.getAttribute("href") ?? "null")
         },
         id,
         mainImage,
         stickers
-    } as LineStickerPack;
-
-    return stickerPack;
+    };
 }
 
 export function isLineStickerPackHtml(html: string): boolean {

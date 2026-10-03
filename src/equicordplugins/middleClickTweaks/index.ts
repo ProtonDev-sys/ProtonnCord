@@ -35,10 +35,8 @@ function handleAuxClick(event: MouseEvent) {
     const isMedia = !!media;
     const isLink = !isMedia && !!anchor?.href && anchor.getAttribute("href") !== "#" && !["img", "video", "button"].includes(role);
 
-    if (isLink && ["links", "both"].includes(openScope)) {
-        event.preventDefault();
-        event.stopPropagation();
-    } else if (isMedia && ["media", "both"].includes(openScope)) {
+    if ((isLink && (openScope === "links" || openScope === "both"))
+        || (isMedia && (openScope === "media" || openScope === "both"))) {
         event.preventDefault();
         event.stopPropagation();
     }

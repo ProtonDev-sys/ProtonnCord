@@ -55,7 +55,8 @@ export function SelectFolderInput({ settingsKey, successMessage }: Props) {
     const path = settings.store[settingsKey];
 
     function getDirName(path: string) {
-        const parts = path.split("\\").length > 1 ? path.split("\\") : path.split("/");
+        let parts = path.split("\\");
+        if (parts.length === 1) parts = path.split("/");
 
         return parts.slice(parts.length - 2, parts.length).join("\\");
     }

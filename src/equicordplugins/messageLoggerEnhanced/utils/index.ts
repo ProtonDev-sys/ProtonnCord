@@ -34,11 +34,13 @@ export function reAddDeletedMessages(messages: LoggedMessageJSON[], deletedMessa
     if (!messages.length || !deletedMessages?.length) return;
     const IDs: Id[] = [];
     const savedIDs: Id[] = [];
+    const existingIds = new Set<string>();
 
     for (let i = 0, len = messages.length; i < len; i++) {
         const { id } = messages[i];
         if (!/^\d+$/.test(id)) return;
         IDs.push({ id: id, time: BigInt(id) });
+        existingIds.add(id);
     }
     for (let i = 0, len = deletedMessages.length; i < len; i++) {
         const record = deletedMessages[i];
@@ -59,9 +61,9 @@ export function reAddDeletedMessages(messages: LoggedMessageJSON[], deletedMessa
     reAddIDs.sort((a, b) => a.time > b.time ? -1 : a.time < b.time ? 1 : 0);
     for (let i = 0, len = reAddIDs.length; i < len; i++) {
         const { id, message } = reAddIDs[i];
-        if (messages.findIndex(e => e.id === id) !== -1) continue;
-        if (!message) continue;
+        if (existingIds.has(id) || !message) continue;
         messages.splice(i, 0, message);
+        existingIds.add(id);
     }
 }
 
@@ -230,21 +232,13 @@ export function addToXAndRemoveFromOpposite(list: ListType, id: string) {
 export function addToX(list: ListType, id: string) {
     if (!id) return;
 
-    const items = Array.from(getConfiguredIdSet(list));
-
-    if (!items.includes(id)) {
-        items.push(id);
-        settings.store[list] = items.join(",");
-    }
+    const ids = getConfiguredIdSet(list);
+    if (!ids.has(id)) settings.store[list] = [...ids, id].join(",");
 }
 
 export function removeFromX(list: ListType, id: string) {
     if (!id) return;
 
-    const items = Array.from(getConfiguredIdSet(list));
-    const index = items.indexOf(id);
-    if (index !== -1) {
-        items.splice(index, 1);
-        settings.store[list] = items.join(",");
-    }
+    const ids = getConfiguredIdSet(list);
+    if (ids.has(id)) settings.store[list] = Array.from(ids).filter(item => item !== id).join(",");
 }

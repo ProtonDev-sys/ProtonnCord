@@ -41,7 +41,7 @@ test("browser packaging replaces stale output and preserves literal userscript C
             await mkdir(join(at(path), ".."), { recursive: true });
             await writeFile(at(path), content);
         }
-        await runInNewContext(`${code}\nPromise.all([appendCssRuntime(), buildExtension("fixture-unpacked", ["manifest.json", "icon.png"])]);`, {
+        const tasks = runInNewContext(`${code}\n[appendCssRuntime(), buildExtension("fixture-unpacked", ["manifest.json", "icon.png"])];`, {
             VERSION: "1.2.3", Buffer, TextEncoder, join, resolve, sep,
             console: { info() { } },
             readFile: (path: string, encoding: BufferEncoding) => readFile(at(path), encoding),
@@ -50,6 +50,7 @@ test("browser packaging replaces stale output and preserves literal userscript C
             mkdir: (path: string, options: Parameters<typeof mkdir>[1]) => mkdir(at(path), options),
             writeFile: (path: string, content: Buffer) => writeFile(at(path), content)
         });
+        try { await Promise.all(tasks); } finally { await Promise.allSettled(tasks); }
         await assert.rejects(readFile(at("dist/browser/fixture-unpacked/stale.js")), { code: "ENOENT" });
         assert.equal(await readFile(at("dist/browser/fixture-unpacked/dist/ProtonnCord.js"), "utf8"), "renderer");
         assert.deepEqual(JSON.parse(await readFile(at("dist/browser/fixture-unpacked/manifest.json"), "utf8")), { manifest_version: 3, version: "1.2.3" });

@@ -5,24 +5,19 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
 
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { loadTestModule } from "./utils/loadTestModule";
 
 function load(file: string, imports: Record<string, unknown>, globals: Record<string, unknown> = {}, expose = "") {
-    const source = transpileModule(readFileSync(`src/equicordplugins/${file}`, "utf8") + expose, {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    return runInNewContext(`${source}\nexports;`, {
-        exports: {}, URL, AbortController, AbortSignal, Error, Promise,
+    return loadTestModule(`src/equicordplugins/${file}`, {}, {
+        URL, AbortController, AbortSignal, Error, Promise,
         require(name: string) {
             assert.ok(Object.hasOwn(imports, name), `Unexpected import ${name}`);
             return imports[name];
         },
         ...globals
-    });
+    }, expose, { mockImports: false });
 }
 
 function deferred<T = any>() {

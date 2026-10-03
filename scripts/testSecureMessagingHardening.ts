@@ -5,11 +5,43 @@ import { runInNewContext } from "node:vm";
 import { createSourceFile, isCallExpression, isExportAssignment, isFunctionDeclaration, isObjectLiteralExpression, isMethodDeclaration, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { attachmentReservationEndpoint, installStartupRestGuard, messageEndpoint, settleGuardedRestFailure } from "../src/equicordplugins/secureMessaging.desktop/restGuardFailure";
+import * as wire from "../src/equicordplugins/secureMessaging.desktop/wireAuthorizations";
 
 const channelId = "100000000000000001";
 const messageId = "100000000000000002";
 const source = readFileSync(new URL("../src/equicordplugins/secureMessaging.desktop/index.tsx", import.meta.url), "utf8");
 const parsed = createSourceFile("index.tsx", source, ScriptTarget.ES2022, true);
+
+test("upload reservations keep scoped counts atomic, isolated and time bounded", () => {
+    const file = { filename: "opaque.pcaf", size: 123 };
+    for (const scope of [undefined, ""] as const) {
+        wire.clearWirePayloadAuthorizations();
+        const consume = (files: typeof file[], now = 1_001) => scope === undefined
+            ? wire.consumeAttachmentUploadReservations(channelId, files, now)
+            : wire.consumeScopedAttachmentUploadReservations(channelId, files, scope, now);
+        if (scope === undefined) wire.authorizeAttachmentUploadReservations(channelId, [file, file], 1_000);
+        else wire.authorizeScopedAttachmentUploadReservations(channelId, [file, file], scope, 1_000);
+        assert.equal(wire.consumeScopedAttachmentUploadReservations(channelId, [file], "other", 1_001), false);
+        assert.equal(consume([file, file, file]), false);
+        assert.equal(consume([file, { ...file, size: 124 }]), false);
+        assert.equal(consume([file]), true);
+        assert.equal(consume([file, file]), false);
+        assert.equal(consume([file], 3_601_000), false);
+    }
+    wire.clearWirePayloadAuthorizations();
+});
+
+test("an undefined runtime scoped argument cannot consume an unscoped reservation", () => {
+    wire.clearWirePayloadAuthorizations();
+    const files = [{ filename: "opaque.pcaf", size: 123 }];
+    wire.authorizeAttachmentUploadReservations(channelId, files, 1_000);
+    assert.equal(wire.consumeScopedAttachmentUploadReservations(channelId, files, undefined as unknown as string, 1_001), false);
+    assert.equal(wire.consumeAttachmentUploadReservations(channelId, files, 1_001), true);
+    wire.authorizeScopedAttachmentUploadReservations(channelId, files, undefined as unknown as string, 1_000);
+    assert.equal(wire.consumeAttachmentUploadReservations(channelId, files, 1_001), false);
+    assert.equal(wire.consumeScopedAttachmentUploadReservations(channelId, files, undefined as unknown as string, 1_001), true);
+    wire.clearWirePayloadAuthorizations();
+});
 
 function compiledFunctions(names: string[]): string {
     const selected = parsed.statements.filter(statement => isFunctionDeclaration(statement) && names.includes(statement.name?.text ?? ""));

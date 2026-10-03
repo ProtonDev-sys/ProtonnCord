@@ -405,16 +405,12 @@ function updateActiveSnowOptions() {
 }
 
 const SnowfallManager: React.FC = () => {
-    const snowRef = React.useRef<CopleSnow | null>(null);
-    const styleRef = React.useRef<HTMLStyleElement | null>(null);
-
     React.useEffect(() => {
         // Inject CSS
         const styleEl = document.createElement("style");
         styleEl.id = "snowfall-styles";
         styleEl.textContent = SnowfallCSS;
         document.head.appendChild(styleEl);
-        styleRef.current = styleEl;
 
         const snowOptions: Partial<typeof CopleSnow.defaultOptions> = {
             autoplay: false,
@@ -423,7 +419,6 @@ const SnowfallManager: React.FC = () => {
 
         // Create snow instance with settings
         const snow = new CopleSnow(snowOptions);
-        snowRef.current = snow;
         activeSnow = snow;
 
         const blurHandler = () => snow.stop();
@@ -440,7 +435,6 @@ const SnowfallManager: React.FC = () => {
 
         return () => {
             snow.destroy();
-            snowRef.current = null;
             if (activeSnow === snow) activeSnow = null;
 
             window.removeEventListener("blur", blurHandler);
@@ -449,7 +443,6 @@ const SnowfallManager: React.FC = () => {
             if (styleEl.parentNode) {
                 styleEl.remove();
             }
-            styleRef.current = null;
 
             const snowfield = document.getElementById("snowfield");
             if (snowfield) snowfield.remove();

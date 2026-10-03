@@ -7,6 +7,7 @@ import { runInNewContext } from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { gunzipSync, gzipSync, unzipSync, zipSync } from "fflate";
 
+import { withTimeout } from "../src/debug/promiseTimeout";
 import { detectAudioMimeType, encodePhononAudio, isRecognizedAudioContainer, MAX_AUDIO_SAMPLES } from "../src/equicordplugins/voiceMessageTranscriber.desktop/audioValidation";
 import { buildTargetLanguageOptions, getVoiceMessageMedia, resolveTargetLanguage, VOICE_MESSAGE_FLAG } from "../src/equicordplugins/voiceMessageTranscriber.desktop/options";
 import { formatTimestampedTranscript, normalizeTranscriptionResult, parsePhononResult, PHONON_MODEL } from "../src/equicordplugins/voiceMessageTranscriber.desktop/transcriptionData";
@@ -58,6 +59,41 @@ import { generateWaveform } from "../src/plugins/voiceMessages/waveform";
     assert.equal(cache.get("oversized"), undefined, "retained text has an aggregate memory bound");
     cache.clear();
     assert.equal(timers.size, 0, "stop removes expiry timers");
+    const notified: string[] = [];
+    let unsubscribeCached: () => void;
+    let nested = false;
+    const unsubscribeActive = cache.subscribe("active", () => {
+        assert.equal(cache.get("cached"), undefined, "clear removes entries before invoking callbacks");
+        notified.push("active");
+        if (!nested) {
+            nested = true;
+            unsubscribeCached();
+            cache.subscribe("active", () => notified.push("new listener"));
+            cache.subscribe("new key", () => notified.push("new key"));
+            cache.set("callback-created", "new");
+            cache.clear();
+        }
+    });
+    unsubscribeCached = cache.subscribe("cached", () => notified.push("cached"));
+    cache.set("cached", "text");
+    const releaseCached = cache.retain("cached");
+    cache.clear();
+    assert.deepEqual(notified, ["active", "cached"], "clear snapshots every registration, including uncached keys, before reentrant subscribe/unsubscribe");
+    assert.equal(cache.get("callback-created"), undefined, "nested clear still removes callback-created entries");
+    assert.equal(timers.size, 0, "nested clear still cancels callback-created expiry timers");
+    unsubscribeActive();
+    cache.set("cached", "replacement");
+    assert.equal(timers.size, 0, "clear preserves retained viewers");
+    releaseCached();
+    assert.equal(timers.size, 1, "new entries still schedule expiry after clear");
+    cache.delete("cached");
+    assert.equal(timers.size, 0);
+    const unsubscribeThrow = cache.subscribe("throw", () => { throw new Error("listener failed"); });
+    assert.throws(() => cache.clear(), /listener failed/, "listener errors remain observable");
+    unsubscribeThrow();
+    notified.length = 0;
+    cache.clear();
+    assert.deepEqual(notified, ["new listener", "new key"], "a throwing listener does not leave clear notifications disabled");
 }
 
 const attachment = {
@@ -152,6 +188,7 @@ async function testNativeTranscription() {
     let previewStream: (EventEmitter & { setEncoding: (encoding: string) => void; }) | undefined;
     const archive = zipSync({ "uv.exe": new Uint8Array([1, 2, 3]) });
     let downloadedArchive = archive;
+    let download = async (signal: AbortSignal) => { signal.throwIfAborted(); return new Response(downloadedArchive); };
     const archiveHash = createHash("sha256").update(archive).digest("hex");
     let execute = async (_command: string, _args: string[], _options: any) => ({ stdout: JSON.stringify(phononResult) });
     const nativeCode = transpileModule(readFileSync("src/equicordplugins/voiceMessageTranscriber.desktop/native.ts", "utf8"), {
@@ -164,9 +201,9 @@ async function testNativeTranscription() {
         Buffer,
         TextDecoder,
         process: { platform: "win32", arch: "x64", env: {} },
-        fetch: async () => {
+        fetch: async (unusedUrl: string, options: { signal: AbortSignal; }) => {
             fetchCount++;
-            return new Response(downloadedArchive);
+            return download(options.signal);
         },
         require: (name: string) => {
             if (name === "node:crypto") return { createHash };
@@ -313,9 +350,81 @@ async function testNativeTranscription() {
     await nativeExports.installRuntime(new AbortController().signal);
     assert.equal(publishedReady, 2, "partial installations can be retried");
 
+    const otherSender = Object.assign(new EventEmitter(), { id: 8 });
+    let finishDownload: () => void;
+    let installationSignal: AbortSignal | undefined;
+    const pausedDownload = (signal: AbortSignal) => new Promise<Response>((resolve, reject) => {
+        installationSignal = signal;
+        finishDownload = () => resolve(new Response(downloadedArchive));
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+    for (const cancelledSender of [sender, otherSender, null]) {
+        execute = async () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); };
+        await assert.rejects(nativeExports.transcribe(event, "invalidate-runtime", new Float32Array([0])), /setup or transcription failed/);
+        execute = async () => ({ stdout: JSON.stringify(phononResult) });
+        installationSignal = undefined;
+        download = pausedDownload;
+        const beforeShared = { fetchCount, publishedReady };
+        const first = nativeExports.transcribe(event, "shared-first", new Float32Array([0])).then(() => null, error => error);
+        const second = nativeExports.transcribe({ sender: otherSender }, "shared-second", new Float32Array([0])).then(() => null, error => error);
+        for (let attempts = 0; attempts < 20 && !installationSignal; attempts++) await Promise.resolve();
+        const sharedSignal = installationSignal as AbortSignal | undefined;
+        assert.ok(sharedSignal);
+        assert.equal(fetchCount, beforeShared.fetchCount + 1, "both senders share one installation");
+        const cancellingFirst = cancelledSender !== otherSender;
+        nativeExports.cancelTranscription({ sender: cancellingFirst ? sender : otherSender }, cancellingFirst ? "shared-first" : "shared-second");
+        assert.match((await (cancellingFirst ? first : second)).message, /cancelled/);
+        assert.equal(sharedSignal.aborted, false, "one cancelled waiter leaves the other installation owner active");
+        if (cancelledSender) {
+            finishDownload!();
+            assert.equal(await (cancellingFirst ? second : first), null);
+            assert.equal(publishedReady, beforeShared.publishedReady + 1);
+        } else {
+            otherSender.emit("destroyed");
+            assert.match((await second).message, /cancelled/);
+            assert.equal(sharedSignal.aborted, true, "cancelling every waiter aborts installation");
+            assert.equal(publishedReady, beforeShared.publishedReady, "cancelled setup is not marked ready");
+        }
+        assert.equal(sender.listenerCount("destroyed"), 0);
+        assert.equal(otherSender.listenerCount("destroyed"), 0);
+    }
+    download = async signal => { signal.throwIfAborted(); return new Response(downloadedArchive); };
+    const beforeRetry = { publishedReady, calls: calls.length };
+    execute = async () => { throw new Error("shared setup interrupted"); };
+    await assert.rejects(nativeExports.transcribe(event, "shared-setup-failure", new Float32Array([0])), /setup or transcription failed/);
+    assert.equal(calls.length, beforeRetry.calls + 1, "the fresh shared installation reaches the failing setup command");
+    assert.equal(publishedReady, beforeRetry.publishedReady, "failed shared setup is not marked ready");
+    execute = async () => ({ stdout: JSON.stringify(phononResult) });
+    await nativeExports.transcribe(event, "shared-setup-retry", new Float32Array([0]));
+    assert.equal(publishedReady, beforeRetry.publishedReady + 1, "failed shared installation resets its promise for retry");
+
+    const oldInferences: Array<(error: Error) => void> = [];
+    execute = () => new Promise((unusedResolve, reject) => oldInferences.push(reject));
+    const oldJobs = [sender, otherSender].map((owner, index) =>
+        nativeExports.transcribe({ sender: owner }, `old-${index}`, new Float32Array([0])).then(() => null, error => error));
+    for (let attempts = 0; attempts < 20 && oldInferences.length < 2; attempts++) await Promise.resolve();
+    assert.equal(oldInferences.length, 2);
+    installationSignal = undefined;
+    download = pausedDownload;
+    const beforeEpoch = { fetchCount, publishedReady };
+    const newerSenders = [9, 10].map(id => Object.assign(new EventEmitter(), { id }));
+    const newerJobs: Promise<unknown>[] = [];
+    for (let index = 0; index < oldJobs.length; index++) {
+        oldInferences[index](Object.assign(new Error("old executable missing"), { code: "ENOENT" }));
+        assert.match((await oldJobs[index]).message, /setup or transcription failed/);
+        newerJobs.push(nativeExports.transcribe({ sender: newerSenders[index] }, `newer-${index}`, new Float32Array([0])).then(() => null, error => error));
+        for (let attempts = 0; attempts < 20; attempts++) await Promise.resolve();
+        assert.ok(installationSignal);
+    }
+    assert.equal(fetchCount, beforeEpoch.fetchCount + 1, "an old ENOENT cannot reset a newer pending installation");
+    execute = async () => ({ stdout: JSON.stringify(phononResult) });
+    finishDownload!();
+    assert.deepEqual(await Promise.all(newerJobs), [null, null]);
+    assert.equal(publishedReady, beforeEpoch.publishedReady + 1, "the newer installation is published only once");
+    assert.ok([sender, otherSender, ...newerSenders].every(owner => owner.listenerCount("destroyed") === 0));
 }
 
-void testNativeTranscription().then(() => {
+void withTimeout(testNativeTranscription(), 10_000, "Voice-message transcription fixture timed out").then(() => {
     console.log("voice-message transcription checks passed");
 }, error => {
     console.error(error);

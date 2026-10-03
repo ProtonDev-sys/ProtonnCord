@@ -12,6 +12,7 @@ const PUBLISHER_INTEGRITY = "sha512-x+QEsTVF2slhdL8rIAKC6TGOIYJ5srHWm+NDHEDu8nIs
 const workflow = readFileSync(".github/workflows/publish.yml", "utf8").replaceAll("\r\n", "\n");
 const lockfile = readFileSync("pnpm-lock.yaml", "utf8");
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+    version: string;
     devDependencies?: Record<string, string>;
     scripts?: Record<string, string>;
 };
@@ -45,7 +46,10 @@ for (const ref of actionRefs)
     assert.match(ref, /^[0-9a-f]{40}$/u, "every release action must be pinned to an immutable commit");
 
 const prepare = getJob("prepare");
-assert.ok(prepare.indexOf("- name: Create Tag") > prepare.indexOf("- name: Store release archives"),
+const versionPattern = new RegExp(prepare.match(/\[\[ "\$version" =~ (\S+) \]\]/u)![1]);
+for (const version of [packageJson.version, "1.2.3", "1.2.3.4"]) assert.match(version, versionPattern);
+for (const version of ["1.2", "1.2.3.4.5", "1.2.3-beta", "1.2.3;exit 0", ""]) assert.doesNotMatch(version, versionPattern);
+assert.ok(prepare.indexOf("- name: Store release archives") >= 0 && prepare.indexOf("- name: Create Tag") > prepare.indexOf("- name: Store release archives"),
     "failed builds and archive uploads must not consume the release version tag");
 assert.ok(prepare.includes('latest=${latest_tag:-v0.0.0}'), "repositories without version tags must use an explicit baseline");
 assert.match(prepare, /permissions:\s+contents: write/u, "only the preparation job may create the release tag");

@@ -100,7 +100,7 @@ export function ProfilePopoutComponent({ id, isSideBar = false }: { id: string, 
                             </Paragraph>
                             {!!repos.length && (
                                 <div className={ProfileCardContainerClasses.icons}>
-                                    {topRepos.slice(0, 4).map((repo, idx) => {
+                                    {topRepos.map((repo, idx) => {
                                         const showCount = idx === 3 && repos.length > 4;
 
                                         return (

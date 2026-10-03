@@ -12,8 +12,7 @@ function generateSearchResults(query: string) {
     const channels = UserSettingsActionCreators.FrecencyUserSettingsActionCreators.getCurrentValue()?.guildAndChannelFrecency?.guildAndChannels ?? {};
     const normalizedQuery = query.toLowerCase();
     const frequentChannelsWithQuery = Object.keys(channels)
-        .filter(id => ChannelStore.getChannel(id) != null)
-        .filter(id => ChannelStore.getChannel(id).name?.toLowerCase().includes(normalizedQuery))
+        .filter(id => ChannelStore.getChannel(id)?.name?.toLowerCase().includes(normalizedQuery))
         .sort((id1, id2) => {
             const channel1 = channels[id1];
             const channel2 = channels[id2];

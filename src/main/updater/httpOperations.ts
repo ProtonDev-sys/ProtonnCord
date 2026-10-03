@@ -34,10 +34,7 @@ export type HttpFetcher = (url: string, init: RequestInit) => Promise<Response>;
 export type JsonRequest = (endpoint: string) => Promise<unknown>;
 
 interface AsarFile {
-    integrity: {
-        algorithm: "SHA256";
-        hash: string;
-    };
+    hash: string;
     offset: number;
     size: number;
 }
@@ -71,9 +68,7 @@ function parseRelease(value: unknown, currentHash: string, asarFile: string, for
     if (!Array.isArray(release?.assets))
         throw new Error(`The latest Protonn Cord release is missing ${asarFile}`);
 
-    const asset = release.assets
-        .map(record)
-        .find(candidate => candidate?.name === asarFile);
+    const asset = record(release.assets.find(candidate => record(candidate)?.name === asarFile));
     const downloadUrl = asset?.browser_download_url;
     if (typeof downloadUrl !== "string")
         throw new Error(`The latest Protonn Cord release is missing ${asarFile}`);
@@ -256,7 +251,7 @@ function parseAsarFiles(value: unknown, dataBytes: number, files = new Map<strin
         const offset = Number(offsetText);
         if (!Number.isSafeInteger(offset) || offset + size > dataBytes)
             throw new Error("The downloaded Protonn Cord archive is truncated");
-        files.set(path, { integrity: { algorithm, hash }, offset, size });
+        files.set(path, { hash, offset, size });
     }
     return files;
 }
@@ -295,7 +290,7 @@ export function validateAsar(data: Buffer): void {
             throw new Error("The downloaded Protonn Cord archive has overlapping files");
         previousEnd = Math.max(previousEnd, file.offset + file.size);
         const contents = data.subarray(dataOffset + file.offset, dataOffset + file.offset + file.size);
-        if (createHash("sha256").update(contents).digest("hex") !== file.integrity.hash.toLowerCase())
+        if (createHash("sha256").update(contents).digest("hex") !== file.hash.toLowerCase())
             throw new Error("The downloaded Protonn Cord archive failed its integrity check");
     }
 

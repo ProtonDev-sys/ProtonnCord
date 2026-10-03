@@ -5,7 +5,6 @@
  */
 
 import { Devs } from "@utils/constants";
-import { isNonNullish } from "@utils/guards";
 import definePlugin from "@utils/types";
 import { findStoreLazy } from "@webpack";
 import { FluxDispatcher, LocaleStore } from "@webpack/common";
@@ -56,7 +55,7 @@ interface TrendingCategories {
     trendingGIFPreview: { src: string; };
 }
 
-function toDiscordGif(item: TenorResult): DiscordGif | null {
+function toDiscordGif(item: TenorResult): DiscordGif {
     // Discord uses tinywebp on Linux, webm on rest (including web Linux). Tenor only has "webp", not "tinywebp"
     const format = GIFPickerViewStore.getSelectedFormat() === "tinywebp"
         ? "webp"
@@ -78,7 +77,7 @@ function toDiscordGif(item: TenorResult): DiscordGif | null {
 }
 
 function mapToDiscordGifs(items: TenorResult[]) {
-    return items.map(toDiscordGif).filter(isNonNullish);
+    return items.map(toDiscordGif);
 }
 
 async function tenorFetch<TResult>(path: string, params: Record<string, string>) {
