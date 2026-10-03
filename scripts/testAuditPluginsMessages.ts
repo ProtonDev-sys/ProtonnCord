@@ -5,19 +5,29 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+
+import { createMessageDiff, createWordDiff } from "../src/plugins/messageLogger/diffUtils";
+import { loadTestModule } from "./utils/loadTestModule";
+
+test("message diffs preserve tie order, Unicode tokens and reconstruct both messages", () => {
+    assert.deepEqual(createWordDiff("ab", "ba"), [
+        { type: "added", text: "b" }, { type: "unchanged", text: "a" }, { type: "removed", text: "b" }
+    ]);
+    for (const [before, after] of [["", ""], ["", "😀"], ["😀", ""], ["a😀b", "a😎b"],
+        ["<a:old:123> <@!123>", "<a:new:456> <@&456>"], ["<:x:1> \ud800x", "<:y:2> \udc00y"], ["a<#1>b", "a<#2>b"]]) {
+        const parts = createMessageDiff(before, after);
+        assert.equal(parts.filter(part => part.type !== "added").map(part => part.text).join(""), before);
+        assert.equal(parts.filter(part => part.type !== "removed").map(part => part.text).join(""), after);
+    }
+    const same = "😀<@123>".repeat(1000);
+    assert.deepEqual(createWordDiff(same, same), [{ type: "unchanged", text: same }]);
+});
 
 function load(path: string, mocks: Record<string, unknown>, globals: Record<string, unknown> = {}, result = "exports.default") {
-    const code = transpileModule(readFileSync(path, "utf8"), {
-        fileName: path,
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    return runInNewContext(code + `\n${result};`, {
-        exports: {}, ...globals, require: (name: string) => mocks[name] ?? {}
-    });
+    return loadTestModule(new URL(`../${path}`, import.meta.url), mocks, {
+        ...globals, require: (name: string) => mocks[name] ?? {}
+    }, `\nexports.result = ${result};`, { mockImports: false }).result;
 }
 
 test("text replacement tolerates invalid saved rows and delayed edits follow the original rule ID", () => {
@@ -237,8 +247,10 @@ test("restarting click actions does not retain a previously held modifier", () =
     plugin.stop();
     plugin.start();
     listeners.get("mousedown")!({ button: 0 });
-    plugin.onMessageClick({ author: { id: "me" }, id: "message" }, { isDM: () => false, isSystemDM: () => false },
-        { target: { nodeType: 1 }, detail: 1, button: 0, preventDefault() {} });
+    for (const target of [{ nodeType: 1 }, { nodeType: 3, parentElement: { nodeType: 1 } }]) {
+        plugin.onMessageClick({ author: { id: "me" }, id: "message" }, { isDM: () => false, isSystemDM: () => false },
+            { target, detail: 1, button: 0, preventDefault() {} });
+    }
     assert.deepEqual(copied, []);
     plugin.stop();
     assert.equal(listeners.size, 0);

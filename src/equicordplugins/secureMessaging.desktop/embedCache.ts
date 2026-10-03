@@ -185,10 +185,6 @@ function unfurlUrl(url: string): Promise<Record<string, unknown>[]> {
     return entry.promise;
 }
 
-async function unfurlEmbeds(urls: string[]): Promise<Record<string, unknown>[]> {
-    return (await Promise.all(urls.map(unfurlUrl))).flat();
-}
-
 function entryIsCurrent(message: Message, key: string, entry: EmbedCacheEntry): boolean {
     if (cache.get(key) !== entry) return false;
     if (cacheKey(message) === key) return true;
@@ -335,5 +331,5 @@ export function invalidateEncryptedMessageEmbeds(message: Message): void {
 export async function prefetchEncryptedMessageEmbeds(plaintext: string): Promise<void> {
     if (!externalLinkPreviewsEnabled) return;
     const urls = extractSecureEmbedUrls(plaintext);
-    if (urls.length > 0) await unfurlEmbeds(urls);
+    if (urls.length > 0) await Promise.all(urls.map(unfurlUrl));
 }

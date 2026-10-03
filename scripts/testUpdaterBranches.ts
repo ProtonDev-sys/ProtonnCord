@@ -5,16 +5,13 @@
  */
 
 import assert from "node:assert/strict";
-import { execFile as execFileCallback } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { promisify } from "node:util";
 import { runInNewContext } from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import {
-    type GitRunner,
     inspectGitUpdates,
     pullGitUpdates,
 } from "../src/main/updater/gitOperations";
@@ -28,8 +25,7 @@ import {
     UPDATER_BRANCHES,
     updaterReleaseEndpoint,
 } from "../src/shared/Updater";
-
-const execFile = promisify(execFileCallback);
+import { commitFile, run, runner } from "./utils/gitFixture";
 
 async function testUpdaterControls(): Promise<void> {
     interface Element {
@@ -168,29 +164,9 @@ async function testUpdaterControls(): Promise<void> {
     assert.equal(find(render(), "Button", "Update Now"), undefined, "a current branch has no install action");
 }
 
-async function run(cwd: string, ...args: string[]): Promise<{ stderr: string; stdout: string; }> {
-    const result = await execFile("git", args, {
-        cwd,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-        timeout: 30_000,
-    });
-    return { stderr: String(result.stderr), stdout: String(result.stdout) };
-}
-
-function runner(cwd: string): GitRunner {
-    return (...args) => run(cwd, ...args);
-}
-
 async function configureRepository(repository: string): Promise<void> {
     await run(repository, "config", "user.name", "Updater Branch Test");
     await run(repository, "config", "user.email", "updater-branch-test@example.invalid");
-}
-
-async function commitFile(repository: string, filename: string, content: string, message: string): Promise<string> {
-    await writeFile(join(repository, filename), content);
-    await run(repository, "add", "--", filename);
-    await run(repository, "commit", "-m", message);
-    return (await run(repository, "rev-parse", "HEAD")).stdout.trim();
 }
 
 async function testIpcBranchArguments(): Promise<void> {

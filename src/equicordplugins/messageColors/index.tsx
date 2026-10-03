@@ -22,6 +22,7 @@ interface ParsedColorInfo {
 }
 
 const requiredFirstCharacters = ["r", "R", "h", "H", "#"];
+const rgbaAlphaRegExp = replaceRegexp(/\f(?=\s*?\))/.source);
 
 export default definePlugin({
     authors: [EquicordDevs.Hen],
@@ -229,7 +230,7 @@ function parseColor(str: string, type: ColorType): string {
             return str;
         case ColorType.RGBA:
             if (!str.includes("/"))
-                return str.replaceAll(replaceRegexp(/\f(?=\s*?\))/.source), "/$&");
+                return str.replaceAll(rgbaAlphaRegExp, "/$&");
             return str;
         case ColorType.HEX:
             return str[0] === "#" ? str : `#${str}`;

@@ -57,20 +57,9 @@ export function formatDurationVerbose(time: number, unit: Units, short: boolean 
     const { moment } = require("@webpack/common") as typeof import("@webpack/common");
     const dur = moment.duration(time, unit);
 
-    let unitsAmounts = units.map(unit => ({ amount: dur[unit](), unit }));
-
-    let amountsToBeRemoved = 0;
-
-    outer:
-    for (let i = 0; i < unitsAmounts.length; i++) {
-        if (unitsAmounts[i].amount === 0 || !(i + 1 < unitsAmounts.length)) continue;
-        for (let v = i + 1; v < unitsAmounts.length; v++) {
-            if (unitsAmounts[v].amount !== 0) continue outer;
-        }
-
-        amountsToBeRemoved = unitsAmounts.length - (i + 1);
-    }
-    unitsAmounts = amountsToBeRemoved === 0 ? unitsAmounts : unitsAmounts.slice(0, -amountsToBeRemoved);
+    const unitsAmounts = units.map(unit => ({ amount: dur[unit](), unit }));
+    while (unitsAmounts.length > 1 && unitsAmounts.at(-1)!.amount === 0)
+        unitsAmounts.pop();
 
     const daysAmountIndex = unitsAmounts.findIndex(({ unit }) => unit === "days");
     if (daysAmountIndex !== -1) {
@@ -82,10 +71,10 @@ export function formatDurationVerbose(time: number, unit: Units, short: boolean 
     }
 
     let res: string = "";
-    while (unitsAmounts.length) {
-        const { amount, unit } = unitsAmounts.shift()!;
+    for (let index = 0; index < unitsAmounts.length; index++) {
+        const { amount, unit } = unitsAmounts[index];
 
-        if (res.length) res += unitsAmounts.length ? ", " : " and ";
+        if (res.length) res += index < unitsAmounts.length - 1 ? ", " : " and ";
 
         if (amount > 0 || res.length) {
             res += `${amount} ${getUnitStr(unit, amount === 1, short)}`;

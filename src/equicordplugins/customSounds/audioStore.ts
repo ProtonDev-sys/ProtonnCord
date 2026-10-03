@@ -121,7 +121,7 @@ async function generateDataURI(buffer: ArrayBuffer, type: string, name: string):
         const chunkSize = 8192;
 
         for (let i = 0; i < uint8Array.length; i += chunkSize) {
-            const chunk = uint8Array.slice(i, i + chunkSize);
+            const chunk = uint8Array.subarray(i, i + chunkSize);
             binary += String.fromCharCode(...chunk);
         }
 
@@ -131,7 +131,7 @@ async function generateDataURI(buffer: ArrayBuffer, type: string, name: string):
 }
 
 export async function getAudioDataURI(id: string): Promise<string | undefined> {
-    const all = await getAllAudio();
+    const all = await loadAudioFiles();
     const entry = all[id];
     if (!entry) return undefined;
 

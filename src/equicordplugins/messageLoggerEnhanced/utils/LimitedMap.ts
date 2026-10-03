@@ -20,7 +20,6 @@ import { settings } from "../index";
 
 export class LimitedMap<K, V> {
     public map: Map<K, V> = new Map();
-    constructor() { }
 
     set(key: K, value: V) {
         if (!this.map.has(key) && settings.store.cacheLimit > 0 && this.map.size >= settings.store.cacheLimit) {

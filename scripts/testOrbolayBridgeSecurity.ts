@@ -642,10 +642,12 @@ function emitSensitiveEvents(plugin: OrbolayPlugin): Promise<void> {
 
 async function testHermeticLoopbackBoundary(): Promise<void> {
     const websocketDescriptor = Object.getOwnPropertyDescriptor(globalThis, "WebSocket");
+    const harnessDescriptor = Object.getOwnPropertyDescriptor(globalThis, "__orbolayBridgeHarness");
+    let plugin: OrbolayPlugin | undefined;
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket, writable: true });
     try {
         resetHarness("");
-        const plugin = await loadPlugin();
+        plugin = await loadPlugin();
         assert.equal(plugin.settings.def.sharedSecret.cloudSync, false,
             "the per-install pairing secret must be explicitly excluded from cloud sync");
 
@@ -760,8 +762,12 @@ async function testHermeticLoopbackBoundary(): Promise<void> {
         assert.equal(authenticatedRuntime.dispatches.length, 1, "replayed controls must never dispatch twice");
         plugin.stop();
     } finally {
-        if (websocketDescriptor) Object.defineProperty(globalThis, "WebSocket", websocketDescriptor);
-        else Reflect.deleteProperty(globalThis, "WebSocket");
+        try { plugin?.stop(); } finally {
+            if (websocketDescriptor) Object.defineProperty(globalThis, "WebSocket", websocketDescriptor);
+            else Reflect.deleteProperty(globalThis, "WebSocket");
+            if (harnessDescriptor) Object.defineProperty(globalThis, "__orbolayBridgeHarness", harnessDescriptor);
+            else Reflect.deleteProperty(globalThis, "__orbolayBridgeHarness");
+        }
     }
 }
 

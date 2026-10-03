@@ -195,6 +195,7 @@ class TidalSocket {
 
 export const TidalStore = proxyLazyWebpack(() => {
     const { Store } = Flux;
+    const knownFields = ["track", "coverUrl", "duration", "currentTime", "playing", "repeatMode", "shuffle", "volume"];
 
     class TidalStore extends Store {
         public mPosition = 0;
@@ -214,7 +215,6 @@ export const TidalStore = proxyLazyWebpack(() => {
                 const fields = message.fields && typeof message.fields === "object" ? message.fields
                     : typeof message.field === "string" ? { [message.field]: message.value } : null;
                 if (!fields) return;
-                const knownFields = ["track", "coverUrl", "duration", "currentTime", "playing", "repeatMode", "shuffle", "volume"];
                 if (message.all) this.apiState = {};
                 for (const field of knownFields) {
                     if (Object.hasOwn(fields, field)) this.apiState[field] = fields[field];

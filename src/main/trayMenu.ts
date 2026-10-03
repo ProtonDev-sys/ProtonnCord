@@ -37,21 +37,12 @@ function sendToRenderer(event: IpcEvents): void {
     getMainWindow()?.webContents.send(event);
 }
 
-function findInsertIndex(template: MenuItemConstructorOptions[]): number {
+function findTrayInsertIndex(template: MenuItemConstructorOptions[]): number {
     const openIndex = template.findIndex(item => {
         const label = item.label?.toLowerCase() ?? "";
         return label.includes("open") || label.includes("show");
     });
-    return openIndex !== -1 ? openIndex + 1 : 0;
-}
-
-function isTrayMenu(template: MenuItemConstructorOptions[]): boolean {
-    if (!template.length) return false;
-
-    const hasOpenOrShow = template.some(item => {
-        const label = item.label?.toLowerCase() ?? "";
-        return label.includes("open") || label.includes("show");
-    });
+    if (openIndex === -1) return -1;
 
     const hasQuit = template.some(item =>
         item.label?.toLowerCase().includes("quit") || item.role === "quit"
@@ -62,7 +53,7 @@ function isTrayMenu(template: MenuItemConstructorOptions[]): boolean {
         item.label === "&Edit" || item.label === "Edit"
     );
 
-    return hasOpenOrShow && hasQuit && isNotAppMenu;
+    return hasQuit && isNotAppMenu ? openIndex + 1 : -1;
 }
 
 let aboutWindow: BrowserWindow | null = null;
@@ -154,9 +145,9 @@ export function patchTrayMenu(): void {
 
     Menu.buildFromTemplate = function (template: MenuItemConstructorOptions[]) {
         const alreadyPatched = template.some(item => item.label === "Protonn Cord");
-        if (isTrayMenu(template) && !alreadyPatched) {
+        const insertIndex = findTrayInsertIndex(template);
+        if (insertIndex !== -1 && !alreadyPatched) {
             template = template.slice();
-            const insertIndex = findInsertIndex(template);
             const protonnCordItems = createProtonnCordMenuItems();
             template.splice(insertIndex, 0, ...protonnCordItems);
         }

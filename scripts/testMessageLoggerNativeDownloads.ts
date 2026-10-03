@@ -16,6 +16,7 @@ import { pathToFileURL } from "node:url";
 import { build, type Plugin } from "esbuild";
 import type { IpcMainInvokeEvent } from "electron";
 
+import { withTimeout } from "../src/debug/promiseTimeout";
 import {
     assertAttachmentContent,
     BoundedOperationLimiter,
@@ -37,6 +38,19 @@ const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const DISCORD_EVENT = discordEvent(`https://discord.com/channels/@me/${CHANNEL_ID}`);
 const HARNESS_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 const HARNESS_CACHE_BYTES = 1024;
+
+async function finishGatedOperation<Value>(started: Promise<void>, release: () => void, pending: Promise<Value>, check: () => Promise<void>, label: string): Promise<Value> {
+    const drain = pending.then(() => undefined, () => undefined);
+    try {
+        await withTimeout(Promise.race([started, pending.then(() => { throw new Error(`Fixture: ${label} settled before its start hook`); })]), 5_000, `Fixture watchdog: ${label} did not start`);
+        await withTimeout(check(), 5_000, `Fixture watchdog: ${label} checks did not settle`);
+        release();
+        return await withTimeout(pending, 5_000, `Fixture watchdog: ${label} did not settle`);
+    } finally {
+        release();
+        await withTimeout(drain, 5_000, `Fixture watchdog: ${label} did not drain`).catch(() => undefined);
+    }
+}
 
 function discordEvent(url: string): IpcMainInvokeEvent {
     return { senderFrame: { url } as IpcMainInvokeEvent["senderFrame"] } as IpcMainInvokeEvent;
@@ -297,40 +311,39 @@ async function testFetcher() {
         }
     ), /unexpected redirect/u);
 
-    const timeoutStarted = Date.now();
-    const connectionKeepAlive = setInterval(() => undefined, 100);
-    try {
-        await assert.rejects(fetchDiscordAttachment(
+    for (const [stage, message] of [
+        ["connection", "a stalled connection must honor the overall deadline"],
+        ["body", "a stalled body must honor the same overall deadline"]
+    ] as const) {
+        const timeoutStarted = Date.now();
+        let release = (_reason?: unknown) => {};
+        let signal: AbortSignal | undefined;
+        const onAbort = () => release(signal?.reason);
+        const pending = fetchDiscordAttachment(
             validateDiscordAttachmentUrl(VALID_CDN_URL, ATTACHMENT_ID), ATTACHMENT_ID, "png", {
                 deadline: Date.now() + 30,
-                fetchImpl: async (_input, init) => new Promise<Response>((_resolve, reject) => {
-                    init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
-                })
+                fetchImpl: async (_input, init) => {
+                    signal = init?.signal ?? undefined;
+                    const response = stage === "connection" ? new Promise<Response>((_resolve, reject) => { release = reject; }) : new Response(new ReadableStream({
+                        start(controller) {
+                            controller.enqueue(PNG.subarray(0, 4));
+                            release = reason => controller.error(reason);
+                        }
+                    }), { headers: { "content-type": "image/png" } });
+                    signal?.addEventListener("abort", onAbort, { once: true });
+                    return response;
+                }
             }
-        ), /timed? ?out|abort/i);
-    } finally {
-        clearInterval(connectionKeepAlive);
+        );
+        try {
+            await withTimeout(assert.rejects(pending, /timed? ?out|abort/i), 5_000, `Fixture watchdog: stalled ${stage} did not settle`);
+        } finally {
+            signal?.removeEventListener("abort", onAbort);
+            release(new Error("Fixture cleanup"));
+            await withTimeout(pending.catch(() => undefined), 5_000, "Fixture watchdog: stalled download did not drain").catch(() => undefined);
+        }
+        assert.ok(Date.now() - timeoutStarted < 5_000, message);
     }
-    assert.ok(Date.now() - timeoutStarted < 5_000, "a stalled connection must honor the overall deadline");
-
-    const stalledBodyStarted = Date.now();
-    const bodyKeepAlive = setInterval(() => undefined, 100);
-    try {
-        await assert.rejects(fetchDiscordAttachment(
-            validateDiscordAttachmentUrl(VALID_CDN_URL, ATTACHMENT_ID), ATTACHMENT_ID, "png", {
-                deadline: Date.now() + 30,
-                fetchImpl: async (_input, init) => new Response(new ReadableStream({
-                    start(controller) {
-                        controller.enqueue(PNG.subarray(0, 4));
-                        init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason), { once: true });
-                    }
-                }), { headers: { "content-type": "image/png" } })
-            }
-        ), /timed? ?out|abort/i);
-    } finally {
-        clearInterval(bodyKeepAlive);
-    }
-    assert.ok(Date.now() - stalledBodyStarted < 5_000, "a stalled body must honor the same overall deadline");
 }
 
 async function testLimiter() {
@@ -549,15 +562,15 @@ async function testNativeHandler(root: string) {
         const sawDialog = new Promise<void>(resolve => dialogOpened = resolve);
         harnessGlobal.__messageLoggerNativeHarness.dialogOpened = dialogOpened;
         const chooseLogsDir = native.chooseDir(DISCORD_EVENT, "logsDir");
-        await sawDialog;
-        await Promise.all([
+        const chosenLogsDir = await finishGatedOperation(sawDialog, () => {
+            releaseDialog();
+            harnessGlobal.__messageLoggerNativeHarness.dialogGate = undefined;
+            harnessGlobal.__messageLoggerNativeHarness.dialogOpened = undefined;
+        }, chooseLogsDir, async () => { await Promise.all([
             native.updateAttachmentSizeLimit(DISCORD_EVENT, 2),
             native.updateAllowedExtensions(DISCORD_EVENT, "png,webp")
-        ]);
-        releaseDialog();
-        assert.equal(await chooseLogsDir, concurrentLogsDir);
-        harnessGlobal.__messageLoggerNativeHarness.dialogGate = undefined;
-        harnessGlobal.__messageLoggerNativeHarness.dialogOpened = undefined;
+        ]); }, "directory dialog");
+        assert.equal(chosenLogsDir, concurrentLogsDir);
         const concurrentlyUpdatedSettings = await native.getSettingsNative(DISCORD_EVENT);
         assert.equal(concurrentlyUpdatedSettings.attachmentSizeLimitInMegabytes, 2,
             "a directory dialog must not overwrite a concurrent attachment-size update");
@@ -674,25 +687,10 @@ async function testNativeHandler(root: string) {
             return pngResponse();
         };
         const concurrentDownloads = concurrentIds.map(id => native.downloadAttachment(DISCORD_EVENT, attachmentForId(id)));
-        let startWatchdog: ReturnType<typeof setTimeout> | undefined;
-        try {
-            await Promise.race([
-                firstTwoStarted,
-                new Promise<never>((_resolve, reject) => {
-                    startWatchdog = setTimeout(() => reject(new Error("Two native downloads did not start within 5 seconds")), 5_000);
-                })
-            ]);
-        } catch (error) {
-            releaseFetches();
-            await Promise.allSettled(concurrentDownloads);
-            throw error;
-        } finally {
-            clearTimeout(startWatchdog);
-        }
-        assert.equal(fetchCalls, 2, "only two privileged downloads may be active while the bounded queue is blocked");
-        assert.equal(maximumActiveFetches, 2);
-        releaseFetches();
-        const concurrentResults = await Promise.all(concurrentDownloads);
+        const concurrentResults = await finishGatedOperation(firstTwoStarted, releaseFetches, Promise.all(concurrentDownloads), async () => {
+            assert.equal(fetchCalls, 2, "only two privileged downloads may be active while the bounded queue is blocked");
+            assert.equal(maximumActiveFetches, 2);
+        }, "two native downloads");
         assert.equal(concurrentResults.filter(result => result.error === null).length, 34,
             "two active and thirty-two queued downloads must fit the production limiter");
         assert.equal(concurrentResults.filter(result => /too many/iu.test(result.error ?? "")).length, 2,
@@ -785,11 +783,10 @@ async function testNativeHandler(root: string) {
             return pngResponse();
         };
         const racedDownload = native.downloadAttachment(DISCORD_EVENT, attachmentForId(racedId));
-        await racedFetchStart;
-        harnessGlobal.__messageLoggerNativeHarness.chosenDirectory = switchedCacheDir;
-        assert.equal(await native.chooseDir(DISCORD_EVENT, "imageCacheDir"), switchedCacheDir);
-        releaseRacedFetch();
-        const racedResult = await racedDownload;
+        const racedResult = await finishGatedOperation(racedFetchStart, releaseRacedFetch, racedDownload, async () => {
+            harnessGlobal.__messageLoggerNativeHarness.chosenDirectory = switchedCacheDir;
+            assert.equal(await native.chooseDir(DISCORD_EVENT, "imageCacheDir"), switchedCacheDir);
+        }, "cache-directory raced download");
         assert.equal(racedResult.error, null);
         assert.equal(path.dirname(racedResult.path!), path.resolve(switchedCacheDir),
             "an in-flight download must commit only to the newly selected cache directory");
@@ -821,8 +818,10 @@ async function main() {
         "non-handler test utilities must not be exported from the auto-registered native entrypoint");
     assert.doesNotMatch(cacheSource, /\breadFile\b/u,
         "bounded cache reads must stat and stream from a file handle instead of allocating through readFile");
-    assert.ok(cacheSource.indexOf("const initialStats = await lstat(imagePath)")
-        < cacheSource.indexOf("const content = Buffer.allocUnsafe(openedStats.size)"),
+    const statIndex = cacheSource.indexOf("const initialStats = await lstat(imagePath)");
+    const allocationIndex = cacheSource.indexOf("const content = Buffer.allocUnsafe(openedStats.size)");
+    assert.ok(statIndex >= 0 && allocationIndex >= 0, "cache validation and allocation markers must exist");
+    assert.ok(statIndex < allocationIndex,
     "cache size validation must remain before allocation");
     console.log("message logger native download boundary checks passed");
 }

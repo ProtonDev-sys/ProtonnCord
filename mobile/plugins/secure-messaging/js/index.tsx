@@ -137,9 +137,7 @@ async function localCommand(
 		}
 		case 'on': {
 			const members = memberSnapshot(channelId, userId)
-			const recipients = [
-				...new Set(args.length ? args : memberSnapshot(channelId, userId)),
-			].sort()
+			const recipients = [...new Set(args.length ? args : members)].sort()
 			if (!recipients.length)
 				throw new Error('No recipients supplied or found for this DM')
 			for (const id of recipients) {

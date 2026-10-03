@@ -12,12 +12,12 @@ import { getGuildAcronym } from "@utils/discord";
 import { classes } from "@utils/misc";
 import { Guild, RenderModalProps } from "@vencord/discord-types";
 import { findCssClassesLazy } from "@webpack";
-import { Button, closeModal, GuildStore, IconUtils, Modal, openModal, SortedGuildStore, useStateFromStores } from "@webpack/common";
+import { Button, GuildStore, IconUtils, Modal, openModal, SortedGuildStore, useStateFromStores } from "@webpack/common";
 
 const cl = classNameFactory("vc-hideservers-");
 const IconClasses = findCssClassesLazy("icon", "acronym", "childWrapper");
 
-function HiddenServersModal({ modalProps, close }: { modalProps: RenderModalProps; close(): void; }) {
+function HiddenServersModal({ modalProps }: { modalProps: RenderModalProps; }) {
     const guilds = useStateFromStores([HiddenServersStore, GuildStore, SortedGuildStore], () => HiddenServersStore.hiddenGuildsDetail());
     return (
         <Modal {...modalProps} size="lg" title="Hidden Servers">
@@ -34,8 +34,7 @@ function isGuildHidden(guild: Guild, SortedGuildStore: any) {
 
 function getFolderForGuild(SortedGuildStore: any, guildId: string) {
     return SortedGuildStore.getGuildFolders()
-        .filter((f: any) => f.folderId !== undefined)
-        .find((f: any) => f.guildIds.includes(guildId));
+        .find((f: any) => f.folderId !== undefined && f.guildIds.includes(guildId));
 }
 
 function restoreGuild(guild: Guild, SortedGuildStore: any) {
@@ -144,12 +143,5 @@ export function HiddenServersMenu({ guilds }: { guilds: Guild[]; }) {
 }
 
 export function openHiddenServersModal() {
-    const key = openModal(modalProps => {
-        return (
-            <HiddenServersModal
-                modalProps={modalProps}
-                close={() => closeModal(key)}
-            />
-        );
-    });
+    openModal(modalProps => <HiddenServersModal modalProps={modalProps} />);
 }

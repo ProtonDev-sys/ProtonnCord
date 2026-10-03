@@ -205,8 +205,6 @@ async function* parseJsonStream(readChunk: () => Promise<string | null>) {
 
             parser.write(chunk);
         }
-    } catch (e) {
-        throw e;
     } finally {
         if (!parser.isEnded)
             parser.end();

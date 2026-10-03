@@ -240,6 +240,31 @@ function loadService<T>(name: string, mocks: Record<string, unknown>, globals: R
     });
 }
 
+test("message listener snapshots survive removal and re-registration during awaited work", async () => {
+    const events = loadService<typeof import("../src/api/MessageEvents")>("../api/MessageEvents", {
+        "@utils/Logger": { Logger: class { error() {} } }, "@webpack/common": {}
+    }, {});
+    const gate = deferred();
+    const calls: string[] = [];
+    const first = async () => { calls.push("first"); await gate.promise; };
+    const second = () => { calls.push("second"); };
+    const run = () => events._handlePreEdit("channel", "message", {} as any);
+    events.addMessagePreEditListener(first);
+    events.addMessagePreEditListener(second);
+    const pending = run();
+    assert.equal(events.removeMessagePreEditListener(second), true);
+    events.addMessagePreEditListener(second);
+    gate.resolve();
+    assert.equal(await pending, false);
+    assert.deepEqual(calls, ["first"]);
+    await run();
+    await run();
+    assert.deepEqual(calls, ["first", "first", "second", "first", "second"]);
+    events.removeMessagePreEditListener(first);
+    await run();
+    assert.equal(calls.at(-1), "second");
+});
+
 function cloudFixture() {
     const settingListeners = new Set<() => void>();
     const cssListeners = new Set<() => void>();

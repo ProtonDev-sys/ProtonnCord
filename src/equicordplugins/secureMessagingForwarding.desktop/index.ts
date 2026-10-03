@@ -372,26 +372,18 @@ async function downloadPlainAttachment(attachment: MessageAttachment, channelId:
     const direct = [attachment.url, attachment.proxy_url]
         .map(value => validatedDiscordAttachmentUrl(value, channelId, attachment.id))
         .filter((url): url is URL => url !== null);
-    let bytes: Uint8Array | null = null;
     let lastError: unknown;
-    for (const url of direct) {
-        try {
-            bytes = await fetchCandidate(url, attachment, channelId);
-            break;
-        } catch (error) {
-            lastError = error;
-        }
-    }
-    if (!bytes) {
-        for (const url of await refreshedAttachmentUrls(attachment, channelId)) {
+    const tryUrls = async (urls: URL[]): Promise<Uint8Array | null> => {
+        for (const url of urls) {
             try {
-                bytes = await fetchCandidate(url, attachment, channelId);
-                break;
+                return await fetchCandidate(url, attachment, channelId);
             } catch (error) {
                 lastError = error;
             }
         }
-    }
+        return null;
+    };
+    const bytes = await tryUrls(direct) ?? await tryUrls(await refreshedAttachmentUrls(attachment, channelId));
     if (!bytes) throw lastError instanceof Error ? lastError : new Error("The forwarded attachment could not be downloaded.");
 
     try {

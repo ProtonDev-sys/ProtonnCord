@@ -127,6 +127,15 @@ test("batched persisted updates notify each path once and publish the root once"
     assert.deepEqual(events, ["first:1", "second:2", "global"]);
 });
 
+test("root updates resolve missing and non-object notification paths without creating defaults", () => {
+    const settings = new SettingsStore({ nested: { value: 1 } }, { getDefaultValue: () => assert.fail("notification created a default") });
+    const values: unknown[] = [];
+    for (const path of ["nested.value", "nested.value.missing", "absent.value"])
+        settings.addChangeListener(path, value => values.push(value));
+    settings.setData({ nested: { value: 2 } }, ["nested.value", "nested.value.missing", "absent.value"]);
+    assert.deepEqual(values, [2, undefined, undefined]);
+});
+
 test("lazy defaults, arrays, frozen values, and symbols remain usable", () => {
     const defaults: string[] = [];
     const data = { plugins: {} as Record<string, { values: string[]; }>, frozen: Object.freeze({ nested: Object.freeze({ value: 1 }) }) };

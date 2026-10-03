@@ -289,12 +289,7 @@ async function getActivity(signal?: AbortSignal): Promise<Activity | null> {
         }
     }
 
-    let largeImagePromise: Promise<string>;
-    if (resolvedCoverArtUrl) {
-        largeImagePromise = getAsset(appId, resolvedCoverArtUrl).catch(() => "navidrome");
-    } else {
-        largeImagePromise = getAsset(appId, "navidrome").catch(() => "navidrome");
-    }
+    const largeImagePromise = getAsset(appId, resolvedCoverArtUrl || "navidrome").catch(() => "navidrome");
 
     let smallImagePromise: Promise<string> | undefined;
     if (nd_showSmallImage) {

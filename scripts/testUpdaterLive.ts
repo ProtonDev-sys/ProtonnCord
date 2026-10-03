@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 
@@ -49,12 +49,18 @@ async function discordPage(browser: Browser): Promise<Page> {
     throw new Error("Discord did not expose the Protonn Cord updater bridge");
 }
 
-async function git(...args: string[]): Promise<string> {
+async function gitOutput(...args: string[]): Promise<string> {
+    if (Object.keys(process.env).some(key => /^GIT_(?:DIR|WORK_TREE|COMMON_DIR|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|NAMESPACE|CONFIG(?:_.*)?)$/iu.test(key)))
+        throw new Error("Refusing repository-selecting Git environment overrides");
     return (await execFile("git", args, {
         cwd: process.cwd(),
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
         timeout: 60_000,
-    })).stdout.trim();
+    })).stdout;
+}
+
+async function git(...args: string[]): Promise<string> {
+    return (await gitOutput(...args)).trim();
 }
 
 function comparablePath(value: string): string {
@@ -68,7 +74,7 @@ async function sourceFingerprint(): Promise<string> {
         ["ls-files", "--modified", "--deleted", "--others", "--exclude-standard", "-z"],
         ["diff", "--cached", "--name-only", "-z"],
     ]) {
-        const output = (await execFile("git", args, { cwd: process.cwd() })).stdout;
+        const output = await gitOutput(...args);
         for (const path of output.split("\0")) if (path) changed.add(path);
     }
     const digest = createHash("sha256");
@@ -85,36 +91,57 @@ async function sourceFingerprint(): Promise<string> {
     return digest.digest("hex");
 }
 
-async function main(): Promise<void> {
-    const before = {
-        head: await git("rev-parse", "HEAD"),
-        patcherModifiedAt: (await stat(PATCHER_PATH)).mtimeMs,
-        sourceFingerprint: await sourceFingerprint(),
-        status: await git("status", "--porcelain=v1"),
-    };
-    const browser = await connectWithRetry();
+async function capture<T>(errors: unknown[], action: () => Promise<T>): Promise<T | undefined> {
     try {
+        return await action();
+    } catch (error) {
+        errors.push(error);
+    }
+}
+
+async function sourceState(errors: unknown[]) {
+    return {
+        head: await capture(errors, () => git("rev-parse", "HEAD")),
+        patcherModifiedAt: await capture(errors, async () => (await stat(PATCHER_PATH)).mtimeMs),
+        sourceFingerprint: await capture(errors, sourceFingerprint),
+        status: await capture(errors, () => git("status", "--porcelain=v1")),
+    };
+}
+
+async function main(): Promise<void> {
+    const errors: unknown[] = [];
+    const before = await sourceState(errors);
+    if (errors.length) throw new AggregateError(errors, "The live updater source preflight failed");
+    let browser: Browser | undefined;
+    let proofCompleted = false;
+    await capture(errors, async () => {
+        browser = await connectWithRetry();
         const page = await discordPage(browser);
         const diagnostics = await page.evaluate(() => VencordNative.updater.getDiagnostics());
         assert.equal(diagnostics.ok, true, "the live updater diagnostics must be available");
         if (!diagnostics.ok) throw new Error("the live updater diagnostics failed");
         assert.equal(diagnostics.value.backend, "git", "the live proof must exercise the Git updater, not the standalone HTTP updater");
         assert.equal(diagnostics.value.branch, EXPECTED_BRANCH, "the live proof runs only against Protonn Cord main");
-        assert.equal(comparablePath(diagnostics.value.sourceRoot ?? ""), comparablePath(process.cwd()), "the connected client must use this exact source checkout");
+        assert.ok(typeof diagnostics.value.sourceRoot === "string" && isAbsolute(diagnostics.value.sourceRoot), "the connected client must report an absolute source checkout");
+        assert.equal(comparablePath(diagnostics.value.sourceRoot), comparablePath(process.cwd()), "the connected client must use this exact source checkout");
         assert.equal(diagnostics.value.builtHead, before.head, "the active desktop bundle must have been built from the checked-out HEAD");
         assert.equal(await git("branch", "--show-current"), EXPECTED_BRANCH);
         const remoteHeadLine = await git("ls-remote", `${EXPECTED_REPOSITORY}.git`, `refs/heads/${EXPECTED_BRANCH}`);
         const remoteHead = remoteHeadLine.split(/\s+/u, 1)[0];
         assert.equal(remoteHead, before.head, "refusing to call the live updater because remote main advanced; rebuild and rerun first");
 
-        const proof = await page.evaluate(async () => {
+        const proof = await page.evaluate(async ({ branch, repository }) => {
             const repo = await VencordNative.updater.getRepo();
-            const updates = await VencordNative.updater.getUpdates();
-            const pull = await VencordNative.updater.update();
-            const rebuild = await VencordNative.updater.rebuild();
-            const diagnostics = await VencordNative.updater.getDiagnostics();
+            if (!repo.ok || repo.value !== repository) throw new Error("Refusing the unexpected live updater repository");
+            const updates = await VencordNative.updater.getUpdates(branch);
+            if (!updates.ok || !Array.isArray(updates.value) || updates.value.length !== 0)
+                throw new Error("Refusing to mutate a live checkout with failed or nonempty update results");
+            const pull = await VencordNative.updater.update(branch);
+            if (!pull.ok || pull.value !== false) throw new Error("Refusing to rebuild after a failed or non-no-op live update");
+            const rebuild = await VencordNative.updater.rebuild(branch);
+            const diagnostics = await VencordNative.updater.getDiagnostics(branch);
             return { diagnostics, pull, rebuild, repo, updates };
-        });
+        }, { branch: EXPECTED_BRANCH, repository: EXPECTED_REPOSITORY } as const);
 
         assert.deepEqual(proof.repo, { ok: true, value: EXPECTED_REPOSITORY });
         assert.deepEqual(proof.updates, { ok: true, value: [] }, "the live updater must compare main with Protonn Cord main");
@@ -122,20 +149,17 @@ async function main(): Promise<void> {
         assert.deepEqual(proof.rebuild, { ok: true, value: true }, "the live updater rebuild must complete successfully");
         assert.equal(proof.diagnostics.ok, true);
         if (proof.diagnostics.ok) assert.equal(proof.diagnostics.value.builtHead, before.head);
-    } finally {
-        await browser.disconnect();
-    }
+        proofCompleted = true;
+    });
+    if (browser) await capture(errors, async () => { await browser!.disconnect(); });
 
-    const after = {
-        head: await git("rev-parse", "HEAD"),
-        patcherModifiedAt: (await stat(PATCHER_PATH)).mtimeMs,
-        sourceFingerprint: await sourceFingerprint(),
-        status: await git("status", "--porcelain=v1"),
-    };
-    assert.equal(after.head, before.head, "the no-op updater must not move HEAD");
-    assert.equal(after.status, before.status, "the live updater must not alter tracked or untracked source files");
-    assert.equal(after.sourceFingerprint, before.sourceFingerprint, "the live updater must preserve the exact contents of every changed source file");
-    assert.ok(after.patcherModifiedAt > before.patcherModifiedAt, "the live rebuild must strictly refresh the desktop bundle");
+    const after = await sourceState(errors);
+    await capture(errors, async () => assert.equal(after.head, before.head, "the no-op updater must not move HEAD"));
+    await capture(errors, async () => assert.equal(after.status, before.status, "the live updater must not alter tracked or untracked source files"));
+    await capture(errors, async () => assert.equal(after.sourceFingerprint, before.sourceFingerprint, "the live updater must preserve the exact contents of every changed source file"));
+    if (proofCompleted) await capture(errors, async () => assert.ok(after.patcherModifiedAt! > before.patcherModifiedAt!, "the live rebuild must strictly refresh the desktop bundle"));
+    if (errors.length === 1) throw errors[0];
+    if (errors.length) throw new AggregateError(errors, "The live updater proof, disconnect or preservation audit failed");
 
     console.log(JSON.stringify({
         head: after.head,

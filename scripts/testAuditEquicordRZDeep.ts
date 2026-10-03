@@ -6,7 +6,9 @@ import { join, normalize } from "node:path";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
-import { createSourceFile, JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { createSourceFile, ScriptTarget, transpileModule } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 test("transcriber clipboard feedback awaits success and ignores stale completions", async () => {
     const source = readFileSync("src/equicordplugins/voiceMessageTranscriber.desktop/index.tsx", "utf8");
@@ -55,17 +57,14 @@ test("transcriber clipboard feedback awaits success and ignores stale completion
 
 function loadModule<T>(path: string, imports: Record<string, unknown>, globals: Record<string, unknown> = {}, extra = ""): T {
     const exports = {};
-    const source = transpileModule(readFileSync(path, "utf8") + extra, {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    runInNewContext(source, {
+    loadTestModule(path, imports, {
         exports, Buffer, Uint8Array, Float32Array, URL, AbortSignal, AbortController,
         require(name: string) {
             assert.ok(Object.hasOwn(imports, name), `Unexpected import ${name} in ${path}`);
             return imports[name];
         },
         ...globals
-    });
+    }, extra, { mockImports: false });
     return exports as T;
 }
 

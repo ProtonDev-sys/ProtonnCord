@@ -131,6 +131,7 @@ test("initial browsing reads presentation only for visible cards and reuses each
     assert.equal(descriptionReads, 36, "offscreen cards do not evaluate presentation getters");
     const next = catalog.read(all, null, 72);
     assert.deepEqual(next.cards.slice(0, 36), first.cards);
+    first.cards.forEach((card, index) => assert.equal(next.cards[index], card));
     const beforeEdits = catalog.read(all, null, 388);
     f.store.store.plugins.Plugin000 = { enabled: false };
     for (let i = 0; i < 100; i++) {

@@ -81,7 +81,7 @@ async function messageDeleteHandler(payload: MessageDeletePayload & { isBulk: bo
             const cachedMessage = cacheSentMessages.get(`${payload.channelId},${payload.id}`);
             if (!cachedMessage) return;
 
-            message = { ...cacheSentMessages.get(`${payload.channelId},${payload.id}`), deleted: true } as LoggedMessageJSON;
+            message = { ...cachedMessage, deleted: true } as LoggedMessageJSON;
         }
 
         const ghostPinged = isGhostPinged(message as any);

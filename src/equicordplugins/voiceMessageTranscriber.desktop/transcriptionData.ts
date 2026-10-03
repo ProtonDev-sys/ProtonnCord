@@ -14,6 +14,7 @@ export class IdleResultCache<Value> {
     private readonly listeners = new Map<string, Set<() => void>>();
     private timer: ReturnType<typeof setTimeout> | undefined;
     private characters = 0;
+    private clearing = false;
 
     constructor(private readonly measure: (value: Value) => number, private readonly idleMs = 300_000) { }
 
@@ -75,9 +76,14 @@ export class IdleResultCache<Value> {
     }
 
     clear() {
-        for (const key of [...this.entries.keys()]) this.remove(key);
+        const listeners = [...this.listeners.values()].flatMap(listeners => [...listeners]);
+        this.entries.clear();
+        this.characters = 0;
         if (this.timer) clearTimeout(this.timer);
         this.timer = undefined;
+        if (this.clearing) return;
+        this.clearing = true;
+        try { listeners.forEach(listener => listener()); } finally { this.clearing = false; }
     }
 
     private remove(key: string) {

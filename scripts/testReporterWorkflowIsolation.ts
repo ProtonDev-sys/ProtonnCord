@@ -24,6 +24,9 @@ async function main() {
     assert.doesNotMatch(publish, /actions\/checkout|pnpm|esbuild|dist\/report\.mjs/, "the secret job must not execute selected repository code");
     assert.doesNotMatch(workflow, /uses:\s+[^\s@]+@(?:v\d+|main|master|latest)\b/u,
         "workflow actions must be pinned to immutable revisions");
+    const actionRefs = Array.from(workflow.matchAll(/uses:\s+[^@\s]+@([^\s#]+)/gu), match => match[1]);
+    assert.ok(actionRefs.length > 0, "workflow must use reviewed actions");
+    for (const ref of actionRefs) assert.match(ref, /^[0-9a-f]{40}$/u, "every reporter action must be pinned to an immutable commit");
     assert.match(publish, /MAX_PAYLOAD_BYTES = 64 \* 1024/, "the inert payload must be bounded before signing");
     assert.match(publish, /!metadata\.isFile\(\) \|\| metadata\.isSymbolicLink\(\)/,
         "the secret job must reject linked or special report artifacts");

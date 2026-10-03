@@ -70,11 +70,7 @@ async function setAllowedList(newList: ContextMenuEmoji[]) {
     notifyCacheChange();
 }
 
-function isItemAllowed(item: (CustomEmoji | UnicodeEmoji)) {
-    return allowedEmojiKeys.has(emojiKey(item));
-}
-
-function itemAlreadyInList(item: ContextMenuEmoji) {
+function isItemAllowed(item: ContextMenuEmoji | CustomEmoji | UnicodeEmoji) {
     return allowedEmojiKeys.has(emojiKey(item));
 }
 
@@ -131,7 +127,7 @@ function removeBulkFromAllowedList(items: ContextMenuEmoji[]) {
         const keysToRemove = new Set<string>();
         let removedCount = 0;
         for (const item of items) {
-            if (itemAlreadyInList(item)) {
+            if (isItemAllowed(item)) {
                 keysToRemove.add(emojiKey(item));
                 removedCount++;
             }
@@ -145,7 +141,7 @@ function removeBulkFromAllowedList(items: ContextMenuEmoji[]) {
 
 function addToAllowedList(item: ContextMenuEmoji) {
     return withWriteLock(async () => {
-        if (itemAlreadyInList(item)) {
+        if (isItemAllowed(item)) {
             showToast(`"${item.name}" is already in the list`, Toasts.Type.FAILURE);
             return;
         }
@@ -157,7 +153,7 @@ function addToAllowedList(item: ContextMenuEmoji) {
 
 function removeFromAllowedList(item: ContextMenuEmoji) {
     return withWriteLock(async () => {
-        if (!itemAlreadyInList(item)) {
+        if (!isItemAllowed(item)) {
             showToast(`"${item.name}" is not in the list`, Toasts.Type.FAILURE);
             return;
         }
@@ -218,7 +214,7 @@ const buildGuildContextPatch = (guild: { id: string; name: string; }) => {
 };
 
 function buildMenuItems(emoji: ContextMenuEmoji) {
-    const isInList = itemAlreadyInList(emoji);
+    const isInList = isItemAllowed(emoji);
     return (
         <>
             <Menu.MenuSeparator />

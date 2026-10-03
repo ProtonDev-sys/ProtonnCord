@@ -42,11 +42,6 @@ const enum ForumLayoutTypes {
     GRID = 2
 }
 
-interface DefaultReaction {
-    emojiId: string | null;
-    emojiName: string | null;
-}
-
 const enum ChannelTypes {
     GUILD_TEXT = 0,
     GUILD_VOICE = 2,

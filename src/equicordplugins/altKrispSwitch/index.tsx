@@ -23,11 +23,7 @@ export default definePlugin({
     ],
     shouldCancelSuppression([enableKrisp, options]) {
         if (options?.section === "Noise Cancellation Popout") {
-            if (enableKrisp) {
-                return false;
-            } else {
-                return true;
-            }
+            return !enableKrisp;
         }
     }
 });

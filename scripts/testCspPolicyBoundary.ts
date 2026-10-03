@@ -20,6 +20,7 @@ async function main() {
 
     await assert.rejects(
         access(new URL("../src/equicordplugins/equicordHelper/native.ts", import.meta.url)),
+        { code: "ENOENT" },
         "the required helper must not install a native CSP wildcard"
     );
 

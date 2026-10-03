@@ -28,6 +28,17 @@ let isViewingViaBookmark = false;
 let isNavigatingViaTabFlag = false;
 let navigationTimeoutId: NodeJS.Timeout | undefined;
 const NAVIGATION_TIMEOUT_MS = 1000;
+const specialTabRoutes: Record<string, string> = {
+    "__quests__": "/quest-home",
+    "__message-requests__": "/message-requests",
+    "__friends__": "/channels/@me",
+    "__shop__": "/shop",
+    "__library__": "/library",
+    "__discovery__": "/discovery",
+    "__nitro__": "/store",
+    "__icymi__": "/icymi",
+    "__activity__": "/channels/@me/activity",
+};
 
 export function isViewingViaBookmarkMode() {
     return settings.store.bookmarksIndependentFromTabs && isViewingViaBookmark;
@@ -82,8 +93,7 @@ export function clearStaleNavigationContext() {
 }
 
 function replaceArray<T>(array: T[], ...values: T[]) {
-    const len = array.length;
-    for (let i = 0; i < len; i++) array.pop();
+    array.length = 0;
     array.push(...values);
 }
 
@@ -229,12 +239,9 @@ export function closeTabsToTheRight(id: number) {
     const i = openTabs.findIndex(v => v.id === id);
     if (i === -1) return logger.error("Couldn't find channel tab with ID " + id, openTabs);
 
-    const tabsToTheRight = openTabs.filter((_, ind) => ind > i);
-    closedTabs.push(...tabsToTheRight.reverse());
-    const tabsToTheLeft = openTabs.filter((_, ind) => ind <= i);
-    replaceArray(openTabs, ...tabsToTheLeft);
+    closedTabs.push(...openTabs.splice(i + 1).reverse());
 
-    if (!tabsToTheLeft.some(v => v.id === currentlyOpenTab)) moveToTab(openTabs.at(-1)!.id);
+    if (!openTabs.some(v => v.id === currentlyOpenTab)) moveToTab(openTabs.at(-1)!.id);
     else update();
 }
 
@@ -242,12 +249,9 @@ export function closeTabsToTheLeft(id: number) {
     const i = openTabs.findIndex(v => v.id === id);
     if (i === -1) return logger.error("Couldn't find channel tab with ID " + id, openTabs);
 
-    const tabsToTheLeft = openTabs.filter((_, ind) => ind < i);
-    closedTabs.push(...tabsToTheLeft.reverse());
-    const tabsToTheRight = openTabs.filter((_, ind) => ind >= i);
-    replaceArray(openTabs, ...tabsToTheRight);
+    closedTabs.push(...openTabs.splice(0, i).reverse());
 
-    if (!tabsToTheRight.some(v => v.id === currentlyOpenTab)) moveToTab(openTabs[0].id);
+    if (!openTabs.some(v => v.id === currentlyOpenTab)) moveToTab(openTabs[0].id);
     else update();
 }
 
@@ -286,10 +290,9 @@ export function handleChannelSwitch(ch: BasicChannelTabsProps) {
 
         if (isRapidNavigation && settings.store.enableRapidNavigation) {
             // Replace current tab content instead of creating new one
-            const currentTab = openTabs.find(t => t.id === currentlyOpenTab);
-            if (currentTab && currentTab.channelId !== ch.channelId) {
-                currentTab.channelId = ch.channelId;
-                currentTab.guildId = ch.guildId;
+            if (tab && tab.channelId !== ch.channelId) {
+                tab.channelId = ch.channelId;
+                tab.guildId = ch.guildId;
                 update();
                 return;
             }
@@ -408,19 +411,7 @@ export function moveToTab(id: number) {
 
     // handle special pages with synthetic channelIds
     if (tab.channelId && tab.channelId.startsWith("__")) {
-        const routeMap: Record<string, string> = {
-            "__quests__": "/quest-home",
-            "__message-requests__": "/message-requests",
-            "__friends__": "/channels/@me",
-            "__shop__": "/shop",
-            "__library__": "/library",
-            "__discovery__": "/discovery",
-            "__nitro__": "/store",
-            "__icymi__": "/icymi",
-            "__activity__": "/channels/@me/activity",
-        };
-
-        const route = routeMap[tab.channelId];
+        const route = specialTabRoutes[tab.channelId];
         if (route) {
             setNavigationSource(tab.guildId, tab.channelId, "tab");
             NavigationRouter.transitionTo(route);
@@ -436,7 +427,7 @@ export function moveToTab(id: number) {
     if (tab.messageId) {
         setNavigationSource(tab.guildId, tab.channelId, "tab");
         NavigationRouter.transitionTo(`/channels/${tab.guildId}/${tab.channelId}/${tab.messageId}`);
-        delete openTabs[openTabs.indexOf(tab)].messageId;
+        delete tab.messageId;
     }
     else if (tab.channelId !== SelectedChannelStore.getChannelId() || tab.guildId !== SelectedGuildStore.getGuildId()) {
         setNavigationSource(tab.guildId, tab.channelId, "tab");
@@ -581,19 +572,7 @@ export function navigateToBookmark(ch: BasicChannelTabsProps) {
 
         // Handle special pages with synthetic channelIds
         if (ch.channelId && ch.channelId.startsWith("__")) {
-            const routeMap: Record<string, string> = {
-                "__quests__": "/quest-home",
-                "__message-requests__": "/message-requests",
-                "__friends__": "/channels/@me",
-                "__shop__": "/shop",
-                "__library__": "/library",
-                "__discovery__": "/discovery",
-                "__nitro__": "/store",
-                "__icymi__": "/icymi",
-                "__activity__": "/channels/@me/activity",
-            };
-
-            const route = routeMap[ch.channelId];
+            const route = specialTabRoutes[ch.channelId];
             if (route) {
                 NavigationRouter.transitionTo(route);
                 // trigger update to reflect tab deselection

@@ -12,6 +12,7 @@ export function captureSendPolicy(
 	const identity = state.identity
 	const expectedMembers = JSON.stringify(conversation.members)
 	const selected = [...conversation.recipients]
+	const expectedRecipients = JSON.stringify(selected)
 	const recipients = selected.map(id => {
 		const trusted = state.trusted[id]
 		if (
@@ -28,7 +29,7 @@ export function captureSendPolicy(
 			state.identity !== identity ||
 			state.conversations[channelId] !== conversation ||
 			conversation.needsReview ||
-			JSON.stringify(conversation.recipients) !== JSON.stringify(selected)
+			JSON.stringify(conversation.recipients) !== expectedRecipients
 		)
 			throw new Error('Encryption settings changed while preparing this send')
 		if (JSON.stringify(currentMembers) !== expectedMembers)

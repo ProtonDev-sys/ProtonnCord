@@ -45,15 +45,15 @@ function parseArgument(value: string) {
 }
 
 export function parseTagArguments(message: string) {
-    const args: ReturnType<typeof parseArgument>[] = [];
+    const args = new Map<string, ReturnType<typeof parseArgument>>();
     for (const [, value] of message.matchAll(ArgumentRegex)) {
         const arg = parseArgument(value);
         if (!arg.name) continue;
-        const previous = args.find(previous => previous.name === arg.name);
-        if (!previous) args.push(arg);
+        const previous = args.get(arg.name);
+        if (!previous) args.set(arg.name, arg);
         else if (arg.defaultValue === null) previous.defaultValue = null;
     }
-    return args;
+    return Array.from(args.values());
 }
 
 export function validateTag(tag: Tag) {
@@ -70,12 +70,13 @@ export function validateTag(tag: Tag) {
 
 function syncTagCommands(_data?: unknown, path = "") {
     if (!active || (path && path !== "plugins" && path !== "plugins.CustomCommands" && path !== "plugins.CustomCommands.tagsList" && !path.startsWith("plugins.CustomCommands.tagsList."))) return;
+    const tags = new Map(getTags().map(tag => [tag.name, tag]));
     for (const command of Object.values(commands) as TagCommand[]) {
         if (command[CustomCommandsMarker] === undefined) continue;
-        const tag = getTag(command.name);
+        const tag = tags.get(command.name);
         if (!tag || tag.message !== command[CustomCommandsMarker]) unregisterCommand(command.name);
     }
-    for (const tag of getTags()) {
+    for (const tag of tags.values()) {
         const command: TagCommand | undefined = commands[tag.name];
         if (command?.[CustomCommandsMarker] === tag.message) continue;
         try { registerTagCommand(tag); } catch (error) { logger.error("Could not register custom command", tag.name, error); }

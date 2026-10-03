@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import { withTimeout } from "../src/debug/promiseTimeout";
 import {
     guardedRestFailureResponse,
     type GuardedRestFailureResponse,
@@ -26,7 +27,13 @@ type RestResponse = GuardedRestFailureResponse | SuccessfulRestResponse;
 type QueueOperation = (callback: (response: RestResponse) => void) => void;
 
 async function runQueueOperation(operation: QueueOperation): Promise<RestResponse> {
-    return new Promise(resolve => operation(resolve));
+    let callbacks = 0;
+    const result = await withTimeout(new Promise<RestResponse>(resolve => operation(response => {
+        callbacks++;
+        resolve(response);
+    })), 5_000, "Fixture watchdog: REST callback did not settle");
+    assert.equal(callbacks, 1, "each REST operation must complete exactly once");
+    return result;
 }
 
 async function main(): Promise<void> {

@@ -3,22 +3,20 @@ import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { createSourceFile, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { createSourceFile, JsxEmit, ScriptTarget } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 function loadModule<T>(path: string, imports: Record<string, unknown>, globals: Record<string, unknown> = {}, extraSource = ""): T {
-    const source = readFileSync(new URL(`../${path}`, import.meta.url), "utf8") + extraSource;
     const exports = {};
-    runInNewContext(transpileModule(source, {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: 4 }
-    }).outputText, {
+    loadTestModule(new URL(`../${path}`, import.meta.url), imports, {
         exports, URL, URLSearchParams, AbortSignal, console,
         require(name: string) {
             assert.ok(Object.hasOwn(imports, name), `Unexpected import ${name} in ${path}`);
             return imports[name];
         },
         ...globals
-    });
+    }, extraSource, { compilerOptions: { jsx: JsxEmit.ReactJSX }, mockImports: false });
     return exports as T;
 }
 
@@ -256,14 +254,13 @@ interface TenorPlugin {
     tenorIntegrationSearch(integration: string, query: string): void;
 }
 
-function tenorFixture() {
+function tenorFixture(format = "tinywebm") {
     const actions: Array<{ type: string; items?: unknown[]; }> = [];
     const requests: Array<{ url: URL; response: ReturnType<typeof deferred<{ ok: boolean; json(): Promise<unknown>; }>>; }> = [];
     const plugin = loadModule<{ default: TenorPlugin; }>("src/plugins/tenorGifSearch/index.tsx", {
         "@utils/constants": constants,
-        "@utils/guards": { isNonNullish: (value: unknown) => value != null },
         "@utils/types": definePlugin,
-        "@webpack": { findStoreLazy: () => ({ getSelectedFormat: () => "tinywebm" }) },
+        "@webpack": { findStoreLazy: () => ({ getSelectedFormat: () => format }) },
         "@webpack/common": { LocaleStore: { locale: "en-US" }, FluxDispatcher: { dispatch: (action: typeof actions[number]) => actions.push(action) } }
     }, {
         fetch(url: string, options: { signal: AbortSignal; }) {
@@ -323,18 +320,25 @@ for (const outcome of ["success", "failure"] as const) {
 }
 
 test("Tenor successful searches retain their result mapping", async () => {
-    const fixture = tenorFixture();
-    await fixture.start();
-    fixture.plugin.handleSearchFetch("cats");
-    fixture.respond(1, { results: [{
-        id: "gif", title: "Cat", itemurl: "https://tenor.com/view/cat",
-        media: [{ gif: { url: "https://example.org/cat.gif" }, tinywebm: {
-            url: "https://example.org/cat.webm", dims: [100, 80], preview: "https://example.org/cat.png"
-        } }]
-    }] });
-    await flush();
-    assert.equal(fixture.actions[0].type, "GIF_PICKER_QUERY_SUCCESS");
-    assert.equal(fixture.actions[0].items?.length, 1);
+    for (const format of ["tinywebm", "tinywebp"]) {
+        const fixture = tenorFixture(format);
+        await fixture.start();
+        const item = {
+            id: "gif", title: "Cat", itemurl: "https://tenor.com/view/cat",
+            media: [{ gif: { url: "https://example.org/cat.gif" }, [format === "tinywebp" ? "webp" : format]: {
+                url: "https://example.org/cat.webm", dims: [100, 80], preview: "https://example.org/cat.png"
+            } }]
+        };
+        fixture.plugin.handleSearchFetch("cats");
+        fixture.respond(1, { results: [item] });
+        await flush();
+        assert.equal(fixture.actions[0].type, "GIF_PICKER_QUERY_SUCCESS");
+        assert.equal(fixture.actions[0].items?.length, 1);
+        fixture.plugin.handleSearchFetch("ordered");
+        fixture.respond(2, { results: [item, { ...item, id: "second" }, item] });
+        await flush();
+        assert.deepEqual(Array.from(fixture.actions[1].items ?? [], (value: any) => value.id), ["gif", "second"]);
+    }
 });
 
 test("Dearrow unmount aborts every component request and preserves the host lifecycle", async () => {

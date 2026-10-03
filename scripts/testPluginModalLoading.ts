@@ -29,6 +29,7 @@ function loadPluginModal() {
     });
     const lookups: string[][] = [];
     let currentUserReads = 0;
+    let authorRequests = 0;
     const effects: (() => void | (() => void))[] = [];
     const settingTimers = new Map<number, () => void>();
     let settingTimerId = 0;
@@ -122,7 +123,7 @@ function loadPluginModal() {
             },
             Toasts: { show() {}, genId: () => "toast", Type: { SUCCESS: "success" }, Position: { TOP: "top" } },
             UserStore: { getCurrentUser: () => { currentUserReads++; return currentUser; } },
-            UserUtils: { getUser: () => { throw new Error("Author requests must wait for the effect"); } },
+            UserUtils: { getUser: () => { authorRequests++; throw new Error("Author requests must wait for the effect"); } },
         },
         "~plugins": {
             PluginMeta: { Example: { folderName: "src/plugins/example", userPlugin: false } },
@@ -159,7 +160,7 @@ function loadPluginModal() {
     const flushSettingTimers = () => { const work = [...settingTimers.values()]; settingTimers.clear(); for (const callback of work) callback(); };
     return {
         module, render, plugin, settings, onClose, UserRecord, lookups, effects, timers, dispatched, subscriptions, toggles, toggle, requiredBy,
-        contributorOpens, restartKeys, modalOpeners, optionType, settingTimers, flushSettingTimers, currentUserReads: () => currentUserReads, timersRun: () => timersRun,
+        contributorOpens, restartKeys, modalOpeners, optionType, settingTimers, flushSettingTimers, currentUserReads: () => currentUserReads, timersRun: () => timersRun, authorRequests: () => authorRequests,
     };
 }
 
@@ -174,7 +175,9 @@ test("plugin modal lookups wait for rendering and first-tick avatar classes are 
     assert.equal(fixture.lookups.length, 0);
     assert.equal(fixture.currentUserReads(), 0);
     assert.equal(fixture.effects.length, 0);
+    assert.equal(fixture.authorRequests(), 0);
     const modal = fixture.render();
+    assert.equal(fixture.authorRequests(), 0, "author requests wait for effects, even if synchronous failures are caught");
     assert.deepEqual(fixture.lookups, [["moreUsers", "avatar", "clickableAvatar"]]);
     assert.equal(modal.props.onClose, fixture.onClose);
     assert.equal(modal.props.transitionState, "opening");
@@ -190,6 +193,7 @@ test("plugin modal lookups wait for rendering and first-tick avatar classes are 
     const more = summary.props.renderMoreUsers("");
     assert.equal(more.props.children[0]({}).props.className, "more-users");
     fixture.render();
+    assert.equal(fixture.authorRequests(), 0, "repeat renders must not request authors before effects");
     assert.equal(fixture.lookups.length, 1, "repeat renders reuse the CSS lookup");
     assert.equal(fixture.timersRun(), 0, "all assertions run before any lazy-helper timer");
 });

@@ -203,37 +203,23 @@ export function removeChannelToolbarButton(id: string) {
     channelToolbarListeners.forEach(listener => listener());
 }
 
-function HeaderBarButtons() {
+function RegisteredButtons({ buttons, listeners, location }: {
+    buttons: Map<string, ButtonEntry>;
+    listeners: Set<() => void>;
+    location: string;
+}) {
     const [, forceUpdate] = useState(0);
 
     useEffect(() => {
         const listener = () => forceUpdate(n => n + 1);
-        headerBarListeners.add(listener);
-        return () => { headerBarListeners.delete(listener); };
-    }, []);
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
+    }, [listeners]);
 
-    return Array.from(headerBarButtons)
+    return Array.from(buttons)
         .sort(([, a], [, b]) => a.priority - b.priority)
         .map(([id, { render: Button }]) => (
-            <ErrorBoundary noop key={id} onError={e => logger.error(`Failed to render header bar button: ${id}`, e.error)}>
-                <Button />
-            </ErrorBoundary>
-        ));
-}
-
-function ChannelToolbarButtons() {
-    const [, forceUpdate] = useState(0);
-
-    useEffect(() => {
-        const listener = () => forceUpdate(n => n + 1);
-        channelToolbarListeners.add(listener);
-        return () => { channelToolbarListeners.delete(listener); };
-    }, []);
-
-    return Array.from(channelToolbarButtons)
-        .sort(([, a], [, b]) => a.priority - b.priority)
-        .map(([id, { render: Button }]) => (
-            <ErrorBoundary noop key={id} onError={e => logger.error(`Failed to render channel toolbar button: ${id}`, e.error)}>
+            <ErrorBoundary noop key={id} onError={e => logger.error(`Failed to render ${location} button: ${id}`, e.error)}>
                 <Button />
             </ErrorBoundary>
         ));
@@ -241,10 +227,10 @@ function ChannelToolbarButtons() {
 
 /** @internal Injected by HeaderBarAPI patch (do NOT call directly) */
 export function _addHeaderBarButtons() {
-    return [<HeaderBarButtons key="vc-header-bar-buttons" />];
+    return [<RegisteredButtons key="vc-header-bar-buttons" buttons={headerBarButtons} listeners={headerBarListeners} location="header bar" />];
 }
 
 /** @internal Injected by HeaderBarAPI patch (do NOT call directly) */
 export function _addChannelToolbarButtons(toolbar: ReactNode[]) {
-    toolbar.push(<ChannelToolbarButtons key="vc-channel-toolbar-buttons" />);
+    toolbar.push(<RegisteredButtons key="vc-channel-toolbar-buttons" buttons={channelToolbarButtons} listeners={channelToolbarListeners} location="channel toolbar" />);
 }

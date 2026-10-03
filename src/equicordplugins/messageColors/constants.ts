@@ -77,15 +77,13 @@ export const enum ColorType {
 
 // It's sooo hard to read regex without this, it makes it at least somewhat bearable
 export const replaceRegexp = (reg: string) => {
-    const n = new RegExp(reg
+    return new RegExp(reg
         // \c - 'comma'
         // \v - 'value'
         // \f - 'float'
         .replaceAll("\\f", "[+-]?([0-9]*[.])?[0-9]+")
         .replaceAll("\\c", "(?:,|\\s)")
         .replaceAll("\\v", "\\s*?\\d+?\\s*?"), "g");
-
-    return n;
 };
 
 export const regex = [

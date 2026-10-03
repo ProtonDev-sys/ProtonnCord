@@ -187,6 +187,7 @@ assert.match(reviewSource, /cancelId: 0/u, "Escape and window-close actions must
 
 const updateStart = nativeSource.indexOf("export async function updatePlugin");
 const updateEnd = nativeSource.indexOf("export async function openGitPathModal");
+assert.ok(updateStart >= 0 && updateEnd > updateStart, "the production update implementation must exist");
 const updateSource = nativeSource.slice(updateStart, updateEnd);
 const approvalIndex = updateSource.indexOf("if (!await reviewPluginUpdate");
 const currentRevisionIndex = updateSource.indexOf("isUpdateReviewPlanCurrent");

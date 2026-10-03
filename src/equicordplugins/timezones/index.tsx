@@ -238,8 +238,7 @@ const TimestampComponent = ErrorBoundary.wrap(({ userId, timestamp, type }: Prop
         } else {
             const timezoneInfo = getTimezoneAbbreviation(timezone, currentTime);
             const tz = timezoneInfo || timezone;
-            const hideLocalTime = isLocal && type === "message";
-            displayTime = hideLocalTime ? tz : `${shortTime} ${tz}`;
+            displayTime = `${shortTime} ${tz}`;
         }
     }
 

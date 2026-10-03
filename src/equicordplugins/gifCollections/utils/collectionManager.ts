@@ -63,7 +63,7 @@ export const refreshCacheCollection = async (): Promise<void> => {
 
 export async function createCollection(name: string, gifs: Gif[]): Promise<void> {
     return queueCollectionMutation(async () => {
-        const collections = cache_collections.map(collection => ({ ...collection, gifs: [...collection.gifs] }));
+        const collections = [...cache_collections];
         const fullName = `${settings.store.collectionPrefix}${name}`;
 
         if (collections.some(c => c.name === fullName)) {
@@ -87,7 +87,7 @@ export async function createCollection(name: string, gifs: Gif[]): Promise<void>
 
 export async function addToCollection(name: string, gif: Gif): Promise<void> {
     return queueCollectionMutation(async () => {
-        const collections = cache_collections.map(collection => ({ ...collection, gifs: [...collection.gifs] }));
+        const collections = cache_collections.map(collection => ({ ...collection }));
         const collection = collections.find(c => c.name === name);
         if (!collection) return void logger.warn("Collection not found");
 
@@ -107,7 +107,7 @@ export async function addToCollection(name: string, gif: Gif): Promise<void> {
 
 export async function renameCollection(oldName: string, newName: string): Promise<void> {
     return queueCollectionMutation(async () => {
-        const collections = cache_collections.map(collection => ({ ...collection, gifs: [...collection.gifs] }));
+        const collections = cache_collections.map(collection => ({ ...collection }));
         const collection = collections.find(c => c.name === oldName);
         if (!collection) throw new Error("Collection not found");
         if (collections.some(other => other !== collection && other.name === `${settings.store.collectionPrefix}${newName}`))
@@ -122,7 +122,7 @@ export async function renameCollection(oldName: string, newName: string): Promis
 
 export async function removeFromCollection(id: string): Promise<void> {
     return queueCollectionMutation(async () => {
-        const collections = cache_collections.map(collection => ({ ...collection, gifs: [...collection.gifs] }));
+        const collections = cache_collections.map(collection => ({ ...collection }));
         const collection = collections.find(c => c.gifs.some(g => g.id === id));
         if (!collection) return void logger.warn("Collection not found");
 
@@ -148,7 +148,7 @@ export async function resetCollections(): Promise<void> {
 
 export async function moveGifToCollection(gifId: string, fromName: string, toName: string): Promise<void> {
     return queueCollectionMutation(async () => {
-        const collections = cache_collections.map(collection => ({ ...collection, gifs: [...collection.gifs] }));
+        const collections = cache_collections.map(collection => ({ ...collection }));
         const from = collections.find(c => c.name === fromName);
         const to = collections.find(c => c.name === toName);
         if (!from || !to) throw new Error("Collection not found");

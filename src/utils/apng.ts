@@ -139,10 +139,10 @@ export function parseAPNG(buffer: ArrayBuffer): Promise<Animation> {
                     if (frame) frame.dataParts!.push(bytes.subarray(off + 8, off + 8 + length));
                     break;
                 case "IEND":
-                    postDataParts.push(subBuffer(bytes, off, 12 + length));
+                    postDataParts.push(bytes.subarray(off, off + 12 + length));
                     break;
                 default:
-                    preDataParts.push(subBuffer(bytes, off, 12 + length));
+                    preDataParts.push(bytes.subarray(off, off + 12 + length));
             }
         });
 
@@ -173,11 +173,6 @@ export function parseAPNG(buffer: ArrayBuffer): Promise<Animation> {
             const url = URL.createObjectURL(new Blob(bb, { "type": "image/png" }));
             delete frame.dataParts;
 
-            /**
-             * Using "createElement" instead of "new Image" because of bug in Chrome 27
-             * https://code.google.com/p/chromium/issues/detail?id=238071
-             * http://stackoverflow.com/questions/16377375/using-canvas-drawimage-in-chrome-extension-content-script/16378270
-             */
             const img = frame.img = new Image();
             img.onload = function () {
                 URL.revokeObjectURL(url);
@@ -236,15 +231,8 @@ function readByte(bytes: U8Arr, off: number): number {
     return bytes[off];
 }
 
-function subBuffer(bytes: U8Arr, start: number, length: number): U8Arr {
-    const a = new Uint8Array(length);
-    a.set(bytes.subarray(start, start + length));
-    return a;
-}
-
 function readString(bytes: U8Arr, off: number, length: number): string {
-    const chars = Array.prototype.slice.call(bytes.subarray(off, off + length));
-    return String.fromCharCode.apply(String, chars);
+    return String.fromCharCode(...bytes.subarray(off, off + length));
 }
 
 function makeDWordArray(x: number): number[] {

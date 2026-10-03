@@ -13,7 +13,7 @@ import { JSX } from "react";
 import { ActivityTooltip } from "../components/ActivityTooltip";
 import { TwitchIcon } from "../components/TwitchIcon";
 import { settings } from "../settings";
-import { ActivityListIcon, ActivityListProps, ApplicationIcon, IconCSSProperties } from "../types";
+import { ActivityListIcon, ActivityListProps, IconCSSProperties } from "../types";
 import { cl, getApplicationIcons } from "../utils";
 
 // Discord no longer shows an icon here by default but we use the one from the popout now here
@@ -27,15 +27,11 @@ export function patchActivityList({ activities: rawActivities, user, hideTooltip
     const activities = rawActivities?.filter((a): a is Activity => a != null) ?? [];
     const applicationIcons = getApplicationIcons(activities);
     if (applicationIcons.length) {
-        const compareImageSource = (a: ApplicationIcon, b: ApplicationIcon) => {
-            return a.image?.src === b.image?.src;
-        };
-
-        const uniqueIcons = applicationIcons.filter((element, index, array) => {
-            return array.findIndex(el => compareImageSource(el, element)) === index;
-        });
-
-        for (const appIcon of uniqueIcons) {
+        const sources = new Set<string | undefined>();
+        for (const appIcon of applicationIcons) {
+            const source = appIcon.image?.src;
+            if (sources.has(source)) continue;
+            sources.add(source);
             icons.push({
                 iconElement: <img {...appIcon.image} />,
                 tooltip: <ActivityTooltip activity={appIcon.activity} application={appIcon.application} user={user} />

@@ -317,10 +317,13 @@ test("markdown headers retain every cell and stopped rules cannot match", () => 
 
 test("message color matcher does not consume prefixes of longer hex codes", () => {
     const settings = { store: { enableShortHexCodes: true } };
+    const { replaceRegexp } = load<{ replaceRegexp(source: string): RegExp; }>("../../messageColors/constants.ts", {
+        "@api/Settings": { definePluginSettings: () => ({}) }, "@utils/types": { OptionType: {} }
+    });
     const colors = load<{ default: { start(): void; getColor(order: number): { match(content: string): RegExpExecArray | null; }; }; }>("../../messageColors/index.tsx", {
         "./styles.css": {}, "@components/ErrorBoundary": { wrap: () => undefined }, "@utils/constants": { EquicordDevs: {} },
         "@utils/types": { __esModule: true, default: (value: unknown) => value, StartAt: {} }, "@webpack/common": {},
-        "./constants": { ColorType: { HEX: "hex" }, regex: [], settings }
+        "./constants": { ColorType: { HEX: "hex" }, regex: [], settings, replaceRegexp }
     });
     colors.default.start();
     const rule = colors.default.getColor(1);

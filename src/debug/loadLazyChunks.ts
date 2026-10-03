@@ -51,8 +51,7 @@ export async function loadLazyChunks() {
 
         const { promise: chunksSearchingDone, resolve: chunksSearchingResolve } = Promise.withResolvers<void>();
 
-        // True if resolved, false otherwise
-        const chunksSearchPromises = [] as Array<() => boolean>;
+        let pendingChunkSearches = 0;
 
         // Only match direct bound entry points; broader matching also loads every language pack and slows webpack finds testing.
         const PartialLazyChunkRegex = canonicalizeMatch(/(?:(?:Promise\.all\(\[)?((?:\i\.e\("?[^)]+?"?\),?)+?)(?:\]\))?)\.then\(\i\.bind\(\i,"?([^)]+?)"?\)\)/g);
@@ -131,37 +130,23 @@ export async function loadLazyChunks() {
         }
 
         function factoryListener(factory: AnyModuleFactory | ModuleFactory) {
-            let isResolved = false;
+            pendingChunkSearches++;
             searchAndLoadLazyChunks(String(factory))
                 .catch(() => {})
                 .finally(() => {
-                    isResolved = true;
-                    setTimeout(() => {
-                        let allResolved = true;
-
-                        for (let i = 0; i < chunksSearchPromises.length; i++) {
-                            const isResolved = chunksSearchPromises[i]();
-
-                            if (isResolved) {
-                                // Remove finished promises to avoid having to iterate through a huge array everytime
-                                chunksSearchPromises.splice(i--, 1);
-                            } else {
-                                allResolved = false;
-                            }
-                        }
-
-                        if (allResolved) chunksSearchingResolve();
-                    }, 0);
+                    if (--pendingChunkSearches === 0) {
+                        setTimeout(() => {
+                            if (pendingChunkSearches === 0) chunksSearchingResolve();
+                        }, 0);
+                    }
                 });
-
-            chunksSearchPromises.push(() => isResolved);
         }
 
         Webpack.factoryListeners.add(factoryListener);
         for (const moduleId in wreq.m) {
             factoryListener(wreq.m[moduleId]);
         }
-        if (chunksSearchPromises.length === 0) chunksSearchingResolve();
+        if (pendingChunkSearches === 0) chunksSearchingResolve();
 
         try {
             await withTimeout(

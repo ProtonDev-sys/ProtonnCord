@@ -63,14 +63,15 @@ function fixture() {
     return {
         metrics, instances,
         render(target: Target | null, intersectOnly = false) {
-            const [ref] = exports.useIntersection(intersectOnly);
+            let [ref, visible] = exports.useIntersection(intersectOnly);
             if (previousRef !== ref || previousTarget !== target) {
                 previousRef?.(null);
                 if (target) ref(target);
+                [, visible] = exports.useIntersection(intersectOnly);
             }
             previousRef = ref;
             previousTarget = target;
-            return isIntersecting;
+            return visible;
         },
         unmount() { previousRef?.(null); }
     };

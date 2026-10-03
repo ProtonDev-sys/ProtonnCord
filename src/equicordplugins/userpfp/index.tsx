@@ -84,13 +84,7 @@ const settings = definePluginSettings({
         type: OptionType.STRING,
         default: "https://userpfp.github.io/UserPFP/source/data.json",
         hidden: !IS_DEV,
-        isValid: (value => {
-            if (!value) {
-                value = "https://userpfp.github.io/UserPFP/source/data.json";
-                return false;
-            }
-            return true;
-        })
+        isValid: value => !!value
     },
 });
 

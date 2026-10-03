@@ -154,14 +154,7 @@ export class SettingsStore<T extends object> implements SettingsStoreOptions {
         const paths = typeof pathToNotify === "string" ? [pathToNotify] : pathToNotify ?? [];
         for (const path of new Set(paths)) {
             if (!path) continue;
-            let current: unknown = value;
-            for (const key of path.split(".")) {
-                if (current === null || typeof current !== "object") {
-                    current = undefined;
-                    break;
-                }
-                current = current[key];
-            }
+            const current = atPath(value, path.split("."));
             dispatchListeners(this.pathListeners.get(path), current, path);
             this.notifyPrefixes(path, current);
         }

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { parseLinePackHtml } from "./lineStickers";
 import { LineEmoji, LineEmojiPack, Sticker, StickerPack } from "./types";
 import { corsFetch } from "./utils";
 
@@ -96,30 +97,7 @@ export function convert(sp: LineEmojiPack): StickerPack {
   * @return {Promise<LineEmojiPack>} The sticker pack.
   */
 export function parseHtml(html: string): LineEmojiPack {
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const mainImage = JSON.parse((doc.querySelector("[ref=mainImage]") as HTMLElement)?.dataset?.preview ?? "null") as LineEmoji;
-    if (!mainImage || typeof mainImage.id !== "string") throw new Error("Could not find sticker pack metadata");
-    const { id } = mainImage;
-    mainImage.stickerPackId = id;
-
-    const stickers =
-        [...doc.querySelectorAll(".FnStickerPreviewItem")]
-            .map(x => JSON.parse((x as HTMLElement).dataset.preview ?? "null"))
-            .filter(x => x !== null)
-            .map(x => ({ ...x, stickerPackId: id })) as LineEmoji[];
-
-    const stickerPack = {
-        title: doc.querySelector("[data-test=emoji-name-title]")?.textContent ?? "null",
-        author: {
-            name: doc.querySelector("[data-test=emoji-author]")?.textContent ?? "null",
-            url: "https://store.line.me/" + (doc.querySelector("[data-test=emoji-author]")?.getAttribute("href") ?? "null")
-        },
-        id,
-        mainImage,
-        stickers
-    } as LineEmojiPack;
-
-    return stickerPack;
+    return parseLinePackHtml(html, ".FnStickerPreviewItem", "emoji");
 }
 
 export function isLineEmojiPackHtml(html: string): boolean {

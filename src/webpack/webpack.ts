@@ -71,7 +71,7 @@ export const filters = {
             return stringMatches(Function.prototype.toString.call(m), parsedCode);
         };
 
-        filter.$$vencordProps = [...code];
+        filter.$$vencordProps = code;
         return filter;
     },
     byStoreName: (name: StoreNameFilter): FilterFn => m =>
@@ -93,7 +93,7 @@ export const filters = {
             return false;
         };
 
-        filter.$$vencordProps = [...code];
+        filter.$$vencordProps = code;
         return filter;
     },
 
@@ -288,9 +288,6 @@ export function findAll(filter: FilterFn, { topLevelOnly = false }: { topLevelOn
  */
 export const findBulk = traceFunction("findBulk", function findBulk(...filterFns: FilterFn[]) {
     if (IS_ANTI_CRASH_TEST) return [];
-
-    if (!Array.isArray(filterFns))
-        throw new Error("Invalid filters. Expected function[] got " + typeof filterFns);
 
     const { length } = filterFns;
 
