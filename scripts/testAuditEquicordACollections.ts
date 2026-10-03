@@ -5,19 +5,18 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { isCollectionList } from "../src/equicordplugins/gifCollections/types";
 import { getUrlExtension } from "../src/equicordplugins/gifCollections/utils/getUrlExtension";
 
+import { loadTestModule } from "./utils/loadTestModule";
+
 function loadUtility(file: string, mocks: Record<string, any>) {
-    const source = readFileSync(`src/equicordplugins/gifCollections/utils/${file}.ts`, "utf8");
-    const output = transpileModule(source, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, esModuleInterop: false } }).outputText;
     const exports: any = {};
-    runInNewContext(output, { exports, require: (id: string) => mocks[id] ?? {} });
+    loadTestModule(`src/equicordplugins/gifCollections/utils/${file}.ts`, mocks, {
+        exports, require: (id: string) => mocks[id] ?? {}
+    }, "", { compilerOptions: { jsx: undefined, esModuleInterop: false }, mockImports: false });
     return exports;
 }
 

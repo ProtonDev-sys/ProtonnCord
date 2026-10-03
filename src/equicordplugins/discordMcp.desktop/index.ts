@@ -46,12 +46,6 @@ import {
     requireSnowflake,
 } from "./policy";
 
-interface BridgeRequest {
-    id: string;
-    tool: DiscordMcpToolName;
-    arguments?: unknown;
-}
-
 interface ToolArguments {
     folder_id?: unknown;
     guild_ids?: unknown;

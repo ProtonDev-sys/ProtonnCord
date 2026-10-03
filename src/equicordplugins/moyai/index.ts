@@ -163,22 +163,22 @@ export default definePlugin({
     }
 });
 
-function countOccurrences(sourceString: string, subString: string) {
+function countOccurrences(sourceString: string, subString: string, limit: number) {
     let i = 0;
     let lastIdx = 0;
-    while ((lastIdx = sourceString.indexOf(subString, lastIdx) + 1) !== 0)
+    while (i < limit && (lastIdx = sourceString.indexOf(subString, lastIdx) + 1) !== 0)
         i++;
 
     return i;
 }
 
-function countMatches(sourceString: string, pattern: RegExp) {
+function countMatches(sourceString: string, pattern: RegExp, limit: number) {
     if (!pattern.global)
         throw new Error("pattern must be global");
 
     pattern.lastIndex = 0;
     let i = 0;
-    while (pattern.test(sourceString))
+    while (i < limit && pattern.test(sourceString))
         i++;
     pattern.lastIndex = 0;
 
@@ -186,10 +186,8 @@ function countMatches(sourceString: string, pattern: RegExp) {
 }
 
 function getMoyaiCount(message: string) {
-    const count = countOccurrences(message, MOYAI)
-        + countMatches(message, customMoyaiRe);
-
-    return Math.min(count, 10);
+    const count = countOccurrences(message, MOYAI, 10);
+    return count + countMatches(message, customMoyaiRe, 10 - count);
 }
 
 function boom() {

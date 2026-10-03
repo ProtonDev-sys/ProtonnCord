@@ -43,11 +43,9 @@ for (const method of [
     "construct",
     "defineProperty",
     "deleteProperty",
-    "getOwnPropertyDescriptor",
     "getPrototypeOf",
     "has",
     "isExtensible",
-    "ownKeys",
     "preventExtensions",
     "set",
     "setPrototypeOf"

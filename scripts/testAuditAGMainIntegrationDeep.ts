@@ -1,21 +1,17 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 function load(path: string, mocks: Record<string, unknown>) {
-    const code = transpileModule(readFileSync(path, "utf8"), {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    return runInNewContext(`${code}\nexports;`, {
-        exports: {}, structuredClone, console, require(name: string) {
+    return loadTestModule(path, {}, {
+        structuredClone, console, require(name: string) {
             assert.ok(name in mocks, `Unexpected import ${name}`);
             return mocks[name];
         }
-    });
+    }, "", { mockImports: false });
 }
 
 function bookmarkHarness(initial: Record<string, any>, failLoad = false) {

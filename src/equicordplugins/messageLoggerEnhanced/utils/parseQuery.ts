@@ -43,7 +43,7 @@ export const parseQuery = memoize((query: string = ""): QueryResult | string => 
         trimmedQuery = trimmedQuery.substring(trimmedQuery.length, 1);
     }
 
-    const [filter, rest] = trimmedQuery.split(" ", 2);
+    const [filter] = trimmedQuery.split(" ", 1);
     if (!filter) {
         return query;
     }
@@ -61,7 +61,7 @@ export const parseQuery = memoize((query: string = ""): QueryResult | string => 
 });
 
 export const tokenizeQuery = (query: string) => {
-    const parts = query.split(" ").map(parseQuery);
+    const parts = query.split(" ").map(part => parseQuery(part));
     const queries = parts.filter(p => typeof p !== "string") as QueryResult[];
     const rest = parts.filter(p => typeof p === "string") as string[];
 

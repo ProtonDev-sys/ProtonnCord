@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { access } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -387,6 +388,9 @@ async function main() {
         assert.equal(audioBlock.mimeType, "audio/mp4", "mislabelled Discord MP4 voice media receives an audio MIME type");
         assert.ok(audioBlock.data.length > downloaded.download.size, "the MCP audio block contains base64 media bytes");
         await access(downloaded.download.path);
+        const savedBytes = await readFile(downloaded.download.path);
+        assert.equal(savedBytes.byteLength, downloaded.download.size);
+        assert.equal(createHash("sha256").update(savedBytes).digest("hex"), downloaded.download.sha256);
 
         if (otherDm) {
             const otherMessages = await callTool("discord_read_messages", { channel_id: otherDm.id, limit: 1 });

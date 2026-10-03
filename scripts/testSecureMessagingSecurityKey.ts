@@ -53,19 +53,24 @@ const electronStub: Plugin = {
 async function loadModule(): Promise<{ directory: string; module: SecurityKeyVaultModule; }> {
     const directory = await mkdtemp(join(tmpdir(), "pc-security-key-vault-"));
     const output = join(directory, "security-key-vault.mjs");
-    await build({
-        bundle: true,
-        entryPoints: [fileURLToPath(new URL(
-            "../src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts",
-            import.meta.url,
-        ))],
-        format: "esm",
-        outfile: output,
-        platform: "node",
-        plugins: [electronStub],
-        target: "node24",
-    });
-    return { directory, module: await import(pathToFileURL(output).href) as SecurityKeyVaultModule };
+    try {
+        await build({
+            bundle: true,
+            entryPoints: [fileURLToPath(new URL(
+                "../src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts",
+                import.meta.url,
+            ))],
+            format: "esm",
+            outfile: output,
+            platform: "node",
+            plugins: [electronStub],
+            target: "node24",
+        });
+        return { directory, module: await import(pathToFileURL(output).href) as SecurityKeyVaultModule };
+    } catch (error) {
+        await rm(directory, { force: true, recursive: true }).catch(() => undefined);
+        throw error;
+    }
 }
 
 function profile(
@@ -511,6 +516,7 @@ async function main(): Promise<void> {
         assert.throws(() => module.createActiveOneKeyMobilePairing(localUserId, plaintextVault), /locked/u);
         key.fill(0);
     } finally {
+        module.clearSecurityKeyVaultSession();
         await rm(directory, { force: true, recursive: true });
     }
 
@@ -614,9 +620,13 @@ async function main(): Promise<void> {
         "the native result must report identity replacement and its disabled-conversation count");
     const lockFunctionStart = native.indexOf("export async function lockSecurityKeyVault");
     const lockFunctionEnd = native.indexOf("export async function removeSecurityKeyVault", lockFunctionStart);
+    assert.ok(lockFunctionStart >= 0 && lockFunctionEnd > lockFunctionStart, "the lock function boundaries must exist");
     const lockFunction = native.slice(lockFunctionStart, lockFunctionEnd);
+    const clearIndex = lockFunction.indexOf("clearSecurityKeyVaultSession();");
+    const serializedIndex = lockFunction.indexOf("return runSerialized");
+    assert.ok(clearIndex >= 0 && serializedIndex >= 0, "the key clearing and serialization markers must exist");
     assert.ok(
-        lockFunction.indexOf("clearSecurityKeyVaultSession();") < lockFunction.indexOf("return runSerialized"),
+        clearIndex < serializedIndex,
         "locking must clear the in-memory E2E key before fallible storage or mutex work",
     );
 

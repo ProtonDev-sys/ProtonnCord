@@ -13,6 +13,12 @@ import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { proxyLazy, SYM_LAZY_GET } from "../src/utils/lazy";
 
+function zustandCreate<T>(initializer: (set: (next: Partial<T>) => void, get: () => T) => T) {
+    let state: T;
+    state = initializer(next => { state = { ...state, ...next }; }, () => state);
+    return { getState: () => state };
+}
+
 function loadComponent(path: string, hooks: Record<string, unknown> = {}, additionalMocks: Record<string, object> = {}, globals: Record<string, unknown> = {}) {
     const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
     const mocks: Record<string, object> = {
@@ -39,17 +45,29 @@ function loadComponent(path: string, hooks: Record<string, unknown> = {}, additi
     });
 }
 
+test("intl hashing preserves zero, negative and byte-boundary digests", () => {
+    let digest = 0n;
+    const { runtimeHashMessageKey } = loadComponent("src/utils/intlHash.ts", {}, { "@intrnl/xxhash64": { hash: () => digest } });
+    for (const [value, expected] of [[0n, "AAAAAA"], [-1n, "AAAAAA"], [1n, "AQAAAA"], [255n, "/wAAAA"], [256n, "AAEAAA"]] as const) {
+        digest = value;
+        assert.equal(runtimeHashMessageKey("fixture"), expected);
+    }
+});
+
+test("verbose durations retain zero gaps, week remainders and short units", () => {
+    const { formatDurationVerbose } = loadComponent("src/utils/text.ts", { moment }, { "./guards": { isTruthy: Boolean } });
+    for (const [seconds, expected] of [[0, "0 seconds"], [1, "1 second"], [60, "1 minute"], [3601, "1 hour, 0 minutes and 1 second"], [604800, "1 week"], [691201, "1 week, 1 day, 0 hours, 0 minutes and 1 second"]] as const)
+        assert.equal(formatDurationVerbose(seconds, "seconds"), expected);
+    assert.equal(formatDurationVerbose(3601, "seconds", true), "1 h, 0 m and 1 s");
+});
+
 function decorFixture() {
     const scheduled = new Map<() => Promise<void>, number>();
     const requests: { ids: string[]; signal?: AbortSignal; resolve: (result: Record<string, string | null>) => void; reject: (error: Error) => void; }[] = [];
     const errors: unknown[] = [];
     const clock = { now: 1_000 };
     const module = loadComponent("src/plugins/decor/lib/stores/UsersDecorationsStore.ts", {
-        zustandCreate<T>(initializer: (set: (next: Partial<T>) => void, get: () => T) => T) {
-            let state: T;
-            state = initializer(next => { state = { ...state, ...next }; }, () => state);
-            return { getState: () => state };
-        }
+        zustandCreate
     }, {
         "@plugins/decor/lib/api": { getUsersDecorations: (ids: string[], signal?: AbortSignal) => new Promise<Record<string, string | null>>((resolve, reject) => requests.push({ ids, signal, resolve, reject })) },
         "@plugins/decor/lib/constants": { DECORATION_FETCH_COOLDOWN: 10_000, SKU_ID: "decor" },
@@ -264,11 +282,7 @@ function decorAuthorizationFixture() {
     const closed: string[] = [];
     const store = loadComponent("src/plugins/decor/lib/stores/AuthorizationStore.tsx", {
         UserStore: { getCurrentUser: () => account.id ? { id: account.id } : undefined },
-        zustandCreate<T>(initializer: (set: (next: Partial<T>) => void, get: () => T) => T) {
-            let state: T;
-            state = initializer(next => { state = { ...state, ...next }; }, () => state);
-            return { getState: () => state };
-        },
+        zustandCreate,
         OAuth2AuthorizeModal: "oauth",
         openModal(render: (props: object) => { props: typeof modals[number]["props"]; }, options: { onCloseCallback(): void; }) {
             modals.push({ props: render({}).props, close: options.onCloseCallback });
@@ -547,11 +561,7 @@ async function decorPrivateFixture() {
     const publicStore = decorFixture().store;
     publicStore.getState().start();
     const store = loadComponent("src/plugins/decor/lib/stores/CurrentUserDecorationsStore.ts", {
-        zustandCreate<T>(initializer: (set: (next: Partial<T>) => void, get: () => T) => T) {
-            let state: T;
-            state = initializer(next => { state = { ...state, ...next }; }, () => state);
-            return { getState: () => state };
-        }
+        zustandCreate
     }, {
         "@plugins/decor/lib/api": api,
         "@plugins/decor/lib/utils/decoration": utils,

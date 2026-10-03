@@ -53,25 +53,9 @@ const surfaceInstances = new Map<SurfaceId, WeakRef<SurfaceInstance>>();
 const failedPropsProviders = new WeakSet<SurfacePropsProvider>();
 const logger = new Logger("SurfaceClasses");
 
-function getPropsProviderSet(surfaceId: SurfaceId) {
-    let set = propsProviders.get(surfaceId);
-
-    if (set == null) {
-        set = new Set();
-        propsProviders.set(surfaceId, set);
-    }
-
-    return set;
-}
-
-function getListenerSet(surfaceId: SurfaceId) {
-    let set = listeners.get(surfaceId);
-
-    if (set == null) {
-        set = new Set();
-        listeners.set(surfaceId, set);
-    }
-
+function getOrCreateSet<T>(registry: Map<SurfaceId, Set<T>>, surfaceId: SurfaceId) {
+    let set = registry.get(surfaceId);
+    if (!set) registry.set(surfaceId, set = new Set());
     return set;
 }
 
@@ -190,7 +174,7 @@ function notifyOneSurface(surfaceId: SurfaceId) {
 }
 
 export function addSurfacePropsProvider(surfaceId: SurfaceId, provider: SurfacePropsProvider) {
-    getPropsProviderSet(surfaceId).add(provider);
+    getOrCreateSet(propsProviders, surfaceId).add(provider);
     notifyOneSurface(surfaceId);
 
     return () => {
@@ -215,7 +199,7 @@ export function _useSurfaceProps(surfaceId: SurfaceId) {
     useEffect(() => {
         const listener = () => forceUpdate();
 
-        getListenerSet(surfaceId).add(listener);
+        getOrCreateSet(listeners, surfaceId).add(listener);
         return () => { listeners.get(surfaceId)?.delete(listener); };
     }, [surfaceId]);
 

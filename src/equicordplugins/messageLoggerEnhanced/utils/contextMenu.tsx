@@ -174,18 +174,12 @@ export const contextMenuPath: NavContextMenuPatchCallback = (children, props) =>
     }
 };
 
+const contextMenuIds = ["message", "channel-context", "user-context", "guild-context", "gdm-context"];
+
 export const setupContextMenuPatches = () => {
-    addContextMenuPatch("message", contextMenuPath);
-    addContextMenuPatch("channel-context", contextMenuPath);
-    addContextMenuPatch("user-context", contextMenuPath);
-    addContextMenuPatch("guild-context", contextMenuPath);
-    addContextMenuPatch("gdm-context", contextMenuPath);
+    addContextMenuPatch(contextMenuIds, contextMenuPath);
 };
 
 export const removeContextMenuBindings = () => {
-    removeContextMenuPatch("message", contextMenuPath);
-    removeContextMenuPatch("channel-context", contextMenuPath);
-    removeContextMenuPatch("user-context", contextMenuPath);
-    removeContextMenuPatch("guild-context", contextMenuPath);
-    removeContextMenuPatch("gdm-context", contextMenuPath);
+    removeContextMenuPatch(contextMenuIds, contextMenuPath);
 };

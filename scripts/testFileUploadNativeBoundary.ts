@@ -6,8 +6,11 @@
 
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
+import dns from "node:dns/promises";
 import { mkdtemp, rm } from "node:fs/promises";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import http, { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import https from "node:https";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -225,22 +228,33 @@ async function testEventBoundary(native: NativeModule): Promise<void> {
 
 async function testFetchBoundary(native: NativeModule, origin: string, requests: RecordedRequest[]): Promise<void> {
     const before = requests.length;
-    for (const url of [
-        `${origin}/secret`,
-        "https://127.0.0.1/secret",
-        "https://[::1]/secret",
-        "https://169.254.169.254/latest/meta-data",
-        "https://example.com/public-image.png",
-        "https://httpbin.org/image/png",
-        "https://cdn.discordapp.com/api/v10/users/@me.png",
-        "file:///C:/Windows/System32/drivers/etc/hosts",
-        "data:text/plain,secret"
-    ]) {
-        const result = await native.fetchFile(discordEvent("https://discord.com/channels/@me/1"), url);
-        assert.equal(result.success, false, `${url} must not be readable through the main process`);
-        assert.equal(result.data, undefined);
+    const boundaries = [[dns, "resolve4"], [dns, "resolve6"], [dns, "lookup"], [http, "request"], [http, "get"], [https, "request"], [https, "get"], [globalThis, "fetch"]] as const;
+    const originals = boundaries.map(([module, name]) => Reflect.get(module, name));
+    let dispatches = 0;
+    for (const [module, name] of boundaries) Reflect.set(module, name, () => { dispatches++; throw new Error("Fixture network dispatch denied"); });
+    syncBuiltinESMExports();
+    try {
+        for (const url of [
+            `${origin}/secret`,
+            "https://127.0.0.1/secret",
+            "https://[::1]/secret",
+            "https://169.254.169.254/latest/meta-data",
+            "https://example.com/public-image.png",
+            "https://httpbin.org/image/png",
+            "https://cdn.discordapp.com/api/v10/users/@me.png",
+            "file:///C:/Windows/System32/drivers/etc/hosts",
+            "data:text/plain,secret"
+        ]) {
+            const result = await native.fetchFile(discordEvent("https://discord.com/channels/@me/1"), url);
+            assert.equal(result.success, false, `${url} must not be readable through the main process`);
+            assert.equal(result.data, undefined);
+            assert.equal(dispatches, 0, `${url} must be rejected before DNS or transport dispatch`);
+        }
+        assert.equal(requests.length, before, "loopback read SSRF must be rejected before the local server receives a request");
+    } finally {
+        boundaries.forEach(([module, name], index) => Reflect.set(module, name, originals[index]));
+        syncBuiltinESMExports();
     }
-    assert.equal(requests.length, before, "loopback read SSRF must be rejected before the local server receives a request");
 }
 
 async function approve(
@@ -478,7 +492,8 @@ async function testUploadAdmission(native: NativeModule): Promise<void> {
 async function main(): Promise<void> {
     const root = await mkdtemp(path.join(tmpdir(), "protonncord-file-upload-native-"));
     const bundlePath = path.join(root, "file-upload-native.mjs");
-    const server = await startTestServer();
+    let server: Awaited<ReturnType<typeof startTestServer>> | undefined;
+    let failure: unknown;
     harnessGlobal.__fileUploadNativeHarness = {
         dataDir: path.join(root, "data"),
         dialogCalls: [],
@@ -486,6 +501,7 @@ async function main(): Promise<void> {
         enabled: true
     };
     try {
+        server = await startTestServer();
         await build({
             absWorkingDir: path.resolve("."),
             bundle: true,
@@ -525,9 +541,13 @@ async function main(): Promise<void> {
         await testFixedResponseCap(native);
         await testUploadAdmission(native);
         console.log("file upload native boundary checks passed");
+    } catch (error) {
+        failure = error;
+        throw error;
     } finally {
-        await server.close();
-        await rm(root, { force: true, recursive: true });
+        try {
+            try { await server?.close(); } finally { await rm(root, { force: true, recursive: true }); }
+        } catch (error) { throw failure ?? error; }
     }
 }
 

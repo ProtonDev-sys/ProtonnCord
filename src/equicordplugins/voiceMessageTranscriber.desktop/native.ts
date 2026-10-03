@@ -109,7 +109,7 @@ const uvDownloads: Record<string, { name: string; sha256: string; }> = {
     "linux-arm64": { name: "uv-aarch64-unknown-linux-gnu.tar.gz", sha256: "030b69227b40af8c1981b7301793dc66e71ed3c796ea8688209dd268bd91ec51" },
     "darwin-arm64": { name: "uv-aarch64-apple-darwin.tar.gz", sha256: "b88bda573e566ef9bced66b155fe0408626fbbc053aee1c30ba686f0728c9447" }
 };
-let runtimeInstallation: Promise<string> | undefined;
+let runtimeInstallation: { promise: Promise<string>; controller: AbortController; waiters: Set<AbortSignal>; } | undefined;
 
 function runtimeDirectory() {
     return join(DATA_DIR, "VoiceMessageTranscriber", RUNTIME_VERSION);
@@ -205,14 +205,32 @@ async function installRuntime(signal: AbortSignal): Promise<string> {
     return executable;
 }
 
-function ensureRuntime(signal: AbortSignal): Promise<string> {
+async function ensureRuntime(signal: AbortSignal): Promise<string> {
+    signal.throwIfAborted();
     if (!runtimeInstallation) {
-        runtimeInstallation = installRuntime(signal).catch(error => {
-            runtimeInstallation = undefined;
+        const controller = new AbortController();
+        const promise: Promise<string> = installRuntime(controller.signal).catch(error => {
+            if (runtimeInstallation?.promise === promise) runtimeInstallation = undefined;
             throw error;
         });
+        runtimeInstallation = { promise, controller, waiters: new Set() };
     }
-    return runtimeInstallation;
+    const installation = runtimeInstallation;
+    installation.waiters.add(signal);
+    let rejectAbort: (reason: unknown) => void;
+    const cancelled = new Promise<never>((unusedResolve, reject) => { rejectAbort = reject; });
+    const abort = () => {
+        rejectAbort(signal.reason);
+        if ([...installation.waiters].every(waiter => waiter.aborted)) installation.controller.abort();
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    try {
+        return await Promise.race([installation.promise, cancelled]);
+    } finally {
+        installation.waiters.delete(signal);
+        signal.removeEventListener("abort", abort);
+    }
 }
 
 export async function transcribe(event: IpcMainInvokeEvent, id: string, audio: Float32Array) {
@@ -227,8 +245,11 @@ export async function transcribe(event: IpcMainInvokeEvent, id: string, audio: F
     event.sender.once("destroyed", cancel);
     let directory: string | undefined;
     let streamError: unknown;
+    let installation: typeof runtimeInstallation;
     try {
-        const executable = await ensureRuntime(controller.signal);
+        const pendingRuntime = ensureRuntime(controller.signal);
+        installation = runtimeInstallation;
+        const executable = await pendingRuntime;
         controller.signal.throwIfAborted();
         directory = await mkdtemp(join(tmpdir(), "protonn-phonon-"));
         const filename = join(directory, "audio.wav");
@@ -277,10 +298,11 @@ export async function transcribe(event: IpcMainInvokeEvent, id: string, audio: F
             output?.removeListener("data", receive);
         }
         if (streamError) throw streamError;
-        return parsePhononResult(stdout.trim().split("\n").at(-1)!);
+        const finalOutput = stdout.trim();
+        return parsePhononResult(finalOutput.slice(finalOutput.lastIndexOf("\n") + 1));
     } catch (error) {
         if (controller.signal.aborted && !streamError) throw new Error("Transcription cancelled");
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") runtimeInstallation = undefined;
+        if ((error as NodeJS.ErrnoException).code === "ENOENT" && runtimeInstallation === installation) runtimeInstallation = undefined;
         throw new Error("Phonon-2 setup or transcription failed. Check your connection and available disk space, then retry. Unsupported devices or missing system libraries may require an OS update.");
     } finally {
         event.sender.removeListener("destroyed", cancel);

@@ -130,8 +130,9 @@ function toggleGlobal(): void {
 }
 
 function toggleLocation(locationId: string, effectiveList: string[], defaultHidden: boolean): void {
-    if (effectiveList.includes(locationId)) {
-        effectiveList.splice(effectiveList.indexOf(locationId), 1);
+    const index = effectiveList.indexOf(locationId);
+    if (index !== -1) {
+        effectiveList.splice(index, 1);
     } else {
         effectiveList.push(locationId);
     }
@@ -148,14 +149,6 @@ const SilentTypingChatToggle: ChatBarButtonFactory = ({ channel, type }) => {
         enabledGlobally,
         chatIcon,
         defaultHidden,
-        enabledLocations,
-        disabledLocations,
-        alwaysEnableInActiveVoiceChat,
-        temporaryEnableThresholdServers,
-        temporaryEnableThresholdDirectMessages,
-        chatIconLeftClickAction,
-        chatIconMiddleClickAction,
-        chatIconRightClickAction,
     } = settings.use([
         "enabledGlobally",
         "chatIcon",
@@ -327,8 +320,6 @@ const ChatBarContextCheckbox: NavContextMenuPatchCallback = children => {
         chatContextMenu,
         enabledGlobally,
         defaultHidden,
-        hideChatBoxTypingIndicators,
-        hideMembersListTypingIndicators
     } = settings.use([
         "chatIcon",
         "chatContextMenu",

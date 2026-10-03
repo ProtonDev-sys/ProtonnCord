@@ -98,7 +98,8 @@ for (const filename of ["../escape.png", "..\\escape.png", "double.ext.png", ".h
 assert.equal(parseImageCacheFilename("123.PNG"), null, "non-canonical cache extensions must not be indexed");
 
 async function runFileChecks() {
-    const cacheRoot = await mkdtemp(path.join(tmpdir(), "protonncord-message-cache-"));
+    const fixtureRoot = await mkdtemp(path.join(tmpdir(), "protonncord-message-cache-"));
+    const cacheRoot = path.join(fixtureRoot, "cache");
     const resolvedTemporaryRoot = `${path.resolve(tmpdir())}${path.sep}`;
     assert.ok(path.resolve(cacheRoot).startsWith(resolvedTemporaryRoot), "the test cache must remain inside the system temp directory");
 
@@ -216,7 +217,7 @@ async function runFileChecks() {
         assert.equal(concurrentQuotaFiles.reduce((total, file) => total + file.byteLength, 0), 4,
             "concurrent writes must never push the on-disk cache above quota");
     } finally {
-        await rm(cacheRoot, { recursive: true, force: true });
+        await rm(fixtureRoot, { recursive: true, force: true });
     }
 }
 

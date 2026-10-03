@@ -31,7 +31,7 @@ async function main() {
     const resolverCalls = [...service.matchAll(/getAsset\(appId,\s*([^\n)]+)/g)].map(match => match[1]);
     assert.deepEqual(
         resolverCalls,
-        ["resolvedCoverArtUrl", '"navidrome"', '"navidrome"'],
+        ['resolvedCoverArtUrl || "navidrome"', '"navidrome"'],
         "Discord's asset resolver may only receive Last.fm output or fixed public keys"
     );
 

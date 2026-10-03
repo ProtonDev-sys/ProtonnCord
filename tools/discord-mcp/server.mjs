@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
-import { access, mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -351,7 +351,6 @@ export async function callBridge(tool, args = {}, timeoutMs = DEFAULT_TIMEOUT_MS
     try {
         while (Date.now() < deadline) {
             try {
-                await access(responsePath);
                 const response = JSON.parse(await readFile(responsePath, "utf8"));
                 if (response?.id !== id) throw new Error("Discord MCP returned a mismatched response ID");
                 if (!response.ok) throw new Error(response.error || "Discord MCP request failed");

@@ -110,11 +110,10 @@ async function collectNavigationSamples(page: Page, targets: string[], iteration
 }
 
 async function getChannelPaths(page: Page): Promise<string[]> {
-    return page.evaluate(() => Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href^='/channels/']"))
+    return page.evaluate(() => Array.from(new Set(Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href^='/channels/']"))
         .filter(anchor => anchor.getClientRects().length > 0)
         .map(anchor => anchor.getAttribute("href"))
-        .filter((href): href is string => typeof href === "string" && /^\/channels\/\d+\/\d+$/.test(href))
-        .filter((href, index, paths) => paths.indexOf(href) === index));
+        .filter((href): href is string => typeof href === "string" && /^\/channels\/\d+\/\d+$/.test(href)))));
 }
 
 async function ensureGuildChannelPaths(page: Page): Promise<string[]> {

@@ -14,24 +14,14 @@
     line-height: 1.2;
 }
 
-.vc-h2 {
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 1.25;
-}
-
-.vc-h3 {
-    font-size: 16px;
-    font-weight: 500;
-    line-height: 1.25;
-}
-
+.vc-h2,
 .vc-h4 {
     font-size: 16px;
     font-weight: 600;
     line-height: 1.25;
 }
 
+.vc-h3,
 .vc-h5 {
     font-size: 16px;
     font-weight: 500;

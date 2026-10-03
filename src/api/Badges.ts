@@ -109,34 +109,11 @@ export function _getBadges(args: BadgeUserArgs) {
     const equicordDonorBadges = BadgeAPIPlugin.getEquicordDonorBadges(args.userId);
     const GlobalBadges = isPluginEnabled("GlobalBadges")
         ? (Plugins.GlobalBadges as typeof GlobalBadgesPlugin).getGlobalBadges(args.userId)
-        : false;
+        : undefined;
 
     // do globalbadges first so it shows before the contrib badges but after donor badges
-    if (GlobalBadges) {
-        badges.unshift(
-            ...GlobalBadges.map(badge => ({
-                ...args,
-                ...badge,
-            }))
-        );
-    }
-
-    if (donorBadges) {
-        badges.unshift(
-            ...donorBadges.map(badge => ({
-                ...args,
-                ...badge,
-            }))
-        );
-    }
-
-    if (equicordDonorBadges) {
-        badges.unshift(
-            ...equicordDonorBadges.map(badge => ({
-                ...args,
-                ...badge,
-            }))
-        );
+    for (const group of [GlobalBadges, donorBadges, equicordDonorBadges]) {
+        if (group) badges.unshift(...group.map(badge => ({ ...args, ...badge })));
     }
 
     return badges;

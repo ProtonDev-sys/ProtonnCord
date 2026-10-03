@@ -92,24 +92,15 @@ export function showAllActivitiesComponent({ activity, user, ...props }: Readonl
                         gap: "5px",
                     }}
                 >
-                    {activities.map((activity, index) =>
-                        index === 0 ? (
-                            <ActivityView
-                                key={index}
-                                activity={activity}
-                                user={user}
-                                currentUser={currentUser}
-                                {...props}
-                            />) : (
-                            <ActivityView
-                                key={index}
-                                activity={activity}
-                                user={user}
-                                application={getActivityApplication(activity)}
-                                currentUser={currentUser}
-                                {...generalProps}
-                            />
-                        ))}
+                    {activities.map((activity, index) => (
+                        <ActivityView
+                            key={index}
+                            activity={activity}
+                            user={user}
+                            currentUser={currentUser}
+                            {...(index === 0 ? props : { application: getActivityApplication(activity), ...generalProps })}
+                        />
+                    ))}
                 </div>
             </ErrorBoundary>
         );

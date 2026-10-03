@@ -30,9 +30,10 @@ function fixture() {
 test("top-level matches retain waiter order without reading nested exports", () => {
     const { subscriptions, dispatch } = fixture();
     const moduleId = Symbol("module");
+    let nestedReads = 0;
     const exports = Object.defineProperty({}, "unused", {
         enumerable: true,
-        get() { assert.fail("A top-level match must not inspect nested exports"); },
+        get() { nestedReads++; assert.fail("A top-level match must not inspect nested exports"); },
     });
     const received: string[] = [];
     subscriptions.set(value => value === exports, (value, id) => {
@@ -44,6 +45,7 @@ test("top-level matches retain waiter order without reading nested exports", () 
     dispatch(exports, moduleId);
     assert.deepEqual(received, ["first", "second"]);
     assert.equal(subscriptions.size, 0);
+    assert.equal(nestedReads, 0);
 });
 
 test("an earlier nested match is delivered before a later top-level match", () => {
@@ -84,10 +86,13 @@ test("primitive and function exports are searched only at the top level", () => 
         dispatch(exports);
         assert.deepEqual(seen, [exports]);
     }
-    const { subscriptions, dispatch } = fixture();
-    subscriptions.set(() => assert.fail("Absent exports must not be filtered"), () => assert.fail());
+    const { subscriptions, dispatch, failures } = fixture();
+    let filterCalls = 0;
+    subscriptions.set(() => { filterCalls++; assert.fail("Absent exports must not be filtered"); }, () => assert.fail());
     dispatch(null);
     dispatch(undefined);
+    assert.equal(filterCalls, 0);
+    assert.deepEqual(failures, []);
 });
 
 test("shallow enumeration includes inherited keys and handles circular references", () => {
@@ -301,20 +306,24 @@ test("early nested matches leave the unused export tail unread", () => {
     const { subscriptions, dispatch } = fixture();
     const first = {};
     let reads = 0;
+    let unusedReads = 0;
     const exports = {
         get first() { reads++; return first; },
-        get unused() { return assert.fail("Unused tail must not be read"); },
+        get unused() { unusedReads++; return assert.fail("Unused tail must not be read"); },
     };
     subscriptions.set(value => value === first, () => {});
     subscriptions.set(value => value === first, () => {});
     dispatch(exports);
     assert.equal(reads, 2, "Successful callbacks invalidate the cache, without reading the unused tail");
+    assert.equal(unusedReads, 0);
     assert.equal(subscriptions.size, 0);
 });
 
 test("dispatch without waiters does not enumerate exports", () => {
     const { dispatch } = fixture();
-    dispatch(new Proxy({}, { ownKeys: () => assert.fail("No subscriptions need these exports") }));
+    let enumerations = 0;
+    dispatch(new Proxy({}, { ownKeys: () => { enumerations++; assert.fail("No subscriptions need these exports"); } }));
+    assert.equal(enumerations, 0);
 });
 
 for (const [waiterCount, exportCount] of [[1, 1], [16, 32], [128, 32], [512, 128]]) {
@@ -411,12 +420,18 @@ test("the factory wrapper keeps listener ordering, isolates errors, and returns 
 
 test("the factory wrapper still skips blacklisted and absent exports", () => {
     const state = factoryWrapperFixture();
-    state.moduleListeners.add(() => assert.fail("Ignored module reached a listener"));
-    state.subscriptions.set(() => assert.fail("Ignored module reached a filter"), () => assert.fail());
+    let listenerCalls = 0;
+    let filterCalls = 0;
+    state.moduleListeners.add(() => { listenerCalls++; assert.fail("Ignored module reached a listener"); });
+    state.subscriptions.set(() => { filterCalls++; assert.fail("Ignored module reached a filter"); }, () => assert.fail());
     state.setBlacklisted(true);
     assert.equal(state.run({}), "factory-result");
     state.setBlacklisted(false);
     assert.equal(state.run(null), "factory-result");
     assert.equal(state.run(undefined), "factory-result");
     assert.equal(state.subscriptions.size, 1);
+    assert.equal(listenerCalls, 0);
+    assert.equal(filterCalls, 0);
+    assert.deepEqual(state.errors, []);
+    assert.deepEqual(state.failures, []);
 });

@@ -566,9 +566,8 @@ async function testConnectionLifetime(module: DevCompanionModule): Promise<void>
 }
 
 async function main(): Promise<void> {
-    const originalWebSocket = Object.getOwnPropertyDescriptor(globalThis, "WebSocket");
-    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-    const originalLocation = Object.getOwnPropertyDescriptor(globalThis, "location");
+    const originals = ["WebSocket", "window", "location", "__devCompanionHarness", EXECUTION_SENTINEL]
+        .map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
 
     await testAuthenticator();
     testCommandSchemas();
@@ -588,28 +587,24 @@ async function main(): Promise<void> {
     assert.match(indexSource, /componentProps:\s*\{\s*type: "password"/u,
         "the shared authentication secret must not be displayed as ordinary text");
 
-    harnessGlobal.__devCompanionHarness = { authSecret: SECRET, logs: [], lookups: 0, reloads: 0, toasts: [] };
-    Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket, writable: true });
-    Object.defineProperty(globalThis, "window", { configurable: true, value: globalThis, writable: true });
-    Object.defineProperty(globalThis, "location", {
-        configurable: true,
-        value: { reload: () => { harnessGlobal.__devCompanionHarness.reloads++; } },
-        writable: true
-    });
-
     try {
+        harnessGlobal.__devCompanionHarness = { authSecret: SECRET, logs: [], lookups: 0, reloads: 0, toasts: [] };
+        Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket, writable: true });
+        Object.defineProperty(globalThis, "window", { configurable: true, value: globalThis, writable: true });
+        Object.defineProperty(globalThis, "location", {
+            configurable: true,
+            value: { reload: () => { harnessGlobal.__devCompanionHarness.reloads++; } },
+            writable: true
+        });
         const module = await loadInitWs();
         await testHostileServers(module);
         await testConnectionLifetime(module);
     } finally {
         for (const socket of FakeWebSocket.instances) socket.close(1000, "test cleanup");
-        if (originalWebSocket) Object.defineProperty(globalThis, "WebSocket", originalWebSocket);
-        else Reflect.deleteProperty(globalThis, "WebSocket");
-        if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
-        else Reflect.deleteProperty(globalThis, "window");
-        if (originalLocation) Object.defineProperty(globalThis, "location", originalLocation);
-        else Reflect.deleteProperty(globalThis, "location");
-        Reflect.deleteProperty(globalThis, EXECUTION_SENTINEL);
+        for (const [name, descriptor] of originals) {
+            if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+            else Reflect.deleteProperty(globalThis, name);
+        }
     }
 
     console.log("Dev Companion authenticated channel security checks passed");

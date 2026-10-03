@@ -184,14 +184,7 @@ export default definePlugin({
     },
 
     filterStream(channelStream: [ChannelStreamGroupProps | ChannelStreamMessageProps | ChannelStreamDividerProps]) {
-        const {
-            alsoHideIgnoredUsers,
-            disableNotifications,
-            hideBlockedUserReplies,
-            allowAutoModMessages,
-            defaultHideUsers,
-            overrideUsers
-        } = settings.use([
+        const { alsoHideIgnoredUsers } = settings.use([
             "alsoHideIgnoredUsers",
             "disableNotifications",
             "hideBlockedUserReplies",
@@ -230,7 +223,7 @@ export default definePlugin({
 
             if (isBlockedGroup || (isIgnoredGroup && alsoHideIgnoredUsers)) {
                 const filteredContent: [Message | ChannelStreamDividerProps] = item.content.filter((subItem, index) => {
-                    const isMessage = ["MESSAGE", "THREAD_STARTER_MESSAGE"].includes(subItem.type);
+                    const isMessage = subItem.type === "MESSAGE" || subItem.type === "THREAD_STARTER_MESSAGE";
                     const isThreadStarter = index === 0 && subItem.type === "THREAD_STARTER_MESSAGE";
                     const message = (isMessage && (isThreadStarter ? actualStarterMessage : subItem.content)) || null;
                     return !(isThreadStarter && skipStarter) && (!message || this.shouldKeepMessage(message)[0]);
@@ -239,7 +232,7 @@ export default definePlugin({
                 const shouldKeep = filteredContent.length;
                 shouldKeep && newChannelStream.push({ ...item, content: filteredContent });
             } else {
-                const isMessage = ["MESSAGE", "THREAD_STARTER_MESSAGE"].includes(item.type);
+                const isMessage = item.type === "MESSAGE" || item.type === "THREAD_STARTER_MESSAGE";
                 const message = (isMessage && (isThreadStarter ? actualStarterMessage : item.content)) || null;
                 const shouldKeep = !isMessage || !message || this.shouldKeepMessage(message)[0];
                 shouldKeep && newChannelStream.push(item);

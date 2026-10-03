@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
+import { withTimeout } from "../src/debug/promiseTimeout";
 import {
     canDeleteRecordedMessage,
     DISCORD_MCP_TOOL_NAMES,
@@ -76,13 +77,15 @@ assert.equal(canDeleteRecordedMessage(sent, "895063026686885909", "9999999999999
 
 async function main() {
 const bridgeDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-test-"));
+try {
 assert.equal(dirname(resolve(bridgeDirectory)), resolve(tmpdir()), "cleanup must stay in the test temporary directory");
 const requestsDirectory = join(bridgeDirectory, "requests");
 const responsesDirectory = join(bridgeDirectory, "responses");
 const fakeImagePath = join(bridgeDirectory, "test-image.png");
 const fakeImage = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const secret = randomBytes(32).toString("base64url");
-await Promise.all([mkdir(requestsDirectory), mkdir(responsesDirectory)]);
+await mkdir(requestsDirectory);
+await mkdir(responsesDirectory);
 await writeFile(join(bridgeDirectory, "config.json"), JSON.stringify({ schemaVersion: 1, secret }));
 await writeFile(fakeImagePath, fakeImage);
 
@@ -93,6 +96,7 @@ const child = spawn(process.execPath, [resolve("tools/discord-mcp/server.mjs")],
 }) as ChildProcessWithoutNullStreams;
 
 let nextRpcId = 1;
+let workerError: Error | undefined;
 const pending = new Map<number, { resolve(value: any): void; reject(error: Error): void; }>();
 const childClosed = new Promise<void>(resolvePromise => child.once("close", () => resolvePromise()));
 const rejectPending = (error: Error) => {
@@ -112,6 +116,7 @@ stdout.on("line", line => {
 });
 
 function rpc(method: string, params?: unknown): Promise<any> {
+    if (workerError) return Promise.reject(workerError);
     const id = nextRpcId++;
     return new Promise((resolvePromise, rejectPromise) => {
         const timeout = setTimeout(() => {
@@ -162,7 +167,7 @@ const fakeWorker = (async () => {
         }
         await new Promise(resolvePromise => setTimeout(resolvePromise, 10));
     }
-})();
+})().catch(error => { workerError = error; rejectPending(error); });
 
 try {
     const initialized = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } });
@@ -216,10 +221,16 @@ try {
     assert.match(unknown.message, /Unknown tool/);
 } finally {
     workerRunning = false;
-    child.kill();
-    await childClosed;
-    stdout.close();
-    await fakeWorker;
+    try {
+        child.kill();
+        await withTimeout(childClosed, 5_000, "Fixture server termination timed out");
+    } finally {
+        stdout.close();
+        await fakeWorker;
+    }
+    if (workerError) throw workerError;
+}
+} finally {
     await rm(bridgeDirectory, { force: true, recursive: true });
 }
 

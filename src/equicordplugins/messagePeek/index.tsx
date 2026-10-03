@@ -164,6 +164,10 @@ function getMessageContent(message: Message): MessageContent | null {
     return null;
 }
 
+function MessagePreviewAuthor({ user }: { user: User; }) {
+    return showMeYourName.getTypingMemberListProfilesReactionsVoiceNameText({ user, type: "membersList" }) || RelationshipStore.getNickname(user.id) || user.globalName || user.username;
+}
+
 function MessagePreviewContent({ channel, user }: { channel: Channel; user: User | null | undefined; }) {
     const lastMessage = useStateFromStores(
         [MessageStore, UserStore, RelationshipStore],
@@ -184,10 +188,9 @@ function MessagePreviewContent({ channel, user }: { channel: Channel; user: User
 
     const currentUserId = UserStore.getCurrentUser()?.id;
     const isOwnMessage = lastMessage.author.id === currentUserId;
-    const smynName = !isOwnMessage && isPluginEnabled(showMeYourName.name)
-        ? showMeYourName.getTypingMemberListProfilesReactionsVoiceNameText({ user: lastMessage.author, type: "membersList" })
-        : null;
-    const authorName = isOwnMessage ? "You" : (smynName || RelationshipStore.getNickname(lastMessage.author.id) || lastMessage.author.globalName || lastMessage.author.username);
+    const authorName = isOwnMessage ? "You" : isPluginEnabled(showMeYourName.name)
+        ? <MessagePreviewAuthor user={lastMessage.author} />
+        : (RelationshipStore.getNickname(lastMessage.author.id) || lastMessage.author.globalName || lastMessage.author.username);
     const Icon = content.icon ? Icons[content.icon] : null;
 
     return (
