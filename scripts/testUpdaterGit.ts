@@ -5,43 +5,19 @@
  */
 
 import assert from "node:assert/strict";
-import { execFile as execFileCallback } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { promisify } from "node:util";
 
 import {
-    type GitRunner,
     inspectGitUpdates,
     pullGitUpdates,
 } from "../src/main/updater/gitOperations";
-
-const execFile = promisify(execFileCallback);
-
-async function run(cwd: string, ...args: string[]): Promise<{ stderr: string; stdout: string; }> {
-    const result = await execFile("git", args, {
-        cwd,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-        timeout: 30_000,
-    });
-    return { stderr: String(result.stderr), stdout: String(result.stdout) };
-}
-
-function runner(cwd: string): GitRunner {
-    return (...args) => run(cwd, ...args);
-}
+import { commitFile, run, runner } from "./utils/gitFixture";
 
 async function configureRepository(path: string): Promise<void> {
     await run(path, "config", "user.name", "Updater Test");
     await run(path, "config", "user.email", "updater-test@example.invalid");
-}
-
-async function commitFile(path: string, filename: string, content: string, message: string): Promise<string> {
-    await writeFile(join(path, filename), content);
-    await run(path, "add", "--", filename);
-    await run(path, "commit", "-m", message);
-    return (await run(path, "rev-parse", "HEAD")).stdout.trim();
 }
 
 async function main(): Promise<void> {

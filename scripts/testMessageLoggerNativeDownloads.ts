@@ -821,8 +821,10 @@ async function main() {
         "non-handler test utilities must not be exported from the auto-registered native entrypoint");
     assert.doesNotMatch(cacheSource, /\breadFile\b/u,
         "bounded cache reads must stat and stream from a file handle instead of allocating through readFile");
-    assert.ok(cacheSource.indexOf("const initialStats = await lstat(imagePath)")
-        < cacheSource.indexOf("const content = Buffer.allocUnsafe(openedStats.size)"),
+    const statIndex = cacheSource.indexOf("const initialStats = await lstat(imagePath)");
+    const allocationIndex = cacheSource.indexOf("const content = Buffer.allocUnsafe(openedStats.size)");
+    assert.ok(statIndex >= 0 && allocationIndex >= 0, "cache validation and allocation markers must exist");
+    assert.ok(statIndex < allocationIndex,
     "cache size validation must remain before allocation");
     console.log("message logger native download boundary checks passed");
 }

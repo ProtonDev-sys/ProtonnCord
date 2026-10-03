@@ -1021,12 +1021,14 @@ test("all clip and bridge native entrypoints deny untrusted callers before side 
         const api = loadModule(`src/equicordplugins/${path}`, imports, { Buffer });
         for (const method of Object.values(api) as ((...args: unknown[]) => unknown)[]) {
             for (const event of [null, {}, trustedEvent("https://example.org/")]) {
+                let result: unknown;
                 try {
-                    const result = method(event, "fixture", "fixture");
-                    await assert.rejects(Promise.resolve(result), /Untrusted/);
+                    result = method(event, "fixture", "fixture");
                 } catch (error) {
                     assert.match(String(error), /Untrusted/);
+                    continue;
                 }
+                await assert.rejects(Promise.resolve(result), /Untrusted/);
             }
         }
     }

@@ -238,6 +238,7 @@ function loadGlobalBadges() {
     const requests: { url: string; signal: AbortSignal; resolve(response: Response): void; reject(error: Error): void; }[] = [];
     const errors: unknown[][] = [];
     const intervals = new Map<number, () => Promise<void>>();
+    let intervalId = 0;
     const toasts: { type: string; }[] = [];
     const mocks = {
         "./settings": { settings: { store } },
@@ -260,7 +261,7 @@ function loadGlobalBadges() {
         "@utils/types": { __esModule: true, default: (plugin: object) => plugin },
         "@webpack/common": { Toasts: { genId: () => "toast", show: (toast: { type: string; }) => toasts.push(toast), Type: { SUCCESS: "success", FAILURE: "failure" } } }
     }, {
-        setInterval: (callback: () => Promise<void>) => { intervals.set(1, callback); return 1; },
+        setInterval: (callback: () => Promise<void>) => { intervals.set(++intervalId, callback); return intervalId; },
         clearInterval: (id: number) => intervals.delete(id)
     });
     return { utils, plugin, store, requests, errors, intervals, toasts };
@@ -335,19 +336,22 @@ test("global badge refresh retries failures, rejects malformed data and reports 
 
 test("global badge refresh aborts superseded and stopped requests without parsing stale bodies", async () => {
     const { utils, plugin, requests } = loadGlobalBadges();
+    let bodyReads = 0;
     const first = utils.loadBadges();
     const second = utils.loadBadges();
     assert.equal(requests[0].signal.aborted, true);
     assert.equal(requests[1].signal.aborted, false);
-    requests[0].resolve({ ok: true, json: () => assert.fail("stale body was parsed") } as unknown as Response);
+    requests[0].resolve({ ok: true, json: () => { bodyReads++; assert.fail("stale body was parsed"); } } as unknown as Response);
     assert.equal(await first, false);
+    assert.equal(bodyReads, 0);
     requests[1].resolve(response({ users: { current: [] } }));
     assert.equal(await second, true);
     const stopped = utils.loadBadges();
     plugin.stop();
     assert.equal(requests[2].signal.aborted, true);
-    requests[2].resolve({ ok: true, json: () => assert.fail("stopped body was parsed") } as unknown as Response);
+    requests[2].resolve({ ok: true, json: () => { bodyReads++; assert.fail("stopped body was parsed"); } } as unknown as Response);
     assert.equal(await stopped, false);
+    assert.equal(bodyReads, 0);
     assert.equal(plugin.getGlobalBadges("current")?.length, 0);
 });
 

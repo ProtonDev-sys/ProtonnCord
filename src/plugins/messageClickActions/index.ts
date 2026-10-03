@@ -644,9 +644,6 @@ export default definePlugin({
     },
 
     onMessageClick(msg, channel, event) {
-        let target = event.target as HTMLElement;
-        if (target.nodeType === Node.TEXT_NODE) target = target.parentElement as HTMLElement;
-
         const myId = AuthenticationStore.getId();
         const isMe = msg.author.id === myId;
         const isDM = channel.isDM();
@@ -715,11 +712,6 @@ export default definePlugin({
 
         if (isDoubleClick) {
             doubleClickFired = true;
-
-            if (singleClickTimeout) {
-                clearTimeout(singleClickTimeout);
-                singleClickTimeout = null;
-            }
 
             const isQuickDoubleClick = !doubleClickDetected || (Date.now() - secondMouseDownTime < settings.store.doubleClickHoldThreshold);
             const executeDoubleClick = () => {

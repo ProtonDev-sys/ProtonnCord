@@ -233,6 +233,7 @@ test("ImageZoom owns only its active image root and can render again after stop/
 
 test("ImageZoom uses viewport image coordinates, preserves external URLs, and restores media attributes", () => {
     let cursor = 0;
+    let geometryReads = 0;
     let draggable: string | null = "true";
     const hooks: any[] = [];
     const effects: (() => void)[] = [];
@@ -243,7 +244,10 @@ test("ImageZoom uses viewport image coordinates, preserves external URLs, and re
         setAttribute: (_name: string, value: string) => draggable = value,
         removeAttribute: () => draggable = null
     };
-    const imageElement = { querySelector: () => media, getBoundingClientRect: () => ({ left: 10, top: 20, width: 100, height: 80 }) };
+    const imageElement = { querySelector: () => media, getBoundingClientRect: () => {
+        geometryReads++;
+        return { left: 10, top: 20, width: 100, height: 80 };
+    } };
     const store = { zoom: NaN, size: Infinity, zoomSpeed: NaN, invertScroll: false, saveZoomValues: true };
     const mocks: Record<string, object> = {
         "@components/ErrorBoundary": { __esModule: true, default: { wrap: (component: unknown) => component } },
@@ -293,12 +297,15 @@ test("ImageZoom uses viewport image coordinates, preserves external URLs, and re
     assert.equal(draggable, "false");
     const event = { button: 0, clientX: 60, clientY: 70, pageX: 160, pageY: 270 };
     handlers.get("mousedown")!(event);
+    assert.equal(geometryReads, 1);
     let lens = render();
     assert.equal(lens.props.style.width, "100px");
     assert.equal(lens.props.style.transform, "translate(110px, 220px)");
     assert.equal(lens.props.children[0].props.style.transform, "translate(-50px, -50px)");
     assert.equal(lens.props.children[0].props.src, instance.props.src);
+    geometryReads = 0;
     handlers.get("wheel")!({ ...event, deltaY: Infinity });
+    assert.equal(geometryReads, 1);
     assert.equal(Number.isFinite(store.zoom), true);
     instance.props.src = "https://media.discordapp.net/attachments/image.png";
     render();

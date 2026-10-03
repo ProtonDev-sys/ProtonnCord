@@ -9,6 +9,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { inspect } from "node:util";
 
 import { build, type Plugin } from "esbuild";
 import { deflateSync, inflateSync } from "fflate";
@@ -22,6 +23,11 @@ import {
 
 type CloudSetupModule = typeof import("../src/api/SettingsSync/cloudSetup");
 type CloudSyncModule = typeof import("../src/api/SettingsSync/cloudSync");
+
+function assertRedactedLogs(logs: unknown, message = "captured logs must redact secrets"): void {
+    assert.doesNotMatch(JSON.stringify(logs), new RegExp(SECRET_SENTINEL, "u"), message);
+    assert.doesNotMatch(inspect(logs, { depth: null, customInspect: false, maxStringLength: null, maxArrayLength: null, showHidden: true }), new RegExp(SECRET_SENTINEL, "u"), message);
+}
 
 interface RequestRecord {
     body: BodyInit | null | undefined;
@@ -929,7 +935,7 @@ async function testSourcePushDominanceAndBoundedConflicts(sync: CloudSyncModule)
     assert.equal(bounded.quickCss, QUICK_CSS);
     assert.equal(bounded.settings.autoUpdate, false);
     assert.equal(bounded.localStorage.Vencord_settingsDirty, "true");
-    assert.doesNotMatch(JSON.stringify(bounded.logs), new RegExp(SECRET_SENTINEL, "u"), "remote sync errors are redacted before logging");
+    assertRedactedLogs(bounded.logs, "remote sync errors are redacted before logging");
     assertNoDataStoreBoundary(bounded);
 
     const sequential = makeRuntime();
@@ -1304,7 +1310,7 @@ async function testMalformedAndCappedResponses(sync: CloudSyncModule): Promise<v
     });
     assert.equal(await sync.getCloudSettings(true, true), false);
     assert.equal(reflectedChecksum.dataStore.get(MANIFEST_STORE_KEY), undefined);
-    assert.doesNotMatch(JSON.stringify(reflectedChecksum.logs), new RegExp(SECRET_SENTINEL, "u"));
+    assertRedactedLogs(reflectedChecksum.logs);
     assert.doesNotMatch(JSON.stringify(reflectedChecksum.notifications), new RegExp(SECRET_SENTINEL, "u"));
 
     const capped = makeRuntime();
@@ -1379,14 +1385,14 @@ async function testMalformedUrlAndNetworkErrorsRedact(sync: CloudSyncModule): Pr
     useRuntime(malformedUrl);
     assert.equal(await sync.putCloudSettings(false), false);
     assert.equal(malformedUrl.requests.length, 0);
-    assert.doesNotMatch(JSON.stringify(malformedUrl.logs), new RegExp(SECRET_SENTINEL, "u"));
+    assertRedactedLogs(malformedUrl.logs);
     assert.doesNotMatch(JSON.stringify(malformedUrl.notifications), new RegExp(SECRET_SENTINEL, "u"));
 
     const network = makeRuntime();
     useRuntime(network);
     network.fetchHandler = async () => { throw new Error(SECRET_SENTINEL); };
     assert.equal(await sync.putCloudSettings(false), false);
-    assert.doesNotMatch(JSON.stringify(network.logs), new RegExp(SECRET_SENTINEL, "u"));
+    assertRedactedLogs(network.logs);
     assert.doesNotMatch(JSON.stringify(network.notifications), new RegExp(SECRET_SENTINEL, "u"));
 }
 
@@ -1519,7 +1525,7 @@ async function testStaleOnlyOAuthCancellationRemovesWrite(setup: CloudSetupModul
     );
 }
 
-async function testNewerFailedOAuthDoesNotPreserveStaleWrite(setup: CloudSetupModule): Promise<void> {
+async function settleOlderOAuth(setup: CloudSetupModule, newerSecret: string, olderSecret: string, beforeOlder?: (runtime: Runtime) => void): Promise<Runtime> {
     const runtime = makeUnauthenticatedRuntime();
     useRuntime(runtime);
     const oldResponse = deferred<Response>();
@@ -1527,7 +1533,7 @@ async function testNewerFailedOAuthDoesNotPreserveStaleWrite(setup: CloudSetupMo
         if (requestPath(request) === "/v1/oauth/settings") return oauthConfiguration();
         const code = new URL(request.url).searchParams.get("code");
         if (code === "old") return await oldResponse.promise;
-        if (code === "new") return jsonResponse({ secret: `invalid\n${SECRET_SENTINEL}` });
+        if (code === "new") return jsonResponse({ secret: newerSecret });
         throw new Error(`Unexpected OAuth request ${request.url}`);
     };
 
@@ -1539,38 +1545,24 @@ async function testNewerFailedOAuthDoesNotPreserveStaleWrite(setup: CloudSetupMo
     await setup.authorizeCloud();
     const newCallback = oauthCallback(runtime);
     await newCallback({ location: `${ORIGIN_A}/oauth/callback?code=new` });
-    oldResponse.resolve(jsonResponse({ secret: "stale-old-secret" }));
+    beforeOlder?.(runtime);
+    oldResponse.resolve(jsonResponse({ secret: olderSecret }));
     await oldPromise;
+    return runtime;
+}
 
+async function testNewerFailedOAuthDoesNotPreserveStaleWrite(setup: CloudSetupModule): Promise<void> {
+    const runtime = await settleOlderOAuth(setup, `invalid\n${SECRET_SENTINEL}`, "stale-old-secret");
     assert.equal((runtime.dataStore.get(SECRET_STORE_KEY) as Record<string, string>)[cloudScope()], undefined);
     assert.equal(runtime.settings.cloud.authenticated, false);
-    assert.doesNotMatch(JSON.stringify(runtime.logs), new RegExp(SECRET_SENTINEL, "u"));
+    assertRedactedLogs(runtime.logs);
 }
 
 async function testNewerIdenticalOAuthSuccessWins(setup: CloudSetupModule): Promise<void> {
-    const runtime = makeUnauthenticatedRuntime();
-    useRuntime(runtime);
     const secret = "identical-current-secret";
-    const oldResponse = deferred<Response>();
-    runtime.fetchHandler = async request => {
-        if (requestPath(request) === "/v1/oauth/settings") return oauthConfiguration();
-        const code = new URL(request.url).searchParams.get("code");
-        if (code === "old") return await oldResponse.promise;
-        if (code === "new") return jsonResponse({ secret });
-        throw new Error(`Unexpected OAuth request ${request.url}`);
-    };
-
-    await setup.authorizeCloud();
-    const oldCallback = oauthCallback(runtime);
-    const oldPromise = oldCallback({ location: `${ORIGIN_A}/oauth/callback?code=old` });
-    await new Promise(resolve => setImmediate(resolve));
-
-    await setup.authorizeCloud();
-    const newCallback = oauthCallback(runtime);
-    await newCallback({ location: `${ORIGIN_A}/oauth/callback?code=new` });
-    assert.equal((runtime.dataStore.get(SECRET_STORE_KEY) as Record<string, string>)[cloudScope()], secret);
-    oldResponse.resolve(jsonResponse({ secret }));
-    await oldPromise;
+    const runtime = await settleOlderOAuth(setup, secret, secret, current => {
+        assert.equal((current.dataStore.get(SECRET_STORE_KEY) as Record<string, string>)[cloudScope()], secret);
+    });
 
     assert.equal(
         (runtime.dataStore.get(SECRET_STORE_KEY) as Record<string, string>)[cloudScope()],
@@ -1711,7 +1703,7 @@ async function testMalformedOAuthStateAndBodies(setup: CloudSetupModule): Promis
     };
     await setup.authorizeCloud();
     await oauthCallback(invalidSecret)({ location: `${ORIGIN_A}/oauth/callback?code=test` });
-    assert.doesNotMatch(JSON.stringify(invalidSecret.logs), new RegExp(SECRET_SENTINEL, "u"), "invalid OAuth secrets must not be logged");
+    assertRedactedLogs(invalidSecret.logs, "invalid OAuth secrets must not be logged");
     assert.deepEqual(invalidSecret.dataStore.get(SECRET_STORE_KEY), {});
 
     const colonSecret = makeUnauthenticatedRuntime();
@@ -1723,7 +1715,7 @@ async function testMalformedOAuthStateAndBodies(setup: CloudSetupModule): Promis
     await setup.authorizeCloud();
     await oauthCallback(colonSecret)({ location: `${ORIGIN_A}/oauth/callback?code=colon` });
     assert.deepEqual(colonSecret.dataStore.get(SECRET_STORE_KEY), {});
-    assert.doesNotMatch(JSON.stringify(colonSecret.logs), new RegExp(SECRET_SENTINEL, "u"));
+    assertRedactedLogs(colonSecret.logs);
     assert.doesNotMatch(JSON.stringify(colonSecret.notifications), new RegExp(SECRET_SENTINEL, "u"));
 }
 
