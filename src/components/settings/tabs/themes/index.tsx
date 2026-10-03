@@ -78,6 +78,14 @@ interface UnifiedTheme {
     activationMode: ThemeActivationMode;
 }
 
+function sortThemes(themes: UnifiedTheme[], pinnedThemes: string[]) {
+    const pinOrder = new Map<string, number>();
+    for (let index = pinnedThemes.length - 1; index >= 0; index--)
+        pinOrder.set(pinnedThemes[index], index);
+    const rank = (theme: UnifiedTheme) => pinOrder.get(theme.type === "online" ? theme.link! : theme.header.fileName) ?? pinnedThemes.length;
+    return themes.sort((first, second) => rank(first) - rank(second));
+}
+
 function ThemesTab() {
     const settings = useSettings(["themeLinks", "enabledThemeLinks", "enabledThemes", "enableOnlineThemes", "pinnedThemes", "themeActivationModes.*", "themeNames.*"]);
 
@@ -120,12 +128,12 @@ function ThemesTab() {
         }
     }
 
-    function onLocalThemeChange(fileName: string, value: boolean) {
-        if (value) {
-            if (settings.enabledThemes.includes(fileName)) return;
-            settings.enabledThemes = [...settings.enabledThemes, fileName];
+    function setThemeEnabled(key: "enabledThemes" | "enabledThemeLinks", themeId: string, enabled: boolean) {
+        if (enabled) {
+            if (settings[key].includes(themeId)) return;
+            settings[key] = [...settings[key], themeId];
         } else {
-            settings.enabledThemes = settings.enabledThemes.filter(f => f !== fileName);
+            settings[key] = settings[key].filter(name => name !== themeId);
         }
     }
 
@@ -211,15 +219,6 @@ function ThemesTab() {
             })
         );
         if (reads.current.mounted && revision === reads.current.online) setOnlineThemes(themes);
-    }
-
-    function onThemeLinkEnabledChange(link: string, enabled: boolean) {
-        if (enabled) {
-            if (settings.enabledThemeLinks.includes(link)) return;
-            settings.enabledThemeLinks = [...settings.enabledThemeLinks, link];
-        } else {
-            settings.enabledThemeLinks = settings.enabledThemeLinks.filter(f => f !== link);
-        }
     }
 
     function clearThemeState(themeId: string) {
@@ -342,24 +341,11 @@ function ThemesTab() {
             break;
     }
 
-    const getThemeId = (t: UnifiedTheme) => t.type === "online" ? t.link! : t.header.fileName;
-    filteredThemes.sort((a, b) => {
-        const aId = getThemeId(a);
-        const bId = getThemeId(b);
-        const aPinIndex = settings.pinnedThemes.indexOf(aId);
-        const bPinIndex = settings.pinnedThemes.indexOf(bId);
-        const aIsPinned = aPinIndex !== -1;
-        const bIsPinned = bPinIndex !== -1;
+    sortThemes(filteredThemes, settings.pinnedThemes);
 
-        if (aIsPinned && !bIsPinned) return -1;
-        if (!aIsPinned && bIsPinned) return 1;
-        if (aIsPinned && bIsPinned) return aPinIndex - bPinIndex;
-        return 0;
-    });
-
-    const localCount = allThemes.filter(t => t.type === "local").length;
-    const onlineCount = allThemes.filter(t => t.type === "online").length;
-    const enabledCount = allThemes.filter(t => t.enabled).length;
+    const localCount = userThemes?.length ?? 0;
+    const onlineCount = onlineThemes?.length ?? 0;
+    const enabledCount = allThemes.reduce((count, theme) => count + Number(theme.enabled), 0);
 
     return (
         <SettingsTab>
@@ -439,7 +425,7 @@ function ThemesTab() {
                                     key={onlineTheme.link}
                                     theme={onlineTheme}
                                     enabled={theme.enabled}
-                                    onChange={enabled => onThemeLinkEnabledChange(onlineTheme.link, enabled)}
+                                    onChange={enabled => setThemeEnabled("enabledThemeLinks", onlineTheme.link, enabled)}
                                     onDelete={() => deleteThemeLink(onlineTheme.link)}
                                     showDeleteButton
                                     disabled={onlineThemesDisabled}
@@ -467,7 +453,7 @@ function ThemesTab() {
                             <ThemeCard
                                 key={localTheme.fileName}
                                 enabled={theme.enabled}
-                                onChange={enabled => onLocalThemeChange(localTheme.fileName, enabled)}
+                                onChange={enabled => setThemeEnabled("enabledThemes", localTheme.fileName, enabled)}
                                 onDelete={async () => {
                                     try {
                                         await VencordNative.themes.deleteTheme(localTheme.fileName);

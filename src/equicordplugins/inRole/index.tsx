@@ -13,7 +13,6 @@ import { Paragraph } from "@components/Paragraph";
 import { Devs } from "@utils/constants";
 import { getCurrentChannel, getCurrentGuild } from "@utils/discord";
 import definePlugin from "@utils/types";
-import { GuildMember } from "@vencord/discord-types";
 import { ChannelStore, GuildMemberStore, GuildRoleStore, Menu, Parser } from "@webpack/common";
 
 import { showInRoleModal } from "./RoleMembersModal";
@@ -21,14 +20,7 @@ import { showInRoleModal } from "./RoleMembersModal";
 const DeveloperMode = getUserSettingLazy("appearance", "developerMode")!;
 
 function getMembersInRole(roleId: string, guildId: string) {
-    const members = GuildMemberStore.getMembers(guildId);
-    const membersInRole: GuildMember[] = [];
-    members.forEach(member => {
-        if (roleId === guildId || member.roles.includes(roleId)) {
-            membersInRole.push(member);
-        }
-    });
-    return membersInRole;
+    return GuildMemberStore.getMembers(guildId).filter(member => roleId === guildId || member.roles.includes(roleId));
 }
 
 export default definePlugin({

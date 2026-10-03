@@ -9,12 +9,18 @@ import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 
 import { debounce } from "../src/shared/debounce";
+import { runtimeHashMessageKey } from "../src/utils/intlHash";
 import { Logger } from "../src/utils/Logger";
 import { classNameToSelector } from "../src/utils/css";
 import { mergeDefaults } from "../src/utils/mergeDefaults";
 import { Queue } from "../src/utils/Queue";
 import { TTLMap } from "../src/utils/TTLMap";
 import { wordsFromSnake, wordsToCamel, wordsToPascal, wordsToTitle } from "../src/utils/text";
+
+test("intl hashing retains native-compatible byte order for empty, ASCII and Unicode keys", () => {
+    for (const [key, expected] of [["", "menYUT"], ["APP_NAME", "U68SHW"], ["SETTINGS", "3D5yo/"], ["你好", "MybZM8"], ["emoji_😀", "yhBeth"]])
+        assert.equal(runtimeHashMessageKey(key), expected);
+});
 
 test("debounce retains the latest receiver and arguments across repeated calls", t => {
     t.mock.timers.enable({ apis: ["setTimeout"] });

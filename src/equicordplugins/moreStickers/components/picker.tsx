@@ -280,7 +280,8 @@ export function PickerContent({ stickerPacks, selectedStickerPackId, setSelected
 
     function queryFilter(stickers: Sticker[]): Sticker[] {
         if (!query) return stickers;
-        return stickers.filter(sticker => sticker.title.toLowerCase().includes(query.toLowerCase()));
+        const normalizedQuery = query.toLowerCase();
+        return stickers.filter(sticker => sticker.title.toLowerCase().includes(normalizedQuery));
     }
 
     React.useEffect(() => {
@@ -296,49 +297,28 @@ export function PickerContent({ stickerPacks, selectedStickerPackId, setSelected
         }
     }, [currentSticker]);
 
-    const stickersToRows = (stickers: Sticker[]): JSX.Element[] => stickers
-        .reduce((acc, sticker, i) => {
-            if (i % 3 === 0) {
-                acc.push([]);
-            }
-            acc[acc.length - 1].push(sticker);
-            return acc;
-        }, [] as Sticker[][])
-        .map((stickers, i) => (
-            <PickerContentRow
-                key={i}
-                rowIndex={i}
-                channelId={channelId}
-                grid1={{
-                    rowIndex: i,
-                    colIndex: 1,
-                    sticker: stickers[0],
-                    onHover: setCurrentSticker,
-                    onSend: (_, s) => { !s && closePopout(); },
-                    isHovered: currentSticker?.id === stickers[0].id
-                }}
-                grid2={
-                    stickers.length > 1 ? {
-                        rowIndex: i,
-                        colIndex: 2,
-                        sticker: stickers[1],
-                        onHover: setCurrentSticker,
-                        onSend: (_, s) => { !s && closePopout(); },
-                        isHovered: currentSticker?.id === stickers[1].id
-                    } : undefined
-                }
-                grid3={
-                    stickers.length > 2 ? {
-                        rowIndex: i,
-                        colIndex: 3,
-                        sticker: stickers[2],
-                        onHover: setCurrentSticker,
-                        onSend: (_, s) => { !s && closePopout(); },
-                        isHovered: currentSticker?.id === stickers[2].id
-                    } : undefined
-                }
-            />
-        ));
+    const onSend: PickerContentRowGrid["onSend"] = (_, shouldStayOpen) => { if (!shouldStayOpen) closePopout(); };
+    const stickersToRows = (stickers: Sticker[]): JSX.Element[] => Array.from({ length: Math.ceil(stickers.length / 3) }, (_, rowIndex) => {
+        const grid = (colIndex: number): PickerContentRowGrid | undefined => {
+            const sticker = stickers[rowIndex * 3 + colIndex - 1];
+            return sticker ? {
+                rowIndex,
+                colIndex,
+                sticker,
+                onHover: setCurrentSticker,
+                onSend,
+                isHovered: currentSticker?.id === sticker.id
+            } : undefined;
+        };
+        return <PickerContentRow
+            key={rowIndex}
+            rowIndex={rowIndex}
+            channelId={channelId}
+            grid1={grid(1)!}
+            grid2={grid(2)}
+            grid3={grid(3)}
+        />;
+    });
 
     return (
         <div className={clPicker("content-list-wrapper")}>

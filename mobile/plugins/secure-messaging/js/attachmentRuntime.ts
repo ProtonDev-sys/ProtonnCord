@@ -711,9 +711,7 @@ function start(message: MessageLike, secure: SecurePlaintext): void {
 		.then(result => {
 			if (generation !== cacheGeneration) return
 			cache.set(key, result)
-			patchAttachments?.(message.channel_id ?? message.channelId!, message.id, [
-				...(message.attachments ?? []),
-			])
+			refreshEncryptedMessage(message)
 		})
 		.catch(error => {
 			if (generation !== cacheGeneration) return
@@ -726,9 +724,7 @@ function start(message: MessageLike, secure: SecurePlaintext): void {
 						: Infinity,
 				sourceUrls,
 			})
-			patchAttachments?.(message.channel_id ?? message.channelId!, message.id, [
-				...(message.attachments ?? []),
-			])
+			refreshEncryptedMessage(message)
 		})
 }
 
@@ -790,8 +786,5 @@ export function clearAttachmentCache(): void {
 	for (const path of files) void removeCachedFile(path)
 	const messages = [...renderedMessages.values()]
 	renderedMessages.clear()
-	for (const message of messages)
-		patchAttachments?.(message.channel_id ?? message.channelId!, message.id, [
-			...(message.attachments ?? []),
-		])
+	for (const message of messages) refreshEncryptedMessage(message)
 }

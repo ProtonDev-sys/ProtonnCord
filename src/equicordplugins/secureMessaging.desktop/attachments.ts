@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { exactArrayBuffer } from "./exactArrayBuffer";
+import { exactArrayBuffer as cryptoBytes } from "./exactArrayBuffer";
 import { decodeBase64Url, encodeBase64Url, isSnowflake } from "./protocol";
 
 export const LEGACY_ATTACHMENT_PAYLOAD_PREFIX = "PCEA1:";
@@ -137,6 +137,18 @@ function validateStickers(stickers: SecureStickerItem[]): void {
     }
 }
 
+function parseCompactStickers(values: unknown[]): SecureStickerItem[] {
+    const stickers: SecureStickerItem[] = [];
+    for (const sticker of values) {
+        if (!Array.isArray(sticker) || sticker.length !== 3 ||
+            typeof sticker[0] !== "string" || typeof sticker[1] !== "string" || typeof sticker[2] !== "number")
+            throw new Error("Secure sticker item is invalid");
+        stickers.push({ id: sticker[0], name: sticker[1], formatType: sticker[2] });
+    }
+    validateStickers(stickers);
+    return stickers;
+}
+
 function concatBytes(...values: Uint8Array[]): Uint8Array {
     const result = new Uint8Array(values.reduce((total, value) => total + value.byteLength, 0));
     let offset = 0;
@@ -145,10 +157,6 @@ function concatBytes(...values: Uint8Array[]): Uint8Array {
         offset += value.byteLength;
     }
     return result;
-}
-
-function cryptoBytes(value: Uint8Array): ArrayBuffer {
-    return exactArrayBuffer(value);
 }
 
 function uint32(value: number): Uint8Array {
@@ -598,16 +606,10 @@ export function parseSecurePlaintext(value: string): SecurePlaintext {
         const detachedTextIndex = parsed[1] as number;
         if (detachedTextIndex < 0 || detachedTextIndex >= attachments.count)
             throw new Error("Detached secure message index is invalid");
-        const stickers: SecureStickerItem[] = [];
+        let stickers: SecureStickerItem[] = [];
         if (parsed.length === 3) {
             if (!Array.isArray(parsed[2]) || parsed[2].length === 0) throw new Error("Secure sticker list is invalid");
-            for (const sticker of parsed[2]) {
-                if (!Array.isArray(sticker) || sticker.length !== 3 ||
-                    typeof sticker[0] !== "string" || typeof sticker[1] !== "string" || typeof sticker[2] !== "number")
-                    throw new Error("Secure sticker item is invalid");
-                stickers.push({ id: sticker[0], name: sticker[1], formatType: sticker[2] });
-            }
-            validateStickers(stickers);
+            stickers = parseCompactStickers(parsed[2]);
         }
         const canonical = [
             compactBundle(attachments),
@@ -636,16 +638,10 @@ export function parseSecurePlaintext(value: string): SecurePlaintext {
         let attachments: AttachmentBundleDescriptor | null = null;
         if (parsed[1] !== null) attachments = parseCompactBundle(parsed[1], manifestRich || manifestAttachment);
         else if (manifestRich || manifestAttachment) throw new Error("Secure attachment manifest is missing");
-        const stickers: SecureStickerItem[] = [];
+        let stickers: SecureStickerItem[] = [];
         if (compactRich) {
             if (!Array.isArray(parsed[2])) throw new Error("Secure sticker list is invalid");
-            for (const sticker of parsed[2]) {
-                if (!Array.isArray(sticker) || sticker.length !== 3 ||
-                    typeof sticker[0] !== "string" || typeof sticker[1] !== "string" || typeof sticker[2] !== "number")
-                    throw new Error("Secure sticker item is invalid");
-                stickers.push({ id: sticker[0], name: sticker[1], formatType: sticker[2] });
-            }
-            validateStickers(stickers);
+            stickers = parseCompactStickers(parsed[2]);
             if (stickers.length === 0) throw new Error("Secure rich content requires a sticker");
         }
         const canonical = [

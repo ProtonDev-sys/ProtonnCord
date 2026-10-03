@@ -782,6 +782,18 @@ test("a rejected async start releases its current run without changing the synch
     assert.equal(errors.length, 1);
 });
 
+test("an async start thenable is assimilated once for completion and failure observation", async () => {
+    const { manager, add, errors } = loadManager();
+    let calls = 0;
+    const plugin = add({ name: "Thenable", start: () => ({ then(resolve: () => void) { calls++; resolve(); } }) as any });
+    assert.equal(manager.startPlugin(plugin), true);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 1);
+    assert.equal(plugin.started, true);
+    assert.equal(errors.length, 0);
+    assert.equal(manager.stopPlugin(plugin), true);
+});
+
 test("a late start rejection cannot stop a newer run of the same plugin", async () => {
     const { manager, add, dispatcher, resourceCount, errors } = loadManager();
     let rejectStart!: (reason: Error) => void;

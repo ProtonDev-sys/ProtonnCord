@@ -5,23 +5,20 @@
  */
 
 import assert from "node:assert/strict";
-import { constants as FsConstants, readFileSync } from "node:fs";
+import { constants as FsConstants } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import ts from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 function load<T>(path: string, mocks: Record<string, unknown>, globals: Record<string, unknown>): T {
-    const code = ts.transpileModule(readFileSync(path, "utf8"), {
-        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-    }).outputText;
-    return runInNewContext(`${code}\nexports;`, {
-        exports: {}, ...globals,
+    return loadTestModule<T>(path, mocks, {
+        ...globals,
         require(name: string) {
             assert.ok(Object.hasOwn(mocks, name), `Unexpected native import: ${name}`);
             return mocks[name];
         },
-    });
+    }, "", { compilerOptions: { jsx: undefined }, mockImports: false });
 }
 
 function migrationFixture(initial: Record<string, string>, env: Record<string, string> = {}, dev = true) {
