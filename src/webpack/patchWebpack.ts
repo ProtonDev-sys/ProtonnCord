@@ -206,10 +206,6 @@ define(Function.prototype, "m", {
             });
 
             const proxiedModuleFactories = new Proxy(originalModules, moduleFactoriesHandler);
-            /*
-            If Webpack ever decides to set module factories using the variable of the modules object directly, instead of wreq.m, switch the proxy to the prototype
-            Reflect.setPrototypeOf(originalModules, new Proxy(originalModules, moduleFactoriesHandler));
-            */
 
             define(this, "m", { value: proxiedModuleFactories });
 
@@ -232,21 +228,6 @@ define(Function.prototype, "m", {
 
 // The proxy for patching eagerly and/or wrapping factories in their proxy.
 const moduleFactoriesHandler: ProxyHandler<AnyWebpackRequire["m"]> = {
-    /*
-    If Webpack ever decides to set module factories using the variable of the modules object directly instead of wreq.m, we need to switch the proxy to the prototype
-    and that requires defining additional traps for keeping the object working
-
-    // Proxies on the prototype don't intercept "get" when the property is in the object itself. But in case it isn't we need to return undefined,
-    // to avoid Reflect.get having no effect and causing a stack overflow
-    get(target, p, receiver) {
-        return undefined;
-    },
-    // Same thing as get
-    has(target, p) {
-        return false;
-    },
-    */
-
     get(target, p, receiver) {
         if (p === SYM_ORIGINAL_MODULE_FACTORIES) {
             return target;
