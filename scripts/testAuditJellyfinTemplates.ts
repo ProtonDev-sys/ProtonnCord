@@ -5,10 +5,9 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 async function activityName(template: string, item: Record<string, unknown>, privacy = false) {
     const config = {
@@ -22,15 +21,11 @@ async function activityName(template: string, item: Record<string, unknown>, pri
         "./polling": { createPresencePolling: () => ({}) },
         "./assetCache": { getCachedApplicationAsset: async () => "fixture-asset" }
     };
-    const source = readFileSync("src/equicordplugins/richPresence/services/jellyfin.ts", "utf8");
-    const code = transpileModule(source + "\nexport { getActivity };", {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
-    }).outputText;
-    const api = runInNewContext(code + "\nexports;", {
-        exports: {}, require(name: string) { assert.ok(name in mocks, name); return mocks[name]; },
+    const api = loadTestModule("src/equicordplugins/richPresence/services/jellyfin.ts", mocks, {
+        require(name: string) { assert.ok(name in mocks, name); return mocks[name]; },
         fetch: async () => ({ ok: true, headers: { get: () => "application/json" },
             json: async () => [{ UserId: "fixture", NowPlayingItem: { Type: "Audio", ...item } }] })
-    });
+    }, "\nexport { getActivity };", { compilerOptions: { jsx: undefined }, mockImports: false });
     return (await api.getActivity(config, { signal: new AbortController().signal, isCurrent: () => true, wait: (work: Promise<unknown>) => work })).name;
 }
 

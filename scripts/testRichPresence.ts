@@ -32,12 +32,7 @@ function presetFixture(initial: unknown = undefined) {
         },
         "@utils/misc": { isObject: (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) }
     };
-    const code = transpileModule(readFileSync("src/plugins/customRPC/presets.ts", "utf8"), {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
-    }).outputText;
-    const presets: typeof import("../src/plugins/customRPC/presets") = runInNewContext(code + "\nexports;", {
-        exports: {}, require(name: string) { assert.ok(name in mocks, name); return mocks[name]; }
-    });
+    const presets: typeof import("../src/plugins/customRPC/presets") = loadMusicSource("src/plugins/customRPC/presets.ts", mocks);
     return { presets, state };
 }
 
@@ -145,14 +140,10 @@ function fixture(platform: "browser" | "equibop" | "vesktop" | "legcord" = "brow
             Toasts: { show() {}, genId: () => "toast", Type: { SUCCESS: "success" }, Position: { BOTTOM: 1 } }
         }
     };
-    const code = transpileModule(readFileSync("src/plugins/arRPC.web/index.tsx", "utf8"), {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    const plugin = runInNewContext(code + "\nexports.default;", {
-        exports: {}, IS_EQUIBOP: platform === "equibop", IS_VESKTOP: platform === "vesktop",
+    const plugin = loadMusicSource("src/plugins/arRPC.web/index.tsx", mocks, {
+        IS_EQUIBOP: platform === "equibop", IS_VESKTOP: platform === "vesktop",
         window: platform === "legcord" ? { legcord: {} } : {}, WebSocket: FakeSocket,
-        require(name: string) { assert.ok(name in mocks, name); return mocks[name]; }
-    });
+    }).default;
     const event = (value: unknown) => plugin.handleEvent({ data: JSON.stringify(value) });
     return { plugin, event, actions, assets, notices, sockets, errors, controls };
 }
@@ -443,15 +434,11 @@ function customRpcFixture() {
         },
         "./RpcSettings": {}
     };
-    const code = transpileModule(readFileSync("src/plugins/customRPC/index.tsx", "utf8"), {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    const module = runInNewContext(code + "\nexports;", {
-        exports: {}, performance: { timeOrigin: initialTime - 10_000 + 0.75 },
+    const module = loadMusicSource("src/plugins/customRPC/index.tsx", mocks, {
+        performance: { timeOrigin: initialTime - 10_000 + 0.75 },
         Date: class extends Date { constructor(value = state.now) { super(value); } static now() { return state.now; } },
         setTimeout(callback: () => void, delay: number) { timers.set(++timerId, { callback, delay, at: state.now + delay }); return timerId; },
         clearTimeout(id?: number) { if (id !== undefined) timers.delete(id); },
-        require(name: string) { assert.ok(name in mocks, name); return mocks[name]; }
     });
     function runNext() {
         const next = [...timers].sort((a, b) => a[1].at - b[1].at)[0];

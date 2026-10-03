@@ -98,6 +98,46 @@ const OTHER_CHANNEL_ID = "200000000000000002";
 const NOW = 1_800_000_000_000;
 const MESSAGE_ID = "qqqqqqqqqqqqqqqqqqqqqg";
 
+function attachmentUpload(file: File, uniqueId: string, durationSecs?: number, waveform?: string) {
+    return Object.assign(new EventEmitter(), {
+        channelId: CHANNEL_ID,
+        classification: "unknown",
+        clip: null,
+        contentHash: null,
+        currentSize: file.size,
+        description: null,
+        durationSecs,
+        etag: undefined,
+        error: null,
+        filename: file.name,
+        id: "0",
+        isImage: false,
+        status: "NOT_STARTED" as const,
+        isThumbnail: false,
+        isVideo: false,
+        uploadedFilename: "",
+        responseUrl: "",
+        item: { file, origin: "test", platform: CloudUploadPlatform.WEB },
+        loaded: 0,
+        mimeType: file.type,
+        origin: "test",
+        postCompressionSize: undefined,
+        preCompressionSize: file.size,
+        sensitive: false,
+        spoiler: false,
+        startTime: 0,
+        uniqueId,
+        waveform,
+        async upload() { },
+        cancel() { },
+        async delete() { },
+        getSize() { return this.currentSize; },
+        async maybeConvertToWebP() { },
+        removeFromMsgDraft() { },
+        setFilename(value: string) { this.filename = value; },
+    }) satisfies CloudUpload;
+}
+
 type MutableJson = Record<string, any>;
 
 function clone<T>(value: T): T {
@@ -682,43 +722,7 @@ async function main(): Promise<void> {
     );
     const largeMessageText = `large encrypted body ${"text ".repeat(600)}`;
     const largeMessageFile = new File([largeMessageText], DETACHED_TEXT_FILENAME, { type: DETACHED_TEXT_MIME_TYPE });
-    const largeMessageUpload = Object.assign(new EventEmitter(), {
-        channelId: CHANNEL_ID,
-        classification: "unknown",
-        clip: null,
-        contentHash: null,
-        currentSize: largeMessageFile.size,
-        description: null,
-        durationSecs: undefined,
-        etag: undefined,
-        error: null,
-        filename: largeMessageFile.name,
-        id: "0",
-        isImage: false,
-        status: "NOT_STARTED" as const,
-        isThumbnail: false,
-        isVideo: false,
-        uploadedFilename: "",
-        responseUrl: "",
-        item: { file: largeMessageFile, origin: "test", platform: CloudUploadPlatform.WEB },
-        loaded: 0,
-        mimeType: largeMessageFile.type,
-        origin: "test",
-        postCompressionSize: undefined,
-        preCompressionSize: largeMessageFile.size,
-        sensitive: false,
-        spoiler: false,
-        startTime: 0,
-        uniqueId: "test",
-        waveform: undefined,
-        async upload() { },
-        cancel() { },
-        async delete() { },
-        getSize() { return this.currentSize; },
-        async maybeConvertToWebP() { },
-        removeFromMsgDraft() { },
-        setFilename(value: string) { this.filename = value; },
-    }) satisfies CloudUpload;
+    const largeMessageUpload = attachmentUpload(largeMessageFile, "test");
     const largeMessageMetadata = {
         description: null,
         duration: null,
@@ -783,43 +787,7 @@ async function main(): Promise<void> {
     assert.equal(isValidAttachmentWaveform(voiceWaveform.replace(/=+$/u, "")), false, "non-canonical voice waveforms are rejected");
     const voiceBytes = new Uint8Array([0x4f, 0x67, 0x67, 0x53, 0, 1, 2, 3, 4, 5]);
     const voiceFile = new File([voiceBytes], "voice-message.ogg", { type: "audio/ogg; codecs=opus" });
-    const voiceUpload = Object.assign(new EventEmitter(), {
-        channelId: CHANNEL_ID,
-        classification: "unknown",
-        clip: null,
-        contentHash: null,
-        currentSize: voiceFile.size,
-        description: null,
-        durationSecs: 1.25,
-        etag: undefined,
-        error: null,
-        filename: voiceFile.name,
-        id: "0",
-        isImage: false,
-        status: "NOT_STARTED" as const,
-        isThumbnail: false,
-        isVideo: false,
-        uploadedFilename: "",
-        responseUrl: "",
-        item: { file: voiceFile, origin: "test", platform: CloudUploadPlatform.WEB },
-        loaded: 0,
-        mimeType: voiceFile.type,
-        origin: "test",
-        postCompressionSize: undefined,
-        preCompressionSize: voiceFile.size,
-        sensitive: false,
-        spoiler: false,
-        startTime: 0,
-        uniqueId: "voice-test",
-        waveform: voiceWaveform,
-        async upload() { },
-        cancel() { },
-        async delete() { },
-        getSize() { return this.currentSize; },
-        async maybeConvertToWebP() { },
-        removeFromMsgDraft() { },
-        setFilename(value: string) { this.filename = value; },
-    }) satisfies CloudUpload;
+    const voiceUpload = attachmentUpload(voiceFile, "voice-test", 1.25, voiceWaveform);
     const preparedVoice = await prepareEncryptedAttachments([voiceUpload], "", CHANNEL_ID, ALICE_ID);
     const voiceDescriptor = parseSecurePlaintext(preparedVoice.plaintext).attachments;
     assert.ok(voiceDescriptor, "encrypted voice messages carry an authenticated attachment descriptor");
