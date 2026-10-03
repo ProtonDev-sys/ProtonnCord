@@ -10,6 +10,22 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
+import { createMessageDiff, createWordDiff } from "../src/plugins/messageLogger/diffUtils";
+
+test("message diffs preserve tie order, Unicode tokens and reconstruct both messages", () => {
+    assert.deepEqual(createWordDiff("ab", "ba"), [
+        { type: "added", text: "b" }, { type: "unchanged", text: "a" }, { type: "removed", text: "b" }
+    ]);
+    for (const [before, after] of [["", ""], ["", "😀"], ["😀", ""], ["a😀b", "a😎b"],
+        ["<a:old:123> <@!123>", "<a:new:456> <@&456>"], ["<:x:1> \ud800x", "<:y:2> \udc00y"], ["a<#1>b", "a<#2>b"]]) {
+        const parts = createMessageDiff(before, after);
+        assert.equal(parts.filter(part => part.type !== "added").map(part => part.text).join(""), before);
+        assert.equal(parts.filter(part => part.type !== "removed").map(part => part.text).join(""), after);
+    }
+    const same = "😀<@123>".repeat(1000);
+    assert.deepEqual(createWordDiff(same, same), [{ type: "unchanged", text: same }]);
+});
+
 function load(path: string, mocks: Record<string, unknown>, globals: Record<string, unknown> = {}, result = "exports.default") {
     const code = transpileModule(readFileSync(path, "utf8"), {
         fileName: path,

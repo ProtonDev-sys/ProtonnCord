@@ -1,18 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
-import { runInNewContext } from "node:vm";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { createRendererRuntime } from "../src/runtime/bootstrap";
 import { createSettingsPersistence } from "../src/shared/settingsPersistence";
+import { loadTestModule } from "./utils/loadTestModule";
 
 function loadModule(path: string, globals: Record<string, unknown> = {}) {
-    const code = transpileModule(readFileSync(path, "utf8"), {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
-    }).outputText;
-    return runInNewContext(`${code}\nexports;`, { exports: {}, ...globals });
+    return loadTestModule(path, {}, globals, "", { compilerOptions: { jsx: undefined }, mockImports: false });
 }
 
 test("single-record updates abort when updater or put throws", async () => {

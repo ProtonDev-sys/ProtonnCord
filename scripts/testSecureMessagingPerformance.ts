@@ -207,8 +207,8 @@ function testSourceBoundaries(): void {
         "an account reconnect invalidates render caches once",
     );
 
-    assert.match(crypto, /return exactArrayBuffer\(value\)/);
-    assert.match(attachments, /return exactArrayBuffer\(value\)/);
+    assert.match(crypto, /import \{ exactArrayBuffer as cryptoBytes \} from "\.\/exactArrayBuffer";/);
+    assert.match(attachments, /import \{ exactArrayBuffer as cryptoBytes \} from "\.\/exactArrayBuffer";/);
     assert.match(packageJson, /"testSecureMessagingPerformance": "tsx scripts\/testSecureMessagingPerformance\.ts && tsx scripts\/testSecureMessagingReceive\.ts"/);
     assert.match(workflow, /Test Secure Messaging performance boundaries/);
     assert.equal(

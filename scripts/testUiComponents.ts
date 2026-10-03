@@ -39,6 +39,22 @@ function loadComponent(path: string, hooks: Record<string, unknown> = {}, additi
     });
 }
 
+test("intl hashing preserves zero, negative and byte-boundary digests", () => {
+    let digest = 0n;
+    const { runtimeHashMessageKey } = loadComponent("src/utils/intlHash.ts", {}, { "@intrnl/xxhash64": { hash: () => digest } });
+    for (const [value, expected] of [[0n, "AAAAAA"], [-1n, "AAAAAA"], [1n, "AQAAAA"], [255n, "/wAAAA"], [256n, "AAEAAA"]] as const) {
+        digest = value;
+        assert.equal(runtimeHashMessageKey("fixture"), expected);
+    }
+});
+
+test("verbose durations retain zero gaps, week remainders and short units", () => {
+    const { formatDurationVerbose } = loadComponent("src/utils/text.ts", { moment }, { "./guards": { isTruthy: Boolean } });
+    for (const [seconds, expected] of [[0, "0 seconds"], [1, "1 second"], [60, "1 minute"], [3601, "1 hour, 0 minutes and 1 second"], [604800, "1 week"], [691201, "1 week, 1 day, 0 hours, 0 minutes and 1 second"]] as const)
+        assert.equal(formatDurationVerbose(seconds, "seconds"), expected);
+    assert.equal(formatDurationVerbose(3601, "seconds", true), "1 h, 0 m and 1 s");
+});
+
 function decorFixture() {
     const scheduled = new Map<() => Promise<void>, number>();
     const requests: { ids: string[]; signal?: AbortSignal; resolve: (result: Record<string, string | null>) => void; reject: (error: Error) => void; }[] = [];

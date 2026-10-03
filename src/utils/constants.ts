@@ -1428,19 +1428,13 @@ export const EquicordDevs = Object.freeze({
     },
 } satisfies Record<string, Dev>);
 
-// iife so #__PURE__ works correctly
-export const VencordDevsById = /* #__PURE__*/ (() =>
-    Object.freeze(Object.fromEntries(
-        Object.entries(Devs)
-            .filter(d => d[1].id !== 0n)
-            .map(([_, v]) => [v.id, v] as const)
-    ))
-)() as Record<string, Dev>;
+function indexDevelopers(developers: Record<string, Dev>): Record<string, Dev> {
+    const byId: Record<string, Dev> = {};
+    for (const developer of Object.values(developers)) {
+        if (developer.id !== 0n) byId[String(developer.id)] = developer;
+    }
+    return Object.freeze(byId);
+}
 
-export const EquicordDevsById = /* #__PURE__*/ (() =>
-    Object.freeze(Object.fromEntries(
-        Object.entries(EquicordDevs)
-            .filter(d => d[1].id !== 0n)
-            .map(([_, v]) => [v.id, v] as const)
-    ))
-)() as Record<string, Dev>;
+export const VencordDevsById = /* #__PURE__*/ indexDevelopers(Devs);
+export const EquicordDevsById = /* #__PURE__*/ indexDevelopers(EquicordDevs);

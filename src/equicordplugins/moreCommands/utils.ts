@@ -181,7 +181,10 @@ export function selectRandomElement(arr) {
     return arr[randomIndex];
 }
 export const isOneCharacterString = (str: string): boolean => {
-    return str.split("").every((char: string) => char === str[0]);
+    for (let index = 1; index < str.length; index++) {
+        if (str[index] !== str[0]) return false;
+    }
+    return true;
 };
 
 export function replaceString(inputString) {
@@ -238,10 +241,7 @@ export function uwuifyArray(arr) {
 
 export function getFavoriteGif(opts: CommandArgument[], other: CommandContext) {
     const frecencyStore = UserSettingsActionCreators.FrecencyUserSettingsActionCreators.getCurrentValue();
-    const gifsArray = Object.keys(frecencyStore?.favoriteGifs?.gifs ?? {});
-    const chosenGifUrl = gifsArray[Math.floor(Math.random() * gifsArray.length)];
-
-    return chosenGifUrl ?? "";
+    return selectRandomElement(Object.keys(frecencyStore?.favoriteGifs?.gifs ?? {})) ?? "";
 }
 
 export function calculateAffinityScore(affinity): number {
@@ -265,26 +265,7 @@ export function calculateAffinityScore(affinity): number {
 
 // stolen from petpet thanks vee
 export function loadFriendImage(source: File | string): Promise<HTMLImageElement> {
-    const isFile = source instanceof File;
-    const url = isFile ? URL.createObjectURL(source) : source;
-
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        const revokeUrl = () => {
-            if (isFile) URL.revokeObjectURL(url);
-        };
-
-        img.onload = () => {
-            revokeUrl();
-            resolve(img);
-        };
-        img.onerror = (event, _source, _lineno, _colno, err) => {
-            revokeUrl();
-            reject(err || event);
-        };
-        img.crossOrigin = "anonymous";
-        img.src = url;
-    });
+    return loadImageWithCors(source, "anonymous");
 }
 
 export function generatePoissonDiskPosition(
@@ -373,6 +354,10 @@ export function calculateCanvasSize(userCount: number, avatarSize: number): { wi
 export const FRAMES = 1;
 
 export function loadImage(source: File | string) {
+    return loadImageWithCors(source, "Anonymous");
+}
+
+function loadImageWithCors(source: File | string, crossOrigin: string): Promise<HTMLImageElement> {
     const isFile = source instanceof File;
     const url = isFile ? URL.createObjectURL(source) : source;
 
@@ -390,7 +375,7 @@ export function loadImage(source: File | string) {
             revokeUrl();
             reject(err || event);
         };
-        img.crossOrigin = "Anonymous";
+        img.crossOrigin = crossOrigin;
         img.src = url;
     });
 }
