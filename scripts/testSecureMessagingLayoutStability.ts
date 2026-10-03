@@ -26,9 +26,7 @@ async function main(): Promise<void> {
     assert.equal(compensatedScrollTop(500, 10, 110), 600);
     assert.equal(compensatedScrollTop(500, Number.NaN, 110), 500);
 
-    const originalDocument = globalThis.document;
-    const originalGetComputedStyle = globalThis.getComputedStyle;
-    const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+    const originalGlobals = ["document", "getComputedStyle", "requestAnimationFrame"].map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
     const frames: FrameRequestCallback[] = [];
     let anchorContentTop = 510;
 
@@ -94,9 +92,10 @@ async function main(): Promise<void> {
         assert.equal(scroller.scrollTop, 700, "the stabilizer must not fight direct history scrolling");
         assert.equal(frames.length, 0);
     } finally {
-        Object.defineProperty(globalThis, "document", { configurable: true, value: originalDocument });
-        Object.defineProperty(globalThis, "getComputedStyle", { configurable: true, value: originalGetComputedStyle });
-        Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value: originalRequestAnimationFrame });
+        for (const [name, descriptor] of originalGlobals) {
+            if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+            else Reflect.deleteProperty(globalThis, name);
+        }
     }
 
     const attachmentCache = readFileSync(new URL(

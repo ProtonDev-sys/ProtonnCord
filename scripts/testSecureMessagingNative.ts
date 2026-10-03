@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import { build, type Plugin } from "esbuild";
 import type { IpcMainInvokeEvent } from "electron";
 
+import { withTimeout } from "../src/debug/promiseTimeout";
 import {
     attachmentBundleRoot,
     attachmentBundleRootFromDigests,
@@ -40,6 +41,7 @@ const DM_CHANNEL_ID = "200000000000000001";
 const GROUP_CHANNEL_ID = "200000000000000002";
 const OUTSIDER_CHANNEL_ID = "200000000000000003";
 const DISCORD_EVENT = discordEvent("https://discord.com/channels/@me/200000000000000001");
+let unexpectedFetches = 0;
 
 class AuthenticatedProtector {
     available = true;
@@ -50,10 +52,9 @@ class AuthenticatedProtector {
     failVaultDirectorySync = false;
     finalFileSyncCalls = 0;
     parentDirectorySyncCalls = 0;
-    pauseVaultStatAt: number | null = null;
+    pauseVaultSignatureAfterRead = false;
     resumeVaultStat: Promise<void> | null = null;
     resumeVaultWrite: Promise<void> | null = null;
-    vaultStatCalls = 0;
     vaultStatPaused: (() => void) | null = null;
     vaultWritePaused: (() => void) | null = null;
     vaultDirectorySyncCalls = 0;
@@ -263,12 +264,19 @@ const runtimeStubs: Plugin = {
             contents: `
                 import * as fs from "node:fs/promises";
                 export * from "node:fs/promises";
+                export async function readFile(path, options) {
+                    const value = await fs.readFile(path, options);
+                    const protector = globalThis.__secureMessagingNativeHarness.protector;
+                    if (protector.vaultStatPaused && String(path).replaceAll("\\\\", "/").endsWith("/secure-messaging/vault.bin"))
+                        protector.pauseVaultSignatureAfterRead = true;
+                    return value;
+                }
                 export async function stat(path, options) {
                     const value = await fs.stat(path, options);
                     const protector = globalThis.__secureMessagingNativeHarness.protector;
                     if (String(path).replaceAll("\\\\", "/").endsWith("/secure-messaging/vault.bin")) {
-                        protector.vaultStatCalls++;
-                        if (protector.vaultStatCalls === protector.pauseVaultStatAt) {
+                        if (options?.bigint && protector.pauseVaultSignatureAfterRead) {
+                            protector.pauseVaultSignatureAfterRead = false;
                             protector.vaultStatPaused?.();
                             await protector.resumeVaultStat;
                         }
@@ -382,6 +390,20 @@ function pauseNextVaultWrite(): { release(): void; started: Promise<void>; } {
     };
 }
 
+async function lockDuringBarrier<Result>(native: NativeModule, barrier: { release(): void; started: Promise<void>; }, pending: Promise<Result>, label: string) {
+    let lock: ReturnType<NativeModule["lockSecurityKeyVault"]> | undefined;
+    const drain = pending.then(() => undefined, () => undefined);
+    try {
+        await withTimeout(Promise.race([barrier.started, pending.then(() => { throw new Error(`Fixture: ${label} settled before its hook`); })]), 5_000, `Fixture watchdog: ${label} hook did not start`);
+        lock = native.lockSecurityKeyVault(DISCORD_EVENT);
+        barrier.release();
+        return await withTimeout(Promise.all([pending, lock]), 5_000, `Fixture watchdog: ${label} race did not settle`);
+    } finally {
+        barrier.release();
+        await withTimeout(Promise.allSettled([drain, lock]), 5_000, `Fixture watchdog: ${label} did not drain`).catch(() => undefined);
+    }
+}
+
 async function createAnnouncement(native: NativeModule, userId: string): Promise<string> {
     const result = await native.createAnnouncement(DISCORD_EVENT, userId);
     expectStatus(result, "created", `create announcement for ${userId}`);
@@ -435,12 +457,12 @@ async function testInvalidInputs(native: NativeModule): Promise<void> {
             "invalid_input",
             "a mismatched disposable data directory cannot query the Downloads path",
         );
+        process.env[dataDirectoryName] = harnessGlobal.__secureMessagingNativeHarness.dataDir;
         expectStatus(
             await native.getLiveTestDownloadsDirectory(hostileEvent),
             "invalid_input",
             "a non-Discord IPC caller cannot query the live-test Downloads path",
         );
-        process.env[dataDirectoryName] = harnessGlobal.__secureMessagingNativeHarness.dataDir;
         const downloadsDirectory = await native.getLiveTestDownloadsDirectory(DISCORD_EVENT);
         expectStatus(downloadsDirectory, "ready", "an acknowledged disposable profile can query its Downloads path");
         assert.equal(downloadsDirectory.path, resolve(harnessGlobal.__secureMessagingNativeHarness.dataDir, "Downloads"));
@@ -1129,6 +1151,7 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         }],
     });
     expectStatus(invalidAttachmentUrl, "invalid_input", "native attachment downloads reject non-Discord origins");
+    const fetchesBeforeMissingAttachment = unexpectedFetches;
     const oneOfTwoAttachments = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, {
         ...attachmentMessageInput,
         attachments: [{
@@ -1139,6 +1162,7 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         }],
     });
     expectStatus(oneOfTwoAttachments, "invalid_message", "missing ciphertext attachments fail before any download");
+    assert.equal(unexpectedFetches, fetchesBeforeMissingAttachment, "missing ciphertext attachments must not invoke fetch");
 
     const incomingAttachmentBytes = new TextEncoder().encode("authenticated incoming attachment bytes");
     const incomingAttachmentMaterial = generateAttachmentBundleMaterial(1);
@@ -2194,26 +2218,18 @@ async function testOneKeyIdentityLifecycle(bundlePath: string, root: string): Pr
 
         const setupStartedAt = Date.now();
         const setupBarrier = pauseNextOneKeyCipher();
-        const pendingSetup = native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID);
-        await setupBarrier.started;
-        const lockDuringSetup = native.lockSecurityKeyVault(DISCORD_EVENT);
-        setupBarrier.release();
-        const staleSetup = await pendingSetup;
+        const [staleSetup, lockDuringSetup] = await lockDuringBarrier(native, setupBarrier, native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID), "OneKey setup");
         expectStatus(staleSetup, "unavailable", "lock invalidates a pending OneKey setup ceremony");
         assert.equal(staleSetup.reason, "security_key_locked");
-        expectStatus(await lockDuringSetup, "not_configured", "lock completes before stale setup activation");
+        expectStatus(lockDuringSetup, "not_configured", "lock completes before stale setup activation");
         expectStatus(await native.getSecurityKeyVaultState(DISCORD_EVENT), "not_configured",
             "a stale setup ceremony cannot reactivate or protect the vault");
 
         const setupWriteBarrier = pauseNextVaultWrite();
-        const setupDuringSave = native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID);
-        await setupWriteBarrier.started;
-        const lockDuringSetupSave = native.lockSecurityKeyVault(DISCORD_EVENT);
-        setupWriteBarrier.release();
-        const canceledSetupSave = await setupDuringSave;
+        const [canceledSetupSave, lockDuringSetupSave] = await lockDuringBarrier(native, setupWriteBarrier, native.setupOneKeyVault(DISCORD_EVENT, ALICE_ID), "OneKey setup write");
         expectStatus(canceledSetupSave, "unavailable", "lock cancels setup after activation but before commit");
         assert.equal(canceledSetupSave.reason, "security_key_locked");
-        expectStatus(await lockDuringSetupSave, "not_configured", "lock completes after canceled setup commit");
+        expectStatus(lockDuringSetupSave, "not_configured", "lock completes after canceled setup commit");
         const canceledSetupStored = JSON.parse(protector.decryptString(await readFile(vaultPath))) as Record<string, unknown>;
         assert.equal("mode" in canceledSetupStored, false,
             "a canceled setup must not atomically replace the plaintext vault with a hardware envelope");
@@ -2261,14 +2277,10 @@ async function testOneKeyIdentityLifecycle(bundlePath: string, root: string): Pr
             "locked lookup treats an unknown conversation as unconfigured");
 
         const unlockBarrier = pauseNextOneKeyCipher();
-        const pendingUnlock = native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID);
-        await unlockBarrier.started;
-        const lockDuringUnlock = native.lockSecurityKeyVault(DISCORD_EVENT);
-        unlockBarrier.release();
-        const staleUnlock = await pendingUnlock;
+        const [staleUnlock, lockDuringUnlock] = await lockDuringBarrier(native, unlockBarrier, native.unlockSecurityKeyVault(DISCORD_EVENT, ALICE_ID), "OneKey unlock");
         expectStatus(staleUnlock, "unavailable", "lock invalidates a pending OneKey unlock ceremony");
         assert.equal(staleUnlock.reason, "security_key_locked");
-        expectStatus(await lockDuringUnlock, "locked", "lock completes before stale unlock activation");
+        expectStatus(lockDuringUnlock, "locked", "lock completes before stale unlock activation");
         expectStatus(await native.getSecurityKeyVaultState(DISCORD_EVENT), "locked",
             "a stale unlock ceremony cannot restore the cleared hardware session");
 
@@ -2335,18 +2347,18 @@ async function testOneKeyIdentityLifecycle(bundlePath: string, root: string): Pr
         let resumeVaultStat!: () => void;
         const vaultStatPaused = new Promise<void>(resolve => { protector.vaultStatPaused = resolve; });
         protector.resumeVaultStat = new Promise<void>(resolve => { resumeVaultStat = resolve; });
-        protector.pauseVaultStatAt = protector.vaultStatCalls + 4;
-        const concurrentMigration = native.getChatAccessState(DISCORD_EVENT, ALICE_ID);
-        await vaultStatPaused;
-        const concurrentLock = native.lockSecurityKeyVault(DISCORD_EVENT);
-        resumeVaultStat();
-        const interruptedMigration = await concurrentMigration;
+        const [interruptedMigration, concurrentLock] = await lockDuringBarrier(native, {
+            started: vaultStatPaused,
+            release() {
+                protector.pauseVaultSignatureAfterRead = false;
+                protector.resumeVaultStat = null;
+                protector.vaultStatPaused = null;
+                resumeVaultStat();
+            }
+        }, native.getChatAccessState(DISCORD_EVENT, ALICE_ID), "legacy-index vault signature after read");
         expectStatus(interruptedMigration, "unavailable", "concurrent lock interrupts legacy-index migration");
         assert.equal(interruptedMigration.reason, "security_key_locked");
-        expectStatus(await concurrentLock, "locked", "concurrent lock completes after guarded migration");
-        protector.pauseVaultStatAt = null;
-        protector.resumeVaultStat = null;
-        protector.vaultStatPaused = null;
+        expectStatus(concurrentLock, "locked", "concurrent lock completes after guarded migration");
         const preservedEnvelope = JSON.parse(protector.decryptString(await readFile(vaultPath))) as Record<string, unknown>;
         assert.equal(preservedEnvelope.mode, "security_key",
             "a concurrent memory lock must not downgrade the hardware envelope to plaintext");
@@ -2414,6 +2426,8 @@ async function main(): Promise<void> {
     const bundlePath = join(root, "secure-messaging-native.mjs");
     const linuxBundlePath = join(root, "secure-messaging-native-linux.mjs");
     const windowsBundlePath = join(root, "secure-messaging-native-windows.mjs");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => { unexpectedFetches++; throw new Error("Unexpected fixture fetch"); };
     try {
         await buildNativeBundle(bundlePath);
         await buildNativeBundle(linuxBundlePath, "linux");
@@ -2421,8 +2435,10 @@ async function main(): Promise<void> {
         await testStorageFailures(bundlePath, linuxBundlePath, windowsBundlePath, root);
         await testNativeLifecycle(bundlePath, join(root, "secure-messaging-live-lifecycle"));
         await testOneKeyIdentityLifecycle(windowsBundlePath, root);
+        assert.equal(unexpectedFetches, 0, "all native fixture requests must use scenario-owned fetch stubs");
         console.log("secure-messaging native IPC checks passed");
     } finally {
+        globalThis.fetch = originalFetch;
         await rm(root, { force: true, recursive: true });
     }
 }

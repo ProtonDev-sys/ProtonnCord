@@ -85,7 +85,10 @@ test("ClientTheme tolerates an unrelated stylesheet failure and rejects missing 
     await pending;
     assert.ok(good.styles.has("vc-clientTheme-overrides"));
     assert.equal(good.warnings.length, 1);
-    assert.doesNotMatch(good.styles.get("vc-clientTheme-vars")?.textContent ?? "", /NaN/);
+    const variables = good.styles.get("vc-clientTheme-vars");
+    assert.ok(variables);
+    assert.doesNotMatch(variables.textContent, /NaN/);
+    assert.match(variables.textContent, /--theme-l: 20\.588235294117645%;/);
     const missing = clientThemeFixture();
     const incomplete = missing.api.startClientTheme("313338");
     missing.requests[0].result.resolve(new Response("body { color: red; }"));
