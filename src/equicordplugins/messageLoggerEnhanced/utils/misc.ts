@@ -59,11 +59,6 @@ export const getMessageStatus = (message: LoggedMessageJSON) => {
 export const discordIdToDate = (id: string) => new Date((parseInt(id) / 4194304) + DISCORD_EPOCH);
 
 export const sortMessagesByDate = (timestampA: string, timestampB: string) => {
-    // very expensive
-    // const timestampA = discordIdToDate(a).getTime();
-    // const timestampB = discordIdToDate(b).getTime();
-    // return timestampB - timestampA;
-
     // newest first
     if (timestampA < timestampB) {
         return 1;
@@ -84,33 +79,28 @@ export function findLastIndex<T>(array: T[], predicate: (e: T, t: number, n: T[]
     return -1;
 }
 
-const getTimestamp = (timestamp: any): Date => {
-    return new Date(timestamp);
-};
-
 export const mapTimestamp = (m: any) => {
-    if (m.timestamp) m.timestamp = getTimestamp(m.timestamp);
-    if (m.editedTimestamp) m.editedTimestamp = getTimestamp(m.editedTimestamp);
+    if (m.timestamp) m.timestamp = new Date(m.timestamp);
+    if (m.editedTimestamp) m.editedTimestamp = new Date(m.editedTimestamp);
     if (m.embeds) m.embeds = m.embeds.map(e => sanitizeEmbed(m.channel_id, m.id, e));
     return m;
 };
 
 export const messageJsonToMessageClass = memoize((log: { message: LoggedMessageJSON; }) => {
-    // console.time("message populate");
     if (!log?.message) return null;
 
     const message: any = new MessageClass(log.message);
-    message.timestamp = getTimestamp(message.timestamp);
+    message.timestamp = new Date(message.timestamp);
 
     const editHistory = message.editHistory?.map(mapTimestamp);
     if (editHistory && editHistory.length > 0) {
         message.editHistory = editHistory;
     }
     if (message.editedTimestamp)
-        message.editedTimestamp = getTimestamp(message.editedTimestamp);
+        message.editedTimestamp = new Date(message.editedTimestamp);
 
     if (message.firstEditTimestamp)
-        message.firstEditTimestamp = getTimestamp(message.firstEditTimestamp);
+        message.firstEditTimestamp = new Date(message.firstEditTimestamp);
 
     message.author = UserStore.getUser(message.author.id) ?? new AuthorClass(message.author);
     message.author.nick = message.author.globalName ?? message.author.username;
@@ -121,9 +111,8 @@ export const messageJsonToMessageClass = memoize((log: { message: LoggedMessageJ
         message.poll.expiry = moment(message.poll.expiry);
 
     if (message.messageSnapshots)
-        message.messageSnapshots.map(m => mapTimestamp(m.message));
+        message.messageSnapshots.forEach(m => mapTimestamp(m.message));
 
-    // console.timeEnd("message populate");
     return message;
 });
 
