@@ -68,8 +68,7 @@ test("settings hooks retain subscriptions across equal path arrays and release o
         compilerOptions: { target: ScriptTarget.ES2022, module: ModuleKind.CommonJS }
     }).outputText;
     const settings = new SettingsStore({ first: 0, second: 0, nested: { value: 0 } });
-    let effectKey: unknown;
-    let initialized = false;
+    let effectDeps: unknown[] | undefined;
     let cleanup: (() => void) | undefined;
     let effects = 0;
     let renders = 0;
@@ -78,10 +77,9 @@ test("settings hooks retain subscriptions across equal path arrays and release o
         exports: {}, SettingsStore: settings,
         React: { useReducer: () => [null, forceUpdate] },
         useEffect(effect: () => () => void, deps: unknown[]) {
-            if (initialized && Object.is(effectKey, deps[0])) return;
+            if (effectDeps?.length === deps.length && deps.every((value, index) => Object.is(value, effectDeps?.[index]))) return;
             cleanup?.();
-            initialized = true;
-            effectKey = deps[0];
+            effectDeps = [...deps];
             effects++;
             cleanup = effect();
         }

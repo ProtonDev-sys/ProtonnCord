@@ -53,19 +53,24 @@ const electronStub: Plugin = {
 async function loadModule(): Promise<{ directory: string; module: SecurityKeyVaultModule; }> {
     const directory = await mkdtemp(join(tmpdir(), "pc-security-key-vault-"));
     const output = join(directory, "security-key-vault.mjs");
-    await build({
-        bundle: true,
-        entryPoints: [fileURLToPath(new URL(
-            "../src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts",
-            import.meta.url,
-        ))],
-        format: "esm",
-        outfile: output,
-        platform: "node",
-        plugins: [electronStub],
-        target: "node24",
-    });
-    return { directory, module: await import(pathToFileURL(output).href) as SecurityKeyVaultModule };
+    try {
+        await build({
+            bundle: true,
+            entryPoints: [fileURLToPath(new URL(
+                "../src/equicordplugins/secureMessaging.desktop/securityKeyVault.ts",
+                import.meta.url,
+            ))],
+            format: "esm",
+            outfile: output,
+            platform: "node",
+            plugins: [electronStub],
+            target: "node24",
+        });
+        return { directory, module: await import(pathToFileURL(output).href) as SecurityKeyVaultModule };
+    } catch (error) {
+        await rm(directory, { force: true, recursive: true }).catch(() => undefined);
+        throw error;
+    }
 }
 
 function profile(
@@ -511,6 +516,7 @@ async function main(): Promise<void> {
         assert.throws(() => module.createActiveOneKeyMobilePairing(localUserId, plaintextVault), /locked/u);
         key.fill(0);
     } finally {
+        module.clearSecurityKeyVaultSession();
         await rm(directory, { force: true, recursive: true });
     }
 
