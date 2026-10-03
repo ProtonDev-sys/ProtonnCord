@@ -49,7 +49,7 @@ const prepare = getJob("prepare");
 const versionPattern = new RegExp(prepare.match(/\[\[ "\$version" =~ (\S+) \]\]/u)![1]);
 for (const version of [packageJson.version, "1.2.3", "1.2.3.4"]) assert.match(version, versionPattern);
 for (const version of ["1.2", "1.2.3.4.5", "1.2.3-beta", "1.2.3;exit 0", ""]) assert.doesNotMatch(version, versionPattern);
-assert.ok(prepare.indexOf("- name: Create Tag") > prepare.indexOf("- name: Store release archives"),
+assert.ok(prepare.indexOf("- name: Store release archives") >= 0 && prepare.indexOf("- name: Create Tag") > prepare.indexOf("- name: Store release archives"),
     "failed builds and archive uploads must not consume the release version tag");
 assert.ok(prepare.includes('latest=${latest_tag:-v0.0.0}'), "repositories without version tags must use an explicit baseline");
 assert.match(prepare, /permissions:\s+contents: write/u, "only the preparation job may create the release tag");
