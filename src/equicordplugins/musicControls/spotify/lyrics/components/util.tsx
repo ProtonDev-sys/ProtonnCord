@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { followPlaybackPosition } from "@equicordplugins/musicControls/playbackPosition";
+import { followPlaybackPosition, getLyricIndexes } from "@equicordplugins/musicControls/playbackPosition";
 import { settings } from "@equicordplugins/musicControls/settings";
 import { SpotifyLrcStore } from "@equicordplugins/musicControls/spotify/lyrics/providers/store";
-import { SyncedLyric } from "@equicordplugins/musicControls/spotify/lyrics/providers/types";
 import { SpotifyStore } from "@equicordplugins/musicControls/spotify/SpotifyStore";
 import { classNameFactory } from "@utils/css";
 import { findCssClassesLazy } from "@webpack";
@@ -24,39 +23,6 @@ export function NoteSvg() {
         </svg>
     );
 }
-
-const getIndexes = (lyrics: SyncedLyric[], position: number, delay: number): [number | null, number | null] => {
-    const posInSec = (position + delay) / 1000;
-
-    let left = 0, right = lyrics.length - 1;
-    let currentIndex: number | null = null;
-
-    while (left <= right) {
-        const mid = Math.floor((left + right) / 2);
-        const curr = lyrics[mid];
-        const next = lyrics[mid + 1];
-
-        if (curr.time <= posInSec && (!next || next.time > posInSec)) {
-            currentIndex = mid;
-            break;
-        }
-
-        if (curr.time > posInSec) {
-            right = mid - 1;
-        } else {
-            left = mid + 1;
-        }
-    }
-
-    const nextIdx = currentIndex !== null ? currentIndex + 1 : left;
-    const nextLyricIdx = nextIdx < lyrics.length ? nextIdx : null;
-
-    if (currentIndex !== null && posInSec - lyrics[currentIndex].time > 8) {
-        return [null, nextLyricIdx];
-    }
-
-    return [currentIndex, nextLyricIdx];
-};
 
 export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
     const [track, storePosition, isPlaying] = useStateFromStores(
@@ -76,7 +42,7 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
 
     const lyricRefs = useMemo(() => currentLyrics?.map(() => React.createRef<HTMLDivElement>()) ?? [], [currentLyrics]);
     const [currLrcIndex, nextLyric] = useMemo(() => currentLyrics && position != null
-        ? getIndexes(currentLyrics, position, lyricDelay) : [null, null], [currentLyrics, position, lyricDelay]);
+        ? getLyricIndexes(currentLyrics, position, lyricDelay) : [null, null], [currentLyrics, position, lyricDelay]);
 
     useEffect(() => {
         const index = currLrcIndex ?? nextLyric;
