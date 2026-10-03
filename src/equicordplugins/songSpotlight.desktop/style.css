@@ -286,7 +286,8 @@
     }
 }
 
-.vc-songspotlight-song:hover .vc-songspotlight-song-player {
+.vc-songspotlight-song:hover .vc-songspotlight-song-player,
+.vc-songspotlight-song:focus-within .vc-songspotlight-song-player {
     opacity: 1;
 }
 

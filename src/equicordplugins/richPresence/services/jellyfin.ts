@@ -166,7 +166,7 @@ async function getActivity(store: SettingsStore, update: PresenceUpdate): Promis
 
     const assets = {
         large_image: !store.jf_privacyMode && mediaData.imageUrl
-            ? await update.wait(getCachedApplicationAsset(APPLICATION_ID, mediaData.imageUrl, update.signal)) : undefined,
+            ? await update.wait(getCachedApplicationAsset(APPLICATION_ID, mediaData.imageUrl, update.signal)).catch(() => undefined) : undefined,
         large_text: !store.jf_privacyMode ? mediaData.seriesName || mediaData.album || undefined : undefined,
     };
 

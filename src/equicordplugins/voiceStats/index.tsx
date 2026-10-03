@@ -31,26 +31,35 @@ let totalsDirty = false;
 let pluginStarted = false;
 let startGeneration = 0;
 let saveTail = Promise.resolve();
+let totalsOwnerId: string | null = null;
+const pendingTotals = new Map<string, Record<string, number>>();
 
 async function loadStoredTotals(generation: number) {
     await saveTail;
-    const saved = await get<Record<string, number>>(storageKey);
-    if (!saved || generation !== startGeneration) return;
-    for (const [userId, value] of Object.entries(saved)) {
+    const ownerId = totalsOwnerId;
+    if (!ownerId || generation !== startGeneration) return;
+    const key = `${storageKey}:${ownerId}`;
+    const saved = await get<Record<string, number>>(key);
+    if (generation !== startGeneration || ownerId !== UserStore.getCurrentUser()?.id) return;
+    for (const [userId, value] of Object.entries({ ...saved, ...pendingTotals.get(key) })) {
         if (Number.isSafeInteger(value) && value >= 0)
             totalsByUser.set(userId, Math.max(value, totalsByUser.get(userId) ?? 0));
     }
 }
 
 async function persistTotals() {
-    if (!totalsDirty) return;
-
-    totalsDirty = false;
-    const snapshot = Object.fromEntries(totalsByUser);
-    saveTail = saveTail.then(() => set(storageKey, snapshot)).catch(error => {
-        totalsDirty = true;
-        console.error("VoiceStats could not save totals", error);
-    });
+    if (totalsDirty && totalsOwnerId) {
+        totalsDirty = false;
+        pendingTotals.set(`${storageKey}:${totalsOwnerId}`, Object.fromEntries(totalsByUser));
+    }
+    for (const [key, snapshot] of pendingTotals) {
+        saveTail = saveTail.then(async () => {
+            await set(key, snapshot);
+            if (pendingTotals.get(key) === snapshot) pendingTotals.delete(key);
+        }).catch(error => {
+            console.error("VoiceStats could not save totals", error);
+        });
+    }
     await saveTail;
 }
 
@@ -70,6 +79,10 @@ function startSaveInterval() {
     if (saveIntervalId || sessionStarts.size === 0) return;
 
     saveIntervalId = setInterval(() => {
+        if (totalsOwnerId !== UserStore.getCurrentUser()?.id) {
+            stopTrackingChannel();
+            return;
+        }
         flushActiveSessions();
         void persistTotals();
     }, saveIntervalMs);
@@ -106,6 +119,7 @@ function stopTrackingChannel() {
 }
 
 function getLiveSeconds(userId: string): number {
+    if (totalsOwnerId !== UserStore.getCurrentUser()?.id) return 0;
     const stored = totalsByUser.get(userId) ?? 0;
     const startedAt = sessionStarts.get(userId);
     return startedAt ? stored + Math.floor((Date.now() - startedAt) / 1000) : stored;
@@ -166,6 +180,27 @@ const VoiceStatsSection = ErrorBoundary.wrap(({ userId, isSideBar }: { userId: s
     );
 }, { noop: true });
 
+async function initializeAccount() {
+    pluginStarted = false;
+    stopTrackingChannel();
+    void persistTotals();
+    const generation = ++startGeneration;
+    totalsOwnerId = UserStore.getCurrentUser()?.id ?? null;
+    totalsByUser.clear();
+    totalsDirty = false;
+
+    try { await loadStoredTotals(generation); }
+    catch (error) {
+        console.error("VoiceStats could not load totals", error);
+        return;
+    }
+    if (generation !== startGeneration || totalsOwnerId !== UserStore.getCurrentUser()?.id) return;
+    pluginStarted = true;
+
+    const channelId = SelectedChannelStore.getVoiceChannelId?.();
+    if (totalsOwnerId && channelId) startTrackingChannel(channelId, totalsOwnerId);
+}
+
 export default definePlugin({
     name: "VoiceStats",
     description: "Shows how long you've spent in voice with each user in their profile",
@@ -177,17 +212,21 @@ export default definePlugin({
         priority: 0,
     },
     flux: {
-        CONNECTION_OPEN() {
+        CONNECTION_OPEN: initializeAccount,
+        LOGOUT() {
+            pluginStarted = false;
+            startGeneration++;
             stopTrackingChannel();
-            const myId = UserStore.getCurrentUser()?.id;
-            const channelId = SelectedChannelStore.getVoiceChannelId?.();
-            if (pluginStarted && myId && channelId) startTrackingChannel(channelId, myId);
+            void persistTotals();
+            totalsOwnerId = null;
+            totalsByUser.clear();
+            totalsDirty = false;
         },
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
             if (!pluginStarted) return;
 
             const myId = UserStore.getCurrentUser()?.id;
-            if (!myId) return;
+            if (!myId || myId !== totalsOwnerId) return;
 
             for (const state of voiceStates) {
                 const { userId, channelId, oldChannelId } = state;
@@ -225,26 +264,15 @@ export default definePlugin({
         }
     },
 
-    async start() {
-        pluginStarted = false;
-        const generation = ++startGeneration;
-
-        try { await loadStoredTotals(generation); }
-        catch (error) { console.error("VoiceStats could not load totals", error); }
-        if (generation !== startGeneration) return;
-        pluginStarted = true;
-
-        const myId = UserStore.getCurrentUser()?.id;
-        if (!myId) return;
-
-        const channelId = SelectedChannelStore.getVoiceChannelId?.();
-        if (channelId) startTrackingChannel(channelId, myId);
-    },
+    start: initializeAccount,
 
     stop() {
         pluginStarted = false;
         startGeneration++;
         stopTrackingChannel();
         sessionStarts.clear();
+        totalsByUser.clear();
+        totalsOwnerId = null;
+        totalsDirty = false;
     }
 });

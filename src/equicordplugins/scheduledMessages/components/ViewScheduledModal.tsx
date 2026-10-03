@@ -8,7 +8,7 @@ import { Button } from "@components/Button";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { classNameFactory } from "@utils/css";
 import { RenderModalProps } from "@vencord/discord-types";
-import { ChannelStore, closeModal, Modal, openModal, showToast, Toasts, useState } from "@webpack/common";
+import { ChannelStore, closeModal, Modal, openModal, showToast, Toasts, UserStore, useState } from "@webpack/common";
 
 import { clearAllScheduledMessages, getChannelDisplayInfo, getScheduledMessages, removeScheduledMessage } from "../utils";
 import { CalendarIcon, TimerIcon } from "./Icons";
@@ -65,12 +65,11 @@ function ViewScheduledModalInner({ rootProps, close }: ViewScheduledModalProps) 
                 </div>
             ) : (
                 <div className={cl("message-list")}>
+                    <span>Messages send only from the account that scheduled them. Older messages without account ownership are paused; review and schedule them again manually if needed. Clear All removes every queued message across accounts.</span>
                     {messages.map(msg => {
                         const { name, avatar } = getChannelDisplayInfo(msg.channelId);
                         const channel = ChannelStore.getChannel(msg.channelId);
-                        if (!channel) return null;
-
-                        const isDM = channel.isPrivate();
+                        const isDM = channel?.isPrivate();
                         const displayContent = msg.content.length > 200
                             ? msg.content.slice(0, 200) + "..."
                             : msg.content;
@@ -89,6 +88,9 @@ function ViewScheduledModalInner({ rootProps, close }: ViewScheduledModalProps) 
                                         <span>{new Date(msg.scheduledTime).toLocaleString()}</span>
                                     </div>
                                     <div className={cl("message-content")}>{displayContent}</div>
+                                    {(!msg.ownerUserId || msg.ownerUserId !== UserStore.getCurrentUser()?.id) && (
+                                        <span>{msg.ownerUserId ? "Paused — scheduled by another account" : "Paused — account ownership unknown"}</span>
+                                    )}
                                 </div>
                                 <Button
                                     size="small"

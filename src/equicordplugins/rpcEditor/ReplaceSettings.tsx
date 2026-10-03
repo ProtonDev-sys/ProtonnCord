@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { Button } from "@components/Button";
 import { Card } from "@components/Card";
 import { CheckedTextInput } from "@components/CheckedTextInput";
 import { FormSwitch } from "@components/FormSwitch";
@@ -20,7 +21,18 @@ import { AppIdSetting, makeEmptyAppId } from ".";
 interface SettingsProps {
     appIds: AppIdSetting[];
     update: () => void;
-    save: () => void;
+    save: () => Promise<void>;
+}
+
+export function isValidStreamUrl(value: string): boolean {
+    try {
+        const url = new URL(value);
+        return ["http:", "https:"].includes(url.protocol)
+            && ["twitch.tv", "www.twitch.tv", "youtube.com", "www.youtube.com"].includes(url.hostname)
+            && !url.username && !url.password && /^\/\w+/.test(url.pathname);
+    } catch {
+        return false;
+    }
 }
 
 function isValidSnowflake(v: string) {
@@ -69,18 +81,31 @@ export function ReplaceTutorial() {
 }
 
 export function ReplaceSettings({ appIds, update, save }: SettingsProps) {
+    const [saveFailed, setSaveFailed] = React.useState(false);
+    async function persist() {
+        try {
+            await save();
+            setSaveFailed(false);
+        } catch {
+            setSaveFailed(true);
+        }
+    }
     async function onChange(val: string | boolean, index: number, key: string) {
         if (index === appIds.length - 1)
             appIds.push(makeEmptyAppId());
 
         appIds[index][key] = val;
 
-        save();
         update();
+        await persist();
     }
 
     return (
         <>
+            {saveFailed && <Paragraph>
+                Changes could not be saved. Your edits are still available here.
+                <Button onClick={() => { void persist(); }}>Retry saving</Button>
+            </Paragraph>}
             {
                 appIds.map((setting, i) =>
                     <Card style={{ padding: "1em", opacity: !setting.enabled ? "60%" : "" }} key={i}>
@@ -134,7 +159,7 @@ export function ReplaceSettings({ appIds, update, save }: SettingsProps) {
                                                 onChange(v, i, "newStreamUrl");
                                             }}
                                             validate={v => {
-                                                return /https?:\/\/(www\.)?(twitch\.tv|youtube\.com)\/\w+/.test(v) || "Invalid stream URL";
+                                                return isValidStreamUrl(v) || "Invalid stream URL";
                                             }}
                                         />
 

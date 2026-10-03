@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { pluginRequiresRestart, startPlugin, stopPlugin } from "@api/PluginManager";
 import { useSettings } from "@api/Settings";
 import { BaseText } from "@components/BaseText";
 import { Button } from "@components/Button";
@@ -18,6 +17,7 @@ import {
     SettingsTab as STab,
     wrapTab,
 } from "@components/settings/tabs/BaseTab";
+import { togglePlugin } from "@components/settings/tabs/plugins/pluginToggle";
 import { classes, isObjectEmpty } from "@utils/misc";
 import { Alerts, closeAllModals, NavigationRouter, Toasts, useEffect, useState } from "@webpack/common";
 
@@ -236,16 +236,14 @@ function UserPluginsTab() {
                                         <DeleteIcon />
                                     </button>}
                                     setEnabled={t => {
-                                        Vencord.Settings.plugins[pl.name].enabled = t;
-                                        if (pluginRequiresRestart(pl)) {
+                                        if (t === Vencord.Settings.plugins[pl.name].enabled) return;
+                                        togglePlugin(pl.name, () => {
                                             Toasts.show({
                                                 id: Toasts.genId(),
                                                 message: "Restart to apply changes!",
                                                 type: Toasts.Type.MESSAGE
                                             });
-                                        } else {
-                                            (t ? startPlugin : stopPlugin)(pl);
-                                        }
+                                        });
                                     }}
                                     footer={(
                                         <div className={cl("plugin-footer")}>

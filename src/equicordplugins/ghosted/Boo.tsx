@@ -33,6 +33,43 @@ const clearedChannelListeners = new Set<(channelId: string) => void>();
 
 let _booCount = 0;
 const listeners = new Set<(n: number) => void>();
+const expiryTimers = new Set<ReturnType<typeof setTimeout>>();
+const trackingListeners = new Set<() => void>();
+let trackingVersion = 0;
+let trackingAccountId: string | undefined;
+let trackingStopped = false;
+
+function resetGhostTracking() {
+    const channelIds = new Set([...countedChannels, ...clearedChannels.keys()]);
+    countedChannels.clear();
+    clearedChannels.clear();
+    for (const timer of expiryTimers) clearTimeout(timer);
+    expiryTimers.clear();
+    trackingVersion++;
+    setBooCount(0);
+    for (const listener of trackingListeners) listener();
+    for (const channelId of channelIds) {
+        for (const listener of clearedChannelListeners) listener(channelId);
+    }
+}
+
+export function syncGhostAccount() {
+    const accountId = UserStore.getCurrentUser()?.id;
+    if (accountId === trackingAccountId) return;
+    trackingAccountId = accountId;
+    resetGhostTracking();
+}
+
+export function startGhostTracking() {
+    trackingStopped = false;
+    syncGhostAccount();
+}
+
+export function stopGhostTracking() {
+    trackingStopped = true;
+    trackingAccountId = undefined;
+    resetGhostTracking();
+}
 
 export function getBooCount() {
     return _booCount;
@@ -101,9 +138,43 @@ export function Boo({ channel }: { channel: Channel; }) {
         isDataProcessed: !!lastMessage && !!currentUserId,
     };
     const [isCleared, setIsCleared] = useState(() => clearedChannels.has(id));
+    const [, wakeForExpiry] = useState(0);
 
     const lastMessageTimestampMs = lastMessage ? new Date(lastMessage.timestamp).getTime() : 0;
     const isInactive = !!lastMessage && maxInactiveTimeMs > 0 && Number.isFinite(lastMessageTimestampMs) && Date.now() - lastMessageTimestampMs > maxInactiveTimeMs;
+
+    useEffect(() => {
+        const listener = () => wakeForExpiry(value => value + 1);
+        trackingListeners.add(listener);
+        return () => { trackingListeners.delete(listener); };
+    }, []);
+
+    useEffect(() => {
+        syncGhostAccount();
+    }, [currentUserId]);
+
+    useEffect(() => {
+        if (trackingStopped || !currentUserId || !lastMessage || maxInactiveTimeMs <= 0 || !Number.isFinite(lastMessageTimestampMs)) return;
+        let timer: ReturnType<typeof setTimeout>;
+        const deadline = lastMessageTimestampMs + maxInactiveTimeMs + 1;
+        const schedule = () => {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) {
+                wakeForExpiry(value => value + 1);
+                return;
+            }
+            timer = setTimeout(() => {
+                expiryTimers.delete(timer);
+                if (!trackingStopped && currentUserId === UserStore.getCurrentUser()?.id) schedule();
+            }, Math.min(remaining, 2147483647));
+            expiryTimers.add(timer);
+        };
+        if (!isInactive) schedule();
+        return () => {
+            clearTimeout(timer);
+            expiryTimers.delete(timer);
+        };
+    }, [id, lastMessage?.id, lastMessageTimestampMs, maxInactiveTimeMs, currentUserId, trackingVersion]);
 
     // track if this channel was manually cleared
     useEffect(() => {
@@ -121,7 +192,7 @@ export function Boo({ channel }: { channel: Channel; }) {
     }, [id, lastMessage?.id]);
 
     useEffect(() => {
-        if (!state.isDataProcessed || !lastMessage) return;
+        if (trackingStopped || currentUserId !== UserStore.getCurrentUser()?.id || !state.isDataProcessed || !lastMessage) return;
 
         const isExempted = isChannelExempted(channel);
         let wasManuallyCleared = clearedChannels.has(id);
@@ -181,9 +252,9 @@ export function Boo({ channel }: { channel: Channel; }) {
                 setBooCount(getBooCount() + 1);
             }
         }
-    }, [state.isCurrentUser, state.isDataProcessed, id, lastMessage?.id, isInactive, exemptedChannels, ignoreGroupDms, ignoreBots]);
+    }, [state.isCurrentUser, state.isDataProcessed, currentUserId, id, lastMessage?.id, isInactive, exemptedChannels, ignoreGroupDms, ignoreBots, trackingVersion]);
 
-    if (!state.isDataProcessed || !currentUserId || !lastMessage || state.isCurrentUser || isChannelExempted(channel) || isCleared || (settings.store.ignoreBots && lastMessage.author.bot) || isInactive)
+    if (trackingStopped || !state.isDataProcessed || !currentUserId || !lastMessage || state.isCurrentUser || isChannelExempted(channel) || isCleared || (settings.store.ignoreBots && lastMessage.author.bot) || isInactive)
         return null;
 
     if (!settings.store.showDmIcons) return null;

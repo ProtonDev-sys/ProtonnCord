@@ -1356,7 +1356,7 @@ function normalizePrimaryService(primary: ServiceType, fileName: string): Servic
 
 function buildUploadOrder(primary: ServiceType, fileName: string): ServiceType[] {
     const disableFallbacks = Boolean((settings.store as { disableFallbacks?: boolean; }).disableFallbacks);
-    const effectivePrimary = normalizePrimaryService(primary, fileName);
+    const effectivePrimary = disableFallbacks ? primary : normalizePrimaryService(primary, fileName);
 
     const order: ServiceType[] = [effectivePrimary];
     if (disableFallbacks) {

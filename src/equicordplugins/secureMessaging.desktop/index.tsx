@@ -425,7 +425,7 @@ async function setScreenshotMode(enabled: boolean): Promise<boolean> {
     invalidateSecureRenderCaches();
     const applied = await applyScreenCaptureProtection(!enabled);
     if (generation !== screenCaptureProtectionGeneration) return false;
-    setScreenCaptureProtectionStatus(applied ? enabled ? "screenshot" : "ready" : enabled ? "ready" : "failed");
+    setScreenCaptureProtectionStatus(applied ? enabled ? "screenshot" : "ready" : "failed");
     MessageStore.emitChange();
     return applied;
 }
@@ -2102,6 +2102,7 @@ interface ConversationManagerProps {
 }
 
 function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = false }: ConversationManagerProps) {
+    const { externalLinkPreviews } = settings.use(["externalLinkPreviews"]);
     const context = currentSnapshot(channel);
     const [identity, setIdentity] = useState<IdentityResult | null>(null);
     const [conversation, setConversation] = useState<ConversationResult | null>(null);
@@ -2485,6 +2486,15 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                                 <BaseText size="sm" weight="semibold">Enable encryption</BaseText>
                             </Checkbox>
                             {conversation && <BaseText size="xs">{conversationStatusMessage(conversation)}</BaseText>}
+                        </section>
+
+                        <section className="pc-secure-modal-section">
+                            <Checkbox value={externalLinkPreviews} onChange={(_event, checked) => { settings.store.externalLinkPreviews = checked; }} size={20}>
+                                <BaseText size="sm" weight="semibold">Link and GIF previews</BaseText>
+                            </Checkbox>
+                            <BaseText size="xs" color="text-muted">
+                                Show previews for links such as GitHub and Twitter. This sends URLs from decrypted messages to Discord and preview providers for all encrypted chats.
+                            </BaseText>
                         </section>
 
                         <section className="pc-secure-modal-section">
@@ -3110,12 +3120,22 @@ const renderSecureMessageAccessory: MessageAccessoryFactory = props => {
     return preview ? null : <SecureMessageAccessory message={props.message} />;
 };
 
+function setEncryptedLinkPreviewsEnabled(enabled: boolean): void {
+    setExternalLinkPreviewsEnabled(enabled);
+    const channelId = SelectedChannelStore.getChannelId();
+    if (!channelId) return;
+    for (const message of MessageStore.getMessages(channelId)?._array ?? []) {
+        if (isEncryptedMessage(message.content)) updateMessage(channelId, message.id);
+    }
+}
+
 const settings = definePluginSettings({
     externalLinkPreviews: {
         type: OptionType.BOOLEAN,
+        displayName: "Link and GIF previews",
         description: "Allow link previews by sending decrypted URLs to Discord and preview providers, including while preparing a send.",
         default: false,
-        onChange: (enabled: boolean) => setExternalLinkPreviewsEnabled(enabled),
+        onChange: setEncryptedLinkPreviewsEnabled,
     },
 });
 
@@ -3480,7 +3500,7 @@ export default definePlugin({
 
     patchEncryptedAttachments(message: Message, owner: { forceUpdate(): void; }) {
         const ready = screenCaptureProtectionStatus === "ready";
-        if (!ready) pendingEncryptedRenderOwners.add(owner);
+        if (screenCaptureProtectionStatus === "pending") pendingEncryptedRenderOwners.add(owner);
         return patchEncryptedMessageAttachments(message, owner, ready);
     },
 
@@ -3559,13 +3579,13 @@ export default definePlugin({
 
     patchEncryptedEmbeds(message: Message, owner: { forceUpdate(): void; }) {
         const ready = screenCaptureProtectionStatus === "ready";
-        if (!ready) pendingEncryptedRenderOwners.add(owner);
+        if (screenCaptureProtectionStatus === "pending") pendingEncryptedRenderOwners.add(owner);
         return patchEncryptedMessageEmbeds(message, encryptedRenderCallback(owner), ready);
     },
 
     patchEncryptedStickers(message: Message, owner: { forceUpdate(): void; }) {
         const ready = screenCaptureProtectionStatus === "ready";
-        if (!ready) pendingEncryptedRenderOwners.add(owner);
+        if (screenCaptureProtectionStatus === "pending") pendingEncryptedRenderOwners.add(owner);
         return patchEncryptedMessageStickers(message, encryptedRenderCallback(owner), ready);
     },
 

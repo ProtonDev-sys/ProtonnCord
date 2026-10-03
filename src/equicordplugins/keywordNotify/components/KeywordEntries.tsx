@@ -21,6 +21,18 @@ import { FormGenericLabel } from "./FormGenericLabel";
 import { ListedIds } from "./ListedIds";
 import { ListPrioritySelector } from "./ListPrioritySelector";
 
+const keywordEntryKeys = new WeakMap<object, number>();
+let nextKeywordEntryKey = 0;
+
+function getKeywordEntryKey(entry: object) {
+    let key = keywordEntryKeys.get(entry);
+    if (key === undefined) {
+        key = nextKeywordEntryKey++;
+        keywordEntryKeys.set(entry, key);
+    }
+    return key;
+}
+
 export function KeywordEntries() {
     const update = useForceUpdater();
     const values = keywordEntries;
@@ -62,7 +74,7 @@ export function KeywordEntries() {
 
     const elements = keywordEntries.map((entry, i) => {
         return (
-                <Collapsible key={i} title={`Keyword Entry ${i + 1}`}>
+                <Collapsible key={getKeywordEntryKey(entry)} title={`Keyword Entry ${i + 1}`}>
                     <Flex flexDirection="row">
                         <div style={{ flexGrow: 1 }}>
                             <TextInput

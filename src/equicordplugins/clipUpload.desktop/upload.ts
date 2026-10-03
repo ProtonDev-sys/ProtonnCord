@@ -256,6 +256,7 @@ async function sendClipUpload(uploadFile: File, options: ClipUploadOptions, sign
     await uploadReservedClip(attachment, uploadFile, signal);
     signal.throwIfAborted();
 
+    showToast("Sending clip message. This final step cannot be canceled.", Toasts.Type.MESSAGE);
     const messageResponse = await RestAPI.post({
         url: Constants.Endpoints.MESSAGES(options.channelId),
         body: {
@@ -283,6 +284,7 @@ async function sendClipUpload(uploadFile: File, options: ClipUploadOptions, sign
         }
     }) as RestResponse;
 
+    signal.throwIfAborted();
     if (messageResponse.ok === false) throw messageResponse;
 }
 

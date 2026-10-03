@@ -71,7 +71,7 @@ export default definePlugin({
     start() {
         const amount = settings.store.enableShortHexCodes ? "{1,2}" : "{2}";
         const hex = {
-            reg: new RegExp("#(?:[0-9a-fA-F]{3})" + amount, "g"),
+            reg: new RegExp("#(?:[0-9a-fA-F]{3})" + amount + "(?![0-9a-fA-F])", "g"),
             type: ColorType.HEX
         };
         const index = regex.findIndex(entry => entry.type === ColorType.HEX);

@@ -20,9 +20,9 @@
 // @ts-check
 
 import { readFileSync } from "fs";
-import { appendFile, mkdir, readFile, rm, writeFile } from "fs/promises";
-import { join, resolve, sep } from "path";
-import Zip from "zip-local";
+import { appendFile, mkdir, readFile, readdir, rm, writeFile } from "fs/promises";
+import { zip } from "fflate";
+import { join, relative, resolve, sep } from "path";
 
 import { BUILD_TIMESTAMP, commonOpts, globPlugins, IS_DEV, IS_ANTI_CRASH_TEST, IS_REPORTER, IS_COMPANION_TEST, IS_STANDALONE, VERSION, commonRendererPlugins, buildOrWatchAll, stringifyValues } from "./common.mjs";
 
@@ -169,19 +169,20 @@ async function packageExtensions() {
 }
 
 /** @returns {Promise<void>} */
-function packExtension(source, destination) {
-    return new Promise((resolve, reject) => {
-        Zip.zip(join("dist/browser", source), (error, zip) => {
-            if (error) return reject(error);
-            try {
-                zip.compress().save(join("dist", destination), error => {
-                    if (error) return reject(error);
-                    console.info("Packed extension written to dist/" + destination);
-                    resolve();
-                });
-            } catch (error) {
-                reject(error);
-            }
-        });
+async function packExtension(source, destination) {
+    const directory = join("dist/browser", source);
+    /** @type {import("fflate").AsyncZippable} */
+    const entries = {};
+    for (const entry of await readdir(directory, { recursive: true, withFileTypes: true })) {
+        if (entry.isDirectory()) continue;
+        if (!entry.isFile()) throw new Error("Extension archives must contain only regular files.");
+        const path = join(entry.parentPath, entry.name);
+        entries[relative(directory, path).split(sep).join("/")] = await readFile(path);
+    }
+    /** @type {Promise<Uint8Array>} */
+    const archivePromise = new Promise((resolve, reject) => {
+        zip(entries, { level: 6 }, (error, data) => error ? reject(error) : resolve(data));
     });
+    await writeFile(join("dist", destination), await archivePromise);
+    console.info("Packed extension written to dist/" + destination);
 }

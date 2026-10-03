@@ -10,11 +10,12 @@ import { Margins } from "@utils/margins";
 import { RenderModalProps } from "@vencord/discord-types";
 import { Modal, SearchableSelect, useEffect, useMemo, useState } from "@webpack/common";
 
-import { DATASTORE_KEY, getSystemTimezone, resolveUserTimezone, settings, timezones } from ".";
+import { DATASTORE_KEY, getSystemTimezone, notifyTimezoneChange, resolveUserTimezone, settings, timezones } from ".";
 import { setTimezone, setUserDatabaseTimezone } from "./database";
 
 export async function setUserTimezone(userId: string, timezone: string | null) {
     timezones[userId] = timezone;
+    notifyTimezoneChange();
     await DataStore.set(DATASTORE_KEY, timezones);
 }
 

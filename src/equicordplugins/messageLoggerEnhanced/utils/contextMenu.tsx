@@ -142,13 +142,28 @@ export const contextMenuPath: NavContextMenuPatchCallback = (children, props) =>
                                 color="danger"
 
                                 action={async () => {
-                                    await MessageActions.deleteMessage(props.message.channel_id, props.message.id);
-                                    MessageActions._sendMessage(props.message.channel_id, {
-                                        "content": settings.store.hideMessageFromMessageLoggersDeletedMessage,
-                                        "tts": false,
-                                        "invalidEmojis": [],
-                                        "validNonShortcutEmojis": []
-                                    }, { nonce: props.message.id });
+                                    if (!currentUserId || currentUserId !== UserStore.getCurrentUser()?.id) return;
+                                    const { channel_id: channelId, id: messageId } = props.message;
+                                    let deleted = false;
+                                    try {
+                                        await MessageActions.deleteMessage(channelId, messageId);
+                                        deleted = true;
+                                        if (currentUserId !== UserStore.getCurrentUser()?.id) return;
+                                        const result = await MessageActions._sendMessage(channelId, {
+                                            "content": settings.store.hideMessageFromMessageLoggersDeletedMessage,
+                                            "tts": false,
+                                            "invalidEmojis": [],
+                                            "validNonShortcutEmojis": []
+                                        }, { nonce: messageId });
+                                        if (result?.ok === false) throw new Error("Replacement message was not sent.");
+                                    } catch {
+                                        if (currentUserId !== UserStore.getCurrentUser()?.id) return;
+                                        Toasts.show({
+                                            type: Toasts.Type.FAILURE,
+                                            message: deleted ? "Message deleted, but the replacement failed to send." : "Failed to delete the message.",
+                                            id: Toasts.genId()
+                                        });
+                                    }
                                 }}
                             />
                         </>

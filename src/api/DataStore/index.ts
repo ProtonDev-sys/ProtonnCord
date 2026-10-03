@@ -144,8 +144,14 @@ export function update<T = any>(
                 promisifyRequest(store.transaction).then(resolve, reject);
                 store.get(key).onsuccess = function () {
                     try {
-                        store.put(updater(this.result), key);
+                        const value = updater(this.result);
+                        if (value && typeof (value as any).then === "function") {
+                            void Promise.resolve(value).catch(() => undefined);
+                            throw new TypeError("DataStore update updater must be synchronous");
+                        }
+                        store.put(value, key);
                     } catch (err) {
+                        try { store.transaction.abort(); } catch {}
                         reject(err);
                     }
                 };

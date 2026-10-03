@@ -25,6 +25,12 @@ export default function SekaiStickersModal({ modalProps, settings }: { modalProp
     const [spaceSize, setSpaceSize] = React.useState<number>(36);
     const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
     const img = React.useMemo(() => new Image(), [character]);
+    const mounted = React.useRef(false);
+
+    React.useEffect(() => {
+        mounted.current = true;
+        return () => { mounted.current = false; };
+    }, []);
 
     React.useEffect(() => {
         let active = true;
@@ -128,6 +134,7 @@ export default function SekaiStickersModal({ modalProps, settings }: { modalProp
                         const channel = ChannelStore.getChannel(SelectedChannelStore.getChannelId());
                         if (!channel || !canvasRef.current) return;
                         canvasRef.current.toBlob(blob => {
+                            if (!mounted.current) return;
                             if (!blob) {
                                 showToast("Could not export the sticker image.", Toasts.Type.FAILURE);
                                 return;

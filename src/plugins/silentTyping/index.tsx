@@ -29,6 +29,7 @@ import { Channel } from "@vencord/discord-types";
 import { ChannelStore, FluxDispatcher, Menu, MessageStore, React, SelectedChannelStore, useEffect, UserStore } from "@webpack/common";
 
 const rerenderListeners = new Set<() => void>();
+const temporaryEnableTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function triggerChatToggleRerender() {
     for (const listener of rerenderListeners) {
@@ -380,6 +381,11 @@ export default definePlugin({
     isModified: true,
     settings,
 
+    stop() {
+        for (const timeout of temporaryEnableTimers.values()) clearTimeout(timeout);
+        temporaryEnableTimers.clear();
+    },
+
     shouldHideChatBarTypingIndicators,
     shouldHideMembersListTypingIndicators,
 
@@ -419,12 +425,19 @@ export default definePlugin({
                     ? settings.store.temporaryEnableThresholdServers
                     : settings.store.temporaryEnableThresholdDirectMessages;
 
+                const previousTimeout = temporaryEnableTimers.get(message.channel_id);
+                if (previousTimeout !== undefined) clearTimeout(previousTimeout);
+                temporaryEnableTimers.delete(message.channel_id);
+
                 if (threshold > 0) {
                     triggerChatToggleRerender();
 
-                    setTimeout(() => {
+                    const timeout = setTimeout(() => {
+                        if (temporaryEnableTimers.get(message.channel_id) !== timeout) return;
+                        temporaryEnableTimers.delete(message.channel_id);
                         triggerChatToggleRerender();
                     }, (threshold * 1000) + 25);
+                    temporaryEnableTimers.set(message.channel_id, timeout);
                 }
             }
         }

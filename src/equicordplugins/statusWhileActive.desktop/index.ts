@@ -12,6 +12,8 @@ import { VoiceState } from "@vencord/discord-types";
 import { UserStore, VoiceStateStore } from "@webpack/common";
 
 let savedStatus: string | null = null;
+let savedUserId: string | null = null;
+let appliedStatus: string | null = null;
 
 const StatusSettings = getUserSettingLazy<string>("status", "status")!;
 
@@ -41,21 +43,34 @@ const settings = definePluginSettings({
     }
 });
 
+function restoreStatus() {
+    if (savedStatus && savedUserId === UserStore.getCurrentUser()?.id && StatusSettings.getSetting() === appliedStatus) {
+        StatusSettings.updateSetting(savedStatus);
+    }
+    savedStatus = null;
+    savedUserId = null;
+    appliedStatus = null;
+}
+
 function setStatus(inVoiceChannel: boolean, status: string) {
+    const userId = UserStore.getCurrentUser()?.id;
+    if (savedUserId !== userId) {
+        savedStatus = null;
+        savedUserId = null;
+        appliedStatus = null;
+    }
+    if (!userId) return;
     if (inVoiceChannel) {
         if (status !== settings.store.statusToSet) {
             savedStatus = status;
+            savedUserId = userId;
+            appliedStatus = settings.store.statusToSet;
             StatusSettings?.updateSetting(settings.store.statusToSet);
         }
         return;
     }
 
-    if (savedStatus) {
-        if (savedStatus !== settings.store.statusToSet) {
-            StatusSettings?.updateSetting(savedStatus);
-        }
-        savedStatus = null;
-    }
+    restoreStatus();
 }
 
 function updateStatusForCurrentVoiceState() {
@@ -91,9 +106,6 @@ export default definePlugin({
     },
 
     stop() {
-        if (!savedStatus) return;
-
-        StatusSettings?.updateSetting(savedStatus);
-        savedStatus = null;
+        restoreStatus();
     }
 });

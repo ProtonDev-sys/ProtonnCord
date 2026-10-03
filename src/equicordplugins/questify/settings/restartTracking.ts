@@ -19,6 +19,19 @@ interface RestartPromptOptions {
 let restartDirty = false;
 let didAttachRestartListeners = false;
 const restartListenerCleanups: (() => void)[] = [];
+const deferredCallbacks = new Set<ReturnType<typeof setTimeout>>();
+let lifecycleGeneration = 0;
+
+export function deferSettingsCallback(callback: () => void): void {
+    if (!didAttachRestartListeners) return;
+
+    const generation = lifecycleGeneration;
+    const timer = setTimeout(() => {
+        deferredCallbacks.delete(timer);
+        if (didAttachRestartListeners && generation === lifecycleGeneration) callback();
+    }, 0);
+    deferredCallbacks.add(timer);
+}
 
 function getRestartSettingPaths(settings: RestartTrackingSettings): string[] {
     return Object.entries(settings.def)
@@ -42,6 +55,9 @@ export function initializeRestartTracking(settings: RestartTrackingSettings): vo
 }
 
 export function disposeRestartTracking(): void {
+    lifecycleGeneration++;
+    for (const timer of deferredCallbacks) clearTimeout(timer);
+    deferredCallbacks.clear();
     for (const cleanup of restartListenerCleanups.splice(0)) {
         cleanup();
     }
@@ -62,18 +78,19 @@ export function promptToRestartIfDirty({ onDecline }: RestartPromptOptions = {})
         return false;
     }
 
+    const generation = lifecycleGeneration;
     let didConfirm = false;
     let didDecline = false;
 
     function declineRestart(): void {
-        if (didConfirm || didDecline) {
+        if (didConfirm || didDecline || generation !== lifecycleGeneration || !didAttachRestartListeners) {
             return;
         }
 
         didDecline = true;
 
         if (onDecline) {
-            setTimeout(onDecline, 0);
+            deferSettingsCallback(onDecline);
         }
     }
 

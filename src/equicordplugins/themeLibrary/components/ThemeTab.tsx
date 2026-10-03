@@ -65,8 +65,8 @@ const SearchTags = {
 function ThemeTab() {
     const [themes, setThemes] = useState<Theme[]>([]);
     const [filteredThemes, setFilteredThemes] = useState<Theme[]>([]);
-    const currentSettings = useSettings(["themeLinks", "plugins.ThemeLibrary.hideWarningCard"]);
-    const { themeLinks } = currentSettings;
+    const currentSettings = useSettings(["themeLinks", "enabledThemeLinks", "enableOnlineThemes", "plugins.ThemeLibrary.hideWarningCard"]);
+    const { themeLinks, enabledThemeLinks, enableOnlineThemes } = currentSettings;
     const setThemeLinks = (links: string[]) => { Settings.themeLinks = links; };
     const [likedThemes, setLikedThemes] = useState<ThemeLikeProps>();
     const [searchValue, setSearchValue] = useState({ value: "", status: SearchStatus.ALL });
@@ -78,7 +78,7 @@ function ThemeTab() {
     const onStatusChange = (status: SearchStatus) => setSearchValue(prev => ({ ...prev, status }));
 
     const themeFilter = (theme: Theme) => {
-        const enabled = themeLinks.includes(`${apiUrl}/${theme.id}`);
+        const enabled = enableOnlineThemes !== false && enabledThemeLinks.includes(`${apiUrl}/${theme.id}`);
 
         const tags = new Set(theme.tags.map(tag => tag?.toLowerCase()));
 
@@ -148,7 +148,7 @@ function ThemeTab() {
             const filteredThemes = sortedThemes.filter(themeFilter);
             setFilteredThemes(filteredThemes);
         }
-    }, [searchValue, themes, themeLinks]);
+    }, [searchValue, themes, enabledThemeLinks, enableOnlineThemes]);
 
     return (
         <div>

@@ -13,8 +13,8 @@ import { useEffect, useRef, useState } from "@webpack/common";
 
 import { logger, themeRequest } from "./ThemeTab";
 
-export const LikesComponent = ({ themeId, likedThemes: initialLikedThemes }: { themeId: Theme["id"], likedThemes: ThemeLikeProps | undefined; }) => {
-    const [likesCount, setLikesCount] = useState(0);
+export const LikesComponent = ({ themeId, likedThemes: initialLikedThemes, fallbackLikes = 0 }: { themeId: Theme["id"], likedThemes: ThemeLikeProps | undefined; fallbackLikes?: number; }) => {
+    const [likesCount, setLikesCount] = useState(initialLikedThemes?.likes.find(like => String(like.themeId) === String(themeId))?.likes ?? fallbackLikes);
     const [likedThemes, setLikedThemes] = useState(initialLikedThemes);
     const debounce = useRef(false);
     const generation = useRef(0);
@@ -31,11 +31,11 @@ export const LikesComponent = ({ themeId, likedThemes: initialLikedThemes }: { t
     useEffect(() => {
         const likes = getThemeLikes(themeId);
         setLikesCount(likes);
-    }, [likedThemes, themeId]);
+    }, [likedThemes, themeId, fallbackLikes]);
 
     function getThemeLikes(themeId: Theme["id"]): number {
         const themeLike = likedThemes?.likes.find(like => String(like.themeId) === String(themeId));
-        return themeLike ? themeLike.likes : 0;
+        return themeLike ? themeLike.likes : fallbackLikes;
     }
 
     const handleLikeClick = async (themeId: Theme["id"]) => {

@@ -26,6 +26,8 @@ const SLOWMODE_BUFFER_MS = 250;
 const logger = new Logger("SplitLargeMessages");
 const splitModes = new Set<SplitMode>(["characters", "spaces", "newlines"]);
 const bypassMessageLengthLimit = () => true;
+let active = false;
+let generation = 0;
 
 const settings = definePluginSettings({
     sendDelay: {
@@ -90,11 +92,12 @@ function canSplitInChannel(channel: Channel | undefined) {
         && channel.rateLimitPerUser <= settings.store.slowmodeMax;
 }
 
-async function sendChunks(channelId: string, chunks: string[], delay: number) {
+async function sendChunks(channelId: string, chunks: string[], delay: number, isCurrent: () => boolean) {
     let sent = 0;
 
     try {
         for (const [index, chunk] of chunks.entries()) {
+            if (!isCurrent()) break;
             await sendMessage(channelId, { content: chunk }, true);
             sent++;
 
@@ -120,6 +123,10 @@ function restoreUnsentContent(channelId: string, chunks: string[], sent: number)
 }
 
 const listener: MessageSendListener = async (channelId, message) => {
+    const ownerId = UserStore.getCurrentUser()?.id;
+    const currentGeneration = generation;
+    if (!active || !ownerId) return;
+    const isCurrent = () => active && generation === currentGeneration && UserStore.getCurrentUser()?.id === ownerId;
     const limit = getMessageLimit();
     if (message.content.length <= limit) return;
 
@@ -136,8 +143,8 @@ const listener: MessageSendListener = async (channelId, message) => {
     const chunks = splitMessage(message.content, limit, getSplitMode(settings.store.splitMode));
     ComponentDispatch.dispatchToLastSubscribed("CLEAR_TEXT");
 
-    const sent = await sendChunks(channelId, chunks, getSendDelay(channel));
-    if (sent !== chunks.length) {
+    const sent = await sendChunks(channelId, chunks, getSendDelay(channel), isCurrent);
+    if (sent !== chunks.length && UserStore.getCurrentUser()?.id === ownerId) {
         restoreUnsentContent(channelId, chunks, sent);
         Toasts.show({
             message: `Only ${sent}/${chunks.length} message parts were sent.`,
@@ -159,10 +166,14 @@ export default definePlugin({
     onBeforeMessageSend: listener,
 
     start() {
+        active = true;
+        generation++;
         addMessageLengthBypassListener(bypassMessageLengthLimit);
     },
 
     stop() {
+        active = false;
+        generation++;
         removeMessageLengthBypassListener(bypassMessageLengthLimit);
     },
 

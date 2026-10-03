@@ -51,7 +51,8 @@ function getGifUrls(): string[] {
 
 async function isGifReachable(url: string) {
     try {
-        const response = await fetch(url, { method: "HEAD" });
+        const response = await fetch(url, { method: "HEAD", credentials: "omit", signal: AbortSignal.timeout(15_000) });
+        await response.body?.cancel();
         if (response.ok) return true;
     } catch {
         return await isGifReachableByGet(url);
@@ -62,7 +63,8 @@ async function isGifReachable(url: string) {
 
 async function isGifReachableByGet(url: string) {
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, { credentials: "omit", signal: AbortSignal.timeout(15_000) });
+        await response.body?.cancel();
         return response.ok;
     } catch {
         return false;

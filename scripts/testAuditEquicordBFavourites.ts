@@ -5,6 +5,7 @@
  */
 
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
@@ -116,18 +117,25 @@ test("sending one favourite leaves every other draft attachment in place and can
 
 test("native favorite downloads require an approved HTTPS origin and prevent redirect following", async () => {
     let calls = 0;
-    const api = load("src/equicordplugins/favouriteAnything/native.ts", {}, {
+    const helper = load("src/equicordplugins/fileUpload/nativeNetwork.ts", {
+        "@main/settings": { RendererSettings: { store: { plugins: { FileUpload: { enabled: false } } } } },
+        "node:dns/promises": {}, "node:http": {}, "node:https": {}, "node:net": {}
+    }, {
+        AbortController, Uint8Array,
         fetch: async (_url: URL, options: RequestInit) => {
             calls++;
             assert.equal(options.redirect, "error");
             assert.ok(options.signal);
-            return { ok: true, blob: async () => new Blob(["saved"]) };
+            return new Response("saved");
         }
     });
+    const api = load("src/equicordplugins/favouriteAnything/native.ts", { "../fileUpload/nativeNetwork": helper });
+    const frame = { url: "https://discord.com/channels/@me" };
+    const event = { senderFrame: frame, sender: Object.assign(new EventEmitter(), { mainFrame: frame, isDestroyed: () => false }) };
     for (const url of ["http://cdn.discordapp.com/file", "https://user@cdn.discordapp.com/file", "https://cdn.discordapp.com:444/file", "https://example.invalid/file"]) {
-        await assert.rejects(api.fetchAttachment(null, { url, filename: "file" }), /Invalid URL/);
+        await assert.rejects(api.fetchAttachment(event, { url, filename: "file" }), /Invalid URL/);
     }
-    const file = await api.fetchAttachment(null, { url: "https://cdn.discordapp.com/attachments/file", filename: "file", content_type: "text/plain" });
+    const file = await api.fetchAttachment(event, { url: "https://cdn.discordapp.com/attachments/file", filename: "file", content_type: "text/plain" });
     assert.equal(file.filename, "file");
     assert.equal(calls, 1);
 });

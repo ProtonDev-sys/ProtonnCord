@@ -6,7 +6,7 @@
 
 import { DataStore } from "@api/index";
 import { useAwaiter } from "@utils/react";
-import { ChannelStore, useCallback, UserStore, useState } from "@webpack/common";
+import { ChannelStore, useCallback, useEffect, useMemo, UserStore, useState } from "@webpack/common";
 
 import { bookmarkFolderColors, logger } from "./constants";
 import { Bookmark, BookmarkFolder, Bookmarks, UseBookmark, UseBookmarkMethods } from "./types";
@@ -48,17 +48,44 @@ export function bookmarkPlaceholderName(bookmark: Omit<Bookmark | BookmarkFolder
 
 export function useBookmarks(userId: string): UseBookmark {
     const [bookmarks, _setBookmarks] = useState<{ [k: string]: Bookmarks; }>({});
+    const [loadAttempt, setLoadAttempt] = useState(0);
+    const [saveStatus, setSaveStatus] = useState({ userId, saving: false, failed: false });
+    const writer = useMemo(() => ({ pending: undefined as Bookmarks | undefined, running: false, disposed: false }), [userId]);
+    useEffect(() => {
+        writer.disposed = false;
+        return () => { writer.disposed = true; };
+    }, [writer]);
+    const savePendingBookmarks = useCallback(async () => {
+        if (writer.running || writer.disposed || !writer.pending) return;
+        writer.running = true;
+        setSaveStatus({ userId, saving: true, failed: false });
+        try {
+            while (writer.pending && !writer.disposed) {
+                const snapshot = writer.pending;
+                try {
+                    await DataStore.update("ChannelTabs_bookmarks", old => ({ ...old, [userId]: snapshot }));
+                    if (writer.pending === snapshot) writer.pending = undefined;
+                } catch (error) {
+                    logger.error("Failed to save bookmarks", error);
+                    if (writer.pending !== snapshot) continue;
+                    if (!writer.disposed) setSaveStatus({ userId, saving: false, failed: true });
+                    return;
+                }
+            }
+            if (!writer.disposed) setSaveStatus({ userId, saving: false, failed: false });
+        } finally {
+            writer.running = false;
+        }
+    }, [userId, writer]);
     const setBookmarks = useCallback((bookmarks: { [k: string]: Bookmarks; }) => {
         _setBookmarks(bookmarks);
-        DataStore.update("ChannelTabs_bookmarks", old => ({
-            ...old,
-            [userId]: bookmarks[userId]
-        })).catch(error => logger.error("Failed to save bookmarks", error));
-    }, [userId]);
+        writer.pending = structuredClone(bookmarks[userId]);
+        void savePendingBookmarks();
+    }, [userId, writer, savePendingBookmarks]);
 
-    useAwaiter(() => DataStore.get("ChannelTabs_bookmarks"), {
+    const [, loadError, loading] = useAwaiter(() => DataStore.get("ChannelTabs_bookmarks"), {
         fallbackValue: undefined,
-        deps: [userId],
+        deps: [userId, loadAttempt],
         onSuccess(bookmarks: { [k: string]: Bookmarks; }) {
             _setBookmarks({ ...bookmarks, [userId]: bookmarks?.[userId] ?? [] });
         },
@@ -67,7 +94,7 @@ export function useBookmarks(userId: string): UseBookmark {
 
     const methods = {
         addBookmark: (bookmark, folderIndex) => {
-            if (!bookmarks[userId]) return;
+            if (loading || loadError || writer.disposed || !bookmarks[userId]) return;
 
             if (typeof folderIndex === "number" && !(isBookmarkFolder(bookmarks[userId][folderIndex])))
                 return logger.error("Attempted to add bookmark to non-folder " + folderIndex, bookmarks);
@@ -82,7 +109,7 @@ export function useBookmarks(userId: string): UseBookmark {
             });
         },
         addFolder(name, iconColor, iconName) {
-            if (!bookmarks[userId]) return -1;
+            if (loading || loadError || writer.disposed || !bookmarks[userId]) return -1;
             const length = bookmarks[userId].push({
                 name: name?.trim() || "Folder",
                 iconColor: iconColor ?? bookmarkFolderColors.Black,
@@ -96,7 +123,7 @@ export function useBookmarks(userId: string): UseBookmark {
             return length - 1;
         },
         editBookmark(index, newBookmark) {
-            if (!Number.isInteger(index) || !bookmarks[userId]?.[index]) return;
+            if (loading || loadError || writer.disposed || !Number.isInteger(index) || !bookmarks[userId]?.[index]) return;
             Object.entries(newBookmark).forEach(([k, v]) => {
                 bookmarks[userId][index][k] = v;
             });
@@ -105,7 +132,7 @@ export function useBookmarks(userId: string): UseBookmark {
             });
         },
         deleteBookmark(index, folderIndex) {
-            if (!bookmarks[userId] || !Number.isInteger(index)) return;
+            if (loading || loadError || writer.disposed || !bookmarks[userId] || !Number.isInteger(index)) return;
 
             if (typeof folderIndex === "number") {
                 const folder = bookmarks[userId][folderIndex];
@@ -128,7 +155,7 @@ export function useBookmarks(userId: string): UseBookmark {
             });
         },
         moveDraggedBookmarks(index1, index2) {
-            if (!bookmarks[userId]) return;
+            if (loading || loadError || writer.disposed || !bookmarks[userId]) return;
             if (!Number.isInteger(index1) || !Number.isInteger(index2)
                 || index1 < 0 || index1 >= bookmarks[userId].length
                 || index2 < 0 || index2 >= bookmarks[userId].length)
@@ -143,5 +170,11 @@ export function useBookmarks(userId: string): UseBookmark {
         }
     } as UseBookmarkMethods;
 
-    return [bookmarks[userId], methods];
+    return [loading || loadError ? undefined : bookmarks[userId], methods, {
+        loadError: !!loadError,
+        saveError: saveStatus.userId === userId && saveStatus.failed,
+        saving: saveStatus.userId === userId && saveStatus.saving,
+        retryLoad: () => setLoadAttempt(attempt => attempt + 1),
+        retrySave: () => { void savePendingBookmarks(); }
+    }];
 }

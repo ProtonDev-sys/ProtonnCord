@@ -30,7 +30,9 @@ async function jumpToLastMessage(channelId: string, guildId?: string | null) {
         if (!messageId) return;
         NavigationRouter.transitionTo(`/channels/${guildId ?? "@me"}/${channelId}/${messageId}`);
     } catch {
-        if (generation === navigationGeneration) Toasts.show({ type: Toasts.Type.FAILURE, message: "Failed to find the last message.", id: Toasts.genId() });
+        if (generation === navigationGeneration && accountId === UserStore.getCurrentUser()?.id) {
+            Toasts.show({ type: Toasts.Type.FAILURE, message: "Failed to find the last message.", id: Toasts.genId() });
+        }
     }
 }
 

@@ -63,32 +63,61 @@ export function getMimeType(saveAsGif: boolean): string {
     return saveAsGif ? "image/gif" : "image/png";
 }
 
-let fontLoadingPromise: Promise<void> | null = null;
+const fontLoadingPromises = new Map<string, Promise<string>>();
 
-export async function ensureFontLoaded(): Promise<void> {
-    if (fontLoadingPromise) return fontLoadingPromise;
+async function loadQuoteFont(font: QuoteFont, text: string, italic = false): Promise<string> {
+    const descriptor = `${italic ? "italic " : ""}300 42px '${font}'`;
+    const key = JSON.stringify([descriptor, text]);
+    const pending = fontLoadingPromises.get(key);
+    if (pending) return pending;
 
-    fontLoadingPromise = (async () => {
-        if (!document.getElementById("quoter-font-style")) {
-            const style = document.createElement("style");
-            style.id = "quoter-font-style";
-            style.textContent = `
-                @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@300&display=swap');
-                @import url('https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap');
-                @import url('https://fonts.googleapis.com/css2?family=Momo+Signature&display=swap');
-                @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&display=swap');
-                @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700&display=swap');
-            `;
-            document.head.appendChild(style);
-            await new Promise(resolve => setTimeout(resolve, 300));
-        }
-    })();
+    let expired = false;
+    let timeout: ReturnType<typeof setTimeout>;
+    const readiness = Promise.race([
+        (async () => {
+            await document.fonts.ready;
+            if (expired) return "sans-serif";
+            const faces = await document.fonts.load(descriptor, text);
+            return faces.length > 0 && faces.every(face => face.status === "loaded") ? font : "sans-serif";
+        })(),
+        new Promise<string>(resolve => {
+            timeout = setTimeout(() => {
+                expired = true;
+                resolve("sans-serif");
+            }, 5000);
+        })
+    ]).catch(() => "sans-serif").finally(() => {
+        clearTimeout(timeout);
+        if (fontLoadingPromises.get(key) === readiness) fontLoadingPromises.delete(key);
+    });
+    fontLoadingPromises.set(key, readiness);
+    return readiness;
+}
 
-    return fontLoadingPromise;
+export async function ensureFontLoaded(quoteFont = QuoteFont.MPlusRounded, quoteText = " ", authorText = " "): Promise<{ quoteFont: string; authorFont: string; }> {
+    if (!document.getElementById("quoter-font-style")) {
+        const style = document.createElement("style");
+        style.id = "quoter-font-style";
+        style.textContent = `
+            @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@300&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Momo+Signature&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700&display=swap');
+        `;
+        document.head.appendChild(style);
+    }
+
+    const [selected, author, italicAuthor] = await Promise.all([
+        loadQuoteFont(quoteFont, quoteText),
+        loadQuoteFont(QuoteFont.MPlusRounded, authorText),
+        loadQuoteFont(QuoteFont.MPlusRounded, authorText, true)
+    ]);
+    return { quoteFont: selected, authorFont: author === italicAuthor ? author : "sans-serif" };
 }
 
 export function resetFontLoading() {
-    fontLoadingPromise = null;
+    fontLoadingPromises.clear();
 }
 
 async function canvasToGif(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -234,45 +263,50 @@ function calculateTextLines(
     ctx: CanvasRenderingContext2D,
     text: string,
     fontSize: number,
-    font: QuoteFont,
+    font: string,
     maxWidth: number
 ): string[] {
     ctx.font = `300 ${fontSize}px '${font}', sans-serif`;
-    const words = text.split(" ");
     const lines: string[] = [];
-    let currentLine: string[] = [];
+    for (const paragraph of text.replace(/\r\n?/g, "\n").split("\n")) {
+        const paragraphStart = lines.length;
+        const words = paragraph.split(" ");
+        let currentLine: string[] = [];
 
-    words.forEach(word => {
-        if (measureTextWithCustomEmojis(ctx, word, fontSize) > maxWidth) {
-            if (currentLine.length) {
-                lines.push(currentLine.join(" "));
-                currentLine = [];
-            }
+        words.forEach(word => {
+            if (measureTextWithCustomEmojis(ctx, word, fontSize) > maxWidth) {
+                if (currentLine.length) {
+                    lines.push(currentLine.join(" "));
+                    currentLine = [];
+                }
 
-            let chunk = "";
-            for (const char of word) {
-                const testChunk = chunk + char;
-                if (measureTextWithCustomEmojis(ctx, testChunk, fontSize) > maxWidth) {
-                    if (chunk) lines.push(chunk);
-                    chunk = char;
+                let chunk = "";
+                for (const char of word) {
+                    const testChunk = chunk + char;
+                    if (measureTextWithCustomEmojis(ctx, testChunk, fontSize) > maxWidth) {
+                        if (chunk) lines.push(chunk);
+                        chunk = char;
+                    } else {
+                        chunk = testChunk;
+                    }
+                }
+                if (chunk) lines.push(chunk);
+            } else {
+                const testLine = [...currentLine, word].join(" ");
+                if (measureTextWithCustomEmojis(ctx, testLine, fontSize) > maxWidth && currentLine.length) {
+                    lines.push(currentLine.join(" "));
+                    currentLine = [word];
                 } else {
-                    chunk = testChunk;
+                    currentLine.push(word);
                 }
             }
-            if (chunk) lines.push(chunk);
-        } else {
-            const testLine = [...currentLine, word].join(" ");
-            if (measureTextWithCustomEmojis(ctx, testLine, fontSize) > maxWidth && currentLine.length) {
-                lines.push(currentLine.join(" "));
-                currentLine = [word];
-            } else {
-                currentLine.push(word);
-            }
-        }
-    });
+        });
 
-    if (currentLine.length) {
-        lines.push(currentLine.join(" "));
+        if (currentLine.length) {
+            lines.push(currentLine.join(" "));
+        } else if (lines.length === paragraphStart) {
+            lines.push("");
+        }
     }
 
     return lines;
@@ -281,7 +315,7 @@ function calculateTextLines(
 function calculateOptimalFontSize(
     ctx: CanvasRenderingContext2D,
     quote: string,
-    font: QuoteFont,
+    font: string,
     config: CanvasConfig
 ): FontSizeCalculation {
     let fontSize = FONT_SIZES.initial;
@@ -312,7 +346,7 @@ function calculateOptimalFontSize(
 function drawQuoteText(
     ctx: CanvasRenderingContext2D,
     calculation: FontSizeCalculation,
-    font: QuoteFont,
+    font: string,
     config: CanvasConfig,
     emojis: CustomEmojiToken[],
     emojiImages: Map<string, HTMLImageElement>
@@ -369,18 +403,19 @@ function drawAuthorInfo(
     author: User,
     calculation: FontSizeCalculation,
     config: CanvasConfig,
-    startY: number
+    startY: number,
+    font: string
 ): void {
     const name = author.globalName || author.username;
 
-    ctx.font = `italic 300 ${calculation.authorFontSize}px 'M PLUS Rounded 1c', sans-serif`;
+    ctx.font = `italic 300 ${calculation.authorFontSize}px '${font}', sans-serif`;
     ctx.fillStyle = "#fff";
     const authorText = `- ${name}`;
     const authorX = config.quoteAreaX + (config.quoteAreaWidth - ctx.measureText(authorText).width) / 2;
     const authorY = startY + SPACING.authorTop;
     ctx.fillText(authorText, authorX, authorY);
 
-    ctx.font = `300 ${calculation.usernameFontSize}px 'M PLUS Rounded 1c', sans-serif`;
+    ctx.font = `300 ${calculation.usernameFontSize}px '${font}', sans-serif`;
     ctx.fillStyle = "#888";
     const username = `@${author.username}`;
     const usernameX = config.quoteAreaX + (config.quoteAreaWidth - ctx.measureText(username).width) / 2;
@@ -391,10 +426,11 @@ function drawAuthorInfo(
 function drawWatermark(
     ctx: CanvasRenderingContext2D,
     watermark: string,
-    config: CanvasConfig
+    config: CanvasConfig,
+    font: string
 ): void {
     ctx.fillStyle = "#888";
-    ctx.font = `300 ${FONT_SIZES.watermark}px 'M PLUS Rounded 1c', sans-serif`;
+    ctx.font = `300 ${FONT_SIZES.watermark}px '${font}', sans-serif`;
     const watermarkText = watermark.slice(0, 32);
     const watermarkX = config.width - ctx.measureText(watermarkText).width - SPACING.watermarkPadding;
     const watermarkY = config.height - SPACING.watermarkPadding;
@@ -404,10 +440,9 @@ function drawWatermark(
 export async function createQuoteImage(options: QuoteImageOptions): Promise<Blob> {
     const { avatarUrl, quote: rawQuote, grayScale, author, watermark, showWatermark, saveAsGif, quoteFont } = options;
 
-    await ensureFontLoaded();
-
     const quote = fixUpQuote(rawQuote);
     const { text: quoteText, emojis } = extractCustomEmojis(quote);
+    const fonts = await ensureFontLoaded(quoteFont, quoteText, `${author.globalName || author.username} @${author.username} ${showWatermark ? watermark : ""}`);
     const [emojiImages, avatar] = await Promise.all([loadCustomEmojiImages(emojis), loadAvatarImage(avatarUrl)]);
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
@@ -427,12 +462,12 @@ export async function createQuoteImage(options: QuoteImageOptions): Promise<Blob
 
     drawGradientOverlay(ctx, CANVAS_CONFIG);
 
-    const calculation = calculateOptimalFontSize(ctx, quoteText, quoteFont, CANVAS_CONFIG);
-    const quoteEndY = drawQuoteText(ctx, calculation, quoteFont, CANVAS_CONFIG, emojis, emojiImages);
-    drawAuthorInfo(ctx, author, calculation, CANVAS_CONFIG, quoteEndY);
+    const calculation = calculateOptimalFontSize(ctx, quoteText, fonts.quoteFont, CANVAS_CONFIG);
+    const quoteEndY = drawQuoteText(ctx, calculation, fonts.quoteFont, CANVAS_CONFIG, emojis, emojiImages);
+    drawAuthorInfo(ctx, author, calculation, CANVAS_CONFIG, quoteEndY, fonts.authorFont);
 
     if (showWatermark && watermark) {
-        drawWatermark(ctx, watermark, CANVAS_CONFIG);
+        drawWatermark(ctx, watermark, CANVAS_CONFIG, fonts.authorFont);
     }
 
     return saveAsGif ? await canvasToGif(canvas) : await canvasToBlob(canvas);

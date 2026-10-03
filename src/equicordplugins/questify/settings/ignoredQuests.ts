@@ -30,14 +30,19 @@ export function getIgnoredQuestIDs(): string[] {
 }
 
 function setIgnoredQuestIDs(questIDs: string[]): void {
+    const current = getIgnoredQuestIDs();
+    if (current.length === questIDs.length && current.every((id, index) => id === questIDs[index])) return;
+
     getQuestifySettings().ignoredQuestIDs[ignoredQuestIDsKey] = questIDs;
 }
 
 export function validateIgnoredQuests(qs?: Quest[]): void {
     const currentlyIgnoredQuests = getIgnoredQuestIDs();
-    const quests = qs ?? Array.from(QuestStore.quests.values());
+    const quests = qs;
     const excludedQuests = Array.from(QuestStore.excludedQuests.values());
-    const validIgnored = Array.from(new Set<string>(currentlyIgnoredQuests.filter(id => quests.some(quest => quest.id === id) || excludedQuests.some(quest => quest.id === id))));
+    const validIgnored = quests === undefined
+        ? currentlyIgnoredQuests
+        : Array.from(new Set<string>(currentlyIgnoredQuests.filter(id => quests.some(quest => quest.id === id) || excludedQuests.some(quest => quest.id === id))));
 
     setIgnoredQuestIDs(validIgnored);
     validateQuestBadgeCount();

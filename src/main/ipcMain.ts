@@ -22,9 +22,9 @@ import "./settings";
 
 import { debounce } from "@shared/debounce";
 import { IpcEvents } from "@shared/IpcEvents";
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell, systemPreferences, type WebContents } from "electron";
 import monacoHtml from "file://monacoWin.html?minify&base64";
-import { FSWatcher, mkdirSync, readFileSync, watch, writeFileSync } from "fs";
+import { closeSync, FSWatcher, fsyncSync, mkdirSync, openSync, readFileSync, watch, writeFileSync } from "fs";
 import { open, readdir, readFile, unlink } from "fs/promises";
 import { release } from "os";
 import { join } from "path";
@@ -85,9 +85,10 @@ ipcMain.handle(IpcEvents.OPEN_EXTERNAL, (_, url) => {
 });
 
 ipcMain.handle(IpcEvents.GET_QUICK_CSS, () => readCss());
-ipcMain.handle(IpcEvents.SET_QUICK_CSS, (_, css) =>
-    writeFileSync(QUICK_CSS_PATH, css)
-);
+ipcMain.handle(IpcEvents.SET_QUICK_CSS, (_, css) => {
+    if (typeof css !== "string") throw new Error("Invalid QuickCSS value");
+    return writeFileSync(QUICK_CSS_PATH, css);
+});
 
 ipcMain.handle(IpcEvents.GET_THEMES_LIST, () => listThemes());
 ipcMain.handle(IpcEvents.GET_THEME_DATA, (_, fileName) => getThemeData(fileName));
@@ -111,39 +112,46 @@ ipcMain.handle(IpcEvents.GET_THEME_SYSTEM_VALUES, () => {
 ipcMain.handle(IpcEvents.OPEN_THEMES_FOLDER, () => shell.openPath(THEMES_DIR));
 ipcMain.handle(IpcEvents.OPEN_SETTINGS_FOLDER, () => shell.openPath(SETTINGS_DIR));
 
-let stopWatching: (() => void) | undefined;
+let stopWatching: WeakMap<WebContents, () => void> | undefined;
 
 ipcMain.handle(IpcEvents.INIT_FILE_WATCHERS, async ({ sender }) => {
-    stopWatching?.();
+    const watchersBySender = stopWatching ??= new WeakMap();
+    watchersBySender.get(sender)?.();
+    if (sender.isDestroyed?.()) return;
 
     const watchers: FSWatcher[] = [];
     let stopped = false;
     const stop = () => {
+        if (stopped) return;
         stopped = true;
         watchers.forEach(watcher => watcher.close());
         sender.removeListener("destroyed", stop);
-        if (stopWatching === stop) stopWatching = undefined;
+        if (watchersBySender.get(sender) === stop) watchersBySender.delete(sender);
     };
-    stopWatching = stop;
+    const addWatcher = (watcher: FSWatcher) => {
+        watchers.push(watcher);
+        watcher.on?.("error", stop);
+    };
+    watchersBySender.set(sender, stop);
     sender.once("destroyed", stop);
 
     await open(QUICK_CSS_PATH, "a+").then(fd => fd.close()).catch(() => { });
     if (stopped) return;
 
     try {
-        watchers.push(watch(QUICK_CSS_PATH, { persistent: false }, debounce(async () => {
+        addWatcher(watch(QUICK_CSS_PATH, { persistent: false }, debounce(async () => {
             const css = await readCss();
             if (!stopped) sender.postMessage(IpcEvents.QUICK_CSS_UPDATE, css);
         }, 50)));
     } catch { }
 
     try {
-        watchers.push(watch(THEMES_DIR, { persistent: false }, debounce(() => {
+        addWatcher(watch(THEMES_DIR, { persistent: false }, debounce(() => {
             if (!stopped) sender.postMessage(IpcEvents.THEME_UPDATE, void 0);
         })));
 
         if (IS_DEV) {
-            watchers.push(watch(RENDERER_CSS_PATH, { persistent: false }, async () => {
+            addWatcher(watch(RENDERER_CSS_PATH, { persistent: false }, async () => {
                 const css = await readFile(RENDERER_CSS_PATH, "utf-8").catch(() => null);
                 if (!stopped && css !== null) sender.postMessage(IpcEvents.RENDERER_CSS_UPDATE, css);
             }));
@@ -159,6 +167,55 @@ ipcMain.on(IpcEvents.GET_MONACO_THEME, e => {
 });
 
 let monacoWin: BrowserWindow | null = null;
+let closeRequestId = 0;
+let pendingEditorClose: { window: BrowserWindow; requestId: number; timer: ReturnType<typeof setTimeout>; } | undefined;
+let editorCloseAllowed = false;
+let quitAfterEditorClose = false;
+
+function cancelEditorClose(error: string) {
+    if (!pendingEditorClose) return;
+    const { window, timer } = pendingEditorClose;
+    clearTimeout(timer);
+    pendingEditorClose = undefined;
+    quitAfterEditorClose = false;
+    try {
+        if (!window.isDestroyed() && !window.webContents.isDestroyed())
+            window.webContents.send(IpcEvents.MONACO_CLOSE, null);
+    } catch (sendError) {
+        console.error("[Protonn Cord] Failed to reset QuickCSS close state", sendError);
+    }
+    try {
+        if (!window.isDestroyed()) window.show();
+    } catch (showError) {
+        console.error("[Protonn Cord] Failed to show the QuickCSS editor", showError);
+    }
+    console.error("[Protonn Cord] QuickCSS close cancelled", error);
+}
+
+ipcMain.handle(IpcEvents.MONACO_CLOSE_ACK, ({ sender }, requestId, error) => {
+    if (!pendingEditorClose || sender !== pendingEditorClose.window.webContents
+        || requestId !== pendingEditorClose.requestId) throw new Error("Unexpected QuickCSS close acknowledgement");
+    if (error !== undefined) {
+        cancelEditorClose(String(error));
+        return;
+    }
+    const { window, timer } = pendingEditorClose;
+    try {
+        const descriptor = openSync(QUICK_CSS_PATH, "a");
+        try {
+            fsyncSync(descriptor);
+        } finally {
+            closeSync(descriptor);
+        }
+    } catch (saveError) {
+        cancelEditorClose(String(saveError));
+        return;
+    }
+    clearTimeout(timer);
+    pendingEditorClose = undefined;
+    editorCloseAllowed = true;
+    window.close();
+});
 
 ipcMain.handle(IpcEvents.OPEN_MONACO_EDITOR, async () => {
     if (monacoWin && !monacoWin.isDestroyed()) {
@@ -180,7 +237,32 @@ ipcMain.handle(IpcEvents.OPEN_MONACO_EDITOR, async () => {
         }
     });
 
-    monacoWin.once("closed", () => { monacoWin = null; });
+    editorCloseAllowed = false;
+    const window = monacoWin;
+    window.on("close", event => {
+        if (editorCloseAllowed) return;
+        event.preventDefault();
+        if (pendingEditorClose) return;
+        const requestId = ++closeRequestId;
+        const timer = setTimeout(() => cancelEditorClose("Save acknowledgement timed out"), 10000);
+        pendingEditorClose = { window, requestId, timer };
+        try {
+            window.webContents.send(IpcEvents.MONACO_CLOSE, requestId);
+        } catch (error) {
+            cancelEditorClose(String(error));
+        }
+    });
+    window.once("closed", () => {
+        if (pendingEditorClose?.window === window) {
+            clearTimeout(pendingEditorClose.timer);
+            pendingEditorClose = undefined;
+        }
+        monacoWin = null;
+        if (quitAfterEditorClose) {
+            quitAfterEditorClose = false;
+            app.quit();
+        }
+    });
 
     makeLinksOpenExternally(monacoWin);
 
@@ -190,8 +272,17 @@ ipcMain.handle(IpcEvents.OPEN_MONACO_EDITOR, async () => {
 let quitPromptPending = false;
 
 app.on("before-quit", async event => {
-    if (monacoWin && !monacoWin.isDestroyed() && !monacoWin.isVisible()) {
+    if (monacoWin && !monacoWin.isDestroyed()) {
         event.preventDefault();
+        if (pendingEditorClose) {
+            quitAfterEditorClose = true;
+            return;
+        }
+        if (monacoWin.isVisible()) {
+            quitAfterEditorClose = true;
+            monacoWin.close();
+            return;
+        }
         if (quitPromptPending) return;
         quitPromptPending = true;
         try {
@@ -205,7 +296,10 @@ app.on("before-quit", async event => {
                 detail: "Do you want to close Discord anyway? This will also close the QuickCSS editor."
             });
 
-            if (result.response === 1) app.exit();
+            if (result.response === 1 && monacoWin && !monacoWin.isDestroyed()) {
+                quitAfterEditorClose = true;
+                monacoWin.close();
+            }
         } catch (error) {
             console.error("[Protonn Cord] Failed to confirm closing the QuickCSS editor", error);
         } finally {

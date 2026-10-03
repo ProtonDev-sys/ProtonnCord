@@ -142,6 +142,10 @@ export async function deleteCollection(name: string): Promise<void> {
     });
 }
 
+export async function resetCollections(): Promise<void> {
+    return queueCollectionMutation(() => saveCollections([]));
+}
+
 export async function moveGifToCollection(gifId: string, fromName: string, toName: string): Promise<void> {
     return queueCollectionMutation(async () => {
         const collections = cache_collections.map(collection => ({ ...collection, gifs: [...collection.gifs] }));

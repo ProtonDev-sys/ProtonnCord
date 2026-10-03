@@ -18,7 +18,9 @@ import definePlugin, { OptionType } from "@utils/types";
 import { Message } from "@vencord/discord-types";
 import { React, TextInput } from "@webpack/common";
 
-let blockedKeywords: Array<RegExp>;
+let blockedKeywords: Array<RegExp> = [];
+const MAX_PATTERNS = 128;
+const MAX_PATTERN_LENGTH = 512;
 const cl = classNameFactory("vc-block-keywords-");
 
 function splitPatterns(input: string): string[] {
@@ -30,18 +32,42 @@ function splitPatterns(input: string): string[] {
         .filter(Boolean);
 }
 
+function compileKeyword(pattern: string, index: number, useRegex: boolean, caseSensitive: boolean) {
+    if (index >= MAX_PATTERNS) throw new Error(`Only the first ${MAX_PATTERNS} patterns are checked; this saved pattern is inactive.`);
+    if (pattern.length > MAX_PATTERN_LENGTH) throw new Error(`Patterns longer than ${MAX_PATTERN_LENGTH} characters are inactive.`);
+    if (useRegex) {
+        let inClass = false;
+        for (let offset = 0; offset < pattern.length; offset++) {
+            const character = pattern[offset];
+            if (character === "\\") {
+                const escaped = pattern[++offset];
+                if (!escaped || !"dDsSwWbBfnrtv\\.^$*+?()[]{}|/-".includes(escaped))
+                    throw new Error("Only character-class, boundary, control-character and punctuation escapes are supported.");
+            } else if (character === "[") {
+                if (inClass) throw new Error("Nested character classes are not supported.");
+                inClass = true;
+            } else if (character === "]") {
+                if (!inClass) throw new Error("Escape a literal closing bracket.");
+                inClass = false;
+            } else if (!inClass && "(){}*+?|".includes(character)) {
+                throw new Error("Only fixed-width regexes are supported: literals, classes, dots, anchors and boundaries. Groups, repetition and alternatives are inactive; saved patterns are unchanged.");
+            }
+        }
+        if (inClass) throw new Error("Unclosed character class.");
+    }
+    const source = useRegex ? pattern : `\\b${pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`;
+    return new RegExp(source, caseSensitive ? "" : "i");
+}
+
 function RegexHelper() {
     const [testInput, setTestInput] = React.useState("");
     const { blockedWords, caseSensitive, useRegex } = settings.use(["blockedWords", "caseSensitive", "useRegex"]);
 
     const results = React.useMemo(() => {
-        const caseSensitiveFlag = caseSensitive ? "" : "i";
         return splitPatterns(blockedWords)
-            .map(pattern => {
+            .map((pattern, index) => {
                 try {
-                    const regex = useRegex
-                        ? new RegExp(pattern, caseSensitiveFlag)
-                        : new RegExp(`\\b${pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, caseSensitiveFlag);
+                    const regex = compileKeyword(pattern, index, useRegex, caseSensitive);
                     return { pattern, matches: regex.test(testInput) };
                 } catch (e: unknown) {
                     return { pattern, matches: false, error: e instanceof Error ? e.message : String(e) };
@@ -51,7 +77,7 @@ function RegexHelper() {
 
     return (
         <Card className={cl("regex")}>
-            <HeadingTertiary className={Margins.bottom8}>Regex Helper</HeadingTertiary>
+            <HeadingTertiary className={Margins.bottom8}>Keyword Helper</HeadingTertiary>
             <TextInput
                 type="text"
                 placeholder="Input to test..."
@@ -90,13 +116,13 @@ const settings = definePluginSettings({
     },
     useRegex: {
         type: OptionType.BOOLEAN,
-        description: "Use each value as a regular expression when checking message content (advanced)",
+        description: "Use fixed-width regexes: literals, classes, dots, anchors and boundaries. Groups, repetition and alternatives are unsupported; check Keyword Helper for inactive patterns.",
         default: false,
         restartNeeded: true
     },
     regexHelper: {
         type: OptionType.COMPONENT,
-        description: "Test your regular expressions against a sample input",
+        description: "Test active patterns and inspect errors. Maximum 128 patterns, 512 characters each; unsupported saved patterns are preserved but inactive.",
         component: () => <ErrorBoundary noop><RegexHelper /></ErrorBoundary>,
     },
     caseSensitive: {
@@ -111,10 +137,6 @@ const settings = definePluginSettings({
         default: true,
         restartNeeded: true,
     },
-}, {
-    regexHelper: {
-        hidden() { return !this.store.useRegex; }
-    }
 });
 
 export function containsBlockedKeywords(message: Message) {
@@ -170,19 +192,20 @@ export default definePlugin({
     start() {
         blockedKeywords = [];
         const blockedWordsList = splitPatterns(settings.store.blockedWords);
-        const caseSensitiveFlag = settings.store.caseSensitive ? "" : "i";
 
         if (blockedWordsList.length === 0) return;
 
-        for (const word of blockedWordsList) {
+        for (const [index, word] of blockedWordsList.entries()) {
             try {
-                // Escape regex characters in literal keyword mode.
-                const pattern = settings.store.useRegex ? word : `\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`;
-                blockedKeywords.push(new RegExp(pattern, caseSensitiveFlag));
+                blockedKeywords.push(compileKeyword(word, index, settings.store.useRegex, settings.store.caseSensitive));
             } catch (error) {
                 console.error("[BlockKeywords] Ignoring an invalid regular expression:", error);
             }
         }
+    },
+
+    stop() {
+        blockedKeywords = [];
     },
 
     blockMessagesWithKeywords(messageList) {

@@ -130,13 +130,17 @@ export function RemoveItemContextMenuItems({ type, nameOrId, instance }: { type:
                 label={type === "collection" ? "Delete Collection" : "Remove"}
                 action={() => {
                     const doDelete = async () => {
-                        if (type === "collection") {
-                            deleteCollection(nameOrId);
-                            instance.forceUpdate();
-                        } else {
-                            const collectionName = getItemCollectionNameFromId(nameOrId);
-                            await removeFromCollection(nameOrId);
-                            if (collectionName) dispatchRefresh(collectionName);
+                        try {
+                            if (type === "collection") {
+                                await deleteCollection(nameOrId);
+                                instance.forceUpdate();
+                            } else {
+                                const collectionName = getItemCollectionNameFromId(nameOrId);
+                                await removeFromCollection(nameOrId);
+                                if (collectionName) dispatchRefresh(collectionName);
+                            }
+                        } catch {
+                            showToast("Failed to remove GIF collection item. Try again.", Toasts.Type.FAILURE);
                         }
                     };
 

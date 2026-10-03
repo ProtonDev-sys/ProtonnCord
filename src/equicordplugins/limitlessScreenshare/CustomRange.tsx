@@ -23,7 +23,10 @@ export const CustomRange = ({ onChange, initialValue, minMax, group, id, suffix 
     const [minValue, maxValue] = minMax;
 
     const changeStreamSettings = useMemo(() => lodash.throttle((value: number) => onChange(value), COOLDOWN_MS), []);
-    useEffect(() => () => changeStreamSettings.cancel(), [changeStreamSettings]);
+    useEffect(() => () => {
+        changeStreamSettings.flush();
+        changeStreamSettings.cancel();
+    }, [changeStreamSettings]);
 
     const onChangeHandler = (newValue: number) => {
         const roundedValue = Math.round(denormalize(newValue, minValue, maxValue));

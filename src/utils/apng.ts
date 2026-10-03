@@ -107,7 +107,7 @@ export function parseAPNG(buffer: ArrayBuffer): Promise<Animation> {
         parseChunks(bytes, function (type, bytes, off, length) {
             switch (type) {
                 case "IHDR":
-                    headerDataBytes = bytes.subarray(off + 8, off + 8 + length);
+                    headerDataBytes = bytes.slice(off + 8, off + 8 + length);
                     anim.width = readDWord(bytes, off + 8);
                     anim.height = readDWord(bytes, off + 12);
                     break;
@@ -180,13 +180,14 @@ export function parseAPNG(buffer: ArrayBuffer): Promise<Animation> {
              */
             const img = frame.img = new Image();
             img.onload = function () {
-                URL.revokeObjectURL(img.src);
+                URL.revokeObjectURL(url);
                 createdImages++;
                 if (createdImages == anim.frames.length) {
                     resolve(anim);
                 }
             };
             img.onerror = function () {
+                URL.revokeObjectURL(url);
                 reject("Image creation error");
             };
             img.src = url;
@@ -200,11 +201,21 @@ function parseChunks(bytes: U8Arr, callback: (type: string, bytes: U8Arr, off: n
     let type: string;
 
     do {
+        if (bytes.length - off < 12) throw new Error("Invalid PNG chunk (truncated header or CRC)");
         const length = readDWord(bytes, off);
+        if (length > bytes.length - off - 12) throw new Error("Invalid PNG chunk (truncated data)");
         type = readString(bytes, off + 4, 4);
+        if ((type === "IHDR" && length !== 13)
+            || (type === "acTL" && length !== 8)
+            || (type === "fcTL" && length !== 26)
+            || (type === "fdAT" && length < 4)
+            || (type === "IEND" && length !== 0)) {
+            throw new Error("Invalid PNG chunk length: " + type);
+        }
         res = callback(type, bytes, off, length);
         off += 12 + length;
     } while (res !== false && type != "IEND" && off < bytes.length);
+    if (res !== false && type !== "IEND") throw new Error("Missing PNG end chunk");
 }
 
 function readDWord(bytes: U8Arr, off: number): number {

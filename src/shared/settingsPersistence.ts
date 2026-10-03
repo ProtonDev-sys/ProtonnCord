@@ -15,7 +15,7 @@ export function createSettingsPersistence<T>(persist: (value: T, paths: readonly
     let pending: PendingSettings<T> | undefined;
     let active: Promise<void> | undefined;
     let scheduled = false;
-    let failure: { error: unknown; } | undefined;
+    let failure: { error: unknown; paths: Set<string>; } | undefined;
 
     function schedule() {
         if (scheduled || active || !pending) return;
@@ -30,6 +30,7 @@ export function createSettingsPersistence<T>(persist: (value: T, paths: readonly
         if (active || !pending) return;
         const batch = pending;
         pending = undefined;
+        for (const path of failure?.paths ?? []) batch.paths.add(path);
         let result: Promise<void>;
         try {
             result = persist(batch.value, [...batch.paths]);
@@ -41,7 +42,7 @@ export function createSettingsPersistence<T>(persist: (value: T, paths: readonly
             failure = undefined;
             batch.completion.resolve();
         }, error => {
-            failure = { error };
+            failure = { error, paths: batch.paths };
             batch.completion.reject(error);
         }).finally(() => {
             active = undefined;

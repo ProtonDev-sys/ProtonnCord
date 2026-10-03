@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { SettingsStore } from "@api/Settings";
 import { Logger } from "@utils/Logger";
 import { parseUrl } from "@utils/misc";
 import { Activity } from "@vencord/discord-types";
@@ -30,7 +31,19 @@ let cachedTrackState: string | undefined;
 let lastMinutesAgo: number | undefined;
 let cachedActivity: Activity | undefined;
 let cachedSettingsJSON: string | undefined;
-const lastFmCache = new Map<string, string | null>();
+const MAX_LASTFM_CACHE_SIZE = 150;
+const LASTFM_RETRY_MS = 60_000;
+const lastFmCache = new Map<string, { image: string | null; expires: number; }>();
+let cachedArtRetryAt = 0;
+
+function cacheLastFm(cacheKey: string, image: string | null) {
+    if (!lastFmCache.has(cacheKey) && lastFmCache.size >= MAX_LASTFM_CACHE_SIZE) {
+        lastFmCache.delete(lastFmCache.keys().next().value!);
+    }
+    const expires = image ? Infinity : Date.now() + LASTFM_RETRY_MS;
+    lastFmCache.set(cacheKey, { image, expires });
+    cachedArtRetryAt = image ? 0 : expires;
+}
 
 interface NdTrack {
     id: string;
@@ -130,7 +143,8 @@ function getSettingsJSON() {
         nd_albumArtMode: settings.store.nd_albumArtMode,
         nd_lastfmApiKey: settings.store.nd_lastfmApiKey,
         nd_showAlbum: settings.store.nd_showAlbum,
-        nd_hideOnPause: settings.store.nd_hideOnPause
+        nd_hideOnPause: settings.store.nd_hideOnPause,
+        nd_refreshInterval: settings.store.nd_refreshInterval
     });
 }
 
@@ -147,7 +161,8 @@ async function getActivity(signal?: AbortSignal): Promise<Activity | null> {
 
     const isPaused = track.state?.toLowerCase() === "paused";
 
-    if (track.id === currentTrackId && cachedActivity && cachedSettingsJSON === currentSettingsJSON) {
+    if (track.id === currentTrackId && cachedActivity && cachedSettingsJSON === currentSettingsJSON
+        && (!cachedArtRetryAt || Date.now() < cachedArtRetryAt)) {
         let drift = false;
         if (track.positionMs !== undefined && !isPaused && cachedStartTimestamp) {
             const expectedPosition = Date.now() - cachedStartTimestamp;
@@ -232,14 +247,17 @@ async function getActivity(signal?: AbortSignal): Promise<Activity | null> {
 
     const albumArtMode = normalizeNavidromeAlbumArtMode(settings.store.nd_albumArtMode);
     let resolvedCoverArtUrl: string | null = null;
+    cachedArtRetryAt = 0;
 
     if (albumArtMode === "lastfm" && track.artist) {
         const trimmedKey = nd_lastfmApiKey?.trim();
         const apiKey = trimmedKey || "feff915bf5987580c9dc354d523dc6b9";
         const cacheKey = `${track.id}:${apiKey}`;
 
-        if (lastFmCache.has(cacheKey)) {
-            resolvedCoverArtUrl = lastFmCache.get(cacheKey) ?? null;
+        const cached = lastFmCache.get(cacheKey);
+        if (cached && Date.now() < cached.expires) {
+            resolvedCoverArtUrl = cached.image;
+            cachedArtRetryAt = cached.image ? 0 : cached.expires;
         } else {
             try {
                 const artist = encodeURIComponent(track.artist);
@@ -248,6 +266,7 @@ async function getActivity(signal?: AbortSignal): Promise<Activity | null> {
                 if (track.album) {
                     const album = encodeURIComponent(track.album);
                     const res = await fetch(`https://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=${apiKey}&artist=${artist}&album=${album}&format=json`, { signal });
+                    if (!res.ok) throw new Error("Last.fm album lookup failed");
                     const json = await res.json();
                     image = json?.album?.image?.at(-1)?.["#text"];
                 }
@@ -255,16 +274,17 @@ async function getActivity(signal?: AbortSignal): Promise<Activity | null> {
                 if (!image && track.title) {
                     const title = encodeURIComponent(track.title);
                     const res = await fetch(`https://ws.audioscrobbler.com/2.0/?method=track.getinfo&api_key=${apiKey}&artist=${artist}&track=${title}&format=json`, { signal });
+                    if (!res.ok) throw new Error("Last.fm track lookup failed");
                     const json = await res.json();
                     image = json?.track?.album?.image?.at(-1)?.["#text"];
                 }
 
                 resolvedCoverArtUrl = image ?? null;
-                lastFmCache.set(cacheKey, resolvedCoverArtUrl);
+                if (!signal?.aborted) cacheLastFm(cacheKey, resolvedCoverArtUrl);
             } catch (e: unknown) {
                 if (e instanceof Error && e.name === "AbortError") throw e;
                 resolvedCoverArtUrl = null;
-                lastFmCache.set(cacheKey, null);
+                if (!signal?.aborted) cacheLastFm(cacheKey, null);
             }
         }
     }
@@ -328,9 +348,15 @@ async function getActivity(signal?: AbortSignal): Promise<Activity | null> {
 async function updatePresence() {
     const controller = abortController;
     if (!controller || controller.signal.aborted) return;
+    const snapshot = getSettingsJSON();
     try {
         const activity = await getActivity(controller.signal);
         if (abortController !== controller || controller.signal.aborted) return;
+        if (snapshot !== getSettingsJSON()) {
+            cachedSettingsJSON = undefined;
+            forceUpdate();
+            return;
+        }
         setActivity(activity);
         if (!activity) {
             currentTrackId = undefined;
@@ -363,6 +389,7 @@ async function updatePresence() {
 
 export function start() {
     if (abortController && !abortController.signal.aborted) return;
+    SettingsStore.addGlobalChangeListener(onSettingsChange);
     abortController = new AbortController();
     void updatePresence();
 }
@@ -382,7 +409,21 @@ export function forceUpdate() {
     }
 }
 
+function onSettingsChange(_: unknown, path: string) {
+    if (path && path !== "plugins" && path !== "plugins.RichPresence"
+        && !path.startsWith("plugins.RichPresence.nd_")) return;
+    if (path === "plugins.RichPresence.nd_enabled" || !abortController) return;
+    resetPresence();
+    abortController = new AbortController();
+    void updatePresence();
+}
+
 export function stop() {
+    SettingsStore.removeGlobalChangeListener(onSettingsChange);
+    resetPresence();
+}
+
+function resetPresence() {
     abortController?.abort();
     abortController = undefined;
     clearTimeout(updateTimer);
@@ -395,5 +436,6 @@ export function stop() {
     cachedActivity = undefined;
     cachedSettingsJSON = undefined;
     cachedTrackState = undefined;
+    cachedArtRetryAt = 0;
     setActivity(null);
 }

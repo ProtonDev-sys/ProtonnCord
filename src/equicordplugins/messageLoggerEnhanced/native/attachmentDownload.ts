@@ -388,6 +388,8 @@ export class BoundedOperationLimiter {
     };
 
     private acquire(deadline: number): Promise<() => void> {
+        if (!Number.isFinite(deadline)) return Promise.reject(new Error("Invalid attachment deadline"));
+        if (Date.now() >= deadline) return Promise.reject(new Error("Attachment operation timed out while queued"));
         if (this.active < this.maximumActive) {
             this.active++;
             return Promise.resolve(this.release);
@@ -412,6 +414,7 @@ export class BoundedOperationLimiter {
     async run<T>(deadline: number, operation: () => Promise<T>): Promise<T> {
         const release = await this.acquire(deadline);
         try {
+            if (Date.now() >= deadline) throw new Error("Attachment operation timed out while queued");
             return await operation();
         } finally {
             release();

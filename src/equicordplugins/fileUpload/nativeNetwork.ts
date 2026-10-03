@@ -147,6 +147,7 @@ class BoundedNetworkLimiter {
 const networkLimiter = new BoundedNetworkLimiter(2, 16);
 const mediaLimiter = new BoundedNetworkLimiter(1, 2);
 const uploadAdmissionLimiter = new BoundedNetworkLimiter(1, 0);
+let activeMediaRequests = 0;
 
 function normalizedHostname(url: URL): string {
     return url.hostname.startsWith("[") && url.hostname.endsWith("]")
@@ -434,6 +435,8 @@ async function readFetchBody(response: Response, maxBytes: number): Promise<Uint
     } catch (error) {
         await reader.cancel().catch(() => undefined);
         throw error;
+    } finally {
+        reader.releaseLock();
     }
     const output = new Uint8Array(total);
     let offset = 0;
@@ -638,4 +641,77 @@ export function safeNativeError(error: unknown, fallback: string): string {
         return error.message.slice(0, 256);
     if (error.name === "AbortError" || /timed out/iu.test(error.message)) return "FileUpload request timed out";
     return fallback;
+}
+
+export function assertTrustedNativeEvent(event: IpcMainInvokeEvent): void {
+    const frame = event?.senderFrame;
+    const origin = typeof frame?.url === "string" ? URL.parse(frame.url) : null;
+    if (!frame || frame !== event.sender?.mainFrame || event.sender.isDestroyed()
+        || !origin || origin.username || origin.password || origin.port || !TRUSTED_RENDERER_ORIGINS.has(origin.origin))
+        throw new Error("Untrusted media request");
+}
+
+export async function fetchNativeMedia(event: IpcMainInvokeEvent, value: unknown, allowedHosts: ReadonlySet<string>, maximumBytes: number) {
+    assertTrustedNativeEvent(event);
+    const url = typeof value === "string" && value.length <= 4_096 ? URL.parse(value) : null;
+    if (!url || url.protocol !== "https:" || url.username || url.password || url.port || !allowedHosts.has(url.hostname))
+        throw new Error("Invalid URL");
+    if (activeMediaRequests >= 2) throw new Error("Too many media downloads");
+
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    event.sender.once("destroyed", abort);
+    activeMediaRequests++;
+    try {
+        const response = await fetch(url, {
+            headers: { Accept: "*/*" },
+            credentials: "omit",
+            redirect: "error",
+            signal: AbortSignal.any([AbortSignal.timeout(120_000), controller.signal])
+        });
+        if (!response.ok || !response.body) {
+            await response.body?.cancel();
+            throw new Error(`Server error ${response.status}`);
+        }
+
+        const declaredSize = Number(response.headers.get("content-length"));
+        if (Number.isFinite(declaredSize) && declaredSize > maximumBytes) {
+            await response.body.cancel();
+            throw new Error("Media download exceeds the size limit");
+        }
+
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        let completed = false;
+        try {
+            while (true) {
+                const { done, value: chunk } = await reader.read();
+                if (done) {
+                    completed = true;
+                    break;
+                }
+                size += chunk.byteLength;
+                if (size > maximumBytes) throw new Error("Media download exceeds the size limit");
+                chunks.push(chunk);
+            }
+        } finally {
+            if (!completed) await reader.cancel().catch(() => { });
+            reader.releaseLock();
+        }
+
+        const data = new Uint8Array(size);
+        let offset = 0;
+        for (const chunk of chunks) {
+            data.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+        return {
+            data: data.buffer,
+            type: new Blob([], { type: response.headers.get("content-type") ?? "" }).type
+        };
+    } finally {
+        activeMediaRequests--;
+        event.sender.removeListener("destroyed", abort);
+    }
 }

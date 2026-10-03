@@ -10,7 +10,7 @@ import { classNameFactory } from "@utils/css";
 import { RenderModalProps } from "@vencord/discord-types";
 import { IconUtils, Modal, React, TextInput, Toasts, UserStore, useState } from "@webpack/common";
 
-import { data, saveAvatar } from ".";
+import { data, hasLocalAvatar, saveAvatar } from ".";
 
 const cl = classNameFactory("vc-userpfp-");
 
@@ -105,9 +105,9 @@ export function SetAvatarModal({ userId, modalProps }: { userId: string; modalPr
         }
     ];
 
-    if (avatars[userId]) {
+    if (hasLocalAvatar(userId)) {
         actions.unshift({
-            text: "Delete",
+            text: "Remove Local Override",
             variant: "dangerPrimary",
             disabled: saving,
             onClick: deleteUserAvatar
@@ -123,6 +123,7 @@ export function SetAvatarModal({ userId, modalProps }: { userId: string; modalPr
         >
             <div onKeyDown={handleKey}>
                 {error && <p role="alert">{error}</p>}
+                {hasLocalAvatar(userId) && <p>Removing the local override restores the database avatar, if available, or the original avatar.</p>}
                 {/* Preview */}
                 <div className={cl("preview-row")}>
                     <div className={cl("preview-box")}>

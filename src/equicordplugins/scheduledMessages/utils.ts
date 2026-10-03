@@ -19,6 +19,7 @@ const STORAGE_KEY = "ScheduledMessages_queue";
 let scheduledMessages: ScheduledMessage[] = [];
 let checkTimeout: ReturnType<typeof setTimeout> | null = null;
 let schedulerRunning = false;
+let schedulerController: AbortController | null = null;
 let isProcessingMessages = false;
 
 export const phantomMessageMap = new Map<string, PhantomMessageData>();
@@ -31,8 +32,9 @@ const pendingRecreations = new Map<string, ReturnType<typeof setTimeout>>();
 const RECREATE_DEBOUNCE_MS = 300;
 let phantomGeneration = 0;
 
-export async function loadScheduledMessages(): Promise<void> {
+export async function loadScheduledMessages(isCurrent: () => boolean = () => true): Promise<void> {
     const saved = await DataStore.get<ScheduledMessage[]>(STORAGE_KEY);
+    if (!isCurrent()) return;
     scheduledMessages = Array.isArray(saved) ? saved : [];
     scheduledMessages.sort((a, b) => a.scheduledTime - b.scheduledTime);
 }
@@ -160,8 +162,9 @@ async function buildPhantomAttachments(attachments: ScheduledAttachment[]) {
 export async function createPhantomMessage(msg: ScheduledMessage): Promise<void> {
     if (!settings.store.showPhantomMessages) return;
 
+    const generation = phantomGeneration;
     const currentUser = UserStore.getCurrentUser();
-    if (!currentUser) return;
+    if (!currentUser || msg.ownerUserId !== currentUser.id) return;
 
     const messageId = `scheduled-${msg.id}`;
 
@@ -169,6 +172,7 @@ export async function createPhantomMessage(msg: ScheduledMessage): Promise<void>
     if (msg.reactions?.length) pendingReactions.set(msg.id, [...msg.reactions]);
 
     const attachments = msg.attachments?.length ? await buildPhantomAttachments(msg.attachments) : [];
+    if (generation !== phantomGeneration) return;
 
     const initialReactions = (msg.reactions ?? []).map(r => ({
         emoji: r.emoji,
@@ -186,6 +190,7 @@ export async function createPhantomMessage(msg: ScheduledMessage): Promise<void>
         : MessageActions.fetchMessages({ channelId: msg.channelId });
 
     messagesLoaded.then(() => {
+        if (generation !== phantomGeneration || !phantomMessageMap.has(messageId) || UserStore.getCurrentUser()?.id !== currentUser.id) return;
         FluxDispatcher.dispatch({
             type: "MESSAGE_CREATE",
             channelId: msg.channelId,
@@ -297,15 +302,50 @@ function doRecreatePhantomMessage(messageId: string, channelId: string, reaction
     }, 50);
 }
 
-async function uploadAttachment(channelId: string, att: ScheduledAttachment): Promise<{ id: string; filename: string; uploaded_filename: string; } | null> {
+function waitForRetry(delay: number, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return Promise.resolve();
+    return new Promise(resolve => {
+        const finish = () => {
+            clearTimeout(timeout);
+            signal.removeEventListener("abort", finish);
+            resolve();
+        };
+        const timeout = setTimeout(finish, delay);
+        signal.addEventListener("abort", finish, { once: true });
+    });
+}
+
+async function uploadAttachment(channelId: string, att: ScheduledAttachment, signal: AbortSignal): Promise<{ id: string; filename: string; uploaded_filename: string; } | null> {
+    if (signal.aborted) return null;
     return new Promise(resolve => {
         const bytes = Uint8Array.from(atob(att.data), c => c.charCodeAt(0));
         const file = new File([bytes], att.filename, { type: att.type });
         const upload = new CloudUploader({ file, platform: CloudUploadPlatform.WEB }, channelId);
 
-        upload.on("complete", () => resolve({ id: "0", filename: upload.filename, uploaded_filename: upload.uploadedFilename }));
-        upload.on("error", () => resolve(null));
-        upload.upload();
+        const finish = (result: { id: string; filename: string; uploaded_filename: string; } | null) => {
+            signal.removeEventListener("abort", cancel);
+            upload.off("complete", complete);
+            upload.off("error", failed);
+            resolve(result);
+        };
+        const complete = () => finish({ id: "0", filename: upload.filename, uploaded_filename: upload.uploadedFilename });
+        const failed = () => finish(null);
+        const cancel = () => {
+            finish(null);
+            try {
+                upload.cancel();
+            } catch (error) {
+                logger.warn("Failed to cancel scheduled attachment", error);
+            }
+        };
+        upload.on("complete", complete);
+        upload.on("error", failed);
+        signal.addEventListener("abort", cancel, { once: true });
+        try {
+            void upload.upload().catch(failed);
+        } catch {
+            failed();
+        }
     });
 }
 
@@ -320,33 +360,37 @@ async function postMessage(channelId: string, content: string, attachments?: { i
     });
 }
 
-async function addReactionsToMessage(channelId: string, messageId: string, reactions: ScheduledReaction[]): Promise<void> {
+async function addReactionsToMessage(channelId: string, messageId: string, reactions: ScheduledReaction[], signal: AbortSignal, isActive: () => boolean): Promise<void> {
     for (const reaction of reactions) {
         const emojiStr = reaction.emoji.id
             ? `${reaction.emoji.name}:${reaction.emoji.id}`
             : encodeURIComponent(reaction.emoji.name);
 
         for (let attempt = 0; attempt < 5; attempt++) {
+            if (!isActive()) return;
             try {
                 await RestAPI.put({ url: `/channels/${channelId}/messages/${messageId}/reactions/${emojiStr}/@me` });
                 break;
             } catch (e) {
                 const err = e as { status?: number; body?: { retry_after?: number; }; };
                 if (err.status === 429 || err.body?.retry_after) {
-                    await new Promise(r => setTimeout(r, (err.body?.retry_after ?? 1) * 1000 + 100));
+                    await waitForRetry((err.body?.retry_after ?? 1) * 1000 + 100, signal);
                 } else if (err.status === 404) {
-                    await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+                    await waitForRetry(1000 * (attempt + 1), signal);
                 } else {
                     break;
                 }
             }
         }
-        await new Promise(r => setTimeout(r, 350));
+        await waitForRetry(350, signal);
     }
 }
 
-async function sendScheduledMessage(msg: ScheduledMessage): Promise<boolean> {
+async function sendScheduledMessage(msg: ScheduledMessage, signal: AbortSignal, userId: string): Promise<boolean | null> {
+    const isActive = () => !signal.aborted && msg.ownerUserId === userId && UserStore.getCurrentUser()?.id === userId;
+    let delivered = false;
     try {
+        if (!isActive()) return null;
         if (!ChannelStore.getChannel(msg.channelId)) return false;
 
         const reactions = pendingReactions.get(msg.id) ?? msg.reactions ?? [];
@@ -355,34 +399,41 @@ async function sendScheduledMessage(msg: ScheduledMessage): Promise<boolean> {
 
         if (msg.attachments?.length) {
             const uploaded = (await Promise.all(msg.attachments.map((att, i) =>
-                uploadAttachment(msg.channelId, att).then(r => r ? { ...r, id: String(i) } : null)
+                uploadAttachment(msg.channelId, att, signal).then(r => r ? { ...r, id: String(i) } : null)
             ))).filter(Boolean) as { id: string; filename: string; uploaded_filename: string; }[];
 
+            if (!isActive() || !scheduledMessages.some(queued => queued.id === msg.id)) return null;
             await postMessage(msg.channelId, msg.content, uploaded.length ? uploaded : undefined);
         } else {
+            if (!isActive()) return null;
             await postMessage(msg.channelId, msg.content);
         }
 
+        delivered = true;
+        await removeScheduledMessage(msg.id);
+        if (!isActive()) return true;
         if (reactions.length) {
-            await new Promise(r => setTimeout(r, 1500));
+            await waitForRetry(1500, signal);
+            if (!isActive()) return true;
             const msgArray = (MessageStore.getMessages(msg.channelId) as { _array?: Message[]; })?._array ?? [];
             const currentUserId = UserStore.getCurrentUser()?.id;
 
             for (let i = msgArray.length - 1; i >= Math.max(0, msgArray.length - 10); i--) {
                 const m = msgArray[i];
                 if (m?.author?.id === currentUserId && m?.content === msg.content && !m?.id?.startsWith("scheduled-")) {
-                    await addReactionsToMessage(msg.channelId, m.id, reactions);
+                    await addReactionsToMessage(msg.channelId, m.id, reactions, signal, isActive);
                     break;
                 }
             }
         }
 
-        if (settings.store.showNotifications) {
+        if (isActive() && settings.store.showNotifications) {
             showToast(`Scheduled message sent to ${getChannelDisplayInfo(msg.channelId).name}`, Toasts.Type.SUCCESS);
         }
         return true;
     } catch {
-        if (settings.store.showNotifications) showToast("Failed to send scheduled message", Toasts.Type.FAILURE);
+        if (!delivered && !isActive()) return null;
+        if (isActive() && settings.store.showNotifications) showToast("Failed to send scheduled message", Toasts.Type.FAILURE);
         return false;
     }
 }
@@ -393,9 +444,11 @@ export async function addScheduledMessage(
     scheduledTime: number,
     attachments?: ScheduledAttachment[]
 ): Promise<{ success: boolean; error?: string; }> {
+    const ownerUserId = UserStore.getCurrentUser()?.id;
+    if (!ownerUserId) return { success: false, error: "Sign in before scheduling a message" };
     const minuteStart = Math.floor(scheduledTime / 60000) * 60000;
     const count = scheduledMessages.filter(m =>
-        m.channelId === channelId && m.scheduledTime >= minuteStart && m.scheduledTime < minuteStart + 60000
+        m.ownerUserId === ownerUserId && m.channelId === channelId && m.scheduledTime >= minuteStart && m.scheduledTime < minuteStart + 60000
     ).length;
 
     if (count >= settings.store.maxMessagesPerMinute) {
@@ -404,6 +457,7 @@ export async function addScheduledMessage(
 
     const newMessage: ScheduledMessage = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        ownerUserId,
         channelId,
         content,
         scheduledTime,
@@ -438,17 +492,28 @@ export async function clearAllScheduledMessages(): Promise<void> {
 }
 
 async function checkAndSendMessages(): Promise<void> {
-    if (isProcessingMessages) return;
+    const signal = schedulerController?.signal;
+    const userId = UserStore.getCurrentUser()?.id;
+    if (isProcessingMessages || !schedulerRunning || !signal || signal.aborted) return;
+    if (!userId) {
+        scheduleNextCheck();
+        return;
+    }
     isProcessingMessages = true;
 
     try {
         const now = Date.now();
-        const dueMessages = scheduledMessages.filter(m => m.scheduledTime <= now);
+        const dueMessages = scheduledMessages.filter(m => m.ownerUserId === userId && m.scheduledTime <= now);
 
         for (const msg of dueMessages) {
-            await removeScheduledMessage(msg.id);
-            await sendScheduledMessage(msg);
+            if (signal.aborted || UserStore.getCurrentUser()?.id !== userId) break;
+            if (!scheduledMessages.some(queued => queued.id === msg.id)) continue;
+            const result = await sendScheduledMessage(msg, signal, userId);
+            if (result === null) break;
+            if (!result) await removeScheduledMessage(msg.id);
         }
+    } catch (error) {
+        logger.error("Failed to process scheduled messages", error);
     } finally {
         isProcessingMessages = false;
         scheduleNextCheck();
@@ -457,12 +522,15 @@ async function checkAndSendMessages(): Promise<void> {
 
 export function startScheduler(): void {
     if (schedulerRunning) return;
+    schedulerController = new AbortController();
     schedulerRunning = true;
     void checkAndSendMessages();
 }
 
 export function stopScheduler(): void {
     schedulerRunning = false;
+    schedulerController?.abort();
+    schedulerController = null;
     if (checkTimeout) {
         clearTimeout(checkTimeout);
         checkTimeout = null;
@@ -477,11 +545,12 @@ function scheduleNextCheck(): void {
         checkTimeout = null;
     }
 
-    const nextMessage = scheduledMessages[0];
-    if (!nextMessage) return;
+    if (!scheduledMessages.length) return;
+    const userId = UserStore.getCurrentUser()?.id;
+    const nextMessage = scheduledMessages.find(msg => userId && msg.ownerUserId === userId);
 
     const maxDelay = Math.max(1000, settings.store.checkIntervalSeconds * 1000);
-    const delay = Math.max(0, Math.min(maxDelay, nextMessage.scheduledTime - Date.now()));
+    const delay = nextMessage ? Math.max(0, Math.min(maxDelay, nextMessage.scheduledTime - Date.now())) : maxDelay;
 
     checkTimeout = setTimeout(() => {
         checkTimeout = null;
@@ -490,7 +559,11 @@ function scheduleNextCheck(): void {
 }
 
 export async function recreatePhantomMessages(): Promise<void> {
-    for (const msg of scheduledMessages) await createPhantomMessage(msg);
+    const generation = phantomGeneration;
+    for (const msg of scheduledMessages) {
+        if (generation !== phantomGeneration) break;
+        await createPhantomMessage(msg);
+    }
 }
 
 export function cleanupAllPhantomMessages(): void {

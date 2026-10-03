@@ -30,7 +30,7 @@ const updatePlan = createUpdateReviewPlan(fullHash.toUpperCase(), targetHash);
 assert.deepEqual(updatePlan, {
     localRevision: fullHash,
     targetRevision: targetHash,
-    logRange: `${targetHash}...${fullHash}`
+    logRange: `${fullHash}..${targetHash}`
 }, "the review must capture immutable local and target revisions");
 assert.equal(isUpdateReviewPlanCurrent(updatePlan, fullHash), true);
 assert.equal(isUpdateReviewPlanCurrent(updatePlan, targetHash), false,

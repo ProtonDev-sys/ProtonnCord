@@ -28,7 +28,7 @@ export * from "./misc";
 
 // stolen from mlv2
 // https://github.com/1Lighty/BetterDiscordPlugins/blob/master/Plugins/MessageLoggerV2/MessageLoggerV2.plugin.js#L2367
-interface Id { id: string, time: number; message?: LoggedMessageJSON; }
+interface Id { id: string, time: bigint; message?: LoggedMessageJSON; }
 export const DISCORD_EPOCH = 14200704e5;
 export function reAddDeletedMessages(messages: LoggedMessageJSON[], deletedMessages: LoggedMessageJSON[], channelStart: boolean, channelEnd: boolean) {
     if (!messages.length || !deletedMessages?.length) return;
@@ -37,15 +37,16 @@ export function reAddDeletedMessages(messages: LoggedMessageJSON[], deletedMessa
 
     for (let i = 0, len = messages.length; i < len; i++) {
         const { id } = messages[i];
-        IDs.push({ id: id, time: (parseInt(id) / 4194304) + DISCORD_EPOCH });
+        if (!/^\d+$/.test(id)) return;
+        IDs.push({ id: id, time: BigInt(id) });
     }
     for (let i = 0, len = deletedMessages.length; i < len; i++) {
         const record = deletedMessages[i];
-        if (!record) continue;
-        savedIDs.push({ id: record.id, time: (parseInt(record.id) / 4194304) + DISCORD_EPOCH, message: record });
+        if (!record || !/^\d+$/.test(record.id)) continue;
+        savedIDs.push({ id: record.id, time: BigInt(record.id), message: record });
     }
 
-    savedIDs.sort((a, b) => a.time - b.time);
+    savedIDs.sort((a, b) => a.time < b.time ? -1 : a.time > b.time ? 1 : 0);
     if (!savedIDs.length) return;
     const { time: lowestTime } = IDs[IDs.length - 1];
     const [{ time: highestTime }] = IDs;
@@ -55,7 +56,7 @@ export function reAddDeletedMessages(messages: LoggedMessageJSON[], deletedMessa
     if (highestIDX === -1) return;
     const reAddIDs = savedIDs.slice(lowestIDX, highestIDX + 1);
     reAddIDs.push(...IDs);
-    reAddIDs.sort((a, b) => b.time - a.time);
+    reAddIDs.sort((a, b) => a.time > b.time ? -1 : a.time < b.time ? 1 : 0);
     for (let i = 0, len = reAddIDs.length; i < len; i++) {
         const { id, message } = reAddIDs[i];
         if (messages.findIndex(e => e.id === id) !== -1) continue;
@@ -195,8 +196,6 @@ export function shouldIgnore({ channelId, authorId, guildId, flags, bot, ghostPi
 
     if ((ignoreWebhooks && webhookId) && !isAuthorWhitelisted) return true;
 
-    if (ghostPinged) return false; // keep
-
     // author has highest priority
     if (isAuthorWhitelisted) return false; // keep
     if (isAuthorBlacklisted) return true; // ignore
@@ -215,6 +214,8 @@ export function shouldIgnore({ channelId, authorId, guildId, flags, bot, ghostPi
     if (guildId != null && shouldIgnoreMutedGuilds && UserGuildSettingsStore.isMuted(guildId)) return true; // ignore
     if (channelId != null && shouldIgnoreMutedCategories && UserGuildSettingsStore.isCategoryMuted(guildId!, channelId)) return true; // ignore
     if (channelId != null && shouldIgnoreMutedChannels && UserGuildSettingsStore.isChannelMuted(guildId!, channelId)) return true; // ignore
+
+    if (ghostPinged) return false;
 
     return false; // keep;
 }

@@ -68,7 +68,7 @@ function isEditingCombo(e: KeyboardEvent): boolean {
 
 export function isEditableTarget(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false;
-    return Boolean(target.closest("input, textarea, select, [contenteditable=true], [role=textbox]"));
+    return target.isContentEditable || Boolean(target.closest("input, textarea, select, [role=textbox]"));
 }
 
 type PaletteKeyHandler = (e: KeyboardEvent) => boolean;

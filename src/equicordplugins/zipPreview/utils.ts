@@ -117,7 +117,7 @@ export function getAttachmentUrl(props: ZipPreviewAttachmentProps): string | und
 
 export function getCachedZip(url: string): ZipPreviewCacheState {
     const cached = zipCache.get(url);
-    if (cached) {
+    if (cached && cached.status !== "rejected") {
         zipCache.delete(url);
         zipCache.set(url, cached);
         return cached;

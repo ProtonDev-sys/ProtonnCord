@@ -9,6 +9,7 @@ import { findByPropsLazy, waitFor } from "@webpack";
 import { CssColorData, IconSize } from "./types";
 
 let colorKeys: string[] = [];
+const colorListeners = new Set<() => void>();
 
 const Colors = findByPropsLazy("colors", "layout");
 export const iconSizesInPx: Record<string, number> = findByPropsLazy("md", "lg", "xxs");
@@ -16,6 +17,11 @@ export const iconSizes: IconSize[] = ["xxs", "xs", "sm", "md", "lg"];
 
 export function getCssColorKeys(): string[] {
     return colorKeys;
+}
+
+export function subscribeCssColorKeys(listener: () => void) {
+    colorListeners.add(listener);
+    return () => { colorListeners.delete(listener); };
 }
 
 export const cssColors = new Proxy({} as Record<number, CssColorData>, {
@@ -42,4 +48,5 @@ export const cssColors = new Proxy({} as Record<number, CssColorData>, {
 
 waitFor(["colors", "layout"], m => {
     colorKeys = Object.keys(m.colors);
+    for (const listener of colorListeners) listener();
 });

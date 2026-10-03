@@ -1056,7 +1056,7 @@ async function verifyMentionHighlight(page: Page, message: RawDiscordMessage): P
         return {
             backgroundColor: style.backgroundColor,
             markerBoxShadow: style.boxShadow,
-            mentionedClassApplied: /mentioned_/u.test(article.className),
+            mentionedClassApplied: /\bmentioned_/u.test(article.className),
         };
     }, { channelId: message.channelId, messageId: message.id });
 }

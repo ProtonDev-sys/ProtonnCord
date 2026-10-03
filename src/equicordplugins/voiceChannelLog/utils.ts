@@ -29,7 +29,7 @@ export const playSound = (id: string) => {
 
 export async function downloadSound(id: string): Promise<void> {
     try {
-        const filename = id + settings.store.soundboardFileType;
+        const filename = id + ".ogg";
         const response = await fetch(`https://cdn.discordapp.com/soundboard-sounds/${id}`);
         if (!response.ok) throw new Error(`Sound download failed (${response.status})`);
         const original = await response.arrayBuffer();

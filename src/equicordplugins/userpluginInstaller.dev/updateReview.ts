@@ -69,7 +69,7 @@ export function createUpdateReviewPlan(localRevision: string, targetRevision: st
     return {
         localRevision: local,
         targetRevision: target,
-        logRange: `${target}...${local}`
+        logRange: `${local}..${target}`
     };
 }
 
@@ -163,7 +163,7 @@ export function createUpdateReviewModel(metadata: UpdateReviewMetadata, commits:
     return {
         title: "Review userplugin update",
         message: `Update ${name}?`,
-        detail: `Plugin description:\n${description}\n\nCommits to apply:\n${formatUpdateCommits(commits)}\n\nOnly apply updates from developers you trust.`,
+        detail: `Plugin description:\n${description}\n\nCommits to apply:\n${formatUpdateCommits(commits)}\n\nLocal commits, if any, will be rebased onto the reviewed target.\n\nOnly apply updates from developers you trust.`,
         buttons,
         sourceUrl,
         applyResponse: 1,

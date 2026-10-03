@@ -18,6 +18,7 @@ const PERSIST_THROTTLE_MS = 15_000;
 const logger = new Logger("VoiceRejoin");
 
 type SavedVoiceChannel = {
+    userId: string;
     guildId: string | null;
     channelId: string;
     timestamp: number;
@@ -29,6 +30,11 @@ let lastPersistedChannelId: string | null = null;
 let lastPersistedGuildId: string | null = null;
 let lastPersistedSessionState: boolean | null = null;
 let lastPersistedAt = 0;
+let persistOwnerId: string | null = null;
+let persistTail = Promise.resolve();
+let heartbeatIntervalId: ReturnType<typeof setInterval> | undefined;
+let disconnectedAt: number | undefined;
+let disconnectedOwnerId: string | undefined;
 
 const settings = definePluginSettings({
     rejoinDelay: {
@@ -71,6 +77,7 @@ function cancelReconnectAttempt() {
 }
 
 function resetPersistCache() {
+    persistOwnerId = null;
     lastPersistedChannelId = null;
     lastPersistedGuildId = null;
     lastPersistedSessionState = null;
@@ -85,41 +92,57 @@ function cachePersistedState(saved: SavedVoiceChannel | null, sessionState: bool
 }
 
 function shouldPersistActiveState(saved: SavedVoiceChannel) {
-    return lastPersistedSessionState !== true
+    return persistOwnerId !== saved.userId
+        || lastPersistedSessionState !== true
         || lastPersistedChannelId !== saved.channelId
         || lastPersistedGuildId !== saved.guildId
-        || saved.timestamp - lastPersistedAt >= PERSIST_THROTTLE_MS;
+        || saved.timestamp - lastPersistedAt >= Math.min(PERSIST_THROTTLE_MS, settings.store.rejoinTimeout * 500);
 }
 
-async function persistActiveState(state: VoiceState) {
+async function persistActiveState(state: VoiceState, force = false) {
     const { channelId } = state;
-    if (!channelId) return;
+    const userId = UserStore.getCurrentUser()?.id;
+    if (!channelId || !userId || state.userId !== userId) return;
 
     const saved: SavedVoiceChannel = {
+        userId,
         guildId: state.guildId ?? null,
         channelId,
         timestamp: Date.now(),
     };
 
-    if (!shouldPersistActiveState(saved)) return;
+    if (!force && !shouldPersistActiveState(saved)) return;
 
-    await Promise.all([
-        DataStore.set(DATASTORE_KEY, saved),
-        DataStore.set(DATASTORE_SESSION_KEY, true)
-    ]);
-    cachePersistedState(saved, true);
+    const generation = reconnectGeneration;
+    const pending = persistTail.then(() => DataStore.setMany([
+        [`${DATASTORE_KEY}:${userId}`, saved],
+        [`${DATASTORE_SESSION_KEY}:${userId}`, true]
+    ]));
+    persistTail = pending.catch(() => {});
+    await pending;
+    if (generation === reconnectGeneration && UserStore.getCurrentUser()?.id === userId) {
+        persistOwnerId = userId;
+        cachePersistedState(saved, true);
+    }
 }
 
 async function persistInactiveState() {
-    if (lastPersistedSessionState === false) return;
+    const userId = UserStore.getCurrentUser()?.id;
+    if (!userId || (persistOwnerId === userId && lastPersistedSessionState === false)) return;
 
-    await DataStore.set(DATASTORE_SESSION_KEY, false);
-    cachePersistedState(null, false);
+    const generation = reconnectGeneration;
+    const pending = persistTail.then(() => DataStore.set(`${DATASTORE_SESSION_KEY}:${userId}`, false));
+    persistTail = pending.catch(() => {});
+    await pending;
+    if (generation === reconnectGeneration && UserStore.getCurrentUser()?.id === userId) {
+        persistOwnerId = userId;
+        cachePersistedState(null, false);
+    }
 }
 
-async function waitForChannel(channelId: string) {
+async function waitForChannel(channelId: string, isCurrent: () => boolean) {
     let channel = ChannelStore.getChannel(channelId);
-    for (let i = 0; i < 20 && !channel; i++) {
+    for (let attempt = 0; attempt < 20 && !channel && isCurrent(); attempt++) {
         await new Promise(resolve => setTimeout(resolve, 250));
         channel = ChannelStore.getChannel(channelId);
     }
@@ -145,6 +168,20 @@ export default definePlugin({
     settings,
 
     flux: {
+        LOGOUT() {
+            cancelReconnectAttempt();
+            resetPersistCache();
+            disconnectedAt = undefined;
+            disconnectedOwnerId = undefined;
+        },
+        CONNECTION_CLOSED() {
+            cancelReconnectAttempt();
+            disconnectedAt = Date.now();
+            const userId = UserStore.getCurrentUser()?.id;
+            disconnectedOwnerId = userId;
+            const state = userId ? VoiceStateStore.getVoiceStateForUser(userId) : undefined;
+            if (state?.channelId) void persistActiveState(state, true).catch(error => logger.error("Failed to persist disconnect time", error));
+        },
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
             const currentUser = UserStore.getCurrentUser();
             if (!currentUser) return;
@@ -158,6 +195,7 @@ export default definePlugin({
             }
             if (!myState) return;
 
+            cancelReconnectAttempt();
             if (myState.channelId) {
                 void persistActiveState(myState)
                     .catch(err => logger.error("Failed to persist last voice channel", err));
@@ -170,26 +208,35 @@ export default definePlugin({
         async CONNECTION_OPEN() {
             cancelReconnectAttempt();
             const scheduledGeneration = reconnectGeneration;
+            const userId = UserStore.getCurrentUser()?.id;
+            if (!userId) return;
+            const reconnectDisconnectedAt = disconnectedOwnerId === userId ? disconnectedAt : undefined;
+            disconnectedAt = undefined;
+            disconnectedOwnerId = undefined;
+            const isCurrent = () => scheduledGeneration === reconnectGeneration && UserStore.getCurrentUser()?.id === userId;
 
-            const wasInVC = await DataStore.get(DATASTORE_SESSION_KEY);
-            if (scheduledGeneration !== reconnectGeneration) return;
-
-            if (wasInVC === false) {
-                await DataStore.del(DATASTORE_KEY);
-                resetPersistCache();
+            const currentVoiceState = VoiceStateStore.getVoiceStateForUser(userId);
+            if (currentVoiceState?.channelId) {
+                await persistActiveState(currentVoiceState, true);
                 return;
             }
 
+            await persistTail;
+            const wasInVC = await DataStore.get(`${DATASTORE_SESSION_KEY}:${userId}`);
+            if (!isCurrent()) return;
+
+            if (wasInVC !== true) return;
+
             reconnectTimeoutId = setTimeout(async () => {
                 reconnectTimeoutId = undefined;
-                if (scheduledGeneration !== reconnectGeneration) return;
+                if (!isCurrent()) return;
 
                 try {
-                    const saved = await DataStore.get<SavedVoiceChannel>(DATASTORE_KEY);
-                    if (!saved?.channelId) return;
+                    const saved = await DataStore.get<SavedVoiceChannel>(`${DATASTORE_KEY}:${userId}`);
+                    if (!isCurrent() || !saved?.channelId || saved.userId !== userId) return;
 
-                    const channel = await waitForChannel(saved.channelId);
-                    if (scheduledGeneration !== reconnectGeneration) return;
+                    const channel = await waitForChannel(saved.channelId, isCurrent);
+                    if (!isCurrent()) return;
 
                     if (!channel) {
                         await persistInactiveState();
@@ -202,10 +249,15 @@ export default definePlugin({
                     const isDM = channel.isDM() || channel.isGroupDM() || channel.isMultiUserDM();
                     const myUserId = currentUser.id;
                     const myVoiceState = VoiceStateStore.getVoiceStateForUser(myUserId);
+                    if (myVoiceState?.channelId) {
+                        await persistActiveState(myVoiceState);
+                        return;
+                    }
                     const preventionMode = settings.store.preventReconnectIfCallEnded;
                     const timeoutMs = settings.store.rejoinTimeout * 1000;
 
-                    if (saved.timestamp && Date.now() - saved.timestamp > timeoutMs) {
+                    const lastConnectedAt = reconnectDisconnectedAt ?? saved.timestamp;
+                    if (!Number.isFinite(lastConnectedAt) || Date.now() - lastConnectedAt > timeoutMs) {
                         await persistInactiveState();
                         return;
                     }
@@ -229,19 +281,11 @@ export default definePlugin({
                         }
                     }
 
-                    if (myVoiceState?.channelId) {
-                        await persistInactiveState();
-                        return;
-                    }
-
                     FluxDispatcher.dispatch({
                         type: "VOICE_CHANNEL_SELECT",
                         guildId: saved.guildId,
                         channelId: saved.channelId,
                     });
-
-                    await DataStore.set(DATASTORE_SESSION_KEY, true);
-                    cachePersistedState(saved, true);
                 } catch (err) {
                     logger.error("Failed to run voice rejoin", err);
                 }
@@ -249,7 +293,21 @@ export default definePlugin({
         },
     },
 
+    start() {
+        if (heartbeatIntervalId) clearInterval(heartbeatIntervalId);
+        heartbeatIntervalId = setInterval(() => {
+            if (disconnectedAt !== undefined) return;
+            const userId = UserStore.getCurrentUser()?.id;
+            const state = userId ? VoiceStateStore.getVoiceStateForUser(userId) : undefined;
+            if (state?.channelId) void persistActiveState(state).catch(error => logger.error("Failed to refresh voice session", error));
+        }, 2500);
+    },
+
     stop() {
+        if (heartbeatIntervalId) clearInterval(heartbeatIntervalId);
+        heartbeatIntervalId = undefined;
+        disconnectedAt = undefined;
+        disconnectedOwnerId = undefined;
         cancelReconnectAttempt();
         resetPersistCache();
     },

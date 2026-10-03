@@ -42,9 +42,49 @@ export async function checkedFetch(url: Url, options?: RequestInit) {
     throw new Error(message);
 }
 
-export async function fetchBuffer(url: Url, options?: RequestInit) {
-    const res = await checkedFetch(url, options);
-    const buf = await res.arrayBuffer();
-
-    return Buffer.from(buf);
+export async function fetchBuffer(url: Url, options: RequestInit, limits: { maxBytes: number; timeoutMs: number; }) {
+    const controller = new AbortController();
+    const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    let complete = false;
+    let rejectAbort!: (reason: unknown) => void;
+    const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
+    const onAbort = () => rejectAbort(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(new Error("Extension download timed out")), limits.timeoutMs);
+    try {
+        if (signal.aborted) throw signal.reason;
+        const download = fetch(url, { ...options, signal }).then(res => {
+            if (signal.aborted) {
+                res.body?.cancel().catch(() => undefined);
+                throw signal.reason;
+            }
+            return res;
+        });
+        const res = await Promise.race([download, aborted]);
+        if (!res.body) throw new Error("Extension download has no body");
+        reader = res.body.getReader();
+        if (!res.ok) throw new Error(`Extension download failed: ${res.status} ${res.statusText}`);
+        const declaredSize = Number(res.headers.get("content-length"));
+        if (declaredSize > limits.maxBytes) throw new Error("Extension download exceeds byte limit");
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        while (true) {
+            const chunk = await Promise.race([reader.read(), aborted]);
+            if (chunk.done) break;
+            size += chunk.value.byteLength;
+            if (size > limits.maxBytes) throw new Error("Extension download exceeds byte limit");
+            chunks.push(chunk.value);
+        }
+        complete = true;
+        return Buffer.concat(chunks, size);
+    } finally {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort);
+        if (!complete) {
+            controller.abort();
+            reader?.cancel().catch(() => undefined);
+        }
+        reader?.releaseLock();
+    }
 }

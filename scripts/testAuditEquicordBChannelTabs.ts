@@ -90,15 +90,24 @@ test("delayed tab scroll restoration cannot move the newly selected chat", () =>
 });
 
 function bookmarksHarness() {
-    let state: object | undefined;
+    const states: any[] = [];
+    let hookIndex = 0;
+    let writer: unknown;
+    let hydrated = false;
     let options: any;
     let persisted: any = { sibling: [{ channelId: "untouched" }] };
     let writes = 0;
     const api = load("util/bookmarks.ts", {
         "@api/index": { DataStore: { update(_key: string, callback: (old: object) => object) { persisted = callback(persisted); writes++; return Promise.resolve(); } } },
-        "@utils/react": { useAwaiter(_factory: unknown, opts: object) { options = opts; } },
+        "@utils/react": { useAwaiter(_factory: unknown, opts: object) { options = opts; return [undefined, null, !hydrated]; } },
         "@webpack/common": {
-            useState(initial: object) { state ??= initial; return [state, (next: object) => { state = next; }]; },
+            useState(initial: unknown) {
+                const index = hookIndex++;
+                states[index] ??= initial;
+                return [states[index], (next: any) => { states[index] = typeof next === "function" ? next(states[index]) : next; }];
+            },
+            useMemo: (factory: () => unknown) => writer ??= factory(),
+            useEffect() {},
             useCallback: (fn: unknown) => fn,
             ChannelStore: { getChannel: () => undefined }, UserStore: {}
         },
@@ -106,8 +115,8 @@ function bookmarksHarness() {
     });
     return {
         api,
-        render: () => api.useBookmarks("user"),
-        hydrate(bookmarks: object[]) { options.onSuccess({ user: bookmarks }); },
+        render: () => { hookIndex = 0; return api.useBookmarks("user"); },
+        hydrate(bookmarks: object[]) { hydrated = true; options.onSuccess({ user: bookmarks }); },
         get writes() { return writes; },
         get persisted() { return persisted; }
     };

@@ -25,7 +25,7 @@ import { lodash, Modal, openModal, ScrollerAuto, SearchableSelect, useCallback, 
 import { detectAudioMimeType } from "./audioValidation";
 import { buildTargetLanguageOptions, getVoiceMessageMedia, LanguageOption, resolveTargetLanguage } from "./options";
 import { formatTimestampedTranscript, IdleResultCache, normalizeTranscriptionResult, TranscriptionResult } from "./transcriptionData";
-import { cl, decodeAudio, terminateTranscriptionWorkers, TranscriptionWorker } from "./utils";
+import { cl, terminateTranscriptionWorkers, TranscriptionWorker } from "./utils";
 
 const Native = VencordNative.pluginHelpers.VoiceMessageTranscriber as PluginNative<typeof import("./native")>;
 const MAX_PREPARED_AUDIO_CACHE_ENTRIES = 3;
@@ -34,7 +34,12 @@ let generation = 0;
 function clearTranscriptionState() {
     generation++;
     terminateTranscriptionWorkers();
-    preparedAudioCache.clear();
+    clearingPreparations = true;
+    try {
+        for (const controller of preparationControllers) controller.abort();
+    } finally {
+        clearingPreparations = false;
+    }
     resultCache.clear();
 }
 
@@ -57,30 +62,77 @@ interface PreparedAudio {
     waveform: string;
 }
 
-const preparedAudioCache = new Map<string, Promise<PreparedAudio>>();
+const preparationControllers = new Set<AbortController>();
+const preparationQueue: (() => void)[] = [];
+let activePreparations = 0;
+let clearingPreparations = false;
 
-function prepareAudio(src: string): Promise<PreparedAudio> {
-    const cached = preparedAudioCache.get(src);
-    if (cached) return cached;
-    if (preparedAudioCache.size >= MAX_PREPARED_AUDIO_CACHE_ENTRIES)
-        return Promise.reject(new Error("Audio preparation is busy; please retry shortly"));
+function drainPreparations() {
+    if (clearingPreparations) return;
+    while (activePreparations < MAX_PREPARED_AUDIO_CACHE_ENTRIES && preparationQueue.length)
+        preparationQueue.shift()!();
+}
 
-    const pending = Native.fetchAudio(src)
-        .then(async bytes => {
-            const blob = new Blob([bytes as any], { type: detectAudioMimeType(bytes) ?? "application/octet-stream" });
-            const samples = await decodeAudio(blob);
-            return {
-                blob,
-                samples,
-                waveform: generateWaveform(samples, 16_000)
-            };
-        })
-        .finally(() => {
-            if (preparedAudioCache.get(src) === pending) preparedAudioCache.delete(src);
-        });
-
-    preparedAudioCache.set(src, pending);
-    return pending;
+function prepareAudio(src: string, signal: AbortSignal): Promise<PreparedAudio> {
+    signal.throwIfAborted();
+    const controller = new AbortController();
+    preparationControllers.add(controller);
+    const abort = () => controller.abort();
+    signal.addEventListener("abort", abort, { once: true });
+    return new Promise<PreparedAudio>((resolve, reject) => {
+        const id = crypto.randomUUID();
+        let started = false;
+        let settled = false;
+        let context: AudioContext | undefined;
+        const finish = (error?: unknown, value?: PreparedAudio) => {
+            if (settled) return;
+            settled = true;
+            signal.removeEventListener("abort", abort);
+            controller.signal.removeEventListener("abort", cancel);
+            preparationControllers.delete(controller);
+            if (context) void context.close().catch(() => undefined);
+            if (started) activePreparations--;
+            else {
+                const index = preparationQueue.indexOf(start);
+                if (index !== -1) preparationQueue.splice(index, 1);
+            }
+            if (error) reject(error);
+            else resolve(value!);
+            drainPreparations();
+        };
+        const cancel = () => {
+            if (started) void Native.cancelAudioFetch(id).catch(() => undefined);
+            finish(new Error("Audio preparation cancelled"));
+        };
+        const start = () => {
+            started = true;
+            activePreparations++;
+            void (async () => {
+                try {
+                    const bytes = await Native.fetchAudio(src, id);
+                    controller.signal.throwIfAborted();
+                    const blob = new Blob([bytes as any], { type: detectAudioMimeType(bytes) ?? "application/octet-stream" });
+                    const buffer = await blob.arrayBuffer();
+                    controller.signal.throwIfAborted();
+                    context = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16_000 });
+                    const decoded = await context!.decodeAudioData(buffer);
+                    controller.signal.throwIfAborted();
+                    const samples = new Float32Array(decoded.length);
+                    for (let channel = 0; channel < decoded.numberOfChannels; channel++) {
+                        const data = decoded.getChannelData(channel);
+                        for (let index = 0; index < samples.length; index++)
+                            samples[index] += data[index] / decoded.numberOfChannels;
+                    }
+                    finish(undefined, { blob, samples, waveform: generateWaveform(samples, 16_000) });
+                } catch (error) {
+                    finish(error);
+                }
+            })();
+        };
+        controller.signal.addEventListener("abort", cancel, { once: true });
+        preparationQueue.push(start);
+        drainPreparations();
+    });
 }
 
 function cacheResult(messageId: string, result: CachedResult): void {
@@ -247,7 +299,10 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     const workerRef = useRef<TranscriptionWorker | null>(null);
     const jobIdRef = useRef(0);
     const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const copySequenceRef = useRef(0);
     const autoStartedRef = useRef(false);
+    const preparationRef = useRef<AbortController | null>(null);
+    const fallbackPreparationRef = useRef<AbortController | null>(null);
 
     const stopWorker = useCallback(() => {
         setPartialTranscript("");
@@ -299,6 +354,8 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
         }
         const currentGeneration = generation;
         const jobId = ++jobIdRef.current;
+        preparationRef.current?.abort();
+        const preparation = preparationRef.current = new AbortController();
         stopWorker();
         setStatus("downloading_audio");
         setError(null);
@@ -306,7 +363,7 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
 
         void (async () => {
             try {
-                const prepared = await prepareAudio(src);
+                const prepared = await prepareAudio(src, preparation.signal);
                 if (jobIdRef.current !== jobId || currentGeneration !== generation) return;
                 setStatus("processing_audio");
                 const audio = prepared.samples;
@@ -369,12 +426,23 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
 
     const cancel = useCallback(() => {
         ++jobIdRef.current;
+        preparationRef.current?.abort();
+        fallbackPreparationRef.current?.abort();
         stopWorker();
         setStatus(transcript ? "complete" : "idle");
     }, [stopWorker, transcript]);
 
-    const copy = useCallback((target: Exclude<CopyTarget, null>, text: string) => {
-        copyToClipboard(text);
+    const copy = useCallback(async (target: Exclude<CopyTarget, null>, text: string) => {
+        const sequence = ++copySequenceRef.current;
+        const currentGeneration = generation;
+        try {
+            await copyToClipboard(text);
+        } catch {
+            if (sequence === copySequenceRef.current && currentGeneration === generation)
+                setError("Failed to copy text to the clipboard.");
+            return;
+        }
+        if (sequence !== copySequenceRef.current || currentGeneration !== generation) return;
         setCopied(target);
         if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
         copyTimerRef.current = setTimeout(() => {
@@ -385,12 +453,17 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
 
     useEffect(() => () => {
         ++jobIdRef.current;
+        ++copySequenceRef.current;
+        preparationRef.current?.abort();
+        fallbackPreparationRef.current?.abort();
         stopWorker();
         if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
     }, [stopWorker]);
 
     useEffect(() => resultCache.subscribe(messageId, () => {
         ++jobIdRef.current;
+        preparationRef.current?.abort();
+        fallbackPreparationRef.current?.abort();
         stopWorker();
         setTranscript(null);
         setTranslation(null);
@@ -421,12 +494,14 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
     useEffect(() => {
         setPlaybackSrc(src);
         setResolvedWaveform(waveform || DEFAULT_WAVEFORM);
-        if (!needsPlaybackFallback || waveform) return;
+        if (!needsPlaybackFallback || waveform || !inView || !documentVisible) return;
 
         let active = true;
         let objectUrl: string | undefined;
-        void prepareAudio(src).then(prepared => {
-            if (!active) return;
+        const currentGeneration = generation;
+        const preparation = fallbackPreparationRef.current = new AbortController();
+        void prepareAudio(src, preparation.signal).then(prepared => {
+            if (!active || preparation.signal.aborted || currentGeneration !== generation) return;
             objectUrl = URL.createObjectURL(prepared.blob);
             setPlaybackSrc(objectUrl);
             setResolvedWaveform(prepared.waveform);
@@ -434,9 +509,10 @@ function VoiceMessageTranscriptionAccessory({ duration, messageId, needsPlayback
 
         return () => {
             active = false;
+            preparation.abort();
             if (objectUrl) URL.revokeObjectURL(objectUrl);
         };
-    }, [needsPlaybackFallback, src, waveform]);
+    }, [needsPlaybackFallback, src, waveform, inView, documentVisible]);
 
     useEffect(() => {
         if (!autoTranscribe || transcript || autoStartedRef.current || !inView || !documentVisible) return;

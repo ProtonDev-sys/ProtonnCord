@@ -98,6 +98,18 @@ const stringifyPolicy = (policy: PolicyMap): string =>
         .map(directive => directive.flat().join(" "))
         .join("; ");
 
+function isValidCustomRule(host: string, directives: unknown): directives is string[] {
+    if (!Array.isArray(directives) || directives.length === 0 || directives.some(directive => !ImageAndCssSrc.includes(directive)))
+        return false;
+    try {
+        const url = new URL(`https://${host}`);
+        return url.host === host && !url.hostname.includes("*") && url.username === "" && url.password === ""
+            && url.pathname === "/" && url.search === "" && url.hash === "";
+    } catch {
+        return false;
+    }
+}
+
 const patchCsp = (headers: PolicyMap) => {
     const reportOnlyHeader = findHeader(headers, "content-security-policy-report-only");
     if (reportOnlyHeader)
@@ -124,7 +136,8 @@ const patchCsp = (headers: PolicyMap) => {
                 pushDirective(directive, "blob:", "data:", "vencord:", "vesktop:", "equicord:", "equibop:", "protonncord:");
             }
 
-            for (const [host, directives] of Object.entries(NativeSettings.store.customCspRules)) {
+            for (const [host, directives] of Object.entries(NativeSettings.store.customCspRules ?? {})) {
+                if (!isValidCustomRule(host, directives)) continue;
                 for (const directive of directives) {
                     pushDirective(directive, host);
                 }

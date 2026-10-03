@@ -275,6 +275,74 @@ test("missing and cyclic dependencies report failure without starting their depe
     assert.deepEqual(Array.from(manager.startDependenciesRecursive(parent).failures), ["Parent"]);
 });
 
+test("dependency preflight does not start a valid sibling before discovering a missing dependency", () => {
+    const { manager, add, settings } = loadManager();
+    const sibling = add({ name: "Sibling", start() { assert.fail("preflight must finish before startup"); } });
+    const parent = add({ name: "Parent", dependencies: ["Sibling", "Missing"] });
+    assert.deepEqual(Array.from(manager.startDependenciesRecursive(parent).failures), ["Missing"]);
+    assert.equal(settings.Sibling.enabled, false);
+    assert.equal(sibling.isDependency, undefined);
+});
+
+test("failed dependency startup rolls back only newly started siblings", () => {
+    const { manager, add, settings } = loadManager();
+    const existing = add({ name: "Existing" });
+    settings.Existing.enabled = true;
+    manager.startPlugin(existing);
+    const sibling = add({ name: "Sibling" });
+    add({ name: "Failure", start() { throw new Error("offline startup failure"); } });
+    const parent = add({ name: "Parent", dependencies: ["Existing", "Sibling", "Failure"] });
+    assert.deepEqual(Array.from(manager.startDependenciesRecursive(parent).failures), ["Failure"]);
+    assert.equal(existing.started, true);
+    assert.equal(existing.isDependency, undefined);
+    assert.equal(settings.Existing.enabled, true);
+    assert.equal(sibling.started, false);
+    assert.equal(sibling.isDependency, undefined);
+    assert.equal(settings.Sibling.enabled, false);
+});
+
+for (const asynchronous of [false, true]) test(`failed ${asynchronous ? "asynchronous" : "synchronous"} parent startup releases its dependency transaction`, async () => {
+    const { manager, add, settings } = loadManager();
+    const dependency = add({ name: "Dependency" });
+    const parent = add({ name: "Parent", dependencies: ["Dependency"], start() {
+        if (asynchronous) return Promise.reject(new Error("offline failure")) as any;
+        throw new Error("offline failure");
+    } });
+    assert.equal(manager.startDependenciesRecursive(parent).failures.length, 0);
+    manager.startPlugin(parent);
+    settings.Parent.enabled = true;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(dependency.started, false);
+    assert.equal(settings.Dependency.enabled, false);
+    assert.equal(dependency.isDependency, undefined);
+});
+
+test("dependency rollback retains a dependency claimed by another enabled plugin during startup", () => {
+    const { manager, add, settings } = loadManager();
+    const dependency = add({ name: "Dependency" });
+    add({ name: "Other", dependencies: ["Dependency"] });
+    add({ name: "Failure", start() { settings.Other.enabled = true; throw new Error("offline failure"); } });
+    const parent = add({ name: "Parent", dependencies: ["Dependency", "Failure"] });
+    assert.equal(manager.startDependenciesRecursive(parent).failures.length, 1);
+    assert.equal(dependency.started, true);
+    assert.equal(settings.Dependency.enabled, true);
+    assert.equal(dependency.isDependency, true);
+});
+
+test("dependency rollback preserves transitive dependencies of a newly claimed plugin", () => {
+    const { manager, add, settings } = loadManager();
+    const nested = add({ name: "Nested" });
+    const dependency = add({ name: "Dependency", dependencies: ["Nested"] });
+    add({ name: "Other", dependencies: ["Dependency"] });
+    add({ name: "Failure", start() { settings.Other.enabled = true; throw new Error("offline failure"); } });
+    const parent = add({ name: "Parent", dependencies: ["Dependency", "Failure"] });
+    assert.equal(manager.startDependenciesRecursive(parent).failures.length, 1);
+    assert.equal(dependency.started, true);
+    assert.equal(nested.started, true);
+    assert.equal(settings.Nested.enabled, true);
+    assert.equal(nested.isDependency, true);
+});
+
 test("plugins without lifecycle hooks still reject duplicate starts and stops", () => {
     const { manager, add } = loadManager();
     const plugin = add({ name: "Declarative" });
@@ -282,6 +350,18 @@ test("plugins without lifecycle hooks still reject duplicate starts and stops", 
     assert.equal(manager.startPlugin(plugin), false);
     assert.equal(manager.stopPlugin(plugin), true);
     assert.equal(manager.stopPlugin(plugin), false);
+});
+
+test("dependency rollback retains the complete dependency chain of a required plugin", () => {
+    const { manager, add, settings } = loadManager();
+    const nested = add({ name: "Nested" });
+    const required = add({ name: "Required", required: true, dependencies: ["Nested"] });
+    add({ name: "Failure", start() { throw new Error("offline failure"); } });
+    const parent = add({ name: "Parent", dependencies: ["Required", "Failure"] });
+    assert.equal(manager.startDependenciesRecursive(parent).failures.length, 1);
+    assert.equal(required.started, true);
+    assert.equal(nested.started, true);
+    assert.equal(settings.Nested.enabled, true);
 });
 
 test("initially disabled plugins receive bound declarative callbacks", () => {

@@ -27,15 +27,23 @@ function useDebouncedValue<T>(value: T, delay: number): T {
 }
 
 // this is so shit
+export function normalizeMessagePageSize(value: number) {
+    return Number.isSafeInteger(value) && value > 0 ? value : 100;
+}
+
 export function useMessages(query: string, currentTab: LogTabs, sortNewest: boolean, numDisplayedMessages: number) {
+    numDisplayedMessages = normalizeMessagePageSize(numDisplayedMessages);
     // only for initial load
     const [pending, setPending] = useState(true);
     const [messages, setMessages] = useState<DBMessageRecord[]>([]);
     const [statusTotal, setStatusTotal] = useState<number>(0);
     const [total, setTotal] = useState<number>(0);
     const [resetCounter, setResetCounter] = useState(0);
+    const [loadedRequest, setLoadedRequest] = useState<string | null>(null);
 
     const debouncedQuery = useDebouncedValue(query, 300);
+    const request = JSON.stringify([debouncedQuery, currentTab, sortNewest, numDisplayedMessages, resetCounter]);
+    const currentRequest = JSON.stringify([query, currentTab, sortNewest, numDisplayedMessages, resetCounter]);
 
     useEffect(() => {
         countMessagesIDB().then(x => setTotal(x));
@@ -58,6 +66,7 @@ export function useMessages(query: string, currentTab: LogTabs, sortNewest: bool
                 if (isMounted) {
                     setMessages(messages);
                     setStatusTotal(statusTotal);
+                    setLoadedRequest(request);
                     setPending(false);
                 }
             } else {
@@ -79,7 +88,8 @@ export function useMessages(query: string, currentTab: LogTabs, sortNewest: bool
 
                 if (isMounted) {
                     setMessages(filteredMessages);
-                    setStatusTotal(Number.MAX_SAFE_INTEGER);
+                    setStatusTotal(filteredMessages.length);
+                    setLoadedRequest(request);
                     setPending(false);
                 }
             }
@@ -91,9 +101,9 @@ export function useMessages(query: string, currentTab: LogTabs, sortNewest: bool
             isMounted = false;
         };
 
-    }, [debouncedQuery, sortNewest, numDisplayedMessages, currentTab, resetCounter]);
+    }, [debouncedQuery, sortNewest, numDisplayedMessages, currentTab, resetCounter, request]);
 
-    return { messages, statusTotal, total, pending, reset: () => setResetCounter(c => c + 1) };
+    return { messages, statusTotal, total, pending: pending || loadedRequest !== currentRequest, reset: () => setResetCounter(c => c + 1) };
 }
 
 function getStatus(currentTab: LogTabs) {

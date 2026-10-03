@@ -6,7 +6,7 @@
 
 import type { Quest } from "@vencord/discord-types";
 
-import { fetchAndAlertQuests } from "../utils/fetching";
+import { fetchAndAlertQuests, invalidateQuestFetchAlerts } from "../utils/fetching";
 import { QL } from "../utils/logging";
 import { getCurrentUserId, getQuestifySettings } from "./access";
 
@@ -61,6 +61,7 @@ export function startAutoFetchingQuests(force: boolean = false): void {
 }
 
 export function stopAutoFetchingQuests(): void {
+    invalidateQuestFetchAlerts();
     if (autoFetchInterval) {
         clearInterval(autoFetchInterval);
         autoFetchInterval = null;

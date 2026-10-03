@@ -486,7 +486,11 @@ export async function openStartupTabs(props: BasicChannelTabsProps & { userId: s
     highestIdIndex = 0;
 
     if (keepCurrentChannel) {
-        hydratedUserId = undefined;
+        createTab({ channelId: props.channelId, guildId: props.guildId }, false, undefined, false);
+        currentlyOpenTab = openTabs[0].id;
+        hydratedUserId = userId;
+        setUserId(userId);
+        update(false);
         showToast("Not restoring tabs as KeepCurrentChannel is enabled", Toasts.Type.FAILURE);
         return;
     }

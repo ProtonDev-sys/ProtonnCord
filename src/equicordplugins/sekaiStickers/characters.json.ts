@@ -904,6 +904,7 @@ export const characters = [
     {
         "id": "81",
         "name": "Ena 16",
+        "searchId": "375",
         "character": "ena",
         "img": "ena/Ena_16.png",
         "color": "#B18F6C",

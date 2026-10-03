@@ -215,7 +215,7 @@ test("GuildPickerDumper rejects HTTP error bodies instead of exporting a corrupt
         "@webpack/common": { EmojiStore: { getGuilds: () => ({ guild: { emojis: [{ id: "1", name: "emoji" }] } }) }, showToast: (message: string) => toasts.push(message), Toasts: { Type: {} } },
         fflate: { zipSync() { assert.fail("error bodies cannot become ZIP entries"); } }
     }, {
-        console: { error() {} }, window: { GLOBAL_ENV: { MEDIA_PROXY_ENDPOINT: "//cdn.discordapp.com" } },
+        AbortController, console: { error() {} }, window: { GLOBAL_ENV: { MEDIA_PROXY_ENDPOINT: "//cdn.discordapp.com" } },
         fetch: async () => ({ ok: false, status: 404, headers: { get: () => "text/plain" } })
     }, "\nexport const auditZip = zipGuildAssets;");
     await api.auditZip({ id: "guild", name: "Guild" }, "emojis");

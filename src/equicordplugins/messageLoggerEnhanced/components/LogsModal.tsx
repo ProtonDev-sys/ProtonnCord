@@ -19,7 +19,7 @@ import { cl, clearLogs, settings } from "../index";
 import { LoggedMessage, LoggedMessageJSON } from "../types";
 import { messageJsonToMessageClass } from "../utils";
 import { importLogs } from "../utils/settingsUtils";
-import { useMessages } from "./hooks";
+import { normalizeMessagePageSize, useMessages } from "./hooks";
 
 export interface MessagePreviewProps {
     className: string;
@@ -68,7 +68,8 @@ export function LogsModal({ modalProps, initalQuery }: Props) {
     const [currentTab, setCurrentTab] = useState(LogTabs.DELETED);
     const [queryEh, setQuery] = useState(initalQuery ?? "");
     const [sortNewest, setSortNewest] = useState(settings.store.sortNewest);
-    const [numDisplayedMessages, setNumDisplayedMessages] = useState(settings.store.messagesToDisplayAtOnceInLogs);
+    const pageSize = normalizeMessagePageSize(settings.store.messagesToDisplayAtOnceInLogs);
+    const [numDisplayedMessages, setNumDisplayedMessages] = useState(pageSize);
     const contentRef = useRef<HTMLDivElement | null>(null);
 
     const { messages, total, statusTotal, pending, reset } = useMessages(queryEh, currentTab, sortNewest, numDisplayedMessages);
@@ -86,7 +87,7 @@ export function LogsModal({ modalProps, initalQuery }: Props) {
                         selectedItem={currentTab}
                         onItemSelect={e => {
                             setCurrentTab(e);
-                            setNumDisplayedMessages(settings.store.messagesToDisplayAtOnceInLogs);
+                            setNumDisplayedMessages(pageSize);
                             contentRef.current?.firstElementChild?.scrollTo(0, 0);
                         }}
                     >
@@ -130,18 +131,22 @@ export function LogsModal({ modalProps, initalQuery }: Props) {
                 {
                     text: "Clear Visible Logs",
                     variant: "critical-secondary",
-                    disabled: messages?.length === 0,
-                    onClick: () => Alerts.show({
+                    disabled: pending || messages?.length === 0,
+                    onClick: () => {
+                        if (pending || messages.length === 0) return;
+                        const messageIds = messages.map(e => e.message_id);
+                        Alerts.show({
                         title: "Clear Logs",
                         body: `Are you sure you want to clear ${messages.length} logs`,
                         confirmText: "Clear",
                         confirmVariant: "critical-primary",
                         cancelText: "Cancel",
                         onConfirm: async () => {
-                            await deleteMessagesBulkIDB(messages.map(e => e.message_id));
+                            await deleteMessagesBulkIDB(messageIds);
                             reset();
                         }
-                    })
+                        });
+                    }
                 },
                 {
                     text: "Clear All Logs",
@@ -178,11 +183,11 @@ export function LogsModal({ modalProps, initalQuery }: Props) {
                         {!pending && messages != null && (
                             <LogsContentMemo
                                 visibleMessages={messages}
-                                canLoadMore={messages.length < statusTotal && messages.length >= settings.store.messagesToDisplayAtOnceInLogs}
+                                canLoadMore={messages.length < statusTotal && messages.length >= pageSize}
                                 tab={currentTab}
                                 sortNewest={sortNewest}
                                 reset={reset}
-                                handleLoadMore={() => setNumDisplayedMessages(e => e + settings.store.messagesToDisplayAtOnceInLogs)}
+                                handleLoadMore={() => setNumDisplayedMessages(e => e + pageSize)}
                             />
                         )}
                     </div>
@@ -450,6 +455,8 @@ function isGroupStart(
     if (!currentMessage || !previousMessage) return true;
 
     if (currentMessage.id === previousMessage.id) return true;
+
+    if (currentMessage.channel_id !== previousMessage.channel_id) return true;
 
     const [newestMessage, oldestMessage] = sortNewest
         ? [previousMessage, currentMessage]

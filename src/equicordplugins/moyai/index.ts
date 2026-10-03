@@ -150,7 +150,10 @@ export default definePlugin({
             boom();
         },
 
-        VOICE_CHANNEL_EFFECT_SEND({ emoji }: IVoiceChannelEffectSendEvent) {
+        VOICE_CHANNEL_EFFECT_SEND({ emoji, channelId, userId }: IVoiceChannelEffectSendEvent) {
+            if (channelId !== SelectedChannelStore.getVoiceChannelId()) return;
+            if (settings.store.ignoreBots && UserStore.getUser(userId)?.bot) return;
+            if (settings.store.ignoreBlocked && RelationshipStore.isBlocked(userId)) return;
             if (!emoji?.name) return;
             const name = emoji.name.toLowerCase();
             if (name !== MOYAI && !name.includes("moyai") && !name.includes("moai")) return;

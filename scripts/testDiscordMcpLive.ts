@@ -4,60 +4,228 @@ import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 
-import puppeteer from "puppeteer-core";
+import puppeteer, { Page } from "puppeteer-core";
 
-const TEST_CHANNEL_ID = "895063026686885909";
-const EXPECTED_RECIPIENT_ID = "710514340855545878";
 const DEBUG_URL = process.env.DISCORD_DEBUG_URL ?? "http://127.0.0.1:9222";
 
 interface RpcWaiter {
     resolve(value: any): void;
     reject(error: Error): void;
+    timeout: ReturnType<typeof setTimeout>;
 }
 
-async function connectWithRetry() {
-    const deadline = Date.now() + 60_000;
-    let lastError: unknown;
+function readTestIdentity() {
+    const required = ["DISCORD_MCP_TEST_ACCOUNT_ID", "DISCORD_MCP_TEST_CHANNEL_ID", "DISCORD_MCP_TEST_RECIPIENT_ID"] as const;
+    for (const name of required) {
+        assert.match(process.env[name] ?? "", /^\d{17,20}$/u, `Set ${name} explicitly to the authorized test identity/destination snowflake before running this live harness`);
+    }
+    assert.notEqual(process.env.DISCORD_MCP_TEST_ACCOUNT_ID, process.env.DISCORD_MCP_TEST_RECIPIENT_ID, "The test destination must be another explicitly authorized user");
+    return {
+        accountId: process.env.DISCORD_MCP_TEST_ACCOUNT_ID!,
+        channelId: process.env.DISCORD_MCP_TEST_CHANNEL_ID!,
+        recipientId: process.env.DISCORD_MCP_TEST_RECIPIENT_ID!,
+    };
+}
+
+async function manageTestPlugin(input: { identity: ReturnType<typeof readTestIdentity>; token: string; phase: "activate" | "verify" | "restore"; }) {
+    const global = globalThis as any;
+    const vencord = global.Vencord;
+    const common = vencord?.Webpack?.Common;
+    const key = Symbol.for("ProtonnCord.DiscordMCP.liveTest");
+    if (common?.UserStore?.getCurrentUser()?.id !== input.identity.accountId)
+        throw new Error("Connected Discord account does not match DISCORD_MCP_TEST_ACCOUNT_ID; refusing mutations" + (input.phase === "restore" && global[key] ? "; saved ownership state is retained; inspect manually after verifying the original account" : ""));
+    const plugin = vencord.Plugins.plugins.DiscordMCP;
+    if (!plugin) throw new Error("DiscordMCP plugin is missing from the built client");
+    if (input.phase === "restore") {
+        const state = global[key];
+        if (!state) return;
+        if (state.token !== input.token) throw new Error("Another live harness owns the saved plugin state");
+        try {
+            if (state.startedByTest && plugin.started && !vencord.Plugins.stopPlugin(plugin))
+                throw new Error("Test-owned DiscordMCP activation could not be stopped");
+        } finally {
+            const settings = vencord.Settings.plugins.DiscordMCP;
+            if (settings) {
+                for (const name of ["enabled", "allowedChannelIds"]) {
+                    if (state.fields[name].present) settings[name] = state.fields[name].value;
+                    else delete settings[name];
+                }
+                if (!state.hadSettings && Object.keys(settings).length === 0) delete vencord.Settings.plugins.DiscordMCP;
+            }
+        }
+        delete global[key];
+        return;
+    }
+    const channel = common.ChannelStore?.getChannel(input.identity.channelId);
+    if (channel?.type !== 1 || channel.recipients?.length !== 1 || channel.recipients[0] !== input.identity.recipientId)
+        throw new Error("DISCORD_MCP_TEST_CHANNEL_ID is not the one-to-one DM for DISCORD_MCP_TEST_RECIPIENT_ID; refusing mutations");
+    if (input.phase === "verify") return;
+    if (global[key]) throw new Error("Another live harness already owns plugin settings");
+    const previous = vencord.Settings.plugins.DiscordMCP;
+    const state = {
+        token: input.token,
+        hadSettings: Object.hasOwn(vencord.Settings.plugins, "DiscordMCP"),
+        startedByTest: !plugin.started,
+        fields: Object.fromEntries(["enabled", "allowedChannelIds"].map(name => [name, {
+            present: previous != null && Object.hasOwn(previous, name),
+            value: previous?.[name],
+        }])),
+    };
+    global[key] = state;
+    const settings = vencord.Settings.plugins.DiscordMCP ??= {};
+    delete settings.allowedChannelIds;
+    settings.enabled = true;
+    if (state.startedByTest && !vencord.Plugins.startPlugin(plugin)) throw new Error("DiscordMCP failed to start");
+    const bridge = await global.VencordNative.pluginHelpers.DiscordMCP.initializeBridge();
+    return {
+        legacyAllowlistRemoved: !("allowedChannelIds" in settings),
+        enabled: settings.enabled,
+        pluginStarted: plugin.started,
+        queueDirectory: bridge.queueDirectory,
+    };
+}
+
+function withDeadline<Value>(promise: Promise<Value>, timeoutMs: number, label: string): Promise<Value> {
+    let timeout: ReturnType<typeof setTimeout>;
+    return Promise.race([
+        promise,
+        new Promise<never>((_resolve, reject) => { timeout = setTimeout(() => reject(new Error(`${label} timed out; outcome may be unknown`)), timeoutMs); }),
+    ]).finally(() => clearTimeout(timeout));
+}
+
+function createRpcClient(child: ChildProcessWithoutNullStreams, defaultTimeoutMs = 45_000) {
+    const pending = new Map<number, RpcWaiter>();
+    const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    let nextId = 1;
+    let failure: Error | undefined;
+    const fail = (error: Error) => {
+        failure ??= error;
+        for (const waiter of pending.values()) {
+            clearTimeout(waiter.timeout);
+            waiter.reject(failure);
+        }
+        pending.clear();
+    };
+    child.once("error", fail);
+    child.once("close", (code, signal) => fail(new Error(`MCP child closed (${code ?? signal}); pending outcomes may be unknown`)));
+    child.stdin.on("error", fail);
+    lines.on("line", line => {
+        try {
+            const message = JSON.parse(line);
+            const waiter = pending.get(message?.id);
+            if (!waiter) return;
+            pending.delete(message.id);
+            clearTimeout(waiter.timeout);
+            if (message.error) waiter.reject(new Error(message.error.message));
+            else waiter.resolve(message.result);
+        } catch {
+            fail(new Error("MCP child emitted invalid JSON; pending outcomes may be unknown"));
+        }
+    });
+    return {
+        rpc(method: string, params?: unknown, timeoutMs = defaultTimeoutMs) {
+            if (failure) return Promise.reject(failure);
+            const id = nextId++;
+            return new Promise<any>((resolvePromise, rejectPromise) => {
+                const timeout = setTimeout(() => {
+                    pending.delete(id);
+                    rejectPromise(new Error(`${method} RPC timed out; outcome may be unknown`));
+                }, timeoutMs);
+                pending.set(id, { resolve: resolvePromise, reject: rejectPromise, timeout });
+                try {
+                    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`, error => {
+                        if (error) fail(error);
+                    });
+                } catch (error) {
+                    fail(error instanceof Error ? error : new Error(String(error)));
+                }
+            });
+        },
+        dispose() {
+            fail(new Error("MCP RPC client disposed; pending outcomes may be unknown"));
+            lines.close();
+        },
+    };
+}
+
+async function cleanupLiveTest(input: {
+    channelId: string; subscriptionId?: string; sentMessageId?: string; deleteAttempted: boolean; pendingSend: boolean; marker?: string;
+    callTool?: (name: string, args: Record<string, unknown>, timeoutMs?: number) => Promise<any>;
+    restore(): Promise<unknown>; dispose(): void; kill(): void; disconnect(): Promise<unknown>;
+    warn(message: string): void;
+}, timeoutMs = 5_000) {
+    const attempt = async (label: string, operation: () => Promise<unknown>) => {
+        try { await withDeadline(operation(), timeoutMs, label); }
+        catch (error) { input.warn(`${label}: ${error instanceof Error ? error.message : String(error)}`); }
+    };
+    if (input.subscriptionId && input.callTool)
+        await attempt(`Unsubscribe ${input.subscriptionId}`, () => input.callTool!("discord_unsubscribe_channel", { subscription_id: input.subscriptionId }, timeoutMs));
+    if (input.pendingSend) input.warn(`Send outcome unknown in channel ${input.channelId}; marker ${input.marker ?? "unavailable"}. Inspect manually; no automatic resend or deletion.`);
+    if (input.sentMessageId) {
+        const label = `Message ${input.sentMessageId} in channel ${input.channelId} may be retained or its deletion outcome unknown; inspect manually`;
+        if (input.deleteAttempted) input.warn(label + "; no automatic delete retry");
+        else if (input.callTool) await attempt(label, async () => {
+            const result = await input.callTool!("discord_delete_own_message", { channel_id: input.channelId, message_id: input.sentMessageId }, timeoutMs);
+            if (result?.deleted !== true) throw new Error("Deletion was not confirmed; no automatic retry");
+        });
+        else input.warn(label);
+    }
+    try { input.dispose(); } catch (error) { input.warn(`RPC disposal failed: ${String(error)}`); }
+    try { input.kill(); } catch (error) { input.warn(`MCP child termination failed: ${String(error)}`); }
+    await attempt("Restore test-owned plugin settings/lifecycle", input.restore);
+    await attempt("Disconnect test browser session", input.disconnect);
+}
+
+async function connectWithRetry(timeoutMs = 60_000, attemptTimeoutMs = 5_000, retryDelayMs = 500) {
+    const deadline = Date.now() + timeoutMs;
+    let lastError: unknown = new Error("Discord connection deadline expired; outcome may be unknown");
     while (Date.now() < deadline) {
-        try { return await puppeteer.connect({ browserURL: DEBUG_URL, defaultViewport: null }); }
-        catch (error) { lastError = error; }
-        await new Promise(resolvePromise => setTimeout(resolvePromise, 500));
+        let abandoned = false;
+        try {
+            const connection = puppeteer.connect({ browserURL: DEBUG_URL, defaultViewport: null }).then(async browser => {
+                if (!abandoned) return browser;
+                try { await withDeadline(Promise.resolve().then(() => browser.disconnect()), 5_000, "Disconnect late Discord connection"); }
+                catch (error) {
+                    console.error(`Late Discord connection cleanup failed; session outcome may be unknown: ${String(error)}`);
+                    process.exitCode = 1;
+                }
+                throw new Error("Abandoned Discord connection completed late; it will not be used or replayed");
+            });
+            return await withDeadline(connection, Math.min(attemptTimeoutMs, Math.max(1, deadline - Date.now())), "Discord connection attempt");
+        } catch (error) {
+            abandoned = true;
+            lastError = error;
+        }
+        const remainingMs = deadline - Date.now();
+        if (remainingMs > 0) await new Promise(resolvePromise => setTimeout(resolvePromise, Math.min(retryDelayMs, remainingMs)));
     }
     throw lastError;
 }
 
 async function main() {
+    const identity = readTestIdentity();
+    const TEST_CHANNEL_ID = identity.channelId;
+    const EXPECTED_RECIPIENT_ID = identity.recipientId;
+    const token = `mcp-live-${Date.now()}-${Math.random()}`;
     const browser = await connectWithRetry();
     let mcp: ChildProcessWithoutNullStreams | undefined;
     let sentMessageId: string | undefined;
     let subscriptionId: string | undefined;
-    let callTool: ((name: string, args?: Record<string, unknown>) => Promise<any>) | undefined;
+    let callTool: ((name: string, args?: Record<string, unknown>, timeoutMs?: number) => Promise<any>) | undefined;
+    let page: Page | undefined;
+    let disposeRpc = () => {};
+    let deleteAttempted = false;
+    let pendingSend = false;
+    let marker: string | undefined;
 
     try {
         const pages = await browser.pages();
-        const page = pages.find(candidate => candidate.url().includes("discord.com/channels")) ?? pages[0];
+        page = pages.find(candidate => /^https:\/\/(?:canary\.|ptb\.)?discord\.com\/channels(?:\/|$)/u.test(candidate.url()));
+        assert.ok(page, "No Discord channel page is attached; refusing to use an arbitrary browser tab");
         await page.waitForFunction(() => Boolean((globalThis as any).Vencord?.Plugins?.plugins), { timeout: 30_000 });
 
-        const pluginState = await page.evaluate(async () => {
-            const global = globalThis as any;
-            const vencord = global.Vencord;
-            const plugin = vencord.Plugins.plugins.DiscordMCP;
-            if (!plugin) throw new Error("DiscordMCP plugin is missing from the built client");
-
-            const pluginSettings = vencord.Settings.plugins.DiscordMCP ??= {};
-            delete pluginSettings.allowedChannelIds;
-            pluginSettings.enabled = true;
-            if (!plugin.started) vencord.Plugins.startPlugin(plugin);
-
-            await new Promise(resolvePromise => setTimeout(resolvePromise, 1_000));
-            const bridge = await global.VencordNative.pluginHelpers.DiscordMCP.initializeBridge();
-            return {
-                legacyAllowlistRemoved: !("allowedChannelIds" in pluginSettings),
-                enabled: pluginSettings.enabled,
-                pluginStarted: plugin.started,
-                queueDirectory: bridge.queueDirectory,
-            };
-        });
+        const pluginState = await withDeadline(page.evaluate(manageTestPlugin, { identity, token, phase: "activate" as const }), 10_000, "Plugin activation");
+        assert.ok(pluginState);
 
         assert.equal(pluginState.enabled, true, "DiscordMCP is enabled in persisted ProtonnCord settings");
         assert.equal(pluginState.pluginStarted, true, "DiscordMCP started in the renderer");
@@ -71,30 +239,15 @@ async function main() {
             stdio: ["pipe", "pipe", "pipe"],
         }) as ChildProcessWithoutNullStreams;
 
-        const pending = new Map<number, RpcWaiter>();
         const lastToolContent = new Map<string, any[]>();
-        let rpcId = 1;
         let stderr = "";
-        mcp.stderr.on("data", data => { stderr += data.toString(); });
-        createInterface({ input: mcp.stdout, crlfDelay: Infinity }).on("line", line => {
-            const message = JSON.parse(line);
-            const waiter = pending.get(message.id);
-            if (!waiter) return;
-            pending.delete(message.id);
-            if (message.error) waiter.reject(new Error(message.error.message));
-            else waiter.resolve(message.result);
-        });
-
-        const rpc = (method: string, params?: unknown) => {
-            const id = rpcId++;
-            const result = new Promise<any>((resolvePromise, rejectPromise) => {
-                pending.set(id, { resolve: resolvePromise, reject: rejectPromise });
-            });
-            mcp!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-            return result;
-        };
-        callTool = async (name, args = {}) => {
-            const result = await rpc("tools/call", { name, arguments: args });
+        mcp.stderr.on("data", data => { stderr = (stderr + data.toString()).slice(-65_536); });
+        const client = createRpcClient(mcp);
+        const { rpc } = client;
+        disposeRpc = client.dispose;
+        callTool = async (name, args = {}, timeoutMs = 45_000) => {
+            await withDeadline(page!.evaluate(manageTestPlugin, { identity, token, phase: "verify" as const }), Math.min(timeoutMs, 5_000), "Account/destination verification");
+            const result = await rpc("tools/call", { name, arguments: args }, timeoutMs);
             if (result.isError) throw new Error(result.content?.[0]?.text ?? `${name} failed`);
             lastToolContent.set(name, result.content ?? []);
             return result.structuredContent;
@@ -255,11 +408,15 @@ async function main() {
             subscription_id: subscriptionId,
             timeout_seconds: 15,
         });
+        void waitForMessage.catch(() => undefined);
         await new Promise(resolvePromise => setTimeout(resolvePromise, 250));
 
-        const marker = `Discord MCP live verification ${new Date().toISOString()}`;
+        marker = `Discord MCP live verification ${new Date().toISOString()}`;
+        pendingSend = true;
         const sent = await callTool("discord_send_message", { channel_id: TEST_CHANNEL_ID, content: marker });
+        assert.match(sent?.id ?? "", /^\d{17,20}$/u, "Send result must identify the created message; otherwise its outcome remains unknown");
         sentMessageId = sent.id;
+        pendingSend = false;
         assert.equal(sent.content, marker, "send returns the exact live message");
 
         const subscriptionEvent = await waitForMessage;
@@ -278,6 +435,7 @@ async function main() {
         });
         assert.equal(sentLookup.content, marker, "the sent message can be read back");
 
+        deleteAttempted = true;
         const deleted = await callTool("discord_delete_own_message", {
             channel_id: TEST_CHANNEL_ID,
             message_id: sentMessageId,
@@ -313,17 +471,17 @@ async function main() {
             voiceFixtureDirection: voiceMessage.author?.id === EXPECTED_RECIPIENT_ID ? "received" : "outgoing",
         }, null, 2));
     } finally {
-        if (subscriptionId && callTool) {
-            await callTool("discord_unsubscribe_channel", { subscription_id: subscriptionId }).catch(() => undefined);
-        }
-        if (sentMessageId && callTool) {
-            await callTool("discord_delete_own_message", {
-                channel_id: TEST_CHANNEL_ID,
-                message_id: sentMessageId,
-            }).catch(() => undefined);
-        }
-        mcp?.kill();
-        await browser.disconnect();
+        await cleanupLiveTest({
+            channelId: TEST_CHANNEL_ID, subscriptionId, sentMessageId, deleteAttempted, pendingSend, marker, callTool,
+            restore: () => page ? page.evaluate(manageTestPlugin, { identity, token, phase: "restore" as const }) : Promise.resolve(),
+            dispose: disposeRpc,
+            kill: () => {
+                if (mcp && mcp.exitCode === null && mcp.signalCode === null && !mcp.kill())
+                    throw new Error("Test-owned MCP child termination was not confirmed; inspect the process manually");
+            },
+            disconnect: async () => { await browser.disconnect(); },
+            warn: message => { console.error(message); process.exitCode = 1; },
+        });
     }
 }
 

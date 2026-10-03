@@ -16,8 +16,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+import { makeLazy } from "@utils/lazy";
 import { Logger } from "@utils/Logger";
-import { LazyComponent, LazyComponentWrapper } from "@utils/react";
+import { LazyComponentWrapper } from "@utils/react";
 import { FilterFn, filters, lazyWebpackSearchHistory, waitFor } from "@webpack";
 import { ComponentType } from "react";
 
@@ -28,16 +29,23 @@ export function waitForComponent<T extends ComponentType<any> = ComponentType<an
 
     let myValue: T | null = null;
 
-    const lazyComponent = LazyComponent(() => {
-        if (myValue) return myValue;
-
+    const getFallback = makeLazy(() => {
         const error = new Error(`Vencord could not find the ${name} Component`);
         logger.error(error);
 
         if (IS_DEV) throw error;
 
-        return fallbackValue!;
+        return fallbackValue as T;
+    });
+
+    const getComponent = () => myValue ?? getFallback();
+
+    const lazyComponent = ((props: any) => {
+        const Component = getComponent();
+        return Component ? <Component {...props} /> : null;
     }) as LazyComponentWrapper<T>;
+
+    lazyComponent.$$vencordGetWrappedComponent = getComponent;
 
     waitFor(filter, (v: any) => {
         myValue = v;
