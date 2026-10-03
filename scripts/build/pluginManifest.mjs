@@ -81,7 +81,7 @@ function settingsInfo(property, variables) {
     if (expression && ts.isIdentifier(expression)) expression = unwrap(variables.get(expression.text));
     if (!expression || !ts.isCallExpression(expression) || expression.expression.getText() !== "definePluginSettings") return undefined;
     const entries = properties(unwrap(expression.arguments[0]));
-    if (!entries || entries.has(undefined)) return undefined;
+    if (!entries) return undefined;
     let hasVisibleSettings = false;
     for (const setting of entries.values()) {
         const options = properties(unwrap(initializer(setting)));
@@ -101,8 +101,7 @@ function settingsInfo(property, variables) {
  * Extract metadata only; never evaluate a plugin, a setting default, or migration code.
  * @returns {import("../../src/shared/pluginDefinition").PluginManifestEntry | undefined}
  */
-export function extractPluginManifest(source, file = "plugin.ts") {
-    const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+export function extractPluginManifest(source, file = "plugin.ts", tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)) {
     const variables = new Map();
     for (const statement of tree.statements) {
         if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) {
@@ -113,7 +112,7 @@ export function extractPluginManifest(source, file = "plugin.ts") {
     const call = exported && unwrap(exported.expression);
     if (!call || !ts.isCallExpression(call) || call.expression.getText(tree) !== "definePlugin") return undefined;
     const definition = properties(unwrap(call.arguments[0]));
-    if (!definition || definition.has(undefined)) return undefined;
+    if (!definition) return undefined;
     const metadata = /** @type {Record<string, any>} */ ({});
     for (const key of metadataProperties) {
         const property = definition.get(key);
@@ -298,8 +297,8 @@ export function createPluginManifestAnalyzer(root = process.cwd()) {
     return async function analyze(file) {
         file = resolve(file);
         const framework = await (eagerFramework ??= collectFramework());
-        const { source } = await sourceInfo(file);
-        const metadata = extractPluginManifest(source, file);
+        const { source, tree } = await sourceInfo(file);
+        const metadata = extractPluginManifest(source, file, tree);
         if (!metadata || framework.has(file) || !await isSafe(file, new Set(), framework)) return undefined;
         return metadata;
     };

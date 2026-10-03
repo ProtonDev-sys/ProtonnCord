@@ -123,6 +123,12 @@ async function main(): Promise<void> {
     );
     assert.equal(earlyResponseCancelled, true, "an early response rejection cancels its unread body");
 
+    const fragmented = new ReadableStream<Uint8Array>({ start(controller) {
+        for (const fragment of [new Uint8Array([0, 1, 2, 0]).subarray(1, 3), new Uint8Array([3])]) controller.enqueue(fragment);
+        controller.close();
+    } });
+    assert.deepEqual(await requestBytes(async () => new Response(fragmented), "https://example.invalid/fragments", {}, 1_000, 3), Buffer.from([1, 2, 3]));
+
     const streamingOversize: HttpFetcher = async () => new Response(new ReadableStream<Uint8Array>({
         start(controller) {
             controller.enqueue(new Uint8Array(60));
