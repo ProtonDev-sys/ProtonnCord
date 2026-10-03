@@ -447,9 +447,9 @@ export async function addScheduledMessage(
     const ownerUserId = UserStore.getCurrentUser()?.id;
     if (!ownerUserId) return { success: false, error: "Sign in before scheduling a message" };
     const minuteStart = Math.floor(scheduledTime / 60000) * 60000;
-    const count = scheduledMessages.filter(m =>
-        m.ownerUserId === ownerUserId && m.channelId === channelId && m.scheduledTime >= minuteStart && m.scheduledTime < minuteStart + 60000
-    ).length;
+    const count = scheduledMessages.reduce((total, message) => total + Number(
+        message.ownerUserId === ownerUserId && message.channelId === channelId && message.scheduledTime >= minuteStart && message.scheduledTime < minuteStart + 60000
+    ), 0);
 
     if (count >= settings.store.maxMessagesPerMinute) {
         return { success: false, error: `Maximum of ${settings.store.maxMessagesPerMinute} messages per channel per minute reached` };

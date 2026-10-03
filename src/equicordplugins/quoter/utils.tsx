@@ -17,7 +17,6 @@ const CUSTOM_EMOJI_BASELINE_OFFSET = 0.85;
 
 interface CustomEmojiToken {
     id: string;
-    name: string;
     animated: boolean;
 }
 
@@ -177,10 +176,9 @@ function drawGradientOverlay(ctx: CanvasRenderingContext2D, config: CanvasConfig
 
 function extractCustomEmojis(text: string): { text: string; emojis: CustomEmojiToken[]; } {
     const emojis: CustomEmojiToken[] = [];
-    const cleanText = text.replace(CUSTOM_EMOJI_REGEX, (match, name: string, id: string) => {
+    const cleanText = text.replace(CUSTOM_EMOJI_REGEX, (match, _name: string, id: string) => {
         emojis.push({
             id,
-            name,
             animated: match.startsWith("<a:")
         });
         return CUSTOM_EMOJI_PLACEHOLDER;

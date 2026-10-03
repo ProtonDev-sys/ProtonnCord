@@ -14,9 +14,6 @@ import { FluxDispatcher, React } from "@webpack/common";
 interface FetchTiming {
     channelId: string;
     startTime: number;
-    endTime?: number;
-    duration?: number;
-    timestamp?: Date;
 }
 
 let currentFetch: FetchTiming | null = null;
@@ -162,13 +159,11 @@ function handleChannelSelect(data: any) {
 function handleMessageLoad(data: any) {
     if (!currentFetch || data.channelId !== currentFetch.channelId) return;
 
-    const endTime = performance.now();
-    if (endTime - currentFetch.startTime > MAX_FETCH_DURATION_MS) {
+    const duration = performance.now() - currentFetch.startTime;
+    if (duration > MAX_FETCH_DURATION_MS) {
         currentFetch = null;
         return;
     }
-
-    const duration = endTime - currentFetch.startTime;
 
     channelTimings.delete(currentFetch.channelId);
     channelTimings.set(currentFetch.channelId, {
