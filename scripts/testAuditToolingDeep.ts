@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -223,6 +224,7 @@ function loadLiveHarness(globals: Record<string, unknown> = {}, overrides: Recor
     const imports: Record<string, unknown> = {
         "node:assert/strict": assert,
         "node:child_process": { spawn() { throw new Error("Offline test forbids spawning MCP"); } },
+        "node:crypto": { createHash },
         "node:fs/promises": {},
         "node:path": path,
         "node:readline": { createInterface },

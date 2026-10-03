@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 const BUILD_SCRIPT = "scripts/build/build.mjs";
+const originalBuildHashes = installedBuildHashes();
 const OUTPUT_DIRECTORY = mkdtempSync(join(tmpdir(), "protonncord-native-build-"));
 const OUTPUTS = [
     [join(OUTPUT_DIRECTORY, "desktop/patcher.js"), join(OUTPUT_DIRECTORY, "desktop/patcher.js.map")],
@@ -39,10 +40,8 @@ function installedBuildHashes() {
     });
 }
 
-const originalBuildHashes = installedBuildHashes();
-
 function build(...args: string[]) {
-    execFileSync(process.execPath, [BUILD_SCRIPT, "--standalone", `--outdir=${OUTPUT_DIRECTORY}`, ...args], { stdio: "inherit" });
+    execFileSync(process.execPath, [BUILD_SCRIPT, "--standalone", `--outdir=${OUTPUT_DIRECTORY}`, ...args], { stdio: "inherit", timeout: 300_000 });
 }
 
 function normalizedSources(sourceMapPath: string): string[] {
@@ -51,22 +50,14 @@ function normalizedSources(sourceMapPath: string): string[] {
 }
 
 try {
-    build("--dev");
-
-    for (const [bundlePath, sourceMapPath] of OUTPUTS) {
-        const bundle = readFileSync(bundlePath, "utf8");
-        const sources = normalizedSources(sourceMapPath);
-        assert.ok(sources.some(source => source.endsWith(DEV_NATIVE)), `${bundlePath} must include development natives in a development build`);
-        assert.ok(bundle.includes("UserpluginInstaller"), `${bundlePath} must register development natives in a development build`);
-    }
-
-    build("--reporter");
-
-    for (const [bundlePath, sourceMapPath] of OUTPUTS) {
-        const bundle = readFileSync(bundlePath, "utf8");
-        const sources = normalizedSources(sourceMapPath);
-        assert.ok(sources.some(source => source.endsWith(DEV_NATIVE)), `${bundlePath} must include development natives in a reporter build`);
-        assert.ok(bundle.includes("UserpluginInstaller"), `${bundlePath} must register development natives in a reporter build`);
+    for (const mode of ["--dev", "--reporter"]) {
+        build(mode);
+        for (const [bundlePath, sourceMapPath] of OUTPUTS) {
+            const bundle = readFileSync(bundlePath, "utf8");
+            const sources = normalizedSources(sourceMapPath);
+            assert.ok(sources.some(source => source.endsWith(DEV_NATIVE)), `${bundlePath} must include development natives in a ${mode} build`);
+            assert.ok(bundle.includes("UserpluginInstaller"), `${bundlePath} must register development natives in a ${mode} build`);
+        }
     }
     build();
     for (const [bundlePath, sourceMapPath] of OUTPUTS) {

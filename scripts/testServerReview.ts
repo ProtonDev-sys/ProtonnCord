@@ -215,16 +215,19 @@ async function runtimeChecks() {
     assert.equal(reviewGroup(history.data.guilds.ignored, 30, now), "unused");
     assert.equal(history.data.guilds["emoji-source"].visit, undefined, "using an external emoji does not count as visiting its server");
 
-    const beforeIgnored = JSON.stringify(history.data.guilds.ignored);
+    now += DAY;
+    const beforeForeignEvents = JSON.stringify(history.data.guilds);
     plugin.flux.MESSAGE_CREATE({ message: { author: { id: "someone-else" }, channel_id: "channel", content: "<:x:111>" } });
     plugin.flux.MESSAGE_REACTION_ADD({ userId: "someone-else", channelId: "channel", emoji: { id: "111" } });
     plugin.flux.VOICE_CHANNEL_EFFECT_SEND({ userId: "someone-else", soundId: "333" });
-    assert.equal(JSON.stringify(history.data.guilds.ignored), beforeIgnored);
+    assert.equal(JSON.stringify(history.data.guilds), beforeForeignEvents);
     now += DAY;
     plugin.flux.MESSAGE_CREATE({ message: { author: { id: user }, channel_id: "dm", content: "https://cdn.discordapp.com/emojis/111.png", sticker_items: [{ id: "222" }] } });
     assert.equal(history.data.guilds["emoji-source"].emoji, now);
     assert.equal(history.data.guilds["sticker-source"].sticker, now);
     plugin.flux.MESSAGE_REACTION_ADD({ userId: user, channelId: "channel", emoji: { id: "111" } });
+    assert.equal(history.data.guilds.visited.visit, now);
+    assert.equal(history.data.guilds["emoji-source"].emoji, now);
     plugin.flux.VOICE_CHANNEL_EFFECT_SEND({ userId: user, channelId: "channel", soundId: "333" });
     assert.equal(history.data.guilds["sound-source"].sound, now);
     plugin.flux.GUILD_DELETE({ guild: { id: "ignored", unavailable: true } });
