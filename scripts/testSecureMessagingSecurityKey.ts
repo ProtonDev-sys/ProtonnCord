@@ -614,9 +614,13 @@ async function main(): Promise<void> {
         "the native result must report identity replacement and its disabled-conversation count");
     const lockFunctionStart = native.indexOf("export async function lockSecurityKeyVault");
     const lockFunctionEnd = native.indexOf("export async function removeSecurityKeyVault", lockFunctionStart);
+    assert.ok(lockFunctionStart >= 0 && lockFunctionEnd > lockFunctionStart, "the lock function boundaries must exist");
     const lockFunction = native.slice(lockFunctionStart, lockFunctionEnd);
+    const clearIndex = lockFunction.indexOf("clearSecurityKeyVaultSession();");
+    const serializedIndex = lockFunction.indexOf("return runSerialized");
+    assert.ok(clearIndex >= 0 && serializedIndex >= 0, "the key clearing and serialization markers must exist");
     assert.ok(
-        lockFunction.indexOf("clearSecurityKeyVaultSession();") < lockFunction.indexOf("return runSerialized"),
+        clearIndex < serializedIndex,
         "locking must clear the in-memory E2E key before fallible storage or mutex work",
     );
 

@@ -5,12 +5,10 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { createMessageDiff, createWordDiff } from "../src/plugins/messageLogger/diffUtils";
+import { loadTestModule } from "./utils/loadTestModule";
 
 test("message diffs preserve tie order, Unicode tokens and reconstruct both messages", () => {
     assert.deepEqual(createWordDiff("ab", "ba"), [
@@ -27,13 +25,9 @@ test("message diffs preserve tie order, Unicode tokens and reconstruct both mess
 });
 
 function load(path: string, mocks: Record<string, unknown>, globals: Record<string, unknown> = {}, result = "exports.default") {
-    const code = transpileModule(readFileSync(path, "utf8"), {
-        fileName: path,
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    return runInNewContext(code + `\n${result};`, {
-        exports: {}, ...globals, require: (name: string) => mocks[name] ?? {}
-    });
+    return loadTestModule(new URL(`../${path}`, import.meta.url), mocks, {
+        ...globals, require: (name: string) => mocks[name] ?? {}
+    }, `\nexports.result = ${result};`, { mockImports: false }).result;
 }
 
 test("text replacement tolerates invalid saved rows and delayed edits follow the original rule ID", () => {
@@ -253,8 +247,10 @@ test("restarting click actions does not retain a previously held modifier", () =
     plugin.stop();
     plugin.start();
     listeners.get("mousedown")!({ button: 0 });
-    plugin.onMessageClick({ author: { id: "me" }, id: "message" }, { isDM: () => false, isSystemDM: () => false },
-        { target: { nodeType: 1 }, detail: 1, button: 0, preventDefault() {} });
+    for (const target of [{ nodeType: 1 }, { nodeType: 3, parentElement: { nodeType: 1 } }]) {
+        plugin.onMessageClick({ author: { id: "me" }, id: "message" }, { isDM: () => false, isSystemDM: () => false },
+            { target, detail: 1, button: 0, preventDefault() {} });
+    }
     assert.deepEqual(copied, []);
     plugin.stop();
     assert.equal(listeners.size, 0);

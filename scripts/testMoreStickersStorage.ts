@@ -23,7 +23,11 @@ const recentCode = recentSource.statements.filter(node =>
 function fixture() {
     const values = new Map<string, unknown>();
     let pending = Promise.resolve();
-    const transaction = (write: () => void) => pending = pending.then(write);
+    const transaction = (write: () => void) => {
+        const result = pending.then(write);
+        pending = result.then(() => undefined, () => undefined);
+        return result;
+    };
     const DataStore = {
         async get(key: string) { return structuredClone(values.get(key)); },
         set(key: string, value: unknown) { return transaction(() => { values.set(key, structuredClone(value)); }); },
@@ -51,7 +55,7 @@ function fixture() {
             throw new Error(`Unexpected import: ${name}`);
         }
     }) as typeof import("../src/equicordplugins/moreStickers/stickers");
-    return { recent, packs };
+    return { recent, packs, DataStore };
 }
 
 function evaluate(source: string, globals: Record<string, unknown>): Record<string, unknown> {
@@ -64,6 +68,15 @@ function evaluate(source: string, globals: Record<string, unknown>): Record<stri
 function sticker(id: string, stickerPackId = id): Sticker {
     return { id, stickerPackId, image: "fixture.png", title: id };
 }
+
+test("failed fixture transactions reject without poisoning later writes", async () => {
+    const { DataStore } = fixture();
+    await DataStore.set("fixture", "original");
+    await assert.rejects(DataStore.update("fixture", () => { throw new Error("fixture failure"); }), /fixture failure/);
+    assert.equal(await DataStore.get("fixture"), "original");
+    await DataStore.update("fixture", () => "retry");
+    assert.equal(await DataStore.get("fixture"), "retry");
+});
 
 test("concurrent recent stickers survive, remain unique, and stay bounded", async () => {
     const { recent } = fixture();
