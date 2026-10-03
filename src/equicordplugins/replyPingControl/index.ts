@@ -87,12 +87,7 @@ export default definePlugin({
         const authorId = message.author.id;
         const mentions = message.mentions ?? [];
 
-        if (replyPingBlacklistIds.has(authorId)) {
-            message.mentions = mentions.filter(mention => mention.id !== user.id);
-            return;
-        }
-
-        if (replyPingWhitelistIds.has(authorId) || settings.store.alwaysPingOnReply) {
+        if (!replyPingBlacklistIds.has(authorId) && (replyPingWhitelistIds.has(authorId) || settings.store.alwaysPingOnReply)) {
             if (!mentions.some(mention => mention.id === user.id)) message.mentions = [...mentions, user as any];
         } else {
             message.mentions = mentions.filter(mention => mention.id !== user.id);

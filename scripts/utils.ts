@@ -69,26 +69,26 @@ export function getObjectProp(node: ObjectLiteralExpression, name: string) {
     return prop;
 }
 
-export function parseDevs() {
+function parseDeveloperCatalog(constantName: string, catalog: Record<string, Dev>, errorName: string) {
     const file = createSourceFile("constants.ts", readFileSync("src/utils/constants.ts", "utf8"), ScriptTarget.Latest);
 
     for (const child of file.getChildAt(0).getChildren()) {
         if (!isVariableStatement(child)) continue;
 
-        const devsDeclaration = child.declarationList.declarations.find(d => hasName(d, "Devs"));
+        const devsDeclaration = child.declarationList.declarations.find(d => hasName(d, constantName));
         if (!devsDeclaration?.initializer || !isCallExpression(devsDeclaration.initializer)) continue;
 
         const value = devsDeclaration.initializer.arguments[0];
 
-        if (!isSatisfiesExpression(value) || !isObjectLiteralExpression(value.expression)) throw new Error("Failed to parse devs: not an object literal");
+        if (!isSatisfiesExpression(value) || !isObjectLiteralExpression(value.expression)) throw new Error(`Failed to parse ${errorName}: not an object literal`);
 
         for (const prop of value.expression.properties) {
             const name = (prop.name as Identifier).text;
             const value = isPropertyAssignment(prop) ? prop.initializer : prop;
 
-            if (!isObjectLiteralExpression(value)) throw new Error(`Failed to parse devs: ${name} is not an object literal`);
+            if (!isObjectLiteralExpression(value)) throw new Error(`Failed to parse ${errorName}: ${name} is not an object literal`);
 
-            devs[name] = {
+            catalog[name] = {
                 name: (getObjectProp(value, "name") as StringLiteral).text,
                 id: (getObjectProp(value, "id") as BigIntLiteral).text.slice(0, -1)
             };
@@ -97,38 +97,15 @@ export function parseDevs() {
         return;
     }
 
-    throw new Error("Could not find Devs constant");
+    throw new Error(`Could not find ${constantName} constant`);
+}
+
+export function parseDevs() {
+    parseDeveloperCatalog("Devs", devs, "devs");
 }
 
 export function parseEquicordDevs() {
-    const file = createSourceFile("constants.ts", readFileSync("src/utils/constants.ts", "utf8"), ScriptTarget.Latest);
-
-    for (const child of file.getChildAt(0).getChildren()) {
-        if (!isVariableStatement(child)) continue;
-
-        const devsDeclaration = child.declarationList.declarations.find(d => hasName(d, "EquicordDevs"));
-        if (!devsDeclaration?.initializer || !isCallExpression(devsDeclaration.initializer)) continue;
-
-        const value = devsDeclaration.initializer.arguments[0];
-
-        if (!isSatisfiesExpression(value) || !isObjectLiteralExpression(value.expression)) throw new Error("Failed to parse EquicordDevs: not an object literal");
-
-        for (const prop of value.expression.properties) {
-            const name = (prop.name as Identifier).text;
-            const value = isPropertyAssignment(prop) ? prop.initializer : prop;
-
-            if (!isObjectLiteralExpression(value)) throw new Error(`Failed to parse EquicordDevs: ${name} is not an object literal`);
-
-            equicordDevs[name] = {
-                name: (getObjectProp(value, "name") as StringLiteral).text,
-                id: (getObjectProp(value, "id") as BigIntLiteral).text.slice(0, -1)
-            };
-        }
-
-        return;
-    }
-
-    throw new Error("Could not find EquicordDevs constant");
+    parseDeveloperCatalog("EquicordDevs", equicordDevs, "EquicordDevs");
 }
 
 export async function parseFile(fileName: string) {
@@ -247,10 +224,7 @@ export async function parseFile(fileName: string) {
             .join(posixSep)
             .replace(/\/index\.([jt]sx?)$/, "");
 
-        data.dirName = posixNormalize(fileName)
-            .split(sep)
-            .join(posixSep)
-            .replace(/\/index\.([jt]sx?)$/, "")
+        data.dirName = data.filePath
             .replace(/^src\/plugins\//, "")
             .replace(/^src\/equicordplugins\//, "");
 

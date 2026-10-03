@@ -20,10 +20,6 @@ function LeaveIcon() {
     return <svg {...iconProps}><g fill="none" fillRule="evenodd"><path d="m18 0h-18v18h18z" /><path d="m3.8 8 3.6-3.6-1.4-1.4-6 6 6 6 1.4-1.4-3.6-3.6h14.2v-2" fill="currentColor" /></g></svg>;
 }
 
-function MoveIcon() {
-    return <svg {...iconProps}><g fill="none" fillRule="evenodd"><path d="m18 0h-18v18h18z" /><path d="m0 8h14.2l-3.6-3.6 1.4-1.4 6 6-6 6-1.4-1.4 3.6-3.6h-14.2" fill="currentColor" /></g></svg>;
-}
-
 function SoundboardIcon() {
     return <svg {...iconProps} viewBox="0 0 24 24" fill="none">
         <path d="M12 3v18M8 7v10M4 10v4M16 7v10M20 10v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -73,7 +69,7 @@ function ActivityIcon() {
 const iconMap: Record<LogEventType, () => React.ReactNode> = {
     join: JoinIcon,
     leave: LeaveIcon,
-    move: MoveIcon,
+    move: JoinIcon,
     soundboard: SoundboardIcon,
     server_mute: MuteIcon,
     server_deafen: DeafenIcon,
