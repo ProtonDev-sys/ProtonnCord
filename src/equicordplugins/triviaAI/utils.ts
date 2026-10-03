@@ -13,6 +13,10 @@ import { MessageStore, SelectedChannelStore, showToast, Toasts, UserStore } from
 import { settings } from "./settings";
 
 const logger = new Logger("TriviaAI");
+const MAX_PAYLOAD_IMAGES = 4;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_CONCURRENT_IMAGE_LOADS = 2;
+let activeImageLoads = 0;
 
 type TextPart = {
     type: "text";
@@ -41,10 +45,12 @@ export async function getPayload(message: Message): Promise<ApiMessage[] | null>
     const currentUserId = UserStore.getCurrentUser()?.id;
 
     const payload: ApiMessage[] = [];
+    let remainingImages = MAX_PAYLOAD_IMAGES;
 
     for (const msg of allMessages) {
-        const parsed = parseMessageContent(msg);
+        const parsed = parseMessageContent(msg, remainingImages);
         if (!parsed) continue;
+        if (Array.isArray(parsed)) remainingImages -= parsed.filter(part => part.type === "image_url").length;
 
         const isOwn = currentUserId != null && msg.author?.id === currentUserId;
         const isTargetMessage = msg.id === message.id;
@@ -83,13 +89,17 @@ export async function getPayload(message: Message): Promise<ApiMessage[] | null>
 
     if (!settings.store.sendImagesAsBase64) return payload;
 
-    return Promise.all(payload.map(async msg => {
-        if (typeof msg.content === "string") return msg;
-
-        const content = await Promise.all(msg.content.map(part => part.type === "image_url" ? toBase64Image(part) : part));
-
-        return { ...msg, content: content.filter(part => part !== null) };
-    }));
+    // Convert sequentially within each payload; the shared bound also covers overlapping answers.
+    for (const msg of payload) {
+        if (typeof msg.content === "string") continue;
+        const content: (TextPart | ImagePart)[] = [];
+        for (const part of msg.content) {
+            const converted = part.type === "image_url" ? await toBase64Image(part) : part;
+            if (converted) content.push(converted);
+        }
+        msg.content = content;
+    }
+    return payload;
 }
 
 export function getPreviousMessages(message: Message, count: number): Message[] {
@@ -109,7 +119,7 @@ export function getPreviousMessages(message: Message, count: number): Message[] 
     return allMessages.slice(Math.max(0, idx - count), idx);
 }
 
-export function parseMessageContent(message: Message): ContentPayload | null {
+export function parseMessageContent(message: Message, maxImages = MAX_PAYLOAD_IMAGES): ContentPayload | null {
     const textParts: string[] = [];
 
     if (message.content && message.content.trim().length > 0) {
@@ -142,10 +152,13 @@ export function parseMessageContent(message: Message): ContentPayload | null {
     }
 
     const imageUrls = new Set<string>();
+    const addImage = (url?: string) => {
+        if (url && imageUrls.size < maxImages) imageUrls.add(url);
+    };
 
     message.attachments
         .filter(att => att.content_type?.startsWith("image/"))
-        .forEach(att => imageUrls.add(att.proxy_url ?? att.url));
+        .forEach(att => addImage(att.proxy_url ?? att.url));
 
     message.embeds.forEach(embed => {
         const potentialUrls = [
@@ -155,7 +168,7 @@ export function parseMessageContent(message: Message): ContentPayload | null {
         ];
 
         potentialUrls.forEach(url => {
-            if (url) imageUrls.add(url);
+            addImage(url);
         });
     });
 
@@ -183,12 +196,40 @@ export function parseMessageContent(message: Message): ContentPayload | null {
 }
 
 async function toBase64Image(part: ImagePart): Promise<ImagePart | null> {
+    if (activeImageLoads >= MAX_CONCURRENT_IMAGE_LOADS) return null;
+    activeImageLoads++;
     try {
         const req = await fetch(part.image_url.url, { signal: AbortSignal.timeout(15_000) });
-        if (!req.ok) return null;
+        if (!req.ok || Number(req.headers.get("content-length")) > MAX_IMAGE_BYTES || !req.body) {
+            await req.body?.cancel();
+            return null;
+        }
+
+        const reader = req.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        try {
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                size += value.byteLength;
+                if (size > MAX_IMAGE_BYTES) throw new Error("Image is too large to convert.");
+                chunks.push(value);
+            }
+        } catch (error) {
+            await reader.cancel().catch(() => undefined);
+            throw error;
+        } finally {
+            reader.releaseLock();
+        }
+        const bytes = new Uint8Array(size);
+        let offset = 0;
+        for (const chunk of chunks) {
+            bytes.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
 
         let binary = "";
-        const bytes = new Uint8Array(await req.arrayBuffer());
         for (let i = 0; i < bytes.length; i += 0x8000) {
             binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
         }
@@ -200,6 +241,8 @@ async function toBase64Image(part: ImagePart): Promise<ImagePart | null> {
     } catch (e) {
         logger.warn("failed to convert image to base64", e);
         return null;
+    } finally {
+        activeImageLoads--;
     }
 }
 

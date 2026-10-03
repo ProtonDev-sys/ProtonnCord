@@ -166,33 +166,38 @@ async function fetchMessage(channelID: string, messageID: string) {
     const cached = messageCache.get(messageID);
     if (cached) return cached.message;
 
-    setMessageCache(messageID, { fetched: false });
+    const pendingEntry = { fetched: false };
+    setMessageCache(messageID, pendingEntry);
     const requestGeneration = generation;
     const accountId = AuthenticationStore.getId();
 
-    const res = await RestAPI.get({
-        url: Constants.Endpoints.MESSAGES(channelID),
-        query: {
-            limit: 1,
-            around: messageID
-        },
-        retries: 2
-    }).catch(() => null);
+    try {
+        const res = await RestAPI.get({
+            url: Constants.Endpoints.MESSAGES(channelID),
+            query: {
+                limit: 1,
+                around: messageID
+            },
+            retries: 2
+        }).catch(() => null);
 
-    if (requestGeneration !== generation || accountId !== AuthenticationStore.getId()) return;
+        if (requestGeneration !== generation || accountId !== AuthenticationStore.getId()) return;
 
-    const msg = res?.body?.[0];
-    if (msg?.id !== messageID || msg?.channel_id !== channelID) return;
+        const msg = res?.body?.[0];
+        if (msg?.id !== messageID || msg?.channel_id !== channelID) return;
 
-    const message = MessageStore.getMessages(msg.channel_id).receiveMessage(msg).get(msg.id);
-    if (!message) return;
+        const message = MessageStore.getMessages(msg.channel_id).receiveMessage(msg).get(msg.id);
+        if (!message) return;
 
-    setMessageCache(message.id, {
-        message,
-        fetched: true
-    });
+        setMessageCache(message.id, {
+            message,
+            fetched: true
+        });
 
-    return message;
+        return message;
+    } finally {
+        if (messageCache.get(messageID) === pendingEntry) messageCache.delete(messageID);
+    }
 }
 
 function getImages(message: Message): Attachment[] {

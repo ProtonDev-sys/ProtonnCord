@@ -22,13 +22,13 @@ import {
     Menu,
     Modal,
     openModal,
+    React,
     useCallback,
     useEffect,
-    useMemo,
     useState
 } from "@webpack/common";
 
-import { cssColors, getCssColorKeys, iconSizes, iconSizesInPx } from "../utils";
+import { cssColors, getCssColorKeys, iconSizes, iconSizesInPx, subscribeCssColorKeys } from "../utils";
 
 const logger = new Logger("IconViewer");
 const BugIcon = findComponentByCodeLazy("1.1.27.1.37 0a6.66 6.6");
@@ -52,6 +52,7 @@ function useColorNavigation(initialColor: number) {
             setColor(c => {
                 const next = c + (e.key === "ArrowLeft" ? -1 : 1);
                 const max = getCssColorKeys().length;
+                if (!max) return c;
                 return next < 0 ? max - 1 : next >= max ? 0 : next;
             });
         }
@@ -219,7 +220,7 @@ function OtherContextMenu({ iconName, Icon, color }: { iconName: string; Icon: I
 function IconModal({ iconName, Icon, onClose, transitionState }: { iconName: string; Icon: Icon; } & RenderModalProps) {
     const [color, setColor] = useColorNavigation(209);
     const colorData = cssColors[color];
-    const colorKeys = useMemo(() => getCssColorKeys(), []);
+    const colorKeys = React.useSyncExternalStore(subscribeCssColorKeys, getCssColorKeys);
 
     const fill = iconName === "CircleShieldIcon" ? "var(--background-base-low)" : colorData?.css;
     const findCode = `const ${iconName} = findExportedComponentLazy("${iconName}")`;
@@ -231,6 +232,7 @@ function IconModal({ iconName, Icon, onClose, transitionState }: { iconName: str
     const onWheel = useCallback((e: React.WheelEvent) => {
         e.preventDefault();
         const max = colorKeys.length;
+        if (!max) return;
         setColor(c => {
             const next = c + (e.deltaY > 0 ? 1 : -1);
             return next < 0 ? max - 1 : next >= max ? 0 : next;

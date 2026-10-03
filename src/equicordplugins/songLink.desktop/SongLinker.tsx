@@ -9,7 +9,7 @@ import { Card } from "@components/Card";
 import { HeadphonesIcon } from "@components/Icons";
 import { Button, useEffect, useState } from "@webpack/common";
 
-import pl, { Native, settings, SongLinkResult } from ".";
+import pl, { getServiceSettings, Native, settings, SongLinkResult } from ".";
 import { Providers } from "./Providers";
 
 interface SongLinkerProps {
@@ -69,11 +69,11 @@ export default function SongLinker({ url, onResolved }: SongLinkerProps) {
                     </BaseText>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", marginTop: "10px" }}>
                         {
-                            Object.keys(songData.links).map(service => servicesSettings[service]?.enabled && Providers[service] && <Button key={`${service}-${url}`} style={{
+                            Object.keys(songData.links).map(service => Providers[service] && getServiceSettings(service, servicesSettings).enabled && <Button key={`${service}-${url}`} style={{
                                 width: "20px !important"
                                 // @ts-ignore
                             }} variant="secondary" onClick={() => {
-                                VencordNative.native.openExternal(servicesSettings[service].openInNative && Providers[service].native && songData.links[service].nativeUri ? songData.links[service].nativeUri : songData.links[service].url);
+                                VencordNative.native.openExternal(getServiceSettings(service).openInNative && Providers[service].native && songData.links[service].nativeUri ? songData.links[service].nativeUri : songData.links[service].url);
                             }}>
                                 <img
                                     src={Providers[service].logo}

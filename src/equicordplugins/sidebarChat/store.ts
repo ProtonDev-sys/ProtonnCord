@@ -9,7 +9,7 @@ import { proxyLazy } from "@utils/lazy";
 import { Logger } from "@utils/Logger";
 import { OptionType } from "@utils/types";
 import { Flux as TFlux } from "@vencord/discord-types";
-import { ChannelActionCreators, ChannelStore, Flux as FluxWP, FluxDispatcher, PopoutActions, PopoutWindowStore } from "@webpack/common";
+import { ChannelActionCreators, ChannelStore, Flux as FluxWP, FluxDispatcher, PopoutActions, PopoutWindowStore, UserStore } from "@webpack/common";
 
 interface IFlux extends TFlux {
     PersistedStore: TFlux["Store"];
@@ -40,6 +40,12 @@ export const settings = definePluginSettings({
         default: [] as string[],
         hidden: true
     },
+    persistedPopoutWindowsByUser: {
+        type: OptionType.CUSTOM,
+        description: "Account-scoped persisted popout chat channel IDs.",
+        default: {} as Record<string, string[]>,
+        hidden: true
+    },
     popoutAlwaysOnTop: {
         type: OptionType.BOOLEAN,
         description: "Keep popout chat windows above all others.",
@@ -50,42 +56,54 @@ export const settings = definePluginSettings({
     },
 });
 
+let sidebarActive = false;
+let selectionGeneration = 0;
+
+export function setSidebarActive(active: boolean) {
+    sidebarActive = active;
+    selectionGeneration++;
+}
+
 export const SidebarStore = proxyLazy(() => {
     const current = {
+        userId: "",
         guildId: "",
         channelId: "",
         width: 0
     };
 
     let previous = { ...current };
-    let selectionGeneration = 0;
 
     class SidebarStore extends (FluxWP as IFlux).PersistedStore {
         static persistKey = "SidebarStore";
 
         // @ts-ignore
-        initialize(previousState: { guildId?: string; channelId?: string; width?: number; } | undefined) {
+        initialize(previousState: { userId?: string; guildId?: string; channelId?: string; width?: number; } | undefined) {
             if (!settings.store.persistSidebar || !previousState) return;
             const { guildId, channelId, width } = previousState;
+            current.width = width || 0;
+            if (!previousState.userId || previousState.userId !== UserStore.getCurrentUser()?.id) return;
+            current.userId = previousState.userId;
             current.guildId = guildId || "";
             current.channelId = channelId || "";
-            current.width = width || 0;
         }
 
         getState() {
-            return current;
+            return current.userId === UserStore.getCurrentUser()?.id ? current : { ...current, guildId: "", channelId: "" };
         }
     }
 
     const store = new SidebarStore(FluxDispatcher, {
         // @ts-ignore
         async VC_SIDEBAR_CHAT_NEW({ guildId: newGId, id }: { guildId: string | null; id: string; }) {
+            const userId = UserStore.getCurrentUser()?.id;
+            if (!sidebarActive || !userId) return;
             const generation = ++selectionGeneration;
-            previous = { ...current };
+            previous = { ...store.getState() };
 
-            current.guildId = newGId || "";
-
-            if (current.guildId) {
+            if (newGId) {
+                current.userId = userId;
+                current.guildId = newGId;
                 current.channelId = id;
                 store.emitChange();
                 return;
@@ -95,7 +113,9 @@ export const SidebarStore = proxyLazy(() => {
                 const channelId = ChannelStore.getChannel(id)?.isPrivate()
                     ? id
                     : await ChannelActionCreators.getOrEnsurePrivateChannel(id);
-                if (generation !== selectionGeneration) return;
+                if (!channelId || !sidebarActive || generation !== selectionGeneration || userId !== UserStore.getCurrentUser()?.id) return;
+                current.userId = userId;
+                current.guildId = "";
                 current.channelId = channelId;
                 store.emitChange();
             } catch (error) {
@@ -105,7 +125,8 @@ export const SidebarStore = proxyLazy(() => {
 
         VC_SIDEBAR_CHAT_PREVIOUS() {
             selectionGeneration++;
-            if (previous.channelId) {
+            if (sidebarActive && previous.channelId && previous.userId === UserStore.getCurrentUser()?.id) {
+                current.userId = previous.userId;
                 current.guildId = previous.guildId;
                 current.channelId = previous.channelId;
             }
@@ -117,6 +138,14 @@ export const SidebarStore = proxyLazy(() => {
             previous = { ...current };
             current.guildId = "";
             current.channelId = "";
+            store.emitChange();
+        },
+        LOGOUT() {
+            selectionGeneration++;
+            current.userId = "";
+            current.guildId = "";
+            current.channelId = "";
+            previous = { ...current };
             store.emitChange();
         },
     });
@@ -139,20 +168,20 @@ export function isPopoutWindowOpen(channelId: string) {
 }
 
 export function getPersistedPopoutChannelIds() {
-    return settings.store.persistedPopoutWindowIds ?? [];
+    const userId = UserStore.getCurrentUser()?.id;
+    return userId ? settings.store.persistedPopoutWindowsByUser?.[userId] ?? [] : [];
 }
 
 export function getOpenPopoutChannelIds() {
     return getOpenPopoutWindowKeys().map(key => key.slice(WINDOW_PREFIX.length));
 }
 
-export function syncPersistedPopoutWindows() {
-    if (!settings.store.persistPopoutWindows) {
-        settings.store.persistedPopoutWindowIds = [];
-        return;
-    }
-
-    settings.store.persistedPopoutWindowIds = getOpenPopoutChannelIds();
+export function syncPersistedPopoutWindows(userId = UserStore.getCurrentUser()?.id) {
+    if (!userId) return;
+    settings.store.persistedPopoutWindowsByUser = {
+        ...settings.store.persistedPopoutWindowsByUser,
+        [userId]: settings.store.persistPopoutWindows ? getOpenPopoutChannelIds() : []
+    };
 }
 
 export function setAlwaysOnTopForOpenPopouts(value: boolean) {

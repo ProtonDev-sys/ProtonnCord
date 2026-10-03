@@ -7,7 +7,7 @@
 import { openModal } from "@utils/index";
 import { OAuth2AuthorizeModal, showToast, Toasts } from "@webpack/common";
 
-import { settings } from ".";
+import { notifyTimezoneChange, settings } from ".";
 
 const databaseTimezones: Record<string, { value: string | null; }> = {};
 const CLIENT_ID = "1377021506810417173";
@@ -37,6 +37,7 @@ async function safeJsonParse(response: Response): Promise<any> {
 
 export async function setUserDatabaseTimezone(userId: string, timezone: string | null) {
     databaseTimezones[userId] = { value: timezone };
+    notifyTimezoneChange();
 }
 
 export function getTimezone(userId: string): string | null {
@@ -55,6 +56,7 @@ export async function loadDatabaseTimezones(): Promise<boolean> {
                     value: json[id]?.timezone ?? null
                 };
             }
+            notifyTimezoneChange();
             return true;
         }
         return false;
@@ -84,7 +86,7 @@ export async function setTimezone(timezone: string): Promise<boolean> {
         return new Promise(resolve => {
             authModal(() => {
                 setTimezoneInternal(timezone).then(resolve);
-            });
+            }, () => resolve(false));
         });
     }
 
@@ -127,7 +129,7 @@ export async function deleteTimezone(): Promise<boolean> {
         return new Promise(resolve => {
             authModal(() => {
                 deleteTimezoneInternal().then(resolve);
-            });
+            }, () => resolve(false));
         });
     }
 
@@ -158,35 +160,46 @@ async function deleteTimezoneInternal(): Promise<boolean> {
     }
 }
 
-export function authModal(callback?: () => void) {
+export function authModal(callback?: () => void, onFailure?: () => void) {
+    const redirectUri = getRedirectUri();
+    let callbackStarted = false;
     openModal(modalProps => (
         <OAuth2AuthorizeModal
             {...modalProps}
             clientId={CLIENT_ID}
-            redirectUri={getRedirectUri()}
+            redirectUri={redirectUri}
             responseType="code"
             scopes={["identify"]}
             permissions={0n}
             cancelCompletesFlow={false}
             callback={async (res: any) => {
-                if (!res || !res.location) return;
+                callbackStarted = true;
+                if (!res || !res.location) return onFailure?.();
                 try {
                     const url = new URL(res.location);
+                    const expected = new URL(redirectUri);
+                    if (getRedirectUri() !== redirectUri || url.origin !== expected.origin || url.pathname !== expected.pathname || url.username || url.password)
+                        throw new Error("Unexpected authorization callback");
                     const r = await fetch(url, {
                         credentials: "include",
+                        redirect: "error",
+                        signal: AbortSignal.timeout(15_000),
                         headers: { Accept: "application/json" }
                     });
                     const json = await safeJsonParse(r);
                     if (!r.ok) {
                         handleApiError(json, "Authorization failed");
+                        onFailure?.();
                         return;
                     }
+                    if (getRedirectUri() !== redirectUri) throw new Error("Timezone database changed during authorization");
                     showToast("Authorization successful!", Toasts.Type.SUCCESS);
                     callback?.();
                 } catch (e) {
                     handleApiError(e, "Unexpected error during authorization");
+                    onFailure?.();
                 }
             }}
         />
-    ));
+    ), { onCloseCallback() { if (!callbackStarted) onFailure?.(); } });
 }

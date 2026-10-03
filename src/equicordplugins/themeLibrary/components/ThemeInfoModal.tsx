@@ -27,9 +27,11 @@ async function downloadTheme(theme: Theme) {
     try {
         await Native.downloadTheme(theme);
         showToast(`Downloaded ${theme.name}!`, Toasts.Type.SUCCESS);
+        return true;
     } catch (err: unknown) {
         logger.error(err);
         showToast(`Failed to download ${theme.name}! (check console)`, Toasts.Type.FAILURE);
+        return false;
     }
 }
 
@@ -79,8 +81,7 @@ export const ThemeInfoModal: React.FC<ThemeInfoModalProps> = ({ author, theme, .
                                             text: "Overwrite",
                                             variant: "dangerPrimary",
                                             onClick: async () => {
-                                                await downloadTheme(theme);
-                                                modalProps.onClose();
+                                                if (await downloadTheme(theme)) modalProps.onClose();
                                             }
                                         },
                                         {

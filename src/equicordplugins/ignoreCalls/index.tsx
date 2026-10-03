@@ -55,14 +55,25 @@ const cl = classNameFactory("vc-ignore-calls-");
 const Deafen = findComponentByCodeLazy("0-1.02-.1H3.05a9");
 
 const ContextMenuPatch: NavContextMenuPatchCallback = (children, { channel }: { channel: Channel; }) => {
-    checkAccount();
-    const permanentlyIgnoredUsers = settings.store.permanentlyIgnoredUsers.split(",").map(s => s.trim()).filter(Boolean);
-
-    const [tempChecked, setTempChecked] = React.useState(ignoredChannelIds.has(channel?.id));
-    const [permChecked, setPermChecked] = React.useState(permanentlyIgnoredUsers.includes(channel?.id));
     if (!channel) return;
+    children.push(<IgnoreCallItems channel={channel} />);
+};
 
-    children.push(
+function getPermanentIgnoreIds(channel: Channel) {
+    return channel.type === 1 ? [channel.id, ...(channel.recipients ?? [])] : [channel.id];
+}
+
+function isPermanentlyIgnored(channel: Channel, ignored: string[]) {
+    return getPermanentIgnoreIds(channel).some(id => ignored.includes(id));
+}
+
+function IgnoreCallItems({ channel }: { channel: Channel; }) {
+    const currentUserId = checkAccount();
+    const { permanentlyIgnoredUsers } = settings.use(["permanentlyIgnoredUsers"]);
+    const permanentlyIgnoredIds = permanentlyIgnoredUsers.split(",").map(value => value.trim()).filter(Boolean);
+    const [tempChecked, setTempChecked] = React.useState(ignoredChannelIds.has(channel.id));
+    const permChecked = isPermanentlyIgnored(channel, permanentlyIgnoredIds);
+    return (
         <>
             <Menu.MenuSeparator />
             <Menu.MenuCheckboxItem
@@ -70,6 +81,7 @@ const ContextMenuPatch: NavContextMenuPatchCallback = (children, { channel }: { 
                 label="Temporarily Ignore Calls"
                 checked={tempChecked}
                 action={() => {
+                    if (!currentUserId || checkAccount() !== currentUserId) return;
                     if (tempChecked)
                         ignoredChannelIds.delete(channel.id);
                     else
@@ -83,27 +95,26 @@ const ContextMenuPatch: NavContextMenuPatchCallback = (children, { channel }: { 
                 label="Permanently Ignore Calls"
                 checked={permChecked}
                 action={() => {
+                    if (!currentUserId || checkAccount() !== currentUserId) return;
                     let updated = settings.store.permanentlyIgnoredUsers.split(",").map(value => value.trim()).filter(Boolean);
-                    const isIgnored = updated.includes(channel.id);
+                    const isIgnored = isPermanentlyIgnored(channel, updated);
                     if (isIgnored) {
-                        updated = updated.filter(id => id !== channel.id);
+                        const ignoredIds = getPermanentIgnoreIds(channel);
+                        updated = updated.filter(id => !ignoredIds.includes(id));
                     } else {
                         updated.push(channel.id);
                     }
                     settings.store.permanentlyIgnoredUsers = updated.join(", ");
-
-                    setPermChecked(!isIgnored);
                 }}
             />
         </>
     );
-};
+}
 
 const settings = definePluginSettings({
     permanentlyIgnoredUsers: {
         type: OptionType.STRING,
-        description: "User IDs (comma + space) who should be permanetly ignored",
-        restartNeeded: true,
+        description: "User IDs for direct messages, or DM/group channel IDs, whose calls should be permanently ignored (comma-separated)",
         default: "",
     },
 });
@@ -152,7 +163,7 @@ export default definePlugin({
         const currentUserId = checkAccount();
         if (!currentUserId || !channel) return null;
         const permanentlyIgnoredUsers = settings.store.permanentlyIgnoredUsers.split(",").map(s => s.trim()).filter(Boolean);
-        if (ignoredChannelIds.has(channel.id) || permanentlyIgnoredUsers.includes(channel.id)) {
+        if (ignoredChannelIds.has(channel.id) || isPermanentlyIgnored(channel, permanentlyIgnoredUsers)) {
             dismissCall(channel.id, currentUserId);
             return null;
         }

@@ -114,7 +114,7 @@ export function requireStyle(name: string) {
 export function enableStyle(name: string) {
     const style = requireStyle(name);
 
-    if (style.dom?.isConnected)
+    if (style.dom?.parentNode === managedStyleRootNode)
         return false;
 
     if (!style.dom) {
@@ -134,7 +134,7 @@ export function enableStyle(name: string) {
  */
 export function disableStyle(name: string) {
     const style = requireStyle(name);
-    if (!style.dom?.isConnected)
+    if (style.dom?.parentNode !== managedStyleRootNode)
         return false;
 
     style.dom.remove();
@@ -154,7 +154,7 @@ export const toggleStyle = (name: string) => isStyleEnabled(name) ? disableStyle
  * @returns Whether the style is enabled
  * @see {@link enableStyle} for info on getting the name of an imported style
  */
-export const isStyleEnabled = (name: string) => requireStyle(name).dom?.isConnected ?? false;
+export const isStyleEnabled = (name: string) => requireStyle(name).dom?.parentNode === managedStyleRootNode;
 
 /**
  * Sets the variables of a style

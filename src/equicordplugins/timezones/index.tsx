@@ -22,6 +22,12 @@ import { SetTimezoneModal } from "./TimezoneModal";
 export let timezones: Record<string, string | null> = {};
 export const DATASTORE_KEY = "vencord-timezones";
 
+const timezoneListeners = new Set<() => void>();
+
+export function notifyTimezoneChange() {
+    for (const listener of timezoneListeners) listener();
+}
+
 export function resolveUserTimezone(userId: string): string | null {
     const localTimezone = timezones[userId];
     const shouldUseDatabase =
@@ -191,7 +197,10 @@ const TimestampComponent = ErrorBoundary.wrap(({ userId, timestamp, type }: Prop
     const [timezone, setTimezone] = useState<string | null>(null);
 
     useEffect(() => {
-        setTimezone(resolveUserTimezone(userId));
+        const update = () => setTimezone(resolveUserTimezone(userId));
+        timezoneListeners.add(update);
+        update();
+        return () => { timezoneListeners.delete(update); };
     }, [userId, settings.store.useDatabase, settings.store.preferDatabaseOverLocal]);
 
     useEffect(() => {
@@ -334,6 +343,7 @@ export default definePlugin({
 
     async start() {
         timezones = await DataStore.get<Record<string, string>>(DATASTORE_KEY) || {};
+        notifyTimezoneChange();
 
         if (settings.store.useDatabase) {
             await loadDatabaseTimezones();

@@ -79,6 +79,7 @@ async function decryptWithRetry(
                 return failedDecryption();
             }
         });
+        if (generation !== cacheGeneration || !isCurrent()) return failedDecryption();
         if (result.status === "decrypted" && result.detachedTextIndex !== null) {
             const refreshIds = result.attachmentBundle?.manifest
                 ? message.attachments.slice(result.detachedTextIndex, result.detachedTextIndex + 1).map(attachment => attachment.id)
@@ -123,10 +124,12 @@ function ensureEntry(localUserId: string, message: Message): [string, DecryptCac
         promise: Promise.resolve(failedDecryption()),
         result: null,
     };
+    if (cache.size >= MAX_CACHE_ENTRIES) return [key, { ...entry, result: failedDecryption(), expiresAt: now }];
     cache.set(key, entry);
     const generation = cacheGeneration;
-    entry.promise = decryptWithRetry(localUserId, message, generation, () => cache.get(key) === entry).catch(failedDecryption).then(result => {
-        if (generation === cacheGeneration && cache.get(key) === entry) {
+    const isCurrent = () => cache.get(key) === entry && decryptCacheKey(localUserId, message) === key;
+    entry.promise = decryptWithRetry(localUserId, message, generation, isCurrent).catch(failedDecryption).then(result => {
+        if (generation === cacheGeneration && isCurrent()) {
             const settledAt = Date.now();
             entry.expiresAt = isTransientFailure(result)
                 ? settledAt + TRANSIENT_FAILURE_TTL_MS
@@ -134,6 +137,9 @@ function ensureEntry(localUserId: string, message: Message): [string, DecryptCac
             entry.lastAccess = settledAt;
             entry.result = result;
             pruneCache(key);
+        } else {
+            if (cache.get(key) === entry) cache.delete(key);
+            return failedDecryption();
         }
         return result;
     });

@@ -21,7 +21,7 @@ import { sid } from "@song-spotlight/api/util";
 import { readClipboard } from "@utils/clipboard";
 import { copyWithToast } from "@utils/discord";
 import { RenderModalProps } from "@vencord/discord-types";
-import { Alerts, Modal,openModal, Parser, showToast, Toasts, useCallback, useEffect, useMemo, useRef, UserStore, useState, useStateFromStores } from "@webpack/common";
+import { Alerts, Modal, openModal, Parser, showToast, Toasts, useCallback, useEffect, useMemo, useRef, UserStore, useState, useStateFromStores } from "@webpack/common";
 
 interface ImportButtonProps {
     overwrite: boolean;
@@ -44,7 +44,7 @@ function ImportButton({ overwrite, pending, setPending, onImport }: ImportButton
         }
 
         const { error, data } = UserDataSchema.max(apiConstants.songLimit).safeParse(json);
-        if (error) {
+        if (error || new Set(data.map(sid)).size !== data.length) {
             setPending(false);
             return showToast("Invalid Song Spotlight data in clipboard!", Toasts.Type.FAILURE);
         }
@@ -94,12 +94,12 @@ export default function Settings({ templateData }: SettingsProps) {
     const { isAuthorized, deleteTokens } = useAuthorizationStore();
     const { self } = useSongStore();
 
-    const ticked = useRef(false);
+    const baseline = useRef(self?.data);
     const [localData, setLocalData] = useState(templateData ?? self?.data);
     useEffect(() => {
-        // only setLocalData on the second time this effect runs
-        if (ticked.current) setLocalData(self?.data);
-        else ticked.current = true;
+        const previous = baseline.current;
+        baseline.current = self?.data;
+        setLocalData(draft => draft === undefined || draft === previous ? self?.data : draft);
     }, [self?.data]);
     const [pending, setPending] = useState(!localData);
     const [loadFailed, setLoadFailed] = useState(false);
@@ -193,7 +193,8 @@ export default function Settings({ templateData }: SettingsProps) {
                     <Button
                         variant="dangerPrimary"
                         onClick={() => {
-                            deleteTokens();
+                            if (!userId || UserStore.getCurrentUser()?.id !== userId) return;
+                            deleteTokens(userId);
                             showToast("Successfully signed out!", Toasts.Type.SUCCESS);
                         }}
                         disabled={pending}

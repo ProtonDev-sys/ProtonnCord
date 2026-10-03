@@ -27,14 +27,17 @@ const settings = definePluginSettings({
 });
 
 let cachedUsers: User[] | null = null;
+let cachedAccountId: string | undefined;
 
 function invalidateCachedUsers() {
     cachedUsers = null;
 }
 
 function getCachedUsers(): User[] {
-    if (!cachedUsers) {
-        cachedUsers = Object.values(UserStore.getUsers());
+    const accountId = UserStore.getCurrentUser()?.id;
+    if (!cachedUsers || accountId !== cachedAccountId) {
+        cachedAccountId = accountId;
+        cachedUsers = accountId ? Object.values(UserStore.getUsers()) : [];
     }
     return cachedUsers;
 }
@@ -52,6 +55,7 @@ export default definePlugin({
     stop() {
         UserStore.removeChangeListener(invalidateCachedUsers);
         invalidateCachedUsers();
+        cachedAccountId = undefined;
     },
     settingsAboutComponent: () => (
         <Notice.Warning>

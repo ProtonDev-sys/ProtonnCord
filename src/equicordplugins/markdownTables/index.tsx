@@ -324,7 +324,7 @@ function createTableRule(order: number): MarkdownRule {
     return {
         order,
         match(source, state) {
-            if (shouldSkipTableRule(state)) return null;
+            if (!shouldInstallTableRule || shouldSkipTableRule(state)) return null;
 
             const parsed = parseMarkdownTableMatch(source);
             return parsed ? createTableCapture(parsed, source) : null;

@@ -38,10 +38,10 @@ export function createPersistedValue<T>(key: string, fallback: T) {
         set(next: T) {
             revision++;
             value = next;
-            saveQueue = saveQueue
-                .then(() => DataStore.set(fullKey, next))
-                .catch(error => logger.error(`Failed to save ${key}`, error));
+            const operation = saveQueue.then(() => DataStore.set(fullKey, next));
+            saveQueue = operation.catch(error => logger.error(`Failed to save ${key}`, error));
             notifyPaletteChange();
+            return operation;
         }
     };
 }

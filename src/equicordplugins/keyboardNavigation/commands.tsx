@@ -62,7 +62,7 @@ export const actions: ButtonAction[] = [
 
     {
         id: "togglePlugin", label: "Toggle Plugin", callback: async () => {
-            const plugins = Object.keys(Plugins).filter(name => !PluginManifest[name]?.required);
+            const plugins = Object.keys(Plugins).filter(name => !PluginManifest[name]?.required && !Plugins[name].required && !Plugins[name].isDependency);
             const options: ButtonAction[] = [];
 
             for (const plugin of plugins) {

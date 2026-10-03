@@ -58,6 +58,7 @@ function harness() {
         createAnnouncement: async () => { calls.announcements++; return { status: "created", content: "synthetic announcement" }; },
     };
     const context = {
+        settings: { store: { externalLinkPreviews: false }, use: () => context.settings.store },
         Native: native, channel, chatAccessCache: { status: "ready", localUserId: "self" } as any,
         UserStore: { getCurrentUser: () => ({ id: userId }) }, ChannelStore: {},
         currentSnapshot: () => ({ localUserId: "self", snapshot }),
@@ -127,6 +128,20 @@ function harness() {
         unmount: (name: string) => buckets.get(name)?.effects.forEach(effect => effect.cleanup?.()),
     };
 }
+
+test("conversation settings expose the shared link-preview preference and URL disclosure", async () => {
+    const h = harness();
+    h.render("ConversationManager", h.props.manager);
+    await setImmediate();
+    const modal = h.render("ConversationManager", h.props.manager);
+    const toggle = elements(modal).find(element => element.type === "Checkbox" && JSON.stringify(element.children).includes("Link and GIF previews"))!;
+    assert.equal(toggle.props.value, false);
+    assert.match(JSON.stringify(modal), /sends URLs from decrypted messages to Discord and preview providers/u);
+    toggle.props.onChange(null, true);
+    assert.equal(h.context.settings.store.externalLinkPreviews, true);
+    const updated = h.render("ConversationManager", h.props.manager);
+    assert.equal(elements(updated).find(element => element.type === "Checkbox" && JSON.stringify(element.children).includes("Link and GIF previews"))!.props.value, true);
+});
 
 test("expired trust reviews can refresh in place and require a new explicit comparison", async () => {
     const h = harness();
