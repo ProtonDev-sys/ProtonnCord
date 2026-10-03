@@ -54,9 +54,7 @@ async function isGifReachable(url: string) {
         const response = await fetch(url, { method: "HEAD", credentials: "omit", signal: AbortSignal.timeout(15_000) });
         await response.body?.cancel();
         if (response.ok) return true;
-    } catch {
-        return await isGifReachableByGet(url);
-    }
+    } catch { }
 
     return await isGifReachableByGet(url);
 }

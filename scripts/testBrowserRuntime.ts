@@ -5,16 +5,12 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 function load(path: string, globals: Record<string, unknown>) {
-    const { outputText } = transpileModule(readFileSync(path, "utf8"), {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
-    });
-    return runInNewContext(`${outputText}\nexports;`, { exports: {}, ...globals });
+    return loadTestModule(path, {}, globals, "", { compilerOptions: { jsx: undefined }, mockImports: false });
 }
 
 test("userscript fetch preserves caller options and exposes native blob readers", async () => {
