@@ -15,6 +15,7 @@ import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 import { createSourceFile, isVariableStatement, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import type { MessageSendListener, SendMessageOptions } from "../src/api/MessageEvents";
+import { withTimeout } from "../src/debug/promiseTimeout";
 import { parseSecurePlaintext, serializeSecurePlaintext } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import { createEncryptedUploadDraft, EncryptedAttachmentUploadLimitError, prepareEncryptedAttachments, uploadEncryptedAttachment } from "../src/equicordplugins/secureMessaging.desktop/attachmentUploads";
 import { discordMessageSendSource, patchDiscordMessageSend } from "./fixtures/discordMessageSend";
@@ -46,10 +47,9 @@ class Upload extends EventEmitter {
         this.uploadedFilename = `uploaded-${this.filename}`;
         this.responseUrl = "https://upload.invalid/ciphertext";
         this.emit("complete");
-        this.removeAllListeners();
     }
-    fail() { this.status = "ERROR"; this.emit("error", new Error("offline")); this.removeAllListeners(); }
-    cancel() { this.cancellations++; this.status = "CANCELED"; this.emit("complete"); this.removeAllListeners(); }
+    fail() { this.status = "ERROR"; this.emit("error", new Error("offline")); }
+    cancel() { this.cancellations++; this.status = "CANCELED"; this.emit("complete"); }
 }
 const cloud = (upload: Upload) => upload as unknown as CloudUpload;
 const newUpload = (id = "draft") => new Upload({ file: new File(["private bytes"], "private.txt", { type: "text/plain" }), id, platform: CloudUploadPlatform.WEB });
@@ -254,10 +254,16 @@ test("resolved upload errors preserve mixed drafts and allow a fresh encrypted r
     assert.ok(h.sentBytes() > 0);
 });
 
-test("a repeated send cannot reuse in-flight drafts and a changed draft cancels the pending send", async () => {
+test("a repeated send cannot reuse in-flight drafts and a changed draft cancels the pending send", async testContext => {
     const gate = Promise.withResolvers<void>();
     const h = fixture(async upload => { await gate.promise; upload.complete(); });
-    const pending = h.send();
+    let pending: ReturnType<typeof h.send> | undefined;
+    testContext.after(async () => {
+        gate.resolve();
+        try { if (pending) await withTimeout(pending, 5_000, "Fixture watchdog: pending encrypted send did not drain"); }
+        finally { h.shadows.forEach(upload => { upload.cancel(); upload.removeAllListeners(); }); }
+    });
+    pending = h.send();
     for (let attempt = 0; attempt < 200 && h.sentBytes() === 0; attempt++) await setImmediate();
     assert.ok(h.sentBytes() > 0, "the pending send must reach the encrypted upload");
     assert.equal((await h.send()).cancel, true);
@@ -309,6 +315,8 @@ test("account or guard invalidation after upload leaves the original draft retry
 
 test("terminal upload events are awaited even when upload() resolves early", async () => {
     const upload = newUpload();
+    const unrelated = () => {};
+    upload.on("fixture", unrelated);
     upload.behavior = () => {};
     let settled = false;
     const pending = uploadEncryptedAttachment(cloud(upload)).then(() => { settled = true; });
@@ -317,12 +325,16 @@ test("terminal upload events are awaited even when upload() resolves early", asy
     upload.complete();
     await pending;
     assert.equal(settled, true);
+    assert.deepEqual(upload.eventNames(), ["fixture"], "production cleanup must remove only its own terminal listeners");
+    upload.removeListener("fixture", unrelated);
     assert.equal(upload.eventNames().length, 0);
 });
 
 test("rejection and cancellation release every upload listener", async () => {
     for (const mode of ["reject", "cancel", "abort"] as const) {
         const upload = newUpload();
+        const unrelated = () => {};
+        upload.on("fixture", unrelated);
         const controller = new AbortController();
         upload.behavior = () => { if (mode === "reject") throw new Error("upload rejection"); };
         const pending = uploadEncryptedAttachment(cloud(upload), controller.signal);
@@ -331,6 +343,8 @@ test("rejection and cancellation release every upload listener", async () => {
         if (mode === "cancel") upload.cancel();
         if (mode === "abort") controller.abort();
         await failed;
+        assert.deepEqual(upload.eventNames(), ["fixture"], "production cleanup must retain unrelated listeners");
+        upload.removeListener("fixture", unrelated);
         assert.equal(upload.eventNames().length, 0);
     }
 });

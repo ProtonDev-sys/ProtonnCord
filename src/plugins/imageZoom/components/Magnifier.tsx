@@ -82,9 +82,9 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
 
             if (instance.state.mouseOver && instance.state.mouseDown) {
                 const offset = size.current / 2;
-                const pos = { x: e.clientX, y: e.clientY };
-                const x = -((pos.x - element.current.getBoundingClientRect().left) * zoom.current - offset);
-                const y = -((pos.y - element.current.getBoundingClientRect().top) * zoom.current - offset);
+                const { left, top } = element.current.getBoundingClientRect();
+                const x = -((e.clientX - left) * zoom.current - offset);
+                const y = -((e.clientY - top) * zoom.current - offset);
                 setLensPosition({ x: e.pageX - offset, y: e.pageY - offset });
                 setImagePosition({ x, y });
                 setOpacity(1);

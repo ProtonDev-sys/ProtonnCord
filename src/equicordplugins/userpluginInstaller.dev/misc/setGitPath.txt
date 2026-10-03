@@ -7,7 +7,6 @@
     <title>Git Path</title>
     <script>
         document.addEventListener("DOMContentLoaded", () => {
-            document.title
             document.querySelector("#abort").addEventListener("click", () => {document.title = "abort";})
             document.querySelector("#check").addEventListener("click", () => {document.title = `check-${document.querySelector("input").value.trim()}`; setTimeout(() => {document.title = "git";}, 1000)})
             document.querySelector("#install").addEventListener("click", () => {document.title = `ok-${document.querySelector("input").value.trim()}`;})

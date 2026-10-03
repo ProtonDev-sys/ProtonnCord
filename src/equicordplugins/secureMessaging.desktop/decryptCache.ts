@@ -107,13 +107,13 @@ function pruneCache(protectedKey: string, maximumEntries = MAX_CACHE_ENTRIES): v
     }
 }
 
-function ensureEntry(localUserId: string, message: Message): [string, DecryptCacheEntry] {
+function ensureEntry(localUserId: string, message: Message): DecryptCacheEntry {
     const key = decryptCacheKey(localUserId, message);
     const now = Date.now();
     const existing = cache.get(key);
     if (existing && (existing.result === null || existing.expiresAt > now)) {
         existing.lastAccess = now;
-        return [key, existing];
+        return existing;
     }
     if (existing) cache.delete(key);
 
@@ -124,7 +124,7 @@ function ensureEntry(localUserId: string, message: Message): [string, DecryptCac
         promise: Promise.resolve(failedDecryption()),
         result: null,
     };
-    if (cache.size >= MAX_CACHE_ENTRIES) return [key, { ...entry, result: failedDecryption(), expiresAt: now }];
+    if (cache.size >= MAX_CACHE_ENTRIES) return { ...entry, result: failedDecryption(), expiresAt: now };
     cache.set(key, entry);
     const generation = cacheGeneration;
     const isCurrent = () => cache.get(key) === entry && decryptCacheKey(localUserId, message) === key;
@@ -144,7 +144,7 @@ function ensureEntry(localUserId: string, message: Message): [string, DecryptCac
         return result;
     });
     pruneCache(key);
-    return [key, entry];
+    return entry;
 }
 
 export function getCachedDecryption(localUserId: string, message: Message): DecryptIncomingResult | null {
@@ -160,7 +160,7 @@ export function getCachedDecryption(localUserId: string, message: Message): Decr
 }
 
 export function decryptCachedMessage(localUserId: string, message: Message): Promise<DecryptIncomingResult> {
-    return ensureEntry(localUserId, message)[1].promise;
+    return ensureEntry(localUserId, message).promise;
 }
 
 export function invalidateFailedDecryption(localUserId: string, message: Message): void {

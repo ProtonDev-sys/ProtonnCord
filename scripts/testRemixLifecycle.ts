@@ -486,7 +486,7 @@ test("Remix contains rejected upload preparation and retains the modal", async (
 
 for (const name of ["crop", "shape"] as const) {
     test(`Remix ${name} deselection releases subscriptions and resets unfinished dragging`, () => {
-        const listeners = new Set<unknown>();
+        const listeners = new Map<string, Set<unknown>>();
         const target = { width: 200, height: 100, style: { cursor: "nwse-resize" } };
         let renders = 0;
         const context = { canvas: target, clearRect() { }, fillRect() { }, strokeRect() { } };
@@ -497,14 +497,15 @@ for (const name of ["crop", "shape"] as const) {
         const module = load<Record<string, { selected(): void; unselected(): void; dragging?: string; isDragging?: boolean; }>>(`editor/tools/${name}.ts`, {
             "@equicordplugins/remix/editor/components/Canvas": owner,
             "@equicordplugins/remix/editor/input": { Mouse: { event: {
-                on(_name: string, listener: unknown) { listeners.add(listener); },
-                off(_name: string, listener: unknown) { listeners.delete(listener); }
+                on(event: string, listener: unknown) { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event)!.add(listener); },
+                off(event: string, listener: unknown) { const callbacks = listeners.get(event); callbacks?.delete(listener); if (callbacks?.size === 0) listeners.delete(event); }
             } } },
             "@equicordplugins/remix/editor/utils/canvas": { fillCircle() { }, line() { } }
         });
         const tool = module[name === "crop" ? "CropTool" : "ShapeTool"];
         tool.selected();
         assert.equal(listeners.size, 2);
+        assert.ok([...listeners.values()].every(callbacks => callbacks.size === 1));
         if (name === "crop") tool.dragging = "left top";
         else tool.isDragging = true;
         const before = renders;

@@ -241,8 +241,10 @@ test("CustomIdle retains disabled and long timeouts while rejecting invalid impo
 });
 
 test("AutoMod notification exceptions use the actual suppression flag", () => {
+    const subscriptions: string[][] = [];
+    const store = { allowAutoModMessages: true, disableNotifications: true, alsoHideIgnoredUsers: true };
     const plugin = loadPlugin("src/plugins/noBlockedMessages/index.ts", {
-        "@api/Settings": { definePluginSettings: () => ({ store: { allowAutoModMessages: true, disableNotifications: true } }), migratePluginSetting() {} },
+        "@api/Settings": { definePluginSettings: () => ({ store, use: (keys: string[]) => { subscriptions.push(keys); return store; } }), migratePluginSetting() {} },
         "@utils/constants": { Devs: {}, EquicordDevs: {} },
         "@utils/Logger": {}, "@equicordplugins/blockKeywords": {}, "@webpack/common": {}
     });
@@ -251,6 +253,16 @@ test("AutoMod notification exceptions use the actual suppression flag", () => {
     assert.equal(plugin.disableNotification({ type: 24 }), false);
     plugin.isSuppressed = () => ({ suppressed: true, hide: true });
     assert.equal(plugin.disableNotification({ type: 24 }), true);
+    plugin.shouldKeepMessage = (message: { hidden?: boolean; }) => [!message.hidden, false];
+    const visible = { type: "MESSAGE", content: {} };
+    const group = { type: "MESSAGE_GROUP_BLOCKED", content: [visible, { type: "MESSAGE", content: { hidden: true } }] };
+    const result = plugin.filterStream([visible, group, { type: "MESSAGE", content: { hidden: true } }, { type: "DIVIDER" }]);
+    assert.equal(result.length, 2);
+    assert.equal(result[0], visible);
+    assert.equal(result[1].content.length, 1);
+    assert.equal(result[1].content[0], visible);
+    assert.equal(group.content.length, 2);
+    assert.deepEqual(Array.from(subscriptions[0]), ["alsoHideIgnoredUsers", "disableNotifications", "hideBlockedUserReplies", "allowAutoModMessages", "defaultHideUsers", "overrideUsers"]);
 });
 
 test("reply mention lists match whole IDs and observe changed user and role lists", () => {

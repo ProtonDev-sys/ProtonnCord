@@ -59,8 +59,6 @@ function addIfString(values: Set<string>, value: unknown) {
 function addSplitKeyParts(values: Set<string>, key: string) {
     const parts = key.split(":").filter(Boolean);
     for (const part of parts) addIfString(values, part);
-
-    addIfString(values, parts.at(-1));
 }
 
 export function getStreamKeyCandidates(stream: StreamDescriptor | null | undefined) {

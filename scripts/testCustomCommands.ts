@@ -88,6 +88,9 @@ test("tag arguments normalize once, preserve equals defaults and require every u
     assert.equal(JSON.stringify(plugin.parseTagArguments(message)), JSON.stringify([
         { name: "mood", defaultValue: "a=b" }, { name: "user", defaultValue: null }
     ]));
+    assert.equal(JSON.stringify(plugin.parseTagArguments("{{__proto__ = first}} {{constructor = a=b}} {{__proto__}} {{constructor = second}}")), JSON.stringify([
+        { name: "__proto__", defaultValue: null }, { name: "constructor", defaultValue: "a=b" }
+    ]));
     plugin.default.start();
     tags.addTag({ name: "greet", message });
     assert.equal(JSON.stringify(command("greet").options?.map(option => [option.name, option.required])), JSON.stringify([["user", true], ["mood", false], ["ephemeral", false]]));
@@ -151,13 +154,17 @@ test("failed tag edits and renames preserve the previous setting and registered 
     plugin.default.stop();
 });
 
-test("imported and nested tag changes synchronize without deleting foreign replacements", () => {
-    const { plugin, tags, api, store, errors } = loadTags();
+test("imported and nested tag changes synchronize without deleting foreign replacements", async () => {
+    const { plugin, tags, api, store, errors, execute, local } = loadTags();
     plugin.default.start();
     tags.addTag({ name: "greet", message: "Original" });
+    const previous = api.commands.greet;
     store.store.plugins.CustomCommands.tagsList.greet.message = "Updated";
     const updated = api.commands.greet;
     assert.ok(updated);
+    assert.notEqual(updated, previous);
+    await execute("greet", [{ name: "ephemeral", value: true }]);
+    assert.equal(JSON.stringify(local), JSON.stringify([["fixture", { content: "Updated" }]]));
     store.markAsChanged();
     assert.equal(api.commands.greet, updated);
     api.unregisterCommand("greet");

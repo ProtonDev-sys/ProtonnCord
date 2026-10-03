@@ -36,12 +36,10 @@ export async function fetchAllThemes(): Promise<Theme[]> {
         (typeof theme.id === "string" || typeof theme.id === "number") && typeof theme.name === "string" && typeof theme.description === "string" &&
         typeof theme.content === "string" && Array.isArray(theme.tags) && theme.tags.every(tag => typeof tag === "string") &&
         (Array.isArray(theme.author) ? theme.author : [theme.author]).every(author => author && typeof author.discord_name === "string"))
-        .map(theme => ({ ...theme as Theme, id: String((theme as Theme).id) }));
-    themes.forEach(theme => {
-        if (!theme.source) {
-            theme.source = `${apiUrl}/${theme.id}`;
-        }
-    });
+        .map(theme => {
+            const entry = theme as Theme;
+            return { ...entry, id: String(entry.id), source: entry.source || `${apiUrl}/${entry.id}` };
+        });
     return themes.sort((a, b) => new Date(b.release_date).getTime() - new Date(a.release_date).getTime());
 }
 
@@ -87,7 +85,7 @@ function ThemeTab() {
         const anyTags = SearchTags[searchValue.status];
         if (anyTags && !tags.has(anyTags?.toLowerCase())) return false;
 
-        if ((enabled && searchValue.status === SearchStatus.DISABLED) || (!enabled && searchValue.status === SearchStatus.ENABLED)) return false;
+        if (enabled && searchValue.status === SearchStatus.DISABLED) return false;
 
         if (!searchValue.value.length) return true;
 

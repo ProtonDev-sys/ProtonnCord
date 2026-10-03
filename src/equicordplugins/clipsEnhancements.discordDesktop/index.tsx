@@ -114,10 +114,10 @@ export default definePlugin({
         const splitName = activityName.split(" ");
 
         // Try to match activity by it's start and end
-        const matchedActivities = validActivities.filter(activity => activity.name.endsWith(splitName.at(-1)!) || activity.name.startsWith(splitName.at(0)!));
+        const matchedActivity = validActivities.find(activity => activity.name.endsWith(splitName.at(-1)!) || activity.name.startsWith(splitName.at(0)!));
 
-        if (matchedActivities.length > 0) {
-            return matchedActivities[0].application_id;
+        if (matchedActivity) {
+            return matchedActivity.application_id;
         }
 
         if (settings.store.richPresenceTagging !== "whenMatched") {

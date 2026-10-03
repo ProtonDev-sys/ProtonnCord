@@ -60,6 +60,48 @@ test("MessagePeek cancels pending startup delays and checks account again before
     assert.equal(fetched.length, 5);
 });
 
+test("MessagePeek isolates conditional name hooks across author and plugin transitions", () => {
+    let author = "self";
+    let enabled = true;
+    let hooks = 0;
+    const counts = new Map<any, number>();
+    const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props, children }) };
+    const Preview = load("src/equicordplugins/messagePeek/index.tsx", {
+        "@api/PluginManager": { isPluginEnabled: () => enabled }, "@components/Icons": {}, "@equicordplugins/betterActivities": {},
+        "@plugins/showMeYourName": { __esModule: true, default: { name: "ShowMeYourName", getTypingMemberListProfilesReactionsVoiceNameText() {
+            hooks += 2;
+            return "Formatted";
+        } } },
+        "@utils/misc": { classes: () => "preview" }, "@vencord/discord-types/enums": { MessageFlags: {} },
+        "@webpack": { findCssClassesLazy: () => ({}), findByCodeLazy: () => () => false, findComponentByCodeLazy: () => () => null, findByPropsLazy: () => ({}) },
+        "@webpack/common": { UserStore: { getCurrentUser: () => ({ id: "self" }) }, RelationshipStore: { getNickname: () => "Friend" },
+            MessageStore: { getLastMessage: () => ({ content: "hello", author: { id: author } }) }, Parser: { parseInlineReply: (text: string) => text },
+            useStateFromStores: (_stores: unknown, select: () => unknown) => { hooks++; return select(); } }
+    }, { React }, "\nexports.Preview = MessagePreviewContent;\n").Preview;
+    function render(node: any, seen: Set<any>): string {
+        if (Array.isArray(node)) return node.map(child => render(child, seen)).join("");
+        if (!node || typeof node !== "object") return String(node ?? "");
+        if (typeof node.type !== "function") return render(node.children, seen);
+        hooks = 0;
+        const result = node.type(node.props);
+        if (counts.has(node.type)) assert.equal(hooks, counts.get(node.type), "hook count changed within the same component");
+        counts.set(node.type, hooks);
+        seen.add(node.type);
+        return render(result, seen);
+    }
+    const props = { channel: { id: "channel", isSystemDM: () => false }, user: null };
+    for (let repeat = 0; repeat < 3; repeat++) for (const [nextAuthor, nextEnabled] of [["self", true], ["other", true], ["other", false], ["other", true], ["self", true]] as const) {
+        author = nextAuthor;
+        enabled = nextEnabled;
+        const seen = new Set<any>();
+        assert.equal(render(React.createElement(Preview, props), seen), `${author === "self" ? "You" : enabled ? "Formatted" : "Friend"}: hello`);
+        for (const component of counts.keys()) if (!seen.has(component)) {
+            counts.delete(component);
+        }
+        assert.equal(counts.get(Preview), 1);
+    }
+});
+
 function microphone(deferred = false) {
     let account = "self";
     let deafened = false;

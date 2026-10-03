@@ -90,135 +90,60 @@ const settings = definePluginSettings({
     },
 });
 
-function OutputVolumeComponent() {
-    const [outputVolume, setOutputVolume] = useState(configModule.getOutputVolume());
+const volumeEvents = { Output: "AUDIO_SET_OUTPUT_VOLUME", Input: "AUDIO_SET_INPUT_VOLUME" } as const;
+const deviceConfig = {
+    Output: { event: "AUDIO_SET_OUTPUT_DEVICE", title: "Output device", icon: "🔊" },
+    Input: { event: "AUDIO_SET_INPUT_DEVICE", title: "Input device", icon: "🎤" },
+    Video: { event: "MEDIA_ENGINE_SET_VIDEO_DEVICE", title: "Camera", icon: "📷" }
+} as const;
+
+function VolumeComponent({ kind }: { kind: keyof typeof volumeEvents; }) {
+    const [volume, setVolume] = useState(configModule[`get${kind}Volume`]());
+    const event = volumeEvents[kind];
 
     useEffect(() => {
-        const listener = () => setOutputVolume(configModule.getOutputVolume());
-        FluxDispatcher.subscribe("AUDIO_SET_OUTPUT_VOLUME", listener);
-        return () => FluxDispatcher.unsubscribe("AUDIO_SET_OUTPUT_VOLUME", listener);
-    }, []);
+        const listener = () => setVolume(configModule[`get${kind}Volume`]());
+        FluxDispatcher.subscribe(event, listener);
+        return () => FluxDispatcher.unsubscribe(event, listener);
+    }, [kind]);
 
-    return (
-        <>
-            {settings.store.showOutputVolumeHeader && <Heading>Output volume</Heading>}
-            <Slider maxValue={200} minValue={0} onValueRender={v => `${v.toFixed(0)}%`} initialValue={outputVolume} asValueChanges={volume => {
-                FluxDispatcher.dispatch({
-                    type: "AUDIO_SET_OUTPUT_VOLUME",
-                    volume
-                });
-            }} />
-        </>
-    );
+    return <>
+        {settings.store[`show${kind}VolumeHeader`] && <Heading>{kind} volume</Heading>}
+        <Slider
+            maxValue={kind === "Output" ? 200 : 100}
+            minValue={0}
+            onValueRender={kind === "Output" ? value => `${value.toFixed(0)}%` : undefined}
+            initialValue={volume}
+            asValueChanges={value => FluxDispatcher.dispatch({ type: event, volume: value })}
+        />
+    </>;
 }
 
-function InputVolumeComponent() {
-    const [inputVolume, setInputVolume] = useState(configModule.getInputVolume());
+function DeviceComponent({ kind }: { kind: keyof typeof deviceConfig; }) {
+    const [deviceId, setDeviceId] = useState(configModule[`get${kind}DeviceId`]());
+    const { event, title, icon } = deviceConfig[kind];
+    const showHeader = settings.store[`show${kind}DeviceHeader`];
+    const devices: Record<string, { id: string; name: string; }> = configModule[`get${kind}Devices`]();
 
     useEffect(() => {
-        const listener = () => setInputVolume(configModule.getInputVolume());
-        FluxDispatcher.subscribe("AUDIO_SET_INPUT_VOLUME", listener);
-        return () => FluxDispatcher.unsubscribe("AUDIO_SET_INPUT_VOLUME", listener);
-    }, []);
+        const listener = () => setDeviceId(configModule[`get${kind}DeviceId`]());
+        FluxDispatcher.subscribe(event, listener);
+        return () => FluxDispatcher.unsubscribe(event, listener);
+    }, [kind]);
 
-    return (
-        <>
-            {settings.store.showInputVolumeHeader && <Heading>Input volume</Heading>}
-            <Slider maxValue={100} minValue={0} initialValue={inputVolume} asValueChanges={volume => {
-                FluxDispatcher.dispatch({
-                    type: "AUDIO_SET_INPUT_VOLUME",
-                    volume
-                });
-            }} />
-        </>
-    );
-}
-
-function OutputDeviceComponent() {
-    const [outputDevice, setOutputDevice] = useState(configModule.getOutputDeviceId());
-
-    useEffect(() => {
-        const listener = () => setOutputDevice(configModule.getOutputDeviceId());
-        FluxDispatcher.subscribe("AUDIO_SET_OUTPUT_DEVICE", listener);
-        return () => FluxDispatcher.unsubscribe("AUDIO_SET_OUTPUT_DEVICE", listener);
-    }, []);
-
-    return (
-        <>
-            {settings.store.showOutputDeviceHeader && <Heading>Output device</Heading>}
-            <Select options={Object.values(configModule.getOutputDevices()).map((device: any /* i am NOT typing this*/) => {
-                return { value: device.id, label: settings.store.showOutputDeviceHeader ? device.name : `🔊 ${device.name}` };
-            })}
-                serialize={identity}
-                isSelected={value => value === outputDevice}
-                select={id => {
-                    FluxDispatcher.dispatch({
-                        type: "AUDIO_SET_OUTPUT_DEVICE",
-                        id
-                    });
-                }}>
-
-            </Select>
-        </>
-    );
-}
-
-function InputDeviceComponent() {
-    const [inputDevice, setInputDevice] = useState(configModule.getInputDeviceId());
-
-    useEffect(() => {
-        const listener = () => setInputDevice(configModule.getInputDeviceId());
-        FluxDispatcher.subscribe("AUDIO_SET_INPUT_DEVICE", listener);
-        return () => FluxDispatcher.unsubscribe("AUDIO_SET_INPUT_DEVICE", listener);
-    }, []);
-
-    return (
-        <div style={{ marginTop: "10px" }}>
-            {settings.store.showInputDeviceHeader && <Heading>Input device</Heading>}
-            <Select options={Object.values(configModule.getInputDevices()).map((device: any /* i am NOT typing this*/) => {
-                return { value: device.id, label: settings.store.showInputDeviceHeader ? device.name : `🎤 ${device.name}` };
-            })}
-                serialize={identity}
-                isSelected={value => value === inputDevice}
-                select={id => {
-                    FluxDispatcher.dispatch({
-                        type: "AUDIO_SET_INPUT_DEVICE",
-                        id
-                    });
-                }}>
-
-            </Select>
-        </div>
-    );
-}
-
-function VideoDeviceComponent() {
-    const [videoDevice, setVideoDevice] = useState(configModule.getVideoDeviceId());
-
-    useEffect(() => {
-        const listener = () => setVideoDevice(configModule.getVideoDeviceId());
-        FluxDispatcher.subscribe("MEDIA_ENGINE_SET_VIDEO_DEVICE", listener);
-        return () => FluxDispatcher.unsubscribe("MEDIA_ENGINE_SET_VIDEO_DEVICE", listener);
-    }, []);
-
-    return (
-        <div style={{ marginTop: "10px" }}>
-            {settings.store.showVideoDeviceHeader && <Heading>Camera</Heading>}
-            <Select options={Object.values(configModule.getVideoDevices()).map((device: any /* i am NOT typing this*/) => {
-                return { value: device.id, label: settings.store.showVideoDeviceHeader ? device.name : `📷 ${device.name}` };
-            })}
-                serialize={identity}
-                isSelected={value => value === videoDevice}
-                select={id => {
-                    FluxDispatcher.dispatch({
-                        type: "MEDIA_ENGINE_SET_VIDEO_DEVICE",
-                        id
-                    });
-                }}>
-
-            </Select>
-        </div>
-    );
+    const controls = <>
+        {showHeader && <Heading>{title}</Heading>}
+        <Select
+            options={Object.values(devices).map(device => ({
+                value: device.id,
+                label: showHeader ? device.name : `${icon} ${device.name}`
+            }))}
+            serialize={identity}
+            isSelected={value => value === deviceId}
+            select={id => FluxDispatcher.dispatch({ type: event, id })}
+        />
+    </>;
+    return kind === "Output" ? controls : <div style={{ marginTop: "10px" }}>{controls}</div>;
 }
 
 function VoiceSettings() {
@@ -230,11 +155,11 @@ function VoiceSettings() {
 
         {
             showSettings && <>
-                {settings.store.outputVolume && <OutputVolumeComponent />}
-                {settings.store.inputVolume && <InputVolumeComponent />}
-                {settings.store.outputDevice && <OutputDeviceComponent />}
-                {settings.store.inputDevice && <InputDeviceComponent />}
-                {settings.store.camera && <VideoDeviceComponent />}
+                {settings.store.outputVolume && <VolumeComponent kind="Output" />}
+                {settings.store.inputVolume && <VolumeComponent kind="Input" />}
+                {settings.store.outputDevice && <DeviceComponent kind="Output" />}
+                {settings.store.inputDevice && <DeviceComponent kind="Input" />}
+                {settings.store.camera && <DeviceComponent kind="Video" />}
             </>
         }
     </div>;

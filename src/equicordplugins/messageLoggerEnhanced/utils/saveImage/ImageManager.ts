@@ -31,8 +31,7 @@ import { DEFAULT_IMAGE_CACHE_DIR } from "../constants";
 
 const ImageStore = createStore("MessageLoggerImageData", "MessageLoggerImageStore");
 
-interface IDBSavedImage { attachmentId: string, path: string; }
-const idbSavedImages = new Map<string, IDBSavedImage>();
+const idbSavedImages = new Map<string, string>();
 const idbImagesReady = (async () => {
     try {
 
@@ -41,7 +40,7 @@ const idbImagesReady = (async () => {
             const str = path.toString();
             if (!str.startsWith(DEFAULT_IMAGE_CACHE_DIR)) return;
 
-            idbSavedImages.set(str.split("/")?.[1]?.split(".")?.[0], { attachmentId: str.split("/")?.[1]?.split(".")?.[0], path: str });
+            idbSavedImages.set(str.split("/")?.[1]?.split(".")?.[0], str);
         });
     } catch (err) {
         Flogger.error("Failed to get idb images", err);
@@ -52,7 +51,7 @@ export async function getImage(attachmentId: string, fileExt?: string | null): P
     await idbImagesReady;
     // for people who have access to native api but some images are still in idb
     // also for people who dont have native api
-    const idbPath = idbSavedImages.get(attachmentId)?.path;
+    const idbPath = idbSavedImages.get(attachmentId);
     if (idbPath)
         return get(idbPath, ImageStore);
 
@@ -78,7 +77,7 @@ export async function downloadAttachment(attachemnt: LoggedAttachment): Promise<
 
 export async function deleteImage(attachmentId: string): Promise<void> {
     await idbImagesReady;
-    const idbPath = idbSavedImages.get(attachmentId)?.path;
+    const idbPath = idbSavedImages.get(attachmentId);
     if (idbPath) {
         await del(idbPath, ImageStore);
         idbSavedImages.delete(attachmentId);
@@ -114,7 +113,7 @@ async function downloadAttachmentWeb(attachemnt: LoggedAttachment, attempts = 0)
     const path = `${DEFAULT_IMAGE_CACHE_DIR}/${attachemnt.id}.${extension}`;
 
     await set(path, new Uint8Array(ab), ImageStore);
-    idbSavedImages.set(attachemnt.id, { attachmentId: attachemnt.id, path });
+    idbSavedImages.set(attachemnt.id, path);
 
     return path;
 }
