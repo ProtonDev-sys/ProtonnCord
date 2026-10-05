@@ -2724,7 +2724,13 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
     const hasPlaintext = !embedOnly && Boolean(visiblePlaintext?.trim());
     const renderedPlaintext = captureProtection === "ready" && hasPlaintext && (!result || result.status === "decrypted")
         ? visiblePlaintext : undefined;
-    const parsedPlaintext = useMemo(() => renderedPlaintext ? Parser.parse(renderedPlaintext) : null, [renderedPlaintext]);
+    const parsedPlaintext = useMemo(() => renderedPlaintext ? Parser.parse(renderedPlaintext, false, {
+        allowGameMentions: true,
+        channelId: message.channel_id,
+        viewingChannelId: message.channel_id,
+        messageId: message.id,
+        authorId: message.author?.id,
+    }) : null, [renderedPlaintext, message.channel_id, message.id, message.author?.id]);
 
     useEffect(() => {
         let active = true;

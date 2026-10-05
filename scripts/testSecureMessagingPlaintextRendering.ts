@@ -75,6 +75,7 @@ function fixture(count: number, implementation = source) {
     let optimistic: string | undefined;
     let recoveryResult: DecryptIncomingResult = decrypted("recovered fixture");
     const recoveryCalls: unknown[] = [];
+    const parserCalls: Array<{ text: string; inline?: boolean; state?: Record<string, unknown>; }> = [];
     let embedOnly = false;
     let attachmentStatus = { status: "ready", reason: "synthetic attachment failure" };
     const rowListeners = new Map<string, Set<() => void>>();
@@ -112,7 +113,11 @@ function fixture(count: number, implementation = source) {
         classes: (...values: unknown[]) => values.filter(Boolean).join(" "), useEffect: () => undefined,
         MarkupClasses: { markup: "markup" }, MessageContentClasses: { messageContent: "messageContent" },
         shouldHideSecureEmbedOnlyPlaintext: () => embedOnly,
-        Parser: { parse: (text: string) => { metrics.parserCalls++; return { parsed: text }; } },
+        Parser: { parse: (text: string, inline?: boolean, state?: Record<string, unknown>) => {
+            metrics.parserCalls++;
+            parserCalls.push({ text, inline, state });
+            return { parsed: text };
+        } },
         encryptedAttachmentCacheKey: () => "synthetic-attachment", encryptedAttachmentStatus: () => attachmentStatus,
         LockIcon: "LockIcon", BaseText: "BaseText", Button: "Button", encryptedStatusText: () => "blocked",
         React: { Fragment: "Fragment", createElement: (type: unknown, props: unknown, ...children: unknown[]) => typeof type === "function"
@@ -137,7 +142,16 @@ function fixture(count: number, implementation = source) {
         }
     }
     return {
-        metrics, render, drain, recoveryCalls,
+        metrics, render, drain, recoveryCalls, parserCalls,
+        setMessageContext: (context: { id?: string; channelId?: string; authorId?: string; }) => {
+            if (context.id !== undefined) {
+                const result = results.get(rows[0].id);
+                rows[0].id = context.id;
+                if (result) results.set(context.id, result);
+            }
+            if (context.channelId !== undefined) rows[0].channel_id = context.channelId;
+            if (context.authorId !== undefined) rows[0].author.id = context.authorId;
+        },
         setRecoveryResult: (value: DecryptIncomingResult) => { recoveryResult = value; },
         setProtection: (value: string) => { protection = value; },
         setAccount: (value: string) => { userId = value; },
@@ -209,6 +223,48 @@ if (process.argv.includes("--benchmark")) {
         h.setResult(decrypted("edited plaintext"));
         assert.notDeepEqual(h.render(0), first);
         assert.equal(h.metrics.parserCalls, 2);
+    });
+
+    test("decrypted and optimistic game mentions use Discord's message parser context", () => {
+        const plaintext = "Play <@$700136079562375258> with <@123>\n`<@$700136079562375258>` ||<@$700136079562375258>||";
+        for (const optimistic of [false, true]) {
+            const h = fixture(1);
+            if (optimistic) h.setOptimistic(plaintext);
+            else h.setResult(decrypted(plaintext));
+            h.render(0);
+            assert.equal(h.parserCalls.length, 1);
+            const [call] = h.parserCalls;
+            assert.equal(call.text, plaintext, "Discord receives unchanged markdown, including code and spoilers");
+            assert.equal(call.inline, false, "message text retains block markdown");
+            assert.deepEqual({ ...call.state }, {
+                allowGameMentions: true,
+                channelId: "synthetic-channel",
+                viewingChannelId: "synthetic-channel",
+                messageId: "0",
+                authorId: optimistic ? "synthetic-self" : "synthetic-peer",
+            });
+        }
+    });
+
+    test("message context changes reparse unchanged game mentions", () => {
+        const h = fixture(1);
+        h.setResult(decrypted("<@$700136079562375258>"));
+        h.render(0);
+        h.setMessageContext({ channelId: "another-channel" });
+        h.render(0);
+        assert.equal(h.parserCalls.length, 2);
+        assert.equal(h.parserCalls[1].state?.channelId, "another-channel");
+        assert.equal(h.parserCalls[1].state?.viewingChannelId, "another-channel");
+        h.setMessageContext({ authorId: "another-peer" });
+        h.render(0);
+        assert.equal(h.parserCalls.length, 3);
+        assert.equal(h.parserCalls[2].state?.authorId, "another-peer");
+        h.setMessageContext({ id: "confirmed-message" });
+        h.render(0);
+        assert.equal(h.parserCalls.length, 4);
+        assert.equal(h.parserCalls[3].state?.messageId, "confirmed-message");
+        h.render(0);
+        assert.equal(h.parserCalls.length, 4, "unchanged message context reuses parsed output");
     });
 
     test("protected and blocked states discard parsed plaintext before it can be shown again", () => {
