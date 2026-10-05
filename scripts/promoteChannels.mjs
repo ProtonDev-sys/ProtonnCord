@@ -69,7 +69,7 @@ export async function promoteChannels(api, now = Date.now(), log = console.log) 
         return;
     }
     const main = await merge("main", staging);
-    await checks("main", main, [...CHECKS, "publish.yml"], true);
+    await checks("main", main, CHECKS, true);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

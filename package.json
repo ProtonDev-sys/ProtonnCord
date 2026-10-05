@@ -124,7 +124,6 @@
     },
     "devDependencies": {
         "@electron/asar": "^4.2.0",
-        "@equicord/publish-browser-extension": "4.0.8",
         "@stylistic/eslint-plugin": "^5.10.0",
         "@types/chrome": "^0.2.0",
         "@types/lodash": "^4.17.24",

@@ -92,9 +92,8 @@ test("promotion runs staging checks first, then merges main and dispatches all r
     assert.deepEqual(h.writes.filter(w => w.path.endsWith("/dispatches")).map(w => [w.path, w.body.ref]), [
         ["actions/workflows/test.yml/dispatches", "main"],
         ["actions/workflows/build.yml/dispatches", "main"],
-        ["actions/workflows/publish.yml/dispatches", "main"],
     ]);
-    for (const workflow of ["test.yml", "build.yml", "publish.yml"]) h.run("main", workflow);
+    for (const workflow of ["test.yml", "build.yml"]) h.run("main", workflow);
     h.writes.length = 0;
     await h.tick();
     assert.ok(h.writes.every(w => w.path === "merges"), "completed workflows are never dispatched twice");
@@ -180,7 +179,7 @@ test("missing dispatches after a partial failure are retried without rerunning s
 });
 
 test("promoted workflows support dispatch and credentialed promotion only runs from main", () => {
-    for (const name of ["test", "build", "publish"])
+    for (const name of ["test", "build"])
         assert.match(readFileSync(`.github/workflows/${name}.yml`, "utf8"), /    workflow_dispatch:/);
     const workflow = readFileSync(".github/workflows/promote.yml", "utf8");
     assert.match(workflow, /github.ref == 'refs\/heads\/main'/);
