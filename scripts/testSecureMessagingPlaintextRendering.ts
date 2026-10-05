@@ -61,11 +61,12 @@ function fixture(count: number, implementation = source) {
         author: { id: "synthetic-peer" }, attachments: [], stickerItems: [],
     }));
     const results = new Map<string, DecryptIncomingResult>();
-    const memos = new Map<string, { dependencies: unknown[]; value: unknown; }>();
+    const memos = new Map<number, { dependencies: unknown[]; value: unknown; }>();
     const timers: Array<() => void> = [];
     const microtasks: Array<() => void> = [];
     const metrics = { rows: count, parserCalls: 0, rowRenders: 0, rowCallbacks: 0, flushes: 0, retries: 0, stateUpdates: 0, refreshes: 0 };
     let activeRowId = "";
+    let activeRowIndex = 0;
     let protection = "ready";
     let userId = "synthetic-self";
     let keySuffix = "";
@@ -100,10 +101,10 @@ function fixture(count: number, implementation = source) {
         retryEncryptedAttachmentLoad: () => { if (attachmentRetry) metrics.refreshes++; return attachmentRetry; },
         updateMessage: () => { metrics.refreshes++; },
         useMemo: (calculate: () => unknown, dependencies: unknown[]) => {
-            let memo = memos.get(activeRowId);
+            let memo = memos.get(activeRowIndex);
             if (!memo || dependencies.length !== memo.dependencies.length || dependencies.some((value, index) => !Object.is(value, memo?.dependencies[index]))) {
                 memo = { dependencies, value: calculate() };
-                memos.set(activeRowId, memo);
+                memos.set(activeRowIndex, memo);
             }
             return memo.value;
         },
@@ -129,6 +130,7 @@ function fixture(count: number, implementation = source) {
     function render(index: number) {
         metrics.rowRenders++;
         activeRowId = rows[index].id;
+        activeRowIndex = index;
         return runtime.EncryptedMessageAccessory({ message: rows[index] });
     }
     rows.forEach((row, index) => rowListeners.set(row.id, new Set([() => {
