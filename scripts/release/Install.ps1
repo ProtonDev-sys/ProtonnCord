@@ -12,6 +12,9 @@ function Get-PayloadHash([string]$Path) {
     finally { $stream.Dispose(); $algorithm.Dispose() }
 }
 try {
+    if (Get-Process -Name Discord,DiscordPTB,DiscordCanary,DiscordDevelopment -ErrorAction SilentlyContinue) {
+        throw 'Discord is running. Quit Discord completely and try again.'
+    }
     $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') -Raw | ConvertFrom-Json
     foreach ($name in @('EquilotlCli.exe', 'desktop.asar')) {
         $file = Join-Path $PSScriptRoot $name

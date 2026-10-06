@@ -67,11 +67,20 @@ for (const platform of ["Windows", "Linux"]) {
         }
     }
     if (platform !== "Windows" || process.platform !== "win32") continue;
-    const processes = spawnSync("powershell.exe", ["-NoProfile", "-Command", "if (Get-Process DiscordDevelopment -ErrorAction SilentlyContinue) { exit 1 }"], { encoding: "utf8" });
-    assert.equal(processes.status, 0, "Close DiscordDevelopment before the disposable installer test");
+    // The upstream installer terminates Discord by process name, even for a fake path.
+    // Never execute it on a developer's Windows machine or a self-hosted runner.
+    if (process.env.PROTONN_CORD_TEST_WINDOWS_INSTALLER !== "1"
+        || process.env.GITHUB_ACTIONS !== "true"
+        || process.env.RUNNER_OS !== "Windows"
+        || process.env.RUNNER_ENVIRONMENT !== "github-hosted") {
+        console.log("Windows installer execution skipped; it requires an explicit GitHub-hosted CI job.");
+        continue;
+    }
+    const processes = spawnSync("powershell.exe", ["-NoProfile", "-Command", "if (Get-Process Discord,DiscordPTB,DiscordCanary,DiscordDevelopment -ErrorAction SilentlyContinue) { exit 1 }"], { encoding: "utf8" });
+    assert.equal(processes.status, 0, "Disposable CI runner must not have Discord running");
     const fixture = await mkdtemp(join(tmpdir(), "protonn-release-fixture-"));
     try {
-        const bundle = join(fixture, "bundle"), data = join(fixture, "data"), discord = join(fixture, "discord-dev");
+        const bundle = join(fixture, "bundle"), data = join(fixture, "data"), discord = join(fixture, "discord-canary");
         const resources = join(discord, "app-0.0.1", "resources");
         await mkdir(bundle); await mkdir(resources, { recursive: true });
         for (const [name, bytes] of Object.entries(entries)) await writeFile(join(bundle, name), bytes);

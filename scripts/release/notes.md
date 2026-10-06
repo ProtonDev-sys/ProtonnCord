@@ -1,6 +1,6 @@
-Download **ProtonnCord-1.15.1.9-Windows.zip**, extract it, quit Discord completely, then double-click **Install.cmd**. No Node.js, Git or source build is required. **Uninstall.cmd** removes the mod and preserves your settings.
+Download **ProtonnCord-1.15.1.10-Windows.zip**, extract it, quit Discord completely, then double-click **Install.cmd**. No Node.js, Git or source build is required. **Uninstall.cmd** removes the mod and preserves your settings. The Windows launcher refuses to run while Discord is open.
 
-Linux x86-64 users can download **ProtonnCord-1.15.1.9-Linux.zip**, extract it and run `bash install.sh`. See the included README for PTB, Canary and installations that require administrator access.
+Linux x86-64 users can download **ProtonnCord-1.15.1.10-Linux.zip**, extract it and run `bash install.sh`. See the included README for PTB, Canary and installations that require administrator access.
 
 - Production desktop build with the built-in updater enabled.
 - Bundled, checksum-verified Equilotl installer; the launchers install Protonn Cord.
