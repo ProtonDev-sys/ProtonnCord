@@ -243,7 +243,16 @@ export async function releaseUpdateChannel({ api, branch, sha, runId, files }) {
     await verifyAssets(staged.id, staged.tag_name, true);
     const old = journal.previous ? await getRelease(journal.previous.id) : null;
     requireState(!journal.previous || (old && old.name === journal.previous.name && old.prerelease === journal.previous.prerelease && !old.immutable && ((old.tag_name === channel && !old.draft) || (old.tag_name === backupTag && old.draft))), "Recovery release changed");
-    if (old) requireState((await assets(old.id)).every(asset => names.has(asset.name)), "Would drop an existing client asset");
+    // Versioned user bundles change names each release; retain every other client asset.
+    let downloadRelease;
+    try { downloadRelease = JSON.parse(files.find(file => file.name === "release.json")?.data.toString("utf8")); } catch { }
+    const replacesBundle = name => {
+        const match = /^ProtonnCord-\d+(?:\.\d+){3}-(Windows|Linux)\.zip$/u.exec(name);
+        return branch === "main" && match && downloadRelease?.revision === sha
+            && /^\d+(?:\.\d+){3}$/u.test(downloadRelease.version)
+            && names.has(`ProtonnCord-${downloadRelease.version}-${match[1]}.zip`);
+    };
+    if (old) requireState((await assets(old.id)).every(asset => names.has(asset.name) || replacesBundle(asset.name)), "Would drop an existing client asset");
     const publicRelease = await getPublic();
     requireState(!publicRelease || publicRelease.id === old?.id, "Channel changed since staging");
     if (!await currentHead() && (!old || !old.draft)) return { skipped: true };

@@ -340,6 +340,32 @@ test("missing required assets and dropping older client assets cannot change pub
     assert.equal(fixture.publicRelease()?.id, 1);
 });
 
+test("stable versioned bundles can change names only with a matching replacement and provenance", async () => {
+    for (const scenario of ["valid", "missing-linux", "wrong-revision", "unrelated-asset"]) {
+        const fixture = new GithubFixture("main");
+        fixture.assertAtomic = () => {};
+        const old = fixture.releases.get(1)!;
+        for (const platform of ["Windows", "Linux"])
+            old.assets.push({ ...old.assets[0], id: 900 + old.assets.length, name: `ProtonnCord-1.15.1.9-${platform}.zip` });
+        if (scenario === "unrelated-asset") old.assets.push({ ...old.assets[0], id: 999, name: "other-client.zip" });
+        const additions = [
+            { name: "release.json", data: Buffer.from(JSON.stringify({ version: "1.15.1.10", revision: scenario === "wrong-revision" ? oldSha : newSha })) },
+            { name: "ProtonnCord-1.15.1.10-Windows.zip", data: Buffer.from("Windows bundle") },
+            ...(scenario === "missing-linux" ? [] : [{ name: "ProtonnCord-1.15.1.10-Linux.zip", data: Buffer.from("Linux bundle") }]),
+        ].map(file => ({ ...file, size: file.data.length, digest: hash(file.data) }));
+        const run = () => releaseUpdateChannel({ api: fixture.api, branch: "main", sha: newSha, runId: "1234", files: [...files, ...additions] });
+        if (scenario === "valid") {
+            await run();
+            assert.deepEqual(fixture.publicRelease()!.assets.map(asset => asset.name).sort(), [...files, ...additions].map(file => file.name).sort());
+            assert.equal(fixture.refs.get("tags/latest"), newSha);
+        } else {
+            await assert.rejects(run(), /existing client asset/u);
+            assert.equal(fixture.publicRelease()?.id, 1);
+            assert.equal(fixture.refs.get("tags/latest"), oldSha);
+        }
+    }
+});
+
 test("immutable old release and unauthorized discovery fail before staging writes", async () => {
     const fixture = new GithubFixture();
     fixture.releases.get(1)!.immutable = true;
