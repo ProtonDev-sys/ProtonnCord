@@ -30,6 +30,42 @@ for (const platform of ["Windows", "Linux"]) {
         assert.match(name, /^[A-Za-z0-9][A-Za-z0-9._-]+$/u);
         assert.equal(digest(entries[name]), hash, `bundle checksum: ${name}`);
     }
+    if (platform === "Linux" && process.platform === "linux") {
+        const fixture = await mkdtemp(join(tmpdir(), "protonn-release-fixture-"));
+        try {
+            const bundle = join(fixture, "bundle"), data = join(fixture, "data"), discord = join(fixture, "discord");
+            const resources = join(discord, "resources");
+            await mkdir(bundle); await mkdir(resources, { recursive: true });
+            for (const [name, bytes] of Object.entries(entries)) await writeFile(join(bundle, name), bytes);
+            const original = Buffer.from("Disposable Linux Discord fixture. No account data.");
+            await writeFile(join(resources, "app.asar"), original);
+            function run(action, location = discord) {
+                return spawnSync("bash", [join(bundle, "install.sh"), action, "--location", location], {
+                    encoding: "utf8", timeout: 60_000,
+                    env: { ...process.env, PROTONN_CORD_INSTALL_DIR: data },
+                });
+            }
+            const installed = run("install");
+            assert.equal(installed.status, 0, installed.stdout + installed.stderr);
+            assert.deepEqual(await readFile(join(resources, "_app.asar")), original);
+            assert.equal(digest(await readFile(join(data, "desktop.asar"))), manifest.files["desktop.asar"]);
+            const uninstalled = run("uninstall");
+            assert.equal(uninstalled.status, 0, uninstalled.stdout + uninstalled.stderr);
+            assert.deepEqual(await readFile(join(resources, "app.asar")), original);
+            assert.equal((await readdir(resources)).includes("_app.asar"), false);
+            await writeFile(join(data, "desktop.asar"), "previous installation");
+            assert.notEqual(run("install", join(fixture, "missing")).status, 0);
+            assert.equal(await readFile(join(data, "desktop.asar"), "utf8"), "previous installation");
+            await writeFile(join(bundle, "desktop.asar"), "tampered download");
+            assert.notEqual(run("install").status, 0);
+            assert.deepEqual(await readFile(join(resources, "app.asar")), original);
+            assert.equal(await readFile(join(data, "desktop.asar"), "utf8"), "previous installation");
+            console.log("Disposable Linux install, uninstall, rollback and tamper rejection passed.");
+        } finally {
+            assert.equal(resolve(fixture, ".."), resolve(tmpdir()));
+            await rm(fixture, { recursive: true, force: true });
+        }
+    }
     if (platform !== "Windows" || process.platform !== "win32") continue;
     const processes = spawnSync("powershell.exe", ["-NoProfile", "-Command", "if (Get-Process DiscordDevelopment -ErrorAction SilentlyContinue) { exit 1 }"], { encoding: "utf8" });
     assert.equal(processes.status, 0, "Close DiscordDevelopment before the disposable installer test");
