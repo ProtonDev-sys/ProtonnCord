@@ -64,8 +64,8 @@ async function main() {
     const gc = globalThis.gc;
     assert.ok(gc, "Run node with --expose-gc to compare isolated preparation allocations");
     const modes = { copiedInput: prepareWith(true), fileInput: prepareWith(false) };
-    const channelId = "200000000000000001";
-    const senderId = "100000000000000001";
+    const channelId = "123456789012345678";
+    const senderId = "123456789012345679";
     for (const prepare of Object.values(modes)) await prepare([upload(0, 64 * 1024)], "", channelId, senderId);
     for (const [files, size] of [[1, 64 * 1024], [10, 2 * 1024 ** 2], [1, 64 * 1024 ** 2], [4, 16 * 1024 ** 2]]) {
         for (const [mode, prepare] of Object.entries(modes)) {
