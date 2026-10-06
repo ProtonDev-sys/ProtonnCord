@@ -41,6 +41,11 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
+            - name: Verify repository privacy before publishing
+              run: |
+                  pnpm checkPrivacy
+                  bash scripts/scanReleaseSecrets.sh git .
+
             - name: Verify update channel atomicity offline
               run: pnpm exec tsx --test scripts/testAuditReleaseAtomicityDeep.ts
 
@@ -57,6 +62,13 @@ jobs:
                   pnpm generateVencordPluginJson dist/vencordplugins.json
                   pnpm generateDevsList dist/devs.json
 
+            - name: Package user downloads for the stable channel
+              if: github.ref == 'refs/heads/main'
+              run: |
+                  pnpm packageRelease
+                  pnpm testPublicRelease
+                  bash scripts/scanReleaseSecrets.sh dir dist/public-release
+
             - name: Collect files to be released
               run: |
                   cd dist
@@ -72,6 +84,9 @@ jobs:
                   fi
 
                   cp desktop/* release
+                  if [[ -d public-release ]]; then
+                      cp public-release/* release
+                  fi
                   for file in equibop/*; do
                     filename=$(basename "$file")
                     cp "$file" "release/equibop${filename^}"

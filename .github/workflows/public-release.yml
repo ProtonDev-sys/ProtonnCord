@@ -31,11 +31,7 @@ jobs:
             - name: Verify tracked-file privacy
               run: pnpm checkPrivacy
             - name: Scan Git history for secrets
-              run: |
-                  curl --fail --location --silent --show-error --output /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
-                  echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz' | sha256sum --check --strict
-                  tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-                  /tmp/gitleaks git . --config .gitleaks.toml --redact --no-banner --log-opts=--all
+              run: bash scripts/scanReleaseSecrets.sh git .
             - name: Build production desktop and browser
               run: |
                   export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
@@ -53,7 +49,7 @@ jobs:
             - name: Verify downloadable archive contents and checksums
               run: pnpm testPublicRelease
             - name: Verify archive privacy
-              run: /tmp/gitleaks dir dist/public-release --config .gitleaks.toml --redact --no-banner --max-archive-depth=2
+              run: bash scripts/scanReleaseSecrets.sh dir dist/public-release
             - uses: actions/upload-artifact@v7
               with:
                   name: public-release
