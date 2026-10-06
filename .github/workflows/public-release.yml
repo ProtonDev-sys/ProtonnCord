@@ -50,6 +50,8 @@ jobs:
                   pnpm exec tsx --test scripts/testAuditSecureLiveIsolation.ts
             - name: Package downloadable archives
               run: pnpm packageRelease
+            - name: Verify downloadable archive contents and checksums
+              run: pnpm testPublicRelease
             - name: Verify archive privacy
               run: /tmp/gitleaks dir dist/public-release --redact --no-banner --max-archive-depth=2
             - uses: actions/upload-artifact@v7

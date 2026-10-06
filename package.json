@@ -15,6 +15,7 @@
     "author": "Protonn Cord",
     "scripts": {
         "packageRelease": "node scripts/packagePublicRelease.mjs",
+        "testPublicRelease": "node scripts/testPublicRelease.mjs",
         "checkPrivacy": "node scripts/checkRepositoryPrivacy.mjs",
         "build": "node --require=./scripts/suppressExperimentalWarnings.js scripts/build/build.mjs",
         "buildStandalone": "pnpm build --standalone",

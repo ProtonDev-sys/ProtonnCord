@@ -5,13 +5,19 @@ param(
     [string]$DataDirectory = (Join-Path $env:APPDATA 'ProtonnCord')
 )
 $ErrorActionPreference = 'Stop'
+function Get-PayloadHash([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+    finally { $stream.Dispose(); $algorithm.Dispose() }
+}
 try {
     $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') -Raw | ConvertFrom-Json
     foreach ($name in @('EquilotlCli.exe', 'desktop.asar')) {
         $file = Join-Path $PSScriptRoot $name
         if ((Get-Item -LiteralPath $file).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Refusing linked payload: $name" }
         $expected = $manifest.files.PSObject.Properties[$name].Value
-        if (!$expected -or (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+        if (!$expected -or (Get-PayloadHash $file) -ne $expected) {
             throw "Checksum failed for $name. Download and extract a fresh release."
         }
     }
