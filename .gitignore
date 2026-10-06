@@ -38,3 +38,17 @@ ExtensionCache/
 
 # Local review records; validation results belong in the PR and CI.
 /docs/source-audit/
+
+# Local credentials, account exports, signing material and development state.
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials.json
+cookies.json
+*-identity-backup.json
+/.codex-artifacts/

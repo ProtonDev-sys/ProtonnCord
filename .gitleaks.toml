@@ -1,0 +1,109 @@
+title = "Protonn Cord reviewed public constants and synthetic fixtures"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Reviewed public API constant, schema/badge identifier, or deterministic test vector"
+condition = "AND"
+regexTarget = "match"
+paths = ['''(?:docs/plugin-catalog-baseline|scripts/fixtures/plugin-catalog-baseline)\.json$''']
+regexes = ['''^bypassDiscordUpload","bypassDiscordUploadOnlyOverLimit"$''']
+
+[[allowlists]]
+description = "Reviewed public API constant, schema/badge identifier, or deterministic test vector"
+condition = "AND"
+regexTarget = "match"
+paths = ['''scripts/testOneKeyIdentity\.ts$''']
+regexes = ['''^hpkePrivateKey:\ "a\-iJ\-B5fzik0XUHFar7S5NLTiZ8dex3iP4UeVCCBYCE"$''']
+
+[[allowlists]]
+description = "Reviewed public API constant, schema/badge identifier, or deterministic test vector"
+condition = "AND"
+regexTarget = "match"
+paths = ['''scripts/testOneKeyIdentity\.ts$''']
+regexes = ['''^signingPrivateKey:\ "MC4CAQAwBQYDK2VwBCIEIJgLm9nEf41evh\-zn8MOgM6AN4SDPx_\-084BiKReL5Uq"$''']
+
+[[allowlists]]
+description = "Reviewed public API constant, schema/badge identifier, or deterministic test vector"
+condition = "AND"
+regexTarget = "match"
+paths = ['''scripts/testDevCompanionSecurity\.ts$''']
+regexes = ['''^SECRET\ =\ "0123456789abcdef"$''']
+
+[[allowlists]]
+description = "Reviewed public API constant, schema/badge identifier, or deterministic test vector"
+condition = "AND"
+regexTarget = "match"
+paths = ['''scripts/testDevCompanionSecurity\.ts$''']
+regexes = ['''^OTHER_SECRET\ =\ "fedcba9876543210"$''']
+
+[[allowlists]]
+description = "Reviewed public API constant, schema/badge identifier, or deterministic test vector"
+condition = "AND"
+regexTarget = "match"
+paths = ['''src/plugins/(?:musicRichPresence/(?:index\.tsx|lastfm\.ts)|lastfmRichPresence/index\.tsx)$''']
+regexes = ['''^LASTFM_API_KEY\ =\ "790c37d90400163a5a5fe00d6ca32ef0"$''']
+
+[[allowlists]]
+description = "Reviewed public API constant, schema/badge identifier, or deterministic test vector"
+condition = "AND"
+regexTarget = "match"
+paths = ['''src/plugins/(?:musicRichPresence/(?:index\.tsx|lastfm\.ts)|lastfmRichPresence/index\.tsx)$''']
+regexes = ['''^API_KEY\ =\ "790c37d90400163a5a5fe00d6ca32ef0"$''']
+
+[[allowlists]]
+description = "Reviewed public API constant, schema/badge identifier, or deterministic test vector"
+condition = "AND"
+regexTarget = "match"
+paths = ['''src/plugins/translate/utils\.ts$''']
+regexes = ['''^AIzaSyDLEeFI5OtFBwYBIoK_jj5m32rZK5CkCXA"$''']
+
+[[allowlists]]
+description = "Reviewed public API constant, schema/badge identifier, or deterministic test vector"
+condition = "AND"
+regexTarget = "match"
+paths = ['''src/equicordplugins/showBadgesInChat/index\.tsx$''']
+regexes = ['''^Discord\ Staff",\ "5e74e9b61934fc1f67c65515d1f7e60d"$''']
+
+[[allowlists]]
+description = "Reviewed public API constant, schema/badge identifier, or deterministic test vector"
+condition = "AND"
+regexTarget = "match"
+paths = ['''src/equicordplugins/showBadgesInChat/index\.tsx$''']
+regexes = ['''^Discord\ Bug\ Hunter",\ "2717692c7dca7289b35297368a940dd0"$''']
+
+[[allowlists]]
+description = "Reviewed public API constant, schema/badge identifier, or deterministic test vector"
+condition = "AND"
+regexTarget = "match"
+paths = ['''src/equicordplugins/showBadgesInChat/index\.tsx$''']
+regexes = ['''^Discord\ Bug\ Hunter",\ "848f79194d4be5ff5f81505cbd0ce1e6"$''']
+
+[[allowlists]]
+description = "Exact upstream public Google Translate client constant"
+condition = "AND"
+regexTarget = "line"
+paths = ['''src/plugins/translate/utils\.ts$''']
+regexes = ['''"key":\s*"AIzaSyDLEeFI5OtFBwYBIoK_jj5m32rZK5CkCXA"''']
+
+[[allowlists]]
+description = "Exact public upstream API constants and Discord badge asset hashes in compiled artifacts"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:renderer\.js|browser\.js|ProtonnCord\.user\.js|ProtonnCord\.js|desktop\.asar)$''']
+regexes = [
+    '''^011940fd013da3f7fb926e4a1cd2e618$''',
+    '''^2717692c7dca7289b35297368a940dd0$''',
+    '''^3aa41de486fa12454c3761e8e223442e$''',
+    '''^3f9748e53446a137a052f3454e2de41e$''',
+    '''^5e74e9b61934fc1f67c65515d1f7e60d$''',
+    '''^6df5892e0f35b051f8b61eace34f4967$''',
+    '''^7060786766c9c840eb3019e725d2b358$''',
+    '''^790c37d90400163a5a5fe00d6ca32ef0$''',
+    '''^848f79194d4be5ff5f81505cbd0ce1e6$''',
+    '''^8a88d63823d8a71cd5e390baa45efa02$''',
+    '''^AIzaSyDLEeFI5OtFBwYBIoK_jj5m32rZK5CkCXA$''',
+    '''^bf01d1073931f921909045f3a39fd264$''',
+    '''^fee1624003e2fee35cb398e125dc479b$''',
+]

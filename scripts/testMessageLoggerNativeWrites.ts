@@ -32,7 +32,7 @@ assert.deepEqual(parseImageCacheFilename("123456789012345678.webp"), {
 
 for (const pathApi of [path.posix, path.win32]) {
     const root = pathApi === path.win32 ? "C:\\Users\\test\\savedImages" : "/home/test/savedImages";
-    const filename = "123456789012345679.png";
+    const filename = "123456789012345678.png";
     const target = pathApi.resolve(root, filename);
     assert.equal(pathApi.dirname(target), pathApi.resolve(root));
     assert.equal(pathApi.basename(target), filename);
@@ -50,7 +50,7 @@ for (const pathApi of [path.posix, path.win32]) {
 const invalidIds: unknown[] = [
     null,
     undefined,
-    123456789012345679n,
+    123456789012345678n,
     "",
     ".",
     "..",

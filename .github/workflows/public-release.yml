@@ -1,0 +1,65 @@
+name: Downloadable release
+on:
+    workflow_dispatch:
+    push:
+        tags: ['v*']
+
+permissions:
+    contents: read
+
+concurrency:
+    group: downloadable-release-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    package:
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+                  persist-credentials: false
+            - uses: pnpm/action-setup@v6
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: pnpm
+            - run: pnpm install --frozen-lockfile
+            - name: Verify tracked-file privacy
+              run: pnpm checkPrivacy
+            - name: Scan Git history for secrets
+              run: bash scripts/scanReleaseSecrets.sh git .
+            - name: Build production desktop and browser
+              run: |
+                  export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+                  pnpm buildStandalone
+                  pnpm buildWebStandalone
+            - name: Test installer verification and changed fixtures
+              run: |
+                  pnpm testInstallerSecurity
+                  pnpm testDiscordMcp
+                  pnpm testMessageLoggerNativeWrites
+                  pnpm testTsc
+                  pnpm exec tsx --test scripts/testAuditSecureLiveIsolation.ts
+            - name: Package downloadable archives
+              run: pnpm packageRelease
+            - name: Verify downloadable archive contents and checksums
+              run: pnpm testPublicRelease
+            - name: Verify archive privacy
+              run: bash scripts/scanReleaseSecrets.sh dir dist/public-release
+            - uses: actions/upload-artifact@v7
+              with:
+                  name: public-release
+                  path: dist/public-release/*
+                  if-no-files-found: error
+            - name: Publish versioned release
+              if: startsWith(github.ref, 'refs/tags/v')
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  version="v$(node -p "require('./package.json').version")"
+                  test "$GITHUB_REF_NAME" = "$version"
+                  gh release create "$version" --verify-tag --title "Protonn Cord ${version#v}" --notes-file scripts/release/notes.md dist/public-release/*

@@ -1,0 +1,28 @@
+name: Repository privacy
+on:
+    pull_request:
+    push:
+        branches: [main, staging, nightly]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    scan:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+                  persist-credentials: false
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+            - name: Check tracked files for private configuration and account exports
+              run: node scripts/checkRepositoryPrivacy.mjs
+            - name: Scan history and working tree for secrets
+              run: |
+                  bash scripts/scanReleaseSecrets.sh git .
+                  bash scripts/scanReleaseSecrets.sh dir .
