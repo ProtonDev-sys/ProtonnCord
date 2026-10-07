@@ -302,7 +302,7 @@ for (const stage of ["parent", "partition", "window", "request", "check", "devic
 test("failed screenshot transitions remain fail closed and owners are only retained while pending", () => {
     const renderer = source("index.tsx");
     assert.match(renderer, /setScreenCaptureProtectionStatus\(applied \? enabled \? "screenshot" : "ready" : "failed"\)/u);
-    assert.equal(renderer.match(/if \(screenCaptureProtectionStatus === "pending"\) pendingEncryptedRenderOwners.add\(owner\)/gu)?.length, 3);
+    assert.equal(renderer.match(/if \(screenCaptureProtectionStatus === "pending"\) pendingEncryptedRenderOwners.add\(owner\)/gu)?.length, 4);
 });
 
 test("encrypted forwarding excludes unauthenticated host embeds", () => {

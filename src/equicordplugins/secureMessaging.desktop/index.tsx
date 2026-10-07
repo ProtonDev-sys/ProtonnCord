@@ -121,6 +121,7 @@ import {
     clearEncryptedEmbedCache,
     encryptedMessageInlineEmbedStatus,
     invalidateEncryptedMessageEmbeds,
+    patchEncryptedMessageCodedLinks,
     patchEncryptedMessageEmbeds,
     patchEncryptedMessageStickers,
     prefetchEncryptedMessageEmbeds,
@@ -3305,6 +3306,10 @@ export default definePlugin({
                     replace: "$&$1=$self.patchEncryptedEmbeds($1,this);",
                 },
                 {
+                    match: /renderCodedLinks\((\i)\)\{/,
+                    replace: "$&$1=$self.patchEncryptedCodedLinks($1,this);",
+                },
+                {
                     match: /renderStickersAccessories\((\i)\)\{/,
                     replace: "$&$1=$self.patchEncryptedStickers($1,this);",
                 },
@@ -3587,6 +3592,12 @@ export default definePlugin({
         const ready = screenCaptureProtectionStatus === "ready";
         if (screenCaptureProtectionStatus === "pending") pendingEncryptedRenderOwners.add(owner);
         return patchEncryptedMessageEmbeds(message, encryptedRenderCallback(owner), ready);
+    },
+
+    patchEncryptedCodedLinks(message: Message, owner: { forceUpdate(): void; }) {
+        const ready = screenCaptureProtectionStatus === "ready";
+        if (screenCaptureProtectionStatus === "pending") pendingEncryptedRenderOwners.add(owner);
+        return patchEncryptedMessageCodedLinks(message, encryptedRenderCallback(owner), ready);
     },
 
     patchEncryptedStickers(message: Message, owner: { forceUpdate(): void; }) {
