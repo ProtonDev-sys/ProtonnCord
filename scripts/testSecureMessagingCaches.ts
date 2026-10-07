@@ -55,6 +55,7 @@ function message(overrides: Partial<Message> = {}): Message {
         flags: 0,
         attachments: [],
         embeds: [],
+        codedLinks: [],
         stickerItems: [],
         ...overrides,
     } as Message;
@@ -68,6 +69,7 @@ function harness(options: {
     review?: () => Promise<AnnouncementReviewResult>;
     unfurl?: (urls: string[]) => Promise<object>;
     convert?: (embed: Exports) => Exports | null;
+    codedLinks?: (content: string) => Message["codedLinks"];
 } = {}) {
     let userId = localUserId;
     let decryptCalls = 0;
@@ -88,8 +90,9 @@ function harness(options: {
     const mocks: Record<string, Exports> = {
         "@utils/misc": { sleep: async (delay: number) => { retryDelays.push(delay); } },
         "@webpack": {
-            findByCodeLazy: () => (_channelId: string, _messageId: string, embed: Exports) =>
-                options.convert ? options.convert(embed) : embed,
+            findByCodeLazy: (...fragments: string[]) => fragments.includes("inviteHostRemainingPath:")
+                ? (content: string) => options.codedLinks?.(content) ?? []
+                : (_channelId: string, _messageId: string, embed: Exports) => options.convert ? options.convert(embed) : embed,
         },
         "@webpack/common": {
             Constants: { Endpoints: { UNFURL_EMBED_URLS: "/test-only/unfurl" } },
@@ -262,6 +265,130 @@ async function render(h: ReturnType<typeof harness>, value: Message): Promise<Me
     await setImmediate();
     return h.embeds.patchEncryptedMessageEmbeds(value, noop);
 }
+
+const inviteUrl = "https://discord.gg/example";
+const inviteLink = { type: "INVITE" as const, code: "example", url: inviteUrl };
+
+test("authenticated invites use native coded links without a generic unfurl or stored plaintext", async () => {
+    const parsed: string[] = [];
+    const h = harness({
+        decrypt: async () => ({ ...decrypted(), plaintext: `Join ${inviteUrl}`, stickers: [] }),
+        codedLinks: content => { parsed.push(content); return [inviteLink]; },
+    });
+    const value = message();
+    Object.setPrototypeOf(value, { nativeMessage: true });
+    let notifications = 0;
+    const ready = () => { notifications++; };
+    assert.deepEqual(h.embeds.patchEncryptedMessageCodedLinks(value, ready).codedLinks, []);
+    h.embeds.patchEncryptedMessageEmbeds(value, ready);
+    await setImmediate();
+    const displayed = h.embeds.patchEncryptedMessageCodedLinks(value, ready);
+    assert.deepEqual(displayed.codedLinks, [inviteLink]);
+    assert.deepEqual(parsed, [inviteUrl], "only eligible extracted URLs reach the host parser");
+    assert.equal(h.calls().decrypt, 1, "coded links and ordinary embeds share authentication");
+    assert.equal(h.calls().unfurl, 0, "Discord invite cards do not use the generic unfurl endpoint");
+    assert.ok(notifications > 0);
+    assert.equal(Object.getPrototypeOf(displayed), Object.getPrototypeOf(value));
+    assert.equal(displayed.content, value.content);
+    assert.deepEqual(value.codedLinks, [], "the message store retains only its encrypted record");
+    assert.deepEqual(h.embeds.patchEncryptedMessageCodedLinks(value, ready, false).codedLinks, [], "capture protection hides cached invites");
+    h.embeds.setExternalLinkPreviewsEnabled(false);
+    assert.deepEqual(h.embeds.patchEncryptedMessageCodedLinks(value, ready).codedLinks, [], "revoked preview consent hides cached invites immediately");
+    await setImmediate();
+    assert.deepEqual(parsed, [inviteUrl]);
+});
+
+test("invite cards appear while an unrelated external preview is pending", async () => {
+    const pending = Promise.withResolvers<object>();
+    const h = harness({
+        decrypt: async () => ({ ...decrypted(), plaintext: `${inviteUrl} ${previewUrl}`, stickers: [] }),
+        codedLinks: () => [inviteLink, { type: "CHANNEL_LINK", code: "123/456" }],
+        unfurl: urls => { assert.deepEqual(urls, [previewUrl]); return pending.promise; },
+    });
+    const value = message();
+    let notifications = 0;
+    const ready = () => { notifications++; };
+    h.embeds.patchEncryptedMessageCodedLinks(value, ready);
+    await setImmediate();
+    assert.deepEqual(h.embeds.patchEncryptedMessageCodedLinks(value, ready).codedLinks, [inviteLink]);
+    assert.equal(notifications, 1, "invite rendering does not wait for ordinary unfurls");
+    assert.deepEqual(h.embeds.patchEncryptedMessageEmbeds(value, ready).embeds, []);
+    pending.resolve({ body: { embeds: [rawEmbed] } });
+    await setImmediate();
+    assert.deepEqual(h.embeds.patchEncryptedMessageCodedLinks(value, ready).codedLinks, [inviteLink]);
+    assert.equal(h.embeds.patchEncryptedMessageEmbeds(value, ready).embeds.length, 1);
+    assert.equal(notifications, 2);
+});
+
+test("invite extraction honors code, angle brackets, deduplication and bare invite links", async () => {
+    const seen: string[] = [];
+    const hidden = "https://discord.gg/hidden";
+    const h = harness({
+        decrypt: async () => ({ ...decrypted(), plaintext: `\`${hidden}\` <${hidden}> [hidden](<${hidden}>) discord.gg/example ${inviteUrl}` }),
+        codedLinks: content => { seen.push(content); return [inviteLink]; },
+    });
+    const value = message();
+    h.embeds.patchEncryptedMessageCodedLinks(value, noop);
+    await setImmediate();
+    assert.deepEqual(seen, [inviteUrl]);
+    assert.deepEqual(h.embeds.patchEncryptedMessageCodedLinks(value, noop).codedLinks, [inviteLink]);
+    assert.equal(h.calls().unfurl, 0);
+});
+
+test("unavailable host invite parsing preserves external link and sticker previews", async () => {
+    const h = harness({ codedLinks: () => { throw new Error("host parser unavailable"); } });
+    const value = message();
+    assert.equal((await render(h, value)).embeds.length, 1);
+    assert.deepEqual(h.embeds.patchEncryptedMessageCodedLinks(value, noop).codedLinks, []);
+    assert.equal(h.embeds.patchEncryptedMessageStickers(value, noop).stickerItems[0]?.id, sticker.id);
+});
+
+test("invite cards require successful decryption, preview consent and an unsuppressed visible message", async () => {
+    for (const blocked of ["consent", "suppression", "capture", "untrusted_author", "replay_detected", "invalid_message", "failed", "unavailable"]) {
+        let parserCalls = 0;
+        const h = harness({
+            externalPreviews: blocked !== "consent",
+            decrypt: async () => {
+                if (blocked === "failed") return { status: "failed", error: "cryptographic_operation_failed" };
+                if (blocked === "unavailable") return { status: "unavailable", reason: "security_key_locked" };
+                if (blocked === "replay_detected") return { status: "replay_detected" };
+                if (blocked === "untrusted_author" || blocked === "invalid_message") return { status: blocked };
+                return { ...decrypted(), plaintext: inviteUrl };
+            },
+            codedLinks: () => { parserCalls++; return [inviteLink]; },
+        });
+        const value = message(blocked === "suppression" ? { flags: 4 } : {});
+        h.embeds.patchEncryptedMessageCodedLinks(value, noop, blocked !== "capture");
+        await setImmediate();
+        assert.deepEqual(h.embeds.patchEncryptedMessageCodedLinks(value, noop, blocked !== "capture").codedLinks, [], blocked);
+        assert.equal(parserCalls, 0, blocked);
+        assert.equal(h.calls().unfurl, 0, blocked);
+        if (blocked === "capture") assert.equal(h.calls().decrypt, 0);
+    }
+    const h = harness();
+    const ordinary = message({ content: inviteUrl, codedLinks: [inviteLink] });
+    assert.equal(h.embeds.patchEncryptedMessageCodedLinks(ordinary, noop), ordinary);
+    assert.equal(h.calls().decrypt, 0);
+});
+
+test("an account change or cache clear cancels pending invite reconstruction", async () => {
+    for (const invalidate of ["account", "clear"]) {
+        const pending = Promise.withResolvers<DecryptIncomingResult>();
+        let parserCalls = 0;
+        const h = harness({
+            decrypt: () => pending.promise,
+            codedLinks: () => { parserCalls++; return [inviteLink]; },
+        });
+        let notifications = 0;
+        h.embeds.patchEncryptedMessageCodedLinks(message(), () => { notifications++; });
+        if (invalidate === "account") h.switchAccount();
+        else h.embeds.clearEncryptedEmbedCache();
+        pending.resolve({ ...decrypted(), plaintext: inviteUrl });
+        await setImmediate();
+        assert.equal(parserCalls, 0, invalidate);
+        assert.equal(notifications, 0, invalidate);
+    }
+});
 
 test("message-level embed suppression prevents unfurl requests without hiding stickers", async () => {
     const h = harness();

@@ -26,6 +26,9 @@ const convertEmbed = findByCodeLazy(".uniqueId(\"embed_\")") as (
     messageId: string,
     embed: Record<string, unknown>,
 ) => Embed | null;
+const parseCodedLinks = findByCodeLazy("inviteHostRemainingPath:", ".slice(0,10)") as (
+    content: string,
+) => Array<Message["codedLinks"][number] & { url: string; }>;
 const MAX_CACHE_ENTRIES = 256;
 const MAX_UNFURL_CACHE_ENTRIES = 128;
 const LOCAL_CONTENT_SCAN_VERSION = -1;
@@ -36,6 +39,7 @@ const TRANSIENT_ENTRY_TTL = 30_000;
 const UNFURL_RETRY_DELAYS = [0, 250, 1_000, 3_000] as const;
 
 interface EmbedCacheEntry {
+    codedLinks: ReturnType<typeof parseCodedLinks>;
     embeds: Embed[];
     expiresAt: number;
     lastAccess: number;
@@ -70,6 +74,12 @@ function cacheKey(message: Message): string {
 function cloneWithEmbeds(message: Message, embeds: Embed[]): Message {
     const clone = Object.assign(Object.create(Object.getPrototypeOf(message)), message) as Message;
     clone.embeds = embeds;
+    return clone;
+}
+
+function cloneWithCodedLinks(message: Message, codedLinks: Message["codedLinks"]): Message {
+    const clone = Object.assign(Object.create(Object.getPrototypeOf(message)), message) as Message;
+    clone.codedLinks = codedLinks;
     return clone;
 }
 
@@ -232,12 +242,20 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
         finishEntry(message, key, entry);
         return;
     }
-    if (entry.stickers.length > 0) notify(message, entry);
+    try {
+        // Invite cards use codedLinks, not the generic unfurl endpoint. Give Discord only eligible URLs.
+        entry.codedLinks = parseCodedLinks(urls.join("\n")).filter(link => link.type === "INVITE");
+    } catch {
+        // A changed host parser must not prevent ordinary link or sticker previews.
+    }
+    const inviteUrls = new Set(entry.codedLinks.map(link => link.url));
+    const unfurlUrls = urls.filter(url => !inviteUrls.has(url));
+    if (entry.stickers.length > 0 || entry.codedLinks.length > 0) notify(message, entry);
     if (!entryIsCurrent(message, key, entry)) return;
     // Matching Discord's native previews requires disclosing only the extracted URLs to its unfurl service.
-    const convertedByUrl: Embed[][] = urls.map(() => []);
-    let remaining = urls.length;
-    await Promise.all(urls.map(async (url, index) => {
+    const convertedByUrl: Embed[][] = unfurlUrls.map(() => []);
+    let remaining = unfurlUrls.length;
+    await Promise.all(unfurlUrls.map(async (url, index) => {
         const rawEmbeds = await unfurlUrl(url);
         if (!entryIsCurrent(message, key, entry)) return;
         const converted: Embed[] = [];
@@ -265,7 +283,7 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
         message,
         key,
         entry,
-        entry.embeds.length > 0 ? Date.now() + SUCCESSFUL_UNFURL_TTL : Date.now() + EMPTY_UNFURL_TTL,
+        entry.embeds.length > 0 || entry.codedLinks.length > 0 ? Date.now() + SUCCESSFUL_UNFURL_TTL : Date.now() + EMPTY_UNFURL_TTL,
     );
 }
 
@@ -280,6 +298,7 @@ function ensureEntry(message: Message): EmbedCacheEntry | null {
     if (existing) cache.delete(key);
     pruneCache("", MAX_CACHE_ENTRIES - 1);
     const entry: EmbedCacheEntry = {
+        codedLinks: [],
         embeds: [],
         expiresAt: Number.POSITIVE_INFINITY,
         lastAccess: Date.now(),
@@ -299,6 +318,15 @@ export function patchEncryptedMessageEmbeds(message: Message, onReady: () => voi
     if (!entry) return message;
     if (entry.status === "loading") entry.listeners.add(onReady);
     return cloneWithEmbeds(message, entry.embeds);
+}
+
+export function patchEncryptedMessageCodedLinks(message: Message, onReady: () => void, canDecrypt = true): Message {
+    if (!isEncryptedMessage(message.content)) return message;
+    if (!canDecrypt) return cloneWithCodedLinks(message, []);
+    const entry = ensureEntry(message);
+    if (!entry) return message;
+    if (entry.status === "loading") entry.listeners.add(onReady);
+    return cloneWithCodedLinks(message, entry.codedLinks);
 }
 
 export function encryptedMessageInlineEmbedStatus(message: Message): SecureInlineEmbedStatus {
