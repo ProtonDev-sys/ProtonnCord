@@ -33,6 +33,13 @@ export interface AtomicFileOperations {
 export type HttpFetcher = (url: string, init: RequestInit) => Promise<Response>;
 export type JsonRequest = (endpoint: string) => Promise<unknown>;
 
+export class HttpRequestError extends Error {
+    constructor(url: string, public readonly status: number, statusText: string) {
+        super(`GET ${url}: ${status} ${statusText}`);
+        this.name = "HttpRequestError";
+    }
+}
+
 interface AsarFile {
     hash: string;
     offset: number;
@@ -116,7 +123,17 @@ export async function inspectHttpUpdates(
     const release = parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile);
     if (!release.pending) return { changes: [], pending: null };
 
-    const comparison = await request(`/compare/${currentHash}...${release.hash}`);
+    let comparison: unknown;
+    try {
+        comparison = await request(`/compare/${currentHash}...${release.hash}`);
+    } catch (error) {
+        if (!(error instanceof HttpRequestError) || error.status !== 404) throw error;
+        // Rewritten or unrelated histories can lack a comparison while the release remains installable.
+        return {
+            changes: [{ author: "ProtonnCord", hash: release.hash, message: `Update to the latest ${branch} release (previous build cannot be compared)` }],
+            pending: release.pending,
+        };
+    }
     const parsedChanges = parseChanges(comparison);
     const changes = parsedChanges.length > 0
         ? parsedChanges
@@ -161,7 +178,7 @@ export async function requestBytes(
 
         if (!response.ok) {
             await discard();
-            throw new Error(`GET ${url}: ${response.status} ${response.statusText}`);
+            throw new HttpRequestError(url, response.status, response.statusText);
         }
 
         const declaredLength = response.headers.get("Content-Length");

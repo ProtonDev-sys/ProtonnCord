@@ -15,6 +15,7 @@ import {
     applyPendingHttpUpdate,
     type AtomicFileOperations,
     type HttpFetcher,
+    HttpRequestError,
     inspectHttpUpdates,
     type PendingHttpUpdate,
     replaceAsarAtomically,
@@ -88,6 +89,28 @@ async function main(): Promise<void> {
         changes: [{ author: "ProtonDev-sys", hash: COMMIT_HASH, message: "Exact release commit" }],
         pending: { hash: RELEASE_HASH, url: DOWNLOAD_URL },
     });
+
+    const rewritten = await inspectHttpUpdates(async endpoint => {
+        if (endpoint === "/releases/tags/nightly") return release(RELEASE_HASH);
+        assert.equal(endpoint, `/compare/${CURRENT_HASH}...${RELEASE_HASH}`);
+        return requestJson(async () => new Response("missing comparison", { status: 404, statusText: "Not Found" }),
+            `https://api.github.com/repos/ProtonDev-sys/ProtonnCord${endpoint}`, {}, 1_000, 100);
+    }, CURRENT_HASH, ASAR_FILE, "nightly");
+    assert.deepEqual(rewritten, {
+        changes: [{ author: "ProtonnCord", hash: RELEASE_HASH, message: "Update to the latest nightly release (previous build cannot be compared)" }],
+        pending: { hash: RELEASE_HASH, url: DOWNLOAD_URL },
+    });
+
+    for (const failure of [new HttpRequestError("comparison", 403, "Forbidden"), new HttpRequestError("comparison", 429, "Too Many Requests"),
+        new HttpRequestError("comparison", 500, "Internal Server Error"), new Error("network failure"), new Error("GET comparison: 404 Not Found")]) {
+        await assert.rejects(inspectHttpUpdates(async endpoint => {
+            if (endpoint === "/releases/latest") return release(RELEASE_HASH);
+            throw failure;
+        }, CURRENT_HASH, ASAR_FILE), error => error === failure, "only a structured comparison 404 allows recovery");
+    }
+    const missingRelease = new HttpRequestError("release", 404, "Not Found");
+    await assert.rejects(inspectHttpUpdates(async () => { throw missingRelease; }, CURRENT_HASH, ASAR_FILE), error => error === missingRelease);
+    await assert.rejects(inspectHttpUpdates(async endpoint => endpoint === "/releases/latest" ? release(RELEASE_HASH) : {}, CURRENT_HASH, ASAR_FILE), /invalid Protonn Cord changelog/iu);
 
     await assert.rejects(
         inspectHttpUpdates(async () => release("not-a-commit"), CURRENT_HASH, ASAR_FILE),
