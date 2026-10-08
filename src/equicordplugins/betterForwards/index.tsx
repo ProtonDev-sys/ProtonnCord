@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { plugins } from "@api/PluginManager";
 import { definePluginSettings, migratePluginSettings } from "@api/Settings";
 import { BaseText } from "@components/BaseText";
 import ErrorBoundary from "@components/ErrorBoundary";
@@ -19,20 +20,27 @@ import { proxyLazyWebpack } from "@webpack";
 import { ChannelActionCreators, ChannelStore, Checkbox, React, Tooltip, useMemo, useState } from "@webpack/common";
 import { Dispatch, MouseEvent, ReactNode, SetStateAction } from "react";
 
+import { secureForwardImageEmbeds } from "../secureMessaging.desktop/forwarding";
+import { isEncryptedMessage } from "../secureMessaging.desktop/protocol";
 import { ChannelName, ForwardPicker, GuildName, Timestamp } from "./components";
 import managedStyle from "./style.css?managed";
 
 export const cl = classNameFactory("vc-betterforwards-");
 
 export interface ForwardOptions {
+    embedIndicesAreImages?: boolean;
     onlyEmbedIndices?: number[];
     onlyAttachmentIds?: string[];
+}
+
+interface SecureForwarding {
+    tryForward?(message: Message, destinationChannelId: string, options: ForwardOptions & { withMessage?: string; }): Promise<boolean>;
 }
 
 export interface ForwardOptionsState {
     opts: ForwardOptions;
     setOpts: Dispatch<SetStateAction<ForwardOptions>>;
-    defaultOpts: Required<ForwardOptions>;
+    defaultOpts: Required<Pick<ForwardOptions, "onlyAttachmentIds" | "onlyEmbedIndices">>;
     hasOpts: boolean;
     message?: Message;
 }
@@ -159,12 +167,21 @@ export default definePlugin({
     ],
 
     async sendForward(additionalMessage: string | null, channels: { id: string; type: string; }[], message: Message, options: ForwardOptions) {
+        const ids = (await Promise.all(channels.map(getId))).filter(Boolean) as string[];
+        const secureForwarding = (plugins as unknown as Record<string, SecureForwarding>).SecureMessagingForwarding;
+        const fallbackIds = (await Promise.all(ids.map(async id =>
+            await secureForwarding?.tryForward?.(message, id, { ...options, embedIndicesAreImages: true, withMessage: additionalMessage ?? undefined }) ? null : id
+        ))).filter((id): id is string => id !== null);
+        if (fallbackIds.length === 0) return;
+        if (isEncryptedMessage(message.content) || message.messageSnapshots?.some(snapshot => isEncryptedMessage(snapshot.message.content)))
+            throw new Error("Encrypted messages can only be forwarded through Secure Messaging.");
+
         const contentMessage = message.messageSnapshots?.[0]?.message ?? message;
 
         const newLine = `\n${settings.store.forwardPreface} `;
         const hasSelection = options.onlyAttachmentIds !== undefined || options.onlyEmbedIndices !== undefined;
         const content = hasSelection ? "" : contentMessage.content.trim().replaceAll("\n", newLine);
-        const embedUrls = contentMessage.embeds
+        const embedUrls = secureForwardImageEmbeds(contentMessage.embeds)
             .filter((_, index) => options.onlyEmbedIndices ? options.onlyEmbedIndices.includes(index) : !hasSelection)
             .flatMap(embed => embed.images?.length ? embed.images.map(image => image.url)
                 : [embed.url ?? embed.image?.url ?? embed.video?.url ?? embed.thumbnail?.url]);
@@ -178,11 +195,9 @@ export default definePlugin({
             ? contentMessage.attachments.filter(a => attIds.includes(a.id))
             : contentMessage.attachments;
 
-        const ids = (await Promise.all(channels.map(getId))).filter(Boolean) as string[];
-
         const mediaUrls = [...attachments.map(attachment => attachment.url), ...embedUrls.filter(Boolean)];
         const chunkSize = 5;
-        await Promise.all(ids.map(async id => {
+        await Promise.all(fallbackIds.map(async id => {
             if (mediaUrls.length > 0) {
                 for (let i = 0; i < mediaUrls.length; i += chunkSize) {
                     const group = mediaUrls.slice(i, i + chunkSize);
@@ -236,7 +251,7 @@ export default definePlugin({
 
             // Discord incorrectly assumes that embed indices directly map to whole embeds, this is an attempt to fix that
             const onlyEmbedIndices = message?.embeds
-                .flatMap((e, i) => e.images?.map(() => ({ id: id++, eId: i })) ?? { id: id++, eId: i })
+                .flatMap((e, i) => e.images?.length ? e.images.map(() => ({ id: id++, eId: i })) : { id: id++, eId: i })
                 .filter(({ eId }) => embedsIds.has(eId))
                 .map(({ id }) => id) ?? [];
 
@@ -246,7 +261,7 @@ export default definePlugin({
         const defaultOpts = useMemo(
             () => ({
                 onlyAttachmentIds: message?.attachments.map(a => a.id) ?? [],
-                onlyEmbedIndices: message?.embeds.flatMap(e => e.images ?? [{}]).map((_, i) => i) ?? []
+                onlyEmbedIndices: message?.embeds.flatMap(e => e.images?.length ? e.images : [{}]).map((_, i) => i) ?? []
             }),
             [message]
         );
@@ -256,7 +271,7 @@ export default definePlugin({
         const forwardOptions = useMemo(() => {
             if (!hasOpts) return opts;
 
-            const fixed = { onlyAttachmentIds: [], onlyEmbedIndices: [], ...opts };
+            const fixed = { onlyAttachmentIds: [], onlyEmbedIndices: [], ...opts, embedIndicesAreImages: true };
 
             // Server-side validation can be bypassed by specifying a fake attachment id
             if (fixed.onlyAttachmentIds.length + fixed.onlyEmbedIndices.length === 0) fixed.onlyAttachmentIds = ["0"];

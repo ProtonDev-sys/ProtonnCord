@@ -45,6 +45,13 @@ const embedText = secureForwardEmbedText([
     { title: "Text card", description: "description" },
 ], [0]);
 assert.equal(embedText, "https://example.com/video");
+assert.equal(secureForwardEmbedText([
+    { rawTitle: "Host card", rawDescription: "Host description", fields: [{ rawName: "Field", rawValue: "Value" }] },
+]), "Host card\nHost description\nField\nValue");
+assert.equal(secureForwardEmbedText([
+    { images: [{ url: "https://example.com/first.png" }, { url: "https://example.com/second.png" }] },
+    { images: [{ url: "https://example.com/selected.png" }] },
+], [1]), "https://example.com/selected.png", "grouped images retain the selected host embed index");
 
 const composed = composeSecureForwardText({
     authorLabel: "A *sender*",
@@ -79,16 +86,16 @@ const runtime = readFileSync(new URL(
     "../src/equicordplugins/secureMessagingForwarding.desktop/index.ts",
     import.meta.url,
 ), "utf8");
-assert.match(runtime, /actions\.sendForward = guardedSendForward/u);
-assert.match(runtime, /actions\.sendForwards = guardedSendForwards/u);
+assert.match(runtime, /replaceForwardExport\(actions, "sendForward", guardedSendForward\)/u);
+assert.match(runtime, /replaceForwardExport\(actions, "sendForwards", guardedSendForwards\)/u);
 assert.match(runtime, /for \(const destinationChannelId of new Set\(destinationChannelIds\)\)/u);
 assert.match(runtime, /const selective = options\.onlyAttachmentIds !== undefined \|\| options\.onlyEmbedIndices !== undefined/u);
 assert.match(runtime, /const attachmentSelection = selective \? rawAttachmentSelection \?\? new Set<string>\(\) : null/u);
 assert.match(runtime, /const embedSelection = selective \? rawEmbedSelection \?\? \[\] : undefined/u);
 assert.match(runtime, /secureForwardRoute\(source, destination\)/u);
 assert.match(runtime, /await secureForward\(message, destinationChannelId, options\)/u);
-assert.match(runtime, /await sendMessage\(destinationChannelId/u);
-assert.doesNotMatch(runtime, /message_reference|messageReference|alsoForwardToChannelId/u,
+assert.match(runtime, /await plugin\.sendEncryptedForward\(destinationChannelId/u);
+assert.doesNotMatch(runtime, /message_reference:|messageReference:|alsoForwardToChannelId:/u,
     "secure forwarding must create a new encrypted message without a Discord source reference");
 assert.doesNotMatch(runtime, /credentials:\s*["']include["']/u,
     "attachment downloads must not attach Discord renderer credentials");

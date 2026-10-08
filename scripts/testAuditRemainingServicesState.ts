@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { composeSecureForwardText, secureForwardEmbedText, secureForwardRoute } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
+import { composeSecureForwardText, secureForwardEmbedText, secureForwardImageEmbeds, secureForwardRoute } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
 import { loadTestModule } from "./utils/loadTestModule";
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -96,28 +96,44 @@ const USER = "111111111111111111";
 const SOURCE = "222222222222222222";
 const DESTINATION = "333333333333333333";
 const SECOND_DESTINATION = "444444444444444444";
-function forwardingFixture() {
-    const state = { userId: USER, ready: true, protection: "enabled", delayDecrypt: false, delayProtection: false };
+function forwardingFixture({ getterExports = false, deferModule = false } = {}) {
+    const state = { userId: USER, ready: true, protection: "enabled", sourceProtected: false, sourceProtection: "enabled", delayDecrypt: false, delayProtection: false };
     let resumeDecrypt: ((value: unknown) => void) | undefined;
     let resumeProtection: ((value: unknown) => void) | undefined;
     const sends: any[] = [];
     const nativeSends: string[] = [];
     const toasts: string[] = [];
-    const securePlugin = { started: true, getScreenCaptureProtectionStatus: () => state.ready ? "ready" : "hidden" };
+    const securePlugin = {
+        started: true,
+        getScreenCaptureProtectionStatus: () => state.ready ? "ready" : "hidden",
+        sendEncryptedForward: async (destination: string, content: string, uploads: unknown[], stickerIds: string[]) => {
+            sends.push([destination, { content }, false, { uploads, stickerIds }]);
+        },
+    };
     const actions = {
         sendForward: async (_message: unknown, destination: string) => { nativeSends.push(destination); },
         sendForwards: async (_message: unknown, destinations: string[]) => { nativeSends.push(...destinations); }
     };
     const original = actions.sendForward;
+    if (getterExports) {
+        const originalMany = actions.sendForwards;
+        Object.defineProperty(actions, "sendForward", { configurable: true, enumerable: false, get: () => original });
+        Object.defineProperty(actions, "sendForwards", { configurable: true, enumerable: true, get: () => originalMany });
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(actions);
+    const subscriptions = new Map<unknown, (module: unknown) => void>();
     const plugin = load("src/equicordplugins/secureMessagingForwarding.desktop/index.ts", {
         "@api/PluginManager": { plugins: { SecureMessaging: securePlugin } },
         "@utils/constants": { EquicordDevs: {} },
         "@utils/discord": { sendMessage: async (...args: unknown[]) => { sends.push(args); } },
         "@utils/types": { __esModule: true, default: (value: unknown) => value },
         "@vencord/discord-types/enums": { CloudUploadPlatform: {} },
-        "@webpack": { waitFor: (_props: unknown, callback: (value: unknown) => void) => callback(actions) },
+        "@webpack": {
+            waitFor: (filter: unknown, callback: (value: unknown) => void) => deferModule ? subscriptions.set(filter, callback) : callback(actions),
+            waitForSubscriptions: subscriptions,
+        },
         "@webpack/common": {
-            ChannelStore: { getChannel: (id: string) => id === SOURCE ? { id, guild_id: "555555555555555555" } : { id, recipients: ["666666666666666666"], isDM: () => true } },
+            ChannelStore: { getChannel: (id: string) => id === SOURCE && !state.sourceProtected ? { id, guild_id: "555555555555555555" } : { id, recipients: ["666666666666666666"], isDM: () => true } },
             UserStore: { getCurrentUser: () => ({ id: state.userId }), getUser: () => undefined },
             GuildRoleStore: {}, Constants: {}, RestAPI: {},
             showToast: (text: string) => toasts.push(text), Toasts: { Type: {} }
@@ -125,15 +141,18 @@ function forwardingFixture() {
         "../secureMessaging.desktop/attachmentCache": {},
         "../secureMessaging.desktop/attachments": { MAX_ATTACHMENT_BYTES: 500 * 1024 * 1024, MAX_ATTACHMENT_COUNT: 10 },
         "../secureMessaging.desktop/decryptCache": { decryptCachedMessage: async () => state.delayDecrypt ? new Promise(resolve => { resumeDecrypt = resolve; }) : { status: "decrypted", plaintext: "private fixture text", stickers: [] } },
-        "../secureMessaging.desktop/forwarding": { composeSecureForwardText, secureForwardEmbedText, secureForwardRoute },
+        "../secureMessaging.desktop/forwarding": { composeSecureForwardText, secureForwardEmbedText, secureForwardImageEmbeds, secureForwardRoute },
         "../secureMessaging.desktop/protocol": { isEncryptedMessage: (content: string) => content === "encrypted-fixture" }
     }, {
-        VencordNative: { pluginHelpers: { SecureMessaging: { getConversation: async () => state.delayProtection ? new Promise(resolve => { resumeProtection = resolve; }) : { status: state.protection } } } }
+        VencordNative: { pluginHelpers: { SecureMessaging: {
+            getChannelProtection: async (_user: string, channel: string) => ({ status: channel === SOURCE && state.sourceProtected || state.protection !== "disabled" && state.protection !== "unconfigured" ? "protected" : state.protection }),
+            getConversation: async (_user: string, snapshot: { channelId: string; }) => state.delayProtection ? new Promise(resolve => { resumeProtection = resolve; }) : { status: snapshot.channelId === SOURCE ? state.sourceProtection : state.protection },
+        } } }
     }).default;
     plugin.start();
     const message = { content: "encrypted-fixture", channel_id: SOURCE, attachments: [], embeds: [], author: { username: "fixture" } };
     return {
-        plugin, state, message, actions, sends, nativeSends, toasts, original, securePlugin,
+        plugin, state, message, actions, sends, nativeSends, toasts, original, securePlugin, descriptors, subscriptions,
         finishDecrypt: () => { assert.ok(resumeDecrypt); resumeDecrypt({ status: "decrypted", plaintext: "private fixture text", stickers: [] }); },
         finishProtection: () => { assert.ok(resumeProtection); resumeProtection({ status: state.protection }); }
     };
@@ -152,6 +171,65 @@ test("secure forwards retain protected-copy and ordinary-forward routes", async 
     assert.deepEqual(fixture.nativeSends, [DESTINATION]);
     fixture.plugin.stop();
     assert.equal(fixture.actions.sendForward, fixture.original);
+});
+
+test("secure forward guards wrap configurable getter exports and restore their exact descriptors", async () => {
+    const fixture = forwardingFixture({ getterExports: true });
+    assert.notEqual(fixture.actions.sendForward, fixture.original);
+    await fixture.actions.sendForward(fixture.message, DESTINATION);
+    assert.equal(fixture.sends.length, 1);
+    fixture.plugin.stop();
+    assert.deepEqual(Object.getOwnPropertyDescriptors(fixture.actions), fixture.descriptors);
+    fixture.plugin.start();
+    const thirdParty = async () => undefined;
+    fixture.actions.sendForward = thirdParty;
+    fixture.plugin.stop();
+    assert.equal(fixture.actions.sendForward, thirdParty, "cleanup keeps a later owner's replacement");
+    assert.deepEqual(Object.getOwnPropertyDescriptor(fixture.actions, "sendForwards"), fixture.descriptors.sendForwards);
+});
+
+test("secure forwarding cancels pending module subscriptions and ignores callbacks from an earlier start", () => {
+    const fixture = forwardingFixture({ deferModule: true });
+    const late = [...fixture.subscriptions.values()][0];
+    assert.equal(fixture.subscriptions.size, 1);
+    fixture.plugin.stop();
+    assert.equal(fixture.subscriptions.size, 0);
+    late(fixture.actions);
+    assert.equal(fixture.actions.sendForward, fixture.original);
+    fixture.plugin.start();
+    [...fixture.subscriptions.values()][0](fixture.actions);
+    assert.notEqual(fixture.actions.sendForward, fixture.original);
+    fixture.plugin.stop();
+});
+
+test("public forward routing returns false only for ordinary forwards and blocks protected fallback", async () => {
+    const fixture = forwardingFixture();
+    const plain = { ...fixture.message, content: "ordinary" };
+    assert.equal(await fixture.plugin.tryForward(plain, DESTINATION), true);
+    assert.equal(fixture.sends.length, 1);
+    fixture.state.protection = "unconfigured";
+    assert.equal(await fixture.plugin.tryForward(plain, DESTINATION), false);
+    assert.equal(fixture.nativeSends.length, 0, "the caller performs the ordinary fallback itself");
+    await assert.rejects(fixture.plugin.tryForward(fixture.message, DESTINATION), /Protected messages/);
+    await assert.rejects(fixture.plugin.tryForward({ ...plain, messageSnapshots: [{ message: fixture.message }] }, DESTINATION), /Protected messages/);
+    fixture.securePlugin.started = false;
+    assert.equal(await fixture.plugin.tryForward(plain, DESTINATION), false);
+    await assert.rejects(fixture.plugin.tryForward(fixture.message, DESTINATION), /Enable Secure Messaging/);
+    assert.equal(fixture.sends.length, 1);
+    fixture.plugin.stop();
+});
+
+test("changed local identities and unavailable protected sources cannot fall back to native forwarding", async () => {
+    const fixture = forwardingFixture();
+    fixture.state.protection = "local_identity_changed";
+    await assert.rejects(fixture.plugin.tryForward(fixture.message, DESTINATION), /identity changed/);
+    fixture.state.protection = "enabled";
+    fixture.state.sourceProtected = true;
+    fixture.state.sourceProtection = "local_identity_changed";
+    await assert.rejects(fixture.plugin.tryForward({ ...fixture.message, content: "ordinary" }, DESTINATION), /identity changed/);
+    assert.equal(fixture.sends.length, 0);
+    assert.equal(fixture.nativeSends.length, 0);
+    fixture.plugin.stop();
 });
 
 test("secure forwards cancel when account, runtime or protection changes during preparation", async () => {
