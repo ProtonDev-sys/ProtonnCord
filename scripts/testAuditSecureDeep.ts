@@ -426,14 +426,17 @@ test("attachment singleflight admissions stay bounded while pending", async () =
 
 test("preview cache saturation does not schedule more decryption", () => {
     const cache = new Map(Array.from({ length: 256 }, (_, index) => [String(index), { status: "loading" }]));
+    const capacityListeners = new Set<() => void>();
     let loads = 0;
-    const ensure = extracted("embedCache.ts", "ensureEntry", { cache, isEncryptedMessage: () => true,
+    const ensure = extracted("embedCache.ts", "ensureEntry", { cache, capacityListeners, isEncryptedMessage: () => true,
         cacheKey: () => "new", pruneCache() {}, MAX_CACHE_ENTRIES: 256, Date, loadEntry: () => { loads++; } });
-    const entry = ensure(message());
+    const onReady = () => undefined;
+    const entry = ensure(message(), onReady);
     assert.equal(entry.status, "ready");
     assert.equal(entry.embeds.length, 0);
     assert.equal(cache.size, 256);
     assert.equal(loads, 0);
+    assert.ok(capacityListeners.has(onReady));
 });
 
 test("empty and proxy-only embed selections cannot count as forwarded content", () => {
