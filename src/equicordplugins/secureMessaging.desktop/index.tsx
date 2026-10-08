@@ -13,10 +13,12 @@ import {
     addMessagePreEditListener,
     addMessagePreSendListener,
     MessageEditListener,
+    MessageObject,
     MessageSendListener,
     removeMessageLengthBypassListener,
     removeMessagePreEditListener,
     removeMessagePreSendListener,
+    SendMessageOptions,
 } from "@api/MessageEvents";
 import { updateMessage } from "@api/MessageUpdater";
 import { definePluginSettings } from "@api/Settings";
@@ -1964,6 +1966,53 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
     }
 };
 
+async function sendEncryptedForward(channelId: string, content: string, uploads: CloudUpload[], stickerIds: string[]): Promise<void> {
+    const generation = secureOperationGeneration;
+    const visibilityGeneration = screenCaptureProtectionGeneration;
+    const localUserId = UserStore.getCurrentUser()?.id;
+    const channel = ChannelStore.getChannel(channelId);
+    if (!localUserId || !channel || !currentSnapshot(channel))
+        throw new Error("Open the protected destination before forwarding into it.");
+    const requireProtection = async () => {
+        const protection = await resolveConversationProtection(channelId);
+        const scope = protection.kind === "snapshot"
+            ? conversationAuthorizationScope(localUserId, protection.conversation)
+            : null;
+        if (!secureOperationIsCurrent(generation, localUserId) || secureRuntimeUserId !== localUserId ||
+            applicationGuardsBlocked || !networkGuardEnabled || screenCaptureProtectionStatus !== "ready" ||
+            visibilityGeneration !== screenCaptureProtectionGeneration || !scope || protection.kind !== "snapshot" ||
+            hasSelectedKeyReviewBlock(localUserId, protection.conversation))
+            throw new Error("The destination is no longer ready for an encrypted forward.");
+        return scope;
+    };
+    const expectedScope = await requireProtection();
+    const message: MessageObject = { content, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] };
+    const options: SendMessageOptions = {
+        channelId,
+        command: null,
+        content,
+        uploads: [...uploads],
+        stickerIds: [...stickerIds],
+        location: "Secure Messaging forward",
+    };
+    // Programmatic MessageActions sends bypass the composer's pre-send hook.
+    // Prepare forwards through the same authenticated text, attachment and sticker path.
+    const prepared = await outgoingListener(channelId, message, options, {
+        channel,
+        content,
+        hasAttachments: uploads.length > 0,
+        hasStickers: stickerIds.length > 0,
+        openWarningPopout: () => undefined,
+    });
+    if (prepared?.cancel || !isEncryptedMessage(message.content) ||
+        preparedOutgoingMessages.get(message)?.ciphertext !== message.content)
+        throw new Error("Secure Messaging could not prepare the encrypted forward.");
+    if (await requireProtection() !== expectedScope)
+        throw new Error("The destination recipients changed while the encrypted forward was being prepared.");
+    options.content = message.content;
+    await MessageActions.sendMessage(channelId, message, false, options);
+}
+
 const editListener: MessageEditListener = async (channelId, messageId, message) => {
     if (applicationGuardsBlocked) return { cancel: true };
     const generation = secureOperationGeneration;
@@ -3620,6 +3669,8 @@ export default definePlugin({
         if (screenCaptureProtectionStatus === "pending") pendingEncryptedRenderOwners.add(owner);
         return patchEncryptedMessageStickers(message, encryptedRenderCallback(owner, message.id), ready);
     },
+
+    sendEncryptedForward,
 
     useSecureReplyPreview,
 
