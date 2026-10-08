@@ -130,6 +130,7 @@ import {
     setExternalLinkPreviewsEnabled,
 } from "./embedCache";
 import { shouldHideSecureEmbedOnlyPlaintext } from "./embedUrls";
+import { parseSecureForwardText } from "./forwarding";
 import { KeyReviewGate } from "./keyReviewGate";
 import { encryptedAllowedMentions, encryptedMessageMentionsUser } from "./mentionNotifications";
 import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
@@ -1358,7 +1359,7 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
             : await resolveConversationProtection(forward.channelId);
         if (requiresProtectedNetworkGuard(sourceProtection) || requiresProtectedNetworkGuard(protection)) {
             showToast(
-                "Forwarding is unavailable for protected conversations. Copy the content and send it as a new encrypted message.",
+                "This forward could not be encrypted safely.",
                 Toasts.Type.FAILURE,
             );
             throw new Error("Secure Messaging blocked forwarding into or out of a protected conversation");
@@ -2781,21 +2782,32 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
         ? getOptimisticOutgoingPlaintext(message.content)
         : undefined;
     const visiblePlaintext = result?.status === "decrypted" ? result.plaintext : optimisticPlaintext;
+    const forward = captureProtection === "ready" && (result?.status === "decrypted" || !result) && visiblePlaintext !== undefined
+        ? result?.status === "decrypted" ? result.forward : parseSecureForwardText(visiblePlaintext)
+        : null;
+    const bodyPlaintext = forward?.content ?? visiblePlaintext;
     const inlineEmbedStatus = encryptedMessageInlineEmbedStatus(message);
-    const embedOnly = visiblePlaintext !== undefined && (result?.status === "decrypted"
+    const embedOnly = bodyPlaintext !== undefined && (result?.status === "decrypted"
         ? result.attachmentBundle === null && result.stickers.length === 0
         : !result && message.attachments.length === 0 && message.stickerItems.length === 0) &&
-        shouldHideSecureEmbedOnlyPlaintext(visiblePlaintext, inlineEmbedStatus);
-    const hasPlaintext = !embedOnly && Boolean(visiblePlaintext?.trim());
+        shouldHideSecureEmbedOnlyPlaintext(bodyPlaintext, inlineEmbedStatus);
+    const hasPlaintext = !embedOnly && Boolean(bodyPlaintext?.trim());
     const renderedPlaintext = captureProtection === "ready" && hasPlaintext && (!result || result.status === "decrypted")
-        ? visiblePlaintext : undefined;
-    const parsedPlaintext = useMemo(() => renderedPlaintext ? Parser.parse(renderedPlaintext, false, {
-        allowGameMentions: true,
-        channelId: message.channel_id,
-        viewingChannelId: message.channel_id,
-        messageId: message.id,
-        authorId: message.author?.id,
-    }) : null, [renderedPlaintext, message.channel_id, message.id, message.author?.id]);
+        ? bodyPlaintext : undefined;
+    const renderedNote = forward?.note;
+    const parsedPlaintext = useMemo(() => {
+        const context = {
+            allowGameMentions: true,
+            channelId: message.channel_id,
+            viewingChannelId: message.channel_id,
+            messageId: message.id,
+            authorId: message.author?.id,
+        };
+        return {
+            content: renderedPlaintext ? Parser.parse(renderedPlaintext, false, context) : null,
+            note: renderedNote ? Parser.parse(renderedNote, false, context) : null,
+        };
+    }, [renderedPlaintext, renderedNote, message.channel_id, message.id, message.author?.id]);
 
     useEffect(() => {
         let active = true;
@@ -2835,9 +2847,27 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
             ? <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />
             : null;
         // Decrypted text uses Discord's own message typography; media keeps rendering natively beside it.
+        const text = hasPlaintext && <div className={classes(MarkupClasses.markup, MessageContentClasses.messageContent, "pc-secure-message")}>{parsedPlaintext.content}</div>;
+        if (forward) {
+            const timestamp = forward.timestampMs === null ? null : new Date(forward.timestampMs);
+            return (
+                <>
+                    {parsedPlaintext.note && <div className={classes(MarkupClasses.markup, MessageContentClasses.messageContent, "pc-secure-message pc-secure-forward-note")}>{parsedPlaintext.note}</div>}
+                    <article className="pc-secure-forward" aria-label="Forwarded message">
+                        <div className="pc-secure-forward-label">↪ Forwarded</div>
+                        <div className="pc-secure-forward-source">
+                            <strong>{forward.authorLabel}</strong>
+                            {timestamp && <time dateTime={timestamp.toISOString()}>{timestamp.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</time>}
+                        </div>
+                        {text}
+                        {attachmentStatus}
+                    </article>
+                </>
+            );
+        }
         return (
             <>
-                {hasPlaintext && <div className={classes(MarkupClasses.markup, MessageContentClasses.messageContent, "pc-secure-message")}>{parsedPlaintext}</div>}
+                {text}
                 {attachmentStatus}
             </>
         );

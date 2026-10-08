@@ -86,7 +86,7 @@ async function decryptWithRetry(
                 : undefined;
             const expanded = await decryptIncomingAttachmentsCached(localUserId, message, "text", refreshIds);
             result = expanded.status === "decrypted"
-                ? { ...result, plaintext: expanded.plaintext }
+                ? { ...result, plaintext: expanded.plaintext, ...(expanded.forward ? { forward: expanded.forward } : {}) }
                 : expanded;
         }
         if (generation !== cacheGeneration || !isCurrent()) return failedDecryption();

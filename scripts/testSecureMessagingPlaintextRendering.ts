@@ -12,12 +12,14 @@ import { runInNewContext } from "node:vm";
 import { createSourceFile, isFunctionDeclaration, JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import type { DecryptIncomingResult } from "../src/equicordplugins/secureMessaging.desktop/native";
+import { composeSecureForwardText, parseSecureForwardText } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
 
 const sourcePath = "src/equicordplugins/secureMessaging.desktop/index.tsx";
 const source = readFileSync(sourcePath, "utf8");
 const functionNames = new Set([
     "EncryptedAttachmentStatus", "EncryptedMessageAccessory", "notifySecureMessageRow",
     "flushRenderDecryptions", "scheduleRenderDecryptBatch", "enqueueSettledRenderDecryption",
+    "SecureMessageAccessory", "renderSecurePreviewContent",
 ]);
 
 function decrypted(plaintext: string): Extract<DecryptIncomingResult, { status: "decrypted"; }> {
@@ -79,7 +81,7 @@ function fixture(count: number, implementation = source) {
     let embedOnly = false;
     let attachmentStatus = { status: "ready", reason: "synthetic attachment failure" };
     const rowListeners = new Map<string, Set<() => void>>();
-    const runtime = runInNewContext(`${compiled}\n({ EncryptedMessageAccessory, enqueueSettledRenderDecryption })`, {
+    const runtime = runInNewContext(`${compiled}\n({ EncryptedMessageAccessory, enqueueSettledRenderDecryption, renderSecurePreviewContent: typeof renderSecurePreviewContent === "function" ? renderSecurePreviewContent : undefined })`, {
         RENDER_DECRYPT_BATCH_SIZE: 24, secureOperationGeneration: 1,
         secureMessageRowListeners: rowListeners, settledRenderDecryptions: [], renderDecryptBatchTimer: null,
         setTimeout: (callback: () => void) => { timers.push(callback); return timers.length; },
@@ -110,6 +112,9 @@ function fixture(count: number, implementation = source) {
         useScreenCaptureProtectionStatus: () => protection,
         getCachedDecryption: (_user: string, message: { id: string; }) => results.get(message.id) ?? null,
         getOptimisticOutgoingPlaintext: () => optimistic, encryptedMessageInlineEmbedStatus: () => "absent",
+        parseSecureForwardText,
+        isEncryptedMessage: (content: string) => content.startsWith("PCEM3:"),
+        isKeyAnnouncement: (content: string) => content.startsWith("PCKA1:"),
         classes: (...values: unknown[]) => values.filter(Boolean).join(" "), useEffect: () => undefined,
         MarkupClasses: { markup: "markup" }, MessageContentClasses: { messageContent: "messageContent" },
         shouldHideSecureEmbedOnlyPlaintext: () => embedOnly,
@@ -119,11 +124,12 @@ function fixture(count: number, implementation = source) {
             return { parsed: text };
         } },
         encryptedAttachmentCacheKey: () => "synthetic-attachment", encryptedAttachmentStatus: () => attachmentStatus,
-        LockIcon: "LockIcon", BaseText: "BaseText", Button: "Button", encryptedStatusText: () => "blocked",
+        LockIcon: "LockIcon", BaseText: "BaseText", Button: "Button", ErrorBoundary: "ErrorBoundary", encryptedStatusText: () => "blocked",
         React: { Fragment: "Fragment", createElement: (type: unknown, props: unknown, ...children: unknown[]) => typeof type === "function"
             ? type({ ...props as object, children }) : { type, props, children } },
     }) as {
         EncryptedMessageAccessory(props: { message: typeof rows[number]; }): unknown;
+        renderSecurePreviewContent(message: typeof rows[number]): unknown;
         enqueueSettledRenderDecryption(request: { channelId: string; messageId: string; generation: number; result: DecryptIncomingResult; apply(): void; }): void;
     };
     function render(index: number) {
@@ -143,6 +149,10 @@ function fixture(count: number, implementation = source) {
     }
     return {
         metrics, render, drain, recoveryCalls, parserCalls,
+        renderPreview(index = 0) {
+            activeRowId = rows[index].id;
+            return runtime.renderSecurePreviewContent(rows[index]);
+        },
         setMessageContext: (context: { id?: string; channelId?: string; authorId?: string; }) => {
             if (context.id !== undefined) {
                 const result = results.get(rows[0].id);
@@ -311,6 +321,84 @@ if (process.argv.includes("--benchmark")) {
         const rendered = JSON.stringify(h.render(0));
         assert.match(rendered, /"className":"markup messageContent pc-secure-message"/u);
         assert.doesNotMatch(rendered, /pc-secure-card/u);
+    });
+
+    test("authenticated forwards render source text separately from the parsed note and body", () => {
+        const h = fixture(1);
+        const authorLabel = "*source* <script>alert(1)</script>";
+        const text = composeSecureForwardText({ authorLabel, content: "**Private forwarded body**", timestampMs: 1_700_000_000_000 });
+        const plaintext = `My **forwarding note**\n\n${text}`;
+        h.setResult({ ...decrypted(plaintext), forward: parseSecureForwardText(plaintext)! });
+        const tree = h.render(0) as { children: Array<{ type: string; props: { className?: string; }; }>; };
+        const rendered = JSON.stringify(tree);
+        assert.match(tree.children[0].props.className!, /pc-secure-forward-note/u);
+        assert.equal(tree.children[1].type, "article", "the forwarding note precedes the copied message card");
+        assert.doesNotMatch(JSON.stringify(tree.children[1]), /forwarding note/u);
+        assert.match(rendered, /pc-secure-forward/u);
+        assert.match(rendered, /Forwarded message/u);
+        assert.match(rendered, /\*source\* <script>alert\(1\)<\/script>/u, "source attribution stays plain React text");
+        assert.match(rendered, /2023-11-14T22:13:20\.000Z/u);
+        assert.deepEqual(h.parserCalls.map(call => call.text), ["**Private forwarded body**", "My **forwarding note**"], "metadata never enters Discord's markdown or mention parser");
+        assert.ok(h.parserCalls.every(call => call.state?.authorId === "synthetic-peer"), "the authenticated forwarding sender keeps the actual Discord author context");
+        assert.doesNotMatch(rendered, /Forwarded copy from|messageSnapshots|messageReference/u);
+        h.render(0);
+        assert.equal(h.metrics.parserCalls, 2, "unchanged forward text reuses parsed body and note");
+    });
+
+    test("forward cards keep file-only attachment loading, retry and integrity checks", () => {
+        const h = fixture(1);
+        const plaintext = composeSecureForwardText({ authorLabel: "Original sender", content: "" });
+        h.setResult({ ...decrypted(plaintext), forward: parseSecureForwardText(plaintext)!, attachmentBundle: { count: 1 } as never });
+        h.setAttachments(1, "loading");
+        const rendered = JSON.stringify(h.render(0));
+        assert.match(rendered, /pc-secure-forward/u);
+        assert.match(rendered, /Original sender/u);
+        assert.match(rendered, /Loading encrypted previews/u);
+        assert.equal(h.metrics.parserCalls, 0, "file-only forwards have no empty parsed message body");
+        h.setAttachments(1, "failed");
+        assert.match(JSON.stringify(h.render(0)), /Retry attachment/u);
+        h.setAttachments(0);
+        assert.match(JSON.stringify(h.render(0)), /incomplete or has conflicting/u);
+    });
+
+    test("optimistic forwards and pin previews use the same guarded forward card", () => {
+        const plaintext = composeSecureForwardText({ authorLabel: "Forwarded author", content: "private copied content" });
+        for (const optimistic of [false, true]) {
+            const h = fixture(1);
+            if (optimistic) h.setOptimistic(plaintext);
+            else h.setResult({ ...decrypted(plaintext), forward: parseSecureForwardText(plaintext)! });
+            const normal = JSON.stringify(h.render(0));
+            const preview = JSON.stringify(h.renderPreview());
+            for (const rendered of [normal, preview]) {
+                assert.match(rendered, /pc-secure-forward/u);
+                assert.match(rendered, /Forwarded author/u);
+                assert.match(rendered, /private copied content/u);
+                assert.doesNotMatch(rendered, /PCEM3:|Forwarded copy from/u);
+            }
+            assert.equal(h.parserCalls.length, 1, "pin and timeline reuse the same parsed text");
+        }
+    });
+
+    test("forward metadata and body disappear when capture protection or authentication blocks content", () => {
+        const plaintext = composeSecureForwardText({ authorLabel: "Private source author", content: "secret copied body", timestampMs: 1_700_000_000_000 });
+        const h = fixture(1);
+        h.setOptimistic(plaintext);
+        h.setResult({ ...decrypted(plaintext), forward: parseSecureForwardText(plaintext)! });
+        h.render(0);
+        for (const protection of ["pending", "failed", "screenshot", "disabled"]) {
+            h.setProtection(protection);
+            for (const rendered of [h.render(0), h.renderPreview()]) {
+                assert.doesNotMatch(JSON.stringify(rendered) ?? "", /pc-secure-forward|Private source author|secret copied body|2023-11-14/u);
+            }
+        }
+        h.setProtection("ready");
+        for (const blocked of [
+            { status: "untrusted_author" }, { status: "invalid_message" }, { status: "replay_detected" },
+            { status: "unavailable", reason: "security_key_locked" },
+        ] satisfies DecryptIncomingResult[]) {
+            h.setResult(blocked);
+            assert.doesNotMatch(JSON.stringify(h.render(0)), /pc-secure-forward|Private source author|secret copied body|2023-11-14/u, "optimistic text cannot override a blocked authenticated outcome");
+        }
     });
 
     test("media-only attachment cards retain loading, retry and integrity failures", () => {

@@ -16,6 +16,7 @@ import {
     isSecureInlineMediaEmbedType,
     type SecureInlineEmbedStatus,
 } from "./embedUrls";
+import { parseSecureForwardText, type SecureForwardMetadata } from "./forwarding";
 import { preserveEncryptedMessageScroll } from "./layoutStability";
 import type { DecryptIncomingResult } from "./native";
 import { isEncryptedMessage } from "./protocol";
@@ -286,6 +287,11 @@ function inviteLinks(urls: string[]): ReturnType<typeof parseCodedLinks> {
     }
 }
 
+function previewText(plaintext: string, forward?: SecureForwardMetadata): string {
+    const forwarded = forward ?? parseSecureForwardText(plaintext);
+    return forwarded ? [forwarded.note ?? "", forwarded.content].join("\n\n") : plaintext;
+}
+
 async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry): Promise<void> {
     const localUserId = UserStore.getCurrentUser()?.id;
     if (!localUserId || !message.author?.id) {
@@ -321,7 +327,8 @@ async function loadEntry(message: Message, key: string, entry: EmbedCacheEntry):
         return;
     }
     entry.stickers = decrypted.stickers ?? [];
-    const urls = !externalLinkPreviewsEnabled || (message.flags & EMBED_SUPPRESSED) !== 0 ? [] : extractSecureEmbedUrls(decrypted.plaintext);
+    const urls = !externalLinkPreviewsEnabled || (message.flags & EMBED_SUPPRESSED) !== 0
+        ? [] : extractSecureEmbedUrls(previewText(decrypted.plaintext, decrypted.forward));
     if (urls.length === 0) {
         finishEntry(message, key, entry);
         return;
@@ -466,7 +473,7 @@ export function invalidateEncryptedMessageEmbeds(message: Message): void {
 
 export async function prefetchEncryptedMessageEmbeds(plaintext: string): Promise<void> {
     if (!externalLinkPreviewsEnabled) return;
-    const extracted = extractSecureEmbedUrls(plaintext);
+    const extracted = extractSecureEmbedUrls(previewText(plaintext));
     const urls = eligibleUnfurlUrls(extracted, inviteLinks(extracted));
     if (urls.length > 0) await Promise.all(urls.map(unfurlUrl));
 }

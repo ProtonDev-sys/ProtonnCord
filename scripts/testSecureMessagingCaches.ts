@@ -14,6 +14,7 @@ import { createSourceFile, isFunctionDeclaration, ModuleKind, ScriptTarget, tran
 
 import type { Message } from "@vencord/discord-types";
 
+import { composeSecureForwardText, parseSecureForwardText } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
 import { discordEditedTimestamp, discordMessageNonce } from "../src/equicordplugins/secureMessaging.desktop/messageMetadata";
 import type {
     AnnouncementReviewResult,
@@ -245,6 +246,7 @@ for (const hasManifest of [false, true]) {
             proxy_url: `https://media.discordapp.net/attachments/300000000000000001/40000000000000000${index}/encrypted.pcaf?ex=1`
         })) });
         let expansions = 0;
+        const forward = { authorLabel: "Alice", timestampMs: null, content: previewUrl, note: "A note" };
         const h = harness({
             decrypt: async () => ({
                 ...decrypted(), detachedTextIndex: 1,
@@ -257,10 +259,13 @@ for (const hasManifest of [false, true]) {
                 expansions++;
                 assert.equal(selection, "text");
                 assert.deepEqual(refreshIds && Array.from(refreshIds), hasManifest ? [value.attachments[1].id] : undefined);
-                return expanded();
+                return { ...expanded(), forward };
             }
         });
-        assert.equal((await h.decrypt.decryptCachedMessage(localUserId, value)).status, "decrypted");
+        const result = await h.decrypt.decryptCachedMessage(localUserId, value);
+        assert.equal(result.status, "decrypted");
+        if (result.status === "decrypted") assert.deepEqual(result.forward, forward);
+        assert.equal(await h.decrypt.decryptCachedMessage(localUserId, value), result, "cached text retains authenticated forward attribution");
         assert.equal(expansions, 1);
     });
 }
@@ -313,6 +318,29 @@ test("prefetch skips invite-only messages and unfurls only external siblings", a
     await h.embeds.prefetchEncryptedMessageEmbeds(`${inviteUrl} ${previewUrl}`);
     assert.equal(h.calls().unfurl, 1);
     assert.equal(h.calls().decrypt, 0);
+});
+
+test("forward previews disclose body and note URLs without fetching the source author label", async () => {
+    const authorUrl = "https://author.example/label";
+    const bodyUrl = "https://body.example/preview";
+    const noteUrl = "https://note.example/preview";
+    const plaintext = `${noteUrl}\n\n${composeSecureForwardText({ authorLabel: authorUrl, content: bodyUrl })}`;
+    const forward = parseSecureForwardText(plaintext);
+    assert.ok(forward);
+    for (const path of ["authenticated metadata", "compatible plaintext", "prefetch"]) {
+        const requested: string[] = [];
+        const h = harness({
+            decrypt: async () => ({ ...decrypted(), plaintext, ...(path === "authenticated metadata" ? { forward } : {}) }),
+            unfurl: async urls => {
+                requested.push(...urls);
+                return { body: { embeds: urls.map(url => ({ type: "link", url })) } };
+            },
+        });
+        if (path === "prefetch") await h.embeds.prefetchEncryptedMessageEmbeds(plaintext);
+        else assert.equal((await render(h, message())).embeds.length, 2, path);
+        assert.deepEqual(requested, [noteUrl, bodyUrl], path);
+        assert.equal(requested.includes(authorUrl), false, path);
+    }
 });
 
 test("invite cards appear while an unrelated external preview is pending", async () => {

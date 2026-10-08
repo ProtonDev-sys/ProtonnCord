@@ -28,6 +28,7 @@ import {
     generateAttachmentBundleMaterial,
     serializeSecurePlaintext,
 } from "../src/equicordplugins/secureMessaging.desktop/attachments";
+import { composeSecureForwardText, parseSecureForwardText } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
 import type { ConversationSnapshot } from "../src/equicordplugins/secureMessaging.desktop/native";
 import { parseEncryptedEnvelope } from "../src/equicordplugins/secureMessaging.desktop/protocol";
 
@@ -1125,8 +1126,9 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     assert.equal(decryptedAttachmentMessage.attachmentBundle?.count, 2);
     assert.deepEqual(decryptedAttachmentMessage.stickers, []);
     const secureSticker = { formatType: 3, id: "749054660769218631", name: "Wave" };
+    const forwardedStickerText = composeSecureForwardText({ authorLabel: "Sticker sender", content: "" });
     const encryptedStickerMessage = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
-        plaintext: serializeSecurePlaintext("", null, [secureSticker]),
+        plaintext: serializeSecurePlaintext(forwardedStickerText, null, [secureSticker]),
         snapshot: aliceDm,
     });
     expectStatus(encryptedStickerMessage, "encrypted", "Alice encrypts a sticker item");
@@ -1138,7 +1140,8 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         discordMessageId: messageId(15),
     });
     expectStatus(decryptedStickerMessage, "decrypted", "Bob authenticates encrypted sticker metadata");
-    assert.equal(decryptedStickerMessage.plaintext, "");
+    assert.equal(decryptedStickerMessage.plaintext, forwardedStickerText);
+    assert.deepEqual(decryptedStickerMessage.forward, parseSecureForwardText(forwardedStickerText));
     assert.equal(decryptedStickerMessage.attachmentBundle, null);
     assert.deepEqual(decryptedStickerMessage.stickers, [secureSticker]);
     const invalidAttachmentUrl = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, {
@@ -1490,7 +1493,12 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         globalThis.fetch = originalFetch;
     }
 
-    const detachedText = `detached encrypted message ${"large body ".repeat(600)}`;
+    const detachedText = `A note\n\n${composeSecureForwardText({
+        authorLabel: "Large *message* sender", content: `detached encrypted message ${"large body ".repeat(600)}`,
+        timestampMs: 1_780_000_000_000,
+    })}`;
+    const detachedForward = parseSecureForwardText(detachedText);
+    assert.ok(detachedForward);
     const detachedTextBytes = new TextEncoder().encode(detachedText);
     const detachedTextMaterial = generateAttachmentBundleMaterial(1);
     const detachedTextCiphertext = await encryptAttachmentBytes({
@@ -1542,6 +1550,7 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     expectStatus(detachedDescriptor, "decrypted", "Bob authenticates the detached large text descriptor");
     assert.equal(detachedDescriptor.plaintext, "");
     assert.equal(detachedDescriptor.detachedTextIndex, 0);
+    assert.equal(detachedDescriptor.forward, undefined, "attribution is unavailable until detached text authenticates");
     try {
         globalThis.fetch = async () => new Response(Buffer.from(detachedTextCiphertext), {
             headers: { "content-length": String(detachedTextCiphertext.byteLength) },
@@ -1549,11 +1558,13 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         const expandedDetachedText = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, detachedTextInput);
         expectStatus(expandedDetachedText, "decrypted", "Bob reconstructs detached large text after attachment authentication");
         assert.equal(expandedDetachedText.plaintext, detachedText);
+        assert.deepEqual(expandedDetachedText.forward, detachedForward);
         assert.deepEqual(expandedDetachedText.attachments, [], "the message text transport is hidden from ordinary attachment UI");
         globalThis.fetch = async () => { throw new Error("Detached text should reuse the authenticated native cache"); };
         const cachedDetachedText = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, detachedTextInput);
         expectStatus(cachedDetachedText, "decrypted", "detached text is reused without downloading its ciphertext twice");
         assert.equal(cachedDetachedText.plaintext, detachedText);
+        assert.deepEqual(cachedDetachedText.forward, detachedForward);
         const blockedDetachedDownload = await native.downloadIncomingAttachment(
             DISCORD_EVENT,
             BOB_ID,
