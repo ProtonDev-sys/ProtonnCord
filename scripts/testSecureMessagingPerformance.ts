@@ -202,7 +202,7 @@ function testSourceBoundaries(): void {
         index.indexOf("function IdentityBlock"),
     );
     assert.equal(
-        connectionSource.match(/invalidateSecureRenderCaches\(\)/g)?.length,
+        connectionSource.match(/invalidateSecureRenderCaches\(sameAccount\)/g)?.length,
         1,
         "an account reconnect invalidates render caches once",
     );

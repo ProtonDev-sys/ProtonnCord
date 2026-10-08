@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { runInThisContext } from "node:vm";
 import { createSourceFile, isFunctionDeclaration, ModuleKind, ScriptTarget, transpileModule } from "typescript";
@@ -30,6 +30,10 @@ const localUserId = "100000000000000001";
 const previewUrl = "https://example.com/preview";
 const sticker = { id: "100000000000000010", name: "Wave", formatType: 1 };
 const rawEmbed = { type: "image", url: previewUrl };
+const cleanupEmbeds: Array<() => void> = [];
+afterEach(() => {
+    for (const cleanup of cleanupEmbeds.splice(0)) cleanup();
+});
 const decrypted = (): Extract<DecryptIncomingResult, { status: "decrypted"; }> => ({
     status: "decrypted",
     plaintext: previewUrl,
@@ -136,6 +140,7 @@ function harness(options: {
     if (options.cachedDecrypt) decryptCache.decryptCachedMessage = options.cachedDecrypt;
     const embeds = load("./embedCache") as EmbedCache;
     if (options.externalPreviews !== false) embeds.setExternalLinkPreviewsEnabled(true);
+    cleanupEmbeds.push(() => embeds.clearEncryptedEmbedCache());
     return {
         embeds,
         decrypt: decryptCache,
@@ -296,6 +301,18 @@ test("authenticated invites use native coded links without a generic unfurl or s
     assert.deepEqual(h.embeds.patchEncryptedMessageCodedLinks(value, ready).codedLinks, [], "revoked preview consent hides cached invites immediately");
     await setImmediate();
     assert.deepEqual(parsed, [inviteUrl]);
+});
+
+test("prefetch skips invite-only messages and unfurls only external siblings", async () => {
+    const h = harness({
+        codedLinks: () => [inviteLink],
+        unfurl: async urls => { assert.deepEqual(urls, [previewUrl]); return { body: { embeds: [rawEmbed] } }; },
+    });
+    await h.embeds.prefetchEncryptedMessageEmbeds(inviteUrl);
+    assert.equal(h.calls().unfurl, 0);
+    await h.embeds.prefetchEncryptedMessageEmbeds(`${inviteUrl} ${previewUrl}`);
+    assert.equal(h.calls().unfurl, 1);
+    assert.equal(h.calls().decrypt, 0);
 });
 
 test("invite cards appear while an unrelated external preview is pending", async () => {
@@ -507,6 +524,226 @@ test("encrypted previews keep URL order when the first URL finishes last", async
     assert.deepEqual(h.embeds.patchEncryptedMessageEmbeds(value, noop).embeds.map(embed => embed.url), [previewUrl, secondUrl]);
 });
 
+for (const failure of ["empty", "error"] as const) {
+    test(`expired successful previews remain visible during a ${failure} refresh`, async t => {
+        t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+        const pending = Promise.withResolvers<object>();
+        let refresh = false;
+        const h = harness({ unfurl: () => refresh ? pending.promise : Promise.resolve({ body: { embeds: [rawEmbed] } }) });
+        const value = message();
+        assert.equal((await render(h, value)).embeds.length, 1);
+        refresh = true;
+        t.mock.timers.tick(30 * 60 * 1_000 + 1);
+        assert.equal(h.embeds.patchEncryptedMessageEmbeds(value, noop).embeds[0]?.url, previewUrl);
+        assert.equal(h.embeds.encryptedMessageInlineEmbedStatus(value), "present");
+        await setImmediate();
+        assert.equal(h.calls().unfurl, 2);
+        if (failure === "empty") pending.resolve({ body: { embeds: [] } });
+        else pending.reject(new Error("temporary preview failure"));
+        await setImmediate();
+        assert.equal(h.embeds.patchEncryptedMessageEmbeds(value, noop).embeds[0]?.url, previewUrl);
+        assert.equal(h.embeds.encryptedMessageInlineEmbedStatus(value), "present");
+    });
+}
+
+test("last successful URL metadata survives message invalidation, eviction and reconnect clearing", async t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+    let empty = false;
+    const h = harness({ unfurl: async () => ({ body: { embeds: empty ? [] : [rawEmbed] } }) });
+    const value = message();
+    assert.equal((await render(h, value)).embeds.length, 1);
+    h.embeds.invalidateEncryptedMessageEmbeds(value);
+    assert.equal((await render(h, value)).embeds[0]?.url, previewUrl);
+    assert.equal(h.calls().unfurl, 1, "message invalidation reuses shared URL metadata");
+    for (let index = 0; index < 256; index++)
+        await render(h, message({ id: `200000000000001${index.toString().padStart(3, "0")}` }));
+    assert.equal((await render(h, value)).embeds[0]?.url, previewUrl);
+    assert.equal(h.calls().unfurl, 1, "message LRU eviction does not force another URL request");
+    const decrypts = h.calls().decrypt;
+    empty = true;
+    t.mock.timers.tick(30 * 60 * 1_000 + 1);
+    h.embeds.clearEncryptedEmbedCache(true);
+    assert.equal((await render(h, value)).embeds[0]?.url, previewUrl,
+        "an empty revalidation retains raw metadata after an authenticated cache rebuild");
+    assert.equal(h.calls().decrypt, decrypts);
+    h.embeds.clearEncryptedEmbedCache();
+    assert.deepEqual((await render(h, value)).embeds, [], "a full security clear discards the last successful preview");
+});
+
+test("reconnect cancellation cannot make expired raw metadata fresh or overwrite replacement work", async t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+    const oldRefresh = Promise.withResolvers<object>();
+    const replacement = Promise.withResolvers<object>();
+    let requests = 0;
+    const h = harness({ unfurl: () => {
+        requests++;
+        if (requests === 1) return Promise.resolve({ body: { embeds: [rawEmbed] } });
+        return requests === 2 ? oldRefresh.promise : replacement.promise;
+    } });
+    const value = message();
+    await render(h, value);
+    t.mock.timers.tick(30 * 60 * 1_000 + 1);
+    const cancelled = h.embeds.prefetchEncryptedMessageEmbeds(previewUrl);
+    await setImmediate();
+    h.embeds.clearEncryptedEmbedCache(true);
+    const fresh = h.embeds.prefetchEncryptedMessageEmbeds(previewUrl);
+    await setImmediate();
+    assert.equal(requests, 3, "preserved expired metadata still needs a request in the new generation");
+    await cancelled;
+    replacement.resolve({ body: { embeds: [{ ...rawEmbed, title: "Fresh replacement" }] } });
+    await fresh;
+    oldRefresh.resolve({ body: { embeds: [{ ...rawEmbed, title: "Late cancelled replacement" }] } });
+    await setImmediate();
+    assert.equal(Reflect.get((await render(h, value)).embeds[0], "title"), "Fresh replacement");
+    t.mock.timers.tick(30_001);
+    await render(h, value);
+    assert.equal(requests, 3, "cancelled completion cannot shorten the replacement's successful TTL");
+});
+
+test("partial previews retry missing URLs after 30 seconds while keeping successful URLs and order", async t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+    const missingUrl = "https://example.com/missing";
+    let recovered = false;
+    const h = harness({
+        decrypt: async () => ({ ...decrypted(), plaintext: `${missingUrl} ${previewUrl}`, stickers: [] }),
+        unfurl: async urls => ({ body: { embeds: urls[0] === missingUrl && !recovered ? [] : [{ type: "image", url: urls[0] }] } }),
+    });
+    const value = message();
+    assert.deepEqual((await render(h, value)).embeds.map(embed => embed.url), [previewUrl]);
+    assert.equal(h.calls().unfurl, 5);
+    recovered = true;
+    t.mock.timers.tick(30_001);
+    assert.deepEqual(h.embeds.patchEncryptedMessageEmbeds(value, noop).embeds.map(embed => embed.url), [previewUrl]);
+    await setImmediate();
+    assert.deepEqual(h.embeds.patchEncryptedMessageEmbeds(value, noop).embeds.map(embed => embed.url), [missingUrl, previewUrl]);
+    assert.equal(h.calls().unfurl, 6, "only the failed URL is requested again");
+});
+
+test("four stalled unfurls release queue permits at their deadline and discard late responses", async t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+    const stalled = Array.from({ length: 4 }, (_, index) => `https://example.com/stalled/${index}`);
+    const pending = Promise.withResolvers<object>();
+    let plaintext = previewUrl;
+    let conversions = 0;
+    const h = harness({
+        decrypt: async () => ({ ...decrypted(), plaintext, stickers: [] }),
+        unfurl: urls => stalled.includes(urls[0]) ? pending.promise : Promise.resolve({ body: { embeds: [rawEmbed] } }),
+        convert: embed => { conversions++; return embed; },
+    });
+    const warming = h.embeds.prefetchEncryptedMessageEmbeds(stalled.join(" "));
+    const value = message();
+    h.embeds.patchEncryptedMessageEmbeds(value, noop);
+    await setImmediate();
+    assert.equal(h.calls().unfurl, 4);
+    t.mock.timers.tick(9_999);
+    await setImmediate();
+    assert.equal(h.calls().unfurl, 4);
+    t.mock.timers.tick(1);
+    await warming;
+    await setImmediate();
+    assert.equal(h.calls().unfurl, 5, "deadline failures do not restart the stalled network requests");
+    assert.equal(h.embeds.patchEncryptedMessageEmbeds(value, noop).embeds[0]?.url, previewUrl);
+    pending.resolve({ body: { embeds: [{ type: "image", url: stalled[0] }] } });
+    await setImmediate();
+    plaintext = stalled[0];
+    assert.deepEqual((await render(h, message({ id: "200000000000000009" }))).embeds, []);
+    assert.equal(conversions, 1, "late results cannot populate the preview cache");
+    assert.equal(h.calls().unfurl, 5);
+});
+
+test("clearing cancels active deadlines and queued URL disclosure without waiting for stalled REST", async t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+    const pending = Promise.withResolvers<object>();
+    const urls = Array.from({ length: 5 }, (_, index) => `https://example.com/cancel/${index}`);
+    const h = harness({ unfurl: request => request[0] === previewUrl ? Promise.resolve({ body: { embeds: [rawEmbed] } }) : pending.promise });
+    const warming = h.embeds.prefetchEncryptedMessageEmbeds(urls.join(" "));
+    await setImmediate();
+    assert.equal(h.calls().unfurl, 4);
+    h.embeds.clearEncryptedEmbedCache();
+    await warming;
+    await h.embeds.prefetchEncryptedMessageEmbeds(previewUrl);
+    assert.equal(h.calls().unfurl, 5, "fresh work immediately gets the released permits");
+    t.mock.timers.tick(60_000);
+    await setImmediate();
+    assert.equal(h.calls().unfurl, 5, "cancelled deadlines cannot trigger retries or disclose the queued URL");
+    pending.resolve({ body: { embeds: [rawEmbed] } });
+});
+
+for (const recover of [false, true]) {
+    test(`mounted empty previews ${recover ? "recover when the provider becomes ready" : "get exactly one automatic retry"} after 30 seconds`, async t => {
+        t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+        let recovered = false;
+        const h = harness({
+            decrypt: async () => ({ ...decrypted(), stickers: [] }),
+            unfurl: async () => ({ body: { embeds: recovered ? [rawEmbed] : [] } }),
+        });
+        const value = message();
+        let displayed: Message;
+        const onReady = () => { displayed = h.embeds.patchEncryptedMessageEmbeds(value, onReady); };
+        displayed = h.embeds.patchEncryptedMessageEmbeds(value, onReady);
+        await setImmediate();
+        assert.equal(h.calls().unfurl, 4);
+        t.mock.timers.tick(29_999);
+        await setImmediate();
+        assert.equal(h.calls().unfurl, 4);
+        recovered = recover;
+        t.mock.timers.tick(1);
+        await setImmediate();
+        const expectedCalls = recover ? 5 : 8;
+        assert.equal(h.calls().unfurl, expectedCalls, "the saved mounted callback starts one shared retry");
+        assert.equal(displayed.embeds.length, recover ? 1 : 0);
+        t.mock.timers.tick(120_000);
+        await setImmediate();
+        assert.equal(h.calls().unfurl, expectedCalls, "automatic empty-preview retries remain bounded");
+    });
+}
+
+test("clearing removes the scheduled empty-preview retry", async t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+    const h = harness({
+        decrypt: async () => ({ ...decrypted(), stickers: [] }),
+        unfurl: async () => ({ body: { embeds: [] } }),
+    });
+    const value = message();
+    let notifications = 0;
+    const onReady = () => { notifications++; h.embeds.patchEncryptedMessageEmbeds(value, onReady); };
+    h.embeds.patchEncryptedMessageEmbeds(value, onReady);
+    await setImmediate();
+    assert.equal(notifications, 1);
+    h.embeds.clearEncryptedEmbedCache();
+    t.mock.timers.tick(120_000);
+    await setImmediate();
+    assert.equal(notifications, 1);
+    assert.equal(h.calls().unfurl, 4);
+});
+
+for (const change of ["consent", "account", "suppression", "edit"] as const) {
+    test(`${change} changes prevent a stale successful refresh from publishing`, async t => {
+        t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+        const pending = Promise.withResolvers<object>();
+        let refresh = false;
+        let conversions = 0;
+        const h = harness({
+            decrypt: async () => ({ ...decrypted(), stickers: [] }),
+            unfurl: () => refresh ? pending.promise : Promise.resolve({ body: { embeds: [rawEmbed] } }),
+            convert: embed => { conversions++; return embed; },
+        });
+        const value = message();
+        assert.equal((await render(h, value)).embeds.length, 1);
+        refresh = true;
+        t.mock.timers.tick(30 * 60 * 1_000 + 1);
+        assert.equal(h.embeds.patchEncryptedMessageEmbeds(value, noop).embeds.length, 1);
+        await setImmediate();
+        if (change === "consent") h.embeds.setExternalLinkPreviewsEnabled(false);
+        if (change === "account") h.switchAccount();
+        if (change === "suppression") value.flags = 4 as Message["flags"];
+        if (change === "edit") value.nonce = "200000000000000003";
+        pending.resolve({ body: { embeds: [{ ...rawEmbed, title: "Late replacement" }] } });
+        await setImmediate();
+        assert.equal(conversions, 1, "the old authenticated message cannot publish a replacement");
+    });
+}
+
 for (const change of ["clear", "account", "suppression", "edit", "retry"] as const) {
     test(`${change} invalidation prevents a late sibling preview from publishing`, async () => {
         const slow = Promise.withResolvers<object>();
@@ -571,15 +808,48 @@ test("concurrent preview consumers share decryption and unfurl work", async () =
     assert.equal(h.embeds.patchEncryptedMessageEmbeds(value, noop).embeds.length, 1);
 });
 
+test("a mounted preview denied by 256 pending entries retries when capacity becomes available", async () => {
+    const pending = Promise.withResolvers<DecryptIncomingResult>();
+    const first = Promise.withResolvers<DecryptIncomingResult>();
+    let ready = false;
+    let decrypts = 0;
+    const h = harness({ cachedDecrypt: () => {
+        decrypts++;
+        if (decrypts === 1) return first.promise;
+        return ready ? Promise.resolve({ ...decrypted(), stickers: [] }) : pending.promise;
+    } });
+    const values = Array.from({ length: 257 }, (_, index) => message({ id: `200000000000001${index.toString().padStart(3, "0")}` }));
+    for (const value of values.slice(0, 256)) h.embeds.patchEncryptedMessageEmbeds(value, noop);
+    const value = values[256];
+    let displayed: Message;
+    const onReady = () => { displayed = h.embeds.patchEncryptedMessageEmbeds(value, onReady); };
+    displayed = h.embeds.patchEncryptedMessageEmbeds(value, onReady);
+    assert.equal(displayed.embeds.length, 0);
+    assert.equal(decrypts, 256, "capacity limits do not start untracked decryption work");
+    ready = true;
+    pending.resolve({ ...decrypted(), stickers: [] });
+    await setImmediate();
+    assert.equal(decrypts, 257, "any completion wakes the denied renderer even while the first entry is stalled");
+    assert.equal(displayed.embeds[0]?.url, previewUrl);
+    assert.equal(h.calls().unfurl, 1, "admitted consumers reuse completed URL metadata");
+    first.resolve({ ...decrypted(), stickers: [] });
+    await setImmediate();
+});
+
 test("repeated embed and sticker renders retain one completion callback per owner", async () => {
     const source = readFileSync("src/equicordplugins/secureMessaging.desktop/index.tsx", "utf8");
     const parsed = createSourceFile("index.tsx", source, ScriptTarget.ES2022, true);
     const helper = parsed.statements.find(statement => isFunctionDeclaration(statement) && statement.name?.text === "encryptedRenderCallback");
     assert.ok(helper);
     const compiled = transpileModule(helper.getText(parsed), { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText;
-    const getCallback = runInThisContext(`(() => { const encryptedRenderCallbacks = new WeakMap(); ${compiled}; return encryptedRenderCallback; })()`) as (owner: { forceUpdate(): void; }) => () => void;
-    assert.match(source, /patchEncryptedMessageEmbeds\(message, encryptedRenderCallback\(owner\), ready\)/);
-    assert.match(source, /patchEncryptedMessageStickers\(message, encryptedRenderCallback\(owner\), ready\)/);
+    const createCallback = runInThisContext(`(notifySecureMessageRow, WeakRef) => { const encryptedRenderCallbacks = new WeakMap(); ${compiled}; return encryptedRenderCallback; }`) as (
+        notify: (messageId: string) => void,
+        reference: unknown,
+    ) => (owner: { forceUpdate(): void; }, messageId: string) => () => void;
+    const rows: string[] = [];
+    const getCallback = createCallback(messageId => rows.push(messageId), WeakRef);
+    assert.match(source, /patchEncryptedMessageEmbeds\(message, encryptedRenderCallback\(owner, message\.id\), ready\)/);
+    assert.match(source, /patchEncryptedMessageStickers\(message, encryptedRenderCallback\(owner, message\.id\), ready\)/);
     const pending = Promise.withResolvers<DecryptIncomingResult>();
     const h = harness({ cachedDecrypt: () => pending.promise });
     const value = message();
@@ -587,14 +857,23 @@ test("repeated embed and sticker renders retain one completion callback per owne
     const owner = { forceUpdate() { notifications++; } };
     const otherOwner = { forceUpdate() { notifications++; } };
     for (let render = 0; render < 100; render++) {
-        h.embeds.patchEncryptedMessageEmbeds(value, getCallback(owner));
-        h.embeds.patchEncryptedMessageStickers(value, getCallback(owner));
+        h.embeds.patchEncryptedMessageEmbeds(value, getCallback(owner, value.id));
+        h.embeds.patchEncryptedMessageStickers(value, getCallback(owner, value.id));
     }
-    h.embeds.patchEncryptedMessageEmbeds(value, getCallback(otherOwner));
+    h.embeds.patchEncryptedMessageEmbeds(value, getCallback(otherOwner, value.id));
     pending.resolve({ ...decrypted(), plaintext: "Plain authenticated text", stickers: [] });
     await setImmediate();
     assert.equal(notifications, 2, "notify each mounted renderer once, even after repeated renders");
     assert.equal(h.calls().unfurl, 0);
+    assert.deepEqual(rows, [value.id, value.id], "embed completion also refreshes the plaintext row");
+    const callback = getCallback(owner, value.id);
+    assert.equal(getCallback(owner, "reused-row"), callback, "virtualized row reuse retains one owner callback");
+    callback();
+    assert.equal(rows.at(-1), "reused-row", "the callback refreshes its owner's latest message");
+    const disposedCallback = createCallback(messageId => rows.push(messageId), class { deref() { return undefined; } })(owner, value.id);
+    disposedCallback();
+    assert.equal(notifications, 3, "disposed weak references cannot force another render");
+    assert.equal(rows.length, 3);
 });
 
 for (const failure of [

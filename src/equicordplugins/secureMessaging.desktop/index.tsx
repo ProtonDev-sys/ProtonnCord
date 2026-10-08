@@ -32,7 +32,7 @@ import { makeLazy, proxyLazy } from "@utils/lazy";
 import { classes } from "@utils/misc";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/discord-types";
-import { CloudUploadPlatform } from "@vencord/discord-types/enums";
+import { CloudUploadPlatform, MessageFlags } from "@vencord/discord-types/enums";
 import { findByPropsLazy, findComponentByCodeLazy, findCssClassesLazy } from "@webpack";
 import {
     ChannelStore,
@@ -240,7 +240,7 @@ const screenCaptureProtectionListeners = new Set<(status: ScreenCaptureProtectio
 /** Discord message rows showing an encrypted envelope, keyed by message ID, refreshed when its decryption settles. */
 const secureMessageRowListeners = new Map<string, Set<() => void>>();
 const pendingEncryptedRenderOwners = new Set<{ forceUpdate(): void; }>();
-const encryptedRenderCallbacks = new WeakMap<{ forceUpdate(): void; }, () => void>();
+const encryptedRenderCallbacks = new WeakMap<{ forceUpdate(): void; }, { callback: () => void; messageId: string; }>();
 let settledRenderDecryptions: SettledRenderDecryption[] = [];
 let renderDecryptBatchTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -309,13 +309,20 @@ function decryptCachedMessageForRender(
     );
 }
 
-function encryptedRenderCallback(owner: { forceUpdate(): void; }): () => void {
-    let callback = encryptedRenderCallbacks.get(owner);
-    if (!callback) {
-        callback = () => owner.forceUpdate();
-        encryptedRenderCallbacks.set(owner, callback);
+function encryptedRenderCallback(owner: { forceUpdate(): void; }, messageId: string): () => void {
+    let entry = encryptedRenderCallbacks.get(owner);
+    if (!entry) {
+        const reference = new WeakRef(owner);
+        entry = { callback: () => {
+            const mounted = reference.deref();
+            if (!mounted) return;
+            mounted.forceUpdate();
+            notifySecureMessageRow(entry!.messageId);
+        }, messageId };
+        encryptedRenderCallbacks.set(owner, entry);
     }
-    return callback;
+    entry.messageId = messageId;
+    return entry.callback;
 }
 
 async function saveEncryptedAttachment(url: string): Promise<void> {
@@ -378,9 +385,9 @@ function useScreenCaptureProtectionStatus(): ScreenCaptureProtectionStatus {
     return status;
 }
 
-function invalidateSecureRenderCaches(): void {
+function invalidateSecureRenderCaches(preserveUnfurls = false): void {
     clearEncryptedAttachmentCache();
-    clearEncryptedEmbedCache();
+    clearEncryptedEmbedCache(preserveUnfurls);
     clearEncryptedMessageDecryptCache();
     MessageStore.emitChange();
 }
@@ -733,10 +740,15 @@ function prefetchReceivedEncryptedMessage(dispatched: Message | undefined): void
     if (!message?.author?.id || message.state === "SENDING" || !isEncryptedMessage(message.content)) return;
     const generation = secureOperationGeneration;
     const key = decryptCacheKey(localUserId, message);
-    void prefetchCachedMessage(localUserId, message)?.then(() => {
+    void prefetchCachedMessage(localUserId, message)?.then(result => {
+        const current = MessageStore.getMessage(channelId, message.id);
         if (secureOperationIsCurrent(generation, localUserId) && screenCaptureProtectionStatus === "ready" &&
-            key === decryptCacheKey(localUserId, message) && chatGateReason({ channelId }) === null)
+            current && key === decryptCacheKey(localUserId, current) && channelId === SelectedChannelStore.getChannelId() &&
+            chatGateReason({ channelId }) === null) {
+            if (result.status === "decrypted" && (current.flags & MessageFlags.SUPPRESS_EMBEDS) === 0)
+                void prefetchEncryptedMessageEmbeds(result.plaintext);
             notifySecureMessageRow(message.id);
+        }
     });
 }
 
@@ -2055,6 +2067,7 @@ async function sendKeyAnnouncement(channelId: string, localUserId: string): Prom
 
 async function handleSecureConnectionOpen(): Promise<void> {
     const localUserId = UserStore.getCurrentUser()?.id ?? null;
+    const sameAccount = localUserId !== null && secureRuntimeUserId === localUserId;
     const accountChanged = secureRuntimeUserId !== null && secureRuntimeUserId !== localUserId;
     secureRuntimeUserId = localUserId;
     if (accountChanged) closeChatUnlockPrompt();
@@ -2065,13 +2078,15 @@ async function handleSecureConnectionOpen(): Promise<void> {
         revokePreparedSecureOperations();
         activeMessageLengthBypassKey = null;
         cancelSuppressedChatLoads();
+    }
+    invalidateSecureRenderCaches(sameAccount);
+    if (accountChanged) {
         try {
             await Native.lockSecurityKeyVault();
         } catch {
             // The native process still clears its in-memory key on process exit; renderer state fails closed.
         }
     }
-    invalidateSecureRenderCaches();
     await refreshChatAccessState(localUserId);
 }
 
@@ -3591,19 +3606,19 @@ export default definePlugin({
     patchEncryptedEmbeds(message: Message, owner: { forceUpdate(): void; }) {
         const ready = screenCaptureProtectionStatus === "ready";
         if (screenCaptureProtectionStatus === "pending") pendingEncryptedRenderOwners.add(owner);
-        return patchEncryptedMessageEmbeds(message, encryptedRenderCallback(owner), ready);
+        return patchEncryptedMessageEmbeds(message, encryptedRenderCallback(owner, message.id), ready);
     },
 
     patchEncryptedCodedLinks(message: Message, owner: { forceUpdate(): void; }) {
         const ready = screenCaptureProtectionStatus === "ready";
         if (screenCaptureProtectionStatus === "pending") pendingEncryptedRenderOwners.add(owner);
-        return patchEncryptedMessageCodedLinks(message, encryptedRenderCallback(owner), ready);
+        return patchEncryptedMessageCodedLinks(message, encryptedRenderCallback(owner, message.id), ready);
     },
 
     patchEncryptedStickers(message: Message, owner: { forceUpdate(): void; }) {
         const ready = screenCaptureProtectionStatus === "ready";
         if (screenCaptureProtectionStatus === "pending") pendingEncryptedRenderOwners.add(owner);
-        return patchEncryptedMessageStickers(message, encryptedRenderCallback(owner), ready);
+        return patchEncryptedMessageStickers(message, encryptedRenderCallback(owner, message.id), ready);
     },
 
     useSecureReplyPreview,
