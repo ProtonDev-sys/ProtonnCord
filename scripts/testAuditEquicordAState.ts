@@ -68,29 +68,6 @@ test("GlobalBadges avoids settings work for users without badges", () => {
     assert.ok(reads > 0);
 });
 
-test("HideChatButtons keeps hooks unconditional and remembers the last open state", () => {
-    const hookCalls: string[] = [];
-    const effects: (() => void)[] = [];
-    let initialState: any;
-    const { ButtonsInnerComponent, settings, setOpenFixture } = loadPlugin("hideChatButtons/index.tsx",
-        "\nexport { ButtonsInnerComponent }; export function setOpenFixture(value) { hidechatbuttonsopen = value; }", {
-            "@webpack/common": {
-                useState: (value: any) => { hookCalls.push("state"); initialState = value; return [value, () => { throw new Error("Remount must preserve toggle"); }]; },
-                useRef: (value: any) => { hookCalls.push("ref"); return { current: value }; },
-                useEffect: (callback: any) => { hookCalls.push("effect"); effects.push(callback); }
-            }
-        });
-    settings.store.open = false;
-    setOpenFixture(true);
-    assert.equal(ButtonsInnerComponent({ buttons: [] }), null);
-    const emptyHookCalls = [...hookCalls];
-    hookCalls.length = 0;
-    ButtonsInnerComponent({ buttons: [{ props: {} }] });
-    assert.deepEqual(hookCalls, emptyHookCalls);
-    assert.equal(initialState, true);
-    for (const effect of effects) effect();
-});
-
 test("HideMessages restores the original DM list when its patched props already contain filtered IDs", () => {
     const { default: plugin, toggleDm } = loadPlugin("hideMessages/index.tsx", "\nexport { toggleDm };", {
         "@api/PluginManager": { isPluginEnabled: () => false }

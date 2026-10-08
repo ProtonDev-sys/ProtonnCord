@@ -256,14 +256,22 @@ test("Synced lyrics retain fractional times, embedded brackets, repeated timesta
 test("MiddleClickTweaks keeps paste protection when link blocking is set to none", () => {
     const listeners = new Map<string, Function>();
     const { default: plugin, settings } = load("middleClickTweaks/index.ts", "", {
-        "@utils/index": { EquicordDevs: {} }
+        "@utils/index": { Devs: {}, EquicordDevs: {} }
     }, {
         document: { addEventListener: (name: string, fn: Function) => listeners.set(name, fn), removeEventListener: (name: string) => listeners.delete(name) }
     });
     plugin.start();
     settings.store.openScope = "none";
     settings.def.openScope.onChange?.("none");
-    listeners.get("mouseup")?.({ button: 1 });
+    let nativePasteBlocked = false;
+    listeners.get("mouseup")?.({ button: 1, preventDefault() { nativePasteBlocked = true; } });
+    assert.equal(nativePasteBlocked, true, "the native selection paste is canceled as well as Discord editor pastes");
+    assert.equal(plugin.isPastingDisabled(false), true);
+    settings.store.pasteScope = "focus";
+    nativePasteBlocked = false;
+    listeners.get("mouseup")?.({ button: 1, preventDefault() { nativePasteBlocked = true; } });
+    assert.equal(nativePasteBlocked, false, "the focus-only setting still allows native paste inside focused fields");
+    assert.equal(plugin.isPastingDisabled(true), false);
     assert.equal(plugin.isPastingDisabled(false), true);
     plugin.stop();
     assert.equal(listeners.size, 0);
