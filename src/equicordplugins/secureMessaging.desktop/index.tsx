@@ -3179,7 +3179,7 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
 
     const trusted = review.status === "trusted";
     return (
-        <div className={`pc-secure-card ${review.status === "key_changed" ? "pc-secure-card-danger" : "pc-secure-card-warning"}`}>
+        <div className={classes("pc-secure-card", review.status === "key_changed" ? "pc-secure-card-danger" : !trusted && "pc-secure-card-warning")}>
             <div className="pc-secure-card-header">
                 🔑 {trusted ? "Verified Secure Messaging key" : review.status === "key_changed" ? "Encryption key changed" : "Encryption key needs verification"}
             </div>
