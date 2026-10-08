@@ -144,7 +144,6 @@ function loadPluginModal() {
         },
         "./settingUpdates": scheduler,
         "./shared": {
-            getPluginSource: () => ({ label: "Vencord", title: "Vencord plugin" }),
             restartAfterSaving() {},
         },
     };

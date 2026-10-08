@@ -5,19 +5,6 @@
     min-width: 0;
 }
 
-.vc-plugin-modal-source {
-    flex-shrink: 0;
-    padding: 2px 8px;
-    border: 1px solid var(--border-normal, var(--border-subtle));
-    border-radius: 999px;
-    color: var(--text-muted);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    line-height: 14px;
-    text-transform: uppercase;
-}
-
 .vc-plugin-modal-info {
     display: flex;
     flex-direction: column;

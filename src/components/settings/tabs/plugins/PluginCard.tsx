@@ -16,15 +16,14 @@ import { classNameFactory } from "@utils/css";
 import { React } from "@webpack/common";
 import type { MouseEvent } from "react";
 
-import Plugins, { PluginManifest, PluginMeta } from "~plugins";
+import Plugins, { PluginManifest } from "~plugins";
 
 import { togglePlugin } from "./pluginToggle";
-import { getPluginSource } from "./shared";
 
 const cl = classNameFactory("vc-plugin-card-");
 
 interface PluginCardProps extends React.HTMLProps<HTMLDivElement> {
-    plugin: Pick<PluginManifestEntry, "name" | "description" | "isModified">;
+    plugin: Pick<PluginManifestEntry, "name" | "description">;
     disabled?: boolean;
     enabled?: boolean;
     hasVisibleSettings?: boolean;
@@ -42,7 +41,6 @@ const stopPropagation = (event: MouseEvent) => event.stopPropagation();
 export function PluginCard({ plugin, disabled, enabled, hasVisibleSettings, onRestartNeeded, onMouseEnter, onMouseLeave, isNew, isFavorite, requiredBy }: PluginCardProps) {
     const { name } = plugin;
     const titleId = React.useId();
-    const source = getPluginSource(PluginMeta[name], plugin.isModified);
     const showCog = hasVisibleSettings ?? PluginManifest[name]?.hasVisibleSettings ?? hasAnyVisibleSettings(Plugins[name]);
     const isEnabled = enabled ?? isPluginEnabled(name);
 
@@ -83,14 +81,11 @@ export function PluginCard({ plugin, disabled, enabled, hasVisibleSettings, onRe
 
             <p className={cl("description")} title={plugin.description}>{plugin.description}</p>
 
-            {(source || disabled) && (
+            {disabled && (
                 <div className={cl("footer")}>
-                    {source && <span className={cl("source")} title={source.title}>{source.label}</span>}
-                    {disabled && (
-                        <span className={cl("required")} title={requiredBy?.join(", ")}>
-                            {requiredBy?.length ? `Required by ${requiredBy.join(", ")}` : "Required"}
-                        </span>
-                    )}
+                    <span className={cl("required")} title={requiredBy?.join(", ")}>
+                        {requiredBy?.length ? `Required by ${requiredBy.join(", ")}` : "Required"}
+                    </span>
                 </div>
             )}
         </div>

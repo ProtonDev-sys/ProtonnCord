@@ -58,7 +58,7 @@ test("favorite ordering and enable filters update while unrelated settings reuse
     assert.deepEqual(names(catalog.read(all, null, 36)), ["Bravo", "Alpha", "Charlie"]);
 });
 
-test("search preserves names, acronyms, descriptions, terms, tag intersections, sources and API visibility", () => {
+test("search preserves names, acronyms, descriptions, terms, tag intersections, user plugins and API visibility", () => {
     const f = fixture([
         { name: "BetterFolders", description: "Organize servers", tags: ["Utility", "Appearance"], searchTerms: ["Collections"] },
         { name: "UserThing", tags: ["Utility"] }, { name: "ForkThing" }, { name: "BridgeAPI" }, { name: "Hidden", hidden: true }
@@ -72,8 +72,7 @@ test("search preserves names, acronyms, descriptions, terms, tag intersections, 
     }
     assert.deepEqual(names(catalog.read({ ...all, tags: ["Utility", "Appearance"] }, null, 36)), ["BetterFolders"]);
     for (const [status, expected] of [
-        [SearchStatus.USER_PLUGINS, ["UserThing"]], [SearchStatus.EQUICORD, ["ForkThing"]],
-        [SearchStatus.VENCORD, ["BetterFolders"]], [SearchStatus.API_PLUGINS, ["BridgeAPI"]],
+        [SearchStatus.USER_PLUGINS, ["UserThing"]], [SearchStatus.API_PLUGINS, ["BridgeAPI"]],
         [SearchStatus.NEW, ["ForkThing"]]
     ] as const) assert.deepEqual(names(catalog.read({ ...all, status }, new Set(["ForkThing"]), 36)), expected);
 });
