@@ -269,9 +269,7 @@ export default function PluginSettings() {
         [SearchStatus.FAVORITES, "Favorites"],
         ...newPluginsSet ? [[SearchStatus.NEW, "New"] as [SearchStatus, string]] : [],
     ];
-    const sourceChips: [SearchStatus, string][] = [
-        [SearchStatus.EQUICORD, "Protonn Cord"],
-        [SearchStatus.VENCORD, "Vencord"],
+    const additionalChips: [SearchStatus, string][] = [
         ...hasUserPlugins ? [[SearchStatus.USER_PLUGINS, "User plugins"] as [SearchStatus, string]] : [],
         [SearchStatus.API_PLUGINS, "APIs"],
     ];
@@ -296,7 +294,7 @@ export default function PluginSettings() {
                             <Chip key={status} active={filter.status === status} onClick={() => setStatus(status)}>{label}</Chip>
                         ))}
                         <span className={cl("chip-separator")} aria-hidden="true" />
-                        {sourceChips.map(([status, label]) => (
+                        {additionalChips.map(([status, label]) => (
                             <Chip key={status} active={filter.status === status} onClick={() => setStatus(status)}>{label}</Chip>
                         ))}
                         <span className={cl("chip-separator")} aria-hidden="true" />
