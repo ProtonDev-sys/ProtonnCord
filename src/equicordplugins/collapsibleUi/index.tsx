@@ -413,12 +413,13 @@ const ToolbarButtons = ErrorBoundary.wrap(() => {
     );
 }, { noop: true });
 
-const CollapsedMenuButton = ErrorBoundary.wrap(() => (
+const CollapsedMenuButton = ErrorBoundary.wrap(({ expandedColor }: { expandedColor: boolean; }) => (
     <Clickable
         className={cl("restore-button")}
         role="button"
         tabIndex={0}
         aria-label="Collapsible UI"
+        style={expandedColor ? { color: "#c32a32" } : undefined}
         onClick={openToolbarMenu}
         onContextMenu={openToolbarMenu}
     >
@@ -427,14 +428,14 @@ const CollapsedMenuButton = ErrorBoundary.wrap(() => (
 ), { noop: true });
 
 const ChatButtonsRow = ErrorBoundary.wrap(({ buttons }: { buttons: ReactNode; }) => {
-    const chatButtonsCollapsed = usePanelCollapsed("chatButtons");
+    const { chatButtonsCollapsed, chatButtonsColor } = settings.use(["chatButtonsCollapsed", "chatButtonsColor"]);
 
     return (
         <div className={classes(cl("chat-buttons"), chatButtonsCollapsed && cl("chat-buttons-collapsed"))}>
             <div className={cl("chat-buttons-items")}>
                 {buttons}
             </div>
-            <CollapsedMenuButton />
+            <CollapsedMenuButton expandedColor={chatButtonsColor && !chatButtonsCollapsed} />
         </div>
     );
 }, { noop: true });
@@ -444,8 +445,8 @@ export default definePlugin({
     description: "Native collapsible channel, member, chat button, and user area surfaces.",
     tags: ["Appearance", "Customisation", "Chat", "Servers"],
     dependencies: ["HeaderBarAPI", "ChatInputButtonAPI", "SurfaceClassesAPI"],
-    authors: [EquicordDevs.benjii],
-    searchTerms: ["ui", "sidebar", "collapsible"],
+    authors: [EquicordDevs.benjii, EquicordDevs.iamme],
+    searchTerms: ["ui", "sidebar", "collapsible", "HideChatButtons"],
     managedStyle,
     settings,
 
