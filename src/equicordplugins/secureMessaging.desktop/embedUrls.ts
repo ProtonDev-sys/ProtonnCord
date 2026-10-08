@@ -6,7 +6,7 @@
 
 const MAX_EMBED_URLS = 10;
 const MAX_EMBED_URL_LENGTH = 2_048;
-const URL_PATTERN = /`+|https?:\/\/[^\s<>"'`]+/giu;
+const URL_PATTERN = /`+|https?:\/\/[^\s<>"'`]+|(?<![\w./@:-])(?:www\.)?(?:discord\.gg\/|(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/invite\/)[^\s<>"'`]+/giu;
 const EXACT_URL_PATTERN = /^https?:\/\/[^\s<>"'`]+$/iu;
 const TRAILING_PUNCTUATION = /[,.!?;:\\]/u;
 const INLINE_MEDIA_EMBED_TYPES = new Set<string>(["gifv", "image", "video"]);
@@ -66,7 +66,7 @@ export function extractSecureEmbedUrls(plaintext: string): string[] {
         const formatting = /(?:\*{1,3}|_{1,3}|~~)$/u.exec(plaintext.slice(Math.max(0, match.index - 3), match.index))?.[0];
         if (formatting && candidate.endsWith(formatting))
             candidate = trimSecureEmbedUrl(candidate.slice(0, -formatting.length));
-        const normalized = normalizeSecureEmbedUrl(candidate);
+        const normalized = normalizeSecureEmbedUrl(/^https?:\/\//iu.test(candidate) ? candidate : `https://${candidate}`);
         if (normalized === null) continue;
         if (seen.has(normalized)) continue;
         seen.add(normalized);

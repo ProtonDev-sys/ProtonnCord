@@ -24,11 +24,14 @@ export interface ForwardMentionResolvers {
 export interface ForwardEmbed {
     author?: { name?: unknown; url?: unknown; } | null;
     description?: unknown;
-    fields?: Array<{ name?: unknown; value?: unknown; }> | null;
+    fields?: Array<{ name?: unknown; value?: unknown; rawName?: unknown; rawValue?: unknown; }> | null;
     image?: { url?: unknown; proxy_url?: unknown; proxyUrl?: unknown; } | null;
+    images?: Array<{ url?: unknown; }> | null;
     provider?: { name?: unknown; url?: unknown; } | null;
     thumbnail?: { url?: unknown; proxy_url?: unknown; proxyUrl?: unknown; } | null;
     title?: unknown;
+    rawTitle?: unknown;
+    rawDescription?: unknown;
     url?: unknown;
     video?: { url?: unknown; proxy_url?: unknown; proxyUrl?: unknown; } | null;
 }
@@ -123,6 +126,14 @@ export function sanitizeForwardMentions(
         .replace(/@(everyone|here)\b/giu, "@\u200b$1");
 }
 
+export function secureForwardImageEmbeds(embeds: readonly ForwardEmbed[]): ForwardEmbed[] {
+    return embeds.flatMap(embed => embed.images?.length
+        ? embed.images.map((image, index) => index === 0
+            ? { ...embed, image: undefined, images: [image] }
+            : { url: image.url })
+        : [embed]);
+}
+
 export function secureForwardEmbedText(
     embeds: readonly ForwardEmbed[] = [],
     selection?: readonly number[],
@@ -139,6 +150,7 @@ export function secureForwardEmbedText(
             embed.url,
             embed.video?.url,
             embed.image?.url,
+            ...(Array.isArray(embed.images) ? embed.images.map(image => image?.url) : []),
             embed.thumbnail?.url,
             embed.author?.url,
             embed.provider?.url,
@@ -150,10 +162,10 @@ export function secureForwardEmbedText(
 
         const lines = [
             textValue(embed.author?.name),
-            textValue(embed.title),
-            textValue(embed.description),
+            textValue(embed.rawTitle ?? embed.title),
+            textValue(embed.rawDescription ?? embed.description),
             ...(Array.isArray(embed.fields)
-                ? embed.fields.flatMap(field => [textValue(field?.name), textValue(field?.value)])
+                ? embed.fields.flatMap(field => [textValue(field?.rawName ?? field?.name), textValue(field?.rawValue ?? field?.value)])
                 : []),
             textValue(embed.provider?.name),
         ].filter((line): line is string => line !== null);

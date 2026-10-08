@@ -3,6 +3,8 @@ import { EventEmitter } from "node:events";
 import { test } from "node:test";
 import type { OnLoadArgs, OnLoadResult, PluginBuild } from "esbuild";
 
+import { secureForwardEmbedText, secureForwardImageEmbeds } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
+import { isEncryptedMessage } from "../src/equicordplugins/secureMessaging.desktop/protocol";
 import { loadTestModule } from "./utils/loadTestModule";
 
 function loadModule(path: string, imports: Record<string, unknown>, globals: Record<string, unknown>, extraSource = "") {
@@ -597,24 +599,27 @@ test("channel cleaning preserves adjacent Unicode letters and base64 extraction 
     assert.equal(decoder.findBase64Strings("Zg===").length, 0);
 });
 
-function forwardFixture(sendMessage: (...args: any[]) => any) {
+function forwardFixture(sendMessage: (...args: any[]) => any, secureForwarding?: { tryForward(...args: any[]): Promise<boolean>; }, common = {}) {
     return loadModule("src/equicordplugins/betterForwards/index.tsx", {
+        "@api/PluginManager": { plugins: { SecureMessagingForwarding: secureForwarding } },
         "@api/Settings": pluginSettings(), "@components/BaseText": {}, "@components/ErrorBoundary": {},
         "@components/Flex": {}, "@components/Icons": {}, "@components/margins": {},
         "@utils/constants": pluginAuthors, "@utils/css": cssFixture, "@utils/discord": { sendMessage },
         "@utils/types": pluginTypes, "@webpack": { proxyLazyWebpack: (factory: unknown) => factory },
-        "@webpack/common": { ChannelStore: {}, ChannelActionCreators: {} }, "./components": {}, "./style.css?managed": {}
+        "@webpack/common": { ChannelStore: {}, ChannelActionCreators: {}, ...common },
+        "../secureMessaging.desktop/forwarding": { secureForwardImageEmbeds },
+        "../secureMessaging.desktop/protocol": { isEncryptedMessage }, "./components": {}, "./style.css?managed": {}
     }, {}).default;
 }
 
-test("forward fallback sends only selected media, preserving original embed indices", async () => {
+test("forward fallback sends only selected media, preserving picker image indices", async () => {
     const messages: string[] = [];
     const plugin = forwardFixture(async (_channel, body) => messages.push(body.content));
     const message = {
         channel_id: "origin", content: "DESELECTED PRIVATE TEXT", attachments: [{ id: "private", url: "private-file" }],
         embeds: [{ images: [{ url: "private-image-1" }, { url: "private-image-2" }] }, { url: "selected-image" }]
     };
-    await plugin.sendForward("note", [{ id: "destination", type: "channel" }], message, { onlyEmbedIndices: [1] });
+    await plugin.sendForward("note", [{ id: "destination", type: "channel" }], message, { onlyEmbedIndices: [2] });
     assert.equal(messages.length, 1);
     assert.ok(messages[0].includes("selected-image"));
     assert.ok(messages[0].includes("note"));
@@ -643,6 +648,108 @@ test("forward fallback awaits sequential chunks and propagates delivery failures
     assert.ok(sent[0].includes("full text"));
     const failed = forwardFixture(async () => { throw new Error("delivery failed"); });
     await assert.rejects(failed.sendForward(null, [{ id: "destination", type: "channel" }], message, {}), /delivery failed/);
+});
+
+test("forward fallback routes the original message and selections securely after resolving a user DM", async () => {
+    const snapshot = { content: "PCEM3:snapshot", attachments: [{ id: "encrypted", url: "ciphertext-url" }], embeds: [{}] };
+    const message = { channel_id: "origin", content: "outer", messageSnapshots: [{ message: snapshot }] };
+    const selection = { onlyAttachmentIds: ["encrypted"], onlyEmbedIndices: [0] };
+    const routed: any[][] = [];
+    let directSends = 0;
+    const plugin = forwardFixture(async () => { directSends++; }, {
+        async tryForward(...args: any[]) { routed.push(args); return true; }
+    }, {
+        ChannelStore: { getDMFromUserId: () => undefined },
+        ChannelActionCreators: { getOrEnsurePrivateChannel: async (id: string) => `dm-${id}` }
+    });
+    await plugin.sendForward("  private note  ", [{ id: "recipient", type: "user" }], message, selection);
+    assert.equal(routed.length, 1);
+    assert.equal(routed[0][0], message, "secure routing authenticates the original outer message");
+    assert.equal(routed[0][1], "dm-recipient");
+    assert.equal(routed[0][2].onlyAttachmentIds, selection.onlyAttachmentIds);
+    assert.equal(routed[0][2].onlyEmbedIndices, selection.onlyEmbedIndices);
+    assert.equal(routed[0][2].embedIndicesAreImages, true);
+    assert.equal(routed[0][2].withMessage, "  private note  ");
+    assert.equal(directSends, 0, "secure media must not become plaintext fallback URLs");
+});
+
+test("mixed forward destinations route securely before ordinary fallback and preserve ordinary content", async () => {
+    const routed: string[] = [];
+    const sent: { channel: string; content: string; }[] = [];
+    let finishSecure!: (handled: boolean) => void;
+    const secure = new Promise<boolean>(resolve => { finishSecure = resolve; });
+    const plugin = forwardFixture(async (channel, body) => { sent.push({ channel, content: body.content }); }, {
+        async tryForward(_message, channel) { routed.push(channel); return channel === "secure" ? secure : false; }
+    });
+    const message = { channel_id: "origin", content: "outer text", messageSnapshots: [{ message: { content: "snapshot text", attachments: [], embeds: [] } }] };
+    const forwarding = plugin.sendForward("note", [{ id: "secure", type: "channel" }, { id: "ordinary", type: "channel" }], message, {});
+    await drainTasks();
+    assert.deepEqual(routed, ["secure", "ordinary"]);
+    assert.equal(sent.length, 0, "all routes must settle before plaintext fallback begins");
+    finishSecure(true);
+    await forwarding;
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].channel, "ordinary");
+    assert.ok(sent[0].content.includes("snapshot text") && sent[0].content.includes("note"));
+    assert.ok(!sent[0].content.includes("outer text"));
+});
+
+for (const picked of [0, 1]) test(`grouped embed image ${picked} stays selected through secure and ordinary forwarding`, async () => {
+    const images = ["https://example.com/first.png", "https://example.com/second.png"];
+    const sent: { channel: string; content: string; }[] = [];
+    const message = { channel_id: "origin", content: "DESELECTED PRIVATE TEXT", attachments: [], embeds: [{ images: images.map(url => ({ url })) }] };
+    const plugin = forwardFixture(async (channel, body) => { sent.push({ channel, content: body.content }); }, {
+        async tryForward(source, channel, options) {
+            assert.equal(source, message);
+            assert.equal(options.embedIndicesAreImages, true, "the secure route must interpret the picker indices as images");
+            if (channel !== "secure") return false;
+            sent.push({ channel, content: secureForwardEmbedText(secureForwardImageEmbeds(source.embeds), options.onlyEmbedIndices) });
+            return true;
+        }
+    });
+    await plugin.sendForward(null, [{ id: "secure", type: "channel" }, { id: "ordinary", type: "channel" }], message, { onlyEmbedIndices: [picked] });
+    assert.deepEqual(sent.map(value => value.channel), ["secure", "ordinary"]);
+    for (const value of sent) {
+        assert.ok(value.content.includes(images[picked]));
+        assert.ok(!value.content.includes(images[1 - picked]), "the deselected image must not be forwarded");
+        assert.ok(!value.content.includes("PRIVATE"));
+    }
+});
+
+test("forward picker marks image indices for native routing and preserves empty image embeds", () => {
+    const plugin = forwardFixture(async () => undefined, undefined, {
+        useState: (initial: () => unknown) => [initial(), () => undefined],
+        useMemo: (callback: () => unknown) => callback()
+    });
+    const props = plugin.useProps({
+        message: { attachments: [], messageSnapshots: [], embeds: [{ images: [], url: "https://example.com/empty" }, { images: [{ url: "one" }, { url: "two" }] }] },
+        forwardOptions: { onlyEmbedIndices: [1] }
+    });
+    assert.equal(props.forwardOptions.embedIndicesAreImages, true);
+    assert.deepEqual(Array.from(props.forwardOptions.onlyEmbedIndices), [1, 2]);
+    assert.deepEqual(Array.from(props.__state.defaultOpts.onlyEmbedIndices), [0, 1, 2]);
+});
+
+test("secure forwarding failures never trigger plaintext fallback for any destination", async () => {
+    let directSends = 0;
+    const plugin = forwardFixture(async () => { directSends++; }, {
+        async tryForward(_message, channel) {
+            if (channel === "blocked") throw new Error("secure conversation is locked");
+            return false;
+        }
+    });
+    const message = { channel_id: "origin", content: "private text", attachments: [], embeds: [] };
+    await assert.rejects(plugin.sendForward(null, [{ id: "ordinary", type: "channel" }, { id: "blocked", type: "channel" }], message, {}), /locked/);
+    assert.equal(directSends, 0);
+});
+
+test("missing secure forwarding support blocks encrypted outer messages and forwarded snapshots", async () => {
+    let directSends = 0;
+    const plugin = forwardFixture(async () => { directSends++; });
+    const encrypted = { channel_id: "origin", content: "PCEM3:encrypted", attachments: [], embeds: [] };
+    for (const message of [encrypted, { ...encrypted, content: "outer", messageSnapshots: [{ message: encrypted }] }])
+        await assert.rejects(plugin.sendForward(null, [{ id: "destination", type: "channel" }], message, {}), /Secure Messaging/);
+    assert.equal(directSends, 0);
 });
 
 function audioFixture(fetch: (...args: any[]) => any, overrides: Record<string, unknown> = {}, react = {}, globals = {}) {

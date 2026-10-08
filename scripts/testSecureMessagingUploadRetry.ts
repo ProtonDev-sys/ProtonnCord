@@ -12,11 +12,11 @@ import { setImmediate } from "node:timers/promises";
 import { runInNewContext } from "node:vm";
 import type { CloudUpload } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
-import { createSourceFile, isVariableStatement, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { createSourceFile, isFunctionDeclaration, isVariableStatement, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import type { MessageSendListener, SendMessageOptions } from "../src/api/MessageEvents";
 import { withTimeout } from "../src/debug/promiseTimeout";
-import { parseSecurePlaintext, serializeSecurePlaintext } from "../src/equicordplugins/secureMessaging.desktop/attachments";
+import { DETACHED_TEXT_FILENAME, DETACHED_TEXT_MIME_TYPE, MAX_DETACHED_TEXT_BYTES, parseSecurePlaintext, serializeSecurePlaintext } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import { createEncryptedUploadDraft, EncryptedAttachmentUploadLimitError, prepareEncryptedAttachments, uploadEncryptedAttachment } from "../src/equicordplugins/secureMessaging.desktop/attachmentUploads";
 import { discordMessageSendSource, patchDiscordMessageSend } from "./fixtures/discordMessageSend";
 
@@ -59,6 +59,13 @@ const declaration = source.statements.flatMap(statement => isVariableStatement(s
     .find(value => value.name.getText(source) === "outgoingListener");
 assert.ok(declaration?.initializer);
 const compiled = transpileModule(`(${declaration.initializer.getText(source)});`, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText;
+const forwardCompiled = transpileModule([
+    "sendEncryptedForward", "appendDetachedTextUpload", "selectedOutgoingStickerIds", "secureStickerItem", "resolveSelectedStickers",
+].map(name => {
+    const helper = source.statements.find(statement => isFunctionDeclaration(statement) && statement.name?.text === name);
+    assert.ok(helper, name);
+    return helper.getText(source);
+}).join("\n"), { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText;
 
 function messageEvents() {
     const exports = {} as typeof import("../src/api/MessageEvents");
@@ -82,6 +89,9 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
     const shadows: Upload[] = [];
     const approvals = new WeakMap();
     const wires: string[] = [];
+    const preparedPlaintexts: string[] = [];
+    const forwards: Array<{ message: { content: string; }; options: SendMessageOptions; }> = [];
+    const runtime = { accountId: "100000000000000001", capture: "ready", visibilityGeneration: 1, guard: true, scope: "scope", review: false, destination: "enabled", disableDuringPreSend: false };
     const options: any = { uploads: originals, stickerIds: ["sticker"], flags: 8192 };
     let storedDrafts = [...originals];
     let nativeCalls = 0;
@@ -89,6 +99,13 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
     let current = true;
     let protectionGate: Promise<void> | undefined;
     let stickerGate: Promise<void> | undefined;
+    let encryptionGate: Promise<void> | undefined;
+    let dispatchError = false;
+    let protectionLookups = 0;
+    const uploadStarted = Promise.withResolvers<Upload>();
+    const protectionStarted = Promise.withResolvers<void>();
+    const stickersStarted = Promise.withResolvers<void>();
+    const encryptionStarted = Promise.withResolvers<void>();
     class Shadow extends Upload {
         constructor(item: ConstructorParameters<typeof Upload>[0], channel: string) {
             super(item, channel);
@@ -104,27 +121,63 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
                 await behavior(upload, index);
             };
         }
+        override async upload() {
+            const pending = super.upload();
+            uploadStarted.resolve(this);
+            await pending;
+        }
     }
-    const send = runInNewContext(compiled, {
+    const context = {
         AbortController, CloudUploader: Shadow, CloudUploadPlatform: { WEB: CloudUploadPlatform.WEB }, createEncryptedUploadDraft, prepareEncryptedAttachments, uploadEncryptedAttachment,
         DraftType: { ChannelMessage: 0 }, UploadAttachmentStore: { getUploads: () => storedDrafts },
         EncryptedAttachmentUploadLimitError, serializeSecurePlaintext, parseSecurePlaintext,
         applicationGuardsBlocked: false,
-        secureOperationGeneration: 1, secureOperationIsCurrent: () => current, currentSnapshot: () => ({ localUserId: "100000000000000001", snapshot: { channelId: originals[0]?.channelId ?? "200000000000000001" } }),
-        takePermittedAnnouncement: () => false, resolveConversationProtection: async () => { await protectionGate; return { kind: "snapshot", conversation: { status: "enabled" } }; },
-        updateMessageLengthBypass() {}, requiresFailClosedSend: () => true, isNativeFailure: () => false, hasSelectedKeyReviewBlock: () => false,
-        selectedOutgoingStickerIds: () => [], blockedOutgoingReason: () => null, resolveSelectedStickers: async () => { await stickerGate; return []; },
+        secureOperationGeneration: 1, secureOperationIsCurrent: (_generation: number, userId?: string) => current && (userId === undefined || userId === runtime.accountId), currentSnapshot: () => ({ localUserId: "100000000000000001", snapshot: { channelId: originals[0]?.channelId ?? "200000000000000001" } }),
+        takePermittedAnnouncement: () => false, resolveConversationProtection: async () => {
+            protectionStarted.resolve();
+            await protectionGate;
+            if (++protectionLookups === 2 && runtime.disableDuringPreSend) runtime.destination = "disabled";
+            return { kind: "snapshot", conversation: { status: runtime.destination, scope: runtime.scope } };
+        },
+        updateMessageLengthBypass() {}, requiresFailClosedSend: (conversation: { status: string; }) => conversation.status !== "disabled", isNativeFailure: () => false, hasSelectedKeyReviewBlock: () => runtime.review,
+        selectedOutgoingStickerIds: () => [], blockedOutgoingReason: () => null, resolveSelectedStickers: async () => { stickersStarted.resolve(); await stickerGate; return []; },
         discordUploadLimitBytes: () => 100_000, detachedTextUploadIndex: () => null, encryptedMentionedUserIds: () => [],
         preparedOutgoingMessages: new WeakMap(), approvedAttachmentUploads: approvals, detachedTextUploads: new WeakSet(),
         MAX_DISCORD_MESSAGE_LENGTH: 2_000, MAX_ATTACHMENT_COUNT: 10, VOICE_MESSAGE_FLAG: 8192,
-        Native: { encryptOutgoing: async () => { nativeCalls++; return { status: "encrypted", content: "encrypted envelope" }; } },
-        prefetchEncryptedMessageEmbeds: async () => {}, conversationAuthorizationScope: () => "scope",
+        Native: { encryptOutgoing: async (_user: string, input: { plaintext: string; }) => { nativeCalls++; preparedPlaintexts.push(input.plaintext); encryptionStarted.resolve(); await encryptionGate; return { status: "encrypted", content: "encrypted envelope" }; } },
+        prefetchEncryptedMessageEmbeds: async () => {}, conversationAuthorizationScope: (_user: string, conversation: { status: string; scope: string; }) => conversation.status === "enabled" ? conversation.scope : null,
         authorizeScopedAttachmentUploadReservations() {}, authorizeScopedWirePayload: (_channel: string, content: string) => wires.push(content),
         rememberOptimisticOutgoingPlaintext() {}, clearOutgoingStickers: (value: typeof options) => { if (Array.isArray(value.stickerIds)) value.stickerIds.length = 0; },
         showToast() {}, Toasts: { Type: { FAILURE: 1 } }, useEncryptedSendStatus: { setState() {} },
-    }) as (...args: any[]) => Promise<{ cancel?: boolean; stop?: boolean; }>;
+        File, DETACHED_TEXT_FILENAME, DETACHED_TEXT_MIME_TYPE, MAX_DETACHED_TEXT_BYTES, MAX_STICKER_COUNT: 3,
+        formatUploadBytes: (bytes: number) => String(bytes),
+        secureRuntimeUserId: "100000000000000001",
+        get screenCaptureProtectionGeneration() { return runtime.visibilityGeneration; },
+        get screenCaptureProtectionStatus() { return runtime.capture; },
+        get networkGuardEnabled() { return runtime.guard; },
+        UserStore: { getCurrentUser: () => ({ id: runtime.accountId }) },
+        ChannelStore: { getChannel: () => ({ id: "200000000000000001" }) },
+        StickersStore: { getStickerById: (id: string) => ({ id, name: "Forwarded sticker", format_type: 1 }) },
+        isEncryptedMessage: (value: string) => value === "encrypted envelope",
+        MessageActions: { async sendMessage(_channel: string, message: { content: string; }, _wait: boolean, sendOptions: SendMessageOptions) {
+            if (dispatchError) throw new Error("Native forward send failed");
+            await nativeUploadWait(sendOptions.attachmentsToUpload as unknown as Upload[] ?? []);
+            forwards.push({ message, options: sendOptions });
+        } },
+    };
+    const send = runInNewContext(compiled, context) as (...args: any[]) => Promise<{ cancel?: boolean; stop?: boolean; }>;
     return {
         originals, shadows, wires, options, approvals, nativeCalls: () => nativeCalls, sentBytes: () => sentBytes,
+        uploadStarted: uploadStarted.promise, protectionStarted: protectionStarted.promise, stickersStarted: stickersStarted.promise, encryptionStarted: encryptionStarted.promise,
+        runtime, preparedPlaintexts, forwards,
+        forward(content = "Forwarded caption", stickerIds: string[] = []) {
+            const forward = runInNewContext(`${forwardCompiled}\nsendEncryptedForward`, Object.assign(context, { outgoingListener: send })) as (
+                channelId: string, content: string, uploads: CloudUpload[], stickerIds: string[],
+            ) => Promise<void>;
+            return forward("200000000000000001", content, originals.map(cloud), stickerIds);
+        },
+        delayEncryption: (gate: Promise<void>) => { encryptionGate = gate; },
+        failDispatch: () => { dispatchError = true; },
         invalidate: () => { current = false; },
         replaceStoredDraft: () => { storedDrafts = [newUpload("replacement"), ...storedDrafts.slice(1)]; },
         withoutStoredDrafts: () => { storedDrafts = []; },
@@ -264,13 +317,14 @@ test("a repeated send cannot reuse in-flight drafts and a changed draft cancels 
         finally { h.shadows.forEach(upload => { upload.cancel(); upload.removeAllListeners(); }); }
     });
     pending = h.send();
-    for (let attempt = 0; attempt < 200 && h.sentBytes() === 0; attempt++) await setImmediate();
-    assert.ok(h.sentBytes() > 0, "the pending send must reach the encrypted upload");
+    const upload = await withTimeout(h.uploadStarted, 5_000, "Fixture watchdog: encrypted upload did not start");
+    assert.equal(upload.status, "STARTED", "the pending send must reach the encrypted upload");
     assert.equal((await h.send()).cancel, true);
     assert.equal(h.nativeCalls(), 1);
     h.originals[0].description = "edited description";
     gate.resolve();
     assert.equal((await pending).cancel, true);
+    assert.ok(h.sentBytes() > 0);
     assert.equal(h.wires.length, 0);
     assert.equal(h.originals[0].description, "edited description");
     assert.ok(h.originals.every(upload => upload.status === "NOT_STARTED"));
@@ -283,13 +337,17 @@ test("a host draft replacement without a cancellation event prevents the stale s
     assert.equal(h.wires.length, 0);
 });
 
-for (const stage of ["protection", "stickers"] as const) test(`draft replacement during ${stage} lookup cannot become a programmatic upload`, async () => {
+for (const stage of ["protection", "stickers"] as const) test(`draft replacement during ${stage} lookup cannot become a programmatic upload`, async testContext => {
     const gate = Promise.withResolvers<void>();
     const h = fixture();
     if (stage === "protection") h.delayProtection(gate.promise);
     else h.delayStickers(gate.promise);
     const pending = h.send();
-    await setImmediate();
+    testContext.after(async () => {
+        gate.resolve();
+        await withTimeout(pending, 5_000, "Fixture watchdog: draft replacement send did not drain");
+    });
+    await withTimeout(stage === "protection" ? h.protectionStarted : h.stickersStarted, 5_000, `Fixture watchdog: ${stage} lookup did not start`);
     h.replaceStoredDraft();
     gate.resolve();
     assert.equal((await pending).cancel, true);
@@ -304,6 +362,89 @@ test("programmatic uploads that were never in the composer remain supported", as
     assert.equal((await h.send()).stop, true);
     h.assertDraft();
 });
+
+test("encrypted forwards use the outgoing pipeline for files and authenticated stickers before native send", async () => {
+    const h = fixture();
+    h.withoutStoredDrafts();
+    const stickerIds = ["300000000000000001"];
+    await h.forward("Forwarded private caption", stickerIds);
+    h.assertDraft();
+    assert.equal(h.forwards.length, 1);
+    assert.equal(h.forwards[0].message.content, "encrypted envelope");
+    assert.equal(h.forwards[0].options.content, "encrypted envelope");
+    assert.deepEqual(Array.from(h.forwards[0].options.attachmentsToUpload ?? []), h.shadows);
+    assert.deepEqual(Array.from(h.forwards[0].options.stickerIds ?? []), [], "sticker IDs stay inside the authenticated encrypted payload");
+    const plaintext = parseSecurePlaintext(h.preparedPlaintexts[0]);
+    assert.equal(plaintext.text, "Forwarded private caption");
+    assert.equal(plaintext.attachments?.count, 2);
+    assert.equal(plaintext.stickers[0]?.id, stickerIds[0]);
+    assert.deepEqual(stickerIds, ["300000000000000001"], "the source selection stays intact");
+    assert.equal(h.wires.length, 1, "the encrypted wire payload is authorized before entering native send");
+    assert.equal(h.forwards[0].options.messageReference, undefined);
+    assert.equal(h.forwards[0].options.alsoForwardToChannelId, undefined);
+});
+
+test("large encrypted forwards use detached encrypted text before native send", async () => {
+    const h = fixture(undefined, 0);
+    const content = "Private forwarded history. ".repeat(160);
+    await h.forward(content);
+    assert.equal(h.forwards.length, 1);
+    const plaintext = parseSecurePlaintext(h.preparedPlaintexts[0]);
+    assert.equal(plaintext.text, "");
+    assert.equal(plaintext.detachedTextIndex, 0);
+    assert.equal(plaintext.attachments?.count, 1);
+    const upload = h.forwards[0].options.attachmentsToUpload?.[0];
+    assert.ok(upload);
+    assert.equal(upload.item.file.type, "application/octet-stream");
+    assert.notEqual(await upload.item.file.text(), content);
+    assert.equal(upload.status, "COMPLETED");
+});
+
+test("encrypted forward preparation and native send failures reject without a plaintext fallback", async () => {
+    const failedUpload = fixture(upload => upload.fail());
+    await assert.rejects(failedUpload.forward(), /could not prepare/);
+    assert.equal(failedUpload.forwards.length, 0);
+    assert.equal(failedUpload.wires.length, 0);
+    failedUpload.assertDraft();
+    const failedSend = fixture(undefined, 0);
+    failedSend.failDispatch();
+    await assert.rejects(failedSend.forward(), /Native forward send failed/);
+    assert.equal(failedSend.forwards.length, 0);
+});
+
+test("a destination disabled before outgoing preparation cannot forward unchanged plaintext", async () => {
+    const h = fixture(undefined, 0);
+    h.runtime.disableDuringPreSend = true;
+    await assert.rejects(h.forward("Protected source plaintext"), /could not prepare/);
+    assert.equal(h.nativeCalls(), 0, "the outgoing hook correctly leaves newly unprotected sends unencrypted");
+    assert.equal(h.forwards.length, 0, "the forward bridge must reject that plaintext handoff");
+});
+
+for (const change of ["account", "capture", "visibility", "guard", "scope", "review", "disabled"] as const) {
+    test(`encrypted forward revalidation cancels a ${change} change during preparation`, async testContext => {
+        const h = fixture(undefined, 0);
+        const gate = Promise.withResolvers<void>();
+        h.delayEncryption(gate.promise);
+        const pending = h.forward();
+        const rejected = assert.rejects(pending, /no longer ready|recipients changed|could not prepare/);
+        testContext.after(async () => {
+            gate.resolve();
+            await withTimeout(rejected, 5_000, "Fixture watchdog: rejected forward did not drain");
+        });
+        await withTimeout(h.encryptionStarted, 5_000, "Fixture watchdog: forward encryption did not start");
+        assert.equal(h.nativeCalls(), 1);
+        if (change === "account") h.runtime.accountId = "100000000000000002";
+        if (change === "capture") h.runtime.capture = "screenshot";
+        if (change === "visibility") h.runtime.visibilityGeneration++;
+        if (change === "guard") h.runtime.guard = false;
+        if (change === "scope") h.runtime.scope = "changed recipients";
+        if (change === "review") h.runtime.review = true;
+        if (change === "disabled") h.runtime.destination = "disabled";
+        gate.resolve();
+        await rejected;
+        assert.equal(h.forwards.length, 0);
+    });
+}
 
 test("account or guard invalidation after upload leaves the original draft retryable", async () => {
     const h = fixture(upload => { upload.complete(); h.invalidate(); });

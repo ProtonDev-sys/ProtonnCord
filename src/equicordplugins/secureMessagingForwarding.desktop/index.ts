@@ -6,16 +6,16 @@
 
 import { plugins } from "@api/PluginManager";
 import { EquicordDevs } from "@utils/constants";
-import { sendMessage } from "@utils/discord";
 import definePlugin, { type PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, MessageAttachment } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
-import { waitFor } from "@webpack";
+import { waitFor, waitForSubscriptions } from "@webpack";
 import {
     ChannelStore,
     CloudUploader,
     Constants,
     GuildRoleStore,
+    MessageStore,
     RestAPI,
     showToast,
     Toasts,
@@ -35,6 +35,7 @@ import {
     type ForwardEmbed,
     type ForwardProtection,
     secureForwardEmbedText,
+    secureForwardImageEmbeds,
     secureForwardRoute,
     validatedDiscordAttachmentUrl,
 } from "../secureMessaging.desktop/forwarding";
@@ -52,6 +53,7 @@ const MAX_TOTAL_FORWARD_BYTES = MAX_ATTACHMENT_BYTES;
 const SNOWFLAKE = /^\d{17,20}$/u;
 
 interface ForwardOptions {
+    embedIndicesAreImages?: boolean;
     isICYMIGameContentForwarding?: boolean;
     onlyAttachmentIds?: string[];
     onlyEmbedIndices?: number[];
@@ -82,15 +84,21 @@ interface PreparedForward {
 
 interface SecureMessagingPluginState {
     getScreenCaptureProtectionStatus?(): string;
+    sendEncryptedForward?(channelId: string, content: string, uploads: CloudUpload[], stickerIds: string[]): Promise<void>;
     started?: boolean;
 }
 
 let generation = 0;
+let running = false;
 let patchedActions: ForwardActions | null = null;
-let originalSendForward: SendForward | null = null;
-let originalSendForwards: SendForwards | null = null;
 let guardedSendForward: SendForward | null = null;
 let guardedSendForwards: SendForwards | null = null;
+let originalActionDescriptors: Partial<Record<keyof ForwardActions, PropertyDescriptor | undefined>> | null = null;
+
+function forwardActionsFilter(module: unknown): boolean {
+    const actions = module as Partial<ForwardActions> | null;
+    return typeof actions?.sendForward === "function" && typeof actions?.sendForwards === "function";
+}
 
 function secureMessagingPlugin(): SecureMessagingPluginState | undefined {
     return (plugins as unknown as Record<string, SecureMessagingPluginState>).SecureMessaging;
@@ -159,6 +167,13 @@ function conversationProtection(result: ConversationResult): ForwardProtection {
             reason: "Verify the destination recipients' encryption keys before forwarding.",
         };
     }
+    if (result.status === "local_identity_changed") {
+        return {
+            protected: true,
+            ready: false,
+            reason: "Your encryption identity changed. Verify it with the recipients and enable encryption again before forwarding.",
+        };
+    }
     return { protected: false, ready: false };
 }
 
@@ -176,19 +191,18 @@ async function inspectProtection(channelId: string, knownEncryptedMessage = fals
 
     const channel = ChannelStore.getChannel(channelId);
     const snapshot = snapshotForChannel(channel, localUserId);
-    if (snapshot) return conversationProtection(await Native.getConversation(localUserId, snapshot));
     if (typeof channel?.guild_id === "string" && SNOWFLAKE.test(channel.guild_id))
         return { protected: false, ready: false };
 
     const persisted: ChannelProtectionResult = await Native.getChannelProtection(localUserId, channelId);
     if (isNativeFailure(persisted)) return { protected: true, ready: false, reason: failureReason(persisted) };
-    return persisted.status === "protected"
-        ? {
-            protected: true,
-            ready: false,
-            reason: "The protected conversation is not loaded. Open it before forwarding.",
-        }
-        : { protected: false, ready: false };
+    if (persisted.status !== "protected") return { protected: false, ready: false };
+    if (snapshot) return conversationProtection(await Native.getConversation(localUserId, snapshot));
+    return {
+        protected: true,
+        ready: false,
+        reason: "The protected conversation is not loaded. Open it before forwarding.",
+    };
 }
 
 function normalizeAttachmentSelection(value: unknown): Set<string> | null {
@@ -495,10 +509,27 @@ function selectedEmbedCount(embeds: readonly ForwardEmbed[], selection: number[]
     return secureForwardEmbedText(embeds, selection).length > 0 ? 1 : 0;
 }
 
+function forwardContentMessage(message: Message): Message {
+    const snapshot = message.messageSnapshots?.[0]?.message;
+    if (!snapshot) return message;
+    const reference = message.messageReference;
+    if (isEncryptedMessage(snapshot.content)) {
+        const original = reference && MessageStore.getMessage(reference.channel_id, reference.message_id);
+        if (!original || original.content !== snapshot.content)
+            throw new Error("Open the original encrypted conversation before forwarding this copied message.");
+        // A snapshot has no authenticated author, nonce or message provenance of its own.
+        return original;
+    }
+    return Object.assign(Object.create(Object.getPrototypeOf(message)), message, snapshot, {
+        channel_id: reference?.channel_id ?? message.channel_id,
+    }) as Message;
+}
+
 async function secureForward(message: Message, destinationChannelId: string, options: ForwardOptions = {}): Promise<void> {
     const expectedGeneration = generation;
     const localUserId = UserStore.getCurrentUser()?.id;
     assertForwardStillActive(expectedGeneration, localUserId);
+    message = forwardContentMessage(message);
     const rawAttachmentSelection = normalizeAttachmentSelection(options.onlyAttachmentIds);
     const rawEmbedSelection = normalizeEmbedSelection(options.onlyEmbedIndices);
     const selective = options.onlyAttachmentIds !== undefined || options.onlyEmbedIndices !== undefined;
@@ -507,7 +538,8 @@ async function secureForward(message: Message, destinationChannelId: string, opt
     const encryptedSource = isEncryptedMessage(message.content);
     if (encryptedSource && rawEmbedSelection && rawEmbedSelection.length > 0)
         throw new Error("Forward the whole encrypted message to include links from its authenticated text.");
-    const embeds = (encryptedSource ? [] : message.embeds ?? []) as unknown as ForwardEmbed[];
+    const sourceEmbeds = (encryptedSource ? [] : message.embeds ?? []) as unknown as ForwardEmbed[];
+    const embeds = selective && options.embedIndicesAreImages ? secureForwardImageEmbeds(sourceEmbeds) : sourceEmbeds;
     const embedCount = selectedEmbedCount(embeds, embedSelection);
     const prepared = encryptedSource
         ? await prepareEncryptedSource(message, attachmentSelection, selective)
@@ -519,6 +551,8 @@ async function secureForward(message: Message, destinationChannelId: string, opt
         throw new Error("The destination is no longer ready for an encrypted forward.");
     if (selective && prepared.uploads.length === 0 && embedCount === 0)
         throw new Error("The selected forwarded content is no longer available.");
+    if (!prepared.plaintext.trim() && prepared.uploads.length === 0 && prepared.stickerIds.length === 0 && embedCount === 0)
+        throw new Error("The forwarded content is no longer available.");
 
     const forwardedContent = composeSecureForwardText({
         attachmentSelection: attachmentSelection === null ? undefined : [...attachmentSelection],
@@ -532,45 +566,71 @@ async function secureForward(message: Message, destinationChannelId: string, opt
     const note = typeof options.withMessage === "string" ? options.withMessage.trim() : "";
     const content = [note, forwardedContent].filter(Boolean).join("\n\n");
     const uploads = prepared.uploads.map(upload => cloudUpload(destinationChannelId, upload));
-    await sendMessage(destinationChannelId, { content }, false, {
-        attachmentsToUpload: uploads,
-        stickerIds: prepared.stickerIds,
-        uploads,
-    } as never);
+    const plugin = secureMessagingPlugin();
+    if (!plugin?.sendEncryptedForward) throw new Error("Secure Messaging's encrypted send is unavailable.");
+    await plugin.sendEncryptedForward(destinationChannelId, content, uploads, prepared.stickerIds);
 }
 
 async function routeForward(
-    actions: ForwardActions,
-    original: SendForward,
     expectedGeneration: number,
     message: Message,
     destinationChannelId: string,
     options?: ForwardOptions,
-): Promise<void> {
-    if (expectedGeneration !== generation || secureMessagingPlugin()?.started !== true)
-        return original.call(actions, message, destinationChannelId, options);
-
+): Promise<boolean> {
+    if (!running || expectedGeneration !== generation)
+        throw new Error("Forwarding was cancelled because the plugin state changed.");
+    if (!SNOWFLAKE.test(destinationChannelId)) throw new Error("Discord supplied an invalid forwarding destination.");
     const localUserId = UserStore.getCurrentUser()?.id;
-
+    const encryptedSource = isEncryptedMessage(message.content) ||
+        isEncryptedMessage(message.messageSnapshots?.[0]?.message.content ?? "");
+    if (secureMessagingPlugin()?.started !== true) {
+        if (encryptedSource) throw new Error("Enable Secure Messaging before forwarding an encrypted message.");
+        return false;
+    }
     const [source, destination] = await Promise.all([
-        inspectProtection(message.channel_id, isEncryptedMessage(message.content)),
+        inspectProtection(message.channel_id, encryptedSource),
         inspectProtection(destinationChannelId),
     ]);
-    if (expectedGeneration !== generation || !localUserId || UserStore.getCurrentUser()?.id !== localUserId)
+    if (!running || expectedGeneration !== generation || !localUserId || UserStore.getCurrentUser()?.id !== localUserId)
         throw new Error("Forwarding was cancelled because the account or plugin state changed.");
     const route = secureForwardRoute(source, destination);
-    if (route === "native") return original.call(actions, message, destinationChannelId, options);
+    if (route === "native") return false;
     if (route === "blocked") {
         const reason = destination.protected && !destination.ready
             ? destination.reason
             : "Protected messages can only be forwarded into another enabled protected conversation.";
-        showToast(reason ?? "Secure Messaging blocked the forward safely.", Toasts.Type.FAILURE);
-        return;
+        throw new Error(reason ?? "Secure Messaging blocked the forward safely.");
     }
+    if (source.protected && !source.ready)
+        throw new Error(source.reason ?? "The source conversation is not ready for an encrypted forward.");
 
     showToast("Preparing encrypted forward…", Toasts.Type.MESSAGE);
     await secureForward(message, destinationChannelId, options);
     showToast("Forwarded as a new encrypted message.", Toasts.Type.SUCCESS);
+    return true;
+}
+
+function canWrapForwardExport(actions: ForwardActions, descriptor: PropertyDescriptor | undefined): boolean {
+    return descriptor === undefined ? Object.isExtensible(actions) :
+        Boolean(descriptor.configurable || "value" in descriptor && descriptor.writable);
+}
+
+function replaceForwardExport(actions: ForwardActions, key: keyof ForwardActions, value: SendForward | SendForwards): void {
+    const descriptor = Object.getOwnPropertyDescriptor(actions, key);
+    Object.defineProperty(actions, key, descriptor && "value" in descriptor
+        ? { ...descriptor, value }
+        : { configurable: true, enumerable: descriptor?.enumerable ?? true, writable: true, value });
+}
+
+function restoreForwardExports(): void {
+    if (!patchedActions || !originalActionDescriptors) return;
+    for (const [key, wrapper] of [["sendForward", guardedSendForward], ["sendForwards", guardedSendForwards]] as const) {
+        const current = Object.getOwnPropertyDescriptor(patchedActions, key);
+        if (!wrapper || current?.value !== wrapper || (!current.configurable && !current.writable)) continue;
+        const original = originalActionDescriptors[key];
+        if (original) Object.defineProperty(patchedActions, key, original);
+        else Reflect.deleteProperty(patchedActions, key);
+    }
 }
 
 function installForwardGuard(actions: ForwardActions, expectedGeneration: number): void {
@@ -578,12 +638,14 @@ function installForwardGuard(actions: ForwardActions, expectedGeneration: number
     const original = actions.sendForward;
     const originalMany = actions.sendForwards;
     if (typeof original !== "function" || typeof originalMany !== "function") return;
+    const oneDescriptor = Object.getOwnPropertyDescriptor(actions, "sendForward");
+    const manyDescriptor = Object.getOwnPropertyDescriptor(actions, "sendForwards");
+    if (!canWrapForwardExport(actions, oneDescriptor) || !canWrapForwardExport(actions, manyDescriptor)) return;
 
-    originalSendForward = original;
-    originalSendForwards = originalMany;
     guardedSendForward = async function (message, destinationChannelId, options) {
         try {
-            await routeForward(actions, original, expectedGeneration, message, destinationChannelId, options);
+            if (!await routeForward(expectedGeneration, message, destinationChannelId, options))
+                await original.call(actions, message, destinationChannelId, options);
         } catch (error) {
             showToast(
                 error instanceof Error ? error.message : "Secure Messaging could not forward this message safely.",
@@ -593,8 +655,6 @@ function installForwardGuard(actions: ForwardActions, expectedGeneration: number
     };
     const sendOne = guardedSendForward;
     guardedSendForwards = async function (message, destinationChannelIds, options) {
-        if (expectedGeneration !== generation || secureMessagingPlugin()?.started !== true)
-            return originalMany.call(actions, message, destinationChannelIds, options);
         if (!Array.isArray(destinationChannelIds) ||
             destinationChannelIds.some(channelId => typeof channelId !== "string" || !SNOWFLAKE.test(channelId))) {
             showToast("Discord supplied invalid forwarding destinations.", Toasts.Type.FAILURE);
@@ -606,20 +666,26 @@ function installForwardGuard(actions: ForwardActions, expectedGeneration: number
             await sendOne.call(actions, message, destinationChannelId, options);
         }
     };
-    actions.sendForward = guardedSendForward;
-    actions.sendForwards = guardedSendForwards;
     patchedActions = actions;
+    originalActionDescriptors = { sendForward: oneDescriptor, sendForwards: manyDescriptor };
+    try {
+        replaceForwardExport(actions, "sendForward", guardedSendForward);
+        replaceForwardExport(actions, "sendForwards", guardedSendForwards);
+    } catch (error) {
+        restoreForwardExports();
+        patchedActions = null;
+        originalActionDescriptors = null;
+        throw error;
+    }
 }
 
 function uninstallForwardGuard(): void {
+    running = false;
     generation++;
-    if (patchedActions && guardedSendForward && originalSendForward && patchedActions.sendForward === guardedSendForward)
-        patchedActions.sendForward = originalSendForward;
-    if (patchedActions && guardedSendForwards && originalSendForwards && patchedActions.sendForwards === guardedSendForwards)
-        patchedActions.sendForwards = originalSendForwards;
+    waitForSubscriptions.delete(forwardActionsFilter);
+    restoreForwardExports();
     patchedActions = null;
-    originalSendForward = null;
-    originalSendForwards = null;
+    originalActionDescriptors = null;
     guardedSendForward = null;
     guardedSendForwards = null;
 }
@@ -632,13 +698,18 @@ export default definePlugin({
     required: true,
 
     start() {
+        running = true;
         const expectedGeneration = ++generation;
-        waitFor(["sendForward", "sendForwards"], module => {
+        waitFor(forwardActionsFilter, module => {
             installForwardGuard(module as ForwardActions, expectedGeneration);
         });
     },
 
     stop() {
         uninstallForwardGuard();
+    },
+
+    tryForward(message: Message, destinationChannelId: string, options?: ForwardOptions): Promise<boolean> {
+        return routeForward(generation, message, destinationChannelId, options);
     },
 });

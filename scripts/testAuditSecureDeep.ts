@@ -6,7 +6,7 @@ import { setImmediate } from "node:timers/promises";
 import { runInNewContext } from "node:vm";
 import { createSourceFile, isFunctionDeclaration, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
-import { composeSecureForwardText, secureForwardEmbedText } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
+import { composeSecureForwardText, secureForwardEmbedText, secureForwardImageEmbeds } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
 
 const folder = "../src/equicordplugins/secureMessaging.desktop/";
 const source = (name: string) => readFileSync(new URL(folder + name, import.meta.url), "utf8");
@@ -302,7 +302,7 @@ for (const stage of ["parent", "partition", "window", "request", "check", "devic
 test("failed screenshot transitions remain fail closed and owners are only retained while pending", () => {
     const renderer = source("index.tsx");
     assert.match(renderer, /setScreenCaptureProtectionStatus\(applied \? enabled \? "screenshot" : "ready" : "failed"\)/u);
-    assert.equal(renderer.match(/if \(screenCaptureProtectionStatus === "pending"\) pendingEncryptedRenderOwners.add\(owner\)/gu)?.length, 3);
+    assert.equal(renderer.match(/if \(screenCaptureProtectionStatus === "pending"\) pendingEncryptedRenderOwners.add\(owner\)/gu)?.length, 4);
 });
 
 test("encrypted forwarding excludes unauthenticated host embeds", () => {
@@ -426,14 +426,17 @@ test("attachment singleflight admissions stay bounded while pending", async () =
 
 test("preview cache saturation does not schedule more decryption", () => {
     const cache = new Map(Array.from({ length: 256 }, (_, index) => [String(index), { status: "loading" }]));
+    const capacityListeners = new Set<() => void>();
     let loads = 0;
-    const ensure = extracted("embedCache.ts", "ensureEntry", { cache, isEncryptedMessage: () => true,
+    const ensure = extracted("embedCache.ts", "ensureEntry", { cache, capacityListeners, isEncryptedMessage: () => true,
         cacheKey: () => "new", pruneCache() {}, MAX_CACHE_ENTRIES: 256, Date, loadEntry: () => { loads++; } });
-    const entry = ensure(message());
+    const onReady = () => undefined;
+    const entry = ensure(message(), onReady);
     assert.equal(entry.status, "ready");
     assert.equal(entry.embeds.length, 0);
     assert.equal(cache.size, 256);
     assert.equal(loads, 0);
+    assert.ok(capacityListeners.has(onReady));
 });
 
 test("empty and proxy-only embed selections cannot count as forwarded content", () => {
@@ -452,7 +455,7 @@ test("empty and proxy-only embed selections cannot count as forwarded content", 
 function secureForwardFixture() {
     const code = readFileSync(new URL("../src/equicordplugins/secureMessagingForwarding.desktop/index.ts", import.meta.url), "utf8");
     const parsed = createSourceFile("forwarding.ts", code, ScriptTarget.Latest, true);
-    const declarations = ["selectedEmbedCount", "secureForward"].map(name => {
+    const declarations = ["selectedEmbedCount", "forwardContentMessage", "secureForward"].map(name => {
         const declaration = parsed.statements.find(statement => isFunctionDeclaration(statement) && statement.name?.text === name);
         assert.ok(declaration, name);
         return declaration.getText(parsed);
@@ -465,12 +468,14 @@ function secureForwardFixture() {
         generation: 1, UserStore: { getCurrentUser: () => ({ id: "100000000000000001" }) },
         assertForwardStillActive() {}, normalizeAttachmentSelection: (value: string[] | undefined) => value === undefined ? undefined : new Set(value),
         normalizeEmbedSelection: (value: number[] | undefined) => value, isEncryptedMessage: (value: string) => value === "encrypted-fixture",
-        secureForwardEmbedText, composeSecureForwardText,
+        secureForwardEmbedText, secureForwardImageEmbeds, composeSecureForwardText,
         prepareEncryptedSource: async () => { decryptions++; return { plaintext: "Authenticated https://example.invalid/verified", uploads: [], stickerIds: [] }; },
         preparePlainSource: async () => ({ plaintext: "", uploads: [], stickerIds: [] }),
         inspectProtection: async () => ({ protected: true, ready: true }), authorLabel: () => "Fixture", mentionResolvers: () => ({}),
         timestampMs: () => undefined, cloudUpload: () => { throw new Error("Unexpected upload"); },
-        sendMessage: async (...args: unknown[]) => { sends.push(args); },
+        secureMessagingPlugin: () => ({ sendEncryptedForward: async (channelId: string, content: string, uploads: unknown[], stickers: string[]) => {
+            sends.push([channelId, { content }, uploads, stickers]);
+        } }),
     });
     return { forward, sends, decryptions: () => decryptions };
 }
@@ -495,4 +500,45 @@ test("proxy-only selected embeds cannot produce a header-only forward", async ()
     const fixture = secureForwardFixture();
     await assert.rejects(fixture.forward({ content: "ordinary", embeds: [{ image: { proxyURL: "fixture" } }] }, "destination", { onlyEmbedIndices: [0] }), /selected forwarded content is no longer available/u);
     assert.equal(fixture.sends.length, 0);
+});
+
+test("image selections from BetterForwards preserve one chosen image inside a grouped embed", async () => {
+    const fixture = secureForwardFixture();
+    const message = { content: "ordinary", embeds: [{
+        url: "https://example.invalid/unselected-card",
+        images: [{ url: "https://example.invalid/first.png" }, { url: "https://example.invalid/second.png" }],
+    }] };
+    await fixture.forward(message, "destination", { onlyEmbedIndices: [1], embedIndicesAreImages: true });
+    const payload = fixture.sends[0][1] as { content: string; };
+    assert.match(payload.content, /second\.png/u);
+    assert.doesNotMatch(payload.content, /first\.png|unselected-card/u);
+    await fixture.forward(message, "destination", { onlyEmbedIndices: [0], embedIndicesAreImages: true });
+    const mainPayload = fixture.sends[1][1] as { content: string; };
+    assert.match(mainPayload.content, /unselected-card/u);
+    assert.match(mainPayload.content, /first\.png/u);
+    assert.doesNotMatch(mainPayload.content, /second\.png/u);
+    await assert.rejects(fixture.forward(message, "destination", { onlyEmbedIndices: [2], embedIndicesAreImages: true }), /selected embeds/u);
+    assert.equal(fixture.sends.length, 2);
+});
+
+test("forwarded snapshots use their content and original attachment channel while encrypted snapshots require original provenance", () => {
+    const normalise = extracted("../secureMessagingForwarding.desktop/index.ts", "forwardContentMessage", {
+        isEncryptedMessage: (content: string) => content === "encrypted-fixture",
+        MessageStore: { getMessage: () => undefined },
+    });
+    const wrapper = { content: "", channel_id: "wrapper", author: { id: "sender" }, messageReference: { channel_id: "original", message_id: "source" },
+        messageSnapshots: [{ message: { content: "Snapshot text", attachments: [{ id: "file" }] } }] };
+    const content = normalise(wrapper);
+    assert.equal(content.content, "Snapshot text");
+    assert.equal(content.channel_id, "original");
+    assert.equal(content.attachments[0].id, "file");
+    assert.equal(content.author, wrapper.author);
+    assert.equal(wrapper.content, "", "normalization does not mutate the stored wrapper");
+    const encrypted = { ...wrapper, messageSnapshots: [{ message: { content: "encrypted-fixture" } }] };
+    assert.throws(() => normalise(encrypted), /Open the original encrypted conversation/u);
+    const original = { content: "encrypted-fixture", id: "source", channel_id: "original", author: { id: "authenticated sender" }, nonce: "provenance" };
+    const authentic = extracted("../secureMessagingForwarding.desktop/index.ts", "forwardContentMessage", {
+        isEncryptedMessage: (value: string) => value === "encrypted-fixture", MessageStore: { getMessage: () => original },
+    });
+    assert.equal(authentic(encrypted), original, "authenticate the original envelope instead of the wrapper ID");
 });

@@ -82,6 +82,7 @@ function harness(options: { rejectNative?: boolean; } = {}) {
     const calls: Array<{ userId: string; request: NativeRequest; settled: boolean; resolve(result: DecryptIncomingResult): void; }> = [];
     const reviews: Array<Message | undefined> = [];
     const notifications: string[] = [];
+    const previewPrefetches: string[] = [];
     const expansions: Array<{ selection: string; ids: readonly string[] | undefined; }> = [];
     let userId: string | null = localUserId;
     let selectedChannelId = channelId;
@@ -144,13 +145,15 @@ function harness(options: { rejectNative?: boolean; } = {}) {
         isEncryptedMessage: (content: string) => content.startsWith("PCEM3:"),
         reviewKeyAnnouncementInBackground: (value: Message | undefined) => reviews.push(value),
         notifySecureMessageRow: (messageId: string) => notifications.push(messageId),
+        MessageFlags: { SUPPRESS_EMBEDS: 4 },
+        prefetchEncryptedMessageEmbeds: async (plaintext: string) => { previewPrefetches.push(plaintext); },
     };
     const handlers = runInNewContext(`${compile(receiveSource)}\n({ handleKeyAnnouncementDispatch, handleLoadedKeyAnnouncements })`, context) as {
         handleKeyAnnouncementDispatch(event: Record<string, unknown>): void;
         handleLoadedKeyAnnouncements(event: Record<string, unknown>): void;
     };
     return {
-        cache, calls, reviews, notifications, expansions, context,
+        cache, calls, reviews, notifications, previewPrefetches, expansions, context,
         receive: handlers.handleKeyAnnouncementDispatch,
         history: handlers.handleLoadedKeyAnnouncements,
         store(value: Message) { records.set(`${value.channel_id}:${value.id}`, value); },
@@ -211,6 +214,28 @@ test("receive duplicates and a simultaneous renderer share one authenticated req
     h.receive({ message: value });
     assert.equal(h.calls.length, 1);
     assert.equal(h.notifications.length, 1);
+    assert.deepEqual(h.previewPrefetches, [decrypted().plaintext], "duplicate receipt shares the authenticated preview warmup");
+});
+
+test("receive warms preview URLs only after authentication and respects embed suppression", async () => {
+    for (const suppressed of [false, true]) {
+        const h = harness();
+        const value = message({ flags: (suppressed ? 4 : 0) as Message["flags"] });
+        h.store(value);
+        h.receive({ message: value });
+        assert.deepEqual(h.previewPrefetches, [], "unverified ciphertext cannot disclose URLs");
+        const result = { ...decrypted(), plaintext: "https://example.com/received-preview" };
+        await h.settle(result);
+        assert.deepEqual(h.previewPrefetches, suppressed ? [] : [result.plaintext]);
+        assert.deepEqual(h.notifications, [value.id], "suppressed messages still refresh their authenticated row");
+    }
+    const h = harness();
+    const value = message({ flags: 0 as Message["flags"] });
+    h.store(value);
+    h.receive({ message: value });
+    h.store(message({ flags: 4 as Message["flags"] }));
+    await h.settle();
+    assert.deepEqual(h.previewPrefetches, [], "a replacement store record's current suppression wins over the received flags");
 });
 
 test("partial edits use the current complete store record rather than a partial wire object", async () => {
@@ -228,6 +253,24 @@ test("partial edits use the current complete store record rather than a partial 
     assert.equal(h.calls[1].request.discordNonce, after.nonce);
     await h.settle();
     assert.equal(h.cache.getCachedDecryption(localUserId, after)?.status, "decrypted");
+});
+
+test("an edited store record prevents an older authenticated result from warming removed URLs", async () => {
+    const h = harness();
+    const before = message();
+    h.store(before);
+    h.receive({ message: before });
+    const after = message({ content: "PCEM3:edited", nonce: "200000000000000003" });
+    h.store(after);
+    h.receive({ message: after });
+    h.calls[0].resolve({ ...decrypted(), plaintext: "https://example.com/removed-preview" });
+    await setImmediate();
+    assert.deepEqual(h.previewPrefetches, []);
+    assert.deepEqual(h.notifications, []);
+    const result = { ...decrypted(), plaintext: "https://example.com/edited-preview" };
+    await h.settle(result);
+    assert.deepEqual(h.previewPrefetches, [result.plaintext]);
+    assert.deepEqual(h.notifications, [after.id]);
 });
 
 test("complete-looking dispatch objects do not replace canonical author and attachment metadata", async () => {
@@ -339,7 +382,7 @@ test("clearing the cache invalidates old results and frees speculative admission
     assert.deepEqual(h.notifications, [after.id]);
 });
 
-for (const change of ["generation", "account", "capture", "gate", "cache"] as const) {
+for (const change of ["generation", "account", "capture", "gate", "cache", "channel"] as const) {
     test(`a ${change} transition suppresses stale receive completion notifications`, async () => {
         const h = harness();
         const value = message();
@@ -350,8 +393,10 @@ for (const change of ["generation", "account", "capture", "gate", "cache"] as co
         if (change === "capture") h.context.screenCaptureProtectionStatus = "screenshot";
         if (change === "gate") h.setGate("locked");
         if (change === "cache") h.cache.clearEncryptedMessageDecryptCache();
+        if (change === "channel") h.select("another-channel");
         await h.settle();
         assert.deepEqual(h.notifications, []);
+        assert.deepEqual(h.previewPrefetches, [], "stale completions cannot disclose decrypted URLs");
     });
 }
 
@@ -366,6 +411,7 @@ for (const status of ["invalid_message", "untrusted_author", "replay_detected"] 
         assert.equal(h.calls.length, 1);
         assert.equal(h.expansions.length, 0);
         assert.equal(value.content, "PCEM3:fixture");
+        assert.deepEqual(h.previewPrefetches, [], "blocked messages never prefetch external previews");
     });
 }
 
@@ -400,4 +446,52 @@ test("receive prefetch preserves detached-text-only expansion", async () => {
     assert.deepEqual(h.expansions, [{ selection: "text", ids: [value.attachments[1].id] }]);
     const result = h.cache.getCachedDecryption(localUserId, value);
     assert.equal(result?.status === "decrypted" && result.plaintext, "Detached private text");
+    assert.deepEqual(h.previewPrefetches, ["Detached private text"], "warmup uses authenticated expanded text");
+});
+
+test("only same-account reconnects retain unfurls while every reconnect reauthenticates messages", async () => {
+    const functions = ["invalidateSecureRenderCaches", "handleSecureConnectionOpen"].map(name => {
+        const declaration = parsed.statements.find(statement => isFunctionDeclaration(statement) && statement.name?.text === name);
+        assert.ok(declaration);
+        return declaration.getText(parsed);
+    }).join("\n");
+    for (const [previousAccount, currentAccount, preserve] of [
+        [localUserId, localUserId, true],
+        [localUserId, "100000000000000003", false],
+        [localUserId, null, false],
+        [null, localUserId, false],
+        [null, null, false],
+    ] as const) {
+        const clears: string[] = [];
+        const lock = deferred<void>();
+        const context = {
+            secureRuntimeUserId: previousAccount as string | null,
+            secureOperationGeneration: 1,
+            chatAccessGeneration: 1,
+            activeMessageLengthBypassKey: "fixture" as string | null,
+            UserStore: { getCurrentUser: () => currentAccount ? { id: currentAccount } : undefined },
+            closeChatUnlockPrompt: () => undefined,
+            commitChatAccessCache: () => undefined,
+            revokePreparedSecureOperations: () => undefined,
+            cancelSuppressedChatLoads: () => undefined,
+            Native: { lockSecurityKeyVault: () => lock.promise },
+            clearEncryptedAttachmentCache: () => clears.push("attachments"),
+            clearEncryptedEmbedCache: (retain: boolean) => clears.push(`embeds:${retain}`),
+            clearEncryptedMessageDecryptCache: () => clears.push("decryptions"),
+            MessageStore: { emitChange: () => clears.push("render") },
+            refreshChatAccessState: async () => undefined,
+        };
+        const lifecycle = runInNewContext(`${compile(functions)}\n({ handleSecureConnectionOpen, invalidateSecureRenderCaches })`, context) as {
+            handleSecureConnectionOpen(): Promise<void>;
+            invalidateSecureRenderCaches(): void;
+        };
+        const reconnect = lifecycle.handleSecureConnectionOpen();
+        assert.deepEqual(clears, ["attachments", `embeds:${preserve}`, "decryptions", "render"], "invalidate before a pending hardware-key lock can keep old URL work alive");
+        lock.resolve(undefined);
+        await reconnect;
+        assert.deepEqual(clears, ["attachments", `embeds:${preserve}`, "decryptions", "render"]);
+        clears.length = 0;
+        lifecycle.invalidateSecureRenderCaches();
+        assert.deepEqual(clears, ["attachments", "embeds:false", "decryptions", "render"], "security invalidation remains a full clear");
+    }
 });
