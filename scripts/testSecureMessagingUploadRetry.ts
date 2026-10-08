@@ -102,6 +102,10 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
     let encryptionGate: Promise<void> | undefined;
     let dispatchError = false;
     let protectionLookups = 0;
+    const uploadStarted = Promise.withResolvers<Upload>();
+    const protectionStarted = Promise.withResolvers<void>();
+    const stickersStarted = Promise.withResolvers<void>();
+    const encryptionStarted = Promise.withResolvers<void>();
     class Shadow extends Upload {
         constructor(item: ConstructorParameters<typeof Upload>[0], channel: string) {
             super(item, channel);
@@ -117,6 +121,11 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
                 await behavior(upload, index);
             };
         }
+        override async upload() {
+            const pending = super.upload();
+            uploadStarted.resolve(this);
+            await pending;
+        }
     }
     const context = {
         AbortController, CloudUploader: Shadow, CloudUploadPlatform: { WEB: CloudUploadPlatform.WEB }, createEncryptedUploadDraft, prepareEncryptedAttachments, uploadEncryptedAttachment,
@@ -125,16 +134,17 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
         applicationGuardsBlocked: false,
         secureOperationGeneration: 1, secureOperationIsCurrent: (_generation: number, userId?: string) => current && (userId === undefined || userId === runtime.accountId), currentSnapshot: () => ({ localUserId: "100000000000000001", snapshot: { channelId: originals[0]?.channelId ?? "200000000000000001" } }),
         takePermittedAnnouncement: () => false, resolveConversationProtection: async () => {
+            protectionStarted.resolve();
             await protectionGate;
             if (++protectionLookups === 2 && runtime.disableDuringPreSend) runtime.destination = "disabled";
             return { kind: "snapshot", conversation: { status: runtime.destination, scope: runtime.scope } };
         },
         updateMessageLengthBypass() {}, requiresFailClosedSend: (conversation: { status: string; }) => conversation.status !== "disabled", isNativeFailure: () => false, hasSelectedKeyReviewBlock: () => runtime.review,
-        selectedOutgoingStickerIds: () => [], blockedOutgoingReason: () => null, resolveSelectedStickers: async () => { await stickerGate; return []; },
+        selectedOutgoingStickerIds: () => [], blockedOutgoingReason: () => null, resolveSelectedStickers: async () => { stickersStarted.resolve(); await stickerGate; return []; },
         discordUploadLimitBytes: () => 100_000, detachedTextUploadIndex: () => null, encryptedMentionedUserIds: () => [],
         preparedOutgoingMessages: new WeakMap(), approvedAttachmentUploads: approvals, detachedTextUploads: new WeakSet(),
         MAX_DISCORD_MESSAGE_LENGTH: 2_000, MAX_ATTACHMENT_COUNT: 10, VOICE_MESSAGE_FLAG: 8192,
-        Native: { encryptOutgoing: async (_user: string, input: { plaintext: string; }) => { nativeCalls++; preparedPlaintexts.push(input.plaintext); await encryptionGate; return { status: "encrypted", content: "encrypted envelope" }; } },
+        Native: { encryptOutgoing: async (_user: string, input: { plaintext: string; }) => { nativeCalls++; preparedPlaintexts.push(input.plaintext); encryptionStarted.resolve(); await encryptionGate; return { status: "encrypted", content: "encrypted envelope" }; } },
         prefetchEncryptedMessageEmbeds: async () => {}, conversationAuthorizationScope: (_user: string, conversation: { status: string; scope: string; }) => conversation.status === "enabled" ? conversation.scope : null,
         authorizeScopedAttachmentUploadReservations() {}, authorizeScopedWirePayload: (_channel: string, content: string) => wires.push(content),
         rememberOptimisticOutgoingPlaintext() {}, clearOutgoingStickers: (value: typeof options) => { if (Array.isArray(value.stickerIds)) value.stickerIds.length = 0; },
@@ -158,6 +168,7 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
     const send = runInNewContext(compiled, context) as (...args: any[]) => Promise<{ cancel?: boolean; stop?: boolean; }>;
     return {
         originals, shadows, wires, options, approvals, nativeCalls: () => nativeCalls, sentBytes: () => sentBytes,
+        uploadStarted: uploadStarted.promise, protectionStarted: protectionStarted.promise, stickersStarted: stickersStarted.promise, encryptionStarted: encryptionStarted.promise,
         runtime, preparedPlaintexts, forwards,
         forward(content = "Forwarded caption", stickerIds: string[] = []) {
             const forward = runInNewContext(`${forwardCompiled}\nsendEncryptedForward`, Object.assign(context, { outgoingListener: send })) as (
@@ -306,13 +317,14 @@ test("a repeated send cannot reuse in-flight drafts and a changed draft cancels 
         finally { h.shadows.forEach(upload => { upload.cancel(); upload.removeAllListeners(); }); }
     });
     pending = h.send();
-    for (let attempt = 0; attempt < 200 && h.sentBytes() === 0; attempt++) await setImmediate();
-    assert.ok(h.sentBytes() > 0, "the pending send must reach the encrypted upload");
+    const upload = await withTimeout(h.uploadStarted, 5_000, "Fixture watchdog: encrypted upload did not start");
+    assert.equal(upload.status, "STARTED", "the pending send must reach the encrypted upload");
     assert.equal((await h.send()).cancel, true);
     assert.equal(h.nativeCalls(), 1);
     h.originals[0].description = "edited description";
     gate.resolve();
     assert.equal((await pending).cancel, true);
+    assert.ok(h.sentBytes() > 0);
     assert.equal(h.wires.length, 0);
     assert.equal(h.originals[0].description, "edited description");
     assert.ok(h.originals.every(upload => upload.status === "NOT_STARTED"));
@@ -325,13 +337,17 @@ test("a host draft replacement without a cancellation event prevents the stale s
     assert.equal(h.wires.length, 0);
 });
 
-for (const stage of ["protection", "stickers"] as const) test(`draft replacement during ${stage} lookup cannot become a programmatic upload`, async () => {
+for (const stage of ["protection", "stickers"] as const) test(`draft replacement during ${stage} lookup cannot become a programmatic upload`, async testContext => {
     const gate = Promise.withResolvers<void>();
     const h = fixture();
     if (stage === "protection") h.delayProtection(gate.promise);
     else h.delayStickers(gate.promise);
     const pending = h.send();
-    await setImmediate();
+    testContext.after(async () => {
+        gate.resolve();
+        await withTimeout(pending, 5_000, "Fixture watchdog: draft replacement send did not drain");
+    });
+    await withTimeout(stage === "protection" ? h.protectionStarted : h.stickersStarted, 5_000, `Fixture watchdog: ${stage} lookup did not start`);
     h.replaceStoredDraft();
     gate.resolve();
     assert.equal((await pending).cancel, true);
@@ -405,13 +421,17 @@ test("a destination disabled before outgoing preparation cannot forward unchange
 });
 
 for (const change of ["account", "capture", "visibility", "guard", "scope", "review", "disabled"] as const) {
-    test(`encrypted forward revalidation cancels a ${change} change during preparation`, async () => {
+    test(`encrypted forward revalidation cancels a ${change} change during preparation`, async testContext => {
         const h = fixture(undefined, 0);
         const gate = Promise.withResolvers<void>();
         h.delayEncryption(gate.promise);
         const pending = h.forward();
         const rejected = assert.rejects(pending, /no longer ready|recipients changed|could not prepare/);
-        for (let attempt = 0; attempt < 100 && h.nativeCalls() === 0; attempt++) await setImmediate();
+        testContext.after(async () => {
+            gate.resolve();
+            await withTimeout(rejected, 5_000, "Fixture watchdog: rejected forward did not drain");
+        });
+        await withTimeout(h.encryptionStarted, 5_000, "Fixture watchdog: forward encryption did not start");
         assert.equal(h.nativeCalls(), 1);
         if (change === "account") h.runtime.accountId = "100000000000000002";
         if (change === "capture") h.runtime.capture = "screenshot";
