@@ -5,6 +5,7 @@
  */
 
 import { exactArrayBuffer as cryptoBytes } from "./exactArrayBuffer";
+import { parseSecureForwardText, type SecureForwardMetadata } from "./forwarding";
 import { decodeBase64Url, encodeBase64Url, isSnowflake } from "./protocol";
 
 export const LEGACY_ATTACHMENT_PAYLOAD_PREFIX = "PCEA1:";
@@ -70,6 +71,7 @@ export interface SecurePlaintext {
     detachedTextIndex: number | null;
     stickers: SecureStickerItem[];
     text: string;
+    forward?: SecureForwardMetadata;
 }
 
 export interface SecureStickerItem {
@@ -589,6 +591,11 @@ export function serializeSecurePlaintext(
     return `${attachments?.manifest ? MANIFEST_ATTACHMENT_PAYLOAD_PREFIX : ATTACHMENT_PAYLOAD_PREFIX}${JSON.stringify([text, compactAttachment])}`;
 }
 
+function parsedMessageText(text: string): { text: string; forward?: SecureForwardMetadata; } {
+    const forward = parseSecureForwardText(text);
+    return { text, ...(forward ? { forward } : {}) };
+}
+
 export function parseSecurePlaintext(value: string): SecurePlaintext {
     if (typeof value !== "string") throw new Error("Secure plaintext is invalid");
     const manifestDetached = value.startsWith(MANIFEST_DETACHED_TEXT_PAYLOAD_PREFIX);
@@ -650,12 +657,12 @@ export function parseSecurePlaintext(value: string): SecurePlaintext {
             ...(compactRich ? [stickers.map(sticker => [sticker.id, sticker.name, sticker.formatType])] : []),
         ];
         if (JSON.stringify(canonical) !== value.slice(prefix.length)) throw new Error("Secure content payload is not canonical");
-        return { text: parsed[0], attachments, detachedTextIndex: null, stickers };
+        return { ...parsedMessageText(parsed[0]), attachments, detachedTextIndex: null, stickers };
     }
 
     const rich = value.startsWith(LEGACY_RICH_CONTENT_PAYLOAD_PREFIX);
     if (!rich && !value.startsWith(LEGACY_ATTACHMENT_PAYLOAD_PREFIX))
-        return { text: value, attachments: null, detachedTextIndex: null, stickers: [] };
+        return { ...parsedMessageText(value), attachments: null, detachedTextIndex: null, stickers: [] };
     const prefix = rich ? LEGACY_RICH_CONTENT_PAYLOAD_PREFIX : LEGACY_ATTACHMENT_PAYLOAD_PREFIX;
     let parsed: unknown;
     try {
@@ -694,5 +701,5 @@ export function parseSecurePlaintext(value: string): SecurePlaintext {
         ...(rich ? { s: stickers.map(sticker => ({ i: sticker.id, n: sticker.name, f: sticker.formatType })) } : {}),
     };
     if (JSON.stringify(canonical) !== value.slice(prefix.length)) throw new Error("Secure content payload is not canonical");
-    return { text: parsed.m, attachments, detachedTextIndex: null, stickers };
+    return { ...parsedMessageText(parsed.m), attachments, detachedTextIndex: null, stickers };
 }

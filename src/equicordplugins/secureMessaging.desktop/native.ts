@@ -43,6 +43,7 @@ import {
     verifyKeyAnnouncement,
 } from "./crypto";
 import { safeDownloadFilename } from "./downloadFilename";
+import { parseSecureForwardText, type SecureForwardMetadata } from "./forwarding";
 import { deriveOneKeyPrivateIdentity } from "./oneKeyVault";
 import {
     decodeBase64Url,
@@ -212,6 +213,7 @@ export type DecryptIncomingResult =
         attachmentBundle: AttachmentBundleDescriptor | null;
         detachedTextIndex: number | null;
         plaintext: string;
+        forward?: SecureForwardMetadata;
         stickers: SecureStickerItem[];
         counter: number;
         envelopeId: string;
@@ -225,6 +227,7 @@ export type DecryptIncomingAttachmentsResult =
         status: "decrypted";
         attachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }>;
         plaintext: string;
+        forward?: SecureForwardMetadata;
         deferredAttachments?: Array<{ id: string; name: string | null; size: number; spoiler?: boolean; }>;
     }
     | { status: "invalid_message" | "replay_detected" | "untrusted_author"; }
@@ -2837,6 +2840,7 @@ async function decryptIncomingInternal(
         let attachmentBundle: AttachmentBundleDescriptor | null = null;
         let detachedTextIndex: number | null = null;
         let stickers: SecureStickerItem[] = [];
+        let forward: SecureForwardMetadata | undefined;
         for (const identity of localIdentities) {
             try {
                 const decrypted = await decryptProtocolMessage({
@@ -2851,6 +2855,7 @@ async function decryptIncomingInternal(
                 plaintext = securePlaintext.text;
                 attachmentBundle = securePlaintext.attachments;
                 stickers = securePlaintext.stickers;
+                forward = securePlaintext.forward;
                 detachedTextIndex = securePlaintext.detachedTextIndex;
                 break;
             } catch {
@@ -2858,6 +2863,7 @@ async function decryptIncomingInternal(
                 attachmentBundle = null;
                 detachedTextIndex = null;
                 stickers = [];
+                forward = undefined;
             }
         }
         if (plaintext === null) return { status: "invalid_message" };
@@ -2876,7 +2882,7 @@ async function decryptIncomingInternal(
                 exactReplay.seenAt = Date.now();
                 await saveVault(context.vault);
             }
-            return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, counter: envelope.q, envelopeId: envelope.i };
+            return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, ...(forward ? { forward } : {}), counter: envelope.q, envelopeId: envelope.i };
         }
         const optimisticReplay = collisions.find(replay =>
             isConfirmedOptimisticMessage(replay, checkedInput.value, envelope, contentDigest, user.value) ||
@@ -2890,7 +2896,7 @@ async function decryptIncomingInternal(
             optimisticReplay.discordMessageIdReplacementUsed = true;
             optimisticReplay.seenAt = Date.now();
             await saveVault(context.vault);
-            return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, counter: envelope.q, envelopeId: envelope.i };
+            return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, ...(forward ? { forward } : {}), counter: envelope.q, envelopeId: envelope.i };
         }
         const sameDiscordMessage = collisions.filter(replay => replay.discordMessageId === checkedInput.value.discordMessageId);
         const reusedEnvelope = collisions.some(replay => replay.discordMessageId !== checkedInput.value.discordMessageId);
@@ -2920,7 +2926,7 @@ async function decryptIncomingInternal(
             collisions[0].discordMessageIdReplacementUsed = true;
             collisions[0].seenAt = Date.now();
             await saveVault(context.vault);
-            return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, counter: envelope.q, envelopeId: envelope.i };
+            return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, ...(forward ? { forward } : {}), counter: envelope.q, envelopeId: envelope.i };
         }
         if (sameDiscordMessage.length > 0) {
             // A Discord edit must carry a freshly signed, monotonically newer envelope. Retaining the
@@ -2931,7 +2937,7 @@ async function decryptIncomingInternal(
         }
 
         if (isOptimisticLocalMessage(checkedInput.value, user.value))
-            return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, counter: envelope.q, envelopeId: envelope.i };
+            return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, ...(forward ? { forward } : {}), counter: envelope.q, envelopeId: envelope.i };
 
         context.account.replayCache.push({
             channelId: checkedInput.value.channelId,
@@ -2947,7 +2953,7 @@ async function decryptIncomingInternal(
         if (context.account.replayCache.length > MAX_REPLAY_RECORDS)
             context.account.replayCache.splice(0, context.account.replayCache.length - MAX_REPLAY_RECORDS);
         await saveVault(context.vault);
-        return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, counter: envelope.q, envelopeId: envelope.i };
+        return { status: "decrypted", plaintext, attachmentBundle, detachedTextIndex, stickers, ...(forward ? { forward } : {}), counter: envelope.q, envelopeId: envelope.i };
     });
 }
 
@@ -2956,8 +2962,9 @@ function resolveDetachedMessageText(
     attachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }>,
     clearDetachedData = true,
     detachedAttachmentId?: string,
-): { attachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }>; plaintext: string; } | null {
-    if (decrypted.detachedTextIndex === null) return { attachments, plaintext: decrypted.plaintext };
+): { attachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }>; plaintext: string; forward?: SecureForwardMetadata; } | null {
+    if (decrypted.detachedTextIndex === null)
+        return { attachments, plaintext: decrypted.plaintext, ...(decrypted.forward ? { forward: decrypted.forward } : {}) };
     const detached = detachedAttachmentId ? attachments.find(attachment => attachment.id === detachedAttachmentId)
         : attachments[decrypted.detachedTextIndex];
     if (!detached || decrypted.plaintext.length > 0 || detached.data.byteLength < 1 ||
@@ -2970,10 +2977,12 @@ function resolveDetachedMessageText(
     try {
         const plaintext = new TextDecoder("utf-8", { fatal: true }).decode(detached.data);
         if (plaintext.length === 0) return null;
+        const forward = parseSecureForwardText(plaintext);
         if (clearDetachedData) detached.data.fill(0);
         return {
             attachments: attachments.filter(attachment => attachment !== detached),
             plaintext,
+            ...(forward ? { forward } : {}),
         };
     } catch {
         return null;
@@ -3029,7 +3038,7 @@ export async function decryptIncomingAttachments(
         }
         if (cachedAttachments.length === attachments.length) {
             const visible = resolveDetachedMessageText(decrypted, cachedAttachments);
-            if (visible) return { status: "decrypted", plaintext: visible.plaintext, attachments: visible.attachments };
+            if (visible) return { status: "decrypted", ...visible };
             for (const attachment of cachedAttachments) attachment.data.fill(0);
             return { status: "invalid_message" };
         }
@@ -3041,7 +3050,8 @@ export async function decryptIncomingAttachments(
             return { status: "invalid_message" };
         if (sessionEpoch !== securityKeySessionEpoch) return unavailableFailure("security_key_locked");
         if (selectedIndexes.length === 0)
-            return { status: "decrypted", plaintext: decrypted.plaintext, attachments: [], deferredAttachments };
+            return { status: "decrypted", plaintext: decrypted.plaintext, attachments: [], deferredAttachments,
+                ...(decrypted.forward ? { forward: decrypted.forward } : {}) };
         const masterKey = decodeBase64Url(bundle.key, 32);
         try {
             const outcomes = await Promise.all(selectedIndexes.map(async index => {
@@ -3137,7 +3147,7 @@ export async function decryptIncomingAttachments(
                 ...outcome.value,
             }));
             const visible = typeof selection === "object"
-                ? { attachments: resolved, plaintext: decrypted.plaintext }
+                ? { attachments: resolved, plaintext: decrypted.plaintext, ...(decrypted.forward ? { forward: decrypted.forward } : {}) }
                 : resolveDetachedMessageText(decrypted, resolved, false, detachedAttachmentId);
             if (!visible) {
                 for (const attachment of resolved) attachment.data.fill(0);
@@ -3146,7 +3156,7 @@ export async function decryptIncomingAttachments(
             for (const attachment of resolved)
                 cacheAuthenticatedAttachment(user.value, checkedInput.value, attachment, attachment.id !== detachedAttachmentId);
             resolved.find(attachment => attachment.id === detachedAttachmentId)?.data.fill(0);
-            return { status: "decrypted", plaintext: visible.plaintext, attachments: visible.attachments,
+            return { status: "decrypted", ...visible,
                 ...(deferredAttachments.length > 0 ? { deferredAttachments } : {}) };
         } finally {
             masterKey.fill(0);

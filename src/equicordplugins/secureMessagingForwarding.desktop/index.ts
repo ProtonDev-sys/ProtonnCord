@@ -9,7 +9,6 @@ import { EquicordDevs } from "@utils/constants";
 import definePlugin, { type PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, MessageAttachment } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
-import { waitFor, waitForSubscriptions } from "@webpack";
 import {
     ChannelStore,
     CloudUploader,
@@ -60,14 +59,6 @@ interface ForwardOptions {
     withMessage?: string;
 }
 
-type SendForward = (message: Message, destinationChannelId: string, options?: ForwardOptions) => Promise<void>;
-type SendForwards = (message: Message, destinationChannelIds: string[], options?: ForwardOptions) => Promise<void>;
-
-interface ForwardActions {
-    sendForward: SendForward;
-    sendForwards: SendForwards;
-}
-
 interface ForwardUpload {
     description: string | null;
     duration: number | null;
@@ -90,15 +81,6 @@ interface SecureMessagingPluginState {
 
 let generation = 0;
 let running = false;
-let patchedActions: ForwardActions | null = null;
-let guardedSendForward: SendForward | null = null;
-let guardedSendForwards: SendForwards | null = null;
-let originalActionDescriptors: Partial<Record<keyof ForwardActions, PropertyDescriptor | undefined>> | null = null;
-
-function forwardActionsFilter(module: unknown): boolean {
-    const actions = module as Partial<ForwardActions> | null;
-    return typeof actions?.sendForward === "function" && typeof actions?.sendForwards === "function";
-}
 
 function secureMessagingPlugin(): SecureMessagingPluginState | undefined {
     return (plugins as unknown as Record<string, SecureMessagingPluginState>).SecureMessaging;
@@ -610,86 +592,6 @@ async function routeForward(
     return true;
 }
 
-function canWrapForwardExport(actions: ForwardActions, descriptor: PropertyDescriptor | undefined): boolean {
-    return descriptor === undefined ? Object.isExtensible(actions) :
-        Boolean(descriptor.configurable || "value" in descriptor && descriptor.writable);
-}
-
-function replaceForwardExport(actions: ForwardActions, key: keyof ForwardActions, value: SendForward | SendForwards): void {
-    const descriptor = Object.getOwnPropertyDescriptor(actions, key);
-    Object.defineProperty(actions, key, descriptor && "value" in descriptor
-        ? { ...descriptor, value }
-        : { configurable: true, enumerable: descriptor?.enumerable ?? true, writable: true, value });
-}
-
-function restoreForwardExports(): void {
-    if (!patchedActions || !originalActionDescriptors) return;
-    for (const [key, wrapper] of [["sendForward", guardedSendForward], ["sendForwards", guardedSendForwards]] as const) {
-        const current = Object.getOwnPropertyDescriptor(patchedActions, key);
-        if (!wrapper || current?.value !== wrapper || (!current.configurable && !current.writable)) continue;
-        const original = originalActionDescriptors[key];
-        if (original) Object.defineProperty(patchedActions, key, original);
-        else Reflect.deleteProperty(patchedActions, key);
-    }
-}
-
-function installForwardGuard(actions: ForwardActions, expectedGeneration: number): void {
-    if (expectedGeneration !== generation || patchedActions) return;
-    const original = actions.sendForward;
-    const originalMany = actions.sendForwards;
-    if (typeof original !== "function" || typeof originalMany !== "function") return;
-    const oneDescriptor = Object.getOwnPropertyDescriptor(actions, "sendForward");
-    const manyDescriptor = Object.getOwnPropertyDescriptor(actions, "sendForwards");
-    if (!canWrapForwardExport(actions, oneDescriptor) || !canWrapForwardExport(actions, manyDescriptor)) return;
-
-    guardedSendForward = async function (message, destinationChannelId, options) {
-        try {
-            if (!await routeForward(expectedGeneration, message, destinationChannelId, options))
-                await original.call(actions, message, destinationChannelId, options);
-        } catch (error) {
-            showToast(
-                error instanceof Error ? error.message : "Secure Messaging could not forward this message safely.",
-                Toasts.Type.FAILURE,
-            );
-        }
-    };
-    const sendOne = guardedSendForward;
-    guardedSendForwards = async function (message, destinationChannelIds, options) {
-        if (!Array.isArray(destinationChannelIds) ||
-            destinationChannelIds.some(channelId => typeof channelId !== "string" || !SNOWFLAKE.test(channelId))) {
-            showToast("Discord supplied invalid forwarding destinations.", Toasts.Type.FAILURE);
-            return;
-        }
-        const localUserId = UserStore.getCurrentUser()?.id;
-        for (const destinationChannelId of new Set(destinationChannelIds)) {
-            if (expectedGeneration !== generation || UserStore.getCurrentUser()?.id !== localUserId) return;
-            await sendOne.call(actions, message, destinationChannelId, options);
-        }
-    };
-    patchedActions = actions;
-    originalActionDescriptors = { sendForward: oneDescriptor, sendForwards: manyDescriptor };
-    try {
-        replaceForwardExport(actions, "sendForward", guardedSendForward);
-        replaceForwardExport(actions, "sendForwards", guardedSendForwards);
-    } catch (error) {
-        restoreForwardExports();
-        patchedActions = null;
-        originalActionDescriptors = null;
-        throw error;
-    }
-}
-
-function uninstallForwardGuard(): void {
-    running = false;
-    generation++;
-    waitForSubscriptions.delete(forwardActionsFilter);
-    restoreForwardExports();
-    patchedActions = null;
-    originalActionDescriptors = null;
-    guardedSendForward = null;
-    guardedSendForwards = null;
-}
-
 export default definePlugin({
     name: "SecureMessagingForwarding",
     description: "Routes Discord forwards into protected conversations through Secure Messaging as new encrypted copies.",
@@ -697,16 +599,23 @@ export default definePlugin({
     hidden: true,
     required: true,
 
+    patches: [{
+        // These actions are private to ForwardModal. Its bulk sender consumes allSettled results.
+        find: '"Unable to find original channel for message"',
+        replacement: {
+            match: /async sendForward\((\i),(\i),(\i)\)\{/,
+            replace: "$&if(await $self.tryForward($1,$2,$3))return;",
+        },
+    }],
+
     start() {
         running = true;
-        const expectedGeneration = ++generation;
-        waitFor(forwardActionsFilter, module => {
-            installForwardGuard(module as ForwardActions, expectedGeneration);
-        });
+        generation++;
     },
 
     stop() {
-        uninstallForwardGuard();
+        running = false;
+        generation++;
     },
 
     tryForward(message: Message, destinationChannelId: string, options?: ForwardOptions): Promise<boolean> {

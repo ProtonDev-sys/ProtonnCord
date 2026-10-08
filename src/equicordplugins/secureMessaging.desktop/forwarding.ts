@@ -46,6 +46,13 @@ export interface ComposeSecureForwardInput {
     timestampMs?: number | null;
 }
 
+export interface SecureForwardMetadata {
+    authorLabel: string;
+    timestampMs: number | null;
+    content: string;
+    note?: string;
+}
+
 function compactLabel(value: unknown, fallback: string): string {
     if (typeof value !== "string") return fallback;
     const compact = value
@@ -58,6 +65,33 @@ function compactLabel(value: unknown, fallback: string): string {
 
 function escapeInlineMarkdown(value: string): string {
     return value.replace(/[\\`*_~|[\]]/gu, "\\$&");
+}
+
+// The readable header stays compatible with older clients. Its attribution is a
+// claim authenticated by the forwarding sender, not a signature from the source.
+export function parseSecureForwardText(value: string): SecureForwardMetadata | null {
+    const prefix = "**Forwarded copy from ";
+    const separator = value.indexOf(`\n\n${prefix}`);
+    const headerOffset = value.startsWith(prefix) ? 0 : separator < 0 ? -1 : separator + 2;
+    if (headerOffset < 0) return null;
+    const lineEnd = value.indexOf("\n", headerOffset);
+    const header = value.slice(headerOffset, lineEnd < 0 ? undefined : lineEnd);
+    if (header.length > 260) return null;
+    const match = /^\*\*Forwarded copy from (.+)\*\*(?: • <t:([1-9]\d{0,12}):f>)?$/u.exec(header);
+    if (!match) return null;
+    const authorLabel = match[1].replace(/\\([\\`*_~|[\]])/gu, "$1");
+    if (compactLabel(authorLabel, "") !== authorLabel || escapeInlineMarkdown(authorLabel) !== match[1]) return null;
+    const timestampMs = match[2] === undefined ? null : Number(match[2]) * 1_000;
+    if (timestampMs !== null && (!Number.isSafeInteger(timestampMs) || Number.isNaN(new Date(timestampMs).getTime()))) return null;
+    if (lineEnd >= 0 && value.slice(lineEnd, lineEnd + 2) !== "\n\n") return null;
+    const note = headerOffset > 0 ? value.slice(0, headerOffset - 2) : undefined;
+    if (note !== undefined && note.trim().length === 0) return null;
+    return {
+        authorLabel,
+        timestampMs,
+        content: lineEnd < 0 ? "" : value.slice(lineEnd + 2),
+        ...(note === undefined ? {} : { note }),
+    };
 }
 
 function safeWebUrl(value: unknown): string | null {
