@@ -8,7 +8,7 @@ import type { PluginManifestEntry } from "@shared/pluginDefinition";
 import type { PluginTag } from "@utils/types";
 
 export const enum SearchStatus {
-    ALL, FAVORITES, ENABLED, DISABLED, EQUICORD, VENCORD, NEW, USER_PLUGINS, API_PLUGINS
+    ALL, FAVORITES, ENABLED, DISABLED, NEW, USER_PLUGINS, API_PLUGINS
 }
 
 export interface PluginFilter {
@@ -18,7 +18,7 @@ export interface PluginFilter {
 }
 
 export interface CatalogCard {
-    plugin: Pick<PluginManifestEntry, "name" | "description" | "isModified">;
+    plugin: Pick<PluginManifestEntry, "name" | "description">;
     enabled: boolean;
     disabled: boolean;
     isNew: boolean;
@@ -126,8 +126,6 @@ export function createPluginCatalogView(source: CatalogSource) {
                 case SearchStatus.FAVORITES: if (!favorites.has(name)) continue; break;
                 case SearchStatus.ENABLED: if (!enabled.has(name)) continue; break;
                 case SearchStatus.DISABLED: if (enabled.has(name)) continue; break;
-                case SearchStatus.EQUICORD: if (!meta.folderName.startsWith("src/equicordplugins/")) continue; break;
-                case SearchStatus.VENCORD: if (!meta.folderName.startsWith("src/plugins/")) continue; break;
                 case SearchStatus.NEW: if (!newPlugins?.has(name)) continue; break;
                 case SearchStatus.USER_PLUGINS: if (!meta.userPlugin) continue; break;
                 case SearchStatus.API_PLUGINS: if (!name.endsWith("API")) continue; break;
@@ -143,18 +141,18 @@ export function createPluginCatalogView(source: CatalogSource) {
 
         function card(name: string, disabled: boolean): CatalogCard {
             const plugin = source.plugins[name];
-            const { description, isModified } = plugin;
+            const { description } = plugin;
             const isEnabled = enabled.has(name);
             const isNew = !disabled && !!newPlugins?.has(name);
             const isFavorite = favorites.has(name);
             const requiredBy = activeDependants.get(name);
             const hasVisibleSettings = plugin.hasVisibleSettings ?? source.hasVisibleSettings(name);
             const old = cardCache.get(name);
-            if (old && old.plugin.description === description && old.plugin.isModified === isModified
+            if (old && old.plugin.description === description
                 && old.enabled === isEnabled && old.disabled === disabled && old.isNew === isNew && old.isFavorite === isFavorite
                 && old.hasVisibleSettings === hasVisibleSettings && sameItems(old.requiredBy, requiredBy)) return old;
             const next: CatalogCard = {
-                plugin: { name, description, isModified }, enabled: isEnabled, disabled, isNew, isFavorite, hasVisibleSettings, requiredBy
+                plugin: { name, description }, enabled: isEnabled, disabled, isNew, isFavorite, hasVisibleSettings, requiredBy
             };
             cardCache.set(name, next);
             return next;

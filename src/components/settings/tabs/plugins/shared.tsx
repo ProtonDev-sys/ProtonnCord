@@ -43,20 +43,6 @@ export const ExcludedReasons: Record<"web" | "browser" | "discordDesktop" | "ves
     dev: "Developer version of Protonn Cord"
 };
 
-export interface PluginSource {
-    label: string;
-    title: string;
-}
-
-/** Where a plugin comes from, derived from its source folder; no network assets are involved. */
-export function getPluginSource(meta: { folderName: string; userPlugin: boolean; } | undefined, isModified?: boolean): PluginSource | null {
-    if (isModified) return { label: "Modified", title: "Vencord plugin modified by Protonn Cord" };
-    if (meta?.folderName.startsWith("src/equicordplugins/")) return { label: "Protonn Cord", title: "Protonn Cord plugin" };
-    if (meta?.folderName.startsWith("src/plugins/")) return { label: "Vencord", title: "Vencord plugin" };
-    if (meta?.userPlugin) return { label: "User", title: "User plugin" };
-    return null;
-}
-
 export function PluginDependencyList({ deps }: { deps: readonly string[]; }) {
     return (
         <>

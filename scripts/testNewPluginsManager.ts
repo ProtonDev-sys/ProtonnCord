@@ -145,7 +145,6 @@ function verifyCatalogCards() {
         "@webpack/common": { React },
         "~plugins": plugins,
         "./pluginToggle": toggle,
-        "./shared": { getPluginSource: () => ({ label: "Vencord", title: "Vencord plugin" }) },
     });
     const find = (tree: any, match: (node: any) => boolean): any[] => Array.isArray(tree)
         ? tree.flatMap(child => find(child, match))

@@ -9,6 +9,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import ts from "typescript";
 
+import { retiredPlugins } from "../src/shared/retiredPlugins";
+
 import { getEntryPoint, isPluginFile } from "./utils";
 import { getPluginTarget } from "./utils.mjs";
 
@@ -141,6 +143,12 @@ function compareCatalog(baseline: CatalogEntry[], current: CatalogEntry[]): stri
     for (const previous of baseline) {
         const plugin = byName.get(previous.name);
         if (!plugin) {
+            const retirement = retiredPlugins[previous.name as keyof typeof retiredPlugins];
+            if (retirement && byName.has(retirement.replacement)) {
+                if (JSON.stringify(previous.settings ?? []) !== JSON.stringify(retirement.settings))
+                    failures.push(`${previous.name}: retirement does not retain its historical settings contract`);
+                continue;
+            }
             failures.push(`Missing plugin/settings namespace: ${previous.name}`);
             continue;
         }
