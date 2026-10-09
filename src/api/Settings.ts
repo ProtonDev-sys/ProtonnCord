@@ -17,6 +17,7 @@
 */
 
 import { getLoadedPluginDefinition } from "@shared/pluginDefinition";
+import { migrateRetiredPlugins } from "@shared/retiredPlugins";
 import { SettingsStore as SettingsStoreClass } from "@shared/SettingsStore";
 import type { UpdaterBranch } from "@shared/Updater";
 import { Logger } from "@utils/Logger";
@@ -83,6 +84,9 @@ export interface Settings {
             [setting: string]: any;
         };
     };
+
+    /** Completed catalog migrations; archived plugin namespaces remain available for recovery. */
+    pluginRetirements?: Record<string, string>;
 
     uiElements: {
         messagePopoverButtons: SettingsPluginUiElements;
@@ -156,6 +160,7 @@ const DefaultSettings: Settings = {
 
 const settings = !IS_REPORTER ? VencordNative.settings.get() : {} as Settings;
 mergeDefaults(settings, DefaultSettings);
+const retiredPluginsMigrated = !IS_REPORTER && migrateRetiredPlugins(settings);
 
 export const SettingsStore = new SettingsStoreClass(settings, {
     readOnly: true,
@@ -215,6 +220,7 @@ if (!IS_REPORTER) {
         SettingsStore.plain.cloud.settingsSyncVersion = Date.now();
         VencordNative.settings.set(SettingsStore.plain, path).catch(error => logger.error("Failed to save settings", error));
     });
+    if (retiredPluginsMigrated) SettingsStore.markAsChanged();
 }
 
 /**

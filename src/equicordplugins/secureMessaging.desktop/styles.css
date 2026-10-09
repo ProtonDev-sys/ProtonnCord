@@ -88,6 +88,61 @@
     border: 1px solid var(--border-subtle);
     border-radius: 0.5rem;
     background: var(--background-mod-subtle, var(--background-secondary));
+    color: var(--text-default);
+}
+
+.pc-secure-forward,
+.pc-secure-row [id^="message-accessories-"] > .pc-secure-forward ~ * {
+    box-sizing: border-box;
+    width: fit-content;
+    max-width: min(42rem, 100%);
+    padding: 0.65rem 0.75rem;
+    border-left: 3px solid var(--border-strong, var(--text-muted));
+    border-radius: 0.25rem;
+    background: var(--background-mod-subtle, var(--background-secondary));
+    color: var(--text-default);
+}
+
+/* The note stays above the card; native media following its article joins the same frame. */
+.pc-secure-row [id^="message-accessories-"]:has(.pc-secure-forward) {
+    width: fit-content;
+    max-width: min(42rem, 100%);
+    gap: 0;
+}
+
+.pc-secure-row [id^="message-accessories-"] > .pc-secure-forward,
+.pc-secure-row [id^="message-accessories-"] > .pc-secure-forward ~ * {
+    width: auto;
+    max-width: none;
+    margin-block: 0;
+    border-radius: 0;
+}
+
+.pc-secure-forward-label {
+    margin-bottom: 0.4rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-style: italic;
+}
+
+.pc-secure-forward-source {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: baseline;
+    margin-bottom: 0.35rem;
+    color: var(--text-strong, var(--text-default));
+    font-size: 0.875rem;
+    overflow-wrap: anywhere;
+}
+
+.pc-secure-forward-source time {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.pc-secure-forward-note {
+    margin-bottom: 0.5rem;
 }
 
 /* Holds the decrypted text's line height while decryption finishes, so rows do not jump. */
@@ -102,13 +157,13 @@
 }
 
 .pc-secure-card-warning {
-    border-color: color-mix(in srgb, var(--status-warning) 55%, var(--border-subtle));
-    background: color-mix(in srgb, var(--background-secondary) 93%, var(--status-warning));
+    border-color: color-mix(in oklab, var(--status-warning) 55%, var(--border-subtle));
+    background-image: linear-gradient(color-mix(in oklab, var(--status-warning) 10%, transparent) 0 0);
 }
 
 .pc-secure-card-danger {
-    border-color: color-mix(in srgb, var(--status-danger) 55%, var(--border-subtle));
-    background: color-mix(in srgb, var(--background-secondary) 93%, var(--status-danger));
+    border-color: color-mix(in oklab, var(--status-danger) 55%, var(--border-subtle));
+    background-image: linear-gradient(color-mix(in oklab, var(--status-danger) 10%, transparent) 0 0);
 }
 
 .pc-secure-card-header {
@@ -116,9 +171,10 @@
     gap: 0.4rem;
     align-items: center;
     margin-bottom: 0.35rem;
-    color: var(--text-muted);
-    font-size: 0.75rem;
+    color: var(--text-strong, var(--text-default));
+    font-size: 0.875rem;
     font-weight: 600;
+    line-height: 1.35;
 }
 
 .pc-secure-card-actions,
@@ -135,8 +191,8 @@
     overflow-wrap: anywhere;
     padding: 0.55rem;
     border-radius: 0.35rem;
-    background: var(--background-tertiary);
-    color: var(--text-normal);
+    background: var(--background-base-lower, var(--background-tertiary));
+    color: var(--text-default);
     font-family: var(--font-code);
     font-size: 0.75rem;
     line-height: 1.5;

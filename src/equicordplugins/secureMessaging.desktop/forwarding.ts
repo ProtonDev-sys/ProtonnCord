@@ -24,11 +24,14 @@ export interface ForwardMentionResolvers {
 export interface ForwardEmbed {
     author?: { name?: unknown; url?: unknown; } | null;
     description?: unknown;
-    fields?: Array<{ name?: unknown; value?: unknown; }> | null;
+    fields?: Array<{ name?: unknown; value?: unknown; rawName?: unknown; rawValue?: unknown; }> | null;
     image?: { url?: unknown; proxy_url?: unknown; proxyUrl?: unknown; } | null;
+    images?: Array<{ url?: unknown; }> | null;
     provider?: { name?: unknown; url?: unknown; } | null;
     thumbnail?: { url?: unknown; proxy_url?: unknown; proxyUrl?: unknown; } | null;
     title?: unknown;
+    rawTitle?: unknown;
+    rawDescription?: unknown;
     url?: unknown;
     video?: { url?: unknown; proxy_url?: unknown; proxyUrl?: unknown; } | null;
 }
@@ -43,6 +46,13 @@ export interface ComposeSecureForwardInput {
     timestampMs?: number | null;
 }
 
+export interface SecureForwardMetadata {
+    authorLabel: string;
+    timestampMs: number | null;
+    content: string;
+    note?: string;
+}
+
 function compactLabel(value: unknown, fallback: string): string {
     if (typeof value !== "string") return fallback;
     const compact = value
@@ -55,6 +65,33 @@ function compactLabel(value: unknown, fallback: string): string {
 
 function escapeInlineMarkdown(value: string): string {
     return value.replace(/[\\`*_~|[\]]/gu, "\\$&");
+}
+
+// The readable header stays compatible with older clients. Its attribution is a
+// claim authenticated by the forwarding sender, not a signature from the source.
+export function parseSecureForwardText(value: string): SecureForwardMetadata | null {
+    const prefix = "**Forwarded copy from ";
+    const separator = value.indexOf(`\n\n${prefix}`);
+    const headerOffset = value.startsWith(prefix) ? 0 : separator < 0 ? -1 : separator + 2;
+    if (headerOffset < 0) return null;
+    const lineEnd = value.indexOf("\n", headerOffset);
+    const header = value.slice(headerOffset, lineEnd < 0 ? undefined : lineEnd);
+    if (header.length > 260) return null;
+    const match = /^\*\*Forwarded copy from (.+)\*\*(?: • <t:([1-9]\d{0,12}):f>)?$/u.exec(header);
+    if (!match) return null;
+    const authorLabel = match[1].replace(/\\([\\`*_~|[\]])/gu, "$1");
+    if (compactLabel(authorLabel, "") !== authorLabel || escapeInlineMarkdown(authorLabel) !== match[1]) return null;
+    const timestampMs = match[2] === undefined ? null : Number(match[2]) * 1_000;
+    if (timestampMs !== null && (!Number.isSafeInteger(timestampMs) || Number.isNaN(new Date(timestampMs).getTime()))) return null;
+    if (lineEnd >= 0 && value.slice(lineEnd, lineEnd + 2) !== "\n\n") return null;
+    const note = headerOffset > 0 ? value.slice(0, headerOffset - 2) : undefined;
+    if (note !== undefined && note.trim().length === 0) return null;
+    return {
+        authorLabel,
+        timestampMs,
+        content: lineEnd < 0 ? "" : value.slice(lineEnd + 2),
+        ...(note === undefined ? {} : { note }),
+    };
 }
 
 function safeWebUrl(value: unknown): string | null {
@@ -123,6 +160,14 @@ export function sanitizeForwardMentions(
         .replace(/@(everyone|here)\b/giu, "@\u200b$1");
 }
 
+export function secureForwardImageEmbeds(embeds: readonly ForwardEmbed[]): ForwardEmbed[] {
+    return embeds.flatMap(embed => embed.images?.length
+        ? embed.images.map((image, index) => index === 0
+            ? { ...embed, image: undefined, images: [image] }
+            : { url: image.url })
+        : [embed]);
+}
+
 export function secureForwardEmbedText(
     embeds: readonly ForwardEmbed[] = [],
     selection?: readonly number[],
@@ -139,6 +184,7 @@ export function secureForwardEmbedText(
             embed.url,
             embed.video?.url,
             embed.image?.url,
+            ...(Array.isArray(embed.images) ? embed.images.map(image => image?.url) : []),
             embed.thumbnail?.url,
             embed.author?.url,
             embed.provider?.url,
@@ -150,10 +196,10 @@ export function secureForwardEmbedText(
 
         const lines = [
             textValue(embed.author?.name),
-            textValue(embed.title),
-            textValue(embed.description),
+            textValue(embed.rawTitle ?? embed.title),
+            textValue(embed.rawDescription ?? embed.description),
             ...(Array.isArray(embed.fields)
-                ? embed.fields.flatMap(field => [textValue(field?.name), textValue(field?.value)])
+                ? embed.fields.flatMap(field => [textValue(field?.rawName ?? field?.name), textValue(field?.rawValue ?? field?.value)])
                 : []),
             textValue(embed.provider?.name),
         ].filter((line): line is string => line !== null);

@@ -125,6 +125,11 @@ export const settings = definePluginSettings({
         hidden: true,
         onChange: onCollapseSettingChanged("chatButtons"),
     },
+    chatButtonsColor: {
+        type: OptionType.BOOLEAN,
+        description: "Color the message buttons control red while the row is expanded.",
+        default: false,
+    },
     titleBarCollapsed: {
         type: OptionType.BOOLEAN,
         description: "Persist the title bar as collapsed.",

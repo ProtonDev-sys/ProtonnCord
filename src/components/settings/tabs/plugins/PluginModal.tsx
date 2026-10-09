@@ -44,7 +44,7 @@ import { openContributorModal } from "./ContributorModal";
 import { FavoriteButton, GithubButton, WebsiteButton } from "./PluginModalButtons";
 import { togglePlugin } from "./pluginToggle";
 import { createSettingChangeScheduler } from "./settingUpdates";
-import { getPluginSource, restartAfterSaving } from "./shared";
+import { restartAfterSaving } from "./shared";
 
 const cl = classNameFactory("vc-plugin-modal-");
 
@@ -207,7 +207,6 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
 
     const pluginMeta = PluginMeta[plugin.name];
     const isEquicordPlugin = pluginMeta.folderName.startsWith("src/equicordplugins/");
-    const source = getPluginSource(pluginMeta, plugin.isModified);
     const enabled = isPluginEnabled(plugin.name);
     const requiredBy = getRequiredBy(plugin);
 
@@ -224,7 +223,6 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
             title={
                 <div className={cl("header")}>
                     <BaseText tag="h1" weight="semibold" size="lg">{plugin.name}</BaseText>
-                    {source && <span className={cl("source")} title={source.title}>{source.label}</span>}
                 </div>
             }
             subtitle={

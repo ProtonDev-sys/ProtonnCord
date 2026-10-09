@@ -13,10 +13,12 @@ import {
     addMessagePreEditListener,
     addMessagePreSendListener,
     MessageEditListener,
+    MessageObject,
     MessageSendListener,
     removeMessageLengthBypassListener,
     removeMessagePreEditListener,
     removeMessagePreSendListener,
+    SendMessageOptions,
 } from "@api/MessageEvents";
 import { updateMessage } from "@api/MessageUpdater";
 import { definePluginSettings } from "@api/Settings";
@@ -32,7 +34,7 @@ import { makeLazy, proxyLazy } from "@utils/lazy";
 import { classes } from "@utils/misc";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import type { Channel, CloudUpload, Message, RenderModalProps } from "@vencord/discord-types";
-import { CloudUploadPlatform } from "@vencord/discord-types/enums";
+import { CloudUploadPlatform, MessageFlags } from "@vencord/discord-types/enums";
 import { findByPropsLazy, findComponentByCodeLazy, findCssClassesLazy } from "@webpack";
 import {
     ChannelStore,
@@ -121,12 +123,14 @@ import {
     clearEncryptedEmbedCache,
     encryptedMessageInlineEmbedStatus,
     invalidateEncryptedMessageEmbeds,
+    patchEncryptedMessageCodedLinks,
     patchEncryptedMessageEmbeds,
     patchEncryptedMessageStickers,
     prefetchEncryptedMessageEmbeds,
     setExternalLinkPreviewsEnabled,
 } from "./embedCache";
 import { shouldHideSecureEmbedOnlyPlaintext } from "./embedUrls";
+import { parseSecureForwardText } from "./forwarding";
 import { KeyReviewGate } from "./keyReviewGate";
 import { encryptedAllowedMentions, encryptedMessageMentionsUser } from "./mentionNotifications";
 import { discordEditedTimestamp, discordMessageNonce } from "./messageMetadata";
@@ -239,7 +243,7 @@ const screenCaptureProtectionListeners = new Set<(status: ScreenCaptureProtectio
 /** Discord message rows showing an encrypted envelope, keyed by message ID, refreshed when its decryption settles. */
 const secureMessageRowListeners = new Map<string, Set<() => void>>();
 const pendingEncryptedRenderOwners = new Set<{ forceUpdate(): void; }>();
-const encryptedRenderCallbacks = new WeakMap<{ forceUpdate(): void; }, () => void>();
+const encryptedRenderCallbacks = new WeakMap<{ forceUpdate(): void; }, { callback: () => void; messageId: string; }>();
 let settledRenderDecryptions: SettledRenderDecryption[] = [];
 let renderDecryptBatchTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -308,13 +312,20 @@ function decryptCachedMessageForRender(
     );
 }
 
-function encryptedRenderCallback(owner: { forceUpdate(): void; }): () => void {
-    let callback = encryptedRenderCallbacks.get(owner);
-    if (!callback) {
-        callback = () => owner.forceUpdate();
-        encryptedRenderCallbacks.set(owner, callback);
+function encryptedRenderCallback(owner: { forceUpdate(): void; }, messageId: string): () => void {
+    let entry = encryptedRenderCallbacks.get(owner);
+    if (!entry) {
+        const reference = new WeakRef(owner);
+        entry = { callback: () => {
+            const mounted = reference.deref();
+            if (!mounted) return;
+            mounted.forceUpdate();
+            notifySecureMessageRow(entry!.messageId);
+        }, messageId };
+        encryptedRenderCallbacks.set(owner, entry);
     }
-    return callback;
+    entry.messageId = messageId;
+    return entry.callback;
 }
 
 async function saveEncryptedAttachment(url: string): Promise<void> {
@@ -377,9 +388,9 @@ function useScreenCaptureProtectionStatus(): ScreenCaptureProtectionStatus {
     return status;
 }
 
-function invalidateSecureRenderCaches(): void {
+function invalidateSecureRenderCaches(preserveUnfurls = false): void {
     clearEncryptedAttachmentCache();
-    clearEncryptedEmbedCache();
+    clearEncryptedEmbedCache(preserveUnfurls);
     clearEncryptedMessageDecryptCache();
     MessageStore.emitChange();
 }
@@ -732,10 +743,15 @@ function prefetchReceivedEncryptedMessage(dispatched: Message | undefined): void
     if (!message?.author?.id || message.state === "SENDING" || !isEncryptedMessage(message.content)) return;
     const generation = secureOperationGeneration;
     const key = decryptCacheKey(localUserId, message);
-    void prefetchCachedMessage(localUserId, message)?.then(() => {
+    void prefetchCachedMessage(localUserId, message)?.then(result => {
+        const current = MessageStore.getMessage(channelId, message.id);
         if (secureOperationIsCurrent(generation, localUserId) && screenCaptureProtectionStatus === "ready" &&
-            key === decryptCacheKey(localUserId, message) && chatGateReason({ channelId }) === null)
+            current && key === decryptCacheKey(localUserId, current) && channelId === SelectedChannelStore.getChannelId() &&
+            chatGateReason({ channelId }) === null) {
+            if (result.status === "decrypted" && (current.flags & MessageFlags.SUPPRESS_EMBEDS) === 0)
+                void prefetchEncryptedMessageEmbeds(result.plaintext);
             notifySecureMessageRow(message.id);
+        }
     });
 }
 
@@ -1343,7 +1359,7 @@ async function protectProgrammaticPost(request: Record<string, any>): Promise<Re
             : await resolveConversationProtection(forward.channelId);
         if (requiresProtectedNetworkGuard(sourceProtection) || requiresProtectedNetworkGuard(protection)) {
             showToast(
-                "Forwarding is unavailable for protected conversations. Copy the content and send it as a new encrypted message.",
+                "This forward could not be encrypted safely.",
                 Toasts.Type.FAILURE,
             );
             throw new Error("Secure Messaging blocked forwarding into or out of a protected conversation");
@@ -1951,6 +1967,53 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
     }
 };
 
+async function sendEncryptedForward(channelId: string, content: string, uploads: CloudUpload[], stickerIds: string[]): Promise<void> {
+    const generation = secureOperationGeneration;
+    const visibilityGeneration = screenCaptureProtectionGeneration;
+    const localUserId = UserStore.getCurrentUser()?.id;
+    const channel = ChannelStore.getChannel(channelId);
+    if (!localUserId || !channel || !currentSnapshot(channel))
+        throw new Error("Open the protected destination before forwarding into it.");
+    const requireProtection = async () => {
+        const protection = await resolveConversationProtection(channelId);
+        const scope = protection.kind === "snapshot"
+            ? conversationAuthorizationScope(localUserId, protection.conversation)
+            : null;
+        if (!secureOperationIsCurrent(generation, localUserId) || secureRuntimeUserId !== localUserId ||
+            applicationGuardsBlocked || !networkGuardEnabled || screenCaptureProtectionStatus !== "ready" ||
+            visibilityGeneration !== screenCaptureProtectionGeneration || !scope || protection.kind !== "snapshot" ||
+            hasSelectedKeyReviewBlock(localUserId, protection.conversation))
+            throw new Error("The destination is no longer ready for an encrypted forward.");
+        return scope;
+    };
+    const expectedScope = await requireProtection();
+    const message: MessageObject = { content, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] };
+    const options: SendMessageOptions = {
+        channelId,
+        command: null,
+        content,
+        uploads: [...uploads],
+        stickerIds: [...stickerIds],
+        location: "Secure Messaging forward",
+    };
+    // Programmatic MessageActions sends bypass the composer's pre-send hook.
+    // Prepare forwards through the same authenticated text, attachment and sticker path.
+    const prepared = await outgoingListener(channelId, message, options, {
+        channel,
+        content,
+        hasAttachments: uploads.length > 0,
+        hasStickers: stickerIds.length > 0,
+        openWarningPopout: () => undefined,
+    });
+    if (prepared?.cancel || !isEncryptedMessage(message.content) ||
+        preparedOutgoingMessages.get(message)?.ciphertext !== message.content)
+        throw new Error("Secure Messaging could not prepare the encrypted forward.");
+    if (await requireProtection() !== expectedScope)
+        throw new Error("The destination recipients changed while the encrypted forward was being prepared.");
+    options.content = message.content;
+    await MessageActions.sendMessage(channelId, message, false, options);
+}
+
 const editListener: MessageEditListener = async (channelId, messageId, message) => {
     if (applicationGuardsBlocked) return { cancel: true };
     const generation = secureOperationGeneration;
@@ -2054,6 +2117,7 @@ async function sendKeyAnnouncement(channelId: string, localUserId: string): Prom
 
 async function handleSecureConnectionOpen(): Promise<void> {
     const localUserId = UserStore.getCurrentUser()?.id ?? null;
+    const sameAccount = localUserId !== null && secureRuntimeUserId === localUserId;
     const accountChanged = secureRuntimeUserId !== null && secureRuntimeUserId !== localUserId;
     secureRuntimeUserId = localUserId;
     if (accountChanged) closeChatUnlockPrompt();
@@ -2064,13 +2128,15 @@ async function handleSecureConnectionOpen(): Promise<void> {
         revokePreparedSecureOperations();
         activeMessageLengthBypassKey = null;
         cancelSuppressedChatLoads();
+    }
+    invalidateSecureRenderCaches(sameAccount);
+    if (accountChanged) {
         try {
             await Native.lockSecurityKeyVault();
         } catch {
             // The native process still clears its in-memory key on process exit; renderer state fails closed.
         }
     }
-    invalidateSecureRenderCaches();
     await refreshChatAccessState(localUserId);
 }
 
@@ -2716,21 +2782,32 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
         ? getOptimisticOutgoingPlaintext(message.content)
         : undefined;
     const visiblePlaintext = result?.status === "decrypted" ? result.plaintext : optimisticPlaintext;
+    const forward = captureProtection === "ready" && (result?.status === "decrypted" || !result) && visiblePlaintext !== undefined
+        ? result?.status === "decrypted" ? result.forward : parseSecureForwardText(visiblePlaintext)
+        : null;
+    const bodyPlaintext = forward?.content ?? visiblePlaintext;
     const inlineEmbedStatus = encryptedMessageInlineEmbedStatus(message);
-    const embedOnly = visiblePlaintext !== undefined && (result?.status === "decrypted"
+    const embedOnly = bodyPlaintext !== undefined && (result?.status === "decrypted"
         ? result.attachmentBundle === null && result.stickers.length === 0
         : !result && message.attachments.length === 0 && message.stickerItems.length === 0) &&
-        shouldHideSecureEmbedOnlyPlaintext(visiblePlaintext, inlineEmbedStatus);
-    const hasPlaintext = !embedOnly && Boolean(visiblePlaintext?.trim());
+        shouldHideSecureEmbedOnlyPlaintext(bodyPlaintext, inlineEmbedStatus);
+    const hasPlaintext = !embedOnly && Boolean(bodyPlaintext?.trim());
     const renderedPlaintext = captureProtection === "ready" && hasPlaintext && (!result || result.status === "decrypted")
-        ? visiblePlaintext : undefined;
-    const parsedPlaintext = useMemo(() => renderedPlaintext ? Parser.parse(renderedPlaintext, false, {
-        allowGameMentions: true,
-        channelId: message.channel_id,
-        viewingChannelId: message.channel_id,
-        messageId: message.id,
-        authorId: message.author?.id,
-    }) : null, [renderedPlaintext, message.channel_id, message.id, message.author?.id]);
+        ? bodyPlaintext : undefined;
+    const renderedNote = forward?.note;
+    const parsedPlaintext = useMemo(() => {
+        const context = {
+            allowGameMentions: true,
+            channelId: message.channel_id,
+            viewingChannelId: message.channel_id,
+            messageId: message.id,
+            authorId: message.author?.id,
+        };
+        return {
+            content: renderedPlaintext ? Parser.parse(renderedPlaintext, false, context) : null,
+            note: renderedNote ? Parser.parse(renderedNote, false, context) : null,
+        };
+    }, [renderedPlaintext, renderedNote, message.channel_id, message.id, message.author?.id]);
 
     useEffect(() => {
         let active = true;
@@ -2770,9 +2847,27 @@ function EncryptedMessageAccessory({ message }: { message: Message; }) {
             ? <EncryptedAttachmentStatus expectedCount={result.attachmentBundle?.count ?? 0} message={message} />
             : null;
         // Decrypted text uses Discord's own message typography; media keeps rendering natively beside it.
+        const text = hasPlaintext && <div className={classes(MarkupClasses.markup, MessageContentClasses.messageContent, "pc-secure-message")}>{parsedPlaintext.content}</div>;
+        if (forward) {
+            const timestamp = forward.timestampMs === null ? null : new Date(forward.timestampMs);
+            return (
+                <>
+                    {parsedPlaintext.note && <div className={classes(MarkupClasses.markup, MessageContentClasses.messageContent, "pc-secure-message pc-secure-forward-note")}>{parsedPlaintext.note}</div>}
+                    <article className="pc-secure-forward" aria-label="Forwarded message">
+                        <div className="pc-secure-forward-label">↪ Forwarded</div>
+                        <div className="pc-secure-forward-source">
+                            <strong>{forward.authorLabel}</strong>
+                            {timestamp && <time dateTime={timestamp.toISOString()}>{timestamp.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</time>}
+                        </div>
+                        {text}
+                        {attachmentStatus}
+                    </article>
+                </>
+            );
+        }
         return (
             <>
-                {hasPlaintext && <div className={classes(MarkupClasses.markup, MessageContentClasses.messageContent, "pc-secure-message")}>{parsedPlaintext}</div>}
+                {text}
                 {attachmentStatus}
             </>
         );
@@ -3084,7 +3179,7 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
 
     const trusted = review.status === "trusted";
     return (
-        <div className={`pc-secure-card ${review.status === "key_changed" ? "pc-secure-card-danger" : "pc-secure-card-warning"}`}>
+        <div className={classes("pc-secure-card", review.status === "key_changed" ? "pc-secure-card-danger" : !trusted && "pc-secure-card-warning")}>
             <div className="pc-secure-card-header">
                 🔑 {trusted ? "Verified Secure Messaging key" : review.status === "key_changed" ? "Encryption key changed" : "Encryption key needs verification"}
             </div>
@@ -3303,6 +3398,10 @@ export default definePlugin({
                 {
                     match: /renderEmbeds\((\i)\)\{/,
                     replace: "$&$1=$self.patchEncryptedEmbeds($1,this);",
+                },
+                {
+                    match: /renderCodedLinks\((\i)\)\{/,
+                    replace: "$&$1=$self.patchEncryptedCodedLinks($1,this);",
                 },
                 {
                     match: /renderStickersAccessories\((\i)\)\{/,
@@ -3586,14 +3685,22 @@ export default definePlugin({
     patchEncryptedEmbeds(message: Message, owner: { forceUpdate(): void; }) {
         const ready = screenCaptureProtectionStatus === "ready";
         if (screenCaptureProtectionStatus === "pending") pendingEncryptedRenderOwners.add(owner);
-        return patchEncryptedMessageEmbeds(message, encryptedRenderCallback(owner), ready);
+        return patchEncryptedMessageEmbeds(message, encryptedRenderCallback(owner, message.id), ready);
+    },
+
+    patchEncryptedCodedLinks(message: Message, owner: { forceUpdate(): void; }) {
+        const ready = screenCaptureProtectionStatus === "ready";
+        if (screenCaptureProtectionStatus === "pending") pendingEncryptedRenderOwners.add(owner);
+        return patchEncryptedMessageCodedLinks(message, encryptedRenderCallback(owner, message.id), ready);
     },
 
     patchEncryptedStickers(message: Message, owner: { forceUpdate(): void; }) {
         const ready = screenCaptureProtectionStatus === "ready";
         if (screenCaptureProtectionStatus === "pending") pendingEncryptedRenderOwners.add(owner);
-        return patchEncryptedMessageStickers(message, encryptedRenderCallback(owner), ready);
+        return patchEncryptedMessageStickers(message, encryptedRenderCallback(owner, message.id), ready);
     },
+
+    sendEncryptedForward,
 
     useSecureReplyPreview,
 

@@ -17,6 +17,16 @@ import {
 const visibleUrl = "https://example.com/visible";
 const hiddenUrl = "https://example.com/hidden";
 
+test("recognizes Discord invite URLs with and without a scheme while respecting suppression", () => {
+    for (const invite of ["discord.gg/example", "www.discord.gg/example", "discord.com/invite/example", "discordapp.com/invite/example", "ptb.discord.com/invite/example", "canary.discord.com/invite/example"]) {
+        assert.deepEqual(extractSecureEmbedUrls(`Join ${invite}.`), [`https://${invite}`]);
+        for (const suppressed of [`<${invite}>`, `\`${invite}\``, `[hidden](<${invite}>)`, `\`\`\`\n${invite}\n\`\`\``])
+            assert.deepEqual(extractSecureEmbedUrls(suppressed), []);
+    }
+    for (const other of ["evil.discord.gg/example", "notdiscord.gg/example", "discord.gg.evil.test/example", "ftp://discord.gg/example", "user@discord.gg/example", "discord.com/channels/123/456"])
+        assert.deepEqual(extractSecureEmbedUrls(other), []);
+});
+
 const suppressedCases: Array<[string, string]> = [
     ["angle brackets", `<${hiddenUrl}>`],
     ["masked suppressed links", `[hidden](<${hiddenUrl}>)`],

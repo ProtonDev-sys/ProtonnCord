@@ -5,7 +5,7 @@
  */
 
 import { definePluginSettings } from "@api/Settings";
-import { EquicordDevs } from "@utils/index";
+import { Devs, EquicordDevs } from "@utils/index";
 import definePlugin, { OptionType } from "@utils/types";
 
 const MIDDLE_CLICK = 1;
@@ -43,7 +43,10 @@ function handleAuxClick(event: MouseEvent) {
 }
 
 function handleMouseUp(event: MouseEvent) {
-    if (event.button === MIDDLE_CLICK) lastMiddleClickUp = Date.now();
+    if (event.button !== MIDDLE_CLICK) return;
+    lastMiddleClickUp = Date.now();
+    // Also cancel the native Linux selection paste, outside Discord's patched editors.
+    if (settings.store.pasteScope === "always") event.preventDefault();
 }
 
 const settings = definePluginSettings({
@@ -76,11 +79,11 @@ const settings = definePluginSettings({
 export default definePlugin({
     name: "MiddleClickTweaks",
     description: "Various middle click tweaks, such as with pasting and link opening.",
-    authors: [EquicordDevs.Etorix, EquicordDevs.korzi],
+    authors: [EquicordDevs.Etorix, EquicordDevs.korzi, Devs.Darxoon],
     settings,
 
     tags: ["Utility"],
-    searchTerms: ["LimitMiddleClickPaste"],
+    searchTerms: ["LimitMiddleClickPaste", "NoMiddleClickPaste"],
 
     isPastingDisabled(isInput: boolean) {
         if (!running) return false;
