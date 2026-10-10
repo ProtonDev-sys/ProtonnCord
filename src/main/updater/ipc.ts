@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 export function serializeErrors<Args extends unknown[], Result>(
     func: (...args: Args) => Result | Promise<Result>,
 ) {

@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 const DISCORD_SNOWFLAKE = /^\d{17,20}$/u;
 const FORBIDDEN_TEXT_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
 

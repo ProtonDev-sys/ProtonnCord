@@ -1,10 +1,4 @@
 /*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
-/*
  * This file contains modified code from:
  * https://github.com/tc39/proposal-arraybuffer-base64
  * * Copyright (c) 2017 ECMA TC39 and contributors

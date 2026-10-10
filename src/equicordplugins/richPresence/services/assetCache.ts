@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { ApplicationAssetUtils } from "@webpack/common";
 
 const MAX_APPLICATION_ASSET_CACHE_SIZE = 150;

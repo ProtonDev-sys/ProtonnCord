@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import type { PluginManifestEntry } from "@shared/pluginDefinition";
 import type { PluginTag } from "@utils/types";
 

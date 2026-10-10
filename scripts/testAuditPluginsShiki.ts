@@ -1,22 +1,13 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { setImmediate } from "node:timers/promises";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 function load(path: string, modules: Record<string, any>, globals: Record<string, any> = {}) {
-    const code = transpileModule(readFileSync(path, "utf8"), {
-        fileName: path, compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
-    }).outputText;
-    return runInNewContext(code + "\nexports;", { exports: {}, AbortSignal, setTimeout, clearTimeout, ...globals,
-        require: (name: string) => { if (!(name in modules)) throw new Error(`Missing fixture module: ${name}`); return modules[name]; } });
+    return loadTestModule(path, modules, { AbortSignal, setTimeout, clearTimeout, ...globals,
+        require: (name: string) => { if (!(name in modules)) throw new Error(`Missing fixture module: ${name}`); return modules[name]; } },
+        "", { fileName: path, compilerOptions: { jsx: undefined }, mockImports: false });
 }
 
 function workerFixture() {

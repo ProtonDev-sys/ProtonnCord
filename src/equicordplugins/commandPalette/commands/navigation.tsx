@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { openPrivateChannel } from "@utils/discord";
 import { ChannelRouter, GuildChannelStore, GuildStore, IconUtils, NavigationRouter, RelationshipStore, SelectedGuildStore, UserStore } from "@webpack/common";
 
