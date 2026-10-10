@@ -406,6 +406,7 @@ function updateFixture(flags = { web: false, disabled: false, dev: false }, sile
     const trayStates: boolean[] = [];
     const state = { checks: 0, updates: 0, relaunches: 0, repairSucceeds: true };
     let check = async () => true;
+    let repair = async () => state.repairSucceeds;
     const settings = { autoUpdate: silent, autoUpdateNotification: !silent, updateBranch: "main" };
     const module = loadService<typeof import("../src/runtime/updates")>("updates", {
         "@api/Notices": { popNotice() {}, showNotice: (message: string) => { notices.push(message); } },
@@ -416,7 +417,7 @@ function updateFixture(flags = { web: false, disabled: false, dev: false }, sile
             checkForUpdates: () => { state.checks++; return check(); },
             isOutdated: false,
             update: async () => { state.updates++; return true; },
-            repair: async () => { state.updates++; return state.repairSucceeds; },
+            repair: async () => { state.updates++; return repair(); },
             UpdateLogger: { error() {} },
         },
     }, {
@@ -429,8 +430,69 @@ function updateFixture(flags = { web: false, disabled: false, dev: false }, sile
         setInterval(callback: () => void, delay: number) { assert.equal(delay, 30 * 60_000); intervals.add(callback); return callback; },
         clearInterval(callback: () => void) { intervals.delete(callback); },
     });
-    return { ...module, listeners, intervals, notices, trayStates, state, settings, setCheck(resolver: typeof check) { check = resolver; } };
+    return { ...module, listeners, intervals, notices, trayStates, state, settings,
+        setCheck(resolver: typeof check) { check = resolver; }, setRepair(resolver: typeof repair) { repair = resolver; } };
 }
+
+test("automatic updates with notifications recover after an offline startup and honor preference changes", async () => {
+    const f = updateFixture();
+    f.settings.autoUpdate = true;
+    f.setCheck(async () => { throw new Error("Offline"); });
+    const service = f.createUpdateService();
+    await service.runInitial!();
+    assert.equal(f.intervals.size, 1, "notification preferences must not disable retry checks");
+    assert.equal(f.state.updates, 0);
+
+    f.setCheck(async () => true);
+    for (const callback of f.intervals) callback();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.state.updates, 1);
+    assert.deepEqual(f.notices, ["Protonn Cord has been updated!"]);
+
+    f.settings.autoUpdate = false;
+    const checks = f.state.checks;
+    for (const callback of f.intervals) callback();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.state.checks, checks, "turning off automatic updates stops periodic requests");
+    f.settings.autoUpdate = true;
+    for (const callback of f.intervals) callback();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.state.checks, checks + 1, "automatic updates can resume without restarting Discord");
+    service.dispose();
+    assert.equal(f.intervals.size, 0);
+});
+
+test("enabling automatic updates after startup activates periodic checks without duplicating timers", async () => {
+    const f = updateFixture();
+    const service = f.createUpdateService();
+    await service.runInitial!();
+    await service.runInitial!();
+    assert.equal(f.intervals.size, 1);
+    const checks = f.state.checks;
+    for (const callback of f.intervals) callback();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.state.checks, checks);
+    f.settings.autoUpdate = true;
+    for (const callback of f.intervals) callback();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.state.updates, 1);
+    assert.deepEqual(f.notices, ["A new version of Protonn Cord is available!", "Protonn Cord has been updated!"],
+        "an available-update notice must not suppress the later installation notice");
+    service.dispose();
+});
+
+test("a tray repair does not restart the app after the selected branch changes", async () => {
+    const f = updateFixture();
+    const pending = deferred<boolean>();
+    f.setRepair(() => pending.promise);
+    const service = f.createUpdateService();
+    const repairing = [...f.listeners.repair][0]();
+    f.settings.updateBranch = "nightly";
+    pending.resolve(true);
+    await repairing;
+    assert.equal(f.state.relaunches, 0);
+    service.dispose();
+});
 
 test("updater build flags retain desktop tray support without background checks in dev/web/disabled builds", () => {
     for (const flags of [{ web: true, disabled: false, dev: false }, { web: false, disabled: true, dev: false }]) {

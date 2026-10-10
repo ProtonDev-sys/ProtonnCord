@@ -50,16 +50,16 @@ export function resetUpdateState() {
 export async function checkForUpdates() {
     const branch = Settings.updateBranch;
     const revision = ++checkRevision;
-    const [nextChanges, diagnostics] = await Promise.all([
-        Unwrap(VencordNative.updater.getUpdates(branch)),
-        Unwrap(VencordNative.updater.getDiagnostics(branch)),
-    ]);
+    const nextChanges = await Unwrap(VencordNative.updater.getUpdates(branch));
+    // A queued install may finish during the check. Classify against that build,
+    // including when the renderer is still waiting for a restart.
+    const diagnostics = await Unwrap(VencordNative.updater.getDiagnostics(branch));
     if (branch !== Settings.updateBranch) return false;
     if (revision !== checkRevision) return isOutdated;
     changes = nextChanges;
 
     if (diagnostics.backend === "git") {
-        const classification = classifyUpdateChanges(changes, gitHash);
+        const classification = classifyUpdateChanges(changes, diagnostics.builtHead ?? gitHash);
         isNewer = classification.isNewer;
         return (isOutdated = classification.isOutdated);
     }

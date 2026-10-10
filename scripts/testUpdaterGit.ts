@@ -47,6 +47,24 @@ async function main(): Promise<void> {
         assert.equal(currentInspection.localOnly, 0);
         assert.equal(currentInspection.remoteOnly, 0);
         assert.equal(await pullGitUpdates(runner(current), remote, initialHead), false);
+        assert.deepEqual((await inspectGitUpdates(runner(current), remote, initialHead.slice(0, 7))).changes, [],
+            "abbreviated build hashes resolve to the same installed commit");
+        const missingBuiltHead = "0".repeat(40);
+        const missingBuild = await inspectGitUpdates(runner(current), remote, missingBuiltHead);
+        assert.equal(missingBuild.changes.length, 1);
+        assert.equal(missingBuild.changes[0].hash, initialHead);
+        assert.match(missingBuild.changes[0].message, /previous build commit is unavailable/u);
+        assert.equal(await pullGitUpdates(runner(current), remote, missingBuiltHead), true,
+            "a missing build commit requests a recoverable rebuild");
+        const unavailableGit = Object.assign(new Error("Git executable unavailable"), { code: "ENOENT" });
+        await assert.rejects(
+            inspectGitUpdates(async (...args) => {
+                if (args.includes("--verify")) throw unavailableGit;
+                return run(current, ...args);
+            }, remote, missingBuiltHead),
+            error => error === unavailableGit,
+            "unrelated Git failures must not be treated as a missing build commit",
+        );
 
         const behind = await clone("behind");
         const remoteHead = await commitFile(seed, "state.txt", "remote update\n", "remote update");
@@ -108,6 +126,40 @@ async function main(): Promise<void> {
             inspectGitUpdates(runner(detached), remote, (await run(detached, "rev-parse", "HEAD")).stdout.trim()),
             /detached/iu,
         );
+
+        const concurrentFetch = await clone("concurrent-fetch");
+        const fetchBuiltHead = (await run(concurrentFetch, "rev-parse", "HEAD")).stdout.trim();
+        const expectedHead = await commitFile(seed, "expected.txt", "expected\n", "expected update");
+        await run(seed, "push", "origin", "main");
+        await run(seed, "switch", "-c", "nightly");
+        const unrelatedHead = await commitFile(seed, "unrelated.txt", "unrelated\n", "different branch update");
+        await run(seed, "push", "origin", "nightly");
+        await run(seed, "switch", "main");
+        const overwriteFetchHead = (branch: string) => async (...args: string[]) => {
+            const result = await run(concurrentFetch, ...args);
+            if (args[0] === "fetch") await run(concurrentFetch, "fetch", "--no-tags", remote, `refs/heads/${branch}`);
+            return result;
+        };
+        assert.equal((await inspectGitUpdates(overwriteFetchHead("nightly"), remote, fetchBuiltHead, "main")).targetHead, expectedHead,
+            "an external fetch cannot replace the advertised update commit");
+        await pullGitUpdates(overwriteFetchHead("nightly"), remote, fetchBuiltHead, "main");
+        assert.equal((await run(concurrentFetch, "rev-parse", "HEAD")).stdout.trim(), expectedHead);
+        await pullGitUpdates(overwriteFetchHead("main"), remote, expectedHead, "nightly");
+        assert.equal((await run(concurrentFetch, "rev-parse", "HEAD")).stdout.trim(), unrelatedHead,
+            "branch switches also use the pinned commit instead of FETCH_HEAD");
+
+        const concurrentCheckout = await clone("concurrent-checkout");
+        const checkoutBuiltHead = (await run(concurrentCheckout, "rev-parse", "HEAD")).stdout.trim();
+        await commitFile(seed, "checkout-update.txt", "update\n", "checkout race update");
+        await run(seed, "push", "origin", "main");
+        await assert.rejects(pullGitUpdates(async (...args) => {
+            const result = await run(concurrentCheckout, ...args);
+            if (args[0] === "fetch") await run(concurrentCheckout, "switch", "-c", "work-in-progress");
+            return result;
+        }, remote, checkoutBuiltHead, "main"), /checkout changed/iu);
+        assert.equal((await run(concurrentCheckout, "branch", "--show-current")).stdout.trim(), "work-in-progress");
+        assert.equal((await run(concurrentCheckout, "rev-parse", "HEAD")).stdout.trim(), checkoutBuiltHead,
+            "updates never merge into a branch selected by another Git client during the fetch");
 
         console.log("git updater repository-state matrix passed");
     } finally {

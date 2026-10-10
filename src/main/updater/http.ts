@@ -46,6 +46,7 @@ const DOWNLOAD_TIMEOUT = 60_000;
 const DOWNLOAD_SIZE_LIMIT = 64 * 1024 * 1024;
 const pendingUpdates = new Map<UpdaterBranch, PendingHttpUpdate>();
 let lastRequestedBranch: UpdaterBranch = "main";
+let lastInstalledHash = gitHash;
 const enqueue = createOperationQueue();
 
 async function githubGet(endpoint: string): Promise<unknown> {
@@ -62,7 +63,7 @@ async function githubGet(endpoint: string): Promise<unknown> {
 async function calculateGitChanges(branch: unknown) {
     const inspection = await inspectHttpUpdates(
         githubGet,
-        gitHash,
+        lastInstalledHash,
         ASAR_FILE,
         parseUpdaterBranch(branch),
     );
@@ -72,7 +73,7 @@ async function calculateGitChanges(branch: unknown) {
 async function fetchUpdates(branch: unknown, force: unknown = false) {
     if (typeof force !== "boolean") throw new Error("Invalid repair option");
     const selectedBranch = parseUpdaterBranch(branch);
-    const pending = await findHttpUpdate(githubGet, gitHash, ASAR_FILE, selectedBranch, force);
+    const pending = await findHttpUpdate(githubGet, lastInstalledHash, ASAR_FILE, selectedBranch, force);
     lastRequestedBranch = selectedBranch;
     if (pending) pendingUpdates.set(selectedBranch, pending);
     else pendingUpdates.delete(selectedBranch);
@@ -100,18 +101,19 @@ async function applyUpdates(branch?: unknown) {
             },
         }),
     );
+    lastInstalledHash = pending.hash;
     pendingUpdates.delete(selectedBranch);
 
     return true;
 }
 
 ipcMain.handle(IpcEvents.GET_REPO, serializeErrors(() => `https://github.com/${gitRemote}`));
-ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors(calculateGitChanges));
+ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors((branch: unknown) => enqueue(() => calculateGitChanges(branch))));
 ipcMain.handle(IpcEvents.UPDATE, serializeErrors((branch: unknown, force?: unknown) => enqueue(() => fetchUpdates(branch, force))));
 ipcMain.handle(IpcEvents.BUILD, serializeErrors((branch?: unknown) => enqueue(() => applyUpdates(branch))));
 ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors((branch: unknown): UpdaterDiagnostics => ({
     backend: "http",
     branch: parseUpdaterBranch(branch),
-    builtHead: gitHash,
+    builtHead: lastInstalledHash,
     sourceRoot: null,
 })));

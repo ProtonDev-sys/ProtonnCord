@@ -259,6 +259,7 @@ async function testHttpBranches(): Promise<void> {
         name: `Protonn Cord staging ${targetHash}`,
         assets: [{
             name: "desktop.asar",
+            digest: `sha256:${"d".repeat(64)}`, size: 128, state: "uploaded",
             browser_download_url: "https://github.com/ProtonDev-sys/ProtonnCord/releases/download/staging/desktop.asar",
         }],
     };
@@ -283,6 +284,7 @@ async function testHttpBranches(): Promise<void> {
             name: `Protonn Cord nightly ${targetHash}`,
             assets: [{
                 name: "desktop.asar",
+                digest: `sha256:${"d".repeat(64)}`, size: 128, state: "uploaded",
                 browser_download_url: "https://github.com/ProtonDev-sys/ProtonnCord/releases/download/nightly/desktop.asar",
             }],
         };

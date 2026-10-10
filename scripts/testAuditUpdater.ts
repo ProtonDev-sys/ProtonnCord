@@ -5,6 +5,7 @@
  */
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
@@ -40,18 +41,19 @@ function rendererFixture() {
     const settings = { updateBranch: "main" as UpdaterBranch };
     const calls: unknown[][] = [];
     let check = async (_branch: UpdaterBranch) => [{ hash: "b".repeat(40), author: "Fixture", message: "Update" }];
+    let diagnostics = { backend: "http", builtHead: "a".repeat(40) };
     let nativeUpdate = async () => true;
     let build = async () => true;
     const updater = load<typeof import("../src/utils/updater")>("src/utils/updater.ts", {
         "@api/Settings": { Settings: settings },
-        "~git-hash": { default: "a".repeat(40) },
+        "~git-hash": { __esModule: true, default: "a".repeat(40) },
         "./Logger": { Logger: class {} },
         "./native": { relaunch: () => assert.fail("Must not restart Discord") },
         "./updateClassification": { classifyUpdateChanges },
     }, {
         VencordNative: { updater: {
             getUpdates: async (branch: UpdaterBranch) => ({ ok: true, value: await check(branch) }),
-            getDiagnostics: async () => ({ ok: true, value: { backend: "http" } }),
+            getDiagnostics: async () => ({ ok: true, value: diagnostics }),
             update: async (branch: UpdaterBranch, force: boolean) => {
                 calls.push(["update", branch, force]);
                 return { ok: true, value: await nativeUpdate() };
@@ -63,8 +65,22 @@ function rendererFixture() {
         } },
     });
     return { updater, settings, calls, setCheck(value: typeof check) { check = value; },
+        setDiagnostics(value: typeof diagnostics) { diagnostics = value; },
         setUpdate(value: typeof nativeUpdate) { nativeUpdate = value; }, setBuild(value: typeof build) { build = value; } };
 }
+
+test("source checks classify against the installed build after a deferred restart", async () => {
+    const f = rendererFixture();
+    f.setCheck(async () => {
+        // A queued build can finish while the native update check is in progress.
+        await Promise.resolve();
+        f.setDiagnostics({ backend: "git", builtHead: "b".repeat(40) });
+        return [{ hash: "a".repeat(40), author: "Fixture", message: "Switch back to main" }];
+    });
+    f.setDiagnostics({ backend: "git", builtHead: "a".repeat(40) });
+    assert.equal(await f.updater.checkForUpdates(), true);
+    assert.equal(f.updater.isNewer, false, "the old running renderer must not block restoring its previous branch");
+});
 
 test("late branch responses, reset checks, and older overlapping checks cannot overwrite updater state", async () => {
     const f = rendererFixture();
@@ -141,6 +157,7 @@ test("native operation queue preserves order and continues after a failure", asy
 test("HTTP repair selects the current release archive while ordinary checks remain current", async () => {
     const hash = "a".repeat(40);
     const release = { name: `Protonn Cord ${hash}`, assets: [{ name: "desktop.asar",
+        digest: `sha256:${"d".repeat(64)}`, size: 128, state: "uploaded",
         browser_download_url: "https://github.com/ProtonDev-sys/ProtonnCord/releases/download/latest/desktop.asar" }] };
     assert.equal(await findHttpUpdate(async () => release, hash, "desktop.asar"), null);
     assert.equal((await findHttpUpdate(async () => release, hash, "desktop.asar", "main", true))?.hash, hash);
@@ -163,7 +180,9 @@ test("HTTP branch selections survive checks and other selections, and failed ins
         "./common": { ASAR_FILE: "desktop.asar" }, "./ipc": { createOperationQueue, serializeErrors },
         "./httpOperations": {
             applyPendingHttpUpdate,
-            findHttpUpdate: async (_request: unknown, _hash: string, _asar: string, branch: UpdaterBranch) => ({ hash: branch, url: branch }),
+            findHttpUpdate: async (_request: unknown, _hash: string, _asar: string, branch: UpdaterBranch) => ({
+                hash: branch, sha256: createHash("sha256").update(branch).digest("hex"), size: branch.length, url: branch,
+            }),
             inspectHttpUpdates: async () => ({ changes: [], pending: null }),
             requestBytes: async (_fetch: unknown, url: string) => Buffer.from(url),
             replaceAsarAtomically: (_target: string, _temporary: string, bytes: Buffer) => {
