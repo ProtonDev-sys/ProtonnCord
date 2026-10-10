@@ -42,7 +42,14 @@ jobs:
               run: pnpm install --frozen-lockfile
 
             - name: Verify update channel atomicity offline
-              run: pnpm exec tsx --test scripts/testAuditReleaseAtomicityDeep.ts
+              run: pnpm exec tsx --test scripts/testAuditReleaseAtomicityDeep.ts scripts/testAuditUpdater.ts scripts/testAuditUpdaterBuild.ts scripts/testAuditUpdaterGit.ts scripts/testRendererRuntime.ts
+
+            - name: Verify updater backends and branch handling offline
+              run: |
+                  pnpm testUpdaterGit
+                  pnpm testUpdaterHttp
+                  pnpm testUpdaterBranches
+                  pnpm testUpdaterClassification
 
             - name: Build web
               run: pnpm buildWebStandalone

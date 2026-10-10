@@ -20,12 +20,14 @@ import { IpcEvents } from "@shared/IpcEvents";
 import { parseUpdaterBranch, type UpdaterDiagnostics } from "@shared/Updater";
 import { execFile as cpExecFile } from "child_process";
 import { ipcMain } from "electron";
+import * as originalFs from "original-fs";
 import { join, resolve } from "path";
 import { promisify } from "util";
 
 import gitHash from "~git-hash";
 import gitRemote from "~git-remote";
 
+import { buildAndInstall } from "./buildOperations";
 import { type GitCommandResult, inspectGitUpdates, pullGitUpdates } from "./gitOperations";
 import { createOperationQueue, serializeErrors } from "./ipc";
 
@@ -35,6 +37,7 @@ const PROTONN_CORD_DIR = join(__dirname, "../../");
 const execFile = promisify(cpExecFile);
 const UPDATE_REPOSITORY = `https://github.com/${gitRemote}.git`;
 const GIT_TIMEOUT_MS = 60_000;
+const DEPENDENCY_TIMEOUT_MS = 10 * 60_000;
 const BUILD_TIMEOUT_MS = 10 * 60_000;
 let lastBuiltHead = gitHash;
 const enqueue = createOperationQueue();
@@ -48,6 +51,7 @@ async function git(...args: string[]): Promise<GitCommandResult> {
         cwd: VENCORD_SRC_DIR,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
         timeout: GIT_TIMEOUT_MS,
+        windowsHide: true,
     };
 
     const result = isFlatpak
@@ -74,20 +78,47 @@ async function pull(branch: unknown) {
 }
 
 async function build(branch?: unknown) {
-    if (branch !== undefined && (await git("branch", "--show-current")).stdout.trim() !== parseUpdaterBranch(branch))
+    const buildBranch = (await git("branch", "--show-current")).stdout.trim();
+    if (branch !== undefined && buildBranch !== parseUpdaterBranch(branch))
         throw new Error("The source branch changed before the update could be built. Check for updates again.");
-    const opts = { cwd: PROTONN_CORD_DIR, timeout: BUILD_TIMEOUT_MS };
+    const buildHead = (await git("rev-parse", "HEAD")).stdout.trim();
+    const verifySource = async () => {
+        if ((await git("rev-parse", "HEAD")).stdout.trim() !== buildHead
+            || (await git("branch", "--show-current")).stdout.trim() !== buildBranch)
+            throw new Error("The source checkout changed while building the update. Build it again before restarting.");
+    };
+    const installCommand = isFlatpak ? "flatpak-spawn" : process.platform === "win32" ? "cmd.exe" : "pnpm";
+    const installArgs = isFlatpak ? ["--host", "pnpm", "install", "--frozen-lockfile"]
+        : process.platform === "win32" ? ["/d", "/s", "/c", "pnpm install --frozen-lockfile"]
+            : ["install", "--frozen-lockfile"];
+    try {
+        await execFile(installCommand, installArgs, {
+            cwd: PROTONN_CORD_DIR,
+            env: { ...process.env, CI: "true" },
+            timeout: DEPENDENCY_TIMEOUT_MS,
+            windowsHide: true,
+        });
+    } catch (error) {
+        throw new Error(`Failed to install source update dependencies. Run pnpm install --frozen-lockfile in ${PROTONN_CORD_DIR} and try again. ${String(error)}`, { cause: error });
+    }
+    await verifySource();
+    const opts = { cwd: PROTONN_CORD_DIR, timeout: BUILD_TIMEOUT_MS, windowsHide: true };
+    await buildAndInstall({
+        distDirectory: VENCORD_SRC_DIR,
+        files: originalFs,
+        build: async stagingDirectory => {
+            const command = isFlatpak ? "flatpak-spawn" : "node";
+            const args = isFlatpak ? ["--host", "node", "scripts/build/build.mjs"] : ["scripts/build/build.mjs"];
+            args.push(`--outdir=${stagingDirectory}`);
+            if (IS_DEV) args.push("--dev");
 
-    const command = isFlatpak ? "flatpak-spawn" : "node";
-    const args = isFlatpak ? ["--host", "node", "scripts/build/build.mjs"] : ["scripts/build/build.mjs"];
-
-    if (IS_DEV) args.push("--dev");
-
-    const res = await execFile(command, args, opts);
-    const succeeded = !res.stderr.includes("Build failed");
-    if (succeeded) lastBuiltHead = (await git("rev-parse", "HEAD")).stdout.trim();
-
-    return succeeded;
+            const res = await execFile(command, args, opts);
+            if (res.stderr.includes("Build failed")) throw new Error("The source update build failed. Please try again.");
+        },
+        verifySource,
+    });
+    lastBuiltHead = buildHead;
+    return true;
 }
 
 async function getDiagnostics(branch: unknown): Promise<UpdaterDiagnostics> {

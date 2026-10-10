@@ -6,6 +6,7 @@
 
 import { createPackage } from "@electron/asar";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,6 +15,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import {
     applyPendingHttpUpdate,
     type AtomicFileOperations,
+    findHttpUpdate,
     type HttpFetcher,
     HttpRequestError,
     inspectHttpUpdates,
@@ -23,16 +25,23 @@ import {
     requestJson,
     validateAsar,
 } from "../src/main/updater/httpOperations";
+import { createOperationQueue, serializeErrors } from "../src/main/updater/ipc";
+import { IpcEvents } from "../src/shared/IpcEvents";
+import { parseUpdaterBranch } from "../src/shared/Updater";
+import { loadTestModule } from "./utils/loadTestModule";
 
 const CURRENT_HASH = "a".repeat(40);
 const RELEASE_HASH = "b".repeat(40);
 const COMMIT_HASH = "c".repeat(40);
+const RELEASE_SHA256 = "d".repeat(64);
+const RELEASE_SIZE = 128;
 const ASAR_FILE = "desktop.asar";
 const DOWNLOAD_URL = "https://github.com/ProtonDev-sys/ProtonnCord/releases/download/test/desktop.asar";
 
-function release(hash: string, withAsset = true): unknown {
+function release(hash: string, withAsset = true) {
     return {
-        assets: withAsset ? [{ browser_download_url: DOWNLOAD_URL, name: ASAR_FILE }] : [],
+        assets: withAsset ? [{ browser_download_url: DOWNLOAD_URL, name: ASAR_FILE,
+            digest: `sha256:${RELEASE_SHA256}`, size: RELEASE_SIZE, state: "uploaded" }] : [],
         name: `Protonn Cord ${hash}`,
     };
 }
@@ -59,7 +68,83 @@ function fileOperations(): AtomicFileOperations {
     };
 }
 
+async function testInstalledReleaseState(): Promise<void> {
+    const handlers = new Map<IpcEvents, (...args: unknown[]) => Promise<{ ok: boolean; value?: unknown; }>>();
+    const requests: string[] = [];
+    const installed: string[] = [];
+    let failInstall = true;
+    let finishDownload: (() => void) | undefined;
+    let signalDownload: (() => void) | undefined;
+    let downloadGate: Promise<void> | undefined;
+    const archives = { main: Buffer.from("main archive"), nightly: Buffer.from("nightly archive") };
+    loadTestModule("src/main/updater/http.ts", {
+        "node:crypto": { randomUUID: () => "fixture" },
+        "@shared/IpcEvents": { IpcEvents: {
+            GET_REPO: IpcEvents.GET_REPO, GET_UPDATES: IpcEvents.GET_UPDATES, UPDATE: IpcEvents.UPDATE,
+            BUILD: IpcEvents.BUILD, GET_UPDATER_DIAGNOSTICS: IpcEvents.GET_UPDATER_DIAGNOSTICS,
+        } },
+        "@shared/Updater": { parseUpdaterBranch },
+        "@shared/vencordUserAgent": { VENCORD_USER_AGENT: "Fixture" },
+        electron: { ipcMain: { handle: (event: IpcEvents, handler: (...args: unknown[]) => Promise<{ ok: boolean; value?: unknown; }>) => handlers.set(event, handler) } },
+        "original-fs": {}, "~git-hash": { __esModule: true, default: CURRENT_HASH }, "~git-remote": { __esModule: true, default: "Fixture/Fixture" },
+        "./common": { ASAR_FILE }, "./ipc": { createOperationQueue, serializeErrors },
+        "./httpOperations": {
+            applyPendingHttpUpdate, findHttpUpdate, inspectHttpUpdates,
+            async requestJson(_fetch: unknown, url: string) {
+                const endpoint = url.slice("https://api.github.com/repos/Fixture/Fixture".length);
+                requests.push(endpoint);
+                if (endpoint.startsWith("/compare/")) return { commits: [] };
+                const branch = endpoint === "/releases/latest" ? "main" : "nightly";
+                const data = archives[branch];
+                return {
+                    name: `Protonn Cord ${branch === "main" ? CURRENT_HASH : RELEASE_HASH}`,
+                    assets: [{ name: ASAR_FILE, browser_download_url: DOWNLOAD_URL.replace("/test/", `/${branch}/`),
+                        digest: `sha256:${createHash("sha256").update(data).digest("hex")}`, size: data.length, state: "uploaded" }],
+                };
+            },
+            async requestBytes(_fetch: unknown, url: string) {
+                signalDownload?.();
+                await downloadGate;
+                return archives[url.includes("/nightly/") ? "nightly" : "main"];
+            },
+            replaceAsarAtomically(_target: string, _temporary: string, data: Buffer) {
+                if (failInstall) throw new Error("Fixture install failure");
+                installed.push(data.toString());
+            },
+        },
+    }, { __dirname: "fixture.asar", process: { pid: 1 }, fetch: () => assert.fail("No live network") });
+    const invoke = (event: IpcEvents, ...args: unknown[]) => handlers.get(event)!({}, ...args);
+    const installedHash = async () => (await invoke(IpcEvents.GET_UPDATER_DIAGNOSTICS, "main")).value as { builtHead: string; };
+
+    assert.deepEqual(await invoke(IpcEvents.UPDATE, "nightly"), { ok: true, value: true });
+    assert.equal((await invoke(IpcEvents.BUILD, "nightly")).ok, false);
+    assert.equal((await installedHash()).builtHead, CURRENT_HASH, "a failed replacement cannot advance the installed hash");
+
+    failInstall = false;
+    downloadGate = new Promise(resolve => { finishDownload = resolve; });
+    const downloadStarted = new Promise<void>(resolve => { signalDownload = resolve; });
+    const installing = invoke(IpcEvents.BUILD, "nightly");
+    await downloadStarted;
+    const requestCount = requests.length;
+    const mainCheck = invoke(IpcEvents.GET_UPDATES, "main");
+    assert.equal(requests.length, requestCount, "checks wait for an in-flight archive replacement");
+    finishDownload!();
+    assert.equal((await installing).value, true);
+    const check = await mainCheck;
+    assert.ok(Array.isArray(check.value) && check.value.length > 0, "returning to the running build still restores the archive on disk");
+    assert.ok(requests.includes(`/compare/${RELEASE_HASH}...${CURRENT_HASH}`));
+    assert.equal((await installedHash()).builtHead, RELEASE_HASH);
+
+    assert.deepEqual((await invoke(IpcEvents.GET_UPDATES, "nightly")).value, []);
+    assert.equal((await invoke(IpcEvents.UPDATE, "nightly")).value, false, "an installed release is not repeatedly downloaded before restart");
+    assert.equal((await invoke(IpcEvents.UPDATE, "main")).value, true);
+    assert.equal((await invoke(IpcEvents.BUILD, "main")).value, true);
+    assert.equal((await installedHash()).builtHead, CURRENT_HASH);
+    assert.deepEqual(installed, ["nightly archive", "main archive"]);
+}
+
 async function main(): Promise<void> {
+    await testInstalledReleaseState();
     const currentRequests: string[] = [];
     const current = await inspectHttpUpdates(async endpoint => {
         currentRequests.push(endpoint);
@@ -87,7 +172,7 @@ async function main(): Promise<void> {
     assert.ok(outdatedRequests.every(endpoint => !endpoint.includes("HEAD")));
     assert.deepEqual(outdated, {
         changes: [{ author: "ProtonDev-sys", hash: COMMIT_HASH, message: "Exact release commit" }],
-        pending: { hash: RELEASE_HASH, url: DOWNLOAD_URL },
+        pending: { hash: RELEASE_HASH, sha256: RELEASE_SHA256, size: RELEASE_SIZE, url: DOWNLOAD_URL },
     });
 
     const rewritten = await inspectHttpUpdates(async endpoint => {
@@ -98,7 +183,7 @@ async function main(): Promise<void> {
     }, CURRENT_HASH, ASAR_FILE, "nightly");
     assert.deepEqual(rewritten, {
         changes: [{ author: "ProtonnCord", hash: RELEASE_HASH, message: "Update to the latest nightly release (previous build cannot be compared)" }],
-        pending: { hash: RELEASE_HASH, url: DOWNLOAD_URL },
+        pending: { hash: RELEASE_HASH, sha256: RELEASE_SHA256, size: RELEASE_SIZE, url: DOWNLOAD_URL },
     });
 
     for (const failure of [new HttpRequestError("comparison", 403, "Forbidden"), new HttpRequestError("comparison", 429, "Too Many Requests"),
@@ -120,6 +205,30 @@ async function main(): Promise<void> {
         inspectHttpUpdates(async () => release(RELEASE_HASH, false), CURRENT_HASH, ASAR_FILE),
         /missing desktop\.asar/iu,
     );
+
+    for (const browser_download_url of [
+        DOWNLOAD_URL.replace("https:", "http:"),
+        DOWNLOAD_URL.replace("github.com", "github.com.example.invalid"),
+        DOWNLOAD_URL.replace("github.com", "github.com:8443"),
+        DOWNLOAD_URL.replace("github.com", "user:password@github.com"),
+        `${DOWNLOAD_URL}?asset=other`,
+        `${DOWNLOAD_URL}#asset`,
+        DOWNLOAD_URL.replace("desktop.asar", "equibop.asar"),
+        "https://github.com/ProtonDev-sys/ProtonnCord",
+    ]) {
+        await assert.rejects(findHttpUpdate(async () => ({
+            ...release(RELEASE_HASH), assets: [{ ...release(RELEASE_HASH).assets[0], browser_download_url }],
+        }), CURRENT_HASH, ASAR_FILE), /invalid desktop\.asar download URL/iu);
+    }
+    for (const invalidMetadata of [
+        { digest: undefined }, { digest: null }, { digest: "sha1:" + "d".repeat(40) }, { digest: "sha256:invalid" },
+        { size: undefined }, { size: 0 }, { size: -1 }, { size: 1.5 }, { size: Number.MAX_SAFE_INTEGER + 1 },
+        { state: "starter" }, { state: undefined },
+    ]) {
+        await assert.rejects(findHttpUpdate(async () => ({
+            ...release(RELEASE_HASH), assets: [{ ...release(RELEASE_HASH).assets[0], ...invalidMetadata }],
+        }), CURRENT_HASH, ASAR_FILE), /integrity metadata/iu);
+    }
 
     const bytes = Buffer.from("bounded response");
     const fetched = await requestBytes(
@@ -253,7 +362,9 @@ async function main(): Promise<void> {
         assert.deepEqual(await readFile(target), validAsar);
         assert.equal(existsSync(temporary), false);
 
-        const expectedPending: PendingHttpUpdate = { hash: RELEASE_HASH, url: DOWNLOAD_URL };
+        const expectedPending: PendingHttpUpdate = {
+            hash: RELEASE_HASH, sha256: createHash("sha256").update(validAsar).digest("hex"), size: validAsar.length, url: DOWNLOAD_URL,
+        };
         let pending: PendingHttpUpdate | null = expectedPending;
         await assert.rejects(async () => {
             pending = await applyPendingHttpUpdate(pending, async () => validAsar, () => {
@@ -261,6 +372,23 @@ async function main(): Promise<void> {
             });
         }, /simulated install failure/iu);
         assert.equal(pending, expectedPending, "a failed install must remain pending for retry");
+
+        for (const wrongArchive of [validAsar.subarray(0, -1), Buffer.concat([validAsar, Buffer.from([0])]), corruptedAsar]) {
+            await assert.rejects(async () => {
+                pending = await applyPendingHttpUpdate(pending, async () => wrongArchive, () => assert.fail("Mismatched releases must never reach installation"));
+            }, /does not match the selected release/iu);
+            assert.equal(pending, expectedPending, "failed digest or size checks retain the pending release");
+        }
+
+        const advancedSource = join(root, "source", "main.js");
+        await writeFile(advancedSource, "module.exports = null;\n");
+        const advancedPath = join(root, "advanced.asar");
+        await createPackage(dirname(advancedSource), advancedPath);
+        const advancedAsar = await readFile(advancedPath);
+        validateAsar(advancedAsar);
+        assert.equal(advancedAsar.byteLength, validAsar.byteLength, "the next valid release has the same size as the selected release");
+        await assert.rejects(applyPendingHttpUpdate(pending, async () => advancedAsar,
+            () => assert.fail("A moved channel URL must not install another release")), /does not match the selected release/iu);
 
         pending = await applyPendingHttpUpdate(pending, async () => validAsar, () => undefined);
         assert.equal(pending, null);

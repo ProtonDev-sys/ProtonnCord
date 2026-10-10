@@ -29,7 +29,7 @@ export interface GitUpdateInspection {
 
 interface GitUpdateState extends GitUpdateInspection {
     currentBranch: string | null;
-    targetRevision: "FETCH_HEAD" | "HEAD";
+    currentHead: string;
 }
 
 const COMMIT_FORMAT = "%an%x00%H%x00%s";
@@ -71,6 +71,18 @@ async function requireCleanTree(git: GitRunner): Promise<void> {
         throw new Error("The Protonn Cord source tree has uncommitted changes; commit or stash them before updating");
 }
 
+async function resolveBuiltHead(git: GitRunner, hash: string): Promise<string | null> {
+    if (!/^[a-f0-9]{7,64}$/u.test(hash)) return null;
+    try {
+        return (await git("rev-parse", "--verify", "--quiet", "--end-of-options", `${hash}^{commit}`)).stdout.trim();
+    } catch (error) {
+        // A shallow or replaced checkout may no longer have the running build's
+        // commit. Other Git failures must still be reported instead of hidden.
+        if (error && typeof error === "object" && "code" in error && error.code === 1) return null;
+        throw error;
+    }
+}
+
 async function fetchUpdateBranch(
     git: GitRunner,
     repository: string,
@@ -81,33 +93,38 @@ async function fetchUpdateBranch(
         throw new Error("The Protonn Cord updater cannot run from a detached Git HEAD");
 
     const branch = selectedBranch === undefined ? current! : parseUpdaterBranch(selectedBranch);
+    const currentHead = (await git("rev-parse", "HEAD")).stdout.trim();
     const remoteBranch = `refs/heads/${branch}`;
     const remote = (await git("ls-remote", "--heads", repository, remoteBranch)).stdout.trim();
     if (!remote)
         throw new Error(`Branch ${branch} is not available in the Protonn Cord update repository`);
+    const [remoteHead, remoteRef] = remote.split(/\s+/u);
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(remoteHead) || remoteRef !== remoteBranch)
+        throw new Error("Git returned an invalid update branch");
 
+    // Pin the advertised commit before fetching: another Git client can replace
+    // FETCH_HEAD at any time, including between our fetch and the next command.
     await git("fetch", "--no-tags", repository, remoteBranch);
     const direction = parseDirection((await git(
         "rev-list",
         "--left-right",
         "--count",
-        "HEAD...FETCH_HEAD",
+        `${currentHead}...${remoteHead}`,
     )).stdout);
 
     const sameBranch = current === branch;
     if (sameBranch && direction.localOnly > 0 && direction.remoteOnly > 0)
         throw new Error(`Branch ${branch} has diverged from Protonn Cord; rebase or merge it manually before updating`);
 
-    const targetRevision = sameBranch && direction.remoteOnly === 0 ? "HEAD" : "FETCH_HEAD";
-    const targetHead = (await git("rev-parse", targetRevision)).stdout.trim();
+    const targetHead = sameBranch && direction.remoteOnly === 0 ? currentHead : remoteHead;
     return {
         branch,
         changes: [],
         currentBranch: current,
+        currentHead,
         localOnly: direction.localOnly,
         remoteOnly: direction.remoteOnly,
         targetHead,
-        targetRevision,
     };
 }
 
@@ -118,24 +135,27 @@ export async function inspectGitUpdates(
     selectedBranch?: UpdaterBranch,
 ): Promise<GitUpdateInspection> {
     const state = await fetchUpdateBranch(git, repository, selectedBranch);
-    let changes = state.targetHead === lastBuiltHead
+    const builtHead = state.targetHead === lastBuiltHead ? lastBuiltHead : await resolveBuiltHead(git, lastBuiltHead);
+    let changes = state.targetHead === builtHead || builtHead === null
         ? []
         : parseChanges((await git(
             "log",
-            `${lastBuiltHead}..${state.targetRevision}`,
+            `${builtHead}..${state.targetHead}`,
             "-z",
             `--pretty=format:${COMMIT_FORMAT}`,
         )).stdout);
 
-    if (state.targetHead !== lastBuiltHead && changes.length === 0) {
+    if (state.targetHead !== builtHead && changes.length === 0) {
         changes = [{
             author: "ProtonnCord",
             hash: state.targetHead,
-            message: `Switch update branch to ${state.branch}`,
+            message: builtHead === null
+                ? `Rebuild from ${state.branch}; the previous build commit is unavailable in this checkout`
+                : `Switch update branch to ${state.branch}`,
         }];
     }
 
-    const { currentBranch: _currentBranch, targetRevision: _targetRevision, ...inspection } = state;
+    const { currentBranch: _currentBranch, currentHead: _currentHead, ...inspection } = state;
     return { ...inspection, changes };
 }
 
@@ -148,11 +168,13 @@ export async function pullGitUpdates(
     const state = await fetchUpdateBranch(git, repository, selectedBranch);
     const before = (await git("rev-parse", "HEAD")).stdout.trim();
     const beforeBranch = await currentBranch(git);
+    if (before !== state.currentHead || beforeBranch !== state.currentBranch)
+        throw new Error("The source checkout changed while checking for updates. Check for updates again.");
 
     if (state.currentBranch === state.branch) {
         if (state.remoteOnly > 0) {
             await requireCleanTree(git);
-            await git("merge", "--ff-only", "FETCH_HEAD");
+            await git("merge", "--ff-only", state.targetHead);
         }
     } else {
         await requireCleanTree(git);
@@ -161,15 +183,15 @@ export async function pullGitUpdates(
                 "rev-list",
                 "--left-right",
                 "--count",
-                `refs/heads/${state.branch}...FETCH_HEAD`,
+                `refs/heads/${state.branch}...${state.targetHead}`,
             )).stdout);
             if (targetDirection.localOnly > 0)
                 throw new Error(`Local branch ${state.branch} has unpublished or divergent commits; reconcile it manually before switching update branches`);
 
             await git("switch", state.branch);
-            if (targetDirection.remoteOnly > 0) await git("merge", "--ff-only", "FETCH_HEAD");
+            if (targetDirection.remoteOnly > 0) await git("merge", "--ff-only", state.targetHead);
         } else {
-            await git("switch", "--create", state.branch, "FETCH_HEAD");
+            await git("switch", "--create", state.branch, state.targetHead);
         }
     }
 

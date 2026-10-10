@@ -225,19 +225,25 @@ export async function releaseUpdateChannel({ api, branch, sha, runId, files }) {
     const existing = await assets(staged.id);
     requireState(existing.every(asset => names.has(asset.name)), "Unexpected staging assets");
     for (const file of files) {
-        const found = existing.find(asset => asset.name === file.name);
-        if (found) {
-            if (matches(found, file)) continue;
-            requireState(found.state === "starter" && found.size === 0 && Number.isSafeInteger(found.id), `Conflicting staging asset ${file.name}`);
-            requireState((await getRelease(staged.id))?.draft === true, "Cannot modify published assets");
-            await reconcile(
-                () => api("DELETE", `/releases/assets/${found.id}`),
-                async () => !(await assets(staged.id)).some(asset => asset.id === found.id),
-            );
-        }
+        let found = existing.find(asset => asset.name === file.name);
+        if (found && matches(found, file)) continue;
         await reconcile(
-            () => api("POST", `/releases/${staged.id}/assets?name=${encodeURIComponent(file.name)}`, file.data, true),
-            async () => (await assets(staged.id)).some(asset => matches(asset, file)),
+            async () => {
+                if (found) {
+                    requireState(found.state === "starter" && found.size === 0 && Number.isSafeInteger(found.id), `Conflicting staging asset ${file.name}`);
+                    requireState((await getRelease(staged.id))?.draft === true, "Cannot modify published assets");
+                    await reconcile(
+                        () => api("DELETE", `/releases/assets/${found.id}`),
+                        async () => !(await assets(staged.id)).some(asset => asset.id === found.id),
+                    );
+                }
+                await api("POST", `/releases/${staged.id}/assets?name=${encodeURIComponent(file.name)}`, file.data, true);
+            },
+            async () => {
+                // An upstream upload failure can leave a starter that must be removed before retrying.
+                found = (await assets(staged.id)).find(asset => asset.name === file.name);
+                return found && matches(found, file);
+            },
         );
     }
     await verifyAssets(staged.id, staged.tag_name, true);

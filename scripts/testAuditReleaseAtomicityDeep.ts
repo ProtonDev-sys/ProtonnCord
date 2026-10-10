@@ -313,6 +313,38 @@ test("GitHub starter asset after 502 is removed only from staging and retried", 
     assert.deepEqual(fixture.calls.filter(call => call.method === "DELETE").map(call => call.path), ["/releases/assets/999"]);
 });
 
+test("a starter asset created by a failed upload is recovered during the same run", async () => {
+    const fixture = new GithubFixture();
+    let starterId: number | undefined;
+    fixture.after = call => {
+        if (!call.upload || starterId !== undefined) return;
+        const asset = fixture.releases.get(10)!.assets[0];
+        starterId = asset.id;
+        Object.assign(asset, { size: 0, digest: "", state: "starter" });
+        throw Object.assign(new Error("fixture upstream upload failed"), { status: 502 });
+    };
+    await fixture.run();
+    assert.ok(starterId !== undefined);
+    assert.equal(fixture.publicRelease()?.target_commitish, newSha);
+    assert.equal(fixture.calls.filter(call => call.upload).length, files.length + 1);
+    assert.deepEqual(fixture.calls.filter(call => call.method === "DELETE").map(call => call.path), [`/releases/assets/${starterId}`]);
+    fixture.assertAtomic();
+});
+
+test("failed uploads never overwrite a completed asset with conflicting contents", async () => {
+    const fixture = new GithubFixture();
+    fixture.after = call => {
+        if (!call.upload) return;
+        fixture.releases.get(10)!.assets[0].digest = hash(Buffer.from("conflicting bytes"));
+        throw Object.assign(new Error("fixture lost upload response"), { status: 502 });
+    };
+    await assert.rejects(fixture.run(), /Conflicting staging asset/u);
+    assert.equal(fixture.publicRelease()?.id, 1);
+    assert.equal(fixture.refs.get("tags/nightly"), oldSha);
+    assert.equal(fixture.calls.filter(call => call.upload).length, 1);
+    assert.ok(!fixture.calls.some(call => call.method === "DELETE" || call.method === "PATCH"));
+});
+
 test("corrupt staged digest and unexpected assets fail closed before channel mutation", async () => {
     for (const corruption of ["digest", "extra", "sha", "stage-ref", "manifest"]) {
         const fixture = new GithubFixture();
