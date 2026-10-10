@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { dialog, IpcMainInvokeEvent } from "electron";
 
 const DISCORD_ATTACHMENT_BASE_URL = "https://cdn.discordapp.com/attachments/";

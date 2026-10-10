@@ -1,29 +1,17 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { EventEmitter } from "../src/equicordplugins/remix/editor/utils/eventEmitter";
+import { loadTestModule } from "./utils/loadTestModule";
 
 function loadModule<T>(path: string, mocks: Record<string, unknown>, globals: Record<string, unknown> = {}): T {
-    const code = transpileModule(readFileSync(path, "utf8"), {
-        fileName: path,
-        compilerOptions: { jsx: JsxEmit.React, module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
-    }).outputText;
-    return runInNewContext(code + "\nexports;", {
-        exports: {}, ...globals,
+    return loadTestModule<T>(path, mocks, {
+        ...globals,
         require(name: string) {
             assert.ok(name in mocks, `Unexpected import: ${name}`);
             return mocks[name];
         }
-    });
+    }, "", { fileName: path, mockImports: false });
 }
 
 interface UnindentPlugin {

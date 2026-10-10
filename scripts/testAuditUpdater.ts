@@ -6,16 +6,14 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { applyPendingHttpUpdate, findHttpUpdate } from "../src/main/updater/httpOperations";
 import { createOperationQueue, serializeErrors } from "../src/main/updater/ipc";
 import { IpcEvents } from "../src/shared/IpcEvents";
 import { parseUpdaterBranch, type UpdaterBranch } from "../src/shared/Updater";
 import { classifyUpdateChanges } from "../src/utils/updateClassification";
+import { loadTestModule } from "./utils/loadTestModule";
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
@@ -25,16 +23,13 @@ function deferred<T>() {
 }
 
 function load<T>(path: string, mocks: Record<string, unknown>, globals: Record<string, unknown>): T {
-    const { outputText } = transpileModule(readFileSync(path, "utf8"), {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 },
-    });
-    return runInNewContext(`${outputText}\nexports;`, {
-        exports: {}, ...globals,
+    return loadTestModule<T>(path, mocks, {
+        ...globals,
         require(name: string) {
             assert.ok(Object.hasOwn(mocks, name), `Unexpected updater import: ${name}`);
             return mocks[name];
         },
-    });
+    }, "", { compilerOptions: { jsx: undefined }, mockImports: false });
 }
 
 function rendererFixture() {

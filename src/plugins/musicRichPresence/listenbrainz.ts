@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { VENCORD_USER_AGENT } from "@shared/vencordUserAgent";
 import { Logger } from "@utils/Logger";
 import { TTLMap } from "@utils/TTLMap";

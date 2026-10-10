@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 /**
  * re-applies the Protonn Cord patch to a freshly installed Discord host
  * version at the moment the native updater finishes writing it.

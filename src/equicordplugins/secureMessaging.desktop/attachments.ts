@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { exactArrayBuffer as cryptoBytes } from "./exactArrayBuffer";
 import { parseSecureForwardText, type SecureForwardMetadata } from "./forwarding";
 import { decodeBase64Url, encodeBase64Url, isSnowflake } from "./protocol";

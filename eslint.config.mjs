@@ -7,7 +7,6 @@
 import stylistic from "@stylistic/eslint-plugin";
 import { defineConfig } from "eslint/config";
 import react from "eslint-plugin-react";
-import header from "eslint-plugin-simple-header";
 import simpleImportSort from "eslint-plugin-simple-import-sort";
 import unusedImports from "eslint-plugin-unused-imports";
 import tseslint from "typescript-eslint";
@@ -33,7 +32,6 @@ export default defineConfig(
     {
         files: ["src/**/*.{tsx,ts,mts,mjs,js,jsx}", "eslint.config.mjs"],
         plugins: {
-            "simple-header": header,
             "@stylistic": stylistic,
             "@typescript-eslint": tseslint.plugin,
             "simple-import-sort": simpleImportSort,
@@ -58,19 +56,6 @@ export default defineConfig(
             }
         },
         rules: {
-            /*
-             * Since it's only been a month and Vencord has already been stolen
-             * by random skids who rebranded it to "AlphaCord" and erased all license
-             * information
-             */
-            "simple-header/header": [
-                "error",
-                {
-                    "files": [`${import.meta.dirname}/scripts/header-new.txt`, `${import.meta.dirname}/scripts/header-old.txt`],
-                    "templates": { "author": [".*", "Vendicated and contributors"] }
-                }
-            ],
-
             // Style Rules
             "@stylistic/jsx-quotes": ["error", "prefer-double"],
             "@stylistic/quotes": ["error", "double", { "avoidEscape": true }],

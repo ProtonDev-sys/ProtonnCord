@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { GitHubOrg, GitHubRepo, RepoGroup, RepoSortMode } from "./types";
 
 const LANGUAGE_ICON_MAP: Record<string, string> = {

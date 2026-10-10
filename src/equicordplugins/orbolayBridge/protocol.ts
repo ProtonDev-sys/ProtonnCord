@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 export const ORBOLAY_PROTOCOL_VERSION = 1;
 export const ORBOLAY_HANDSHAKE_TIMEOUT_MS = 10_000;
 export const ORBOLAY_COMMAND_WINDOW_MS = 5_000;

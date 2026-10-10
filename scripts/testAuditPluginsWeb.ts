@@ -1,23 +1,14 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 function load(path: string, mocks: Record<string, any>, globals: Record<string, unknown> = {}) {
     const modules = { "@utils/constants": { Devs: {} },
         "@utils/types": { __esModule: true, default: (value: unknown) => value, OptionType: {}, ReporterTestable: {}, makeRange: () => [] }, ...mocks };
-    const code = transpileModule(readFileSync(path, "utf8"), {
-        fileName: path, compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    return runInNewContext(code + "\nexports;", { exports: {}, Blob, URL, AbortController, AbortSignal, ...globals, require: (name: string) => modules[name] });
+    return loadTestModule(path, modules, { Blob, URL, AbortController, AbortSignal, ...globals, require: (name: string) => modules[name] },
+        "", { fileName: path, mockImports: false });
 }
 
 function clipboardFixture() {

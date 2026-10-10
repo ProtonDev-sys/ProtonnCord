@@ -1,24 +1,13 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 function load(path: string, mocks: Record<string, object>, globals: Record<string, unknown> = {}) {
-    const code = transpileModule(readFileSync(path, "utf8"), {
-        fileName: path,
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    return runInNewContext(code + "\nexports;", {
-        exports: {}, URL, Headers, FormData, AbortController, Error, ...globals,
+    return loadTestModule(path, mocks, {
+        URL, Headers, FormData, AbortController, Error, ...globals,
         require: (name: string) => { assert.ok(name in mocks, name); return mocks[name]; }
-    });
+    }, "", { fileName: path, mockImports: false });
 }
 
 const logger = { Logger: class { error() {} } };
