@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { insertTextIntoChatInputBox } from "@utils/discord";
 import { parseUrl } from "@utils/misc";
 import { showToast, Toasts } from "@webpack/common";

@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { resolve4, resolve6 } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";

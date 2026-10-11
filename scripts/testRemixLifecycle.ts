@@ -1,15 +1,8 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 const root = "src/equicordplugins/remix/";
 interface Element {
@@ -28,17 +21,13 @@ function elements(value: unknown, type: string): Element[] {
     return [...(element.type === type ? [element] : []), ...elements(element.props.children, type)];
 }
 function load<T>(path: string, mocks: Record<string, unknown>, globals: Record<string, unknown> = {}): T {
-    const code = transpileModule(readFileSync(root + path, "utf8"), {
-        fileName: path,
-        compilerOptions: { jsx: JsxEmit.React, module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, esModuleInterop: true }
-    }).outputText;
-    return runInNewContext(code + "\nexports;", {
-        exports: {}, React, File, AbortController, ...globals,
+    return loadTestModule<T>(root + path, mocks, {
+        React, File, AbortController, ...globals,
         require(name: string) {
             assert.ok(name in mocks, `Unexpected import: ${name}`);
             return mocks[name];
         }
-    });
+    }, "", { fileName: path, compilerOptions: { esModuleInterop: true }, mockImports: false });
 }
 function deferred<T>() { return Promise.withResolvers<T>(); }
 async function settled<T>(promise: Promise<T>): Promise<T> {

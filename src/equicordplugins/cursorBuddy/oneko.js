@@ -1,10 +1,4 @@
 /*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
-/*
  * Sourced from https://raw.githubusercontent.com/adryd325/oneko.js/5281d057c4ea9bd4f6f997ee96ba30491aed16c0/oneko.js
  * Licensed under https://github.com/adryd325/oneko.js/blob/main/LICENSE
  */

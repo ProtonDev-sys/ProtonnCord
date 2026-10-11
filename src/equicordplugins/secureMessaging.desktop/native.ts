@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { DATA_DIR } from "@main/utils/constants";
 import { createHash, randomUUID } from "crypto";
 import { app, BrowserWindow, dialog, type IpcMainInvokeEvent, type MessageBoxOptions, safeStorage } from "electron";

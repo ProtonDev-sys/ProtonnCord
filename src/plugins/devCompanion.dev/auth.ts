@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 export const COMPANION_AUTH_PROTOCOL = "protonn-dev-companion-v1";
 
 const HEX_256_PATTERN = /^[0-9a-f]{64}$/u;

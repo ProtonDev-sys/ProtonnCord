@@ -61,7 +61,6 @@ if (defines.IS_STANDALONE === "false") {
  */
 const nodeCommonOpts = {
     ...commonOpts,
-    define: defines,
     format: "cjs",
     platform: "node",
     target: ["esnext"],
@@ -70,7 +69,6 @@ const nodeCommonOpts = {
 };
 
 const sourceMapFooter = s => watch ? "" : `//# sourceMappingURL=vencord://${s}.js.map`;
-const sourcemap = watch ? "inline" : "external";
 
 const globNativesPlugin = createPluginNativesPlugin({ resolvePluginName, isDev: IS_DEV, isReporter: IS_REPORTER });
 
@@ -93,7 +91,6 @@ const buildConfigs = hosts.flatMap(host => {
             entryPoints: [join(sourceDirectory, "main/index.ts")],
             outfile: outputPath(host, `${mainFile}.js`),
             footer: { js: `//# sourceURL=file:///${desktop ? "VencordPatcher" : "VencordDesktopMain"}\n` + sourceMapFooter(mainFile) },
-            sourcemap,
             plugins: [...(nodeCommonOpts.plugins ?? []), globNativesPlugin],
             define
         },
@@ -105,7 +102,6 @@ const buildConfigs = hosts.flatMap(host => {
             target: ["esnext"],
             footer: { js: `//# sourceURL=file:///${desktop ? "VencordRenderer" : "VencordDesktopRenderer"}\n` + sourceMapFooter("renderer") },
             globalName: "Vencord",
-            sourcemap,
             plugins: [globPlugins(desktop ? "discordDesktop" : "equibop"), ...commonRendererPlugins],
             define
         },
@@ -114,7 +110,6 @@ const buildConfigs = hosts.flatMap(host => {
             entryPoints: [join(sourceDirectory, "preload.ts")],
             outfile: outputPath(host, "preload.js"),
             footer: { js: "//# sourceURL=file:///VencordPreload\n" + sourceMapFooter("preload") },
-            sourcemap,
             define
         }
     ];

@@ -139,18 +139,6 @@ export async function exists(path) {
         .catch(() => false);
 }
 
-// https://github.com/evanw/esbuild/issues/619#issuecomment-751995294
-/**
- * @type {import("esbuild").Plugin}
- */
-export const makeAllPackagesExternalPlugin = {
-    name: "make-all-packages-external",
-    setup(build) {
-        const filter = /^[^./]|^\.[^./]|^\.\.[^/]/; // Must not start with "/" or "./" or "../"
-        build.onResolve({ filter }, args => ({ path: args.path, external: true }));
-    }
-};
-
 /**
  * @type {(kind: "web" | "discordDesktop" | "vesktop" | "equibop") => import("esbuild").Plugin}
  */

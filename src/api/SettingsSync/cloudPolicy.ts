@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 const MAX_CLOUD_URL_LENGTH = 4096;
 const FORBIDDEN_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 

@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { RenderSongInfo } from "@song-spotlight/api/handlers";
 import { Song } from "@song-spotlight/api/structs";
 import { sid } from "@song-spotlight/api/util";

@@ -5,13 +5,11 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { parseSyncedLyrics } from "../src/equicordplugins/musicControls/parseSyncedLyrics";
 import { Provider } from "../src/equicordplugins/musicControls/spotify/lyrics/providers/types";
+import { loadTestModule } from "./utils/loadTestModule";
 
 const prefix = "@equicordplugins/musicControls/";
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -23,13 +21,10 @@ function deferred<T>() {
 }
 
 function load(file: string, modules: Record<string, any>, globals: Record<string, unknown> = {}) {
-    const output = transpileModule(readFileSync(`src/equicordplugins/musicControls/${file}`, "utf8"), {
-        fileName: file, compilerOptions: { target: ScriptTarget.ES2022, module: ModuleKind.CommonJS, jsx: JsxEmit.React, esModuleInterop: false }
-    }).outputText;
-    return runInNewContext(`${output}\nexports;`, {
-        exports: {}, AbortController, AbortSignal, SyntaxError, URL, console: { error() {} },
+    return loadTestModule(`src/equicordplugins/musicControls/${file}`, modules, {
+        AbortController, AbortSignal, SyntaxError, URL, console: { error() {} },
         require: (name: string) => modules[name] ?? {}, ...globals
-    });
+    }, "", { fileName: file, compilerOptions: { esModuleInterop: false }, mockImports: false });
 }
 
 function timers() {

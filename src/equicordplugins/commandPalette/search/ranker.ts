@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import type { PaletteCommand } from "../api/types";
 import { getAlias } from "../state/aliases";
 import { frecencyScore } from "../state/frecency";

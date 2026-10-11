@@ -1,5 +1,3 @@
-/* eslint-disable simple-header/header */
-
 /*
  * Vencord, a modification for Discord's desktop app
  * Copyright (c) 2023 your mom lol

@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import type { ModalActionVariant, RenderModalProps } from "@vencord/discord-types";
 import { Modal, openModal } from "@webpack/common";
 import type { JSX } from "react";

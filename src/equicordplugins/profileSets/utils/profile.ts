@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { getUserSettingLazy } from "@api/UserSettings";
 import { AvatarDecorationData, CustomStatus, DisplayNameStyles, Nameplate, ProfileEffect, ProfilePreset } from "@vencord/discord-types";
 import { FluxDispatcher, GuildMemberStore, IconUtils, UserProfileSettingsStore, UserProfileStore, UserStore } from "@webpack/common";

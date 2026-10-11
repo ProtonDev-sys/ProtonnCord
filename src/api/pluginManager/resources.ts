@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 /** Resources belong to one start/stop cycle, including a partially completed start. */
 export class PluginResources {
     private cleanups: Array<() => unknown> = [];
