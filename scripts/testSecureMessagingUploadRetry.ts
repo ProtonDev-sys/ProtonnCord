@@ -16,8 +16,9 @@ import { createSourceFile, isFunctionDeclaration, isVariableStatement, ModuleKin
 
 import type { MessageSendListener, SendMessageOptions } from "../src/api/MessageEvents";
 import { withTimeout } from "../src/debug/promiseTimeout";
-import { DETACHED_TEXT_FILENAME, DETACHED_TEXT_MIME_TYPE, MAX_DETACHED_TEXT_BYTES, parseSecurePlaintext, serializeSecurePlaintext } from "../src/equicordplugins/secureMessaging.desktop/attachments";
-import { createEncryptedUploadDraft, EncryptedAttachmentUploadLimitError, prepareEncryptedAttachments, uploadEncryptedAttachment } from "../src/equicordplugins/secureMessaging.desktop/attachmentUploads";
+import { DETACHED_TEXT_FILENAME, DETACHED_TEXT_MIME_TYPE, MAX_ATTACHMENT_CIPHERTEXT_BYTES, MAX_DETACHED_TEXT_BYTES, parseSecurePlaintext, serializeSecurePlaintext } from "../src/equicordplugins/secureMessaging.desktop/attachments";
+import { assertEncryptedUploadSizes, createEncryptedUploadDraft, EncryptedAttachmentTotalLimitError, EncryptedAttachmentUploadLimitError, prepareEncryptedAttachments, uploadEncryptedAttachment } from "../src/equicordplugins/secureMessaging.desktop/attachmentUploads";
+import { DiscordUploadLimitUnavailableError, readDiscordUploadLimit } from "../src/equicordplugins/secureMessaging.desktop/uploadLimits";
 import { discordMessageSendSource, patchDiscordMessageSend } from "./fixtures/discordMessageSend";
 
 class Upload extends EventEmitter {
@@ -89,6 +90,9 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
     const shadows: Upload[] = [];
     const approvals = new WeakMap();
     const wires: string[] = [];
+    const toasts: string[] = [];
+    let uploadLimit: number | null = 100_000;
+    let limitReads = 0;
     const preparedPlaintexts: string[] = [];
     const forwards: Array<{ message: { content: string; }; options: SendMessageOptions; }> = [];
     const runtime = { accountId: "100000000000000001", capture: "ready", visibilityGeneration: 1, guard: true, scope: "scope", review: false, destination: "enabled", disableDuringPreSend: false };
@@ -130,7 +134,7 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
     const context = {
         AbortController, CloudUploader: Shadow, CloudUploadPlatform: { WEB: CloudUploadPlatform.WEB }, createEncryptedUploadDraft, prepareEncryptedAttachments, uploadEncryptedAttachment,
         DraftType: { ChannelMessage: 0 }, UploadAttachmentStore: { getUploads: () => storedDrafts },
-        EncryptedAttachmentUploadLimitError, serializeSecurePlaintext, parseSecurePlaintext,
+        EncryptedAttachmentUploadLimitError, EncryptedAttachmentTotalLimitError, DiscordUploadLimitUnavailableError, assertEncryptedUploadSizes, serializeSecurePlaintext, parseSecurePlaintext,
         applicationGuardsBlocked: false,
         secureOperationGeneration: 1, secureOperationIsCurrent: (_generation: number, userId?: string) => current && (userId === undefined || userId === runtime.accountId), currentSnapshot: () => ({ localUserId: "100000000000000001", snapshot: { channelId: originals[0]?.channelId ?? "200000000000000001" } }),
         takePermittedAnnouncement: () => false, resolveConversationProtection: async () => {
@@ -141,14 +145,14 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
         },
         updateMessageLengthBypass() {}, requiresFailClosedSend: (conversation: { status: string; }) => conversation.status !== "disabled", isNativeFailure: () => false, hasSelectedKeyReviewBlock: () => runtime.review,
         selectedOutgoingStickerIds: () => [], blockedOutgoingReason: () => null, resolveSelectedStickers: async () => { stickersStarted.resolve(); await stickerGate; return []; },
-        discordUploadLimitBytes: () => 100_000, detachedTextUploadIndex: () => null, encryptedMentionedUserIds: () => [],
+        discordUploadLimitBytes: () => { limitReads++; return readDiscordUploadLimit({}, () => uploadLimit); }, detachedTextUploadIndex: () => null, encryptedMentionedUserIds: () => [],
         preparedOutgoingMessages: new WeakMap(), approvedAttachmentUploads: approvals, detachedTextUploads: new WeakSet(),
-        MAX_DISCORD_MESSAGE_LENGTH: 2_000, MAX_ATTACHMENT_COUNT: 10, VOICE_MESSAGE_FLAG: 8192,
+        MAX_DISCORD_MESSAGE_LENGTH: 2_000, MAX_ATTACHMENT_COUNT: 10, MAX_ATTACHMENT_CIPHERTEXT_BYTES, VOICE_MESSAGE_FLAG: 8192,
         Native: { encryptOutgoing: async (_user: string, input: { plaintext: string; }) => { nativeCalls++; preparedPlaintexts.push(input.plaintext); encryptionStarted.resolve(); await encryptionGate; return { status: "encrypted", content: "encrypted envelope" }; } },
         prefetchEncryptedMessageEmbeds: async () => {}, conversationAuthorizationScope: (_user: string, conversation: { status: string; scope: string; }) => conversation.status === "enabled" ? conversation.scope : null,
         authorizeScopedAttachmentUploadReservations() {}, authorizeScopedWirePayload: (_channel: string, content: string) => wires.push(content),
         rememberOptimisticOutgoingPlaintext() {}, clearOutgoingStickers: (value: typeof options) => { if (Array.isArray(value.stickerIds)) value.stickerIds.length = 0; },
-        showToast() {}, Toasts: { Type: { FAILURE: 1 } }, useEncryptedSendStatus: { setState() {} },
+        showToast: (message: string) => toasts.push(message), Toasts: { Type: { FAILURE: 1 } }, useEncryptedSendStatus: { setState() {} },
         File, DETACHED_TEXT_FILENAME, DETACHED_TEXT_MIME_TYPE, MAX_DETACHED_TEXT_BYTES, MAX_STICKER_COUNT: 3,
         formatUploadBytes: (bytes: number) => String(bytes),
         secureRuntimeUserId: "100000000000000001",
@@ -168,6 +172,7 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
     const send = runInNewContext(compiled, context) as (...args: any[]) => Promise<{ cancel?: boolean; stop?: boolean; }>;
     return {
         originals, shadows, wires, options, approvals, nativeCalls: () => nativeCalls, sentBytes: () => sentBytes,
+        toasts, limitReads: () => limitReads, setUploadLimit: (value: number | null) => { uploadLimit = value; },
         uploadStarted: uploadStarted.promise, protectionStarted: protectionStarted.promise, stickersStarted: stickersStarted.promise, encryptionStarted: encryptionStarted.promise,
         runtime, preparedPlaintexts, forwards,
         forward(content = "Forwarded caption", stickerIds: string[] = []) {
@@ -452,6 +457,42 @@ test("account or guard invalidation after upload leaves the original draft retry
     h.assertDraft();
     assert.equal(h.wires.length, 0);
     assert.ok(h.shadows.every(upload => !h.approvals.has(upload)));
+});
+
+test("a reduced or unavailable allowance after encryption cancels before upload and preserves the draft", async () => {
+    for (const limit of [21, null]) {
+        const harness = fixture();
+        const gate = Promise.withResolvers<void>();
+        harness.delayEncryption(gate.promise);
+        const pending = harness.send();
+        await harness.encryptionStarted;
+        harness.setUploadLimit(limit);
+        gate.resolve();
+        assert.equal((await pending).cancel, true);
+        assert.equal(harness.sentBytes(), 0);
+        assert.equal(harness.wires.length, 0);
+        assert.equal(harness.limitReads(), 2);
+        assert.match(harness.toasts[0], limit === null ? /limit is unavailable/ : /Discord allows/);
+        harness.assertDraft();
+    }
+});
+
+test("inline encrypted text does not require an available file allowance", async () => {
+    const harness = fixture(undefined, 0);
+    harness.setUploadLimit(null);
+    assert.equal((await harness.send()).stop, true);
+    assert.equal(harness.limitReads(), 0);
+    assert.equal(harness.wires.length, 1);
+});
+
+test("detached text requires a valid allowance and preserves the original draft on failure", async () => {
+    const harness = fixture(undefined, 0);
+    harness.setUploadLimit(null);
+    await assert.rejects(harness.forward("large encrypted text ".repeat(400)), /could not prepare/);
+    assert.equal(harness.sentBytes(), 0);
+    assert.equal(harness.wires.length, 0);
+    assert.match(harness.toasts[0], /limit is unavailable/);
+    harness.assertDraft();
 });
 
 test("terminal upload events are awaited even when upload() resolves early", async () => {

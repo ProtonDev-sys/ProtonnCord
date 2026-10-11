@@ -142,6 +142,27 @@ test("failed size preflight does not remove metadata from the pending draft", as
     assert.equal(value.spoiler, true);
 });
 
+test("the exact encrypted byte boundary includes Unicode metadata and is checked before encryption", async t => {
+    const value = upload();
+    const originalFile = value.item.file;
+    const baseline = await prepareEncryptedAttachments([value], "", channelId, senderUserId, [], null, 1024 * 1024 * 1024);
+    const exactSize = baseline.files[0].size;
+    assert.ok(exactSize > originalFile.size + 20, "private UTF-8 metadata contributes to the final size");
+    const encrypt = t.mock.method(crypto.subtle, "encrypt", () => { throw new Error("oversized files must not be encrypted"); });
+    await assert.rejects(prepareEncryptedAttachments([value], "", channelId, senderUserId, [], null, exactSize - 1), error => {
+        assert.ok(error instanceof EncryptedAttachmentUploadLimitError);
+        assert.equal(error.encryptedBytes, exactSize);
+        assert.equal(error.limitBytes, exactSize - 1);
+        return true;
+    });
+    assert.equal(encrypt.mock.callCount(), 0);
+    assert.equal(value.item.file, originalFile);
+    encrypt.mock.restore();
+    const prepared = await prepareEncryptedAttachments([value, upload()], "", channelId, senderUserId, [], null, exactSize);
+    assert.deepEqual(prepared.files.map(file => file.size), [exactSize, exactSize]);
+    assert.equal(prepared.totalUploadBytes, exactSize * 2);
+});
+
 test("replacing the source file uses the replacement's metadata instead of a previous retry snapshot", async () => {
     const value = upload();
     const first = await prepareEncryptedAttachments([value], "", channelId, senderUserId);
