@@ -4,6 +4,8 @@ This local stdio MCP server talks to ProtonnCord's `DiscordMCP` plugin through a
 
 The tool list is fixed. It offers server and channel metadata, scoped message reads and searches, subscriptions, attachment downloads, plain-text sends without parsed mentions, and deletion only of messages recorded as sent by this bridge. It has no generic REST, membership, role, relationship, or moderation operation.
 
+Message reads, searches, and subscriptions include forwarded content in `messageSnapshots[].message`, with text, embeds, attachment metadata, timestamps, and voice flags. The envelope retains the forwarding user's author and its own content. `isForwarded` and `messageReference` identify the forward and source; forwards have a null `replyToMessageId`. Snapshots have no author or message ID. Download a snapshot attachment using the forwarding envelope's channel/message IDs and the snapshot attachment's ID. `discord_get_message` also generates missing voice waveforms within snapshots.
+
 ## Organizing servers
 
 Call `discord_list_server_folders` and `discord_list_server_activity` first. Folder IDs are strings. Create a folder with `discord_create_server_folder` and at least one server, then pass its ID to `discord_move_servers`; pass `null` as `folder_id` to unfile servers. Discord removes a folder when its last server moves out. `discord_rename_server_folder` changes its name. `discord_reorder_server_folder` uses the zero-based visible positions from the listing, so the final position places a folder at the bottom. `discord_delete_server_folder` preserves every server as an unfiled entry at the deleted folder's position. Folder changes use Discord's own user-settings action.

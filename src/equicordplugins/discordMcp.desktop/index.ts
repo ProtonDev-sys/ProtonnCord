@@ -10,7 +10,7 @@ import { EquicordDevs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import definePlugin, { PluginNative } from "@utils/types";
 import { Channel } from "@vencord/discord-types";
-import { ChannelType, MessageFlags } from "@vencord/discord-types/enums";
+import { ChannelType, MessageFlags, MessageReferenceType } from "@vencord/discord-types/enums";
 import { findByProps } from "@webpack";
 import {
     ChannelStore,
@@ -219,15 +219,15 @@ function generateAttachmentWaveform(attachment: RawAttachment): Promise<string> 
 
 async function serializeMessageWithVoiceWaveform(message: any) {
     const serialized = serializeMessage(message);
-    if (!serialized.isVoiceMessage) return serialized;
-
-    const rawAttachments = Array.isArray(message.attachments) ? message.attachments as RawAttachment[] : [];
-    await Promise.all(serialized.attachments.map(async (attachment, index) => {
-        if (attachment.waveform) return;
-        const rawAttachment = rawAttachments[index];
-        if (!rawAttachment) return;
-        attachment.waveform = await generateAttachmentWaveform(rawAttachment);
-        attachment.waveformSource = "generated";
+    const rawMessages = [message, ...snapshotMessages(message)];
+    await Promise.all([serialized, ...serialized.messageSnapshots.map(snapshot => snapshot.message)].map(async (body, index) => {
+        if (!body.isVoiceMessage) return;
+        const rawAttachments = rawMessages[index].attachments as RawAttachment[];
+        await Promise.all(body.attachments.map(async (attachment, attachmentIndex) => {
+            if (attachment.waveform) return;
+            attachment.waveform = await generateAttachmentWaveform(rawAttachments[attachmentIndex]);
+            attachment.waveformSource = "generated";
+        }));
     }));
     return serialized;
 }
@@ -246,24 +246,45 @@ function serializeEmbed(embed: any) {
     };
 }
 
-function serializeMessage(message: any) {
+function snapshotMessages(message: any): any[] {
+    const snapshots = message.message_snapshots ?? message.messageSnapshots;
+    return Array.isArray(snapshots) ? snapshots.map(snapshot => snapshot?.message).filter(message => message && typeof message === "object") : [];
+}
+
+function serializeMessageBody(message: any) {
     const flags = Number(message?.flags ?? 0);
     return {
-        id: String(message.id),
-        channelId: String(message.channel_id),
-        guildId: message.guild_id ? String(message.guild_id) : null,
-        author: serializeUser(message.author),
         content: typeof message.content === "string" ? message.content : "",
         timestamp: message.timestamp instanceof Date ? message.timestamp.toISOString() : message.timestamp ?? null,
         editedTimestamp: message.edited_timestamp ?? message.editedTimestamp?.toISOString?.() ?? null,
         type: Number(message.type ?? 0),
         flags,
         isVoiceMessage: Boolean(flags & MessageFlags.IS_VOICE_MESSAGE),
-        pinned: Boolean(message.pinned),
-        tts: Boolean(message.tts),
         attachments: Array.isArray(message.attachments) ? message.attachments.map(serializeAttachment) : [],
         embeds: Array.isArray(message.embeds) ? message.embeds.map(serializeEmbed) : [],
-        replyToMessageId: message.message_reference?.message_id ?? message.messageReference?.message_id ?? null,
+    };
+}
+
+function serializeMessage(message: any) {
+    const reference = message.message_reference ?? message.messageReference;
+    const isForwarded = Number(reference?.type ?? MessageReferenceType.DEFAULT) === MessageReferenceType.FORWARD;
+    return {
+        id: String(message.id),
+        channelId: String(message.channel_id),
+        guildId: message.guild_id ? String(message.guild_id) : null,
+        author: serializeUser(message.author),
+        ...serializeMessageBody(message),
+        pinned: Boolean(message.pinned),
+        tts: Boolean(message.tts),
+        isForwarded,
+        messageReference: reference ? {
+            type: Number(reference.type ?? MessageReferenceType.DEFAULT),
+            messageId: reference.message_id ?? null,
+            channelId: reference.channel_id ?? null,
+            guildId: reference.guild_id ?? null,
+        } : null,
+        messageSnapshots: snapshotMessages(message).map(snapshot => ({ message: serializeMessageBody(snapshot) })),
+        replyToMessageId: isForwarded ? null : reference?.message_id ?? null,
     };
 }
 
@@ -771,14 +792,16 @@ async function downloadAttachment(args: ToolArguments) {
     const messageId = requireSnowflake(args.message_id, "message_id");
     const attachmentId = requireSnowflake(args.attachment_id, "attachment_id");
     const message = await fetchMessage(channelId, messageId);
-    const attachment = (message.attachments as RawAttachment[] | undefined)?.find(item => String(item.id) === attachmentId);
+    const source = [message, ...snapshotMessages(message)].find(body =>
+        Array.isArray(body.attachments) && body.attachments.some(item => String(item.id) === attachmentId));
+    const attachment = (source?.attachments as RawAttachment[] | undefined)?.find(item => String(item.id) === attachmentId);
     if (!attachment || typeof attachment.url !== "string" || typeof attachment.filename !== "string")
         throw new Error("Attachment was not found on that message");
 
     const downloaded = await Native.downloadDiscordAttachment(attachment.url, attachment.filename);
     const { data, ...download } = downloaded;
     const serializedAttachment = serializeAttachment(attachment);
-    if (!serializedAttachment.waveform && Boolean(Number(message.flags ?? 0) & MessageFlags.IS_VOICE_MESSAGE)) {
+    if (!serializedAttachment.waveform && Boolean(Number(source.flags ?? 0) & MessageFlags.IS_VOICE_MESSAGE)) {
         serializedAttachment.waveform = await generateAttachmentWaveformFromBytes(data, download.contentType);
         serializedAttachment.waveformSource = "generated";
     }
