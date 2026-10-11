@@ -102,7 +102,9 @@ import {
     serializeSecurePlaintext,
 } from "./attachments";
 import {
+    assertEncryptedUploadSizes,
     createEncryptedUploadDraft,
+    EncryptedAttachmentTotalLimitError,
     EncryptedAttachmentUploadLimitError,
     type PreparedEncryptedAttachments,
     prepareEncryptedAttachments,
@@ -162,6 +164,7 @@ import {
     parseEncryptedEnvelope,
 } from "./protocol";
 import { attachmentReservationEndpoint, installStartupRestGuard, messageEndpoint, settleGuardedRestFailure } from "./restGuardFailure";
+import { DiscordUploadLimitUnavailableError, encryptedUploadLimitsDescription, formatUploadBytes, readDiscordUploadLimit } from "./uploadLimits";
 import {
     authorizeScopedAttachmentUploadReservations,
     authorizeScopedWireEdit,
@@ -1195,7 +1198,7 @@ function appendDetachedTextUpload(uploads: CloudUpload[], plaintext: string, cha
         lastModified: Date.now(),
     });
     if (file.size < 1 || file.size > MAX_DETACHED_TEXT_BYTES)
-        return `Encrypted message text must be smaller than ${formatUploadBytes(MAX_ATTACHMENT_CIPHERTEXT_BYTES)} before encryption.`;
+        return `Encrypted message text must be at most ${formatUploadBytes(MAX_DETACHED_TEXT_BYTES)} before encryption; private metadata and encryption also need space.`;
     const upload = new CloudUploader({ file, platform: CloudUploadPlatform.WEB }, channelId);
     uploads.push(upload);
     detachedTextUploads.add(upload);
@@ -1203,21 +1206,7 @@ function appendDetachedTextUpload(uploads: CloudUpload[], plaintext: string, cha
 }
 
 function discordUploadLimitBytes(): number {
-    const user = UserStore.getCurrentUser();
-    const value = user ? UploadLimits.getUserMaxFileSize(user) : null;
-    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 21)
-        throw new Error("Discord's attachment upload limit is unavailable");
-    return Math.min(value, MAX_ATTACHMENT_CIPHERTEXT_BYTES);
-}
-
-function formatUploadBytes(value: number): string {
-    if (value < 1024) return `${value} B`;
-    if (value < 1024 * 1024) {
-        const kibibytes = value / 1024;
-        return `${kibibytes >= 10 ? kibibytes.toFixed(1) : kibibytes.toFixed(2)} KiB`;
-    }
-    const mebibytes = value / (1024 * 1024);
-    return `${mebibytes >= 10 ? mebibytes.toFixed(1) : mebibytes.toFixed(2)} MiB`;
+    return readDiscordUploadLimit(UserStore.getCurrentUser(), user => UploadLimits.getUserMaxFileSize(user));
 }
 
 function reservationFiles(body: unknown): Array<{ filename: string; size: number; }> | null {
@@ -1826,7 +1815,8 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             uploadDraft!.validate();
             validateStoredDrafts();
         };
-        const uploadLimitBytes = discordUploadLimitBytes();
+        // Inline text needs no file allowance. Detached text and attachments do.
+        let uploadLimitBytes: number | undefined;
         let detachedTextIndex = detachedTextUploadIndex(uploads, plaintext);
         if (detachedTextIndex === null && plaintext.length > MAX_DISCORD_MESSAGE_LENGTH) {
             const appended = appendDetachedTextUpload(uploads, plaintext, channelId);
@@ -1838,6 +1828,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             generatedDetachedUpload = { upload: uploads[appended], uploads };
         }
         if (uploads.length > 0) setAttachmentStatus("Encrypting attachments…");
+        if (uploads.length > 0) uploadLimitBytes = discordUploadLimitBytes();
         let preparedAttachments: PreparedEncryptedAttachments | null = uploads.length > 0
             ? await prepareEncryptedAttachments(
                 uploads,
@@ -1880,6 +1871,7 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             detachedTextIndex = appended;
             generatedDetachedUpload = { upload: uploads[appended], uploads };
             setAttachmentStatus("Encrypting attachments…");
+            uploadLimitBytes = discordUploadLimitBytes();
             preparedAttachments = await prepareEncryptedAttachments(
                 uploads,
                 "",
@@ -1908,11 +1900,17 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
             return { cancel: true };
         }
 
+        // Encryption/key approval can take time. Recheck prepared files before
+        // authorizing any upload reservation against the current account allowance.
+        if (preparedAttachments) {
+            uploadLimitBytes = discordUploadLimitBytes();
+            assertEncryptedUploadSizes(preparedAttachments.files, uploadLimitBytes);
+        }
         void prefetchEncryptedMessageEmbeds(plaintext);
         if (detachedTextIndex !== null && preparedAttachments) {
             const detachedBytes = preparedAttachments.files[detachedTextIndex].size;
             showToast(
-                `Encrypted message text will upload ${formatUploadBytes(detachedBytes)} of Discord's ${formatUploadBytes(uploadLimitBytes)} per-file limit.`,
+                `Encrypted message text will upload ${formatUploadBytes(detachedBytes)}. Discord's per-file allowance is ${formatUploadBytes(uploadLimitBytes!)}; Secure Messaging's per-file safety limit is ${formatUploadBytes(MAX_ATTACHMENT_CIPHERTEXT_BYTES)}.`,
                 Toasts.Type.MESSAGE,
             );
         }
@@ -1945,8 +1943,8 @@ const outgoingListener: MessageSendListener = async (channelId, message, options
         sendPrepared = true;
         return { stop: true };
     } catch (error) {
-        showToast(error instanceof EncryptedAttachmentUploadLimitError
-            ? `Encrypted ${error.filename} would use ${formatUploadBytes(error.encryptedBytes)}; Discord allows ${formatUploadBytes(error.limitBytes)} per file.`
+        showToast(error instanceof EncryptedAttachmentUploadLimitError || error instanceof EncryptedAttachmentTotalLimitError || error instanceof DiscordUploadLimitUnavailableError
+            ? error.message
             : "Secure Messaging stopped the send because encryption or upload failed unexpectedly.", Toasts.Type.FAILURE);
         return { cancel: true };
     } finally {
@@ -2170,6 +2168,9 @@ interface ConversationManagerProps {
 function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = false }: ConversationManagerProps) {
     const { externalLinkPreviews } = settings.use(["externalLinkPreviews"]);
     const context = currentSnapshot(channel);
+    const discordLimit = useStateFromStores([UserStore], () => {
+        try { return discordUploadLimitBytes(); } catch { return null; }
+    });
     const [identity, setIdentity] = useState<IdentityResult | null>(null);
     const [conversation, setConversation] = useState<ConversationResult | null>(null);
     const [securityKey, setSecurityKey] = useState<SecurityKeyVaultResult | null>(null);
@@ -2552,6 +2553,11 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                                 <BaseText size="sm" weight="semibold">Enable encryption</BaseText>
                             </Checkbox>
                             {conversation && <BaseText size="xs">{conversationStatusMessage(conversation)}</BaseText>}
+                        </section>
+
+                        <section className="pc-secure-modal-section">
+                            <Heading tag="h5">File limits</Heading>
+                            <BaseText size="xs" color="text-muted">{encryptedUploadLimitsDescription(discordLimit)}</BaseText>
                         </section>
 
                         <section className="pc-secure-modal-section">

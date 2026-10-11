@@ -11,9 +11,11 @@ import { setImmediate } from "node:timers/promises";
 import { runInNewContext } from "node:vm";
 import { createSourceFile, isFunctionDeclaration, isVariableStatement, JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
+import { encryptedUploadLimitsDescription, readDiscordUploadLimit } from "../src/equicordplugins/secureMessaging.desktop/uploadLimits";
+
 const source = readFileSync(new URL("../src/equicordplugins/secureMessaging.desktop/index.tsx", import.meta.url), "utf8");
 const parsed = createSourceFile("index.tsx", source, ScriptTarget.Latest, true);
-const names = new Set(["ConversationManager", "KeyReviewModal", "SecureMessagingButton", "sendKeyAnnouncement"]);
+const names = new Set(["ConversationManager", "KeyReviewModal", "SecureMessagingButton", "sendKeyAnnouncement", "discordUploadLimitBytes"]);
 const selected = parsed.statements.filter(statement => isFunctionDeclaration(statement)
     ? statement.name && names.has(statement.name.text)
     : isVariableStatement(statement) && statement.declarationList.declarations.some(declaration => names.has(declaration.name.getText(parsed))));
@@ -58,6 +60,8 @@ function harness() {
         createAnnouncement: async () => { calls.announcements++; return { status: "created", content: "synthetic announcement" }; },
     };
     const context = {
+        UploadLimits: { getUserMaxFileSize: (_user: unknown): unknown => 1024 * 1024 * 1024 },
+        encryptedUploadLimitsDescription, readDiscordUploadLimit,
         settings: { store: { externalLinkPreviews: false }, use: () => context.settings.store },
         Native: native, channel, chatAccessCache: { status: "ready", localUserId: "self" } as any,
         UserStore: { getCurrentUser: () => ({ id: userId }) }, ChannelStore: {},
@@ -141,6 +145,19 @@ test("conversation settings expose the shared link-preview preference and URL di
     assert.equal(h.context.settings.store.externalLinkPreviews, true);
     const updated = h.render("ConversationManager", h.props.manager);
     assert.equal(elements(updated).find(element => element.type === "Checkbox" && JSON.stringify(element.children).includes("Link and GIF previews"))!.props.value, true);
+});
+
+test("file-limit settings display the current host allowance, effective cap and unknown state", async () => {
+    const h = harness();
+    h.render("ConversationManager", h.props.manager);
+    await setImmediate();
+    const render = () => JSON.stringify(h.render("ConversationManager", h.props.manager));
+    assert.match(render(), /Discord reports 1024.00 MiB/);
+    assert.match(render(), /Encrypted files can use up to 500.00 MiB/);
+    h.context.UploadLimits.getUserMaxFileSize = () => 20 * 1024 * 1024;
+    assert.match(render(), /Encrypted files can use up to 20.00 MiB/);
+    h.context.UploadLimits.getUserMaxFileSize = () => { throw new Error("changed host module"); };
+    assert.match(render(), /unavailable; file sends are blocked/);
 });
 
 test("expired trust reviews can refresh in place and require a new explicit comparison", async () => {
