@@ -61,6 +61,7 @@ function fixture(options: {
         MAX_DISCORD_MESSAGE_LENGTH, MAX_ATTACHMENT_COUNT: 10,
         generation: 1, context, conversation: {}, plaintext: text, channelId,
         uploads: Array.from({ length: bundle.count }, () => ({})), stickers: [], uploadLimitBytes: 500 * 1024 * 1024,
+        discordUploadLimitBytes: () => 500 * 1024 * 1024,
         detachedTextIndex: null, generatedDetachedUpload: null,
         preparedAttachments: { plaintext: serializeSecurePlaintext(text, bundle) },
         parseSecurePlaintext, serializeSecurePlaintext,

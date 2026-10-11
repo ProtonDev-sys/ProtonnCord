@@ -186,8 +186,7 @@ function encodedAttachmentMetadata(metadata: AttachmentMetadata): Uint8Array {
 
 export function encryptedAttachmentCiphertextSize(metadata: AttachmentMetadata): number {
     const size = 4 + encodedAttachmentMetadata(metadata).byteLength + metadata.size + 16;
-    if (!Number.isSafeInteger(size) || size > MAX_ATTACHMENT_CIPHERTEXT_BYTES)
-        throw new Error("Encrypted attachment exceeds the protocol safety limit");
+    if (!Number.isSafeInteger(size)) throw new Error("Invalid encrypted attachment size");
     return size;
 }
 
@@ -414,6 +413,8 @@ export async function encryptAttachmentBytes(input: {
         throw new Error("Attachment byte length does not match its metadata");
     const metadataBytes = encodedAttachmentMetadata(input.metadata);
     const expectedCiphertextSize = encryptedAttachmentCiphertextSize(input.metadata);
+    if (expectedCiphertextSize > MAX_ATTACHMENT_CIPHERTEXT_BYTES)
+        throw new Error("Encrypted attachment exceeds the protocol safety limit");
     // Snapshot mutable byte callers before the first await. Files are immutable and
     // can supply their bytes directly to one framed buffer without a full-file copy.
     let plaintext = data instanceof Blob ? new Uint8Array() : concatBytes(uint32(metadataBytes.byteLength), metadataBytes, data);
