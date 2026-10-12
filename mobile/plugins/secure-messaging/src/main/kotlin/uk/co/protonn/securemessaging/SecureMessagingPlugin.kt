@@ -2,85 +2,37 @@
 
 package uk.co.protonn.securemessaging
 
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
 import android.net.Uri
 import android.util.Base64
-import android.util.AtomicFile
 import io.github.revenge.bridge.asDelegate
 import io.github.revenge.plugins.plugin
 import io.github.revenge.xposed.api.registerNativeAsyncMethod
 import io.github.revenge.xposed.api.registerNativeMethod
 import java.io.File
 import java.io.ByteArrayOutputStream
-import java.security.KeyStore
 import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
+import revenge.plugin.secure_messaging.BuildConfig
 
-private const val KEY_ALIAS = "uk.co.protonn.secure-messaging.vault"
 private const val VAULT_FILE = "secure-vault.bin"
 private const val MAX_ATTACHMENT_BYTES = 64 * 1024 * 1024
-private val AAD = "ProtonnCord-Mobile/SecureMessaging/v1".toByteArray(Charsets.UTF_8)
-private val vaultLock = Any()
-
-private fun vaultKey(): SecretKey {
-    val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-    (store.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
-    return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
-        init(
-            KeyGenParameterSpec.Builder(
-                KEY_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-            )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
-                .build(),
-        )
-        generateKey()
-    }
-}
-
-private fun encryptVault(plaintext: String): ByteArray {
-    val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
-        init(Cipher.ENCRYPT_MODE, vaultKey())
-        updateAAD(AAD)
-    }
-    val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
-    require(cipher.iv.size in 12..16)
-    return byteArrayOf(1, cipher.iv.size.toByte()) + cipher.iv + ciphertext
-}
-
-private fun decryptVault(bytes: ByteArray): String {
-    require(bytes.size >= 2 + 12 + 16 && bytes[0].toInt() == 1) { "Unsupported secure vault" }
-    val ivLength = bytes[1].toInt() and 0xff
-    require(ivLength in 12..16 && bytes.size >= 2 + ivLength + 16) { "Invalid secure vault" }
-    val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
-        init(Cipher.DECRYPT_MODE, vaultKey(), GCMParameterSpec(128, bytes.copyOfRange(2, 2 + ivLength)))
-        updateAAD(AAD)
-    }
-    return cipher.doFinal(bytes.copyOfRange(2 + ivLength, bytes.size)).toString(Charsets.UTF_8)
-}
+private val storageLock = Any()
 
 @Suppress("UNUSED")
 val secureMessagingPlugin = plugin {
     var stopNative: (() -> Unit)? = null
 
     start {
-        val vault = File(storageDir, VAULT_FILE)
+        val vault = VaultStorage(File(storageDir, VAULT_FILE))
         val active = AtomicBoolean(true)
         val oneKeySession = AtomicReference<OneKeyUsb?>()
         stopNative = {
             active.set(false)
             oneKeySession.getAndSet(null)?.close()
-            // A restart can replace this class loader and its monitor. Finish any
-            // vault operation already in progress before the old instance stops.
-            synchronized(vaultLock) { Unit }
+            // Finish the current storage transaction before stop completes.
+            // Queued handlers must check active under this same monitor.
+            synchronized(storageLock) { Unit }
         }
 
         registerNativeMethod("uk.co.protonn.secure-messaging.random") { rawArgs ->
@@ -93,12 +45,26 @@ val secureMessagingPlugin = plugin {
             )
         }
 
+        registerNativeMethod("uk.co.protonn.secure-messaging.loader.runtimeUrl") {
+            BuildConfig.REVENGE_RUNTIME_URL
+        }
+
 		withAppContext { context ->
 			val oneKey = OneKeyUsb(context)
 			oneKeySession.set(oneKey)
 			if (!active.get()) {
 				oneKeySession.getAndSet(null)?.close()
 				return@withAppContext
+			}
+			registerNativeAsyncMethod("uk.co.protonn.secure-messaging.loader.configure") { rawArgs ->
+				val args = rawArgs.asDelegate()
+				val runtimeUrl: String by args.string()
+				require(runtimeUrl == BuildConfig.REVENGE_RUNTIME_URL) { "The native mobile runtime pin changed; retry the update" }
+				synchronized(storageLock) {
+					check(active.get()) { "Secure Messaging has stopped" }
+					configureLoader(context.filesDir, runtimeUrl)
+					true
+				}
 			}
 			registerNativeAsyncMethod("uk.co.protonn.secure-messaging.attachment.cleanup") {
 				val cacheRoot = context.cacheDir.canonicalFile
@@ -171,36 +137,24 @@ val secureMessagingPlugin = plugin {
 		}
 
         registerNativeAsyncMethod("uk.co.protonn.secure-messaging.vault.load") {
-            synchronized(vaultLock) {
+            synchronized(storageLock) {
                 check(active.get()) { "Secure Messaging has stopped" }
-                if (!vault.exists() && !File(vault.path + ".bak").exists()) null
-                else decryptVault(AtomicFile(vault).openRead().use { it.readBytes() })
+                vault.load()
             }
         }
         registerNativeAsyncMethod("uk.co.protonn.secure-messaging.vault.save") { rawArgs ->
             val args = rawArgs.asDelegate()
             val plaintext: String by args.string()
-            require(plaintext.toByteArray(Charsets.UTF_8).size <= 4 * 1024 * 1024) { "Secure vault is too large" }
-            synchronized(vaultLock) {
+            synchronized(storageLock) {
                 check(active.get()) { "Secure Messaging has stopped" }
-                storageDir.mkdirs()
-                val atomic = AtomicFile(vault)
-                val stream = atomic.startWrite()
-                try {
-                    stream.write(encryptVault(plaintext))
-                    atomic.finishWrite(stream)
-                } catch (error: Exception) {
-                    atomic.failWrite(stream)
-                    throw error
-                }
+                vault.save(plaintext)
                 true
             }
         }
         registerNativeAsyncMethod("uk.co.protonn.secure-messaging.vault.reset") {
-            synchronized(vaultLock) {
+            synchronized(storageLock) {
                 check(active.get()) { "Secure Messaging has stopped" }
-                AtomicFile(vault).delete()
-                !vault.exists() && !File(vault.path + ".bak").exists() && !File(vault.path + ".new").exists()
+                vault.reset()
             }
         }
     }

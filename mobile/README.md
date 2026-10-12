@@ -14,7 +14,7 @@ The build pins both halves of Revenge in [toolchain.json](toolchain.json). The d
 | Discord | Manifest requires Android version `>=341.0`; this is a compatibility bound, not a tested version matrix |
 | Android | Android 7+ for the plugin; Android 8+ and USB host support for OneKey |
 
-Changing only the JavaScript bundle cannot add the native plugin API to an older bootstrap. Newer loader releases also need compatibility review before changing these pins. A nonroot patched APK route has not been validated for this native plugin; a standalone Protonn Cord APK is not produced by this repository.
+Changing only the JavaScript bundle cannot add the native plugin API to an older bootstrap. Newer loader releases also need compatibility review before changing these pins. A [local nonroot APK build](ANDROID.md) authenticates the original Discord APKs, embeds the pinned loader and signs the set with your reusable key. Its packaging checks cover ARM64 and x86-64; real Android startup and device behavior require separate validation. Published mobile releases contain the plugin and runtime rather than a pre-signed Discord APK.
 
 1. Install the pinned module APK from the upstream release and enable it for Discord in your Xposed manager, following [upstream installation instructions](https://github.com/revenge-mod/revenge-xposed/blob/9a1426d0a3df000beb4174d0071d4d80e8be42fc/README.md).
 2. Configure the loader to use the pinned Next runtime below. The pinned loader defaults to Revenge Classic, so this step is required. Its configuration is `files/pyoncord/loader.json` inside Discord's private app data directory, normally `/data/user/0/com.discord/files/pyoncord/loader.json`. With Discord stopped, preserve a copy of an existing configuration and update its `customLoadUrl` field using your root file manager. Preserve file ownership and other existing fields.
@@ -35,7 +35,7 @@ Changing only the JavaScript bundle cannot add the native plugin API to an older
    ```
 
 4. On **Browse**, install **Protonn Cord Secure Messaging**, enable it and reload when prompted. The repository index resolves to an immutable plugin ZIP with a SHA-256 digest checked by the native loader.
-5. Open the plugin's settings to configure an identity or pair your OneKey. **Update from nightly** refreshes the hosted plugin repository and configures the pinned runtime; it keeps the original loader configuration in `loader.json.protonn-backup` when no backup exists.
+5. Open the plugin's settings to configure an identity or pair your OneKey. **Update from nightly** checks the pinned runtime download before installing the plugin update, then configures the loader through the native bridge. The check times out after 10 seconds. Configuration writes are atomic, preserve other saved fields, and keep the original bytes in `loader.json.protonn-backup` when no backup exists. An invalid configuration or backup must be repaired before updating; it is never replaced with an empty one.
 
 The [mobile workflow](../.github/workflows/mobile.yml) publishes the plugin ZIP, runtime, upstream runtime source/license, toolchain pins and checksums. Plugin builds are tagged `mobile-build-RUN_ID-ATTEMPT`; the `mobile-nightly` index follows the current build. Runtime releases are pinned separately. Preserve the plugin's stored data when updating: clearing app/plugin data loses locally held identities and history keys.
 
@@ -92,5 +92,15 @@ bun run test:bundle
 The plugin package is `build/dist/uk.co.protonn.secure-messaging.zip`. Its `plugin.jar` contains DEX bytecode and is loaded by Revenge; the ZIP is not an installable Android APK. See the workflow for building the pinned Hermes runtime with Deno and recording release provenance.
 
 Gradle requires the pinned Bun version for the plugin bundle and installs with `--frozen-lockfile`. Set `BUN` or pass `-PjsToolPath=/absolute/path/to/bun` if it is outside the usual locations. Deno is used separately for the upstream Hermes runtime; npm/Deno are not fallback package managers for this plugin.
+
+With an Android emulator or test device connected, run the native storage suite after publishing the pinned Revenge API:
+
+```sh
+bash gradlew :plugins:secure-messaging:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=uk.co.protonn.securemessaging.NativeStorageTest \
+  --console=plain
+```
+
+These instrumented tests run in their own ordinary Android app sandbox and use the actual Android Keystore, AES-GCM and AtomicFile implementations. They exercise key persistence and replacement, tampered vault rejection, interrupted-write rollback, legacy backup recovery, reset, UTF-8 size bounds, and loader configuration failure/retry with unknown fields and original backups preserved. No Discord installation or account is needed. AndroidX runner and JUnit are test dependencies and are excluded from the released plugin JAR. Results and reports are under `plugins/secure-messaging/build/outputs/androidTest-results/connected` and `plugins/secure-messaging/build/reports/androidTests/connected`.
 
 Unit tests, a compiled-bundle fixture and native compilation cover different failure modes. They do not establish device compatibility. Before claiming a device/Discord version is supported, record its Android and Discord versions, loader/runtime pins, and verify injection, plugin settings, reload/disable cleanup, Android Keystore round trips, attachment selection/rendering and failed-send retry, and OneKey permission denial/cancel/disconnect. A signed-out device can check startup and loader behavior; successful encrypted delivery between live peers needs a separate, explicitly authorized account test.
