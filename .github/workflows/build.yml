@@ -9,10 +9,10 @@ on:
 
 env:
     FORCE_COLOR: true
-    GITHUB_TOKEN: ${{ github.token }}
 
 permissions:
     contents: write
+    actions: read
 
 concurrency:
     group: protonn-cord-release-${{ github.ref }}
@@ -26,14 +26,15 @@ jobs:
         timeout-minutes: 35
 
         steps:
-            - uses: actions/checkout@v7
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   fetch-depth: 0
+                  persist-credentials: false
 
-            - uses: pnpm/action-setup@v6
+            - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
             - name: Use Node.js 24
-              uses: actions/setup-node@v6
+              uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
               with:
                   node-version: 24
                   cache: "pnpm"
@@ -87,8 +88,16 @@ jobs:
                   find release -type f -size 0 -delete
                   rm -f release/package.json release/*.map
 
+            - name: Require full validation for this revision
+              if: github.repository == 'ProtonDev-sys/ProtonnCord' && vars.ACT != 'true'
+              run: node scripts/requireReleaseValidation.mjs
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+
             - name: Upload Protonn Cord update channel
               if: github.repository == 'ProtonDev-sys/ProtonnCord' && vars.ACT != 'true'
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
               shell: bash
               run: |
                   set -euo pipefail

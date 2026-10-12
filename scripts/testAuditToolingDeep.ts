@@ -203,9 +203,15 @@ test("local reporter bounds webhook requests and releases response bodies", asyn
     }
 });
 
-test("CI validates lint before fixing and includes omitted focused suites", () => {
+test("CI validates source without rewriting it and includes focused suites", () => {
     const workflow = read(".github/workflows/test.yml");
-    assert.match(workflow, /run: pnpm lint && pnpm test/u);
+    const scripts = JSON.parse(read("package.json")).scripts;
+    assert.match(workflow, /run: pnpm test\s*\n/u);
+    assert.match(workflow, /run: pnpm audit --prod\s*\n/u);
+    for (const name of ["test", "testWeb"]) {
+        assert.match(scripts[name], /\bpnpm lint\b/u);
+        assert.doesNotMatch(scripts[name], /lint:fix|--fix/u, "test commands must check the reviewed source without editing it");
+    }
     assert.match(workflow, /run: pnpm testPrimaryStreamAudio && pnpm testPromiseTimeout/u);
     assert.doesNotMatch(workflow, /run: pnpm exec tsx --test scripts\/testAuditToolingDeep\.ts/u);
     assert.match(read("scripts/runAuditTests.mjs"), /testAudit\.\+.*ts/u);
