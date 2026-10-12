@@ -92,8 +92,13 @@ async function runReporter() {
             }
         }
 
-        for (const [plugin, moduleId, match, totalTime] of patchTimings) {
+        for (const [plugin, moduleId, match, totalTime, confirmation] of patchTimings) {
             if (totalTime > 10) {
+                ReporterLogger.log("Patch timing confirmation:", JSON.stringify({
+                    plugin, id: String(moduleId), match: String(match), initialMs: totalTime,
+                    ...confirmation ?? { status: "inconclusive", samplesMs: [], reason: "Confirmation was not recorded" }
+                }));
+                if (confirmation?.status === "outlier") continue;
                 new Logger("WebpackPatcher").warn(`Patch by ${plugin} took ${Math.round(totalTime * 100) / 100}ms (Module id is ${String(moduleId)}): ${match}`);
             }
         }

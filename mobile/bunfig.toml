@@ -1,0 +1,4 @@
+# This is a Rolldown plugin build. Discord supplies the React Native runtime.
+# Install the explicit development type dependencies without the native app toolchain peers.
+[install]
+peer = false

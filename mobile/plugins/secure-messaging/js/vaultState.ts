@@ -411,7 +411,7 @@ export class MobileVault {
 			)
 	}
 
-	async useOneKey(secret: Uint8Array, userId: string): Promise<void> {
+	async unlockWithOneKey(secret: Uint8Array, userId: string): Promise<void> {
 		const derived = deriveOneKeyRoot(secret)
 		let installed = false
 		try {

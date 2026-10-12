@@ -59,6 +59,7 @@ jobs:
               working-directory: mobile
               run: |
                   bun install --frozen-lockfile
+                  bun audit
                   bun run test
                   bun run lint:types
                   bun run lint

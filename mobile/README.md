@@ -77,12 +77,15 @@ Use the package manager recorded in the root `package.json`, Bun from [toolchain
 pnpm install --frozen-lockfile
 cd mobile
 bun install --frozen-lockfile
+bun audit
 bun run test
 bun run lint:types
 bun run lint
 bun run build
 bun run test:bundle
 ```
+
+This directory builds a Rolldown plugin. Discord supplies React and React Native at runtime; their type packages, including Reanimated and Worklets, are explicit development dependencies. [bunfig.toml](bunfig.toml) disables automatic peer installation so these type packages do not pull in the unused Metro application bundler. The separately built pinned Revenge runtime keeps its own Deno dependency graph.
 
 The ordinary tests exercise protocol/crypto interoperability, trust changes, replay rejection, storage failures, attachment validation, vault locking and delayed host callbacks. `test:bundle` loads the actual generated `index.js` IIFE with a synthetic Revenge/native host, starts signed out, renders settings, handles commands and a public announcement with a synthetic account, and checks cleanup. It forbids network access and fails if the build artifact is missing. These checks use no Discord credentials or live messages.
 

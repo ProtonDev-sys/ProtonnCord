@@ -5,6 +5,7 @@
  */
 
 import { Settings } from "@api/Settings";
+import { createPatchTimingConfirmer, getPatchTimingLastIndex, type PatchTimingConfirmation } from "@debug/patchTiming";
 import { reporterData } from "@debug/reporterData";
 import { traceFunctionWithResults } from "@debug/Tracer";
 import { makeLazy } from "@utils/lazy";
@@ -26,7 +27,8 @@ export const SYM_PATCHED_SOURCE = Symbol("WebpackPatcher.patchedSource");
 export const SYM_PATCHED_BY = Symbol("WebpackPatcher.patchedBy");
 export const allWebpackInstances = new Set<AnyWebpackRequire>();
 
-export const patchTimings = [] as Array<[plugin: string, moduleId: PropertyKey, match: PatchReplacement["match"], totalTime: number]>;
+export const patchTimings = [] as Array<[plugin: string, moduleId: PropertyKey, match: PatchReplacement["match"], totalTime: number, confirmation?: PatchTimingConfirmation]>;
+const confirmPatchTiming = IS_REPORTER ? createPatchTimingConfirmer() : undefined;
 
 export const getBuildNumber = makeLazy(() => {
     try {
@@ -510,11 +512,16 @@ function patchFactory(moduleId: PropertyKey, originalFactory: AnyModuleFactory):
 
             let newPatchedCode: string = "";
             try {
-                const [patchResult, totalTime] = executePatch(replacement.match, replacement.replace as string);
+                const { match, replace } = replacement;
+                const initialLastIndex = IS_REPORTER ? getPatchTimingLastIndex(match) : undefined;
+                const [patchResult, totalTime] = executePatch(match, replace as string);
                 newPatchedCode = patchResult;
 
                 if (IS_REPORTER) {
-                    patchTimings.push([patch.plugin, moduleId, replacement.match, totalTime]);
+                    const confirmation = totalTime > 10
+                        ? confirmPatchTiming!(patchedCode, patchResult, match, replace, totalTime, initialLastIndex)
+                        : undefined;
+                    patchTimings.push([patch.plugin, moduleId, match, totalTime, confirmation]);
                 }
 
                 if (newPatchedCode === patchedCode) {

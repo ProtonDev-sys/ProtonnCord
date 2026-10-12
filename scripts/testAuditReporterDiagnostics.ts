@@ -178,6 +178,75 @@ test("actual reporter Logger messages preserve patch, lookup and plugin-start fa
     assert.deepEqual(f.calls, ["close", "report", "exit"]);
 });
 
+test("confirmed timing outliers retain the initial and both replay measurements without failing a clean report", async () => {
+    const f = fixture();
+    const timing = { plugin: "FixCodeblockGap", id: "999915", match: "literal", initialMs: 44.1, samplesMs: [0.1, 0.2], status: "outlier" };
+    await f.reporter.main();
+    await f.reporter.handleConsole(consoleMessage(["[Protonn Cord]", "Reporter:", "Patch timing confirmation:", JSON.stringify(timing)]));
+    await f.reporter.finishReporter();
+    assert.deepEqual(JSON.parse(JSON.stringify(f.reporter.report.patchTimingConfirmations)), [timing]);
+    assert.deepEqual(f.exits, [0]);
+    const lines: string[] = [];
+    await declaration("scripts/generateReport.ts", "printReport", {
+        CANARY: false, report: f.reporter.report, process: { env: {} },
+        console: { log: (...args: unknown[]) => lines.push(args.join(" ")) },
+        toCodeBlock: declaration("scripts/generateReport.ts", "toCodeBlock", {})
+    })();
+    assert.match(lines.join("\n"), /## Patch Timing Confirmations\n- FixCodeblockGap \(ID: `999915`\): outlier\n  - Initial: 44\.1ms; confirmation samples: 0\.1ms, 0\.2ms/);
+});
+
+test("slow and inconclusive timing confirmations fail and capture evidence even without the legacy warning", async () => {
+    for (const [status, samplesMs, reason] of [["slow", [12], "slow replay"], ["inconclusive", [], "unsupported replacement"]] as const) {
+        const f = fixture(undefined, "success", { Vencord: { Webpack: { wreq: { m: { "7": function untouchedFactory() { assert.fail("Must not execute a factory"); } } } } } });
+        await f.reporter.main();
+        await f.reporter.handleConsole(consoleMessage(["[Protonn Cord]", "Reporter:", "Patch timing confirmation:", JSON.stringify({
+            plugin: "Fixture", id: "7", match: "/pattern/", initialMs: 25, samplesMs, status, reason
+        })]));
+        await f.reporter.finishReporter();
+        assert.deepEqual(f.exits, [1], status);
+        assert.deepEqual(Array.from(f.captured[0].ids), ["7"], status);
+        assert.equal(JSON.parse(f.written[0]).factories[0].status, "captured");
+        assert.equal(f.reporter.report.patchTimingConfirmations[0].reason, reason);
+    }
+});
+
+test("malformed timing confirmations cannot turn an incomplete or slow replay into an outlier", async () => {
+    const parse = declaration("scripts/generateReport.ts", "parsePatchTimingConfirmation", {});
+    const valid = { plugin: "Fixture", id: "7", match: "pattern", initialMs: 12, samplesMs: [0.1, 0.2], status: "outlier" };
+    for (const change of [
+        { initialMs: "12" }, { initialMs: null }, { initialMs: 10 }, { initialMs: 100.1 }, { id: "07" },
+        { samplesMs: [] }, { samplesMs: [0.1] }, { samplesMs: [0.1, 10.1] }, { samplesMs: [0.1, -1] },
+        { samplesMs: [0.1, null] }, { samplesMs: ["0.1", 0.2] }, { samplesMs: [0.1, 0.2, 0.3] },
+        { status: "ignored" }, { reason: "x".repeat(513) }, { match: "x".repeat(16_385) }
+    ]) assert.throws(() => parse(JSON.stringify({ ...valid, ...change })), /Invalid patch timing confirmation/);
+    for (const value of [undefined, "[", "null", "[]", " ".repeat(32_769)]) assert.throws(() => parse(value));
+    const f = fixture();
+    await f.reporter.main();
+    f.handlers.get("console")!(consoleMessage(["[Protonn Cord]", "Reporter:", "Patch timing confirmation:", JSON.stringify({ ...valid, samplesMs: [0.1] })]));
+    await new Promise(setImmediate);
+    assert.deepEqual(f.exits, [1]);
+    assert.match(f.reporter.report.otherErrors[0], /Invalid patch timing confirmation/);
+});
+
+test("slow warnings appear in the printed report and share bounded factory capture after functional failures", async () => {
+    const f = fixture(undefined, "success", { Vencord: { Webpack: { wreq: { m: {} } } } });
+    await f.reporter.main();
+    for (const message of ["Patch by SlowFixture took 12.6ms (Module id is 7): slow-pattern", "Patch by BrokenFixture had no effect (Module id is 8): broken-pattern"]) {
+        await f.reporter.handleConsole(consoleMessage(["[Protonn Cord]", "WebpackPatcher:", message]));
+    }
+    await f.reporter.finishReporter();
+    assert.deepEqual(f.exits, [1]);
+    assert.deepEqual(Array.from(f.captured[0].ids), ["8", "7"]);
+    const lines: string[] = [];
+    await declaration("scripts/generateReport.ts", "printReport", {
+        CANARY: false, report: f.reporter.report, process: { env: {} },
+        console: { log: (...args: unknown[]) => lines.push(args.join(" ")) },
+        toCodeBlock: declaration("scripts/generateReport.ts", "toCodeBlock", {})
+    })();
+    assert.match(lines.join("\n"), /## Slow Patches\n- SlowFixture \(took 12\.6ms\)\n  - ID: `7`/);
+    assert.match(lines.join("\n"), /\n +slow-pattern\n/);
+});
+
 test("page-error diagnostics retain bounded stacks and fail on missing modules", async t => {
     const f = fixture();
     t.after(() => f.reporter.finishReporter());

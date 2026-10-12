@@ -217,6 +217,18 @@ test("CI validates source without rewriting it and includes focused suites", () 
     assert.match(read("scripts/runAuditTests.mjs"), /testAudit\.\+.*ts/u);
 });
 
+test("mobile CI audits its full frozen graph with the pinned package manager", () => {
+    const workflow = read(".github/workflows/mobile.yml");
+    const toolchain = JSON.parse(read("mobile/toolchain.json"));
+    const validation = workflow.match(/- name: Test mobile against this desktop revision\n([\s\S]*?)(?=            - name:)/u)?.[1];
+    assert.ok(validation, "mobile validation step must be present");
+    assert.match(validation, /working-directory: mobile/u);
+    assert.match(validation, /bun install --frozen-lockfile[ \t]*\n[ \t]*bun audit[ \t]*\n/u, "audit includes development dependencies and all severities, without filtering or ignoring failures");
+    assert.doesNotMatch(validation, /continue-on-error: true|\|\| true/u);
+    assert.equal(workflow.match(/^\s*bun-version:\s*(\S+)\s*$/mu)?.[1], toolchain.bunVersion);
+    assert.match(read("mobile/build.gradle.kts"), /inputs\.files\(\s*"package\.json"[^)]*"bunfig\.toml"/u, "changing the install policy must invalidate the JS bundle");
+});
+
 const identity = { accountId: "100000000000000001", channelId: "100000000000000002", recipientId: "100000000000000003" };
 const identityEnv = {
     DISCORD_MCP_TEST_ACCOUNT_ID: identity.accountId,

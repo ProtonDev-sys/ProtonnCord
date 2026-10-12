@@ -202,7 +202,7 @@ val buildJs = tasks.register("buildJs") {
 
     // The bundler revision and runtime versions are pinned by these inputs.
     inputs.files(
-        "package.json", "tsconfig.json", "biome.json", "bun.lock", "toolchain.json",
+        "package.json", "tsconfig.json", "biome.json", "bun.lock", "bunfig.toml", "toolchain.json",
     ).withPropertyName("config")
     // Everything a plugin's bundle can be built from.
     inputs.files(fileTree("plugins") { exclude("*/build/**", "*/src/**") }).withPropertyName("sources")

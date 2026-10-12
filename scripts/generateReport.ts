@@ -55,9 +55,38 @@ interface PatchInfo {
     error?: string;
 };
 
+interface PatchTimingConfirmation {
+    plugin: string;
+    id: string;
+    match: string;
+    initialMs: number;
+    samplesMs: number[];
+    status: "outlier" | "slow" | "inconclusive";
+    reason?: string;
+}
+
+function parsePatchTimingConfirmation(value: unknown): PatchTimingConfirmation {
+    if (typeof value !== "string" || value.length > 32_768) throw new Error("Invalid patch timing confirmation");
+    const data = JSON.parse(value);
+    if (!data || typeof data !== "object" || Array.isArray(data)
+        || typeof data.plugin !== "string" || data.plugin.length > 200
+        || typeof data.id !== "string" || !/^(?:0|[1-9]\d{0,15})$/.test(data.id)
+        || typeof data.match !== "string" || data.match.length > 16_384
+        || !Number.isFinite(data.initialMs) || data.initialMs <= 10
+        || !Array.isArray(data.samplesMs) || data.samplesMs.length > 2
+        || data.samplesMs.some((sample: unknown) => typeof sample !== "number" || !Number.isFinite(sample) || sample < 0)
+        || !["outlier", "slow", "inconclusive"].includes(data.status)
+        || data.reason !== undefined && (typeof data.reason !== "string" || data.reason.length > 512)
+        || data.status === "outlier" && (data.initialMs > 100 || data.samplesMs.length !== 2 || data.samplesMs.some((sample: number) => sample > 10)))
+        throw new Error("Invalid patch timing confirmation");
+    const { plugin, id, match, initialMs, samplesMs, status, reason } = data;
+    return { plugin, id, match, initialMs, samplesMs, status, ...(reason === undefined ? {} : { reason }) };
+}
+
 const report = {
     badPatches: [] as PatchInfo[],
     slowPatches: [] as PatchInfo[],
+    patchTimingConfirmations: [] as PatchTimingConfirmation[],
     badStarts: [] as {
         plugin: string;
         error: string;
@@ -104,6 +133,24 @@ async function printReport() {
         console.log(`  - ID: \`${p.id}\``);
         console.log(`  - Match: ${toCodeBlock(p.match, "  - Match: ".length)}`);
         if (p.error) console.log(`  - Error: ${toCodeBlock(p.error, "  - Error: ".length)}`);
+    });
+
+    console.log();
+
+    console.log("## Slow Patches");
+    report.slowPatches.forEach(p => {
+        console.log(`- ${p.plugin} (${p.type})`);
+        console.log(`  - ID: \`${p.id}\``);
+        console.log(`  - Match: ${toCodeBlock(p.match, "  - Match: ".length)}`);
+    });
+
+    console.log();
+
+    console.log("## Patch Timing Confirmations");
+    report.patchTimingConfirmations.forEach(p => {
+        console.log(`- ${p.plugin} (ID: \`${p.id}\`): ${p.status}`);
+        console.log(`  - Initial: ${p.initialMs}ms; confirmation samples: ${p.samplesMs.length ? p.samplesMs.map(sample => `${sample}ms`).join(", ") : "not sampled"}`);
+        if (p.reason) console.log(`  - Reason: ${p.reason}`);
     });
 
     console.log();
@@ -398,7 +445,8 @@ function finishReporter(timedOut = false, closeTimeoutMs = 10_000, finalTimeoutM
             const factoryPath = process.env.REPORTER_FACTORY_PATH;
             if (factoryPath && page && process.exitCode) {
                 try {
-                    const ids = [...new Set(report.badPatches.map(patch => patch.id).filter(id => /^(?:0|[1-9]\d{0,15})$/.test(id)))];
+                    const failedPatches = [...report.badPatches, ...report.slowPatches, ...report.patchTimingConfirmations.filter(patch => patch.status !== "outlier")];
+                    const ids = [...new Set(failedPatches.map(patch => patch.id).filter(id => /^(?:0|[1-9]\d{0,15})$/.test(id)))];
                     const maxBytes = 8 * 1024 * 1024;
                     const payload = await waitForReporterCleanup(page.evaluate(captureFailedFactories, {
                         ids: ids.slice(0, 100), omittedModuleCount: Math.max(0, ids.length - 100), maxBytes,
@@ -547,6 +595,13 @@ async function handleConsole(e: ConsoleMessage) {
                         process.exitCode = 1;
                         report.badWebpackFinds.push(otherMessage);
                         break;
+                    case "Patch timing confirmation:": {
+                        if (report.patchTimingConfirmations.length >= 100) throw new Error("Too many patch timing confirmations");
+                        const confirmation = parsePatchTimingConfirmation(otherMessage);
+                        report.patchTimingConfirmations.push(confirmation);
+                        if (confirmation.status !== "outlier") process.exitCode = 1;
+                        break;
+                    }
                     case "Finished test":
                         await finishReporter();
                 }
