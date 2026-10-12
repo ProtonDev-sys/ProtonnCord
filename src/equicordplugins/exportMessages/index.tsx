@@ -144,12 +144,11 @@ export default definePlugin({
             }
         },
         {
-            find: '[role="tab"][aria-disabled="false"]',
+            find: "#{intl::FRIENDS_SECTION_ONLINE}),className:",
             predicate: () => settings.store.exportContacts,
             replacement: {
-                match: /("aria-label":(\i).{0,25}children:null!=\i)\?(this\.renderChildren\(\i\)):null/,
-                replace:
-                    '$1?($2==="Friends"?[...$3,$self.addExportButton()]:$3):null'
+                match: /children:\i\.filter\(\i=>\i\.show\)\.map\(\i=>\(0,\i\.jsx\)\(\i\.\i\.Item,\{id:\i\.id,.{0,150}?\},\i\.id\)\)\}\)/,
+                replace: "$&,$self.addExportButton()"
             }
         }
     ],

@@ -309,7 +309,7 @@ export default definePlugin({
 
         // Activities from the apps launcher in the bottom right of the chat bar
         {
-            find: "#{intl::EMBEDDED_ACTIVITIES_DEVELOPER_ACTIVITY}",
+            find: "disableBannerFadeIn:",
             replacement: {
                 match: /lineClamp:1.{0,50}?(?=!\i&&\i\?.+?application:(\i))/,
                 replace: "$&$self.renderToggleActivityButton($1),"

@@ -286,7 +286,7 @@ test("factory diagnostics cap escaped UTF-8 output, module counts, and optional 
 test("configured literal probes find only unique original factories without executing code or reading module cache", async () => {
     const workflow = load(readFileSync(".github/workflows/client-smoke.yml", "utf8"));
     const configured = workflow.jobs.reporter.steps.find(step => step.name === "Test logged-out Discord").env.REPORTER_FACTORY_PROBES;
-    assert.deepEqual(JSON.parse(configured), [".FORWARD_BREADCRUMB_CLICKED,{", ".CLIENT_THEMES_EDITOR?"]);
+    assert.deepEqual(JSON.parse(configured), [".FORWARD_BREADCRUMB_CLICKED,{"]);
     const originalSymbol = Symbol("original");
     const sourceSymbol = Symbol("source");
     const original = function originalFactory() { assert.fail("Must not execute"); return ".FORWARD_BREADCRUMB_CLICKED,{ shared-literal"; };
@@ -309,7 +309,7 @@ test("configured literal probes find only unique original factories without exec
     const data = JSON.parse(f.written[0]);
     assert.equal(data.probeScan.complete, true);
     assert.deepEqual(data.probes.map(probe => [probe.status, probe.matchCount, probe.matches]), [
-        ["selected", 1, ["7"]], ["not-found", 0, []], ["ambiguous", 2, ["7", "8"]], ["not-found", 0, []], ["not-found", 0, []]
+        ["selected", 1, ["7"]], ["ambiguous", 2, ["7", "8"]], ["not-found", 0, []], ["not-found", 0, []]
     ]);
     assert.deepEqual(data.factories.map(factory => factory.id), ["8", "7"], "failed IDs retain capture priority");
     assert.equal(data.factories[1].original, String(original));

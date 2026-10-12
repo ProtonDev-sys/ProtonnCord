@@ -4,17 +4,26 @@ The Android companion provides Secure Messaging inside Discord through a Revenge
 
 ## Installation and compatibility
 
-The build pins both halves of Revenge in [toolchain.json](toolchain.json). The documented injection route uses the official Discord Android app with an Xposed framework and the pinned [RevengeXposed module](https://github.com/revenge-mod/revenge-xposed/tree/9a1426d0a3df000beb4174d0071d4d80e8be42fc). It requires root and does not require rebuilding Discord.
+The build pins both halves of Revenge in [toolchain.json](toolchain.json). Choose the installation route that fits your phone:
+
+| Route | Requirements | Instructions |
+| --- | --- | --- |
+| Local APK set | Android 9+; a computer with Java and the Android SDK; your reusable signing key | [Build and install without root](ANDROID.md) |
+| Xposed module | A rooted phone with an Xposed framework and the official Discord Android app | Follow the rooted installation steps below |
+
+Both routes use the following pins:
 
 | Component | Pinned target |
 | --- | --- |
 | Native loader | [RevengeXposed 1.6.2, release `1602`](https://github.com/revenge-mod/revenge-xposed/releases/tag/1602), source `9a1426d0a3df000beb4174d0071d4d80e8be42fc` |
 | JavaScript host | [Revenge Next](https://github.com/revenge-mod/revenge-bundle-next/tree/6f22fe1d5843160320a4a06644e816bb11f0c929), source `6f22fe1d5843160320a4a06644e816bb11f0c929` |
 | Plugin | `uk.co.protonn.secure-messaging`, native Revenge API `>=1 <2` |
-| Discord | Manifest requires Android version `>=341.0`; this is a compatibility bound, not a tested version matrix |
-| Android | Android 7+ for the plugin; Android 8+ and USB host support for OneKey |
+| Discord | Manifest accepts Discord version `>=341.0`; the nonroot build pins `348.10 - Stable` / `348010` |
+| Android | Android 7+ for the plugin; Android 9+ for the local APK route; Android 8+ and USB host support for OneKey |
 
-Changing only the JavaScript bundle cannot add the native plugin API to an older bootstrap. Newer loader releases also need compatibility review before changing these pins. A [local nonroot APK build](ANDROID.md) authenticates the original Discord APKs, embeds the pinned loader and signs the set with your reusable key. Its packaging checks cover ARM64 and x86-64; real Android startup and device behavior require separate validation. Published mobile releases contain the plugin and runtime rather than a pre-signed Discord APK.
+Changing only the JavaScript bundle cannot add the native plugin API to an older bootstrap. Newer loader releases also need compatibility review before changing these pins. The local APK build authenticates the original Discord APKs, embeds the pinned loader and signs the set with your reusable key. Packaging checks cover ARM64 and x86-64. The actual x86-64 client has also passed the signed-out Android emulator check described below. Published mobile releases contain the plugin and runtime; build the installable APK set locally using the nonroot guide.
+
+### Rooted installation
 
 1. Install the pinned module APK from the upstream release and enable it for Discord in your Xposed manager, following [upstream installation instructions](https://github.com/revenge-mod/revenge-xposed/blob/9a1426d0a3df000beb4174d0071d4d80e8be42fc/README.md).
 2. Configure the loader to use the pinned Next runtime below. The pinned loader defaults to Revenge Classic, so this step is required. Its configuration is `files/pyoncord/loader.json` inside Discord's private app data directory, normally `/data/user/0/com.discord/files/pyoncord/loader.json`. With Discord stopped, preserve a copy of an existing configuration and update its `customLoadUrl` field using your root file manager. Preserve file ownership and other existing fields.
@@ -104,5 +113,7 @@ bash gradlew :plugins:secure-messaging:connectedDebugAndroidTest \
 These instrumented tests run in their own ordinary Android app sandbox and use the actual Android Keystore, AES-GCM and AtomicFile implementations. They exercise key persistence and replacement, tampered vault rejection, interrupted-write rollback, legacy backup recovery, reset, UTF-8 size bounds, and loader configuration failure/retry with unknown fields and original backups preserved. No Discord installation or account is needed. AndroidX runner and JUnit are test dependencies and are excluded from the released plugin JAR. Results and reports are under `plugins/secure-messaging/build/outputs/androidTest-results/connected` and `plugins/secure-messaging/build/reports/androidTests/connected`.
 
 The reusable [Android smoke workflow](../.github/workflows/android-smoke.yml) also builds the current plugin, the pinned Next runtime and a temporary signed client fixture, then runs the storage suite and signed-out client probe on a fresh Android 15 `google_apis` x86_64 emulator. It records the tested input hashes, device properties, native results, client screenshot and logs. It builds its own inputs without waiting for a nightly release, and uploads diagnostics only; temporary signing material and test APKs are not published.
+
+The [2026-10-12 validation run](https://github.com/ProtonDev-sys/ProtonnCord/actions/runs/38210958852) passed on merged revision `113bb1d40fb45b995437fae84ba7e0f9cc6011d3`: all 13 native storage tests passed, and Discord `348010` reached its signed-out welcome screen on Android 15 / API 35 with the native loader and this plugin's JavaScript started. The client launched after the test harness disabled emulator root. This establishes the tested emulator configuration; it does not establish physical ARM64 phone, signed-in messaging, or OneKey USB compatibility.
 
 Unit tests, a compiled-bundle fixture and native compilation cover different failure modes. They do not establish device compatibility. Before claiming a device/Discord version is supported, record its Android and Discord versions, loader/runtime pins, and verify injection, plugin settings, reload/disable cleanup, Android Keystore round trips, attachment selection/rendering and failed-send retry, and OneKey permission denial/cancel/disconnect. A signed-out device can check startup and loader behavior; successful encrypted delivery between live peers needs a separate, explicitly authorized account test.
