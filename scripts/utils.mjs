@@ -28,3 +28,8 @@ export function getPluginTarget(filePath) {
     const identiferBits = identifier.split(".");
     return identiferBits.length === 1 ? null : identiferBits.at(-1);
 }
+
+/** Compare directory entries using locale-independent code-unit ordering. */
+export function compareBuildEntryNames(left, right) {
+    return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+}

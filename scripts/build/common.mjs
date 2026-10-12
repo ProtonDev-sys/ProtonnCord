@@ -29,7 +29,7 @@ import { minify as minifyHtml } from "html-minifier-terser";
 import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 
-import { getPluginTarget } from "../utils.mjs";
+import { compareBuildEntryNames, getPluginTarget } from "../utils.mjs";
 import { createPluginManifestAnalyzer } from "./pluginManifest.mjs";
 
 const PackageJSON = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../package.json"), "utf-8"));
@@ -167,7 +167,7 @@ export const globPlugins = kind => ({
 
                 const fullDir = `./src/${dir}`;
                 if (!await exists(fullDir)) continue;
-                const files = await readdir(fullDir, { withFileTypes: true });
+                const files = (await readdir(fullDir, { withFileTypes: true })).sort(compareBuildEntryNames);
                 for (const file of files) {
                     const fileName = file.name;
                     if (fileName.startsWith("_") || fileName.startsWith(".")) continue;
