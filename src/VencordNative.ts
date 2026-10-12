@@ -33,7 +33,7 @@ function subscribe<Args extends unknown[]>(event: IpcEvents, listener: (...args:
 }
 
 const PluginHelpers = {} as Record<string, Record<string, (...args: any[]) => Promise<any>>>;
-const pluginIpcMap = sendSync<PluginIpcMappings>(IpcEvents.GET_PLUGIN_IPC_METHOD_MAP);
+const pluginIpcMap = sendSync<PluginIpcMappings | null>(IpcEvents.GET_PLUGIN_IPC_METHOD_MAP) ?? {};
 
 for (const [plugin, methods] of Object.entries(pluginIpcMap)) {
     const map = PluginHelpers[plugin] = {};

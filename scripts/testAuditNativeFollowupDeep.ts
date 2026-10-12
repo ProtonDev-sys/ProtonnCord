@@ -10,6 +10,7 @@ import * as fflate from "fflate";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { ensureSafePath } from "../src/main/utils/ensureSafePath";
+import { isDiscordRendererOrigin } from "../src/shared/rendererOrigin";
 
 const source = (path: string) => readFileSync(path, "utf8");
 const compile = (code: string) => transpileModule(code, {
@@ -88,7 +89,7 @@ function editorFixture() {
     const saveSource = mainSource.slice(mainSource.indexOf("ipcMain.handle(IpcEvents.SET_QUICK_CSS"), mainSource.indexOf("ipcMain.handle(IpcEvents.GET_THEMES_LIST"));
     const context = createContext({
         ...clock, IpcEvents, app, BrowserWindow: Window, __dirname: "/fixture", join,
-        nativeTheme: { shouldUseDarkColors: true }, monacoHtml: "", makeLinksOpenExternally() { },
+        nativeTheme: { shouldUseDarkColors: true }, monacoHtml: "", makeLinksOpenExternally() { }, registerQuickCssEditor() { },
         ipcMain: { handle(name: string, handler: (...args: any[]) => any) { handlers.set(name, handler); } },
         dialog: { async showMessageBox() { events.push("prompt"); return { response }; } },
         console: { error() { events.push("error"); } }, QUICK_CSS_PATH: "fixture-css",
@@ -115,9 +116,11 @@ function editorFixture() {
     } };
     runInNewContext(compile(source("src/preload.ts")), {
         ...clock, exports: {}, location: { protocol: "data:" },
+        window: { origin: "null" }, process: { isMainFrame: true }, IS_DISCORD_DESKTOP: false,
         console: { error() { events.push("error"); } },
         require(name: string) {
             if (name === "@shared/IpcEvents") return { IpcEvents };
+            if (name === "@shared/rendererOrigin") return { isDiscordRendererOrigin };
             if (name === "electron/renderer") return {
                 ipcRenderer: renderer,
                 contextBridge: { exposeInMainWorld(key: string, value: (...args: any[]) => any) { exposed.set(key, value); } }

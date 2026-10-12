@@ -16,9 +16,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+import { ipcMain } from "@main/ipc";
 import { IpcEvents } from "@shared/IpcEvents";
 import { parseUpdaterBranch, type UpdaterDiagnostics } from "@shared/Updater";
-import { ipcMain } from "electron";
 
 import gitHash from "~git-hash";
 import gitRemote from "~git-remote";
