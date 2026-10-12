@@ -463,11 +463,11 @@ function loadReporter(browser: unknown, print: () => Promise<unknown> = async ()
 }
 
 test("reporter startup and navigation failures finalize browser ownership", async () => {
-    for (const failure of ["newPage", "setUserAgent", "setBypassCSP", "evaluateOnNewDocument", "goto"]) {
+    for (const failure of ["newPage", "setBypassCSP", "evaluateOnNewDocument", "goto"]) {
         let closes = 0;
         let reports = 0;
         const page: Record<string, any> = { on() {} };
-        for (const method of ["setUserAgent", "setBypassCSP", "evaluateOnNewDocument", "goto"])
+        for (const method of ["setBypassCSP", "evaluateOnNewDocument", "goto"])
             page[method] = async () => { if (failure === method) throw new Error(method); };
         const browser = { async newPage() { if (failure === "newPage") throw new Error(failure); return page; }, async close() { closes++; } };
         const { reporter, exits } = loadReporter(browser, async () => { reports++; });

@@ -3,13 +3,11 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@example/revenge-plugins",
+      "name": "@protonn-cord/mobile",
       "dependencies": {
         "@noble/ciphers": "^2.3.0",
         "@noble/curves": "^2.3.0",
         "@noble/hashes": "^2.3.0",
-        "@revenge-mod/devtools-client": "^1.4.0",
-        "@revenge-mod/devtools-shared": "^1.3.0",
         "@revenge-mod/plugin-cli": "git+https://github.com/revenge-mod/revenge-plugin-cli.git",
         "@revenge-mod/types": "git+https://github.com/revenge-mod/revenge-types.git",
         "@scure/base": "^2.3.0",
@@ -33,7 +31,6 @@
     "@react-native/community-cli-plugin": "npm:dry-uninstall",
     "babel-jest": "npm:dry-uninstall",
     "babel-plugin-syntax-hermes-parser": "npm:dry-uninstall",
-    "devalue": "5.9.3",
     "hermes-compiler": "npm:dry-uninstall",
     "image-size": "2.0.4",
     "jsc-android": "npm:dry-uninstall",
@@ -285,10 +282,6 @@
 
     "@react-native/virtualized-lists": ["@react-native/virtualized-lists@0.86.0", "", { "dependencies": { "invariant": "^2.2.4", "nullthrows": "^1.1.1" }, "peerDependencies": { "@types/react": "^19.2.0", "react": "*", "react-native": "0.86.0" }, "optionalPeers": ["@types/react"] }, "sha512-4/ZLXdf/OSpPDVO0AsQ1SJdRIzt5t9BNQ46QwGgxvX7/cirYR5k8KXctNGGgW8lQo2gZChEfY2zFCZg9nM/jiw=="],
 
-    "@revenge-mod/devtools-client": ["@revenge-mod/devtools-client@1.4.0", "", { "dependencies": { "@revenge-mod/devtools-shared": "^1.3.0", "bippy": "^0.3.8" } }, "sha512-hGmdM0RcK3/IrzpW7lDOXl+it3wYcoF+ePI43Ey3AvIPaBGIDIGqqitKtrB8wIGo5jREsr703fcjseE+bt+aCg=="],
-
-    "@revenge-mod/devtools-shared": ["@revenge-mod/devtools-shared@1.3.0", "", { "dependencies": { "chalk": "^5.6.2", "devalue": "^5.3.2" } }, "sha512-MLox/xQsYtMG78R4R8sy32P5X7ILUNUPAX8IiWjUsPIclkTweDvwEAUadkvbBo8j+/ZJaJdif+Fg/C9YQNlOqg=="],
-
     "@revenge-mod/plugin-cli": ["@revenge-mod/plugin-cli@github:revenge-mod/revenge-plugin-cli#4dcf299", { "dependencies": { "@swc/core": "^1.15.46", "fflate": "^0.8.3", "rolldown": "^1.2.0" }, "peerDependencies": { "@revenge-mod/types": "git+https://github.com/revenge-mod/revenge-types.git" }, "bin": { "revenge-plugin": "bin/revenge-plugin.js" } }, "revenge-mod-revenge-plugin-cli-4dcf299", "sha512-uBxokG5J4wK+3cLamoBS+g155sQrzlhwAQhdnuuqG8UkRH6lKmI4yXfV07/U9TlFqlZoBRdlkmsfjNVBhXMA5g=="],
 
     "@revenge-mod/types": ["@revenge-mod/types@github:revenge-mod/revenge-types#a2431d7", { "dependencies": { "buffer": "^6.0.3" }, "peerDependencies": { "@react-navigation/core": "^7.14.0", "@react-navigation/native": "^7.1.28", "@react-navigation/stack": "^7.7.2", "@shopify/flash-list": "2.3.2", "@types/node": "^25.9.2", "react": "19.2.3", "react-native": "0.86.0", "react-native-gesture-handler": "^3.2.1", "react-native-reanimated": "^4.5.3", "react-native-safe-area-context": "^5.8.0" }, "optionalPeers": ["@react-navigation/core", "@react-navigation/native", "@react-navigation/stack", "@shopify/flash-list", "@types/node", "react-native-safe-area-context"] }, "revenge-mod-revenge-types-a2431d7", "sha512-XnIzlWWkLYDa5PxXqERbwcGyoJRTL36P56AGtU8RCNLqyC15mdJsKUiJoUTyUh3xt3JEg4cN4aNhs9ajJUDsCA=="],
@@ -375,8 +368,6 @@
 
     "@types/react": ["@types/react@19.2.18", "", { "dependencies": { "csstype": "^3.2.2" } }, "sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w=="],
 
-    "@types/react-reconciler": ["@types/react-reconciler@0.28.9", "", { "peerDependencies": { "@types/react": "*" } }, "sha512-HHM3nxyUZ3zAylX8ZEyrDNd2XZOnQ0D5XfunJF5FLQnZbHHYq4UWvW1QfelQNXv1ICNkwYhfxjwfnqivYB6bFg=="],
-
     "@types/yargs": ["@types/yargs@17.0.35", "", { "dependencies": { "@types/yargs-parser": "*" } }, "sha512-qUHkeCyQFxMXg79wQfTtfndEC+N9ZZg76HJftDJp+qH2tV7Gj4OJi7l+PiWwJ+pWtW8GwSmqsDj/oymhrTWXjg=="],
 
     "@types/yargs-parser": ["@types/yargs-parser@21.0.3", "", {}, "sha512-I4q9QU9MQv4oEOz4tAHJtNz1cwuLxn2F3xcc2iV5WdqLPpUnj30aUuxt1mAxYTG+oe8CZMV/+6rU4S4gRDzqtQ=="],
@@ -451,8 +442,6 @@
 
     "baseline-browser-mapping": ["baseline-browser-mapping@2.11.17", "", { "bin": { "baseline-browser-mapping": "dist/cli.cjs" } }, "sha512-KAUDn1OSS0fmPlGO+NOUMRcOQ/b/shUBH3OgkG73mPgdf+JD/BQ6fHboGxNOxnUmlwcq+lLq3dTkayRPuSfXwg=="],
 
-    "bippy": ["bippy@0.3.34", "", { "dependencies": { "@types/react-reconciler": "^0.28.9" }, "peerDependencies": { "react": ">=17.0.1" } }, "sha512-vmptmU/20UdIWHHhq7qCSHhHzK7Ro3YJ1utU0fBG7ujUc58LEfTtilKxcF0IOgSjT5XLcm7CBzDjbv4lcKApGQ=="],
-
     "braces": ["braces@3.0.3", "", { "dependencies": { "fill-range": "^7.1.1" } }, "sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA=="],
 
     "browserslist": ["browserslist@4.28.8", "", { "dependencies": { "baseline-browser-mapping": "^2.11.12", "caniuse-lite": "^1.0.30001809", "electron-to-chromium": "^1.5.402", "node-releases": "^2.0.53", "update-browserslist-db": "^1.3.0" }, "bin": { "browserslist": "cli.js" } }, "sha512-V2NpofLblG64mfOtSgDhOJESZEGogzDMBv/q+W6oc4LXWP/q75eOXoOaaOu1EOadB9U4Bwx/e0yzbvwKH8zalA=="],
@@ -466,8 +455,6 @@
     "camelcase": ["camelcase@6.3.0", "", {}, "sha512-Gmy6FhYlCY7uOElZUSbxo2UCDH8owEk996gkbrpsgGtrJLM3J7jGxl9Ic7Qwwj4ivOE5AWZWRMecDdF7hqGjFA=="],
 
     "caniuse-lite": ["caniuse-lite@1.0.30001809", "", {}, "sha512-xxWVywk6a6Arlk+hymeycyn/VgqEfLDxupvhH/xiY5SJ/18kmi9o6MiO320DCUzypORHLtvh0I4i04tUhCNHNQ=="],
-
-    "chalk": ["chalk@5.6.2", "", {}, "sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA=="],
 
     "ci-info": ["ci-info@2.0.0", "", {}, "sha512-5tK7EtrZ0N+OLFMthtqOj4fI2Jeb88C4CAZPu25LDVUgXJ0A3Js4PMGqrn0JU1W0Mh1/Z8wZzYPxqUrXeBboCQ=="],
 
@@ -490,8 +477,6 @@
     "csstype": ["csstype@3.2.3", "", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
 
     "debug": ["debug@4.4.3", "", { "dependencies": { "ms": "^2.1.3" } }, "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA=="],
-
-    "devalue": ["devalue@5.9.3", "", {}, "sha512-xRumYOCUZN/EesqHEU3WOXanOZNvfZFZ/o1AHVFDX1yI0UAkZkOgDXt341CzKoBVIkgQba55/+DjGBKrIoKcHw=="],
 
     "ee-first": ["ee-first@1.1.1", "", {}, "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow=="],
 

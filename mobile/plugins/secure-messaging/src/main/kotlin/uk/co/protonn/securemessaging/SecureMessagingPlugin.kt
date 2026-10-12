@@ -15,6 +15,8 @@ import java.io.File
 import java.io.ByteArrayOutputStream
 import java.security.KeyStore
 import java.security.SecureRandom
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -24,6 +26,7 @@ private const val KEY_ALIAS = "uk.co.protonn.secure-messaging.vault"
 private const val VAULT_FILE = "secure-vault.bin"
 private const val MAX_ATTACHMENT_BYTES = 64 * 1024 * 1024
 private val AAD = "ProtonnCord-Mobile/SecureMessaging/v1".toByteArray(Charsets.UTF_8)
+private val vaultLock = Any()
 
 private fun vaultKey(): SecretKey {
     val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -66,8 +69,19 @@ private fun decryptVault(bytes: ByteArray): String {
 
 @Suppress("UNUSED")
 val secureMessagingPlugin = plugin {
+    var stopNative: (() -> Unit)? = null
+
     start {
         val vault = File(storageDir, VAULT_FILE)
+        val active = AtomicBoolean(true)
+        val oneKeySession = AtomicReference<OneKeyUsb?>()
+        stopNative = {
+            active.set(false)
+            oneKeySession.getAndSet(null)?.close()
+            // A restart can replace this class loader and its monitor. Finish any
+            // vault operation already in progress before the old instance stops.
+            synchronized(vaultLock) { Unit }
+        }
 
         registerNativeMethod("uk.co.protonn.secure-messaging.random") { rawArgs ->
             val args = rawArgs.asDelegate()
@@ -81,6 +95,11 @@ val secureMessagingPlugin = plugin {
 
 		withAppContext { context ->
 			val oneKey = OneKeyUsb(context)
+			oneKeySession.set(oneKey)
+			if (!active.get()) {
+				oneKeySession.getAndSet(null)?.close()
+				return@withAppContext
+			}
 			registerNativeAsyncMethod("uk.co.protonn.secure-messaging.attachment.cleanup") {
 				val cacheRoot = context.cacheDir.canonicalFile
 				val owned = listOf(
@@ -152,28 +171,42 @@ val secureMessagingPlugin = plugin {
 		}
 
         registerNativeAsyncMethod("uk.co.protonn.secure-messaging.vault.load") {
-            if (!vault.exists() && !File(vault.path + ".bak").exists()) null
-            else decryptVault(AtomicFile(vault).openRead().use { it.readBytes() })
+            synchronized(vaultLock) {
+                check(active.get()) { "Secure Messaging has stopped" }
+                if (!vault.exists() && !File(vault.path + ".bak").exists()) null
+                else decryptVault(AtomicFile(vault).openRead().use { it.readBytes() })
+            }
         }
         registerNativeAsyncMethod("uk.co.protonn.secure-messaging.vault.save") { rawArgs ->
             val args = rawArgs.asDelegate()
             val plaintext: String by args.string()
             require(plaintext.toByteArray(Charsets.UTF_8).size <= 4 * 1024 * 1024) { "Secure vault is too large" }
-            storageDir.mkdirs()
-            val atomic = AtomicFile(vault)
-            val stream = atomic.startWrite()
-            try {
-                stream.write(encryptVault(plaintext))
-                atomic.finishWrite(stream)
-            } catch (error: Exception) {
-                atomic.failWrite(stream)
-                throw error
+            synchronized(vaultLock) {
+                check(active.get()) { "Secure Messaging has stopped" }
+                storageDir.mkdirs()
+                val atomic = AtomicFile(vault)
+                val stream = atomic.startWrite()
+                try {
+                    stream.write(encryptVault(plaintext))
+                    atomic.finishWrite(stream)
+                } catch (error: Exception) {
+                    atomic.failWrite(stream)
+                    throw error
+                }
+                true
             }
-            true
         }
         registerNativeAsyncMethod("uk.co.protonn.secure-messaging.vault.reset") {
-            AtomicFile(vault).delete()
-            !vault.exists() && !File(vault.path + ".bak").exists() && !File(vault.path + ".new").exists()
+            synchronized(vaultLock) {
+                check(active.get()) { "Secure Messaging has stopped" }
+                AtomicFile(vault).delete()
+                !vault.exists() && !File(vault.path + ".bak").exists() && !File(vault.path + ".new").exists()
+            }
         }
+    }
+
+    stop {
+        stopNative?.invoke()
+        stopNative = null
     }
 }

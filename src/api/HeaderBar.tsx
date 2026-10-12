@@ -16,7 +16,11 @@ import { createComponentRegistry } from "./componentRegistry";
 const logger = new Logger("HeaderBarAPI");
 
 const HeaderBarClasses = findCssClassesLazy("clickable", "selected", "badge", "badgeContainer");
-const HeaderBarIcon = findComponentByCodeLazy(".HEADER_BAR_BADGE_TOP:", '"aria-haspopup":') as ComponentType<ChannelToolbarButtonProps>;
+const HeaderBarIcon = findComponentByCodeLazy<ChannelToolbarButtonProps & {
+    tooltipPosition?: HeaderBarButtonProps["position"];
+    tooltipDisabled?: boolean;
+    badge?: { type: "important"; position: "top" | "bottom"; };
+}>("tooltipSpacing:", '"aria-haspopup":');
 
 export interface HeaderBarButtonProps {
     /** The icon component to render inside the button */
@@ -42,10 +46,6 @@ export interface HeaderBarButtonProps {
 export interface ChannelToolbarButtonProps extends HeaderBarButtonProps {
     /** CSS class name for the icon element */
     iconClassName?: string;
-    /** Tooltip position relative to the button */
-    position?: "top" | "bottom" | "left" | "right";
-    /** Whether the button appears in a selected/active state */
-    selected?: boolean;
     /** Whether the button is disabled */
     disabled?: boolean;
     /** Whether to show a notification badge */
@@ -133,8 +133,8 @@ export function HeaderBarButton(props: HeaderBarButtonProps & { ref?: React.RefO
  *     selected={isOpen}
  * />
  */
-export function ChannelToolbarButton(props: ChannelToolbarButtonProps) {
-    return <HeaderBarIcon {...props} />;
+export function ChannelToolbarButton({ position, showBadge, badgePosition = "top", ...props }: ChannelToolbarButtonProps) {
+    return <HeaderBarIcon {...props} tooltipPosition={position} tooltipDisabled={props.tooltip == null} badge={showBadge ? { type: "important", position: badgePosition } : undefined} />;
 }
 
 const headerBarButtons = createComponentRegistry<ButtonEntry>();

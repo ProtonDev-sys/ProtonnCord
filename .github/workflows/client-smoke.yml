@@ -1,16 +1,11 @@
 name: Discord client smoke
 
 on:
-    pull_request:
-        branches: [nightly]
+    workflow_call:
     workflow_dispatch:
 
 permissions:
     contents: read
-
-concurrency:
-    group: client-smoke-${{ github.event.pull_request.number || github.ref }}
-    cancel-in-progress: true
 
 jobs:
     reporter:

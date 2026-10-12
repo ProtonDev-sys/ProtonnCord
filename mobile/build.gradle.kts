@@ -1,6 +1,7 @@
 import com.android.build.api.dsl.LibraryExtension
 import com.android.build.api.variant.LibraryAndroidComponentsExtension
 import groovy.json.JsonSlurper
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.Callable
 import javax.inject.Inject
@@ -62,74 +63,31 @@ val pluginDefs = file("plugins").listFiles().orEmpty()
 // JS toolchain discovery
 // ---------------------------------------------------------------------------------------------
 
-// Gradle's exec runs with a minimal, non-login PATH that usually omits user-level install dirs,
-// so the well-known locations are probed explicitly.
-data class JsTool(val kind: String, val exe: File) {
-    val installCommand: List<String>
-        get() = when (kind) {
-            "bun" -> listOf(exe.absolutePath, "install", "--frozen-lockfile", "--silent")
-            "npm" -> listOf(exe.absolutePath, "install", "--no-audit", "--no-fund", "--silent")
-            "deno" -> listOf(exe.absolutePath, "install", "--quiet")
-            else -> error("Unknown JS tool: $kind")
-        }
+val bunVersion = parseJson(file("toolchain.json")).str("bunVersion")!!
 
-    val buildCommand: List<String>
-        get() = when (kind) {
-            "bun", "npm" -> listOf(exe.absolutePath, "run", "build")
-            // Deno creates no node_modules/.bin shims, so `deno task build` cannot resolve the CLI,
-            // so we run its bin file directly.
-            "deno" -> listOf(
-                exe.absolutePath, "run", "-A",
-                "node_modules/@revenge-mod/plugin-cli/bin/revenge-plugin.js", "build",
-            )
-            else -> error("Unknown JS tool: $kind")
-        }
-}
-
-fun findJsTool(): JsTool? {
+fun findBun(): File? {
     val kindOverride = findProperty("jsTool") as String?
+    require(kindOverride == null || kindOverride == "bun") {
+        "JS bundles require Bun $bunVersion and bun.lock; npm and Deno are not supported."
+    }
     val pathOverride = (findProperty("jsToolPath") as String?) ?: System.getenv("BUN")
-    if (!pathOverride.isNullOrBlank()) {
-        val exe = File(pathOverride).takeIf(File::isFile) ?: return null
-        return JsTool(kindOverride ?: exe.name.substringBefore('.'), exe)
-    }
+    if (!pathOverride.isNullOrBlank()) return file(pathOverride).takeIf(File::isFile)
 
-    val homes = buildSet {
-        System.getProperty("user.home")?.let(::add)
-        System.getenv("HOME")?.let(::add)
-        System.getProperty("user.name")?.let { user ->
-            add("/home/$user")
-            add("/var/home/$user") // atomic/ostree distros: /home -> /var/home
-        }
-    }
+    val homes = listOfNotNull(System.getProperty("user.home"), System.getenv("HOME")).distinct()
     val pathDirs = System.getenv("PATH").orEmpty().split(File.pathSeparator).filter(String::isNotEmpty)
     val windows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
-
-    fun candidatesFor(kind: String): List<File> = buildList {
-        if (!windows) pathDirs.forEach { add(File(it, kind)) }
-        when (kind) {
-            "bun" -> {
-                homes.forEach { add(File(it, ".bun/bin/bun")) }
-                if (windows) System.getenv("APPDATA")?.let {
-                    add(File(it, "npm/node_modules/bun/bin/bun.exe"))
-                }
-            }
-            // nvm keeps npm next to node, under versions/node/<ver>/bin.
-            "npm" -> homes.forEach { home ->
-                File(home, ".nvm/versions/node").listFiles()
-                    ?.sortedDescending()
-                    ?.forEach { add(File(it, "bin/npm")) }
-            }
-            "deno" -> homes.forEach { add(File(it, ".deno/bin/deno")) }
+    val executable = if (windows) "bun.exe" else "bun"
+    // Gradle can have a smaller PATH than the user's shell.
+    return buildList {
+        pathDirs.forEach { add(File(it, executable)) }
+        homes.forEach { add(File(it, ".bun/bin/$executable")) }
+        if (windows) System.getenv("APPDATA")?.let {
+            add(File(it, "npm/node_modules/bun/bin/bun.exe"))
+        } else {
+            add(File("/usr/local/bin/bun"))
+            add(File("/opt/homebrew/bin/bun"))
         }
-        add(File("/usr/local/bin/$kind"))
-        add(File("/opt/homebrew/bin/$kind"))
-    }
-
-    val kinds = kindOverride?.let(::listOf) ?: listOf("bun", "npm", "deno")
-    return kinds.firstNotNullOfOrNull { kind ->
-        candidatesFor(kind).firstOrNull(File::isFile)?.let { JsTool(kind, it) }
-    }
+    }.firstOrNull(File::isFile)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -231,10 +189,9 @@ val buildJs = tasks.register("buildJs") {
     description = "Builds every plugin's JS bundle via the revenge-plugin CLI."
     mustRunAfter(cleanTasks)
 
-    // The bundler is @revenge-mod/plugin-cli, so the lockfiles (which pin its revision) are the inputs.
+    // The bundler revision and runtime versions are pinned by these inputs.
     inputs.files(
-        "package.json", "tsconfig.json", "biome.json",
-        "bun.lock", "bun.lockb", "package-lock.json", "deno.lock",
+        "package.json", "tsconfig.json", "biome.json", "bun.lock", "toolchain.json",
     ).withPropertyName("config")
     // Everything a plugin's bundle can be built from.
     inputs.files(fileTree("plugins") { exclude("*/build/**", "*/src/**") }).withPropertyName("sources")
@@ -244,17 +201,22 @@ val buildJs = tasks.register("buildJs") {
     }
 
     doLast {
-        val tool = findJsTool()
-        requireNotNull(tool) { "Install Bun or pass -PjsTool=/-PjsToolPath= to build the required JS bundle." }
+        val bun = findBun()
+        requireNotNull(bun) { "Install Bun $bunVersion or pass -PjsToolPath=/path/to/bun." }
+        val version = ByteArrayOutputStream()
+        rootExecOps.exec {
+            commandLine(bun.absolutePath, "--version")
+            standardOutput = version
+        }
+        require(version.toString().trim() == bunVersion) { "Install Bun $bunVersion from mobile/toolchain.json." }
 
-        logger.lifecycle("Building JS bundles with ${tool.kind} (${tool.exe})")
-        // Put the tool's own dir on PATH so nested calls (npm -> node, script -> bin shims) resolve.
-        val path = tool.exe.parentFile.absolutePath + File.pathSeparator + System.getenv("PATH").orEmpty()
-        listOf(tool.installCommand, tool.buildCommand).forEach { cmd ->
+        logger.lifecycle("Building JS bundles with Bun $bunVersion ($bun)")
+        val path = bun.parentFile.absolutePath + File.pathSeparator + System.getenv("PATH").orEmpty()
+        listOf(listOf("install", "--frozen-lockfile", "--silent"), listOf("run", "build")).forEach { args ->
             rootExecOps.exec {
                 workingDir = rootDir
                 environment("PATH", path)
-                commandLine(cmd)
+                commandLine(listOf(bun.absolutePath) + args)
             }
         }
     }

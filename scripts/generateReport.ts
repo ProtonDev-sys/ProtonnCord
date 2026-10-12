@@ -450,11 +450,10 @@ async function main() {
         browser = await pup.launch({
             headless: true,
             executablePath: process.env.CHROMIUM_BIN,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            args: ["--disable-dev-shm-usage", ...(process.platform === "linux" && process.getuid?.() === 0 ? ["--no-sandbox"] : [])]
         });
         reporterTimeout = setTimeout(() => void finishReporter(true), reporterTimeoutMs);
         page = await browser.newPage();
-        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36");
         await page.setBypassCSP(true);
         let consoleMessages = Promise.resolve();
         page.on("console", e => {

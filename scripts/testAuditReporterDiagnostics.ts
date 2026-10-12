@@ -26,11 +26,13 @@ function fixture(screenshot?: "success" | "reject" | "stall") {
     const calls: string[] = [];
     const exits: number[] = [];
     const handlers = new Map<string, (value: unknown) => void>();
+    const launches: Array<{ args: string[]; }> = [];
     const processState = { env: { CHROMIUM_BIN: "fixture", ...(screenshot ? { REPORTER_SCREENSHOT_PATH: "failure.png" } : {}) },
         exitCode: 0, exit(code?: number) { calls.push("exit"); exits.push(code ?? this.exitCode); } };
     const page = {
         on(event: string, handler: (value: unknown) => void) { handlers.set(event, handler); },
-        async setUserAgent() {}, async setBypassCSP() {}, async evaluateOnNewDocument() {}, async goto() {},
+        async setUserAgent() { assert.fail("The reporter must use the installed browser's native identity"); },
+        async setBypassCSP() {}, async evaluateOnNewDocument() {}, async goto() {},
         async screenshot(options: { path: string; type: string; fullPage: boolean; }) {
             assert.equal(options.path, "failure.png");
             assert.equal(options.type, "png");
@@ -42,7 +44,7 @@ function fixture(screenshot?: "success" | "reject" | "stall") {
     };
     const browser = { newPage: async () => page, async close() { calls.push("close"); } };
     const imports = { crypto: {}, fs: { readFileSync: () => "fixture bundle" },
-        "puppeteer-core": { __esModule: true, default: { launch: async () => browser } } };
+        "puppeteer-core": { __esModule: true, default: { launch: async (options: { args: string[]; }) => { launches.push(options); return browser; } } } };
     const source = readFileSync("scripts/generateReport.ts", "utf8").replace("void main();",
         "printReport = async () => recordReport(); exports.audit = { main, finishReporter, handleConsole, handlePageError, report };");
     const code = transpileModule(source, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText;
@@ -52,8 +54,17 @@ function fixture(screenshot?: "success" | "reject" | "stall") {
         recordReport: () => calls.push("report"),
         require(name: string) { assert.ok(Object.hasOwn(imports, name), name); return imports[name]; },
     });
-    return { reporter, calls, exits, handlers, processState };
+    return { reporter, calls, exits, handlers, processState, launches };
 }
+
+test("ordinary client runs retain Chromium's sandbox and installed browser identity", async t => {
+    const f = fixture();
+    t.after(() => f.reporter.finishReporter());
+    await f.reporter.main();
+    assert.equal(f.processState.exitCode, 0);
+    assert.equal(f.launches.length, 1);
+    assert.ok(!f.launches[0].args.some(argument => argument === "--no-sandbox" || argument === "--disable-setuid-sandbox"));
+});
 
 test("actual reporter Logger messages preserve patch, lookup and plugin-start failures through completion", async t => {
     const f = fixture();
