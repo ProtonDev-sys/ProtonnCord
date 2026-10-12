@@ -170,7 +170,7 @@ test("HTTP branch selections survive checks and other selections, and failed ins
         } },
         "@shared/Updater": { parseUpdaterBranch },
         "@shared/vencordUserAgent": { VENCORD_USER_AGENT: "Fixture" },
-        electron: { ipcMain: { handle: (event: IpcEvents, handler: (...args: any[]) => Promise<any>) => handlers.set(event, handler) } },
+        "@main/ipc": { ipcMain: { handle: (event: IpcEvents, handler: (...args: any[]) => Promise<any>) => handlers.set(event, handler) } },
         "original-fs": {}, "~git-hash": { default: "a".repeat(40) }, "~git-remote": { default: "Fixture/Fixture" },
         "./common": { ASAR_FILE: "desktop.asar" }, "./ipc": { createOperationQueue, serializeErrors },
         "./httpOperations": {

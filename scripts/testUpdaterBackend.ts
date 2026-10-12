@@ -89,7 +89,9 @@ test("disabled builds never inspect files or initialize an updater backend", asy
         },
     });
     assert.deepEqual(selectedBackends, []);
-    const diagnostics = await handlers.get(IpcEvents.GET_UPDATER_DIAGNOSTICS)?.({}, "nightly");
+    const frame = { origin: "https://discord.com" };
+    const event = { senderFrame: frame, sender: { mainFrame: frame, isDestroyed: () => false } };
+    const diagnostics = await handlers.get(IpcEvents.GET_UPDATER_DIAGNOSTICS)?.(event, "nightly");
     assert.equal(JSON.stringify(diagnostics), JSON.stringify({
         ok: true,
         value: { backend: "disabled", branch: "nightly", builtHead: "fixture-build", sourceRoot: null }

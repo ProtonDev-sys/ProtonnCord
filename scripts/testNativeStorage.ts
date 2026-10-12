@@ -112,7 +112,7 @@ test("native settings publish only after atomic replacement and preserve prior d
         function step(name: string) { events.push(name); if (name === failAt) throw failure; }
         const dependencies = {
             crypto: { randomUUID: () => "fixture" },
-            electron: { ipcMain: { handle(name: string, callback: (event: unknown, data: object) => void) { handlers.set(name, callback); }, on() { } } },
+            "./ipc": { ipcMain: { handle(name: string, callback: (event: unknown, data: object) => void) { handlers.set(name, callback); }, on() { } } },
             "@shared/IpcEvents": { IpcEvents: { GET_SETTINGS_DIR: "directory", GET_SETTINGS: "get", SET_SETTINGS: "set" } },
             "@shared/SettingsStore": { SettingsStore }, "@utils/mergeDefaults": { mergeDefaults },
             "./utils/constants": { SETTINGS_FILE: "settings.json", NATIVE_SETTINGS_FILE: "native.json", SETTINGS_DIR: "fixture" },
