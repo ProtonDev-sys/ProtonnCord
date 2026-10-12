@@ -132,7 +132,7 @@ jobs:
                   pre-emulator-launch-script: |
                       mkdir -p mobile/build/reports/android-smoke
                       sdkmanager --list_installed > mobile/build/reports/android-smoke/sdk-packages.txt
-                      "$ANDROID_HOME/emulator/emulator" -version > mobile/build/reports/android-smoke/emulator-version.txt 2>&1
+                      "$ANDROID_HOME/emulator/emulator" -no-window -noaudio -version > mobile/build/reports/android-smoke/emulator-version.txt 2>&1
                   script: bash mobile/tools/run-android-smoke.sh
             - name: Retain test reports and diagnostics
               if: always()
