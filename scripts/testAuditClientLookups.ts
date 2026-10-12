@@ -1,67 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
 import ts from "typescript";
 
 import { canonicalizeMatch, canonicalizeReplace } from "../src/utils/patches";
 import { discordChannelRouterSource, discordFocusLockSource, discordGuildlessSource, discordHeaderBarSource, discordProfileExportsSource, discordSearchBarSource, discordSettingsExportsSource, discordSwitchSource } from "./fixtures/discordClientLookups";
-import { loadTestModule } from "./utils/loadTestModule";
-
-const { filters } = loadTestModule("src/webpack/webpack.ts", {
-    "@debug/Tracer": { traceFunction: (_name: string, fn: Function) => fn },
-    "@utils/lazy": {}, "@utils/lazyReact": {}, "@utils/Logger": { Logger: class {} },
-    "@utils/patches": { canonicalizeMatch }, "@utils/text": {}
-}, { IS_REPORTER: false, IS_DEV: false });
-
-// Evaluate the real lookup/declaration independently of unrelated module startup.
-function sourceNode(file: string, predicate: (node: ts.Node) => boolean) {
-    const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
-    let found: ts.Node | undefined;
-    function visit(node: ts.Node) {
-        if (found) return;
-        if (predicate(node)) found = node;
-        else ts.forEachChild(node, visit);
-    }
-    visit(source);
-    assert.ok(found, `Declaration missing in ${file}`);
-    return found.getText(source);
-}
-
-function evaluate(code: string, globals: Record<string, unknown>) {
-    const compiled = ts.transpileModule(code, {
-        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React }
-    }).outputText;
-    return runInNewContext(compiled, { exports: {}, ...globals });
-}
-
-function declaration(file: string, name: string, globals: Record<string, unknown>) {
-    const code = sourceNode(file, node => (ts.isVariableDeclaration(node) || ts.isFunctionDeclaration(node)) && node.name?.getText() === name);
-    return evaluate(`${code.includes(`function ${name}(`) ? "" : "const "}${code};\n${name};`, globals);
-}
-
-const jsx = (type: unknown, props: any) => ({ type, props });
-const React = { createElement: (type: unknown, props: any, ...children: unknown[]) => jsx(type, children.length ? { ...props, children } : props) };
-
-function host(source: string, modules: Record<number, any> = {}, globals: Record<string, unknown> = {}) {
-    const exports: Record<string, any> = {};
-    const requireHost = Object.assign((id: number) => modules[id] ?? {}, {
-        d(target: object, getters: Record<string, () => unknown>) {
-            for (const [key, get] of Object.entries(getters)) Object.defineProperty(target, key, { get, enumerable: true });
-        },
-        r() {}, n: (value: unknown) => () => value
-    });
-    runInNewContext(`(${source})`, globals)({}, exports, requireHost);
-    return exports;
-}
-
-function findComponent(exports: Record<string, any>) {
-    return (...code: (string | RegExp)[]) => {
-        const matches = Object.values(exports).filter(filters.componentByCode(...code));
-        assert.equal(matches.length, 1, `Exactly one public component must match ${code}`);
-        return matches[0];
-    };
-}
+import { declaration, evaluate, filters, findComponent, host, jsx, React, sourceNode } from "./utils/discordClientFixture";
 
 test("ChannelRouter resolves the channel action and preserves routing and voice-chat behavior", () => {
     const routes: unknown[][] = [];

@@ -247,6 +247,48 @@ function waitForReporterCleanup<Value>(promise: Promise<Value>, timeoutMs: numbe
     ]).finally(() => clearTimeout(timeout));
 }
 
+// Runs in the page, reading source only. The patcher's toString proxy returns
+// the original factory without invoking it or reading its exports/cache.
+function captureFailedFactories({ ids, omittedModuleCount, maxBytes }: { ids: string[]; omittedModuleCount: number; maxBytes: number; }) {
+    const factories = globalThis.Vencord?.Webpack?.wreq?.m;
+    const patchedSource = globalThis.Vencord?.WebpackPatcher?.SYM_PATCHED_SOURCE;
+    const result = { version: 1, omittedModuleCount, factories: [] as Array<Record<string, string | number>> };
+    const byteLength = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+    let bytes = byteLength(result) + 64; // Reserve space for a growing omitted count.
+
+    for (const id of ids) {
+        let entry: Record<string, string | number> = { id, status: "missing" };
+        try {
+            const factory = factories?.[id];
+            if (typeof factory === "function") {
+                const original = String(factory);
+                entry = { id, status: "size-limit", characters: original.length };
+                if (original.length < maxBytes - bytes) {
+                    const candidate = { id, status: "captured", original };
+                    if (bytes + byteLength(candidate) + 1 <= maxBytes) entry = candidate;
+                }
+                if (entry.status === "captured" && typeof patchedSource === "symbol") {
+                    const patched = factory[patchedSource];
+                    if (typeof patched === "string") {
+                        const candidate = { ...entry, patched };
+                        if (patched.length < maxBytes - bytes && bytes + byteLength(candidate) + 1 <= maxBytes) entry = candidate;
+                        else entry.patchedStatus = "size-limit";
+                    }
+                }
+            }
+        } catch {
+            entry = { id, status: "unavailable" };
+        }
+        const size = byteLength(entry) + 1;
+        if (bytes + size > maxBytes) result.omittedModuleCount++;
+        else {
+            bytes += size;
+            result.factories.push(entry);
+        }
+    }
+    return JSON.stringify(result);
+}
+
 function terminateReporterBrowser() {
     try { browser?.process()?.kill(); }
     catch (error) { logStderr("Reporter browser termination failed", error); }
@@ -271,6 +313,21 @@ function finishReporter(timedOut = false, closeTimeoutMs = 10_000, finalTimeoutM
             process.exit(1);
         }, finalTimeoutMs);
         try {
+            const factoryPath = process.env.REPORTER_FACTORY_PATH;
+            if (factoryPath && page && process.exitCode) {
+                try {
+                    const ids = [...new Set(report.badPatches.map(patch => patch.id).filter(id => /^(?:0|[1-9]\d{0,15})$/.test(id)))];
+                    const maxBytes = 8 * 1024 * 1024;
+                    const payload = await waitForReporterCleanup(page.evaluate(captureFailedFactories, {
+                        ids: ids.slice(0, 100), omittedModuleCount: Math.max(0, ids.length - 100), maxBytes
+                    }), 5_000, "Reporter factory capture timed out");
+                    if (typeof payload !== "string" || Buffer.byteLength(payload, "utf8") > maxBytes)
+                        throw new Error("Reporter factory capture exceeded its size limit");
+                    writeFileSync(factoryPath, payload, { encoding: "utf8", flag: "wx" });
+                } catch (error) {
+                    logStderr("Could not capture failed reporter factories", describeError(error));
+                }
+            }
             const screenshotPath = process.env.REPORTER_SCREENSHOT_PATH;
             if (screenshotPath && page && process.exitCode) {
                 try {

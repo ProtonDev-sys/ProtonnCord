@@ -20,19 +20,23 @@ function fixture() {
     };
     const imports = {
         "@api/Settings": { definePluginSettings: () => ({ store: {} }), Settings: {} },
+        "@api/UserSettings": { getUserSettingLazy: () => ({}) },
         "@components/ErrorBoundary": { __esModule: true, default: { wrap: (component: unknown) => component } },
+        "@components/Icons": {}, "@utils/clipboard": {}, "@utils/guards": {}, "@utils/misc": {},
         "@equicordplugins/customUserColors": {},
         "@utils/constants": { Devs: {} }, "@utils/css": { classNameFactory: () => () => "" },
         "@utils/discord": {}, "@utils/Logger": { Logger: class {} },
         "@utils/types": { __esModule: true, default: (plugin: unknown) => plugin, makeRange: () => [], OptionType: {} },
-        "@webpack": { findByPropsLazy: () => ({}), findByCodeLazy: () => () => {} },
+        "@webpack": { findByPropsLazy: () => ({}), findByCodeLazy: () => () => {}, findCssClassesLazy: () => ({}) },
         "@webpack/common": { GuildRoleStore: { getRole: (_guild: string, id: string) => id === "role" ? { colorString: "#123456" } : undefined } },
     };
     const clickable = loadTestModule("src/equicordplugins/clickableRoles/index.tsx", imports, { React }).default;
     const color = loadTestModule("src/plugins/roleColorEverywhere/index.tsx", imports, { React }).default;
+    const context = loadTestModule("src/plugins/betterRoleContext/index.tsx", imports, { React }).default;
     const patches = {
         clickable: clickable.patches[1].replacement,
-        color: color.patches.find((patch: any) => patch.find === 'tutorialId:"whos-online').replacement[0]
+        color: color.patches.find((patch: any) => patch.find === 'tutorialId:"whos-online').replacement[0],
+        context: context.patches[0].replacement
     };
     function render(order: Array<keyof typeof patches>) {
         // Keep an adjacent memo in the declaration: a wrapper must not capture
@@ -46,7 +50,7 @@ function fixture() {
         }
         let memoCount = 0;
         const components = runInNewContext(source, {
-            clickable, color, l: { jsx, jsxs: jsx }, s: { memo: (component: unknown) => { memoCount++; return component; } },
+            clickable, color, context, l: { jsx, jsxs: jsx }, s: { memo: (component: unknown) => { memoCount++; return component; } },
             G: { Xx: () => ({ icon: "role-icon" }) }, eo: { clD: { UNKNOWN: "unknown" } },
             ec: { lL: "group", k1: "placeholder", UT: "icon" }, k: { A: "heading" }, U: { A: "role-icon" },
             z: { t: { Uaqbke: "member-label" }, intl: { formatToPlainString: (_key: string, { title, count }: any) => title + ": " + count } }
@@ -55,7 +59,7 @@ function fixture() {
         assert.equal(components.adjacent(), "unchanged");
         return components.role;
     }
-    return { render };
+    return { render, context };
 }
 
 test("role colors preserve Discord's accessible label, hidden visual span, icon and count", () => {
@@ -68,6 +72,31 @@ test("role colors preserve Discord's accessible label, hidden visual span, icon 
     const colored = visual.props.children[0];
     assert.equal(colored.props.style.color, "#123456");
     assert.deepEqual(Array.from(colored.props.children), ["Moderators", " — ", 4]);
+});
+
+test("role color, context menu and click wrappers compose in all orders without losing menu arguments", () => {
+    const orders = [
+        ["context", "color", "clickable"], ["context", "clickable", "color"],
+        ["color", "context", "clickable"], ["color", "clickable", "context"],
+        ["clickable", "context", "color"], ["clickable", "color", "context"]
+    ] as const;
+    for (const order of orders) {
+        const { render, context } = fixture();
+        const calls: unknown[][] = [];
+        context.openRoleContextMenu = (...args: unknown[]) => calls.push(args);
+        const props = { id: "role", label: "Moderators", count: 4, guildId: "guild" };
+        const rendered = render([...order])(props).props.children;
+        assert.equal(rendered.props["aria-label"], "Moderators: 4");
+        assert.equal(rendered.props.children[0].type, "role-icon");
+        const span = rendered.props.children[1];
+        assert.equal(span.props["aria-hidden"], true);
+        assert.equal(span.props.children[0].props.style.color, "#123456");
+        const event = { type: "contextmenu" };
+        span.props.onContextMenu(event);
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0][0], event);
+        assert.equal(calls[0][1], props);
+    }
 });
 
 test("clickable and colored role headers compose in either patch order without capturing a neighbor", () => {

@@ -109,7 +109,7 @@ export default definePlugin({
             find: 'tutorialId:"whos-online',
             replacement: [
                 {
-                    match: /(#{intl::CHANNEL_MEMBERS_A11Y_LABEL}.{0,300}?"aria-hidden":!0,children:)\[\i," (?:—|\\u2014) ",\i\]/,
+                    match: /(#{intl::CHANNEL_MEMBERS_A11Y_LABEL}.{0,300}?"aria-hidden":!0,.{0,150}?children:)\[\i," (?:—|\\u2014) ",\i\]/,
                     replace: "$1[$self.RoleGroupColor(arguments[0])]"
                 },
             ],
