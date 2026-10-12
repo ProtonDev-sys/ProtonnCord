@@ -11,6 +11,7 @@ import { runInNewContext } from "node:vm";
 import { canonicalizeMatch, canonicalizeReplace } from "../src/utils/patches";
 import { discordStageComponents } from "./fixtures/discordStageComponents";
 import { loadTestModule } from "./utils/loadTestModule";
+import { elements as descendants } from "./utils/discordClientFixture";
 
 type Capture = typeof discordStageComponents[number];
 type Element = { type: unknown; props: any; };
@@ -127,12 +128,6 @@ function initialState() {
         boostUpsell: false, selectedParticipant: null as null | { id: string; }, canModerate: true,
         stageInstance: { topic: "Stage topic" } as null | { topic: string; }, participants: [{ id: "speaker" }]
     };
-}
-
-function descendants(node: any): Element[] {
-    if (Array.isArray(node)) return node.flatMap(descendants);
-    if (!node || typeof node !== "object") return [];
-    return [node, ...descendants(node.props?.children)];
 }
 
 function renderHeader(component: (props: unknown) => Element, props: unknown) {

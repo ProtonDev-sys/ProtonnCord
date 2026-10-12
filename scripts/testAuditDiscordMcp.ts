@@ -25,13 +25,6 @@ const nativeMedia = loadTestModule("src/equicordplugins/fileUpload/nativeNetwork
     "node:dns/promises": {}, "node:http": {}, "node:https": {}, "node:net": {}
 }, { URL, Blob, Uint8Array, AbortController, AbortSignal });
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
-
 function loadRenderer(native: object, common: object = {}) {
     const output = transpileModule(readFileSync("src/equicordplugins/discordMcp.desktop/index.ts", "utf8")
         + "\nexport { generateAttachmentWaveform, waveformCache, executeTool, handleBridgeRequest, bridgeLoop, inFlightRequests, serializeMessage };", {
@@ -135,8 +128,8 @@ test("Discord MCP response write failures never replace a completed result with 
 
 for (const blocked of [false, true]) {
     test(`Discord MCP stop cancels every unstarted ${blocked ? "capacity-blocked" : "late claimed"} request`, async () => {
-        const batch = deferred<any[]>();
-        const completed = deferred<void>();
+        const batch = Promise.withResolvers<any[]>();
+        const completed = Promise.withResolvers<void>();
         const responses: any[] = [];
         const f = loadRenderer({
             initializeBridge: async () => {}, cancelRequests: async () => {},
@@ -358,7 +351,7 @@ test("Discord MCP REST rejection remains a failed send without recording deletio
 });
 
 test("Discord MCP stop cannot replace an already-started send's confirmed result with cancellation", async () => {
-    const post = deferred<object>();
+    const post = Promise.withResolvers<object>();
     const responses: any[] = [];
     let records = 0;
     const renderer = loadRenderer({
@@ -427,9 +420,9 @@ test("Discord MCP confirms deletion despite ledger failure and retries only trac
 
 for (const resolved of [false, true]) {
     test(`Discord MCP evicted waveform failures preserve ${resolved ? "completed" : "pending"} replacements`, async () => {
-        const requests: ReturnType<typeof deferred<any>>[] = [];
+        const requests: PromiseWithResolvers<any>[] = [];
         const f = loadRenderer({ fetchDiscordAttachment() {
-            const request = deferred<any>();
+            const request = Promise.withResolvers<any>();
             requests.push(request);
             return request.promise;
         } });

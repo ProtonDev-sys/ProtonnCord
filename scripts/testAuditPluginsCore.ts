@@ -5,16 +5,9 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
-
 function loadSupportHelper() {
-    const check = deferred<boolean>();
-    const restart = deferred<void>();
+    const check = Promise.withResolvers<boolean>();
+    const restart = Promise.withResolvers<void>();
     const modals: unknown[] = [];
     const state = { channelId: "support", userId: "self", updates: 0, restarts: 0 };
     const settings = { store: {}, withPrivateSettings() { return this; } };

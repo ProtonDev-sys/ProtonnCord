@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Build a locally signed non-root APK set from independently authenticated inputs."""
+"""Build a signed standalone Android client or split set from authenticated inputs."""
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import argparse
 from contextlib import contextmanager
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import tempfile
 import urllib.request
@@ -18,6 +20,8 @@ from urllib.parse import urlsplit
 import zipfile
 
 MOBILE = Path(__file__).resolve().parents[1]
+PLUGIN = "uk.co.protonn.secure-messaging"
+REPOSITORY = "https://github.com/ProtonDev-sys/ProtonnCord/releases/download/mobile-nightly"
 
 
 def digest(stream):
@@ -159,6 +163,113 @@ def check_embedded_loader(base, loader):
                 raise ValueError(f"Unexpected LSPatch configuration: {key}")
 
 
+def bootstrap_files(plugin, runtime, toolchain):
+    with zipfile.ZipFile(plugin) as archive:
+        names = {"manifest.json", "index.js", "plugin.jar"}
+        if set(archive.namelist()) != names or len(archive.infolist()) != len(names):
+            raise ValueError("Unexpected files in the bundled plugin")
+        if any(entry.file_size <= 0 or entry.file_size > 16 * 1024 * 1024 for entry in archive.infolist()):
+            raise ValueError("Invalid bundled plugin size")
+        contents = {name: archive.read(name) for name in names}
+    manifest = json.loads(contents["manifest.json"].decode("utf-8"))
+    expected = json.loads((MOBILE / "plugins/secure-messaging/manifest.json").read_text())
+    expected["version"] = manifest.get("version")
+    if not re.fullmatch(r"0\.2\.\d+(?:\.\d+)?-[a-z][a-z0-9]*", str(expected["version"])) \
+            or json.dumps(manifest, sort_keys=True) != json.dumps(expected, sort_keys=True):
+        raise ValueError("Bundled plugin manifest does not match the current source")
+    if not 0 < runtime.stat().st_size <= 16 * 1024 * 1024:
+        raise ValueError("Invalid bundled runtime size")
+    bundle = runtime.read_bytes()
+    if bundle[:8] != bytes.fromhex("c61fbc03c103191f"):
+        raise ValueError("The bundled runtime must be compiled Hermes bytecode")
+    files = {f"files/revenge/plugins/dist/{PLUGIN}/{name}": value for name, value in contents.items()}
+    plugin_id = PLUGIN.encode("ascii")
+    files["files/revenge/plugins/states"] = struct.pack(">iiH", 1, 1, len(plugin_id)) + plugin_id + struct.pack(">i", 1)
+    defaults = {
+        "files/revenge/plugins/repos/repos.json": {"format": 1, "repos": [{"url": REPOSITORY, "enabled": True}]},
+        "files/revenge/plugins/repos/sources.json": {"format": 1, "sources": {PLUGIN: {"repo": REPOSITORY, "channel": "nightly"}}},
+        "files/pyoncord/loader.json": {"customLoadUrl": {"enabled": True,
+            "url": f"https://github.com/ProtonDev-sys/ProtonnCord/releases/download/{toolchain['runtimeRelease']}/revenge.bundle"}},
+    }
+    files.update({name: (json.dumps(value, separators=(",", ":")) + "\n").encode() for name, value in defaults.items()})
+    # Android JSONObject escapes slashes. Match the native writer so its later
+    # configureLoader() rewrite retains the exact owned-runtime cache fallback.
+    loader_config = "files/pyoncord/loader.json"
+    files[loader_config] = files[loader_config].replace(b"/", b"\\/")
+    files["cache/revenge/bundle.js"] = bundle
+    return manifest["version"], files
+
+
+def bootstrap_loader(java, build_tools, original, workspace, cache, pins, plugin, runtime, toolchain):
+    version, files = bootstrap_files(plugin, runtime, toolchain)
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, value in sorted(files.items()):
+            archive.writestr(zipfile.ZipInfo(name), value, compress_type=zipfile.ZIP_DEFLATED)
+    api = download(pins["xposedApi"], cache)
+    classes = workspace / "bootstrap-classes"
+    run([java.parent / "javac", "--release", "8", "-cp", api, "-d", classes, MOBILE / "tools/LoaderBootstrap.java"])
+    dex = workspace / "bootstrap-dex"
+    dex.mkdir()
+    run([java, "-cp", build_tools / "lib/d8.jar", "com.android.tools.r8.D8", "--min-api", "28",
+         "--classpath", api, "--output", dex, *sorted(classes.rglob("*.class"))])
+    output = workspace / "revenge-protonncord.apk"
+    with zipfile.ZipFile(original) as source, zipfile.ZipFile(output, "w") as target:
+        if source.read("assets/xposed_init") != b"io.github.revenge.xposed.Main":
+            raise ValueError("The pinned loader entrypoint changed")
+        if [name for name in source.namelist() if re.fullmatch(r"classes\d*\.dex", name)] != ["classes.dex"]:
+            raise ValueError("The pinned loader DEX layout changed")
+        for entry in source.infolist():
+            if entry.filename == "assets/xposed_init" or re.fullmatch(r"META-INF/(?:MANIFEST\.MF|[^/]+\.(?:SF|RSA|DSA|EC))", entry.filename):
+                continue
+            target.writestr(entry, source.read(entry))
+        target.writestr("assets/xposed_init", "uk.co.protonn.bootstrap.LoaderBootstrap")
+        target.writestr("classes2.dex", (dex / "classes.dex").read_bytes())
+        target.writestr("assets/protonncord/bootstrap.zip", payload.getvalue())
+    tests = workspace / "bootstrap-tests"
+    classpath = os.pathsep.join(map(str, [classes, api]))
+    run([java.parent / "javac", "--release", "8", "-cp", classpath, "-d", tests, MOBILE / "tools/LoaderBootstrapTest.java"])
+    print(run([java, "-cp", classpath + os.pathsep + str(tests), "uk.co.protonn.bootstrap.LoaderBootstrapTest", output, tests]).strip())
+    return output, {"sha256": file_digest(output), "pluginVersion": version,
+                    "files": {name: hashlib.sha256(value).hexdigest() for name, value in sorted(files.items())}}
+
+
+def check_universal_apk(build_tools, path, discord):
+    badging = run([build_tools / "aapt2", "dump", "badging", path])
+    fields = dict(re.findall(r"(\w+)='([^']*)'", badging.splitlines()[0]))
+    if fields.get("name") != discord["packageName"] or fields.get("versionCode") != discord["versionCode"] or fields.get("split"):
+        raise ValueError("Merged APK package, version, or standalone identity changed")
+    abis = re.findall(r"^native-code: (.+)$", badging, re.MULTILINE)
+    if len(abis) != 1 or set(re.findall(r"'([^']+)'", abis[0])) != {"arm64-v8a", "x86_64"}:
+        raise ValueError("Standalone APK must contain both supported 64-bit ABIs")
+    manifest = run([build_tools / "aapt2", "dump", "xmltree", "--file", "AndroidManifest.xml", path])
+    if re.search(r"(?:isSplitRequired|splitTypes|requiredSplitTypes|com\.android\.vending\.splits|E: uses-split)", manifest):
+        raise ValueError("Standalone APK still requires separate splits")
+
+
+def patcher_alignment_source(source):
+    # Preserve LSPatch's nested ZIP aliases. Realigning its finished output duplicates
+    # the linked resources (+262 MB for these pins), so align before signing instead.
+    for suffix in ('".so"', "ORIGINAL_APK_ASSET_PATH"):
+        original = f"AlignmentRules.constantForSuffix({suffix}, 4096)"
+        if source.count(original) != 1:
+            raise ValueError("The pinned patcher's two alignment rules changed")
+        source = source.replace(original, original.replace("4096", "16384"))
+    return source
+
+
+def aligned_patcher(java, patcher, workspace, cache, pins):
+    if pins["patcherSource"]["revision"] != pins["lspatch"]["revision"]:
+        raise ValueError("Patcher source and binary revisions must match")
+    original = download(pins["patcherSource"], cache)
+    source = workspace / "patcher-source/ApkPatcher.java"
+    source.parent.mkdir()
+    source.write_text(patcher_alignment_source(original.read_text(encoding="utf-8")), encoding="utf-8")
+    classes = workspace / "patcher-classes"
+    run([java.parent / "javac", "--release", "21", "-cp", patcher, "-d", classes, source])
+    return os.pathsep.join(map(str, [classes, patcher])), file_digest(source)
+
+
 def build(options):
     pins = json.loads((MOBILE / "android-distribution.json").read_text())
     toolchain = json.loads((MOBILE / "toolchain.json").read_text())
@@ -183,14 +294,18 @@ def build(options):
         if options.output.exists():
             raise ValueError("Output directory already exists; choose a new directory")
 
-    assets = [asset for asset in pins["discord"]["apks"] if asset.get("abi", options.abi) == options.abi]
+    if options.universal and (not options.plugin or not options.runtime) and not options.verify_only:
+        raise ValueError("A standalone APK requires --plugin and --runtime from this source build")
+    assets = [asset for asset in pins["discord"]["apks"] if options.universal or asset.get("abi", options.abi) == options.abi]
     options.output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="protonncord-android-", dir=options.output.parent) as temporary:
         workspace = Path(temporary)
+        original_dir = workspace / "originals"
+        original_dir.mkdir()
         originals = []
         for asset in assets:
             source = options.input_dir / asset["file"] if options.input_dir else download(asset, options.cache)
-            target = workspace / asset["file"]
+            target = original_dir / asset["file"]
             shutil.copyfile(source, target)
             check_hash(target, asset)
             originals.append(target)
@@ -202,23 +317,55 @@ def build(options):
 
         patcher = download(pins["lspatch"], options.cache)
         loader = download(pins["loader"], options.cache)
+        merged = None
+        bootstrap = None
+        patcher_classpath = patcher
+        alignment_source = None
+        if options.universal:
+            editor = download(pins["editor"], options.cache)
+            merged = workspace / "ProtonnCord.apk"
+            unaligned = workspace / "merged-before-alignment.apk"
+            run([java, "-Xmx1536m", "-jar", editor, "m", "-i", original_dir, "-o", unaligned, "-validate-modules", "-clean-meta"])
+            run([build_tools / "zipalign", "-P", "16", "4", unaligned, merged])
+            unaligned.unlink()
+            check_universal_apk(build_tools, merged, pins["discord"])
+            originals = [merged]
+            loader, bootstrap = bootstrap_loader(java, build_tools, loader, workspace, options.cache, pins,
+                                                 options.plugin, options.runtime, toolchain)
+            patcher_classpath, alignment_source = aligned_patcher(java, patcher, workspace, options.cache, pins)
         patched = workspace / "patched"
         print("Patching and signing with the supplied persistent keystore…", flush=True)
-        log = run([java, f"-Djava.io.tmpdir={workspace}", "--class-path", patcher, MOBILE / "tools/PatchAndroid.java", *originals,
+        log = run([java, f"-Djava.io.tmpdir={workspace}", "--class-path", patcher_classpath, MOBILE / "tools/PatchAndroid.java", *originals,
+                   *(["--protonncord-standalone"] if merged else []),
                    "--output", patched, "--sigbypasslv", "0", "--name", "Protonn Cord", "--embed", loader])
-        output_signer = check_patch_report(log, assets[0])
+        output_signer = check_patch_report(log, {"sha256": file_digest(merged)} if merged else assets[0])
         outputs = [patched / (path.stem + "-487-lspatched.apk") for path in originals]
         if set(patched.iterdir()) != set(outputs):
             raise ValueError("Unexpected or missing patched APK outputs")
         # Split manifests omit minSdkVersion. Verify them against the base app's
         # Android 9 requirement, and check that the base actually declares it.
-        check_set([inspect_apk(java, build_tools, path, minimum_sdk=28) for path in outputs], assets, pins["discord"], [output_signer])
-        check_embedded_loader(outputs[0], pins["loader"])
-        receipt = {"format": 1, "abi": options.abi, "packageName": pins["discord"]["packageName"],
+        check_set([inspect_apk(java, build_tools, path, minimum_sdk=28) for path in outputs],
+                  [{"split": ""}] if merged else assets, pins["discord"], [output_signer])
+        check_embedded_loader(outputs[0], bootstrap or pins["loader"])
+        if merged:
+            check_universal_apk(build_tools, outputs[0], pins["discord"])
+            run([build_tools / "zipalign", "-c", "-P", "16", "4", outputs[0]])
+            elf_count = re.findall(r"^PROTONNCORD_ALIGNED_ELFS=(\d+)$", log, re.MULTILINE)
+            if len(elf_count) != 1 or int(elf_count[0]) < 4:
+                raise ValueError("Missing native ELF alignment verification")
+            renamed = patched / "ProtonnCord.apk"
+            outputs[0].rename(renamed)
+            outputs = [renamed]
+        receipt = {"format": 1, "abi": "universal" if merged else options.abi, "packageName": pins["discord"]["packageName"],
                    "versionCode": pins["discord"]["versionCode"], "originalSignerSha256": signer,
                    "signerSha256": output_signer, "runtime": toolchain,
                    "loader": pins["loader"], "lspatch": pins["lspatch"], "inputs": assets,
                    "outputs": {path.name: file_digest(path) for path in outputs}}
+        if merged:
+            receipt.update({"editor": pins["editor"], "xposedApi": pins["xposedApi"], "bootstrap": bootstrap,
+                            "patcherSource": pins["patcherSource"], "alignedPatcherSourceSha256": alignment_source,
+                            "nativeLibrariesChecked": int(elf_count[0]),
+                            "mergedSha256": file_digest(merged), "sourceCommit": run(["git", "-C", MOBILE.parent, "rev-parse", "HEAD"]).strip()})
         (patched / "build-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
         (patched / "loader-config.json").write_text(json.dumps({"customLoadUrl": {"enabled": True,
             "url": f"https://github.com/ProtonDev-sys/ProtonnCord/releases/download/{toolchain['runtimeRelease']}/revenge.bundle"}}, indent=2) + "\n")
@@ -229,6 +376,9 @@ def build(options):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--abi", choices=("arm64-v8a", "x86_64"), default="arm64-v8a")
+    parser.add_argument("--universal", action="store_true", help="Merge both 64-bit ABIs into one APK with fresh-install defaults")
+    parser.add_argument("--plugin", type=Path, help="Compiled Secure Messaging ZIP for a standalone APK")
+    parser.add_argument("--runtime", type=Path, help="Compiled pinned Revenge Next runtime for a standalone APK")
     parser.add_argument("--build-tools", type=Path, required=True, help="Android SDK build-tools/36.0.0 directory")
     parser.add_argument("--cache", type=Path, default=MOBILE / "build/nonroot-cache")
     parser.add_argument("--output", type=Path, default=MOBILE / "build/nonroot")

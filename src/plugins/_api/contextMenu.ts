@@ -48,7 +48,7 @@ export default definePlugin({
             noWarn: true,
             replacement: [
                 {
-                    match: /navId:(?=.+?([,}].*?\)))/g,
+                    match: /navId:(?=.[^,}\r\n\u2028\u2029]*([,}][^)\r\n\u2028\u2029]*\)))/g,
                     replace: (m, rest, ...args) => {
                         if (rest.match(/}=.+/)) return m;
                         const src = args[1]?.slice(Math.max(0, +args[0] - 2000), +args[0]);

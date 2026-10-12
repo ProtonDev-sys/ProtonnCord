@@ -150,6 +150,69 @@ class ApkAuthenticationTests(unittest.TestCase):
                 with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                     android.check_embedded_loader(apk, loader)
 
+    def test_alignment_backport_changes_only_the_two_authenticated_rules(self):
+        source = ('AlignmentRules.constantForSuffix(".so", 4096);\n'
+                  'AlignmentRules.constantForSuffix(ORIGINAL_APK_ASSET_PATH, 4096);\n'
+                  'int unrelated = 4096;\n')
+        actual = android.patcher_alignment_source(source)
+        self.assertEqual(actual.count("16384"), 2)
+        self.assertIn("int unrelated = 4096;", actual)
+        for changed in (source.replace('".so"', '".other"'), source + source, source.replace("4096", "8192")):
+            with self.subTest(source=changed), self.assertRaisesRegex(ValueError, "alignment rules changed"):
+                android.patcher_alignment_source(changed)
+
+    def test_standalone_requires_both_abis_and_no_remaining_split_requirements(self):
+        badging = PACKAGE + "native-code: 'arm64-v8a' 'x86_64'\n"
+        for manifest in ("E: manifest", "A: android:isSplitRequired=0xffffffff", "E: uses-split",
+                         'A: android:name="com.android.vending.splits.required"'):
+            with patch.object(android, "run", side_effect=[badging, manifest]):
+                if manifest == "E: manifest":
+                    android.check_universal_apk(Path("sdk"), Path("client.apk"), DISCORD)
+                else:
+                    with self.assertRaisesRegex(ValueError, "separate splits"):
+                        android.check_universal_apk(Path("sdk"), Path("client.apk"), DISCORD)
+        with patch.object(android, "run", return_value=badging.replace(" 'x86_64'", "")), \
+                self.assertRaisesRegex(ValueError, "both supported"):
+            android.check_universal_apk(Path("sdk"), Path("client.apk"), DISCORD)
+
+    def test_bootstrap_requires_the_real_manifest_shape_and_compiled_runtime(self):
+        toolchain = json.loads((android.MOBILE / "toolchain.json").read_text())
+        manifest = json.loads((android.MOBILE / "plugins/secure-messaging/manifest.json").read_text())
+        manifest["version"] = "0.2.176.1-nightly"
+        with tempfile.TemporaryDirectory() as directory:
+            plugin, runtime = Path(directory) / "plugin.zip", Path(directory) / "revenge.bundle"
+            runtime.write_bytes(bytes.fromhex("c61fbc03c103191f") + b"fixture")
+
+            def write(value=manifest, extra=False):
+                with zipfile.ZipFile(plugin, "w") as archive:
+                    archive.writestr("manifest.json", json.dumps(value))
+                    archive.writestr("index.js", b"plugin script")
+                    archive.writestr("plugin.jar", b"native plugin")
+                    if extra:
+                        archive.writestr("../unexpected", b"bad")
+
+            write()
+            version, files = android.bootstrap_files(plugin, runtime, toolchain)
+            self.assertEqual(version, manifest["version"])
+            self.assertEqual(len(files), 8)
+            self.assertEqual(files["cache/revenge/bundle.js"], runtime.read_bytes())
+            # Android JSONStringer escapes '/' when configureLoader writes this object.
+            native_config = (b'{"customLoadUrl":{"enabled":true,"url":"https:\\/\\/github.com\\/ProtonDev-sys'
+                             b'\\/ProtonnCord\\/releases\\/download\\/' + toolchain["runtimeRelease"].encode()
+                             + b'\\/revenge.bundle"}}\n')
+            self.assertEqual(files["files/pyoncord/loader.json"], native_config)
+            source = json.loads(files["files/revenge/plugins/repos/sources.json"])
+            self.assertEqual(source["sources"][android.PLUGIN], {"repo": android.REPOSITORY, "channel": "nightly"})
+            for changed, extra in [({**manifest, "format": True}, False), ({**manifest, "version": "wrong"}, False),
+                                   ({**manifest, "id": "other.plugin"}, False), (manifest, True)]:
+                write(changed, extra)
+                with self.subTest(manifest=changed, extra=extra), self.assertRaises(ValueError):
+                    android.bootstrap_files(plugin, runtime, toolchain)
+            write()
+            runtime.write_bytes(b"plain JavaScript")
+            with self.assertRaisesRegex(ValueError, "Hermes bytecode"):
+                android.bootstrap_files(plugin, runtime, toolchain)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
-import { canonicalizeMatch, canonicalizeReplace } from "../src/utils/patches";
 import { discordReactionPickerSource, discordStreamSettingsSources, discordVideoTileSources, discordVoiceBackgroundSources } from "./fixtures/discordVoiceMedia";
-import { loadTestModule } from "./utils/loadTestModule";
+import { applyPatch, host, loadPlugin as loadDiscordPlugin } from "./utils/discordClientFixture";
 
 const jsx = (type: unknown, props: any) => ({ type, props });
 const React = { createElement: (type: unknown, props: any) => jsx(type, props) };
@@ -12,34 +11,11 @@ const settings = { store: { voiceBackground: true, maxFPS: 120, maxResolution: 1
     resolutions: [{ label: "Source", value: 0 }, { label: "720p", value: 720 }], fpss: [{ label: "30fps", value: 30 }] } };
 
 function loadPlugin(file: string, imports: Record<string, unknown> = {}) {
-    return loadTestModule(file, {
+    return loadDiscordPlugin(file, {
         "@api/Settings": { definePluginSettings: () => settings },
-        "@utils/constants": { Devs: {}, EquicordDevs: {} },
-        "@utils/types": { __esModule: true, default: (plugin: unknown) => plugin, OptionType: {} },
         "@utils/css": { classNameFactory: () => () => "" },
         ...imports
-    }, { React }).default;
-}
-
-function applyPatch(source: string, patch: any, path = "plugin") {
-    const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
-    return replacements.reduce((current: string, replacement: any) => {
-        const next = current.replace(canonicalizeMatch(replacement.match), canonicalizeReplace(replacement.replace, path));
-        assert.notEqual(next, current, `Captured Discord code must match ${replacement.match}`);
-        return next;
-    }, source);
-}
-
-function host(source: string, modules: Record<number, any>, globals: Record<string, unknown>) {
-    const exports: Record<string, any> = {};
-    const requireHost = Object.assign((id: number) => modules[id] ?? {}, {
-        n: (value: unknown) => () => value,
-        d(target: object, getters: Record<string, () => unknown>) {
-            for (const [key, get] of Object.entries(getters)) Object.defineProperty(target, key, { get });
-        }
-    });
-    runInNewContext(`(${source})`, globals)({}, exports, requireHost);
-    return exports;
+    }, { React });
 }
 
 function backgrounds() {

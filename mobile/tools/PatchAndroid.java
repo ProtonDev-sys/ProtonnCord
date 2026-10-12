@@ -2,6 +2,8 @@
 
 import java.io.File;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.security.DigestInputStream;
 import java.security.KeyStore;
 import java.security.MessageDigest;
@@ -17,6 +19,7 @@ import org.lsposed.patch.util.JavaLogger;
 class PatchAndroid {
     public static void main(String[] args) throws Exception {
         var options = new ArrayList<>(List.of(args));
+        var standalone = options.remove("--protonncord-standalone");
         options.add("--keystore");
         for (var name : List.of("PROTONNCORD_KEYSTORE", "PROTONNCORD_STORE_PASS",
                 "PROTONNCORD_KEY_ALIAS", "PROTONNCORD_KEY_PASS")) {
@@ -40,5 +43,42 @@ class PatchAndroid {
         }
         System.out.println("PROTONNCORD_ORIGINAL=" + HexFormat.of().formatHex(originalDigest.digest()));
         System.out.println("PROTONNCORD_SIGNER=" + fingerprint);
+        if (standalone) checkNativeAlignment(outputs.getFirst());
+    }
+
+    private static void checkNativeAlignment(File output) throws Exception {
+        int count = 0;
+        try (var apk = new ZipFile(output)) {
+            for (var entry : apk.stream().filter(e -> e.getName().matches(
+                    "(?:lib|assets/lspatch/so)/(?:arm64-v8a|x86_64)/[^/]+\\.so")).toList()) {
+                try (var input = apk.getInputStream(entry)) {
+                    var bytes = input.readNBytes(8192);
+                    var elf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+                    if (bytes.length < 64 || elf.getInt(0) != 0x464c457f || bytes[4] != 2 || bytes[5] != 1) {
+                        throw new IllegalArgumentException("Unexpected 64-bit ELF header: " + entry.getName());
+                    }
+                    long table = elf.getLong(32);
+                    int size = Short.toUnsignedInt(elf.getShort(54));
+                    int segments = Short.toUnsignedInt(elf.getShort(56));
+                    if (table < 64 || table > bytes.length || size < 56 || segments == 0
+                            || (long) size * segments > bytes.length - table) {
+                        throw new IllegalArgumentException("Invalid ELF program headers: " + entry.getName());
+                    }
+                    boolean loaded = false;
+                    for (int i = 0; i < segments; i++) {
+                        int start = (int) table + i * size;
+                        if (elf.getInt(start) != 1) continue;
+                        loaded = true;
+                        if (elf.getLong(start + 48) < 16384
+                                || elf.getLong(start + 8) % 16384 != elf.getLong(start + 16) % 16384) {
+                            throw new IllegalArgumentException("ELF LOAD segment is not 16 KiB aligned: " + entry.getName());
+                        }
+                    }
+                    if (!loaded) throw new IllegalArgumentException("ELF has no LOAD segment: " + entry.getName());
+                    count++;
+                }
+            }
+        }
+        System.out.println("PROTONNCORD_ALIGNED_ELFS=" + count);
     }
 }

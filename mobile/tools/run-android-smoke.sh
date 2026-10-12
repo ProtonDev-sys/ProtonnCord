@@ -22,7 +22,7 @@ adb -s "$ANDROID_SERIAL" logcat -d -v threadtime > "$reports/native-logcat.txt" 
 # Run both checks so a storage failure does not hide useful client diagnostics.
 client_result=0
 python3 -B mobile/tools/test_android_client.py \
-    --serial "$ANDROID_SERIAL" --apk-dir mobile/build/nonroot-x86_64 \
+    --serial "$ANDROID_SERIAL" --apk-dir mobile/build/standalone \
     --runtime mobile/build/dist/revenge.bundle \
     --plugin mobile/build/dist/uk.co.protonn.secure-messaging.zip \
     --output mobile/build/reports/android-client \

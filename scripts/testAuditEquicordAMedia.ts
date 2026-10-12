@@ -43,12 +43,6 @@ function load(path: string, helpers = "", mocks: Record<string, any> = {}, globa
     return { ...exports, settings };
 }
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>(r => { resolve = r; });
-    return { promise, resolve };
-}
-
 function hookHarness() {
     const slots: any[] = [];
     let cursor = 0;
@@ -141,7 +135,7 @@ test("QR verification cancels pending confirmation and the first animation frame
 });
 
 test("QR handshake arriving after scanner closure is canceled without opening verification", async () => {
-    const pending = deferred<any>();
+    const pending = Promise.withResolvers<any>();
     let active = true;
     let opened = 0;
     const routes: string[] = [];
@@ -175,7 +169,7 @@ test("MessageColors replaces its hex rule on restart instead of accumulating sta
 
 test("Message previews fetch once per identity and ignore obsolete results", async () => {
     const harness = hookHarness();
-    const requests: { id: string; pending: ReturnType<typeof deferred<any>>; }[] = [];
+    const requests: { id: string; pending: PromiseWithResolvers<any>; }[] = [];
     const { useMessage } = load("messageLinkTooltip/index.tsx", "\nexport { useMessage };", {
         "@api/UserSettings": { getUserSettingLazy: () => ({}) },
         "@webpack/common": {
@@ -183,7 +177,7 @@ test("Message previews fetch once per identity and ignore obsolete results", asy
             ChannelStore: { getChannel: (id: string) => ({ id }) },
             MessageStore: { getMessage: () => undefined, getMessages: () => ({ receiveMessage: (raw: any) => ({ get: () => raw }) }) },
             Constants: { Endpoints: { MESSAGES: (channel: string) => channel } },
-            RestAPI: { get: ({ query }: any) => { const pending = deferred<any>(); requests.push({ id: query.around, pending }); return pending.promise; } }
+            RestAPI: { get: ({ query }: any) => { const pending = Promise.withResolvers<any>(); requests.push({ id: query.around, pending }); return pending.promise; } }
         }
     });
     harness.render(() => useMessage("c", "old"));
@@ -201,13 +195,13 @@ test("Message previews fetch once per identity and ignore obsolete results", asy
 });
 
 test("MessageTranslate cancels superseded text and stopped requests without caching late responses", async () => {
-    const requests: { pending: ReturnType<typeof deferred<any>>; signal: AbortSignal; }[] = [];
+    const requests: { pending: PromiseWithResolvers<any>; signal: AbortSignal; }[] = [];
     const settings = { store: { targetLanguage: "en&extra", confidenceRequirement: 0.8 } };
     const excluded = new Set<string>();
     const { translate, getCached, clearAllTranslations } = load("messageTranslate/utils/translate.ts", "", {
         "../settings": { settings, getExcludedLanguages: () => excluded }
     }, {
-        fetch: (_: string, { signal }: any) => { const pending = deferred<any>(); requests.push({ pending, signal }); return pending.promise; }
+        fetch: (_: string, { signal }: any) => { const pending = Promise.withResolvers<any>(); requests.push({ pending, signal }); return pending.promise; }
     });
     const response = (text: string) => ({ ok: true, json: async () => ({ src: "ja", confidence: 1, sentences: [{ trans: text }] }) });
     const old = translate("message", "old");
@@ -273,7 +267,7 @@ test("MiddleClickTweaks keeps paste protection when link blocking is set to none
 });
 
 test("Moyai stops active audio and queued repetitions when disabled", async () => {
-    const sleeping = deferred<void>();
+    const sleeping = Promise.withResolvers<void>();
     let audioCount = 0;
     let paused = 0;
     const { default: plugin } = load("moyai/index.ts", "", {
@@ -325,7 +319,7 @@ test("MusicControls honors disabled lyric fallback and atomically saves concurre
     const disabled = musicApi(settings, async () => null, async () => { fallbacks++; return {}; });
     assert.equal(await disabled.api.getLyrics({ id: "a" }), null);
     assert.equal(fallbacks, 0);
-    const pending = new Map(["a", "b"].map(id => [id, deferred<any>()]));
+    const pending = new Map(["a", "b"].map(id => [id, Promise.withResolvers<any>()]));
     const concurrent = musicApi(settings, (id: string) => pending.get(id)!.promise, async () => null);
     const first = concurrent.api.getLyrics({ id: "a" });
     const second = concurrent.api.getLyrics({ id: "b" });
@@ -337,7 +331,7 @@ test("MusicControls honors disabled lyric fallback and atomically saves concurre
 });
 
 test("MusicControls cache clear prevents a pending provider response from repopulating saved lyrics", async () => {
-    const pending = deferred<any>();
+    const pending = Promise.withResolvers<any>();
     const fixture = musicApi({ store: { lyricsProvider: "Spotify", fallbackProvider: false } }, () => pending.promise, async () => null);
     const fetching = fixture.api.getLyrics({ id: "a" });
     await Promise.resolve();
@@ -573,8 +567,8 @@ function spotlightApiFixture(fetchFixture: typeof fetch) {
 const spotlightDataURL = "https://dc.songspotlight.nexpid.xyz/api/data";
 
 test("SongSpotlight does not publish an old account's refreshed token into a new account", async () => {
-    const refresh = deferred<Response>();
-    const started = deferred<void>();
+    const refresh = Promise.withResolvers<Response>();
+    const started = Promise.withResolvers<void>();
     const fixture = spotlightApiFixture(async url => {
         if (String(url).endsWith("/refresh")) { started.resolve(); return refresh.promise; }
         return new Response("expired", { status: 401 });
@@ -589,8 +583,8 @@ test("SongSpotlight does not publish an old account's refreshed token into a new
 });
 
 test("SongSpotlight coalesces concurrent refreshes and preserves Headers options", async () => {
-    const refresh = deferred<Response>();
-    const started = deferred<void>();
+    const refresh = Promise.withResolvers<Response>();
+    const started = Promise.withResolvers<void>();
     let refreshes = 0;
     let successful = 0;
     const fixture = spotlightApiFixture(async (url, options) => {
@@ -613,8 +607,8 @@ test("SongSpotlight coalesces concurrent refreshes and preserves Headers options
 });
 
 test("SongSpotlight rejects foreign credential destinations and discards late account data", async () => {
-    const body = deferred<any>();
-    const started = deferred<void>();
+    const body = Promise.withResolvers<any>();
+    const started = Promise.withResolvers<void>();
     let requests = 0;
     const fixture = spotlightApiFixture(async () => {
         requests++;
@@ -657,11 +651,11 @@ test("SongSpotlight targeted sign-out preserves other account tokens and legacy 
 
 test("SongSpotlight render ignores a previous song's late native result", async () => {
     const harness = hookHarness();
-    const waiting: ReturnType<typeof deferred>[] = [];
+    const waiting: PromiseWithResolvers<unknown>[] = [];
     const fixture = load("songSpotlight.desktop/service.ts", "", {
         "@song-spotlight/api/util": { sid: (song: any) => song.id },
         "@webpack/common": harness.hooks
-    }, { VencordNative: { pluginHelpers: { SongSpotlight: { renderSong: () => { const value = deferred(); waiting.push(value); return value.promise; } } } } });
+    }, { VencordNative: { pluginHelpers: { SongSpotlight: { renderSong: () => { const value = Promise.withResolvers(); waiting.push(value); return value.promise; } } } } });
     harness.render(() => fixture.useRender({ id: "a" }));
     harness.render(() => fixture.useRender({ id: "b" }));
     waiting[1].resolve({ label: "b" });
@@ -724,7 +718,7 @@ test("SongSpotlight preview advances by numeric track order and cleans up on unm
 
 test("GIF collection creation stays open on persistence failure and prevents duplicate submissions", async () => {
     const harness = hookHarness();
-    const finish = deferred<void>();
+    const finish = Promise.withResolvers<void>();
     let fail = true;
     let writes = 0;
     let closes = 0;
@@ -825,7 +819,7 @@ function streakStoreFixture(fetcher: typeof fetch, datastore: any = {}) {
 }
 
 test("Streaks ignores inactive requests and stale account responses", async () => {
-    const response = deferred<Response>();
+    const response = Promise.withResolvers<Response>();
     let requests = 0;
     const fixture = streakStoreFixture(async () => { requests++; return response.promise; });
     await fixture.useStreaksStore.getState().fetch();
@@ -840,7 +834,7 @@ test("Streaks ignores inactive requests and stale account responses", async () =
 });
 
 test("Streaks migration coalesces calls and preserves local data changed during upload", async () => {
-    const response = deferred<Response>();
+    const response = Promise.withResolvers<Response>();
     let requests = 0;
     let deletions = 0;
     let data = { fixture: 1 };
@@ -859,8 +853,8 @@ test("Streaks migration coalesces calls and preserves local data changed during 
 });
 
 test("ThemeLibrary token reads cannot overwrite a newer stored token and 401 is unauthorized", async () => {
-    const oldRead = deferred<string>();
-    const started = deferred<void>();
+    const oldRead = Promise.withResolvers<string>();
+    const started = Promise.withResolvers<void>();
     let saved = "old-fixture";
     const fixture = load("themeLibrary/utils/auth.tsx", "\nexport { setThemeLibraryToken, deleteThemeLibraryToken };", {
         "@api/DataStore": { get: () => { started.resolve(); return oldRead.promise; }, set: async (_: string, value: string) => { saved = value; }, del: async () => { saved = ""; } },
@@ -881,7 +875,7 @@ test("ThemeLibrary token reads cannot overwrite a newer stored token and 401 is 
 
 test("ThemeLibrary prevents a second like while authorization is pending", async () => {
     const harness = hookHarness();
-    const authorization = deferred<boolean>();
+    const authorization = Promise.withResolvers<boolean>();
     let authCalls = 0;
     let writes = 0;
     const fixture = load("themeLibrary/components/LikesComponent.tsx", "", {
@@ -929,8 +923,8 @@ test("TriviaAI does not place a late answer into another channel or act after an
     });
     await utility.handleResponse({ channel_id: "original" }, "fixture answer");
     assert.equal(inserted, 0);
-    const response = deferred<string>();
-    const started = deferred<void>();
+    const response = Promise.withResolvers<string>();
+    const started = Promise.withResolvers<void>();
     let user = "a";
     let handled = 0;
     const fixture = load("triviaAI/index.tsx", "\nexport { answerMessage };", {
@@ -1117,7 +1111,7 @@ test("voice translations keep the completed text and language together through c
 });
 
 test("speech-worker termination cancels native setup and prevents late transcript callbacks", async () => {
-    const response = deferred<any>();
+    const response = Promise.withResolvers<any>();
     const cancellations: string[] = [];
     let completions = 0;
     let failures = 0;
@@ -1140,8 +1134,8 @@ test("speech-worker termination cancels native setup and prevents late transcrip
 });
 
 test("speech previews arrive before completion and discard late polls after cancellation", async () => {
-    const response = deferred<any>();
-    const progress = deferred<string>();
+    const response = Promise.withResolvers<any>();
+    const progress = Promise.withResolvers<string>();
     const timers = new Map<number, () => void>();
     const previews: string[] = [];
     let nextTimer = 0;
@@ -1237,8 +1231,8 @@ test("emoji whitelist validates imports before persistence and coalesces bulk na
 });
 
 test("stopped emoji whitelist startup does not install delayed context menus", async () => {
-    const stored = deferred<any>();
-    const started = deferred<void>();
+    const stored = Promise.withResolvers<any>();
+    const started = Promise.withResolvers<void>();
     let installs = 0;
     const fixture = load("whitelistedEmojis/index.tsx", "", {
         "@api/index": { DataStore: { get: () => { started.resolve(); return stored.promise; } } },
@@ -1253,11 +1247,11 @@ test("stopped emoji whitelist startup does not install delayed context menus", a
 });
 
 test("ZIP cache bounds active downloads and discards cleared native responses before parsing", async () => {
-    const responses: ReturnType<typeof deferred<any>>[] = [];
+    const responses: PromiseWithResolvers<any>[] = [];
     let parses = 0;
     const fixture = load("zipPreview/utils.ts", "", {
         "./archive": { MAX_ZIP_BYTES: 50 * 1024 * 1024, inspectZipArchive: () => { parses++; return { entries: [] }; } }
-    }, { VencordNative: { pluginHelpers: { ZipPreview: { fetchDiscordAttachment: () => { const pending = deferred<any>(); responses.push(pending); return pending.promise; } } } } });
+    }, { VencordNative: { pluginHelpers: { ZipPreview: { fetchDiscordAttachment: () => { const pending = Promise.withResolvers<any>(); responses.push(pending); return pending.promise; } } } } });
     const a = fixture.getCachedZip("https://cdn.discordapp.com/attachments/1/2/a.zip");
     const b = fixture.getCachedZip("https://cdn.discordapp.com/attachments/1/2/b.zip");
     assert.equal(fixture.getCachedZip("https://cdn.discordapp.com/attachments/1/2/c.zip").status, "rejected");

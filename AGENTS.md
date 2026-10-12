@@ -24,6 +24,8 @@ Check the branch/worktree before editing. Keep task notes and review ledgers out
 
 Use the versions and commands in `package.json`, `mobile/toolchain.json` and the READMEs. Run checks for the changed behavior; documentation edits need reference checks, not a new performance benchmark. Broad desktop validation is `pnpm build` then `pnpm test`; mobile has its own tests, types and native build. Review formatter changes.
 
+Reuse focused behavior and artifact checks, remove duplicate execution and fixtures, and add regressions only for concrete risks; avoid source-mirroring assertions and large new audit suites.
+
 Build previews in an isolated checkout or `--outdir`; `--dev` uses separate data and disables updates. Live tests require their documented profile/destination conditions and may change real account state. Report what ran and what remains unverified.
 
 Keep coding-model selection in the client configuration. Use current [Codex model guidance](https://learn.chatgpt.com/docs/models) when selecting a model; this repository does not override the session's choice.

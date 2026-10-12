@@ -19,6 +19,35 @@ LAUNCHER_ANR = '''<hierarchy><node package="android" resource-id="android:id/ale
 
 
 class LoginReadinessTests(unittest.TestCase):
+    def test_adbd_reconciles_only_the_observed_restart_connection_close(self):
+        for action, enabled, uid in (("root", True, "0"), ("unroot", False, "2000")):
+            closed = RuntimeError(f"Android command failed: adb: unable to connect for {action}: closed\n")
+            for response in (f"restarting adbd as {'root' if enabled else 'non root'}", closed):
+                with patch.object(client, "command", side_effect=[response, "", uid]) as adb:
+                    self.assertEqual(client.set_adbd_root(adb, enabled), isinstance(response, Exception))
+                    self.assertEqual([call.args for call in adb.call_args_list],
+                                     [(action,), ("wait-for-device",), ("shell", "id -u")])
+                    self.assertEqual([call.kwargs["timeout"] for call in adb.call_args_list], [15, 30, 10])
+
+    def test_adbd_unknown_errors_wrong_uid_and_timeout_remain_fatal(self):
+        for action, enabled, wrong_uid in (("root", True, "2000"), ("unroot", False, "0")):
+            other_action = "unroot" if enabled else "root"
+            closed = RuntimeError(f"Android command failed: adb: unable to connect for {action}: closed\n")
+            for error in (RuntimeError("Android command failed: device offline"),
+                          RuntimeError(f"Android command failed: adb: unable to connect for {other_action}: closed"),
+                          client.subprocess.TimeoutExpired("adb", 15)):
+                with patch.object(client, "command", side_effect=error) as adb, self.assertRaises(type(error)):
+                    client.set_adbd_root(adb, enabled)
+                self.assertEqual(adb.call_count, 1)
+            for uid in (wrong_uid, "1000", ""):
+                with patch.object(client, "command", side_effect=[closed, "", uid]), self.assertRaisesRegex(ValueError, "expected UID"):
+                    client.set_adbd_root(client.command, enabled)
+            for responses in ([closed, client.subprocess.TimeoutExpired("wait", 30)],
+                              [closed, "", client.subprocess.TimeoutExpired("uid", 10)]):
+                with patch.object(client, "command", side_effect=responses) as adb, self.assertRaises(client.subprocess.TimeoutExpired):
+                    client.set_adbd_root(adb, enabled)
+                self.assertEqual(adb.call_count, len(responses))
+
     def exercise(self, frames, error=None, timeout=5):
         now = [0]
         frames = iter(frames)

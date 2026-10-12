@@ -1,144 +1,104 @@
-# Build an Android APK set without root
+# Android APK
 
-The local build embeds the pinned RevengeXposed loader into Discord with LSPatch and signs the resulting APK set with your own reusable key. Android runs the injected loader inside the app process; an installed Xposed framework is unnecessary. Configure the pinned Revenge Next runtime and install the Secure Messaging plugin after installing the APK set.
+The standalone **ProtonnCord.apk** contains Discord, the pinned Revenge native loader, Revenge Next and Secure Messaging. A fresh installation configures the runtime and plugin automatically. Root, a computer and a separate plugin ZIP are unnecessary for installation.
 
-The build authenticates every original APK and verifies the finished set. ARM64 and x86-64 packaging have been exercised with the inputs below. Packaging checks do not establish compatibility with a particular phone, Android release, or OneKey device.
+**The production APK is pending release signing and the standalone Android smoke gate.** When published, download `ProtonnCord.apk` from the reviewed `android-RUN_ID-ATTEMPT` entry on [Releases](https://github.com/ProtonDev-sys/ProtonnCord/releases). The plugin assets under `mobile-build-*` are a different deliverable; their ZIP is not an Android installer.
 
-## Pinned inputs
+## Install on a phone
 
-| Component | Input |
+1. Use Android 9 or newer on an ARM64 phone. The same APK also includes x86-64 for the tested emulator route.
+2. Download `ProtonnCord.apk`, open it and allow installation from that download source when Android asks.
+3. Open the installed app. On a fresh installation, the bundled Next runtime and Secure Messaging plugin are already enabled. No identity, trusted contact or protected conversation is created automatically.
+4. Open the plugin's settings to create an identity or pair your OneKey, then follow the [Secure Messaging guide](README.md#use-secure-messaging).
+
+The APK keeps the application ID **`com.discord`**. It cannot coexist with an official Discord installation under that ID or update an app signed with another key. Back up the data you need before migrating; uninstalling removes local app data. Another Android user or work profile does not allow a different signing certificate for the same installed package. See [Android's update rules](https://developer.android.com/google/play/app-updates).
+
+Later Protonn Cord APKs must use the same release signing identity and an equal or higher Discord version code. Install them over the existing app to retain data. Existing Revenge settings, plugin flags, removed plugins and stored data are preserved. If Android evicts the runtime cache, the APK restores its bundled runtime only while the loader still selects the exact pinned URL; it preserves a changed runtime selection.
+
+Plugin updates use the existing `mobile-nightly` repository through **Update from nightly**. They do not replace the APK or its signing key. A Discord/native-loader update requires a new APK. Rooted users who want to retain official Discord can instead use the [Xposed installation route](README.md#rooted-installation).
+
+## What is packaged
+
+| Component | Pinned input |
 | --- | --- |
 | Discord | `com.discord`, `348.10 - Stable`, version code `348010` |
-| APK splits | One of `arm64-v8a` or `x86_64`, plus English and `xxhdpi` resources |
+| Resources | Both `arm64-v8a` and `x86_64`; English and `xxhdpi` resources |
 | Native loader | [RevengeXposed 1.6.2 / `1602`](https://github.com/revenge-mod/revenge-xposed/releases/tag/1602), native API 1 |
 | Patcher | [JingMatrix LSPatch 1.2 / `487`](https://github.com/JingMatrix/LSPatch/releases/tag/v1.2) |
+| Split merger | [APKEditor 1.4.9](https://github.com/REAndroid/APKEditor/releases/tag/V1.4.9) |
 | JavaScript host | Revenge Next revision in [toolchain.json](toolchain.json) |
-| Android minimum | Android 9 / API 28 for this LSPatch route |
+| Android minimum | Android 9 / API 28 |
 
-[android-distribution.json](android-distribution.json) records exact input URLs, sizes, SHA-256 digests and upstream revisions. Downloads are cached, bounded by size and a five-minute total deadline, and authenticated again before each build. A changed or unavailable input stops the build; updating pins requires review.
+[android-distribution.json](android-distribution.json) records exact input URLs, sizes, SHA-256 digests and upstream revisions. Downloads are bounded by size and a five-minute total deadline, cached and authenticated again before use. A changed or unavailable input stops the build.
 
-Discord's original APKs are obtained through a mirror used by the [official Revenge Manager](https://github.com/revenge-mod/revenge-manager/tree/v1.3.0). Their trust comes from Android APK signatures checked against the application signing-certificate fingerprints published by **Discord itself** at [discord.com/.well-known/assetlinks.json](https://discord.com/.well-known/assetlinks.json). Every split must have the same trusted signer, package and version as the base. The independent APK hashes additionally freeze the selected release. A Google source-stamp certificate does not substitute for the application's signing certificate.
+The original Discord APKs come from a mirror used by the [official Revenge Manager](https://github.com/revenge-mod/revenge-manager/tree/v1.3.0). Every APK signature must match an application signing-certificate fingerprint published by **Discord itself** at [discord.com/.well-known/assetlinks.json](https://discord.com/.well-known/assetlinks.json). All splits must have the same signer, package and version as the base. Their hashes also freeze the selected release. A Google source-stamp certificate does not substitute for the app signer.
 
-The loader and patcher are pinned to the SHA-256 digests of their official GitHub release assets. The loader revision must also match the mobile toolchain. The patcher uses signature-bypass level zero, embeds the loader directly and preserves the original Discord APK inside the output. The build verifies those choices, the original and loader hashes, and the finished signatures. No extra storage permissions or private-data document provider are enabled.
+The build merges those authenticated inputs before applying LSPatch. It retains the pinned loader's original DEX and adds a small first-install bootstrap through Xposed's public API. LSPatch uses signature-bypass level zero, with no extra storage permission or private-data document provider. The final checks verify the nested merged APK, derived loader, package/version, absence of split requirements, signature, ZIP alignment and all packaged 64-bit native libraries' ELF alignment.
 
-## Requirements
+Two alignment constants in the exact pinned LSPatch source are backported from 4 KiB to 16 KiB before signing. This preserves its nested ZIP aliases instead of duplicating hundreds of megabytes of resources through a later realignment. Input/source hashes and the derived source hash are recorded in the CI build receipt. Alignment checks alone do not establish compatibility with a physical 16 KiB-page device.
 
-Use Linux, macOS, or a Linux environment such as WSL2, with:
+## Build an APK locally
 
-- Python 3.10 or newer, using its standard library.
-- JDK 21 or newer, selected by `JAVA_HOME`.
-- Official [Android SDK Build Tools 36.0.0](https://developer.android.com/tools/releases/build-tools), containing `aapt2` and `lib/apksigner.jar`.
-- Android Platform Tools / `adb` when installing the APK set.
-
-With the official SDK command-line tools, install the required SDK packages:
+This section is for developers; installing a published APK does not require these tools. Use Linux or macOS with Python 3.10+, JDK 21+ selected by `JAVA_HOME`, and official [Android SDK Build Tools 36.0.0](https://developer.android.com/tools/releases/build-tools):
 
 ```sh
 sdkmanager 'build-tools;36.0.0' 'platform-tools'
 ```
 
-Set `JAVA_HOME` and `ANDROID_HOME` to your installed JDK and Android SDK paths. Building uses no Discord account or device. The build only writes its cache and selected output directory.
+Supply the compiled plugin and pinned Hermes runtime from the **same reviewed Mobile build**. The eight-file Mobile artifact's `desktop-commit.txt`, manifest, toolchain and checksums establish their source identity. Build those inputs using the [mobile workflow](../.github/workflows/mobile.yml) or the commands in the [development guide](README.md#build-and-test-without-a-discord-account).
 
-## Create and retain a signing key
-
-Create a private PKCS12 keystore once and back it up securely. Use the same keystore and alias for later builds: Android requires a compatible signing certificate to update an installed app. See [Android's signing guidance](https://developer.android.com/studio/publish/app-signing).
-
-For example, in Bash:
+Create a private PKCS12 keystore once, keep it outside the repository and retain it for later updates. Skip generation if you already have that key:
 
 ```bash
-mkdir -p "$HOME/protonncord-signing"
-chmod 700 "$HOME/protonncord-signing"
-export PROTONNCORD_KEYSTORE="$HOME/protonncord-signing/android.p12"
+export PROTONNCORD_KEYSTORE=/your/private/path/android.p12
 export PROTONNCORD_KEY_ALIAS=protonncord
-
 "$JAVA_HOME/bin/keytool" -genkeypair \
   -keystore "$PROTONNCORD_KEYSTORE" -storetype PKCS12 \
   -alias "$PROTONNCORD_KEY_ALIAS" -keyalg RSA -keysize 3072 -validity 10000
-```
 
-`keytool` prompts for the password and certificate details. Skip key generation when you already have your signing key. Keep the keystore outside the repository and build output; do not upload it with APKs or receipts.
-
-Read the password without placing it in shell history, then pass it through the environment:
-
-```bash
 read -r -s -p 'Keystore password: ' PROTONNCORD_STORE_PASS
 printf '\n'
 export PROTONNCORD_STORE_PASS
 export PROTONNCORD_KEY_PASS="$PROTONNCORD_STORE_PASS"
 ```
 
-PKCS12 keys generated by the command above use the store password for the key. An existing keystore with a distinct key password needs `PROTONNCORD_KEY_PASS` set separately. The build requires an existing keystore, keeps passwords out of process arguments, and removes them from tool failure messages.
+The example PKCS12 uses the store password for its key. An existing keystore with a distinct key password needs `PROTONNCORD_KEY_PASS` set separately. Passwords stay out of process arguments and are redacted from tool failure messages. Follow [Android's signing guidance](https://developer.android.com/studio/publish/app-signing) when backing up your key.
 
-## Build and verify
-
-From the repository root, build for a typical ARM64 phone:
+From the repository root:
 
 ```bash
-python3 -B mobile/tools/patch_android.py \
+python3 -B mobile/tools/patch_android.py --universal \
+  --plugin mobile/build/dist/uk.co.protonn.secure-messaging.zip \
+  --runtime mobile/build/dist/revenge.bundle \
   --build-tools "$ANDROID_HOME/build-tools/36.0.0" \
-  --abi arm64-v8a \
-  --output mobile/build/nonroot-arm64
-
+  --output mobile/build/standalone
 unset PROTONNCORD_STORE_PASS PROTONNCORD_KEY_PASS
 ```
 
-Use `--abi x86_64` for an x86-64 emulator. A new output directory is required for every build; existing output is preserved. Successful output contains four signed APKs, `build-receipt.json` with input/output digests and signer fingerprints, and `loader-config.json` for the pinned Next runtime. The receipt contains no private signing material. Upstream ZIP/signing metadata means repeated builds are not promised to be byte-identical.
+The new output directory contains `ProtonnCord.apk`, a build receipt and the pinned loader configuration. Share the APK; keep the receipt for verification. Existing output is never replaced. The builder never generates a release key or installs/uninstalls an app. Upstream signing metadata means repeated builds are not promised to be byte-identical.
 
-For a verification-only run, omit signing variables and add `--verify-only`. To supply original APKs obtained separately, use `--input-dir DIR` with `base.apk`, the selected `split_config.ABI.apk`, `split_config.en.apk` and `split_config.xxhdpi.apk`. These files must match the exact pinned release and still undergo the same hash, signature and metadata checks.
+Use `--universal --verify-only` to authenticate the five original APKs without signing. `--input-dir DIR` accepts separately obtained copies with the exact filenames and bytes in the distribution manifest. The advanced `--abi arm64-v8a` or `--abi x86_64` route still produces a split APK set and leaves stock Revenge Classic configuration to the user; it is not the standalone installation path.
 
-Run the verification-policy tests without Android tools or downloads:
+## Account-free Android validation
 
-```sh
-python3 -B -m unittest discover -s mobile/tools -p 'test_*.py' -v
-```
-
-## Install and configure Next
-
-**The APK set keeps the package name `com.discord`.** Android cannot install it alongside the official app under that same application ID, and your signing key cannot update an installation signed by Discord. A different Android user or work profile does not provide a different installed package signature. Use a disposable emulator or a device without the official package for an initial trial. Moving an existing installation requires an explicit migration decision and backups; uninstalling clears local app data. The build does not uninstall or install anything automatically. See [Android's update rules](https://developer.android.com/google/play/app-updates).
-
-On a suitable device with USB debugging enabled and the computer authorized, check the ABI and install the complete set:
-
-```sh
-adb shell getprop ro.product.cpu.abi
-adb install-multiple -r mobile/build/nonroot-arm64/*.apk
-```
-
-The pinned loader initially starts **Revenge Classic**. Follow the [upstream Classic-to-Next instructions](https://github.com/revenge-mod/revenge-bundle-next/blob/6f22fe1d5843160320a4a06644e816bb11f0c929/README.md), using the hosted pinned bundle instead of a local development server:
-
-1. Open **Settings → Revenge** and enable **Developer Settings**.
-2. Return to settings and open **Developer**.
-3. Set **Load from custom URL** to:
-
-   ```text
-   https://github.com/ProtonDev-sys/ProtonnCord/releases/download/mobile-runtime-6f22fe1/revenge.bundle
-   ```
-
-4. Restart the app. In Next's plugin settings, open **Browse**, install **Protonn Cord Secure Messaging**, enable it and reload when prompted. The pinned runtime supplies the Protonn Cord repository by default. If needed, add the repository from the [mobile installation guide](README.md#installation-and-compatibility).
-
-The generated `loader-config.json` records the same custom URL; merely copying it to shared phone storage does not configure the app's private loader. The settings flow writes that configuration without root. Secure Messaging's **Update from nightly** subsequently keeps the runtime and plugin repository configured.
-
-Keep your signing key when rebuilding Discord or the loader. Install updates as a complete APK set with the same signer and an equal or higher Discord version code. Plugin updates are separate: Next installs the checksummed plugin ZIP from the mobile repository without replacing your app signing key. A stock Revenge Manager update may select a newer native loader, so it is not part of this pinned build workflow.
-
-## Account-free emulator check
-
-The [Android account-free smoke workflow](../.github/workflows/android-smoke.yml) builds the pinned x86-64 APK set, this commit's plugin and the pinned Next runtime, then runs native storage instrumentation and a signed-out Discord launch on a fresh emulator. Its temporary signing key is only for that disposable test installation. APKs and signing material are excluded from diagnostic uploads.
-
-To run the client check after building those inputs, use a fresh `google_apis` userdebug emulator with no existing Discord installation:
+The [Android smoke workflow](../.github/workflows/android-smoke.yml) builds this commit's plugin, the pinned runtime and one standalone APK with a disposable test identity. Its existing fresh Android 15 `google_apis` x86-64 emulator runs the 13 native storage tests and the following client check; there is no second emulator suite. Test APKs and signing material are excluded from diagnostic uploads.
 
 ```sh
 python3 -B mobile/tools/test_android_client.py \
-  --serial emulator-5554 \
-  --apk-dir mobile/build/nonroot-x86_64 \
+  --serial emulator-5554 --apk-dir mobile/build/standalone \
   --runtime mobile/build/dist/revenge.bundle \
   --plugin mobile/build/dist/uk.co.protonn.secure-messaging.zip \
   --output mobile/build/reports/android-client
 ```
 
-The harness rejects physical devices and existing Discord installations. It checks the build receipt and output hashes, installs the complete APK set, and uses `adb root` only to seed the test configuration and collect final storage evidence. It drops ADB privileges before launching Discord. The pinned runtime is loaded from an exact local cache with a localhost HTTP `304` fixture, so an upstream bundle update cannot change the runtime under test.
+The harness rejects physical devices and existing Discord installations. It verifies the APK receipt against the current checkout and supplied plugin/runtime, installs the single APK, verifies an unprivileged ADB shell, and requires the APK bootstrap/native-plugin markers and visible logged-out screen from one unchanged app process. **No app-data fixture is written before that launch.** Only afterward does it inspect the eight APK-owned files and check that no vault exists.
 
-A test-only observer calls the original compiled Secure Messaging script with the host's evaluator and waits for its asynchronous startup to finish. A separate probe checks the native loader version, plugin load errors, random-byte bridge, empty vault, pinned runtime URL and atomic loader configuration. The host additionally requires Discord's visible login/register screen, an unchanged runtime cache and no vault files. It removes only the installation it created and writes `result.json`, `logcat.txt`, `hierarchy.xml` and `screen.png` to the requested report directory.
+For one subsequent restart, the test adds an observer of the original plugin's asynchronous startup, a native bridge probe, an explicit disabled/removed flag and a storage sentinel. It removes the runtime cache without replacing the loader configuration. The restart must restore the pinned cache, preserve those existing files and flags, complete the original plugin's startup and native checks, and show the logged-out screen again. The direct Python command does not repeat native instrumentation, JavaScript compilation or unit tests.
 
-A passing emulator run establishes signed-out startup and native bridge/storage integration for the recorded Android version and ABI. It does not exercise a physical phone, logged-in messaging or OneKey USB hardware.
+`result.json` records both phases and their file hashes. `first-launch/` preserves the original screen, hierarchy and log before test modifications; top-level diagnostics record the restart. Cleanup removes only the installation the harness created. A pass establishes the recorded emulator configuration, signed-out startup and native bridge integration. Physical phones, logged-in encrypted delivery and OneKey USB hardware require their own evidence.
 
-## Validation limits
+## Release signing configuration
 
-Successful packaging verifies cryptographic provenance, APK structure and the signing/update relationship. It does not demonstrate logged-in messaging, attachment pickers or USB hardware behavior. The mobile test suite and compiled-bundle fixture cover protocol and plugin lifecycle behavior without accounts; real Android execution is a separate gate. Record the Android version, Discord version, ABI, loader/runtime pins and signer fingerprint with any device result. Preserve identities and history keys when changing installations or clearing app data.
+Production builds require one retained private signing identity. Configure GitHub Actions secrets `ANDROID_SIGNING_KEYSTORE_B64` (the base64 PKCS12 file) and `ANDROID_SIGNING_PASSWORD`, using alias `protonncord`. Set repository variable `ANDROID_SIGNER_SHA256` to its lowercase, 64-hex certificate SHA-256 fingerprint. The release workflow verifies that certificate before signing and checks it again against the finished APK.
+
+A missing or mismatched identity stops production publication. The disposable emulator key is never a production fallback. The final APK receives the same install/launch/restart check before publication, using the already validated Mobile payload; it does not rebuild Bun, Gradle or the native storage test suite. Supporting receipts remain CI artifacts, while each immutable `android-RUN_ID-ATTEMPT` release contains only `ProtonnCord.apk`.
