@@ -106,7 +106,7 @@ function fixture(id = "438834", options: {
         } } }
     });
     return { id, require, cache, factories, patches, errors, warnings, records, listeners, register, api, window, nativeRequests, originalSymbol,
-        get digests() { return digests; }, force: (moduleId = id) => preflight.requireReporterFactory(moduleId) as void | Promise<void> };
+        get digests() { return digests; }, force: (moduleId = id, shouldContinue?: () => boolean) => preflight.requireReporterFactory(moduleId, shouldContinue) as void | Promise<void> };
 }
 
 test("all three captured factories compile with the real patches and exact approved identities without initialization", async () => {
@@ -232,6 +232,31 @@ test("hash awaits recheck current factory identity, cache and prerequisite state
         if (change === "factory") assert.equal(f.cache[f.id].exports.replacement, true);
         if (change === "cache") assert.equal(f.cache[f.id].exports.alreadyLoaded, true);
     }
+});
+
+test("canceling synthetic traversal prevents both immediate and pending-hash requires without altering later host execution", async () => {
+    for (const changed of [false, true]) {
+        const gate = Promise.withResolvers<void>();
+        const source = changed ? discordReporterFactories["438834"].replace('"conjure-history-database-options"', '"changed"') : undefined;
+        const f = fixture("438834", { source, digest: async (...args) => { await gate.promise; return webcrypto.subtle.digest(...args); } });
+        const before = Reflect.ownKeys(f.cache);
+        let active = true;
+        const pending = f.force(f.id, () => active);
+        active = false;
+        gate.resolve();
+        await pending;
+        assert.deepEqual(Reflect.ownKeys(f.cache), before);
+        assert.equal(f.records.length, 0);
+        assert.equal(f.errors.length, 0);
+        f.cache[796734] = { loaded: true, exports: {} };
+        f.require(f.id);
+        assert.equal(typeof f.cache[f.id].exports.default, "function", "Cancellation never replaces host execution or its prepared code");
+    }
+    const f = fixture("1", { patches: [], source: '1(m){m.exports={loaded:true}}' });
+    assert.equal(f.force("1", () => false), undefined);
+    assert.equal(Object.hasOwn(f.cache, "1"), false);
+    assert.equal(f.force("1", () => true), undefined);
+    assert.equal(f.cache[1].exports.loaded, true);
 });
 
 test("duplicate registration discards unexecuted preparation and restores consumed patches for the replacement", async () => {

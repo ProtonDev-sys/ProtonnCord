@@ -214,6 +214,8 @@ function reporterFixture(throws: boolean, failsFetch = false) {
         }
     }, {
         setTimeout(callback: () => void, delay: number) { timers.set(callback, delay); return callback; },
+        clearTimeout(callback: () => void) { timers.delete(callback); },
+        AbortController,
         fetch: async () => {
             assert.ok(failsFetch, "No real network traffic is permitted");
             throw new Error("Offline inspection failure");

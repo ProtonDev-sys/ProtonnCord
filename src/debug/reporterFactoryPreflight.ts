@@ -30,7 +30,8 @@ async function sourceHash(source: string) {
 
 // Only the reporter's two explicit forced-entry sites call this. Actual host
 // requires, exports, caches, and factory-error handling are never intercepted.
-export function requireReporterFactory(moduleId: PropertyKey): void | Promise<void> {
+export function requireReporterFactory(moduleId: PropertyKey, shouldContinue?: () => boolean): void | Promise<void> {
+    if (shouldContinue?.() === false) return;
     const require = wreq as AnyWebpackRequire;
     const record = IS_REPORTER && IS_WEB && !IS_VESKTOP && !IS_EQUIBOP
         ? REPORTER_SOURCE_ONLY_FACTORIES.find(record => record.id === moduleId)
@@ -56,6 +57,7 @@ export function requireReporterFactory(moduleId: PropertyKey): void | Promise<vo
         if (check) {
             const currentCheck = check;
             return check.verified.then(verified => {
+                if (shouldContinue?.() === false) return;
                 if (verified && currentCheck.prepared.isCurrent()
                     && require.c != null && !(moduleId in require.c) && prerequisiteAbsent(record, require)) {
                     if (!currentCheck.reported) {

@@ -51,7 +51,7 @@ async function runReporter() {
     try {
         ReporterLogger.log("Starting test...");
 
-        const { promise: loadLazyChunksDone, resolve: loadLazyChunksResolve } = Promise.withResolvers<void>();
+        const { promise: loadLazyChunksDone, resolve: loadLazyChunksResolve, reject: loadLazyChunksReject } = Promise.withResolvers<boolean>();
 
         // The main patch for starting the reporter chunk loading
         addPatch({
@@ -66,10 +66,10 @@ async function runReporter() {
         Vencord.Webpack._initReporter = function () {
             // initReporter is called in the patched entry point of Discord
             // setImmediate to only start searching for lazy chunks after Discord initialized the app
-            setTimeout(() => loadLazyChunks().then(loadLazyChunksResolve), 0);
+            setTimeout(() => loadLazyChunks().then(loadLazyChunksResolve, loadLazyChunksReject), 0);
         };
 
-        await loadLazyChunksDone;
+        if (await loadLazyChunksDone === false) return;
 
         // Manually require all modules to make sure all lazily required modules are patched
         for (const moduleId of Object.keys(Webpack.wreq.m)) {

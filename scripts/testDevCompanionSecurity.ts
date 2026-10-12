@@ -18,7 +18,7 @@ type DevCompanionModule = typeof import("../src/plugins/devCompanion.dev/initWs"
 
 interface HarnessRuntime {
     authSecret: string;
-    lazyLoad?: () => Promise<void>;
+    lazyLoad?: () => Promise<boolean>;
     lookups: number;
     logs: unknown[][];
     reloads: number;
@@ -295,7 +295,7 @@ const runtimeStubs: Plugin = {
                     export const stopPlugin = () => false;
                 `,
                 settings: "export const Settings = { plugins: {} };",
-                "lazy-chunks": "export const loadLazyChunks = () => globalThis.__devCompanionHarness.lazyLoad?.() ?? Promise.resolve();",
+                "lazy-chunks": "export const loadLazyChunks = () => globalThis.__devCompanionHarness.lazyLoad?.() ?? Promise.resolve(true);",
                 "reporter-data": "export const reporterData = {};",
                 discord: "export const getIntlMessageFromHash = () => { globalThis.__devCompanionHarness.lookups++; return 'translated'; };",
                 patches: "export const canonicalizeMatch = value => value;",
@@ -514,7 +514,7 @@ async function testHostileServers(module: DevCompanionModule): Promise<void> {
 
 async function testConnectionLifetime(module: DevCompanionModule): Promise<void> {
     const runtime = harnessGlobal.__devCompanionHarness;
-    const pending = Promise.withResolvers<void>();
+    const pending = Promise.withResolvers<boolean>();
     runtime.lazyLoad = () => pending.promise;
     const old = await beginConnection(module);
     await authenticateSocket(old);
@@ -525,10 +525,10 @@ async function testConnectionLifetime(module: DevCompanionModule): Promise<void>
     const lookups = runtime.lookups;
     old.emitMessage(JSON.stringify({ nonce: 2, type: "i18n", data: { hashedKey: "ignored" } }));
     assert.equal(runtime.lookups, lookups, "obsolete connections cannot dispatch a lookup");
-    pending.resolve(); await settle();
+    pending.resolve(true); await settle();
     assert.equal(old.sent.length, oldResponses, "obsolete chunk completion cannot reply");
     await authenticateSocket(replacement);
-    const failure = Promise.withResolvers<void>();
+    const failure = Promise.withResolvers<boolean>();
     runtime.lazyLoad = () => failure.promise;
     replacement.emitMessage(JSON.stringify({ nonce: 3, type: "allModules", data: null }));
     const responses = replacement.sent.length;
@@ -555,6 +555,13 @@ async function testConnectionLifetime(module: DevCompanionModule): Promise<void>
     current.emitMessage(JSON.stringify({ nonce: 6, type: "allModules", data: null }));
     await waitFor(() => parseSent(current).some(message => message.nonce === 6), "current chunk failure did not reply");
     assert.equal(parseSent(current).find(message => message.nonce === 6)?.ok, false);
+    runtime.lazyLoad = () => Promise.resolve(false);
+    current.emitMessage(JSON.stringify({ nonce: 7, type: "allModules", data: null }));
+    await waitFor(() => parseSent(current).some(message => message.nonce === 7), "incomplete chunk loading did not reply");
+    const incomplete = parseSent(current).find(message => message.nonce === 7);
+    assert.equal(incomplete?.ok, false);
+    assert.equal(incomplete?.data, null);
+    assert.match(String(incomplete?.error), /Could not load all modules/);
     delete runtime.lazyLoad;
     module.stopWs();
 }
