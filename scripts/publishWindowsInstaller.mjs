@@ -2,6 +2,7 @@
 // Publish one verified installer without changing the in-app update channel.
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { publishInstaller } from "./publishInstaller.mjs";
 import { createGithubApi } from "./releaseUpdateChannel.mjs";
 
 const repository = "ProtonDev-sys/ProtonnCord";
@@ -31,56 +32,5 @@ const body = `Close Discord, run **${name}**, and select your Discord installati
     + `[Source and license](https://github.com/${repository}/tree/${sha}) · `
     + `[Pinned installer source](${metadata.installerSource})\n\n`
     + `SHA-256: \`${checksum}\`\n`;
-const identity = { tag_name: tag, target_commitish: sha, name: `ProtonnCord ${metadata.version} — Windows nightly`,
-    body, prerelease: true };
-const current = async () => {
-    const ref = await api("GET", "/git/ref/heads/nightly");
-    requireState(ref?.ref === "refs/heads/nightly" && ref.object?.type === "commit", "Invalid nightly branch response.");
-    return ref.object.sha === sha;
-};
-const getRelease = () => api("GET", `/releases/tags/${tag}`);
-const verifyIdentity = release => requireState(release && Number.isSafeInteger(release.id)
-    && Object.entries(identity).every(([key, value]) => release[key] === value), "Unexpected Windows release identity.");
-const getAssets = id => api("GET", `/releases/${id}/assets?per_page=100`);
-const verifyAsset = assets => requireState(Array.isArray(assets) && assets.length === 1 && assets[0].name === name
-    && assets[0].size === data.length && assets[0].digest === `sha256:${checksum}` && assets[0].state === "uploaded",
-"The staged Windows executable does not match the tested artifact.");
-
-if (!await current()) {
-    console.log(`Skipping stale Windows installer for ${sha}.`);
-} else {
-    let release = await getRelease();
-    if (!release) {
-        try { release = await api("POST", "/releases", { ...identity, draft: true, make_latest: "false" }); }
-        catch (error) { release = await getRelease(); if (!release) throw error; }
-    }
-    verifyIdentity(release);
-    let assets = await getAssets(release.id);
-    if (release.draft && Array.isArray(assets) && assets.length === 0) {
-        try { await api("POST", `/releases/${release.id}/assets?name=${name}`, data, true); }
-        catch (error) {
-            assets = await getAssets(release.id);
-            if (!Array.isArray(assets) || assets.length === 0) throw error;
-        }
-        assets = await getAssets(release.id);
-    }
-    verifyAsset(assets);
-    requireState(await current(), "Nightly advanced; the Windows installer remains staged.");
-    const existingTag = await api("GET", `/git/ref/tags/${tag}`);
-    requireState(!existingTag || (existingTag.ref === `refs/tags/${tag}`
-        && existingTag.object?.type === "commit" && existingTag.object.sha === sha), "Unexpected Windows tag target.");
-    if (release.draft) {
-        try { await api("PATCH", `/releases/${release.id}`, { draft: false, make_latest: "false" }); }
-        catch (error) { if ((await getRelease())?.draft !== false) throw error; }
-    }
-    const published = await getRelease();
-    verifyIdentity(published);
-    requireState(published.id === release.id && published.draft === false, "Windows release did not publish.");
-    const publishedTag = await api("GET", `/git/ref/tags/${tag}`);
-    requireState(publishedTag?.object?.type === "commit" && publishedTag.object.sha === sha, "Published Windows tag mismatch.");
-    const publishedAssets = await getAssets(release.id);
-    verifyAsset(publishedAssets);
-    const url = `https://github.com/${repository}/releases/download/${tag}/${name}`;
-    requireState(publishedAssets[0].browser_download_url === url, "Unexpected Windows download endpoint.");
-    console.log(`Published ${url} (${checksum}).`);
-}
+await publishInstaller({ api, repository, sha, tag, name, data, checksum,
+    title: `ProtonnCord ${metadata.version} — Windows nightly`, body, platform: "Windows" });

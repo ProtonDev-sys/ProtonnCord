@@ -24,6 +24,7 @@ const hash = file => createHash("sha256").update(readFileSync(file)).digest("hex
 const before = String.raw`{
   "__type": "preserve-root", "plugins": {"Example": {"enabled": true}}, "favorites": ["Example"],
   "future": {"__type": "preserve-nested", "text": "escaped \" [}, text", "number": 9007199254740993},
+  "escaped": {"\u005f\u005ftype": {"keep": ["__type", null]}},
   "updateBranch" : "main"
 }
 `;
@@ -129,6 +130,11 @@ try {
 
     assert.equal(run(["--install", "stable"]).status, 0, "Repair must succeed.");
     assert.deepEqual(readFileSync(join(resources, "_app.asar")), original, "Repair retains the original Discord archive.");
+    const malformed = '{"plugins":';
+    writeFileSync(settings, malformed);
+    assert.notEqual(run(["--install", "stable"]).status, 0, "Malformed settings must fail before installation.");
+    assert.equal(readFileSync(settings, "utf8"), malformed, "Invalid settings must remain unchanged.");
+    assert.equal(hash(archive), metadata.archiveSha256, "Invalid settings cannot replace the installed payload.");
     copyFileSync(join(resources, "_app.asar"), archive); // A different previous payload makes rollback observable.
     writeFileSync(settings, before);
     assert.notEqual(run(["--install", "ptb"]).status, 0, "An absent channel must fail.");

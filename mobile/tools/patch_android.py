@@ -192,6 +192,10 @@ def bootstrap_files(plugin, runtime, toolchain):
             "url": f"https://github.com/ProtonDev-sys/ProtonnCord/releases/download/{toolchain['runtimeRelease']}/revenge.bundle"}},
     }
     files.update({name: (json.dumps(value, separators=(",", ":")) + "\n").encode() for name, value in defaults.items()})
+    # Android JSONObject escapes slashes. Match the native writer so its later
+    # configureLoader() rewrite retains the exact owned-runtime cache fallback.
+    loader_config = "files/pyoncord/loader.json"
+    files[loader_config] = files[loader_config].replace(b"/", b"\\/")
     files["cache/revenge/bundle.js"] = bundle
     return manifest["version"], files
 

@@ -147,10 +147,26 @@ internal static class ProtonnCordSetup
 
     private static string NightlySettings(string text)
     {
-        if (!(Json.DeserializeObject(text) is Dictionary<string, object>))
+        // Disable the framework parser's __type activation in a validation-only
+        // copy. Unknown metadata, including escaped keys, stays in the saved text.
+        var validation = new StringBuilder();
+        int consumed = 0;
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (text[i] != '"') continue;
+            int end = StringEnd(text, i), next = end;
+            while (next < text.Length && Char.IsWhiteSpace(text[next])) next++;
+            if (next < text.Length && text[next] == ':' && Json.Deserialize<string>(text.Substring(i, end - i)) == "__type")
+            {
+                validation.Append(text, consumed, i - consumed).Append("\"__protonncord_type\"");
+                consumed = end;
+            }
+            i = end - 1;
+        }
+        validation.Append(text, consumed, text.Length - consumed);
+        if (!(Json.DeserializeObject(validation.ToString()) is Dictionary<string, object>))
             throw new InvalidDataException("Existing settings must be a JSON object; they have not been changed.");
-        // Validate with the framework parser, but retain the original text: its
-        // object conversion can discard unknown __type fields or coerce numbers.
+        // Preserve the original bytes instead of reserializing/coercing values.
         var result = new StringBuilder();
         int cursor = text.IndexOf('{') + 1, copied = 0, properties = 0;
         while (true)

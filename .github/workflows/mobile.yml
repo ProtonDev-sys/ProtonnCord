@@ -148,3 +148,15 @@ jobs:
                       gh release create mobile-nightly --target "$GITHUB_SHA" --prerelease --title 'ProtonnCord Mobile nightly' --notes 'Add this release download root as a Revenge plugin repository. Each index points to immutable, checksummed build assets.'
                   fi
                   gh release upload mobile-nightly dist/index.json --clobber
+
+    installer:
+        name: Deliver the signed Android APK
+        needs: [build, publish]
+        if: github.repository == 'ProtonDev-sys/ProtonnCord' && github.ref == 'refs/heads/nightly' && github.event_name != 'pull_request' && vars.ACT != 'true'
+        uses: ./.github/workflows/android-installer.yml
+        permissions:
+            contents: write
+            actions: read
+        secrets:
+            ANDROID_SIGNING_KEYSTORE_B64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_B64 }}
+            ANDROID_SIGNING_PASSWORD: ${{ secrets.ANDROID_SIGNING_PASSWORD }}

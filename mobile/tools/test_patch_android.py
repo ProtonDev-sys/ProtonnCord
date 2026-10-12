@@ -196,6 +196,11 @@ class ApkAuthenticationTests(unittest.TestCase):
             self.assertEqual(version, manifest["version"])
             self.assertEqual(len(files), 8)
             self.assertEqual(files["cache/revenge/bundle.js"], runtime.read_bytes())
+            # Android JSONStringer escapes '/' when configureLoader writes this object.
+            native_config = (b'{"customLoadUrl":{"enabled":true,"url":"https:\\/\\/github.com\\/ProtonDev-sys'
+                             b'\\/ProtonnCord\\/releases\\/download\\/' + toolchain["runtimeRelease"].encode()
+                             + b'\\/revenge.bundle"}}\n')
+            self.assertEqual(files["files/pyoncord/loader.json"], native_config)
             source = json.loads(files["files/revenge/plugins/repos/sources.json"])
             self.assertEqual(source["sources"][android.PLUGIN], {"repo": android.REPOSITORY, "channel": "nightly"})
             for changed, extra in [({**manifest, "format": True}, False), ({**manifest, "version": "wrong"}, False),
