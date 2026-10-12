@@ -210,7 +210,8 @@ function testSourceBoundaries(): void {
     assert.match(crypto, /import \{ exactArrayBuffer as cryptoBytes \} from "\.\/exactArrayBuffer";/);
     assert.match(attachments, /import \{ exactArrayBuffer as cryptoBytes \} from "\.\/exactArrayBuffer";/);
     assert.match(packageJson, /"testSecureMessagingPerformance": "tsx scripts\/testSecureMessagingPerformance\.ts && tsx scripts\/testSecureMessagingReceive\.ts"/);
-    assert.match(workflow, /Test Secure Messaging performance boundaries/);
+    assert.match(JSON.parse(packageJson).scripts.test, /\bpnpm testSecureMessagingPerformance\b/);
+    assert.match(workflow, /run: pnpm test\s*\n/);
     assert.equal(
         existsSync(new URL("../scripts/applySecureMessagingPerformanceTest.py", import.meta.url)),
         false,
