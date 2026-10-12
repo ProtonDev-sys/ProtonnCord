@@ -1,65 +1,65 @@
 {
-  "discord": {
-    "packageName": "com.discord",
-    "versionCode": "348010",
-    "certificateSource": "https://discord.com/.well-known/assetlinks.json",
-    "certificateCheckedAt": "2026-10-12",
-    "certificateSha256": [
-      "3c39d23cf9367849a5c699395647fe0e5bfea5a1f1f40d8c717ddc70f8bfa113",
-      "9903caadd39cb40b6a3ecb33c42cb885651dc4a8eaae27cc66569de86bddfc62"
-    ],
-    "apks": [
-      {
-        "file": "base.apk",
-        "split": "",
-        "url": "https://tracker.vendetta.rocks/tracker/download/348010/base",
-        "size": 107151139,
-        "sha256": "2331efbbb5e37fbd9b6184127bd53f401f3bb873b452d0595911f016cd51a519"
-      },
-      {
-        "file": "split_config.arm64_v8a.apk",
-        "split": "config.arm64_v8a",
-        "abi": "arm64-v8a",
-        "url": "https://tracker.vendetta.rocks/tracker/download/348010/config.arm64_v8a",
-        "size": 73842363,
-        "sha256": "ddd2d855f9e082be9f0cece67be9be4d241d11ffbc20191af0b7fb466f37b58c"
-      },
-      {
-        "file": "split_config.x86_64.apk",
-        "split": "config.x86_64",
-        "abi": "x86_64",
-        "url": "https://tracker.vendetta.rocks/tracker/download/348010/config.x86_64",
-        "size": 79519290,
-        "sha256": "08a8e3ca0a99f8129bf44c167c3289b6f69cd1264c6dea5ebef9ac90cb94ce7d"
-      },
-      {
-        "file": "split_config.en.apk",
-        "split": "config.en",
-        "url": "https://tracker.vendetta.rocks/tracker/download/348010/config.en",
-        "size": 70041,
-        "sha256": "da9d994bf3ae674360b8fab4400a34cb3a45a72b2cc432f24b8d7ff54a8a48d7"
-      },
-      {
-        "file": "split_config.xxhdpi.apk",
-        "split": "config.xxhdpi",
-        "url": "https://tracker.vendetta.rocks/tracker/download/348010/config.xxhdpi",
-        "size": 11318405,
-        "sha256": "2cee2ccb0adf38fb4bf74f8f1f9f5bff7f633505c9c19d4b106665917207085f"
-      }
-    ]
-  },
-  "lspatch": {
-    "file": "lspatch-v1.2-487-release.jar",
-    "revision": "0dc50f42503711b14f5e2bb217c2bdd6321ce5be",
-    "url": "https://github.com/JingMatrix/LSPatch/releases/download/v1.2/lspatch-v1.2-487-release.jar",
-    "size": 12106851,
-    "sha256": "d238fdc414d121b7fa454d8b4ccf420df3a8c97d563761861ff92bd9c5da2165"
-  },
-  "loader": {
-    "file": "revenge-xposed-1602.apk",
-    "revision": "9a1426d0a3df000beb4174d0071d4d80e8be42fc",
-    "url": "https://github.com/revenge-mod/revenge-xposed/releases/download/1602/app-release.apk",
-    "size": 3123787,
-    "sha256": "eec7aac51419223cf631678fa640083645009ab58ebe2a20f6eb0e91ae651a25"
-  }
+	"discord": {
+		"packageName": "com.discord",
+		"versionCode": "348010",
+		"certificateSource": "https://discord.com/.well-known/assetlinks.json",
+		"certificateCheckedAt": "2026-10-12",
+		"certificateSha256": [
+			"3c39d23cf9367849a5c699395647fe0e5bfea5a1f1f40d8c717ddc70f8bfa113",
+			"9903caadd39cb40b6a3ecb33c42cb885651dc4a8eaae27cc66569de86bddfc62"
+		],
+		"apks": [
+			{
+				"file": "base.apk",
+				"split": "",
+				"url": "https://tracker.vendetta.rocks/tracker/download/348010/base",
+				"size": 107151139,
+				"sha256": "2331efbbb5e37fbd9b6184127bd53f401f3bb873b452d0595911f016cd51a519"
+			},
+			{
+				"file": "split_config.arm64_v8a.apk",
+				"split": "config.arm64_v8a",
+				"abi": "arm64-v8a",
+				"url": "https://tracker.vendetta.rocks/tracker/download/348010/config.arm64_v8a",
+				"size": 73842363,
+				"sha256": "ddd2d855f9e082be9f0cece67be9be4d241d11ffbc20191af0b7fb466f37b58c"
+			},
+			{
+				"file": "split_config.x86_64.apk",
+				"split": "config.x86_64",
+				"abi": "x86_64",
+				"url": "https://tracker.vendetta.rocks/tracker/download/348010/config.x86_64",
+				"size": 79519290,
+				"sha256": "08a8e3ca0a99f8129bf44c167c3289b6f69cd1264c6dea5ebef9ac90cb94ce7d"
+			},
+			{
+				"file": "split_config.en.apk",
+				"split": "config.en",
+				"url": "https://tracker.vendetta.rocks/tracker/download/348010/config.en",
+				"size": 70041,
+				"sha256": "da9d994bf3ae674360b8fab4400a34cb3a45a72b2cc432f24b8d7ff54a8a48d7"
+			},
+			{
+				"file": "split_config.xxhdpi.apk",
+				"split": "config.xxhdpi",
+				"url": "https://tracker.vendetta.rocks/tracker/download/348010/config.xxhdpi",
+				"size": 11318405,
+				"sha256": "2cee2ccb0adf38fb4bf74f8f1f9f5bff7f633505c9c19d4b106665917207085f"
+			}
+		]
+	},
+	"lspatch": {
+		"file": "lspatch-v1.2-487-release.jar",
+		"revision": "0dc50f42503711b14f5e2bb217c2bdd6321ce5be",
+		"url": "https://github.com/JingMatrix/LSPatch/releases/download/v1.2/lspatch-v1.2-487-release.jar",
+		"size": 12106851,
+		"sha256": "d238fdc414d121b7fa454d8b4ccf420df3a8c97d563761861ff92bd9c5da2165"
+	},
+	"loader": {
+		"file": "revenge-xposed-1602.apk",
+		"revision": "9a1426d0a3df000beb4174d0071d4d80e8be42fc",
+		"url": "https://github.com/revenge-mod/revenge-xposed/releases/download/1602/app-release.apk",
+		"size": 3123787,
+		"sha256": "eec7aac51419223cf631678fa640083645009ab58ebe2a20f6eb0e91ae651a25"
+	}
 }

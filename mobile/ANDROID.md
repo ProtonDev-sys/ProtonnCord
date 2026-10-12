@@ -118,6 +118,27 @@ The generated `loader-config.json` records the same custom URL; merely copying i
 
 Keep your signing key when rebuilding Discord or the loader. Install updates as a complete APK set with the same signer and an equal or higher Discord version code. Plugin updates are separate: Next installs the checksummed plugin ZIP from the mobile repository without replacing your app signing key. A stock Revenge Manager update may select a newer native loader, so it is not part of this pinned build workflow.
 
+## Account-free emulator check
+
+The [Android account-free smoke workflow](../.github/workflows/android-smoke.yml) builds the pinned x86-64 APK set, this commit's plugin and the pinned Next runtime, then runs native storage instrumentation and a signed-out Discord launch on a fresh emulator. Its temporary signing key is only for that disposable test installation. APKs and signing material are excluded from diagnostic uploads.
+
+To run the client check after building those inputs, use a fresh `google_apis` userdebug emulator with no existing Discord installation:
+
+```sh
+python3 -B mobile/tools/test_android_client.py \
+  --serial emulator-5554 \
+  --apk-dir mobile/build/nonroot-x86_64 \
+  --runtime mobile/build/dist/revenge.bundle \
+  --plugin mobile/build/dist/uk.co.protonn.secure-messaging.zip \
+  --output mobile/build/reports/android-client
+```
+
+The harness rejects physical devices and existing Discord installations. It checks the build receipt and output hashes, installs the complete APK set, and uses `adb root` only to seed the test configuration and collect final storage evidence. It drops ADB privileges before launching Discord. The pinned runtime is loaded from an exact local cache with a localhost HTTP `304` fixture, so an upstream bundle update cannot change the runtime under test.
+
+A test-only observer calls the original compiled Secure Messaging script with the host's evaluator and waits for its asynchronous startup to finish. A separate probe checks the native loader version, plugin load errors, random-byte bridge, empty vault, pinned runtime URL and atomic loader configuration. The host additionally requires Discord's visible login/register screen, an unchanged runtime cache and no vault files. It removes only the installation it created and writes `result.json`, `logcat.txt`, `hierarchy.xml` and `screen.png` to the requested report directory.
+
+A passing emulator run establishes signed-out startup and native bridge/storage integration for the recorded Android version and ABI. It does not exercise a physical phone, logged-in messaging or OneKey USB hardware.
+
 ## Validation limits
 
 Successful packaging verifies cryptographic provenance, APK structure and the signing/update relationship. It does not demonstrate logged-in messaging, attachment pickers or USB hardware behavior. The mobile test suite and compiled-bundle fixture cover protocol and plugin lifecycle behavior without accounts; real Android execution is a separate gate. Record the Android version, Discord version, ABI, loader/runtime pins and signer fingerprint with any device result. Preserve identities and history keys when changing installations or clearing app data.
