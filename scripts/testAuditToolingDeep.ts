@@ -226,7 +226,7 @@ test("both reporter workflow builds load their shared catalog in plain Node", ()
         for (const workflow of ["client-smoke.yml", "reportBrokenPlugins.yml"]) {
             const command = read(`.github/workflows/${workflow}`).match(/\besbuild scripts\/generateReport\.ts[^\n]*/u)?.[0];
             assert.ok(command, `${workflow} reporter build must be present`);
-            const options = Object.fromEntries(command.split(/\s+/u).filter(argument => argument.startsWith("--")).map(argument => {
+            const options: Record<string, string | true> = Object.fromEntries(command.split(/\s+/u).filter(argument => argument.startsWith("--")).map(argument => {
                 const [key, value] = argument.slice(2).split("=");
                 return [key, value ?? true];
             }));
