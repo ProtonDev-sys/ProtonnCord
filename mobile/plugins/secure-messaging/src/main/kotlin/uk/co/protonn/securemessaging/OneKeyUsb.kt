@@ -33,10 +33,16 @@ import kotlinx.coroutines.withTimeout
 internal class OneKeyUsb(private val context: Context) {
     private val busy = Mutex()
     private val cancelled = AtomicBoolean(false)
+    private val closed = AtomicBoolean(false)
     @Volatile private var permissionResult: CompletableDeferred<Unit>? = null
     fun cancel() {
         cancelled.set(true)
         permissionResult?.completeExceptionally(IllegalStateException("OneKey unlock was cancelled"))
+    }
+
+    fun close() {
+        closed.set(true)
+        cancel()
     }
 
     private fun devices(manager: UsbManager): List<UsbDevice> = manager.deviceList.values.filter {
@@ -87,6 +93,7 @@ internal class OneKeyUsb(private val context: Context) {
         check(busy.tryLock()) { "A OneKey unlock is already in progress" }
         cancelled.set(false)
         try {
+            check(!closed.get()) { "Secure Messaging was stopped" }
             check(Build.VERSION.SDK_INT >= 26) { "OneKey USB requires Android 8 or newer" }
             val manager = context.getSystemService(Context.USB_SERVICE) as UsbManager
             val devices = devices(manager)

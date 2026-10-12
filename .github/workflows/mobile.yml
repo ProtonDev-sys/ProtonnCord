@@ -67,6 +67,7 @@ jobs:
               run: |
                   node tools/prepare-release.mjs '0.2.${{ github.run_number }}.${{ github.run_attempt }}-nightly'
                   bash gradlew :plugins:secure-messaging:testDebugUnitTest packageSecureMessaging --console=plain
+                  bun run test:bundle
                   bun run generate-index --dist build/dist --base-url 'https://github.com/${{ github.repository }}/releases/download/mobile-build-${{ github.run_id }}-${{ github.run_attempt }}' --out build/dist/index.json
             - name: Build pinned Revenge runtime
               working-directory: mobile

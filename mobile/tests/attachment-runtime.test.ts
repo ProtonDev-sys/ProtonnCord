@@ -1,9 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 import assert from 'node:assert/strict'
+import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import test from 'node:test'
 import { runInNewContext } from 'node:vm'
+import { base64 } from '@scure/base'
+import * as attachmentProtocol from '../plugins/secure-messaging/js/attachments'
+import { setRandomSource } from '../plugins/secure-messaging/js/crypto'
+import * as protocol from '../plugins/secure-messaging/js/protocol'
 
 const { ModuleKind, ScriptTarget, transpileModule } = createRequire(
 	new URL('../../package.json', import.meta.url),
@@ -21,7 +26,8 @@ function fixture(
 	options: {
 		read?: (uri: string) => Promise<string>
 		decode?: (value: string) => any
-		write?: () => Promise<string>
+		write?: (path: string, encoded: string) => Promise<string>
+		realCrypto?: boolean
 		share?: (path: string) => Promise<string>
 		remove?: () => Promise<unknown>
 		cleanup?: boolean
@@ -50,8 +56,8 @@ function fixture(
 	const modules: Record<string, unknown> = {
 		'@revenge-mod/discord/native': {
 			FileModule: {
-				writeFile: (_: string, path: string) =>
-					options.write?.() ?? Promise.resolve(`/cache/${path}`),
+				writeFile: (_: string, path: string, encoded: string) =>
+					options.write?.(path, encoded) ?? Promise.resolve(`/cache/${path}`),
 				removeFile: async (_: string, path: string) => {
 					removed.push(path)
 					return await options.remove?.()
@@ -109,6 +115,12 @@ function fixture(
 			requireSnowflake: (value: string) => value,
 			decode64: () => new Uint8Array(32),
 		},
+	}
+	if (options.realCrypto) {
+		setRandomSource(size => Uint8Array.from(randomBytes(size)))
+		modules['@scure/base'] = { base64 }
+		modules['./attachments'] = attachmentProtocol
+		modules['./protocol'] = protocol
 	}
 	const api = runInNewContext(`${code}\nexports;`, {
 		exports: {},
@@ -248,6 +260,199 @@ test('prepared uploads retain encrypted metadata and clear its outer plaintext c
 	assert.equal(value.description, undefined)
 	assert.equal(value.spoiler, false)
 	assert.equal(value.filename, 'pc-test-0.pcaf')
+})
+
+test('a retried upload reuses the ciphertext and keeps its original decrypted bytes and metadata', async () => {
+	const written = new Map<string, string>()
+	let reads = 0
+	const f = fixture({
+		realCrypto: true,
+		read: async uri => {
+			reads++
+			return uri === 'content://picker/file'
+				? base64.encode(Uint8Array.of(1, 2, 3))
+				: written.get(uri)!
+		},
+		write: async (path, encoded) => {
+			written.set(`file:///cache/${path}`, encoded)
+			return `/cache/${path}`
+		},
+	})
+	const channelId = '100000000000000001'
+	const senderUserId = '100000000000000002'
+	const value = upload()
+	const first = await f.api.prepareEncryptedUploads(
+		[value],
+		'first caption',
+		channelId,
+		senderUserId,
+	)
+	first.apply()
+	const retry = await f.api.prepareEncryptedUploads(
+		[value],
+		'retry caption',
+		channelId,
+		senderUserId,
+	)
+	retry.apply()
+	assert.equal(reads, 1, 'a retry must not read the ciphertext as a new source')
+	assert.equal(written.size, 1)
+	const firstPayload = attachmentProtocol.parseSecurePlaintext(first.plaintext)
+	const payload = attachmentProtocol.parseSecurePlaintext(retry.plaintext)
+	assert.equal(payload.text, 'retry caption')
+	assert.deepEqual(payload.attachments, firstPayload.attachments)
+	const descriptor = payload.attachments!
+	const decrypted = attachmentProtocol.decryptAttachmentBytes({
+		bundleId: descriptor.id,
+		channelId,
+		count: descriptor.count,
+		ciphertext: base64.decode(written.get(value.item.uri)!),
+		index: 0,
+		masterKey: protocol.decode64(descriptor.key, 32),
+		senderUserId,
+	})
+	assert.deepEqual([...decrypted.data], [1, 2, 3])
+	assert.equal(decrypted.metadata.name, 'private.png')
+	assert.equal(decrypted.metadata.description, 'Private description')
+	assert.equal(decrypted.metadata.spoiler, true)
+	assert.equal(value.description, undefined)
+})
+
+test('changed retry batches cannot add, remove, reorder or retarget encrypted attachments', async () => {
+	for (const change of [
+		'add',
+		'remove',
+		'reverse',
+		'channel',
+		'sender',
+		'uri',
+	]) {
+		const f = fixture()
+		const values = [upload(), upload()]
+		const prepared = await f.api.prepareEncryptedUploads(
+			values,
+			'',
+			'channel',
+			'user',
+		)
+		prepared.apply()
+		const next = [...values]
+		if (change === 'add') next.push(upload())
+		if (change === 'remove') next.pop()
+		if (change === 'reverse') next.reverse()
+		if (change === 'uri') next[0].item.uri = 'content://picker/replacement'
+		await assert.rejects(
+			f.api.prepareEncryptedUploads(
+				next,
+				'',
+				change === 'channel' ? 'other' : 'channel',
+				change === 'sender' ? 'other' : 'user',
+			),
+			/Remove and attach the original files/,
+		)
+		assert.equal(
+			f.metadata.length,
+			2,
+			`${change} must not encrypt another source`,
+		)
+		await assert.rejects(
+			f.api.prepareEncryptedUploads(values, '', 'channel', 'user'),
+			/expired/,
+		)
+	}
+})
+
+test('completed, locked and evicted retries cannot resurrect a ciphertext descriptor', async () => {
+	for (const action of ['complete', 'lock', 'evict']) {
+		const f = fixture()
+		const value = upload()
+		const prepared = await f.api.prepareEncryptedUploads(
+			[value],
+			'',
+			'channel',
+			'user',
+		)
+		prepared.apply()
+		const retry = await f.api.prepareEncryptedUploads(
+			[value],
+			'',
+			'channel',
+			'user',
+		)
+		if (action === 'complete') prepared.complete()
+		if (action === 'lock') f.api.clearAttachmentCache()
+		if (action === 'evict') {
+			let latest = value
+			for (let index = 0; index < 32; index++) {
+				latest = upload()
+				const next = await f.api.prepareEncryptedUploads(
+					[latest],
+					'',
+					'channel',
+					'user',
+				)
+				next.apply()
+			}
+			const retained = await f.api.prepareEncryptedUploads(
+				[latest],
+				'',
+				'channel',
+				'user',
+			)
+			retained.apply()
+		}
+		assert.throws(() => retry.apply(), /locked|expired/)
+		await assert.rejects(
+			f.api.prepareEncryptedUploads([value], '', 'channel', 'user'),
+			/attach the original/,
+		)
+	}
+})
+
+test('unknown copies of encrypted upload objects are rejected before reading ciphertext', async () => {
+	let reads = 0
+	const f = fixture({
+		read: async () => {
+			reads++
+			return 'source'
+		},
+	})
+	const value = upload()
+	const prepared = await f.api.prepareEncryptedUploads(
+		[value],
+		'',
+		'channel',
+		'user',
+	)
+	prepared.apply()
+	const copy = { ...value, item: { ...value.item } }
+	await assert.rejects(
+		f.api.prepareEncryptedUploads([copy], '', 'channel', 'user'),
+		/attach the original/,
+	)
+	assert.equal(reads, 1)
+})
+
+test('changing the upload list or source during preparation blocks apply', async () => {
+	for (const change of ['list', 'source']) {
+		const read = deferred<string>()
+		const f = fixture({ read: () => read.promise })
+		const value = upload()
+		const values = [value]
+		const preparing = f.api.prepareEncryptedUploads(
+			values,
+			'',
+			'channel',
+			'user',
+		)
+		await tick()
+		if (change === 'list') values.push(upload())
+		else value.item.uri = 'content://picker/replacement'
+		read.resolve('source')
+		const prepared = await preparing
+		assert.throws(() => prepared.apply(), /changed or expired/)
+		assert.ok(values.every(value => value.filename === 'private.png'))
+	}
 })
 
 test('upload accumulation refuses a third 64MiB source before reading it and wipes earlier decoded buffers', async () => {
