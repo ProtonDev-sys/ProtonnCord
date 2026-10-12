@@ -155,6 +155,13 @@ test("the missing imports and ContextMenu changes retain the original initializa
         assert.equal(f.records.length, 0);
         assert.equal(f.errors.length, 0);
     }
+
+    // An exported object may have many delimiters but no closing call after navId.
+    const plain = fixture("900000", { source: `900000(e){e.exports={navId:"plain"${",item:0".repeat(1000)}}}` });
+    await plain.force();
+    assert.deepEqual({ ...plain.cache[plain.id].exports }, { navId: "plain", item: 0 });
+    assert.equal(plain.errors.length, 0);
+    assert.equal(plain.warnings.length, 0);
 });
 
 test("later ordinary host requires execute the prepared patches and preserve genuine fatal errors", async () => {
