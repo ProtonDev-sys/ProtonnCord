@@ -148,6 +148,8 @@ jobs:
                       gh release create mobile-nightly --target "$GITHUB_SHA" --prerelease --title 'ProtonnCord Mobile nightly' --notes 'Add this release download root as a Revenge plugin repository. Each index points to immutable, checksummed build assets.'
                   fi
                   gh release upload mobile-nightly dist/index.json --clobber
+                  gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/mobile-nightly" --field "sha=$GITHUB_SHA" --field force=true
+                  [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/mobile-nightly" --jq '.object.type + " " + .object.sha')" == "commit $GITHUB_SHA" ]] || { echo 'The mobile-nightly tag did not advance to the published build.' >&2; exit 1; }
 
     installer:
         name: Deliver the signed Android APK
