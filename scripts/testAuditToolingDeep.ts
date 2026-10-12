@@ -207,7 +207,7 @@ test("CI validates source without rewriting it and includes focused suites", () 
     const workflow = read(".github/workflows/test.yml");
     const scripts = JSON.parse(read("package.json")).scripts;
     assert.match(workflow, /run: pnpm test\s*\n/u);
-    assert.match(workflow, /run: pnpm audit --prod\s*\n/u);
+    assert.match(workflow, /run: pnpm audit\s*\n/u);
     for (const name of ["test", "testWeb"]) {
         assert.match(scripts[name], /\bpnpm lint\b/u);
         assert.doesNotMatch(scripts[name], /lint:fix|--fix/u, "test commands must check the reviewed source without editing it");
