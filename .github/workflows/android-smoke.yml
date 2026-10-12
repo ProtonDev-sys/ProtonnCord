@@ -100,15 +100,17 @@ jobs:
                       output.write(f"PROTONNCORD_STORE_PASS={password}\nPROTONNCORD_KEY_PASS={password}\n")
                       output.write(f"PROTONNCORD_KEYSTORE={os.environ['RUNNER_TEMP']}/protonncord-ci.p12\n")
                   PY
-            - name: Patch and verify the pinned x86_64 client fixture
+            - name: Build and verify the standalone client fixture
               env:
                   JAVA_HOME: ${{ env.JAVA_HOME_21_X64 }}
               run: |
                   "$JAVA_HOME/bin/keytool" -genkeypair -storetype PKCS12 -keyalg RSA -keysize 3072 -validity 2 \
                     -storepass:env PROTONNCORD_STORE_PASS -keypass:env PROTONNCORD_KEY_PASS \
                     -alias "$PROTONNCORD_KEY_ALIAS" -keystore "$PROTONNCORD_KEYSTORE" -dname 'CN=ProtonnCord CI Fixture'
-                  python3 -B mobile/tools/patch_android.py --abi x86_64 \
-                    --build-tools "$ANDROID_HOME/build-tools/36.0.0" --output mobile/build/nonroot-x86_64
+                  python3 -B mobile/tools/patch_android.py --universal \
+                    --plugin mobile/build/dist/uk.co.protonn.secure-messaging.zip \
+                    --runtime mobile/build/dist/revenge.bundle \
+                    --build-tools "$ANDROID_HOME/build-tools/36.0.0" --output mobile/build/standalone
             - name: Enable emulator hardware acceleration
               run: |
                   echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -148,6 +150,10 @@ jobs:
                       mobile/build/reports/android-client/screen.png
                       mobile/build/reports/android-client/hierarchy.xml
                       mobile/build/reports/android-client/result.json
+                      mobile/build/reports/android-client/first-launch/
+                      mobile/build/reports/android-client/failure-*.txt
+                      mobile/build/reports/android-client/failure-*.png
+                      mobile/build/standalone/build-receipt.json
                       mobile/plugins/secure-messaging/build/reports/androidTests/connected/
                       mobile/plugins/secure-messaging/build/outputs/androidTest-results/connected/
                       mobile/.toolchain/runtime-build.log

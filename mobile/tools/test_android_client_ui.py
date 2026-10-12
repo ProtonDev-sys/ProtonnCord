@@ -19,6 +19,27 @@ LAUNCHER_ANR = '''<hierarchy><node package="android" resource-id="android:id/ale
 
 
 class LoginReadinessTests(unittest.TestCase):
+    def test_unroot_reconciles_only_the_observed_restart_connection_close(self):
+        closed = RuntimeError("Android command failed: adb: unable to connect for unroot: closed\n")
+        for response in ("restarting adbd as non root", closed):
+            with patch.object(client, "command", side_effect=[response, "", "2000"]) as adb:
+                self.assertEqual(client.unroot(adb), isinstance(response, Exception))
+                self.assertEqual([call.args for call in adb.call_args_list],
+                                 [("unroot",), ("wait-for-device",), ("shell", "id -u")])
+                self.assertEqual([call.kwargs["timeout"] for call in adb.call_args_list], [15, 30, 10])
+
+    def test_unroot_unknown_errors_wrong_uid_and_timeout_remain_fatal(self):
+        for error in (RuntimeError("Android command failed: device offline"), client.subprocess.TimeoutExpired("adb", 15)):
+            with patch.object(client, "command", side_effect=error) as adb, self.assertRaises(type(error)):
+                client.unroot(adb)
+            self.assertEqual(adb.call_count, 1)
+        for uid in ("0", "1000", ""):
+            with patch.object(client, "command", side_effect=["", "", uid]), self.assertRaisesRegex(ValueError, "unprivileged"):
+                client.unroot(client.command)
+        with patch.object(client, "command", side_effect=["", client.subprocess.TimeoutExpired("wait", 30)]), \
+                self.assertRaises(client.subprocess.TimeoutExpired):
+            client.unroot(client.command)
+
     def exercise(self, frames, error=None, timeout=5):
         now = [0]
         frames = iter(frames)

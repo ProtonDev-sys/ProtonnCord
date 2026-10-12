@@ -50,7 +50,7 @@ try {
     const gui = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", String.raw`
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing, Accessibility
-# Legacy .NET Framework controls expose MSAA even when UIA Invoke is unavailable.
+# Legacy .NET Framework controls expose their native button role through MSAA.
 Add-Type -ReferencedAssemblies ([Accessibility.IAccessible].Assembly.Location) -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -82,17 +82,13 @@ try {
     } while ([DateTime]::UtcNow -lt $deadline)
     if ($process.MainWindowHandle -eq 0) { throw 'Setup window did not appear.' }
     $window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
-    $condition = [System.Windows.Automation.AndCondition]::new(
-        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, 'Install / repair ProtonnCord'),
-        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button))
+    $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, 'Install / repair ProtonnCord')
     $buttons = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
     if ($buttons.Count -ne 1) { throw 'Exactly one install button must be present.' }
     $button = $buttons[0]
     if ($button.Current.ProcessId -ne $process.Id -or -not $button.Current.IsEnabled) { throw 'Setup button is not enabled or belongs to another process.' }
-    Write-Output ('Setup button patterns: ' + (($button.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) -join ', '))
-    $invoke = $null
-    if ($button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) { $invoke.Invoke() }
-    else { [SetupAccessibility]::Press([IntPtr]$button.Current.NativeWindowHandle) }
+    Write-Output ('Setup control: ' + $button.Current.ControlType.ProgrammaticName + ', class=' + $button.Current.ClassName + ', handle=' + $button.Current.NativeWindowHandle)
+    [SetupAccessibility]::Press([IntPtr]$button.Current.NativeWindowHandle)
     $deadline = [DateTime]::UtcNow.AddSeconds(70)
     $installed = $false
     do {
