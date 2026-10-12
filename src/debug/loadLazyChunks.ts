@@ -13,6 +13,7 @@ import { AnyModuleFactory } from "@webpack/types";
 import pLimit from "p-limit";
 
 import { withTimeout } from "./promiseTimeout";
+import { requireReporterFactory } from "./reporterFactoryPreflight";
 
 const CHUNK_OPERATION_TIMEOUT_MS = 15_000;
 const CHUNK_SEARCH_TIMEOUT_MS = 90_000;
@@ -117,9 +118,14 @@ export async function loadLazyChunks() {
             // Requires the entry points for all valid chunk groups
             for (const [, entryPoint] of validChunkGroups) {
                 try {
-                    if (wreq.m[entryPoint]) wreq(entryPoint);
+                    if (wreq.m[entryPoint]) {
+                        if (IS_REPORTER) {
+                            const preparation = requireReporterFactory(entryPoint);
+                            if (preparation) await preparation;
+                        } else wreq(entryPoint);
+                    }
                 } catch (err) {
-                    if (err instanceof TypeError && err.message.includes("reading 'nativeModules'")) {
+                    if (!IS_REPORTER && err instanceof TypeError && err.message.includes("reading 'nativeModules'")) {
                         continue;
                     }
 

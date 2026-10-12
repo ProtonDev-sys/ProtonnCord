@@ -23,6 +23,8 @@ import { createHmac } from "crypto";
 import { readFileSync, writeFileSync } from "fs";
 import pup, { Browser, ConsoleMessage, JSHandle, Page } from "puppeteer-core";
 
+import { REPORTER_SOURCE_ONLY_FACTORIES } from "../src/debug/reporterFactoryCases";
+
 const CANARY = process.env.USE_CANARY === "true";
 const logStderr = (...data: any[]) => console.error(`${CANARY ? "CANARY" : "STABLE"} ---`, ...data);
 
@@ -71,6 +73,35 @@ interface PatchTimingConfirmation {
     reason?: string;
 }
 
+interface SourceOnlyFactory {
+    id: string;
+    reason: "native-capability-unavailable" | "host-module-unavailable";
+    originalSha256: string;
+    patchedSha256: string;
+    capability?: "DiscordNative";
+    missingDependency?: string;
+}
+
+function parseSourceOnlyFactory(value: unknown): SourceOnlyFactory {
+    if (typeof value !== "string" || value.length > 1_024) throw new Error("Invalid source-only factory diagnostic");
+    const data = JSON.parse(value);
+    const isId = (id: unknown) => typeof id === "string" && /^(?:0|[1-9]\d{0,15})$/.test(id);
+    const isHash = (hash: unknown) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash);
+    if (!data || typeof data !== "object" || Array.isArray(data)
+        || Object.keys(data).some(key => !["id", "reason", "originalSha256", "patchedSha256", "capability", "missingDependency"].includes(key))
+        || !isId(data.id) || !isHash(data.originalSha256) || !isHash(data.patchedSha256)
+        || !(data.reason === "native-capability-unavailable" && data.capability === "DiscordNative" && data.missingDependency === undefined
+            || data.reason === "host-module-unavailable" && isId(data.missingDependency) && data.capability === undefined))
+        throw new Error("Invalid source-only factory diagnostic");
+    const { id, reason, originalSha256, patchedSha256, capability, missingDependency } = data;
+    const finding = { id, reason, originalSha256, patchedSha256, ...(capability === undefined ? { missingDependency } : { capability }) };
+    const expected = REPORTER_SOURCE_ONLY_FACTORIES.find(candidate => candidate.id === id);
+    if (!expected || expected.reason !== reason || expected.originalSha256 !== originalSha256 || expected.patchedSha256 !== patchedSha256
+        || ("capability" in expected ? expected.capability !== capability : expected.missingDependency !== missingDependency))
+        throw new Error("Unreviewed source-only factory diagnostic");
+    return finding;
+}
+
 function parsePatchTimingConfirmation(value: unknown): PatchTimingConfirmation {
     if (typeof value !== "string" || value.length > 32_768) throw new Error("Invalid patch timing confirmation");
     const data = JSON.parse(value);
@@ -93,6 +124,7 @@ const report = {
     badPatches: [] as PatchInfo[],
     slowPatches: [] as PatchInfo[],
     patchTimingConfirmations: [] as PatchTimingConfirmation[],
+    sourceOnlyFactories: [] as SourceOnlyFactory[],
     badStarts: [] as {
         plugin: string;
         error: string;
@@ -158,6 +190,18 @@ async function printReport() {
         console.log(`  - Initial: ${p.initialMs}ms; confirmation samples: ${p.samplesMs.length ? p.samplesMs.map(sample => `${sample}ms`).join(", ") : "not sampled"}`);
         if (p.reason) console.log(`  - Reason: ${p.reason}`);
     });
+
+    console.log();
+
+    console.log("## Source-only Factories");
+    if (report.sourceOnlyFactories.length) {
+        console.log("Exact source and patches were checked. The listed host prerequisites were unavailable, so synthetic factory execution was skipped.");
+        report.sourceOnlyFactories.forEach(p => {
+            console.log(`- ID: \`${p.id}\`; ${p.reason}: \`${p.capability ?? p.missingDependency}\``);
+            console.log(`  - Original SHA-256: \`${p.originalSha256}\``);
+            console.log(`  - Patched SHA-256: \`${p.patchedSha256}\``);
+        });
+    }
 
     console.log();
 
@@ -614,6 +658,17 @@ async function handleConsole(e: ConsoleMessage) {
                         const confirmation = parsePatchTimingConfirmation(otherMessage);
                         report.patchTimingConfirmations.push(confirmation);
                         if (confirmation.status !== "outlier") process.exitCode = 1;
+                        break;
+                    }
+                    case "Source-only factory:": {
+                        const finding = parseSourceOnlyFactory(otherMessage);
+                        const existing = report.sourceOnlyFactories.find(p => p.id === finding.id);
+                        if (existing) {
+                            if (JSON.stringify(existing) !== JSON.stringify(finding)) throw new Error("Conflicting source-only factory diagnostics");
+                        } else {
+                            if (report.sourceOnlyFactories.length >= 3) throw new Error("Too many source-only factory diagnostics");
+                            report.sourceOnlyFactories.push(finding);
+                        }
                         break;
                     }
                     case "Finished test":

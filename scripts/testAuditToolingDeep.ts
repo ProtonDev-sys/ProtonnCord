@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -9,7 +9,10 @@ import { createInterface } from "node:readline";
 import { PassThrough, Writable } from "node:stream";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { BuildOptions, buildSync } from "esbuild";
+import { ModuleKind, parseConfigFileTextToJson, ScriptTarget, transpileModule } from "typescript";
+
+import { REPORTER_SOURCE_ONLY_FACTORIES } from "../src/debug/reporterFactoryCases";
 
 const root = path.resolve(import.meta.dirname, "..");
 const read = (file: string) => readFileSync(path.join(root, file), "utf8");
@@ -217,6 +220,36 @@ test("CI validates source without rewriting it and includes focused suites", () 
     assert.match(read("scripts/runAuditTests.mjs"), /testAudit\.\+.*ts/u);
 });
 
+test("both reporter workflow builds load their shared catalog in plain Node", () => {
+    const directory = mkdtempSync(path.join(root, ".reporter-build-test-"));
+    try {
+        for (const workflow of ["client-smoke.yml", "reportBrokenPlugins.yml"]) {
+            const command = read(`.github/workflows/${workflow}`).match(/\besbuild scripts\/generateReport\.ts[^\n]*/u)?.[0];
+            assert.ok(command, `${workflow} reporter build must be present`);
+            const options = Object.fromEntries(command.split(/\s+/u).filter(argument => argument.startsWith("--")).map(argument => {
+                const [key, value] = argument.slice(2).split("=");
+                return [key, value ?? true];
+            }));
+            const outfile = path.join(directory, `${workflow}.mjs`);
+            buildSync({
+                absWorkingDir: root, entryPoints: ["scripts/generateReport.ts"], outfile,
+                bundle: options.bundle === true, platform: options.platform as BuildOptions["platform"],
+                format: options.format as BuildOptions["format"], packages: options.packages as BuildOptions["packages"],
+            });
+            const result = spawnSync(process.execPath, [outfile], {
+                cwd: root, encoding: "utf8", timeout: 10_000, maxBuffer: 1_048_576,
+                env: { ...process.env, CHROMIUM_BIN: "", USE_CANARY: "false", NODE_OPTIONS: "" },
+            });
+            assert.equal(result.error, undefined, workflow);
+            assert.equal(result.status, 1, workflow);
+            assert.equal(result.stdout, "", workflow);
+            assert.equal(result.stderr.trim(), "STABLE --- Missing environment variable CHROMIUM_BIN", workflow);
+        }
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test("mobile CI audits its full frozen graph with the pinned package manager", () => {
     const workflow = read(".github/workflows/mobile.yml");
     const toolchain = JSON.parse(read("mobile/toolchain.json"));
@@ -227,6 +260,17 @@ test("mobile CI audits its full frozen graph with the pinned package manager", (
     assert.doesNotMatch(validation, /continue-on-error: true|\|\| true/u);
     assert.equal(workflow.match(/^\s*bun-version:\s*(\S+)\s*$/mu)?.[1], toolchain.bunVersion);
     assert.match(read("mobile/build.gradle.kts"), /inputs\.files\(\s*"package\.json"[^)]*"bunfig\.toml"/u, "changing the install policy must invalidate the JS bundle");
+});
+
+test("explicit mobile host type pins match their frozen resolutions", () => {
+    const manifest = JSON.parse(read("mobile/package.json"));
+    const parsed = parseConfigFileTextToJson("mobile/bun.lock", read("mobile/bun.lock"));
+    assert.equal(parsed.error, undefined, "Bun lockfile must be valid JSONC");
+    for (const name of ["react", "react-native", "react-native-reanimated", "react-native-worklets"]) {
+        const version = manifest.devDependencies[name];
+        assert.equal(parsed.config.workspaces[""].devDependencies[name], version, `${name} workspace pin`);
+        assert.equal(parsed.config.packages[name][0], `${name}@${version}`, `${name} resolved pin`);
+    }
 });
 
 const identity = { accountId: "100000000000000001", channelId: "100000000000000002", recipientId: "100000000000000003" };
@@ -465,6 +509,7 @@ function loadReporter(browser: unknown, print: () => Promise<unknown> = async ()
     const imports: Record<string, unknown> = {
         crypto: {}, fs: { readFileSync: () => "offline-browser-fixture" },
         "puppeteer-core": { __esModule: true, default: { launch } },
+        "../src/debug/reporterFactoryCases": { REPORTER_SOURCE_ONLY_FACTORIES },
     };
     const reporter = runInNewContext(`${code}\nexports.audit;`, {
         exports: {}, process: processState, setTimeout, clearTimeout, console: { log() {}, error() {} },

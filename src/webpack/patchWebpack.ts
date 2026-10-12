@@ -29,6 +29,10 @@ export const allWebpackInstances = new Set<AnyWebpackRequire>();
 
 export const patchTimings = [] as Array<[plugin: string, moduleId: PropertyKey, match: PatchReplacement["match"], totalTime: number, confirmation?: PatchTimingConfirmation]>;
 const confirmPatchTiming = IS_REPORTER ? createPatchTimingConfirmer() : undefined;
+const reporterFactoryTargets = IS_REPORTER ? new WeakMap<AnyModuleFactory, MaybePatchedModuleFactory>() : undefined;
+const pendingReporterFactories = IS_REPORTER ? new WeakMap<MaybePatchedModuleFactory, Patch[]>() : undefined;
+const reporterPatchOrder = IS_REPORTER ? new WeakMap<Patch, number>() : undefined;
+let reporterPatchSequence = 0;
 
 export const getBuildNumber = makeLazy(() => {
     try {
@@ -244,6 +248,7 @@ const moduleFactoriesHandler: ProxyHandler<AnyWebpackRequire["m"]> = {
 // The proxy for patching lazily and/or running factories with our wrapper.
 const moduleFactoryHandler: ProxyHandler<MaybePatchedModuleFactory> = {
     apply(target, thisArg: unknown, argArray: Parameters<AnyModuleFactory>) {
+        if (IS_REPORTER) pendingReporterFactories!.delete(target);
         // If SYM_ORIGINAL_FACTORY exists in the proxy target, it means the proxy target is already a patched factory.
         // In that case, just run it.
         if (target[SYM_ORIGINAL_FACTORY] != null) {
@@ -278,7 +283,9 @@ const moduleFactoryHandler: ProxyHandler<MaybePatchedModuleFactory> = {
 
 function proxyFactoryAndUpdateExisting(moduleFactories: AnyWebpackRequire["m"], moduleId: PropertyKey, newFactory: AnyModuleFactory, receiver: any, ignoreExistingInTarget = false) {
     notifyFactoryListeners(moduleId, newFactory);
-    const proxiedFactory = new Proxy(Settings.eagerPatches ? patchFactory(moduleId, newFactory) : newFactory, moduleFactoryHandler);
+    const target = Settings.eagerPatches ? patchFactory(moduleId, newFactory) : newFactory;
+    const proxiedFactory = new Proxy(target, moduleFactoryHandler);
+    if (IS_REPORTER) reporterFactoryTargets!.set(proxiedFactory, target);
 
     if (updateExistingFactory(moduleFactories, moduleId, newFactory, proxiedFactory, ignoreExistingInTarget)) {
         return true;
@@ -286,6 +293,50 @@ function proxyFactoryAndUpdateExisting(moduleFactories: AnyWebpackRequire["m"], 
 
     return Reflect.set(moduleFactories, moduleId, proxiedFactory, receiver);
 }
+
+// Compile with the real patcher without executing a synthetic reporter entry.
+// Keep the prepared proxy installed: a later host require must still run its patches.
+export function prepareReporterFactory(moduleId: PropertyKey, expectedFactory: AnyModuleFactory, webpackRequire = wreq as AnyWebpackRequire) {
+    if (!IS_REPORTER || webpackRequire.m[moduleId] !== expectedFactory) return;
+    const target = reporterFactoryTargets!.get(expectedFactory);
+    if (!target) return;
+
+    const originalFactory = target[SYM_ORIGINAL_FACTORY] ?? target;
+    const originalSource = Function.prototype.toString.call(originalFactory);
+    const alreadyPrepared = target[SYM_ORIGINAL_FACTORY] != null;
+    if (!alreadyPrepared) recordReporterPatchOrder!();
+    const consumed: Patch[] = [];
+    const prepared = alreadyPrepared ? target : patchFactory(moduleId, target, consumed);
+    if (webpackRequire.m[moduleId] !== expectedFactory || (target[SYM_ORIGINAL_FACTORY] ?? target) !== originalFactory) {
+        restoreReporterPatches!(consumed);
+        return;
+    }
+    const factory = alreadyPrepared ? expectedFactory : new Proxy(prepared, moduleFactoryHandler);
+    if (!alreadyPrepared) pendingReporterFactories!.set(prepared, consumed);
+    reporterFactoryTargets!.set(factory, prepared);
+    defineInWebpackInstances(moduleId, factory);
+
+    return {
+        factory, originalSource, patchedSource: Function.prototype.toString.call(prepared),
+        isCurrent: () => webpackRequire.m[moduleId] === factory
+            && prepared[SYM_ORIGINAL_FACTORY] === originalFactory
+            && Function.prototype.toString.call(originalFactory) === originalSource
+    };
+}
+
+const recordReporterPatchOrder = IS_REPORTER ? () => {
+    for (const patch of patches)
+        if (!reporterPatchOrder!.has(patch)) reporterPatchOrder!.set(patch, reporterPatchSequence++);
+} : undefined;
+
+const restoreReporterPatches = IS_REPORTER ? (consumed: Patch[]) => {
+    recordReporterPatchOrder!();
+    for (const patch of consumed) {
+        if (patches.includes(patch)) continue;
+        const next = patches.findIndex(candidate => reporterPatchOrder!.get(candidate)! > reporterPatchOrder!.get(patch)!);
+        patches.splice(next === -1 ? patches.length : next, 0, patch);
+    }
+} : undefined;
 
 /**
  * Update a duplicated factory that exists in any of the Webpack instances we track with a new original and proxied factory.
@@ -314,6 +365,18 @@ function updateExistingFactory(moduleFactories: AnyWebpackRequire["m"], moduleId
     }
 
     if (existingFactory != null) {
+        if (IS_REPORTER) {
+            const pendingTarget = reporterFactoryTargets!.get(existingFactory);
+            if (pendingTarget && pendingReporterFactories!.has(pendingTarget)) {
+                // Source preparation is not execution. A newly registered factory
+                // must get its own patches, including records consumed by preparation.
+                restoreReporterPatches!(pendingReporterFactories!.get(pendingTarget)!);
+                pendingReporterFactories!.delete(pendingTarget);
+                defineInWebpackInstances(moduleId, newProxiedFactory);
+                return true;
+            }
+        }
+
         // SYM_ORIGINAL_FACTORY means the factory has already been patched. In this case, only update existingFactory original factory to the new one.
         if (existingFactory[SYM_ORIGINAL_FACTORY] != null) {
             existingFactory[SYM_ORIGINAL_FACTORY] = newFactory;
@@ -489,7 +552,7 @@ function runFactoryWithWrap(patchedFactory: PatchedModuleFactory, thisArg: unkno
  * @param originalFactory The original module factory
  * @returns The patched module factory
  */
-function patchFactory(moduleId: PropertyKey, originalFactory: AnyModuleFactory): PatchedModuleFactory {
+function patchFactory(moduleId: PropertyKey, originalFactory: AnyModuleFactory, reporterConsumedPatches?: Patch[]): PatchedModuleFactory {
     const originalFactoryCode = String(originalFactory);
     const isArrowFunction = originalFactoryCode.startsWith("(");
 
@@ -653,6 +716,7 @@ function patchFactory(moduleId: PropertyKey, originalFactory: AnyModuleFactory):
         }
 
         if (!patch.all) {
+            if (IS_REPORTER) reporterConsumedPatches?.push(patch);
             patches.splice(i--, 1);
         }
     }

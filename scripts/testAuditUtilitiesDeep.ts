@@ -193,6 +193,7 @@ function reporterFixture(throws: boolean, failsFetch = false) {
         "@utils/patches": { canonicalizeMatch: () => /(?:(loader\.e\("[^"]+"\)))\.then\(loader\.bind\(loader,"([^"]+)"\)\)/g },
         "@webpack": { wreq: requireWebpack, factoryListeners: listeners, ChunkIdsRegex: /\("([^"]+)"\)/g },
         "p-limit": () => Object.assign((work: () => unknown) => work(), { clearQueue() {} }),
+        "./reporterFactoryPreflight": { requireReporterFactory: requireWebpack },
         "./promiseTimeout": {
             withTimeout: async (promise: Promise<unknown>, timeout: number) => {
                 if (timeout === 90_000) {

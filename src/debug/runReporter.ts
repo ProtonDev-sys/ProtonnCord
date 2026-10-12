@@ -12,6 +12,7 @@ import { getBuildNumber, patches, patchTimings } from "@webpack/patcher";
 
 import { loadLazyChunks } from "./loadLazyChunks";
 import { reporterData } from "./reporterData";
+import { requireReporterFactory } from "./reporterFactoryPreflight";
 
 function describeLookupError(error: unknown) {
     const parts: string[] = [];
@@ -73,7 +74,8 @@ async function runReporter() {
         // Manually require all modules to make sure all lazily required modules are patched
         for (const moduleId of Object.keys(Webpack.wreq.m)) {
             try {
-                Webpack.wreq(moduleId);
+                const preparation = requireReporterFactory(moduleId);
+                if (preparation) await preparation;
             } catch { }
         }
 

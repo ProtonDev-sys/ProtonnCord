@@ -38,12 +38,11 @@ jobs:
                   REPORTER_TIMEOUT_MS: 180000
                   REPORTER_SCREENSHOT_PATH: ${{ runner.temp }}/client-smoke/failure.png
                   REPORTER_FACTORY_PATH: ${{ runner.temp }}/client-smoke/failed-factories.json
-                  REPORTER_FACTORY_IDS: '["335253"]'
               shell: bash
               run: |
                   set -euo pipefail
                   mkdir -p "$RUNNER_TEMP/client-smoke"
-                  pnpm exec esbuild scripts/generateReport.ts --outfile=dist/report.mjs
+                  pnpm exec esbuild scripts/generateReport.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/report.mjs
                   status=0
                   node dist/report.mjs > "$RUNNER_TEMP/client-smoke/stdout.log" 2> "$RUNNER_TEMP/client-smoke/stderr.log" || status=$?
                   cat "$RUNNER_TEMP/client-smoke/stdout.log"

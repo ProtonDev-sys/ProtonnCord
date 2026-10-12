@@ -11,6 +11,8 @@ import { runInNewContext } from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { load } from "yaml-js";
 
+import { REPORTER_SOURCE_ONLY_FACTORIES } from "../src/debug/reporterFactoryCases";
+
 import { declaration } from "./utils/discordClientFixture";
 import { loadTestModule } from "./utils/loadTestModule";
 
@@ -62,9 +64,10 @@ function fixture(screenshot?: "success" | "reject" | "stall", factoryCapture?: "
         if (factoryCapture === "write-fail") throw new Error("Cannot write diagnostic");
         written.push(data);
     } },
-        "puppeteer-core": { __esModule: true, default: { launch: async (options: { args: string[]; }) => { launches.push(options); return browser; } } } };
+        "puppeteer-core": { __esModule: true, default: { launch: async (options: { args: string[]; }) => { launches.push(options); return browser; } } },
+        "../src/debug/reporterFactoryCases": { REPORTER_SOURCE_ONLY_FACTORIES } };
     const source = readFileSync("scripts/generateReport.ts", "utf8").replace("void main();",
-        "printReport = async () => recordReport(); exports.audit = { main, finishReporter, handleConsole, handlePageError, report, captureFailedFactories, parseFactoryProbes, parseFactoryIds };");
+        "printReport = async () => recordReport(); exports.audit = { main, finishReporter, handleConsole, handlePageError, report, captureFailedFactories, parseFactoryProbes, parseFactoryIds, parseSourceOnlyFactory };");
     const code = transpileModule(source, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText;
     const reporter = runInNewContext(`${code}\nexports.audit;`, {
         exports: {}, process: processState, console: { log() {}, error() {} }, Buffer, TextEncoder, performance, ...globals,
@@ -207,6 +210,92 @@ test("patched factory errors remain fatal after fallback and retain bounded stac
         assert.equal(finding.id, expected[0] ?? "-");
         assert.deepEqual(Array.from(f.captured[0].ids), expected);
         if (expected.length) assert.equal(JSON.parse(f.written[0]).factories[0].original, String(original));
+    }
+});
+
+test("actual source-only Logger records retain exact reviewed identities and disclose execution coverage once", async () => {
+    const f = fixture();
+    const messages: ReturnType<typeof consoleMessage>[] = [];
+    const { Logger } = loadTestModule<typeof import("../src/utils/Logger")>("src/utils/Logger.ts", {}, {
+        IS_REPORTER: true, IS_WEB: true, IS_VESKTOP: false, IS_EQUIBOP: false,
+        console: { log: (...args: unknown[]) => messages.push(consoleMessage(args)) }
+    });
+    for (const record of REPORTER_SOURCE_ONLY_FACTORIES) {
+        new Logger("Reporter").log("Source-only factory:", JSON.stringify(record));
+        new Logger("Reporter").log("Source-only factory:", JSON.stringify(Object.fromEntries(Object.entries(record).reverse())));
+    }
+    await f.reporter.main();
+    for (const message of messages) await f.reporter.handleConsole(message);
+    await f.reporter.finishReporter();
+    assert.deepEqual(JSON.parse(JSON.stringify(f.reporter.report.sourceOnlyFactories)), REPORTER_SOURCE_ONLY_FACTORIES);
+    assert.deepEqual(f.exits, [0]);
+    const lines: string[] = [];
+    await declaration("scripts/generateReport.ts", "printReport", {
+        CANARY: false, report: f.reporter.report, process: { env: {} },
+        console: { log: (...args: unknown[]) => lines.push(args.join(" ")) },
+        toCodeBlock: declaration("scripts/generateReport.ts", "toCodeBlock", {})
+    })();
+    assert.match(lines.join("\n"), /## Source-only Factories\nExact source and patches were checked\..*synthetic factory execution was skipped\./);
+    for (const record of REPORTER_SOURCE_ONLY_FACTORIES) {
+        assert.equal(lines.filter(line => line.startsWith(`- ID: \`${record.id}\``)).length, 1);
+        assert.ok(lines.includes(`  - Original SHA-256: \`${record.originalSha256}\``));
+        assert.ok(lines.includes(`  - Patched SHA-256: \`${record.patchedSha256}\``));
+    }
+});
+
+test("source-only records never suppress actual factory, patch, timing, lookup, start or page failures", async () => {
+    const sourceOnly = consoleMessage(["[Protonn Cord]", "Reporter:", "Source-only factory:", JSON.stringify(REPORTER_SOURCE_ONLY_FACTORIES[0])]);
+    for (const before of [true, false]) {
+        const f = fixture();
+        await f.reporter.main();
+        if (before) await f.reporter.handleConsole(sourceOnly);
+        for (const args of [
+            ["WebpackPatcher:", "Error in patched module factory (Module id is 33006):\n", new Error("Later ordinary host initialization failed")],
+            ["WebpackPatcher:", "Patch by Fixture errored (Module id is 33006): /fixture/", new Error("Invalid patch syntax")],
+            ["WebpackPatcher:", "Patch by Fixture had no effect (Module id is 33006): /fixture/"],
+            ["WebpackPatcher:", "Patch by Fixture took 15ms (Module id is 33006): /fixture/"],
+            ["Reporter:", "Webpack Find Fail:", 'findByProps("fixture")'],
+            ["PluginManager:", "Failed to start Fixture", new Error("Fixture start error")]
+        ]) await f.reporter.handleConsole(consoleMessage(["[Protonn Cord]", ...args], "error"));
+        f.reporter.handlePageError(new Error("Visible client failure"));
+        if (!before) await f.reporter.handleConsole(sourceOnly);
+        await f.reporter.finishReporter();
+        assert.deepEqual(f.exits, [1]);
+        assert.equal(f.reporter.report.sourceOnlyFactories.length, 1);
+        assert.equal(f.reporter.report.badPatches.length, 3);
+        assert.equal(f.reporter.report.slowPatches.length, 1);
+        assert.equal(f.reporter.report.badWebpackFinds.length, 1);
+        assert.equal(f.reporter.report.badStarts.length, 1);
+        assert.ok(f.reporter.report.otherErrors.some(error => error.includes("Visible client failure")));
+    }
+});
+
+test("malformed, forged or conflicting source-only records fail instead of claiming unreviewed coverage", async () => {
+    const parse = fixture().reporter.parseSourceOnlyFactory;
+    const native = REPORTER_SOURCE_ONLY_FACTORIES[0];
+    const host = REPORTER_SOURCE_ONLY_FACTORIES[1];
+    const invalid = [
+        ...[undefined, "[", "null", "[]", " ".repeat(1_025)],
+        ...[
+            { ...native, id: 33006 }, { ...native, id: "033006" }, { ...native, id: "90071992547409999" },
+            { ...native, id: "999" }, { ...native, reason: "ignored" }, { ...native, capability: "NativeShim" },
+            { ...native, capability: undefined }, { ...native, missingDependency: "123" },
+            { ...native, originalSha256: native.originalSha256.toUpperCase() },
+            { ...native, originalSha256: "a".repeat(64) }, { ...native, patchedSha256: "b".repeat(64) },
+            { ...native, unreviewed: true }, { ...host, missingDependency: "123" },
+            { ...host, missingDependency: undefined }, { ...host, capability: "DiscordNative" }
+        ].map(record => JSON.stringify(record))
+    ];
+    for (const value of invalid) assert.throws(() => parse(value));
+    for (const value of [invalid.at(-1), JSON.stringify({ ...native, patchedSha256: "b".repeat(64) })]) {
+        const f = fixture();
+        await f.reporter.main();
+        await f.reporter.handleConsole(consoleMessage(["[Protonn Cord]", "Reporter:", "Source-only factory:", JSON.stringify(native)]));
+        f.handlers.get("console")!(consoleMessage(["[Protonn Cord]", "Reporter:", "Source-only factory:", value]));
+        await new Promise(setImmediate);
+        assert.deepEqual(f.exits, [1]);
+        assert.equal(f.reporter.report.sourceOnlyFactories.length, 1);
+        assert.match(f.reporter.report.otherErrors[0], /source-only factory diagnostic/);
     }
 });
 
@@ -418,7 +507,7 @@ test("configured literal probes find only unique original factories without exec
 test("configured numeric factory requests capture known source without scanning or executing modules", async () => {
     const workflow = load(readFileSync(".github/workflows/client-smoke.yml", "utf8"));
     const configured = workflow.jobs.reporter.steps.find(step => step.name === "Test logged-out Discord").env;
-    assert.deepEqual(JSON.parse(configured.REPORTER_FACTORY_IDS), ["335253"]);
+    assert.equal(configured.REPORTER_FACTORY_IDS, undefined);
     assert.equal(configured.REPORTER_FACTORY_PROBES, undefined);
     const original = function knownFactory() { assert.fail("Must not execute a factory"); };
     const reads: string[] = [];
