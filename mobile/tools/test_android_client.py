@@ -90,19 +90,20 @@ def verify_inputs(options):
     return receipt, apk, defaults, f"https://github.com/ProtonDev-sys/ProtonnCord/releases/download/{toolchain['runtimeRelease']}/revenge.bundle"
 
 
-def unroot(adb):
+def set_adbd_root(adb, enabled):
+    action, expected_uid = ("root", "0") if enabled else ("unroot", "2000")
     closed = False
     try:
-        adb("unroot", timeout=15)
+        adb(action, timeout=15)
     except RuntimeError as error:
         # adbd can close the control connection while restarting. Do not repeat
         # the mutation: wait for that same serial and prove the requested UID.
-        if str(error).strip() != "Android command failed: adb: unable to connect for unroot: closed":
+        if str(error).strip() != f"Android command failed: adb: unable to connect for {action}: closed":
             raise
         closed = True
     adb("wait-for-device", timeout=30)
-    if adb("shell", "id -u", timeout=10) != "2000":
-        raise ValueError("ADB must be the unprivileged shell during the client launch")
+    if adb("shell", "id -u", timeout=10) != expected_uid:
+        raise ValueError(f"ADB {action} did not reach expected UID {expected_uid}")
     return closed
 
 
@@ -254,7 +255,7 @@ def run(options):
     result = {"status": "failed", "api": api, "abi": abi, "firstLaunch": {}, "restart": {}}
     try:
         # Prove a normal APK-owned first launch before any private-data fixture writes.
-        result["firstLaunch"]["adbdRestartConnectionClosed"] = unroot(adb)
+        result["firstLaunch"]["adbdRestartConnectionClosed"] = set_adbd_root(adb, False)
         adb("install", apk, timeout=180)
         installed = True
         uid = re.fullmatch(r"package:com\.discord uid:(\d+)", adb("shell", "pm list packages -U com.discord"))
@@ -265,10 +266,7 @@ def run(options):
             raise ValueError("Discord launcher activity was not resolved")
         launch_client(adb, activity, remote_ui, first_output, result["firstLaunch"], runtime_url, first=True)
         adb("shell", "am force-stop com.discord")
-        adb("root", timeout=15)
-        adb("wait-for-device", timeout=30)
-        if adb("shell", "id -u") != "0":
-            raise ValueError("Use a userdebug emulator supporting adb root for post-launch inspection")
+        result["firstLaunch"]["inspectionAdbdRestartConnectionClosed"] = set_adbd_root(adb, True)
         result["firstLaunch"].update(status="passed", verifiedBeforeTestWrites=True, files=check_files(adb, defaults))
 
         with tempfile.TemporaryDirectory(prefix="android-client-probe-", dir=options.output) as temporary:
@@ -282,11 +280,10 @@ def run(options):
             # runtime without resetting the observed script, disabled flags or data.
             adb("shell", f"rm {DATA}/cache/revenge/bundle.js && test ! -e {DATA}/cache/revenge/bundle.js")
             result["restart"]["cacheRemovedBeforeLaunch"] = True
-            result["restart"]["adbdRestartConnectionClosed"] = unroot(adb)
+            result["restart"]["adbdRestartConnectionClosed"] = set_adbd_root(adb, False)
             launch_client(adb, activity, remote_ui, options.output, result["restart"], runtime_url)
             adb("shell", "am force-stop com.discord")
-            adb("root", timeout=15)
-            adb("wait-for-device", timeout=30)
+            result["restart"]["inspectionAdbdRestartConnectionClosed"] = set_adbd_root(adb, True)
             files = check_files(adb, {**defaults, **observed}, native_config=True)
             adb("shell", f"test ! -e {DATA}/files/revenge/plugins/dist/uk.co.protonn.removed-example")
             result["restart"].update(status="passed", cacheRestored=True, statePreserved=True, files=files)
