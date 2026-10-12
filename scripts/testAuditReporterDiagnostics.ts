@@ -178,6 +178,38 @@ test("actual reporter Logger messages preserve patch, lookup and plugin-start fa
     assert.deepEqual(f.calls, ["close", "report", "exit"]);
 });
 
+test("patched factory errors remain fatal after fallback and retain bounded stacks and numeric source evidence", async () => {
+    for (const label of [
+        "Error in patched module factory (Module id is 335253):\n",
+        "Error in patched module factory:\n",
+        ...["fixture", "90071992547409999", "0335253", "-1", "Symbol(module)", "line\nbreak"].map(id => `Error in patched module factory (Module id is ${id}):\n`)
+    ]) {
+        const original = function failedFactory() { assert.fail("Source capture must not execute a factory"); };
+        const f = fixture(undefined, "success", { Vencord: { Webpack: { wreq: { m: { "335253": original } } } } });
+        const messages: ReturnType<typeof consoleMessage>[] = [];
+        const { Logger } = loadTestModule<typeof import("../src/utils/Logger")>("src/utils/Logger.ts", {}, {
+            IS_REPORTER: true, IS_WEB: true, IS_VESKTOP: false, IS_EQUIBOP: false,
+            console: { error: (...args: unknown[]) => messages.push(consoleMessage(args, "error")) }
+        });
+        const error = Object.assign(new Error("Patch initialization failed"), {
+            stack: ["ReferenceError: Patch initialization failed", ...Array.from({ length: 40 }, (_, i) => `at frame${i} (${"x".repeat(500)})`)].join("\n")
+        });
+        new Logger("WebpackPatcher").error(label, error);
+        await f.reporter.main();
+        await f.reporter.handleConsole(messages[0]);
+        await f.reporter.finishReporter();
+        assert.deepEqual(f.exits, [1]);
+        const finding = f.reporter.report.badPatches[0];
+        assert.equal(finding.type, "factory execution error");
+        assert.match(finding.error, /ReferenceError: Patch initialization failed\nat frame0/);
+        assert.ok(finding.error.length <= 8_000 && finding.error.split("\n").length <= 25);
+        const expected = label === "Error in patched module factory (Module id is 335253):\n" ? ["335253"] : [];
+        assert.equal(finding.id, expected[0] ?? "-");
+        assert.deepEqual(Array.from(f.captured[0].ids), expected);
+        if (expected.length) assert.equal(JSON.parse(f.written[0]).factories[0].original, String(original));
+    }
+});
+
 test("confirmed timing outliers retain the initial and both replay measurements without failing a clean report", async () => {
     const f = fixture();
     const timing = { plugin: "FixCodeblockGap", id: "999915", match: "literal", initialMs: 44.1, samplesMs: [0.1, 0.2], status: "outlier" };
@@ -386,7 +418,7 @@ test("configured literal probes find only unique original factories without exec
 test("configured numeric factory requests capture known source without scanning or executing modules", async () => {
     const workflow = load(readFileSync(".github/workflows/client-smoke.yml", "utf8"));
     const configured = workflow.jobs.reporter.steps.find(step => step.name === "Test logged-out Discord").env;
-    assert.equal(configured.REPORTER_FACTORY_IDS, undefined);
+    assert.deepEqual(JSON.parse(configured.REPORTER_FACTORY_IDS), ["335253"]);
     assert.equal(configured.REPORTER_FACTORY_PROBES, undefined);
     const original = function knownFactory() { assert.fail("Must not execute a factory"); };
     const reads: string[] = [];

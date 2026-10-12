@@ -38,6 +38,7 @@ jobs:
                   REPORTER_TIMEOUT_MS: 180000
                   REPORTER_SCREENSHOT_PATH: ${{ runner.temp }}/client-smoke/failure.png
                   REPORTER_FACTORY_PATH: ${{ runner.temp }}/client-smoke/failed-factories.json
+                  REPORTER_FACTORY_IDS: '["335253"]'
               shell: bash
               run: |
                   set -euo pipefail

@@ -361,6 +361,32 @@ function notifyFactoryListeners(moduleId: PropertyKey, factory: AnyModuleFactory
     }
 }
 
+// Snapshot only the current module and its initial namespaces. Descriptor copies
+// preserve getters without reading them and keep circular import references valid.
+function createFactoryRollback(module: object, exports: unknown) {
+    const moduleExports = Object.getOwnPropertyDescriptor(module, "exports");
+    const targets = new Set([exports, moduleExports?.value, module]);
+    const snapshots = Array.from(targets).flatMap(target => target != null && (typeof target === "object" || typeof target === "function")
+        ? [{ target, descriptors: Object.getOwnPropertyDescriptors(target), prototype: Object.getPrototypeOf(target), extensible: Object.isExtensible(target) }]
+        : []);
+
+    return () => {
+        for (const { target, descriptors, prototype, extensible } of snapshots) {
+            if (Object.isExtensible(target) !== extensible)
+                throw new Error("Factory changed an object's extensibility");
+
+            for (const key of Reflect.ownKeys(target)) {
+                if (!Object.hasOwn(descriptors, key) && !Reflect.deleteProperty(target, key))
+                    throw new Error("Factory added a non-configurable property");
+            }
+
+            Object.defineProperties(target, descriptors);
+            if (!Reflect.setPrototypeOf(target, prototype))
+                throw new Error("Could not restore a factory object's prototype");
+        }
+    };
+}
+
 /**
  * Run a (possibly) patched module factory with a wrapper which notifies our listeners.
  *
@@ -407,6 +433,11 @@ function runFactoryWithWrap(patchedFactory: PatchedModuleFactory, thisArg: unkno
         }
     }
 
+    const moduleId = module.id;
+    // A failed patched factory can leave export getters referencing uninitialized
+    // bindings. Keep the namespace identity, but restore its descriptors before retrying.
+    const rollback = patchedFactory === originalFactory ? undefined : createFactoryRollback(module, exports);
+
     let factoryReturn: unknown;
     try {
         factoryReturn = patchedFactory.apply(thisArg, argArray);
@@ -416,8 +447,14 @@ function runFactoryWithWrap(patchedFactory: PatchedModuleFactory, thisArg: unkno
             throw err;
         }
 
-        logger.error("Error in patched module factory:\n", err);
-        return originalFactory.apply(thisArg, argArray);
+        logger.error(`Error in patched module factory (Module id is ${String(moduleId)}):\n`, err);
+        try {
+            rollback!();
+        } catch (rollbackError) {
+            logger.error(`Could not restore patched module factory (Module id is ${String(moduleId)}):\n`, rollbackError);
+            throw err;
+        }
+        factoryReturn = originalFactory.apply(thisArg, argArray);
     }
 
     exports = module.exports;

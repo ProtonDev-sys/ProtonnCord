@@ -47,6 +47,12 @@ async function maybeGetError(handle: JSHandle): Promise<string | undefined> {
         .catch(() => undefined);
 }
 
+async function getFactoryErrorDetails(handle: JSHandle): Promise<string> {
+    const [message, stack] = await Promise.all(["message", "stack"].map(property => handle?.getProperty(property)
+        .then(value => value?.jsonValue()).catch(() => undefined)));
+    return describeError({ message: typeof message === "string" ? message : "Unknown factory error", stack: typeof stack === "string" ? stack : undefined });
+}
+
 interface PatchInfo {
     plugin: string;
     type: string;
@@ -541,6 +547,14 @@ async function handleConsole(e: ConsoleMessage) {
 
         switch (tag) {
             case "WebpackPatcher:":
+                if (message.startsWith("Error in patched module factory:") || message.startsWith("Error in patched module factory (Module id is ")) {
+                    process.exitCode = 1;
+                    const error = await getFactoryErrorDetails(e.args()[3]);
+                    const id = message.match(/^Error in patched module factory \(Module id is (0|[1-9]\d{0,15})\):/)?.[1] ?? "-";
+                    logStderr(message, error);
+                    report.badPatches.push({ plugin: "Webpack module", type: "factory execution error", id, match: "(runtime)", error });
+                    break;
+                }
                 const patchFailMatch = message.match(/Patch by (.+?) (had no effect|errored|found no module) \(Module id is (.+?)\): (.+)/);
                 const patchSlowMatch = message.match(/Patch by (.+?) (took [\d.]+?ms) \(Module id is (.+?)\): (.+)/);
                 const match = patchFailMatch ?? patchSlowMatch;
