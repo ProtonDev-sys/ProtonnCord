@@ -12,102 +12,77 @@ import { OpenExternalIcon } from "@components/Icons";
 import { Devs, EquicordDevs } from "@utils/constants";
 import { classNameFactory } from "@utils/css";
 import definePlugin from "@utils/types";
-import { CloudUpload } from "@vencord/discord-types";
-import { findByPropsLazy } from "@webpack";
-import { DraftType, FluxDispatcher, Menu, PermissionsBits, PermissionStore, React, SelectedChannelStore, showToast, Toasts, UploadAttachmentStore, useEffect, UserStore, useState } from "@webpack/common";
+import { Channel, CloudUpload } from "@vencord/discord-types";
+import { DraftType, Menu, PermissionsBits, PermissionStore, React, SelectedChannelStore, showToast, Toasts, UploadAttachmentStore, useEffect, UserStore, useState } from "@webpack/common";
 
 import { settings } from "./settings";
 import { serviceLabels, ServiceType } from "./types";
 import { getMediaUrl } from "./utils/getMediaUrl";
-import { cancelCurrentUpload, getUploadState, isConfigured, isFileTypeAllowed, isUploadBusy, logger, stopUploads, subscribeUploadState, uploadFile, uploadPickedFile, uploadProvidedFiles } from "./utils/upload";
+import { cancelCurrentUpload, getUploadState, isConfigured, isExternalUploadAllowed, isFileTypeAllowed, isUploadBusy, logger, stopUploads, subscribeUploadState, uploadFile, uploadPickedFile, uploadProvidedFiles } from "./utils/upload";
 const cl = classNameFactory("vc-file-upload-");
-const { getUserMaxFileSize } = findByPropsLazy("getUserMaxFileSize");
-let uploadAddFilesInterceptor: ((event: unknown) => void) | null = null;
-let pasteEventListener: ((event: ClipboardEvent) => void) | null = null;
+let started = false;
+let uploadContextGeneration = 0;
 
-type UploadAddFilesEvent = {
-    type: string;
-    files?: unknown;
-    uploads?: unknown;
-    items?: unknown;
-    draftType?: unknown;
-    maxFileSize?: unknown;
-    fileSizeLimit?: unknown;
-    limits?: {
-        fileSize?: unknown;
+interface UploadContext {
+    accountId: string;
+    channel: Channel;
+    generation: number;
+    pastedFile: boolean;
+}
+
+function isCurrentUploadContext(context: UploadContext): boolean {
+    const { channel } = context;
+    return started && context.generation === uploadContextGeneration
+        && UserStore.getCurrentUser()?.id === context.accountId
+        && SelectedChannelStore.getChannelId() === channel.id
+        && (!channel.guild_id || PermissionStore.can(
+            (channel.isThread() ? PermissionsBits.SEND_MESSAGES_IN_THREADS : PermissionsBits.SEND_MESSAGES) | PermissionsBits.ATTACH_FILES, channel
+        ));
+}
+
+function captureUploadContext(channel: Channel, draftType: number, options?: {
+    requireConfirm?: boolean; isThumbnail?: boolean; filesMetadata?: unknown; origin?: string; fileUploadPastedFiles?: boolean;
+}): UploadContext | undefined {
+    const accountId = UserStore.getCurrentUser()?.id;
+    const pastedFile = options?.origin === "clipboard" && options.fileUploadPastedFiles === true;
+    if (!accountId || !channel?.id || draftType !== DraftType.ChannelMessage
+        || options?.requireConfirm === false || options?.isThumbnail || options?.filesMetadata != null
+        || !(settings.store.bypassDiscordUpload || pastedFile && settings.store.autoUploadPastedFiles)
+        || !isConfigured() || isUploadBusy()) return;
+
+    const context = { accountId, channel, generation: uploadContextGeneration, pastedFile };
+    return isCurrentUploadContext(context) ? context : undefined;
+}
+
+async function interceptUploadFiles(files: readonly File[], context: UploadContext | undefined, exceedsCount: () => boolean, exceedsSize: () => boolean, openChat: () => void): Promise<boolean> {
+    if (!context) return false;
+    const canClaim = (checkBusy = true) => isCurrentUploadContext(context) && isConfigured() && (!checkBusy || !isUploadBusy())
+        && files.length > 0 && files.every(file => file instanceof File && isFileTypeAllowed(file))
+        && !exceedsCount() && (context.pastedFile && settings.store.autoUploadPastedFiles
+            || settings.store.bypassDiscordUpload && (!settings.store.bypassDiscordUploadOnlyOverLimit || exceedsSize()));
+    if (!canClaim()) return false;
+    if (!await isExternalUploadAllowed(context.accountId, context.channel.id)) return false;
+    if (!canClaim()) return false;
+    openChat();
+    if (!canClaim()) return false;
+
+    // The uploader claims its busy state synchronously before its first await.
+    void uploadProvidedFiles(files, undefined, () => canClaim(false)).catch(error => logger.warn("Upload handoff failed", error));
+    return true;
+}
+
+function retireUploadContext() {
+    uploadContextGeneration++;
+    stopUploads();
+}
+
+function withUploadContext(action: () => Promise<unknown>, channelId = SelectedChannelStore.getChannelId()) {
+    const accountId = UserStore.getCurrentUser()?.id;
+    const generation = uploadContextGeneration;
+    return () => {
+        if (started && accountId && channelId && generation === uploadContextGeneration
+            && UserStore.getCurrentUser()?.id === accountId && SelectedChannelStore.getChannelId() === channelId) return action();
     };
-};
-
-function shouldInterceptUploadFiles(files: readonly File[], payload: UploadAddFilesEvent): boolean {
-    if (!settings.store.bypassDiscordUploadOnlyOverLimit) return true;
-
-    const directLimit = [payload.maxFileSize, payload.fileSizeLimit, payload.limits?.fileSize].find(limit => Number.isFinite(limit)) as number | undefined;
-    const fallbackLimit = getUserMaxFileSize(UserStore.getCurrentUser());
-    const discordLimit = Math.max(0, directLimit ?? fallbackLimit);
-
-    return files.some(file => file.size > discordLimit);
-}
-function extractFilesFromValue(value: unknown): File[] {
-    if (value instanceof File) return [value];
-
-    if (!Array.isArray(value)) return [];
-
-    return value.flatMap(entry => {
-        if (entry instanceof File) return [entry];
-
-        if (!entry || typeof entry !== "object") return [];
-
-        const uploadFile = "file" in entry ? entry.file : null;
-        if (uploadFile instanceof File) return [uploadFile];
-
-        const item = "item" in entry && entry.item && typeof entry.item === "object" ? entry.item : null;
-        if (!item || !("file" in item)) return [];
-
-        return item.file instanceof File ? [item.file] : [];
-    });
-}
-
-function interceptUploadAddFiles(event: unknown): void {
-    if (!event || typeof event !== "object" || !("type" in event)) return;
-
-    const payload = event as UploadAddFilesEvent;
-    if (payload.type !== "UPLOAD_ATTACHMENT_ADD_FILES") return;
-
-    if (payload.draftType !== DraftType.ChannelMessage) return;
-
-    if (!settings.store.bypassDiscordUpload || !isConfigured() || isUploadBusy()) return;
-
-    const files = [
-        ...extractFilesFromValue(payload.files),
-        ...extractFilesFromValue(payload.uploads),
-        ...extractFilesFromValue(payload.items)
-    ];
-    const uniqueFiles = Array.from(new Set(files));
-
-    if (!uniqueFiles.length) return;
-    if (!uniqueFiles.every(isFileTypeAllowed)) return;
-    if (!shouldInterceptUploadFiles(uniqueFiles, payload)) return;
-
-    payload.files = [];
-    payload.uploads = [];
-    payload.items = [];
-    void uploadProvidedFiles(uniqueFiles);
-}
-
-function handlePaste(event: ClipboardEvent) {
-    if (!(event.target instanceof Element) || !event.target.closest("[data-slate-editor]")) return;
-    const files = Array.from(event.clipboardData?.files || []);
-    if (files.length === 0) return;
-
-    if (!settings.store.autoUploadPastedFiles || !isConfigured() || isUploadBusy()) return;
-
-    const allowed = files.filter(f => isFileTypeAllowed(f));
-    if (allowed.length !== files.length) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    void uploadProvidedFiles(allowed);
 }
 
 function formatBytes(bytes: number): string {
@@ -199,7 +174,7 @@ const messageContextMenuPatch: NavContextMenuPatchCallback = (children, props) =
                 label={`Upload to ${serviceName}`}
                 key="file-upload"
                 id="file-upload"
-                action={() => uploadFile(url)}
+                action={withUploadContext(() => uploadFile(url))}
             />
         );
     }
@@ -224,7 +199,7 @@ const imageContextMenuPatch: NavContextMenuPatchCallback = (children, props) => 
                 label={`Upload to ${serviceName}`}
                 key="file-upload"
                 id="file-upload"
-                action={() => uploadFile(url)}
+                action={withUploadContext(() => uploadFile(url))}
             />
         </Menu.MenuGroup>
     );
@@ -260,7 +235,9 @@ const ExternalIcon = () => <OpenExternalIcon height={24} width={24} />;
 const channelAttachMenuPatch: NavContextMenuPatchCallback = (children, props) => {
     const channel = props?.channel;
     if (!channel) return;
-    if (channel.guild_id && !PermissionStore.can(PermissionsBits.SEND_MESSAGES, channel)) return;
+    if (channel.guild_id && !PermissionStore.can(
+        (channel.isThread() ? PermissionsBits.SEND_MESSAGES_IN_THREADS : PermissionsBits.SEND_MESSAGES) | PermissionsBits.ATTACH_FILES, channel
+    )) return;
     if (children.some(child => child?.props?.id === "file-upload-manual" || child?.props?.id === "file-upload-uploads")) return;
 
     const uploads = UploadAttachmentStore.getUploads(channel.id, DraftType.ChannelMessage);
@@ -283,7 +260,7 @@ const channelAttachMenuPatch: NavContextMenuPatchCallback = (children, props) =>
                         id={`file-upload-draft-${upload.id}`}
                         key={upload.id}
                         label={upload.filename}
-                        action={() => handleUploadFileFromDraft(upload, channel.id)}
+                        action={withUploadContext(() => handleUploadFileFromDraft(upload, channel.id), channel.id)}
                     />
                 ))}
                 <Menu.MenuSeparator />
@@ -291,7 +268,7 @@ const channelAttachMenuPatch: NavContextMenuPatchCallback = (children, props) =>
                     id="file-upload-manual"
                     key="file-upload-manual"
                     label="Choose File..."
-                    action={() => uploadPickedFile()}
+                    action={withUploadContext(uploadPickedFile, channel.id)}
                 />
             </Menu.MenuItem>
         );
@@ -306,7 +283,7 @@ const channelAttachMenuPatch: NavContextMenuPatchCallback = (children, props) =>
                     type: "icon",
                     icon: ExternalIcon
                 }}
-                action={() => uploadPickedFile()}
+                action={withUploadContext(uploadPickedFile, channel.id)}
             />
         );
     }
@@ -326,13 +303,38 @@ export default definePlugin({
                 replace: "$1,$self.renderUploadProgress()$2"
             }
         },
-        // forces an early return on the file size limit nitro upsell modal
+        // Claim only supported channel uploads after Discord prepares and validates the files.
         {
-            find: "#{intl::tRuxk9::raw}",
-            replacement: {
-                match: /(?<=MAX_FILE_SIZE_250_MB.{0,250})Array\.from\(\i\)\.some/,
-                replace: "$self.shouldBypassDiscordUploadSizeCheck()?false:$&"
-            }
+            find: "Unexpected mismatch between files and file metadata",
+            group: true,
+            replacement: [
+                {
+                    match: /(?=let\{filesMetadata:\i,requireConfirm:)/,
+                    replace: "const fileUploadContext=$self.captureUploadContext(arguments[1],arguments[2],arguments[3]);"
+                },
+                {
+                    match: /if\((\i\.type!==\i\.\i\.GUILD_VOICE&&\i\.type!==\i\.\i\.GUILD_STAGE_VOICE\|\|\i\.\i\.getChatOpen\(\i\.id\)\|\|\i\.\i\.updateChatOpen\(\i\.id,!0\)),(\i)\)/,
+                    replace: "function fileUploadOpenChat(){return $1}if(fileUploadOpenChat(),$2)"
+                },
+                {
+                    match: /if\((\(0,\i\.\i\))\(\{files:(\i),guildId:(\i)\}\)\)return void \i\((\i),\2\);if\((\i\.\i\.getUploadCount\(\4\.id,\i\)\+\i\.length>\i\.\i)\)/,
+                    replace: "if(fileUploadContext&&await $self.interceptUploadFiles($2,fileUploadContext,()=>($5),()=>$1({files:$2,guildId:$3,canDeferSizeChecks:!1}),fileUploadOpenChat))return;$&"
+                }
+            ]
+        },
+        {
+            find: 'origin:"clipboard"',
+            group: true,
+            replacement: [
+                {
+                    match: /(?<=let\{files:\i,errors:\i)(?=\}=function\(\i,\i\)\{)/,
+                    replace: ",convertedStringToFile:fileUploadPasteIsText"
+                },
+                {
+                    match: /(?<=origin:"clipboard")(?=\})/,
+                    replace: ",fileUploadPastedFiles:!fileUploadPasteIsText"
+                }
+            ]
         },
     ],
     contextMenus: {
@@ -340,33 +342,17 @@ export default definePlugin({
         "image-context": imageContextMenuPatch,
         "channel-attach": channelAttachMenuPatch
     },
+    flux: { LOGOUT: retireUploadContext },
+
     start() {
-        if (uploadAddFilesInterceptor) {
-            return;
-        }
-
-        uploadAddFilesInterceptor = event => interceptUploadAddFiles(event);
-        FluxDispatcher.addInterceptor(uploadAddFilesInterceptor);
-
-        pasteEventListener = event => handlePaste(event);
-        document.addEventListener("paste", pasteEventListener, true);
+        started = true;
     },
     stop() {
-        stopUploads();
-        if (uploadAddFilesInterceptor) {
-            const index = FluxDispatcher._interceptors.indexOf(uploadAddFilesInterceptor);
-            if (index > -1) FluxDispatcher._interceptors.splice(index, 1);
-            uploadAddFilesInterceptor = null;
-        }
-
-        if (pasteEventListener) {
-            document.removeEventListener("paste", pasteEventListener, true);
-            pasteEventListener = null;
-        }
+        started = false;
+        retireUploadContext();
     },
-    shouldBypassDiscordUploadSizeCheck(): boolean {
-        return Boolean(settings.store.bypassDiscordUpload) && isConfigured();
-    },
+    captureUploadContext,
+    interceptUploadFiles,
     renderUploadProgress() {
         return <ProgressBar />;
     }

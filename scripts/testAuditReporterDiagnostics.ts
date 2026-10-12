@@ -317,7 +317,7 @@ test("configured literal probes find only unique original factories without exec
 test("configured numeric factory requests capture known source without scanning or executing modules", async () => {
     const workflow = load(readFileSync(".github/workflows/client-smoke.yml", "utf8"));
     const configured = workflow.jobs.reporter.steps.find(step => step.name === "Test logged-out Discord").env;
-    assert.deepEqual(JSON.parse(configured.REPORTER_FACTORY_IDS), ["230797"]);
+    assert.equal(configured.REPORTER_FACTORY_IDS, undefined);
     assert.equal(configured.REPORTER_FACTORY_PROBES, undefined);
     const original = function knownFactory() { assert.fail("Must not execute a factory"); };
     const reads: string[] = [];
@@ -330,7 +330,7 @@ test("configured numeric factory requests capture known source without scanning 
     const require = Object.assign(() => assert.fail("Must not require a module"), { m: factories });
     Object.defineProperty(require, "c", { get() { assert.fail("Must not read module cache"); } });
     const f = fixture(undefined, "success", { Vencord: { Webpack: { wreq: require } } });
-    Object.assign(f.processState.env, { REPORTER_FACTORY_IDS: JSON.stringify([...JSON.parse(configured.REPORTER_FACTORY_IDS), "230797", "7", "8", "9", "10"]) });
+    Object.assign(f.processState.env, { REPORTER_FACTORY_IDS: JSON.stringify(["230797", "230797", "7", "8", "9", "10"]) });
     await f.reporter.main();
     f.reporter.report.badPatches.push({ id: "7" });
     f.processState.exitCode = 1;
