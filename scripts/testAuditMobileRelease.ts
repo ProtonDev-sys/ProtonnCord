@@ -92,6 +92,8 @@ with open(os.environ["MOBILE_TEST_CALLS"], "a") as stream:
     stream.write(json.dumps(sys.argv[1:]) + "\\n")
 if os.environ["MOBILE_TEST_CONFLICT"] == "1" and sys.argv[1:3] == ["release", "create"]:
     sys.exit(1)
+if sys.argv[1:3] == ["api", f"repos/{os.environ['GITHUB_REPOSITORY']}/git/ref/tags/mobile-nightly"]:
+    print(f"commit {os.environ['GITHUB_SHA']}")
 `);
     writeFileSync(join(bin, "git"), `#!/usr/bin/env python3
 import os, sys
@@ -120,7 +122,13 @@ test("publish-only retry retains the downloaded build's tag, version and bytes",
     assert.ok(created);
     assert.equal(created[2], build.tag, "attempt 2 must publish the artifact's attempt-1 tag");
     assert.equal(created[created.indexOf("--target") + 1], context.GITHUB_SHA);
-    assert.deepEqual(calls.at(-1), ["release", "upload", "mobile-nightly", "dist/index.json", "--clobber"]);
+    assert.deepEqual(calls.slice(-3), [
+        ["release", "upload", "mobile-nightly", "dist/index.json", "--clobber"],
+        ["api", "--method", "PATCH", `repos/${context.GITHUB_REPOSITORY}/git/refs/tags/mobile-nightly`,
+            "--field", `sha=${context.GITHUB_SHA}`, "--field", "force=true"],
+        ["api", `repos/${context.GITHUB_REPOSITORY}/git/ref/tags/mobile-nightly`,
+            "--jq", '.object.type + " " + .object.sha'],
+    ]);
     assert.deepEqual(readdirSync(build.dist).sort(), Object.keys(build.assets).sort());
     for (const [name, bytes] of Object.entries(build.assets)) assert.deepEqual(readFileSync(join(build.dist, name)), Buffer.from(bytes));
 });
