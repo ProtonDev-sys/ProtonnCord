@@ -49,8 +49,29 @@ try {
 
     const gui = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", String.raw`
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing, Accessibility
+# Legacy .NET Framework controls expose MSAA even when UIA Invoke is unavailable.
+Add-Type -ReferencedAssemblies ([Accessibility.IAccessible].Assembly.Location) -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using Accessibility;
+public static class SetupAccessibility {
+    [DllImport("oleacc.dll")]
+    private static extern int AccessibleObjectFromWindow(IntPtr window, uint objectId, ref Guid iid,
+        [MarshalAs(UnmanagedType.Interface)] out IAccessible accessible);
+    public static void Press(IntPtr window) {
+        if (window == IntPtr.Zero) throw new InvalidOperationException("Button has no native window.");
+        var iid = new Guid("618736e0-3c3d-11cf-810c-00aa00389b71");
+        IAccessible accessible;
+        Marshal.ThrowExceptionForHR(AccessibleObjectFromWindow(window, 0xfffffffc, ref iid, out accessible));
+        if (accessible.get_accName(0) != "Install / repair ProtonnCord" || Convert.ToInt32(accessible.get_accRole(0)) != 43)
+            throw new InvalidOperationException("MSAA object is not the setup button.");
+        accessible.accDoDefaultAction(0);
+    }
+}
+'@
 $process = Start-Process -FilePath $env:PROTONN_SETUP_EXE -PassThru
+$window = $null
 try {
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
@@ -61,10 +82,17 @@ try {
     } while ([DateTime]::UtcNow -lt $deadline)
     if ($process.MainWindowHandle -eq 0) { throw 'Setup window did not appear.' }
     $window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
-    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'Install / repair ProtonnCord')
-    $button = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
-    if ($null -eq $button) { throw 'Install button was not found.' }
-    $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $condition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, 'Install / repair ProtonnCord'),
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button))
+    $buttons = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+    if ($buttons.Count -ne 1) { throw 'Exactly one install button must be present.' }
+    $button = $buttons[0]
+    if ($button.Current.ProcessId -ne $process.Id -or -not $button.Current.IsEnabled) { throw 'Setup button is not enabled or belongs to another process.' }
+    Write-Output ('Setup button patterns: ' + (($button.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) -join ', '))
+    $invoke = $null
+    if ($button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) { $invoke.Invoke() }
+    else { [SetupAccessibility]::Press([IntPtr]$button.Current.NativeWindowHandle) }
     $deadline = [DateTime]::UtcNow.AddSeconds(70)
     $installed = $false
     do {
@@ -77,22 +105,26 @@ try {
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
     if (-not $installed) { throw 'GUI installation did not complete.' }
-    $bounds = $window.Current.BoundingRectangle
-    $bitmap = New-Object System.Drawing.Bitmap([int]$bounds.Width, [int]$bounds.Height)
-    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    try {
-        $graphics.CopyFromScreen([int]$bounds.X, [int]$bounds.Y, 0, 0, $bitmap.Size)
-        $bitmap.Save($env:PROTONN_SETUP_SCREENSHOT, [System.Drawing.Imaging.ImageFormat]::Png)
-    } finally { $graphics.Dispose(); $bitmap.Dispose() }
     Write-Output 'Double-click GUI installation completed.'
 } finally {
+    try {
+        if ($null -ne $window -and -not $process.HasExited) {
+            $bounds = $window.Current.BoundingRectangle
+            $bitmap = New-Object System.Drawing.Bitmap([int]$bounds.Width, [int]$bounds.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            try {
+                $graphics.CopyFromScreen([int]$bounds.X, [int]$bounds.Y, 0, 0, $bitmap.Size)
+                $bitmap.Save($env:PROTONN_SETUP_SCREENSHOT, [System.Drawing.Imaging.ImageFormat]::Png)
+            } finally { $graphics.Dispose(); $bitmap.Dispose() }
+        }
+    } catch { Write-Warning ('Setup screenshot: ' + $_.Exception.Message) }
     if (-not $process.HasExited) {
         $process.CloseMainWindow() | Out-Null
         if (-not $process.WaitForExit(5000)) { $process.Kill() }
     }
 }`], { env, encoding: "utf8", timeout: 100000 });
-    assert.equal(gui.status, 0, gui.error?.message ?? gui.stderr);
     console.log(gui.stdout.trim());
+    assert.equal(gui.status, 0, gui.error?.message ?? gui.stderr);
     assert.deepEqual(readFileSync(join(resources, "_app.asar")), original);
     assert.equal(extractFile(app, "index.js").toString(), `require(${JSON.stringify(archive)})`);
     assert.equal(hash(archive), metadata.archiveSha256);
