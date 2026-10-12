@@ -39,6 +39,14 @@ try {
             ` }));
         } }],
     });
+    const patcher = await readFile(join(repository, "src/main/patcher.ts"), "utf8");
+    const permissionStart = patcher.indexOf("function isDiscordOrigin(");
+    const permissionEnd = patcher.indexOf("if (!IS_VANILLA)");
+    assert.ok(permissionStart >= 0 && permissionEnd > permissionStart);
+    await build({
+        stdin: { contents: `import * as electron from "electron";\n${patcher.slice(permissionStart, permissionEnd)}\nexport { installDiscordMediaPermissionBypass };`, loader: "ts" },
+        bundle: true, platform: "node", format: "cjs", external: ["electron"], outfile: join(directory, "permissions.cjs"),
+    });
     await writeFile(join(directory, "host-preload.cjs"), 'require("electron").contextBridge.exposeInMainWorld("testHostPreload", true);\n');
     await writeFile(join(directory, "raw-preload.cjs"), `
         const { ipcRenderer, contextBridge } = require("electron");
@@ -123,10 +131,17 @@ function runElectronChecks(buildDirectory) {
     app.whenReady().then(async () => {
         // Override both network schemes before creating any renderer. These
         // fixtures never reach Discord or any other network service.
-        const respond = request => new Response(
-            new URL(request.url).pathname === "/parent" ? '<!doctype html><iframe src="https://discord.com/child"></iframe>' : "<!doctype html><title>IPC fixture</title>",
-            { headers: { "content-type": "text/html", ...(new URL(request.url).pathname === "/opaque" ? { "content-security-policy": "sandbox allow-scripts" } : {}) } },
-        );
+        const respond = request => {
+            const path = new URL(request.url).pathname;
+            const html = path === "/parent" ? '<iframe src="https://discord.com/child"></iframe>'
+                : path === "/media-parent" ? '<iframe src="https://attacker.invalid/media-child" allow="camera; microphone"></iframe>'
+                    : "<title>IPC fixture</title>";
+            return new Response(`<!doctype html>${html}`, { headers: {
+                "content-type": "text/html",
+                ...(path === "/opaque" ? { "content-security-policy": "sandbox allow-scripts" } : {}),
+                ...(path === "/media-parent" ? { "permissions-policy": 'camera=(self "https://attacker.invalid"), microphone=(self "https://attacker.invalid")' } : {}),
+            } });
+        };
         session.defaultSession.protocol.handle("https", respond);
         session.defaultSession.protocol.handle("http", respond);
 
@@ -209,6 +224,22 @@ function runElectronChecks(buildDirectory) {
         assert.equal(globalThis.fixtureNativeLoads, 1);
         assert.equal(globalThis.fixtureNativeCalls, 8);
         assert.equal(watcherStarts, 10);
+        require("./permissions.cjs").installDiscordMediaPermissionBypass();
+        let delegatedMediaChecks = 0;
+        session.defaultSession.setPermissionCheckHandler(() => { delegatedMediaChecks++; return false; });
+        session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+        const media = window(join(__dirname, "raw-preload.cjs"));
+        await media.loadURL("https://discord.com/media-parent");
+        const mediaChild = media.webContents.mainFrame.frames.find(frame => frame.url === "https://attacker.invalid/media-child");
+        assert.ok(mediaChild);
+        for (const permission of ["camera", "microphone"]) {
+            const query = `navigator.permissions.query({ name: ${JSON.stringify(permission)} }).then(permission => permission.state)`;
+            assert.equal(await evaluate(media, query), "granted");
+            assert.notEqual(await mediaChild.executeJavaScript(query), "granted");
+        }
+        assert.ok(delegatedMediaChecks > 0, "untrusted media checks must reach the host's permission policy");
+        media.destroy();
+        console.log("PASS camera and microphone permission checks trust the requester, with foreign frames delegated to the host policy.");
         const result = JSON.stringify({ electron: process.versions.electron, chromium: process.versions.chrome, assertions: "all passed" });
         writeFileSync(join(__dirname, "result.json"), result);
         console.log(result);
