@@ -239,11 +239,11 @@ let isFinishing = false;
 let reporterTimeout: ReturnType<typeof setTimeout> | undefined;
 let finishing: Promise<void> | undefined;
 
-function waitForReporterCleanup<Value>(promise: Promise<Value>, timeoutMs: number): Promise<Value> {
+function waitForReporterCleanup<Value>(promise: Promise<Value>, timeoutMs: number, message = "Reporter browser cleanup timed out"): Promise<Value> {
     let timeout: ReturnType<typeof setTimeout>;
     return Promise.race([
         promise,
-        new Promise<never>((_resolve, reject) => { timeout = setTimeout(() => reject(new Error("Reporter browser cleanup timed out")), timeoutMs); }),
+        new Promise<never>((_resolve, reject) => { timeout = setTimeout(() => reject(new Error(message)), timeoutMs); }),
     ]).finally(() => clearTimeout(timeout));
 }
 
@@ -271,6 +271,14 @@ function finishReporter(timedOut = false, closeTimeoutMs = 10_000, finalTimeoutM
             process.exit(1);
         }, finalTimeoutMs);
         try {
+            const screenshotPath = process.env.REPORTER_SCREENSHOT_PATH;
+            if (screenshotPath && page && process.exitCode) {
+                try {
+                    await waitForReporterCleanup(page.screenshot({ path: screenshotPath, type: "png", fullPage: false }), 5_000, "Reporter screenshot timed out");
+                } catch (error) {
+                    logStderr("Could not capture reporter screenshot", describeError(error));
+                }
+            }
             try {
                 if (browser) await waitForReporterCleanup(browser.close(), closeTimeoutMs);
             } catch (error) {
@@ -294,7 +302,7 @@ function finishReporter(timedOut = false, closeTimeoutMs = 10_000, finalTimeoutM
 
 async function failReporter(error: unknown) {
     if (!isFinishing) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = describeError(error);
         logStderr("Reporter failed", message);
         report.otherErrors.push(message);
         process.exitCode = 1;
@@ -323,7 +331,7 @@ async function handleConsole(e: ConsoleMessage) {
 
     const firstArg = await rawArgs[0]?.jsonValue();
 
-    const isEquicord = firstArg === "[Equicord]" || firstArg === "[ProtonnCord]";
+    const isMod = firstArg === "[Protonn Cord]" || firstArg === "[Equicord]" || firstArg === "[ProtonnCord]";
     const isDebug = firstArg === "[PUP_DEBUG]";
     const isReporterMeta = firstArg === "[REPORTER_META]";
 
@@ -333,7 +341,7 @@ async function handleConsole(e: ConsoleMessage) {
     }
 
     outer:
-    if (isEquicord) {
+    if (isMod) {
         try {
             var args = await Promise.all(e.args().map(a => a.jsonValue()));
         } catch {
@@ -415,20 +423,26 @@ async function handleConsole(e: ConsoleMessage) {
             } else {
                 logStderr("[Unexpected Error]", text);
                 report.otherErrors.push(text);
+                process.exitCode = 1;
             }
         }
     }
 }
 
-function handlePageError(e: any) {
-    if (e.message.includes("Sentry successfully disabled")) return;
+function describeError(error: unknown): string {
+    const details = error as { message?: unknown; stack?: unknown; } | null;
+    const message = typeof details?.message === "string" ? details.message : String(error);
+    const stack = typeof details?.stack === "string" ? details.stack : message;
+    return stack.split("\n", 25).join("\n").slice(0, 8_000);
+}
 
-    if (!e.message.startsWith("Object") && !e.message.includes("Cannot find module") && !/^.{1,2}$/.test(e.message)) {
-        logStderr("[Page Error]", e.message);
-        report.otherErrors.push(e.message);
-    } else {
-        report.ignoredErrors.push(e.message);
-    }
+function handlePageError(error: unknown) {
+    const details = describeError(error);
+    if (details.includes("Sentry successfully disabled")) return;
+
+    logStderr("[Page Error]", details);
+    report.otherErrors.push(details);
+    process.exitCode = 1;
 }
 
 async function main() {
@@ -442,7 +456,11 @@ async function main() {
         page = await browser.newPage();
         await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36");
         await page.setBypassCSP(true);
-        page.on("console", e => { void handleConsole(e).catch(failReporter); });
+        let consoleMessages = Promise.resolve();
+        page.on("console", e => {
+            // Keep the completion marker behind earlier asynchronous finding reads.
+            consoleMessages = consoleMessages.then(() => handleConsole(e)).catch(failReporter);
+        });
         page.on("error", e => { void failReporter(e); });
         page.on("pageerror", handlePageError);
         await page.evaluateOnNewDocument(`

@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
-function fixture(service: "spotify" | "tidal") {
+function fixture(service: "spotify" | "tidal", surface: "lyrics" | "seekbar" = "lyrics") {
     let now = 0;
     let anchor = 0;
     let position: number | undefined;
@@ -19,7 +19,7 @@ function fixture(service: "spotify" | "tidal") {
     const pending: (() => void)[] = [];
     const timers = new Set<() => void>();
     const store = {
-        track: { id: "a", duration: 60_000, songDuration: 60 }, mPosition: 10_000, isPlaying: true,
+        track: { id: "a", duration: 60_000, songDuration: 60 }, mPosition: 10_000, isPlaying: true, isSettingPosition: false,
         get position() { return this.mPosition + (this.isPlaying ? now - anchor : 0); }
     };
     const name = service === "spotify" ? "Spotify" : "Tidal";
@@ -28,12 +28,17 @@ function fixture(service: "spotify" | "tidal") {
         setInterval(callback: () => void, delay: number) { assert.equal(delay, 1000); timers.add(callback); return callback; },
         clearInterval: (callback: () => void) => timers.delete(callback)
     };
-    const compile = (file: string) => transpileModule(readFileSync(file, "utf8"), {
+    const compile = (file: string, expose = "") => transpileModule(readFileSync(file, "utf8") + expose, {
         fileName: file,
         compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
     }).outputText;
     const playbackPosition = runInNewContext(compile("src/equicordplugins/musicControls/playbackPosition.ts") + "\nexports;", { exports: {}, ...intervals });
     const mocks: Record<string, unknown> = {
+        "@api/Settings": {}, "@components/BaseText": {}, "@components/Flex": {}, "@components/Icons": {},
+        "@components/Paragraph": {}, "@components/Span": {}, "@utils/discord": {}, "@utils/misc": {},
+        "@utils/text": { formatDuration: String },
+        "../settings": {}, "./SeekBar": {}, "@equicordplugins/musicControls/spotify/SeekBar": {},
+        [`./${name}Store`]: { [`${name}Store`]: store },
         "@equicordplugins/musicControls/playbackPosition": playbackPosition,
         "@equicordplugins/musicControls/settings": { settings: { use: () => ({ lyricDelay: 0 }) } },
         [`${base}/${name}Store`]: { [`${name}Store`]: store },
@@ -41,7 +46,8 @@ function fixture(service: "spotify" | "tidal") {
         "@utils/css": { classNameFactory: () => () => "" },
         "@webpack": { findCssClassesLazy: () => ({}) },
         "@webpack/common": {
-            React: { createRef: () => ({ current: null }) },
+            React: { createRef: () => ({ current: null }), createElement: (type: unknown, props: object) => ({ type, props }) },
+            lodash: { debounce: (callback: () => void) => Object.assign(callback, { cancel() {} }) },
             useStateFromStores: (_stores: unknown, selector: () => unknown) => selector(),
             useMemo: (factory: () => unknown) => factory(),
             useState(value: number) {
@@ -58,11 +64,18 @@ function fixture(service: "spotify" | "tidal") {
             }
         }
     };
-    const path = `src/equicordplugins/musicControls/${service}/lyrics/components/util.tsx`;
-    const api = runInNewContext(compile(path) + "\nexports;", {
-        exports: {}, require(key: string) { assert.ok(key in mocks, key); return mocks[key]; }, ...intervals
+    const component = service === "spotify" ? "PlayerComponent.tsx" : "TidalPlayer.tsx";
+    const path = `src/equicordplugins/musicControls/${service}/${surface === "lyrics" ? "lyrics/components/util.tsx" : component}`;
+    const expose = surface === "lyrics" ? "" : `\nexports.SeekBarForTest = ${service === "spotify" ? "SpotifySeekBar" : "TdlSeekBar"};`;
+    const api = runInNewContext(compile(path, expose) + "\nexports;", {
+        exports: {}, require(key: string) { if (key.endsWith(".css")) return {}; assert.ok(key in mocks, key); return mocks[key]; }, ...intervals
     });
-    const render = () => { effectIndex = 0; api.useLyrics({ scroll: false }); pending.splice(0).forEach(run => run()); };
+    const render = () => {
+        effectIndex = 0;
+        if (surface === "lyrics") api.useLyrics({ scroll: false });
+        else api.SeekBarForTest();
+        pending.splice(0).forEach(run => run());
+    };
     render();
     return {
         store, render, timers, position: () => position,
@@ -73,9 +86,9 @@ function fixture(service: "spotify" | "tidal") {
     };
 }
 
-for (const service of ["spotify", "tidal"] as const) {
-    test(`${service} samples playback after delayed ticks and clamps to duration`, () => {
-        const state = fixture(service);
+for (const service of ["spotify", "tidal"] as const) for (const surface of ["lyrics", "seekbar"] as const) {
+    test(`${service} ${surface} samples playback after delayed ticks and clamps to duration`, () => {
+        const state = fixture(service, surface);
         assert.equal(state.position(), 10_000);
         state.advance(30_000);
         state.tick();
@@ -87,8 +100,8 @@ for (const service of ["spotify", "tidal"] as const) {
         assert.equal(state.timers.size, 0);
     });
 
-    test(`${service} stops on pause and resynchronizes after seek/resume`, () => {
-        const state = fixture(service);
+    test(`${service} ${surface} stops on pause and resynchronizes after seek/resume`, () => {
+        const state = fixture(service, surface);
         state.store.isPlaying = false;
         state.seek(2000);
         assert.equal(state.timers.size, 0);
@@ -106,8 +119,8 @@ for (const service of ["spotify", "tidal"] as const) {
         state.unmount();
     });
 
-    test(`${service} resets for a new track even when duration and reported position are unchanged`, () => {
-        const state = fixture(service);
+    test(`${service} ${surface} resets for a new track even when duration and reported position are unchanged`, () => {
+        const state = fixture(service, surface);
         state.advance(30_000);
         state.tick();
         state.store.track = { ...state.store.track, id: "b" };
@@ -117,3 +130,23 @@ for (const service of ["spotify", "tidal"] as const) {
         state.unmount();
     });
 }
+
+test("Spotify seekbar stops sampling during a pending seek and resynchronizes on completion", () => {
+    const state = fixture("spotify", "seekbar");
+    state.store.isSettingPosition = true;
+    state.render();
+    assert.equal(state.timers.size, 0);
+    state.advance(30_000);
+    state.tick();
+    assert.equal(state.position(), 10_000);
+    state.seek(5000);
+    assert.equal(state.position(), 5000, "a reported position still applies while seeking");
+    state.store.isSettingPosition = false;
+    state.render();
+    assert.equal(state.timers.size, 1);
+    state.advance(5000);
+    state.tick();
+    assert.equal(state.position(), 10_000);
+    state.unmount();
+    assert.equal(state.timers.size, 0);
+});

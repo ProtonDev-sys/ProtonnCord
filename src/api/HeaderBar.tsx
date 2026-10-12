@@ -8,8 +8,10 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { Logger } from "@utils/Logger";
 import { classes } from "@utils/misc";
 import { findComponentByCodeLazy, findCssClassesLazy } from "@webpack";
-import { Clickable, Tooltip, useEffect, useState } from "@webpack/common";
+import { Clickable, Tooltip } from "@webpack/common";
 import type { ComponentType, JSX, MouseEventHandler, ReactNode } from "react";
+
+import { createComponentRegistry } from "./componentRegistry";
 
 const logger = new Logger("HeaderBarAPI");
 
@@ -135,11 +137,8 @@ export function ChannelToolbarButton(props: ChannelToolbarButtonProps) {
     return <HeaderBarIcon {...props} />;
 }
 
-const headerBarButtons = new Map<string, ButtonEntry>();
-const channelToolbarButtons = new Map<string, ButtonEntry>();
-
-const headerBarListeners = new Set<() => void>();
-const channelToolbarListeners = new Set<() => void>();
+const headerBarButtons = createComponentRegistry<ButtonEntry>();
+const channelToolbarButtons = createComponentRegistry<ButtonEntry>();
 
 /**
  * Adds a button to the header bar (title bar area).
@@ -159,7 +158,6 @@ const channelToolbarListeners = new Set<() => void>();
  */
 export function addHeaderBarButton(id: string, render: HeaderBarButtonFactory, priority = 0) {
     headerBarButtons.set(id, { render, priority });
-    headerBarListeners.forEach(listener => listener());
 }
 
 /**
@@ -169,7 +167,6 @@ export function addHeaderBarButton(id: string, render: HeaderBarButtonFactory, p
  */
 export function removeHeaderBarButton(id: string) {
     headerBarButtons.delete(id);
-    headerBarListeners.forEach(listener => listener());
 }
 
 /**
@@ -190,7 +187,6 @@ export function removeHeaderBarButton(id: string) {
  */
 export function addChannelToolbarButton(id: string, render: HeaderBarButtonFactory, priority = 0) {
     channelToolbarButtons.set(id, { render, priority });
-    channelToolbarListeners.forEach(listener => listener());
 }
 
 /**
@@ -200,24 +196,13 @@ export function addChannelToolbarButton(id: string, render: HeaderBarButtonFacto
  */
 export function removeChannelToolbarButton(id: string) {
     channelToolbarButtons.delete(id);
-    channelToolbarListeners.forEach(listener => listener());
 }
 
-function RegisteredButtons({ buttons, listeners, location }: {
-    buttons: Map<string, ButtonEntry>;
-    listeners: Set<() => void>;
+function RegisteredButtons({ buttons, location }: {
+    buttons: typeof headerBarButtons;
     location: string;
 }) {
-    const [, forceUpdate] = useState(0);
-
-    useEffect(() => {
-        const listener = () => forceUpdate(n => n + 1);
-        listeners.add(listener);
-        return () => { listeners.delete(listener); };
-    }, [listeners]);
-
-    return Array.from(buttons)
-        .sort(([, a], [, b]) => a.priority - b.priority)
+    return buttons.useEntries()
         .map(([id, { render: Button }]) => (
             <ErrorBoundary noop key={id} onError={e => logger.error(`Failed to render ${location} button: ${id}`, e.error)}>
                 <Button />
@@ -227,10 +212,10 @@ function RegisteredButtons({ buttons, listeners, location }: {
 
 /** @internal Injected by HeaderBarAPI patch (do NOT call directly) */
 export function _addHeaderBarButtons() {
-    return [<RegisteredButtons key="vc-header-bar-buttons" buttons={headerBarButtons} listeners={headerBarListeners} location="header bar" />];
+    return [<RegisteredButtons key="vc-header-bar-buttons" buttons={headerBarButtons} location="header bar" />];
 }
 
 /** @internal Injected by HeaderBarAPI patch (do NOT call directly) */
 export function _addChannelToolbarButtons(toolbar: ReactNode[]) {
-    toolbar.push(<RegisteredButtons key="vc-channel-toolbar-buttons" buttons={channelToolbarButtons} listeners={channelToolbarListeners} location="channel toolbar" />);
+    toolbar.push(<RegisteredButtons key="vc-channel-toolbar-buttons" buttons={channelToolbarButtons} location="channel toolbar" />);
 }

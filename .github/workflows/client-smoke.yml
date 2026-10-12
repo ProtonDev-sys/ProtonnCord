@@ -1,0 +1,62 @@
+name: Discord client smoke
+
+on:
+    pull_request:
+        branches: [nightly]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: client-smoke-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    reporter:
+        name: Discord ${{ matrix.channel }} reporter
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        strategy:
+            fail-fast: false
+            matrix:
+                channel: [stable, canary]
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+            - name: Use Node.js 24
+              uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+              with:
+                  node-version: 24
+                  cache: pnpm
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile --prefer-offline
+            - name: Build reporter
+              run: pnpm buildReporter
+            - name: Test logged-out Discord
+              timeout-minutes: 5
+              env:
+                  CHROMIUM_BIN: /usr/bin/google-chrome
+                  USE_CANARY: ${{ matrix.channel == 'canary' && 'true' || 'false' }}
+                  REPORTER_TIMEOUT_MS: 180000
+                  REPORTER_SCREENSHOT_PATH: ${{ runner.temp }}/client-smoke/failure.png
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  mkdir -p "$RUNNER_TEMP/client-smoke"
+                  pnpm exec esbuild scripts/generateReport.ts --outfile=dist/report.mjs
+                  status=0
+                  node dist/report.mjs > "$RUNNER_TEMP/client-smoke/stdout.log" 2> "$RUNNER_TEMP/client-smoke/stderr.log" || status=$?
+                  cat "$RUNNER_TEMP/client-smoke/stdout.log"
+                  cat "$RUNNER_TEMP/client-smoke/stderr.log" >&2
+                  exit "$status"
+            - name: Upload failure diagnostics
+              if: failure()
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: client-smoke-${{ matrix.channel }}
+                  path: ${{ runner.temp }}/client-smoke/
+                  retention-days: 7
+                  if-no-files-found: warn

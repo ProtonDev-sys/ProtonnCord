@@ -22,6 +22,7 @@ import { Flex } from "@components/Flex";
 import { CopyIcon, ImageIcon, LinkIcon, OpenExternalIcon } from "@components/Icons";
 import { Paragraph } from "@components/Paragraph";
 import { Span } from "@components/Span";
+import { followPlaybackPosition } from "@equicordplugins/musicControls/playbackPosition";
 import { classNameFactory } from "@utils/css";
 import { copyWithToast, openImageModal } from "@utils/discord";
 import { classes } from "@utils/misc";
@@ -166,15 +167,8 @@ function SpotifySeekBar() {
     }, [duration, storePosition]);
 
     useEffect(() => {
-        if (isPlaying && !isSettingPosition) {
-            setPosition(SpotifyStore.position);
-            const interval = setInterval(() => {
-                setPosition(p => Math.min(p + 1000, duration));
-            }, 1000);
-
-            return () => clearInterval(interval);
-        }
-    }, [duration, storePosition, isSettingPosition, isPlaying]);
+        if (!isSettingPosition) return followPlaybackPosition(SpotifyStore, duration, setPosition);
+    }, [duration, storePosition, isSettingPosition, isPlaying, trackId]);
 
     const onChange = (v: number) => {
         if (isSettingPosition) return;
