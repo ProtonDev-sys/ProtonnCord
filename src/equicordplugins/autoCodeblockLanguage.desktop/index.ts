@@ -431,8 +431,8 @@ export default definePlugin({
             find: "#{intl::PREVIEW_NUM_LINES}",
             predicate: () => !isPluginEnabled(shikiCodeblocks.name),
             replacement: {
-                match: /(?<=function \i\((\i)\)\{)(?=let\{text:\i,language:)/,
-                replace: "$1.language=$self.resolveLanguage($1.language,$1.text);"
+                match: /let\{text:(\i),language:(\i),wordWrap:\i\}=\i;/,
+                replace: "$&$2=$self.resolveLanguage($2,$1);"
             }
         }
     ],

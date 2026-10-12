@@ -22,6 +22,10 @@ jobs:
         name: Discord client smoke
         uses: ./.github/workflows/client-smoke.yml
 
+    Android:
+        name: Android client and storage
+        uses: ./.github/workflows/android-smoke.yml
+
     Test:
         name: Test
         runs-on: ubuntu-latest

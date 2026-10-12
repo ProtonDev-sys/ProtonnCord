@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { load } from "yaml-js";
 
 import { declaration } from "./utils/discordClientFixture";
 import { loadTestModule } from "./utils/loadTestModule";
@@ -42,7 +43,7 @@ function fixture(screenshot?: "success" | "reject" | "stall", factoryCapture?: "
             if (factoryCapture === "reject") throw new Error("Factory capture failed");
             if (factoryCapture === "stall") await new Promise(() => {});
             if (factoryCapture === "oversize") return "x".repeat(8 * 1024 * 1024 + 1);
-            return runInNewContext(`(${callback})(${JSON.stringify(options)})`, { TextEncoder, ...globals });
+            return runInNewContext(`(${callback})(${JSON.stringify(options)})`, { TextEncoder, performance, ...globals });
         },
         async screenshot(options: { path: string; type: string; fullPage: boolean; }) {
             assert.equal(options.path, "failure.png");
@@ -63,10 +64,10 @@ function fixture(screenshot?: "success" | "reject" | "stall", factoryCapture?: "
     } },
         "puppeteer-core": { __esModule: true, default: { launch: async (options: { args: string[]; }) => { launches.push(options); return browser; } } } };
     const source = readFileSync("scripts/generateReport.ts", "utf8").replace("void main();",
-        "printReport = async () => recordReport(); exports.audit = { main, finishReporter, handleConsole, handlePageError, report, captureFailedFactories };");
+        "printReport = async () => recordReport(); exports.audit = { main, finishReporter, handleConsole, handlePageError, report, captureFailedFactories, parseFactoryProbes };");
     const code = transpileModule(source, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText;
     const reporter = runInNewContext(`${code}\nexports.audit;`, {
-        exports: {}, process: processState, console: { log() {}, error() {} }, Buffer, TextEncoder, ...globals,
+        exports: {}, process: processState, console: { log() {}, error() {} }, Buffer, TextEncoder, performance, ...globals,
         setTimeout: (callback: () => void, milliseconds: number) => setTimeout(callback, milliseconds === 5_000 ? 10 : milliseconds), clearTimeout,
         recordReport: () => calls.push("report"),
         require(name: string) { assert.ok(Object.hasOwn(imports, name), name); return imports[name]; },
@@ -81,6 +82,79 @@ test("ordinary client runs retain Chromium's sandbox and installed browser ident
     assert.equal(f.processState.exitCode, 0);
     assert.equal(f.launches.length, 1);
     assert.ok(!f.launches[0].args.some(argument => argument === "--no-sandbox" || argument === "--disable-setuid-sandbox"));
+});
+
+async function runLookupReporter(findByProps: (property: string) => unknown, count: number) {
+    const messages: unknown[][] = [];
+    const webpack: any = {
+        wreq: { m: {} }, findByProps,
+        lazyWebpackSearchHistory: Array.from({ length: count }, (_, i) => ["findByProps", [`property${i}`]])
+    };
+    const run = declaration("src/debug/runReporter.ts", "runReporter", {
+        Logger: class { log(...args: unknown[]) { messages.push(["[Protonn Cord]", "Reporter:", ...args]); } },
+        addPatch: () => queueMicrotask(() => webpack._initReporter()),
+        loadLazyChunks: async () => {}, Webpack: webpack, Vencord: { Webpack: webpack },
+        setTimeout: (callback: () => void) => queueMicrotask(callback), patches: [], patchTimings: [],
+        describeLookupError: declaration("src/debug/runReporter.ts", "describeLookupError", {}),
+        IS_REPORTER: false, IS_COMPANION_TEST: false
+    });
+    await run();
+    return messages;
+}
+
+test("lookup diagnostics retain a real throwing export and its cause once while every affected lookup still fails", async () => {
+    const original = new Error("Module getter failed", { cause: new TypeError("Uninitialized export") });
+    const webpack = loadTestModule("src/webpack/webpack.ts", {
+        "@debug/Tracer": { traceFunction: (_name: string, fn: Function) => fn },
+        "@utils/lazy": {}, "@utils/lazyReact": {}, "@utils/Logger": { Logger: class {} },
+        "@utils/patches": {}, "@utils/text": {}
+    }, { IS_REPORTER: false, IS_DEV: false, IS_ANTI_CRASH_TEST: false });
+    webpack._initWebpack({ c: { 1: { loaded: true, exports: Object.defineProperty({}, "broken", {
+        enumerable: true, get() { throw original; }
+    }) } } });
+    const messages = await runLookupReporter(webpack.findByProps, 229);
+    const exceptions = messages.filter(([, , message]) => message === "Webpack Find Exception:");
+    assert.equal(exceptions.length, 1);
+    assert.match(String(exceptions[0][3]), /1 \(229 lookups\)/);
+    assert.match(String(exceptions[0][3]), /Error: Module getter failed\n\s+at/);
+    assert.match(String(exceptions[0][3]), /Caused by:\nTypeError: Uninitialized export/);
+    const f = fixture();
+    await f.reporter.main();
+    for (const message of messages) await f.reporter.handleConsole(consoleMessage(message));
+    assert.equal(f.reporter.report.badWebpackFinds.length, 229);
+    assert.equal(f.reporter.report.badWebpackFinds[228], 'findByProps("property228")');
+    assert.deepEqual(f.exits, [1]);
+});
+
+test("lookup error details bound long stacks and cause chains and tolerate cycles and inaccessible error properties", () => {
+    const describe = declaration("src/debug/runReporter.ts", "describeLookupError", {});
+    const failure = { stack: ["Error: long failure", ...Array.from({ length: 30 }, (_, i) => `at frame${i} ${"x".repeat(500)}`)].join("\n"), cause: new Error("Original cause") };
+    const detail = describe(failure);
+    assert.match(detail, /Error: long failure/);
+    assert.match(detail, /Caused by:\nError: Original cause/);
+    assert.doesNotMatch(detail, /frame20/);
+    assert.ok(detail.length <= 6_400);
+    failure.cause.cause = failure;
+    assert.match(describe(failure), /Circular cause/);
+    assert.equal(describe(null), "null");
+    assert.equal(describe("x".repeat(10_000)).length, 2_000);
+    assert.match(describe(new Proxy({}, { get() { throw new Error("Unavailable property"); } })), /Unable to read/);
+    const inaccessibleCause = Object.defineProperty(new Error("Preserved original"), "cause", { get() { throw new Error("Unavailable cause"); } });
+    assert.match(describe(inaccessibleCause), /Error: Preserved original/);
+    assert.match(describe(inaccessibleCause), /Unable to read error properties: cause/);
+    let chain: unknown = new Error("Deepest cause");
+    for (let i = 0; i < 20; i++) chain = { stack: "x".repeat(10_000), cause: chain };
+    assert.ok(describe(chain).length <= 6_400);
+});
+
+test("lookup diagnostic groups have a fixed bound without dropping additional findings", async () => {
+    const messages = await runLookupReporter(property => { throw new Error(property + "x".repeat(10_000)); }, 40);
+    const exceptions = messages.filter(([, , message]) => message === "Webpack Find Exception:");
+    assert.equal(exceptions.length, 8);
+    assert.ok(exceptions.every(message => String(message[3]).length < 6_500));
+    assert.equal(messages.filter(([, , message]) => message === "Webpack Find Fail:").length, 40);
+    assert.ok(messages.some(([, , message, detail]) => message === "Webpack Find Exception Limit:" && String(detail).includes("32 additional")));
+    assert.equal(messages.at(-1)?.[2], "Finished test");
 });
 
 test("actual reporter Logger messages preserve patch, lookup and plugin-start failures through completion", async t => {
@@ -209,9 +283,114 @@ test("factory diagnostics cap escaped UTF-8 output, module counts, and optional 
     assert.deepEqual(f.exits, [1]);
 });
 
+test("configured literal probes find only unique original factories without executing code or reading module cache", async () => {
+    const workflow = load(readFileSync(".github/workflows/client-smoke.yml", "utf8"));
+    const configured = workflow.jobs.reporter.steps.find(step => step.name === "Test logged-out Discord").env.REPORTER_FACTORY_PROBES;
+    assert.deepEqual(JSON.parse(configured), [".FORWARD_BREADCRUMB_CLICKED,{", ".CLIENT_THEMES_EDITOR?"]);
+    const originalSymbol = Symbol("original");
+    const sourceSymbol = Symbol("source");
+    const original = function originalFactory() { assert.fail("Must not execute"); return ".FORWARD_BREADCRUMB_CLICKED,{ shared-literal"; };
+    const second = function secondFactory() { assert.fail("Must not execute"); return "shared-literal"; };
+    const patched = Object.assign(function patchedFactory() { assert.fail("Must not execute"); }, { [originalSymbol]: original });
+    second[sourceSymbol] = 'function onlyPatched(){return ".FORWARD_BREADCRUMB_CLICKED,{"}';
+    const handler = declaration("src/webpack/patchWebpack.ts", "moduleFactoryHandler", {
+        SYM_ORIGINAL_FACTORY: originalSymbol, SYM_PATCHED_SOURCE: sourceSymbol,
+        SYM_PATCHED_BY: Symbol("patchedBy"), SYM_IS_PROXIED_FACTORY: Symbol("proxied")
+    });
+    const factories = { "7": new Proxy(patched, handler), "8": second, ignored: original };
+    const require = Object.assign(() => assert.fail("Must not require a module"), { m: factories });
+    Object.defineProperty(require, "c", { get() { assert.fail("Must not read module cache"); } });
+    const f = fixture(undefined, "success", { Vencord: { Webpack: { wreq: require }, WebpackPatcher: { SYM_PATCHED_SOURCE: sourceSymbol } } });
+    Object.assign(f.processState.env, { REPORTER_FACTORY_PROBES: JSON.stringify([...JSON.parse(configured), "shared-literal", ".*", "not-in-source"]) });
+    await f.reporter.main();
+    f.reporter.report.badPatches.push({ id: "8" });
+    f.processState.exitCode = 1;
+    await f.reporter.finishReporter();
+    const data = JSON.parse(f.written[0]);
+    assert.equal(data.probeScan.complete, true);
+    assert.deepEqual(data.probes.map(probe => [probe.status, probe.matchCount, probe.matches]), [
+        ["selected", 1, ["7"]], ["not-found", 0, []], ["ambiguous", 2, ["7", "8"]], ["not-found", 0, []], ["not-found", 0, []]
+    ]);
+    assert.deepEqual(data.factories.map(factory => factory.id), ["8", "7"], "failed IDs retain capture priority");
+    assert.equal(data.factories[1].original, String(original));
+    assert.equal(data.factories[0].patched, second[sourceSymbol]);
+    assert.deepEqual(f.exits, [1]);
+});
+
+test("invalid or excessive probe configuration cannot discard failed-ID capture", async () => {
+    const f = fixture(undefined, "success", { Vencord: { Webpack: { wreq: { m: { "7": function fixtureFactory() {} } } } } });
+    const parse = f.reporter.parseFactoryProbes;
+    for (const value of ["", "[", "{}", '[null]', '[""]', JSON.stringify(["x".repeat(129)]), JSON.stringify(Array(9).fill("x")), " ".repeat(8_193)]) {
+        const parsed = parse(value);
+        assert.equal(parsed.probes.length, 0);
+        assert.match(parsed.probeError, /at most 8/);
+        assert.ok(parsed.probeError.length < 200);
+    }
+    assert.equal(parse(undefined).probes.length, 0);
+    assert.equal(parse("[]").probeError, undefined);
+    assert.equal(parse(JSON.stringify(Array(8).fill("x".repeat(128)))).probes.length, 1, "valid duplicate literals are searched once");
+    Object.assign(f.processState.env, { REPORTER_FACTORY_PROBES: "[invalid" });
+    await f.reporter.main();
+    f.reporter.report.badPatches.push({ id: "7" });
+    f.processState.exitCode = 1;
+    await f.reporter.finishReporter();
+    const data = JSON.parse(f.written[0]);
+    assert.equal(data.factories[0].status, "captured");
+    assert.match(data.probeError, /REPORTER_FACTORY_PROBES/);
+    assert.equal(data.probes, undefined);
+    assert.deepEqual(f.exits, [1]);
+});
+
+test("probe captures share the 100-factory and 8 MiB escaped UTF-8 limits with failed IDs", () => {
+    const original = function target() { return "unique-probe"; };
+    const factories = Object.fromEntries(Array.from({ length: 100 }, (_, id) => [String(id), function unrelated() {}]));
+    factories["100"] = original;
+    const f = fixture(undefined, "success", { Vencord: { Webpack: { wreq: { m: factories } } } });
+    const options = { ids: Object.keys(factories).slice(0, 100), omittedModuleCount: 0, maxBytes: 8 * 1024 * 1024, probes: ["unique-probe"] };
+    const limited = JSON.parse(f.reporter.captureFailedFactories(options));
+    assert.equal(limited.factories.length, 100);
+    assert.equal(limited.probes[0].status, "module-limit");
+    const duplicate = JSON.parse(f.reporter.captureFailedFactories({ ...options, ids: ["100"] }));
+    assert.deepEqual(duplicate.factories.map(factory => factory.id), ["100"], "a probe and failure selecting one ID must not duplicate its source");
+    const source = 'function large(){return "unique-probe' + "🙂".repeat(3 * 1024 * 1024) + '"}';
+    original.toString = () => source;
+    const payload = f.reporter.captureFailedFactories({ ...options, ids: [] });
+    assert.ok(Buffer.byteLength(payload, "utf8") <= options.maxBytes);
+    const oversized = JSON.parse(payload);
+    assert.equal(oversized.probes[0].status, "selected");
+    assert.equal(oversized.factories[0].status, "size-limit");
+    assert.equal(oversized.factories[0].original, undefined);
+});
+
+test("incomplete probe scans disclose unavailable factories and bounded time, entry and character work", () => {
+    const match = function firstFactory() { return "unique-probe"; };
+    const options = { ids: ["1"], probes: ["unique-probe"], omittedModuleCount: 0, maxBytes: 8 * 1024 * 1024 };
+    const check = (factories: object, status: string, extraGlobals: Record<string, unknown> = {}, probes = options.probes) => {
+        const f = fixture(undefined, "success", { Vencord: { Webpack: { wreq: { m: factories } } }, performance: { now: () => 0 }, ...extraGlobals });
+        const data = JSON.parse(f.reporter.captureFailedFactories({ ...options, probes }));
+        assert.equal(data.probeScan.complete, false);
+        assert.equal(data.probeScan.status, status);
+        assert.equal(data.probes[0].status, "incomplete", "a partial scan cannot claim uniqueness");
+        assert.deepEqual(data.factories.map(factory => factory.id), ["1"], "failed-ID capture survives an incomplete probe scan");
+        return data;
+    };
+    const unavailable = check({ "1": match, get "2"() { throw new Error("Detached factory"); } }, "unavailable");
+    assert.equal(unavailable.probeScan.unavailableFactories, 1);
+    let time = 0;
+    check({ "1": match, "2": function laterFactory() {} }, "time-limit", { performance: { now: () => time += 1_000 } });
+    const entries = Object.fromEntries(Array.from({ length: 50_001 }, (_, id) => [String(id + 1), id ? function unrelated() {} : match]));
+    const entryLimited = check(entries, "entry-limit");
+    assert.equal(entryLimited.probeScan.examinedEntries, 50_000);
+    const large = Object.assign(function largeFactory() {}, { toString: () => "x".repeat(2 * 1024 * 1024) });
+    const chars = Object.fromEntries(Array.from({ length: 10 }, (_, id) => [String(id + 1), id ? large : match]));
+    const characterLimited = check(chars, "character-limit", {}, ["unique-probe", ...Array.from({ length: 7 }, (_, id) => `absent-${id}`)]);
+    assert.ok(characterLimited.probeScan.searchedCharacters <= 128 * 1024 * 1024);
+});
+
 test("factory diagnostic failures, stalls, and oversized replies preserve the failed verdict and teardown", async () => {
     for (const mode of ["reject", "stall", "oversize", "write-fail"] as const) {
         const f = fixture("success", mode);
+        Object.assign(f.processState.env, { REPORTER_FACTORY_PROBES: '["fixture"]' });
         await f.reporter.main();
         f.reporter.handlePageError(new Error("Startup failure"));
         await f.reporter.finishReporter();
@@ -220,6 +399,7 @@ test("factory diagnostic failures, stalls, and oversized replies preserve the fa
         assert.equal(f.written.length, 0);
     }
     const success = fixture(undefined, "success");
+    Object.assign(success.processState.env, { REPORTER_FACTORY_PROBES: '["fixture"]' });
     await success.reporter.main();
     await success.reporter.finishReporter();
     assert.deepEqual(success.calls, ["close", "report", "exit"], "successful runs must not capture factories");

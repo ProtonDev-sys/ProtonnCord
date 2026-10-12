@@ -332,20 +332,12 @@ export default definePlugin({
                     replace: "$1$self.hasUnmutedVoiceChannel(arguments[0]?.guild?.id)?$2:null"
                 },
                 {
-                    match: /return (\i)\.type===\i\.\i\.GUILD_VOICE/,
-                    replace: "$&&&!$self.isChannelMuted($1?.guildId,$1?.id)"
+                    match: /if\((\i)===(\i)\.afkChannelId(?=\)return\[\];let \i=\i\.\i\.getMutableParticipants)/,
+                    replace: "$&||$self.isChannelMuted($2.id,$1)"
                 },
                 {
-                    match: /\.afkChannelId\?\[\].{0,50}.filter\((\i)=>\i\.type===\i\.\i\.VOICE/,
-                    replace: "$&&&!$self.isChannelMuted($1?.guildId,$1?.channelId)"
-                },
-                {
-                    match: /\.getAllApplicationStreams\(\).filter\((\i)=>\i\.guildId===\i/,
-                    replace: "$&&&!$self.isChannelMuted($1?.guildId,$1?.channelId)"
-                },
-                {
-                    match: /\.getEmbeddedActivitiesForGuild\((\i)\)(?=.flatMap\(\i=>)/,
-                    replace: "$&.filter(e=>!$self.isChannelMuted($1?.guildId,e?.channelId))"
+                    match: /\.getEmbeddedActivitiesForGuild\((\i)\)(?=\.filter\(\i=>\{let \i=\i\.\i\.getBasicChannel\(\(0,(\i\.\i)\)\(\i\.location\)\);return)/,
+                    replace: "$&.filter(activity=>!$self.isChannelMuted($1,(0,$2)(activity.location)))"
                 }
             ],
             predicate: () => settings.store.hideVoiceIndicatorForMutedChannels,

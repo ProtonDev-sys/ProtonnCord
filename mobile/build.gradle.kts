@@ -63,7 +63,11 @@ val pluginDefs = file("plugins").listFiles().orEmpty()
 // JS toolchain discovery
 // ---------------------------------------------------------------------------------------------
 
-val bunVersion = parseJson(file("toolchain.json")).str("bunVersion")!!
+val toolchain = parseJson(file("toolchain.json"))
+val bunVersion = toolchain.str("bunVersion")!!
+val runtimeRelease = toolchain.str("runtimeRelease")!!
+require(runtimeRelease.matches(Regex("mobile-runtime-[A-Za-z0-9._-]+"))) { "Invalid mobile runtime release pin" }
+val runtimeUrl = "https://github.com/ProtonDev-sys/ProtonnCord/releases/download/$runtimeRelease/revenge.bundle"
 
 fun findBun(): File? {
     val kindOverride = findProperty("jsTool") as String?
@@ -102,7 +106,12 @@ configure(subprojects.filter { it.path.startsWith(":plugins:") }) {
     extensions.configure<LibraryExtension> {
         namespace = "revenge.plugin." + name.replace(Regex("[^A-Za-z0-9]"), "_")
         compileSdk = compileSdkVer.toInt()
-        defaultConfig { minSdk = minSdkVer.toInt() }
+        defaultConfig {
+            minSdk = minSdkVer.toInt()
+            buildConfigField("String", "REVENGE_RUNTIME_URL", "\"$runtimeUrl\"")
+            testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        }
+        buildFeatures.buildConfig = true
         compileOptions {
             sourceCompatibility = JavaVersion.toVersion(bytecodeVer)
             targetCompatibility = JavaVersion.toVersion(bytecodeVer)
@@ -129,6 +138,8 @@ configure(subprojects.filter { it.path.startsWith(":plugins:") }) {
         add("compileOnly", xposedApiDep)
         add("compileOnly", coroutinesDep)
         add("testImplementation", "junit:junit:4.13.2")
+        add("androidTestImplementation", "junit:junit:4.13.2")
+        add("androidTestImplementation", "androidx.test:runner:1.7.0")
     }
 
     val androidExt = extensions.getByType<LibraryExtension>()

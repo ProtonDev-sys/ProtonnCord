@@ -21,8 +21,8 @@ export default definePlugin({
         {
             find: "\"data-selenium-video-tile\":",
             replacement: {
-                match: /(?<=function\((\i),\i\)\{)/,
-                replace: "Object.assign($1.style=$1.style||{},$self.getVoiceBackgroundStyles($1));",
+                match: /(let\{[^{}]*style:(\i),[^{}]*participantUserId:\i[^{}]*\}=(\i);)/,
+                replace: "$1$2={...$2,...$self.getVoiceBackgroundStyles($3)};",
             }
         },
     ],

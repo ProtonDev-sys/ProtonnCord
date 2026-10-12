@@ -17,13 +17,14 @@ import { NewCustomizationSection, useEffect, useState } from "@webpack/common";
 const CustomizationSection = findComponentByCodeLazy(".DESCRIPTION", "hasBackground:");
 
 export interface DecorSectionProps {
+    disabled?: boolean;
     hideTitle?: boolean;
     hideDivider?: boolean;
     noMargin?: boolean;
     useNewSection?: boolean;
 }
 
-export default function DecorSection({ hideTitle = false, hideDivider = false, noMargin = false, useNewSection = false }: DecorSectionProps) {
+export default function DecorSection({ disabled = false, hideTitle = false, hideDivider = false, noMargin = false, useNewSection = false }: DecorSectionProps) {
     const authorization = useAuthorizationStore();
     const { selectedDecoration, select: selectDecoration, fetch: fetchDecorations, loading, busy, error: decorationError } = useCurrentUserDecorationsStore();
     const [error, setError] = useState<string | null>(null);
@@ -72,7 +73,7 @@ export default function DecorSection({ hideTitle = false, hideDivider = false, n
         <Section {...sectionProps}>
             <Flex gap="4px">
                 <Button
-                    disabled={!authorization.ready || authorization.busy || busy}
+                    disabled={disabled || !authorization.ready || authorization.busy || busy}
                     onClick={() => {
                         setError(null);
                         if (!authorization.isAuthorized()) {
@@ -88,7 +89,7 @@ export default function DecorSection({ hideTitle = false, hideDivider = false, n
                 </Button>
                 {owner && selectedDecoration && authorization.isAuthorized() && (
                     <Button
-                        disabled={loading || busy || authorization.busy}
+                        disabled={disabled || loading || busy || authorization.busy}
                         onClick={() => {
                             setError(null);
                             selectDecoration(null, owner).catch(showError);

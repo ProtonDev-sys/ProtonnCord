@@ -249,14 +249,63 @@ function waitForReporterCleanup<Value>(promise: Promise<Value>, timeoutMs: numbe
 
 // Runs in the page, reading source only. The patcher's toString proxy returns
 // the original factory without invoking it or reading its exports/cache.
-function captureFailedFactories({ ids, omittedModuleCount, maxBytes }: { ids: string[]; omittedModuleCount: number; maxBytes: number; }) {
+function captureFailedFactories({ ids, omittedModuleCount, maxBytes, probes = [], probeError }: {
+    ids: string[]; omittedModuleCount: number; maxBytes: number; probes?: string[]; probeError?: string;
+}) {
     const factories = globalThis.Vencord?.Webpack?.wreq?.m;
     const patchedSource = globalThis.Vencord?.WebpackPatcher?.SYM_PATCHED_SOURCE;
-    const result = { version: 1, omittedModuleCount, factories: [] as Array<Record<string, string | number>> };
+    const selected = new Set(ids.slice(0, 100));
+    const result = {
+        version: 1, omittedModuleCount: omittedModuleCount + Math.max(0, ids.length - 100),
+        factories: [] as Array<Record<string, string | number>>,
+        ...(probeError ? { probeError } : {}),
+        ...(probes.length ? {
+            probes: probes.map(literal => ({ literal, status: "not-found", matchCount: 0, matches: [] as string[] })),
+            probeScan: { complete: false, status: "complete", examinedEntries: 0, searchedCharacters: 0, unavailableFactories: 0 }
+        } : {})
+    };
+
+    if (result.probes && result.probeScan) {
+        const scan = result.probeScan;
+        const deadline = performance.now() + 2_000;
+        if (!factories) scan.status = "unavailable";
+        // These limits bound literal comparisons as well as the number of factory
+        // reads. An incomplete scan must never claim a unique or absent match.
+        for (const id in factories) {
+            if (performance.now() >= deadline) { scan.status = "time-limit"; break; }
+            if (scan.examinedEntries >= 50_000) { scan.status = "entry-limit"; break; }
+            scan.examinedEntries++;
+            if (!Object.hasOwn(factories, id) || !/^(?:0|[1-9]\d{0,15})$/.test(id)) continue;
+            try {
+                const factory = factories[id];
+                if (typeof factory !== "function") continue;
+                const source = String(factory);
+                const work = source.length * probes.length;
+                if (work > 128 * 1024 * 1024 - scan.searchedCharacters) { scan.status = "character-limit"; break; }
+                scan.searchedCharacters += work;
+                for (const probe of result.probes) {
+                    if (!source.includes(probe.literal)) continue;
+                    probe.matchCount++;
+                    if (probe.matches.length < 2) probe.matches.push(id);
+                }
+            } catch { scan.unavailableFactories++; }
+        }
+        scan.complete = scan.status === "complete" && scan.unavailableFactories === 0;
+        if (scan.status === "complete" && !scan.complete) scan.status = "unavailable";
+        for (const probe of result.probes) {
+            if (probe.matchCount > 1) probe.status = "ambiguous";
+            else if (!scan.complete) probe.status = "incomplete";
+            else if (probe.matchCount === 1) {
+                const [id] = probe.matches;
+                probe.status = selected.has(id) || selected.size < 100 ? "selected" : "module-limit";
+                if (probe.status === "selected") selected.add(id);
+            }
+        }
+    }
     const byteLength = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
     let bytes = byteLength(result) + 64; // Reserve space for a growing omitted count.
 
-    for (const id of ids) {
+    for (const id of selected) {
         let entry: Record<string, string | number> = { id, status: "missing" };
         try {
             const factory = factories?.[id];
@@ -289,6 +338,19 @@ function captureFailedFactories({ ids, omittedModuleCount, maxBytes }: { ids: st
     return JSON.stringify(result);
 }
 
+function parseFactoryProbes(value: string | undefined): { probes: string[]; probeError?: string; } {
+    if (value === undefined) return { probes: [] };
+    try {
+        if (value.length > 8_192) throw new Error();
+        const probes: unknown = JSON.parse(value);
+        if (!Array.isArray(probes) || probes.length > 8 || probes.some(probe => typeof probe !== "string" || !probe.length || probe.length > 128))
+            throw new Error();
+        return { probes: [...new Set(probes)] };
+    } catch {
+        return { probes: [], probeError: "REPORTER_FACTORY_PROBES must be a JSON array of at most 8 nonempty literal strings of at most 128 characters (8192 characters total)." };
+    }
+}
+
 function terminateReporterBrowser() {
     try { browser?.process()?.kill(); }
     catch (error) { logStderr("Reporter browser termination failed", error); }
@@ -319,7 +381,8 @@ function finishReporter(timedOut = false, closeTimeoutMs = 10_000, finalTimeoutM
                     const ids = [...new Set(report.badPatches.map(patch => patch.id).filter(id => /^(?:0|[1-9]\d{0,15})$/.test(id)))];
                     const maxBytes = 8 * 1024 * 1024;
                     const payload = await waitForReporterCleanup(page.evaluate(captureFailedFactories, {
-                        ids: ids.slice(0, 100), omittedModuleCount: Math.max(0, ids.length - 100), maxBytes
+                        ids: ids.slice(0, 100), omittedModuleCount: Math.max(0, ids.length - 100), maxBytes,
+                        ...parseFactoryProbes(process.env.REPORTER_FACTORY_PROBES)
                     }), 5_000, "Reporter factory capture timed out");
                     if (typeof payload !== "string" || Buffer.byteLength(payload, "utf8") > maxBytes)
                         throw new Error("Reporter factory capture exceeded its size limit");

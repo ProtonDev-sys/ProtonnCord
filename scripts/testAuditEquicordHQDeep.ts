@@ -229,15 +229,19 @@ test("folder cancellation preserves settings without toasts and path copying use
     assert.equal(toastCount, 0);
 });
 
-test("custom stream sliders flush their pending final value before canceling on unmount", () => {
+test("custom stream sliders flush through the latest native handler before canceling on unmount", () => {
     let cleanup!: () => void;
     let pendingValue: number | undefined;
     let canceled = 0;
+    let memo: unknown;
+    let ref: { current: unknown; };
+    const staleApplied: number[] = [];
     const applied: number[] = [];
     const range = load<{ CustomRange(props: unknown): TestElement; }>("../../limitlessScreenshare/CustomRange.tsx", {
         "@webpack/common": {
             Menu: { MenuControlItem: "control", MenuSliderControl: "slider" },
-            useState: (value: number) => [value, () => undefined], useMemo: (factory: () => unknown) => factory(),
+            useState: (value: number) => [value, () => undefined], useMemo: (factory: () => unknown) => memo ??= factory(),
+            useRef: (value: unknown) => ref ??= { current: value },
             useEffect: (effect: () => () => void) => { cleanup = effect(); },
             lodash: { throttle: (callback: (value: number) => void) => Object.assign((value: number) => { pendingValue = value; }, {
                 flush: () => { if (pendingValue !== undefined) callback(pendingValue); pendingValue = undefined; },
@@ -247,17 +251,20 @@ test("custom stream sliders flush their pending final value before canceling on 
         "./settings": { COOLDOWN_MS: 1000 },
         "./utils": { normalize: () => 0, denormalize: (value: number, minimum: number, maximum: number) => value * (maximum - minimum) / 100 + minimum }
     }, { React: testReact });
-    const element = range.CustomRange({ onChange: (value: number) => applied.push(value), initialValue: 1, minMax: [1, 50], group: "fps", id: "test", suffix: "fps" });
+    const props = { onChange: (value: number) => staleApplied.push(value), initialValue: 1, minMax: [1, 50], group: "fps", id: "test", suffix: "fps" };
+    const element = range.CustomRange(props);
     element.props.control({}, null).props.onChange(100);
-    assert.deepEqual(applied, []);
+    assert.equal(applied.length, 0);
+    range.CustomRange({ ...props, onChange: (value: number) => applied.push(value) });
     cleanup();
     assert.deepEqual(applied, [50]);
+    assert.deepEqual(staleApplied, []);
     assert.equal(canceled, 1);
 });
 
 test("rounded resolution sliders never round their minimum down to source resolution", () => {
     const settings = { store: { maxFPS: 120, maxResolution: 1080, roundResolution: true, resolutions: [], fpss: [] } };
-    const plugin = load<{ default: { OptionsRange(callback: (value: number) => void, initial: number, resolution: boolean): any[]; SettingsRange(callback: (...values: any[]) => void, params: unknown, resolution: boolean): any[]; }; }>("../../limitlessScreenshare/index.tsx", {
+    const plugin = load<{ default: { OptionsRange(callback: (value: number) => void, initial: number, resolution: boolean): any[]; SettingsRange(resolution: boolean, render: (option: { value: number; }) => { props: { action(): void; }; }): any[]; }; }>("../../limitlessScreenshare/index.tsx", {
         "./style.css": {}, "@utils/constants": { EquicordDevs: {} },
         "@utils/css": { classNameFactory: () => () => "" }, "@utils/types": { __esModule: true, default: (value: unknown) => value },
         "@webpack/common": { MediaEngineStore: { getState: () => ({}) }, Menu: {} },
@@ -265,7 +272,7 @@ test("rounded resolution sliders never round their minimum down to source resolu
     });
     const applied: number[] = [];
     const options = plugin.default.OptionsRange(value => applied.push(value), 720, true)[0];
-    const stream = plugin.default.SettingsRange((_enabled, value) => applied.push(value), [true, "resolution"], true)[0];
+    const stream = plugin.default.SettingsRange(true, ({ value }) => ({ props: { action: () => applied.push(value) } }))[0];
     options.onChange(Math.round(options.minMax[0]));
     stream.onChange(Math.round(stream.minMax[0]));
     assert.deepEqual(applied, [10, 10]);
