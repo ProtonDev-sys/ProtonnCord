@@ -249,15 +249,22 @@ function waitForReporterCleanup<Value>(promise: Promise<Value>, timeoutMs: numbe
 
 // Runs in the page, reading source only. The patcher's toString proxy returns
 // the original factory without invoking it or reading its exports/cache.
-function captureFailedFactories({ ids, omittedModuleCount, maxBytes, probes = [], probeError }: {
-    ids: string[]; omittedModuleCount: number; maxBytes: number; probes?: string[]; probeError?: string;
+function captureFailedFactories({ ids, omittedModuleCount, maxBytes, probes = [], probeError, requestedIds = [], requestedIdsError }: {
+    ids: string[]; omittedModuleCount: number; maxBytes: number; probes?: string[]; probeError?: string; requestedIds?: string[]; requestedIdsError?: string;
 }) {
     const factories = globalThis.Vencord?.Webpack?.wreq?.m;
     const patchedSource = globalThis.Vencord?.WebpackPatcher?.SYM_PATCHED_SOURCE;
     const selected = new Set(ids.slice(0, 100));
+    const requestedFactories = requestedIds.map(id => {
+        const status = selected.has(id) || selected.size < 100 ? "selected" : "module-limit";
+        if (status === "selected") selected.add(id);
+        return { id, status };
+    });
     const result = {
         version: 1, omittedModuleCount: omittedModuleCount + Math.max(0, ids.length - 100),
         factories: [] as Array<Record<string, string | number>>,
+        ...(requestedFactories.length ? { requestedFactories } : {}),
+        ...(requestedIdsError ? { requestedIdsError } : {}),
         ...(probeError ? { probeError } : {}),
         ...(probes.length ? {
             probes: probes.map(literal => ({ literal, status: "not-found", matchCount: 0, matches: [] as string[] })),
@@ -308,7 +315,7 @@ function captureFailedFactories({ ids, omittedModuleCount, maxBytes, probes = []
     for (const id of selected) {
         let entry: Record<string, string | number> = { id, status: "missing" };
         try {
-            const factory = factories?.[id];
+            const factory = factories && Object.hasOwn(factories, id) ? factories[id] : undefined;
             if (typeof factory === "function") {
                 const original = String(factory);
                 entry = { id, status: "size-limit", characters: original.length };
@@ -351,6 +358,19 @@ function parseFactoryProbes(value: string | undefined): { probes: string[]; prob
     }
 }
 
+function parseFactoryIds(value: string | undefined): { requestedIds: string[]; requestedIdsError?: string; } {
+    if (value === undefined) return { requestedIds: [] };
+    try {
+        if (value.length > 1_024) throw new Error();
+        const ids: unknown = JSON.parse(value);
+        if (!Array.isArray(ids) || ids.length > 8 || ids.some(id => typeof id !== "string" || !/^(?:0|[1-9]\d{0,15})$/.test(id)))
+            throw new Error();
+        return { requestedIds: [...new Set(ids)] };
+    } catch {
+        return { requestedIds: [], requestedIdsError: "REPORTER_FACTORY_IDS must be a JSON array of at most 8 canonical numeric strings of at most 16 digits (1024 characters total)." };
+    }
+}
+
 function terminateReporterBrowser() {
     try { browser?.process()?.kill(); }
     catch (error) { logStderr("Reporter browser termination failed", error); }
@@ -382,7 +402,8 @@ function finishReporter(timedOut = false, closeTimeoutMs = 10_000, finalTimeoutM
                     const maxBytes = 8 * 1024 * 1024;
                     const payload = await waitForReporterCleanup(page.evaluate(captureFailedFactories, {
                         ids: ids.slice(0, 100), omittedModuleCount: Math.max(0, ids.length - 100), maxBytes,
-                        ...parseFactoryProbes(process.env.REPORTER_FACTORY_PROBES)
+                        ...parseFactoryProbes(process.env.REPORTER_FACTORY_PROBES),
+                        ...parseFactoryIds(process.env.REPORTER_FACTORY_IDS)
                     }), 5_000, "Reporter factory capture timed out");
                     if (typeof payload !== "string" || Buffer.byteLength(payload, "utf8") > maxBytes)
                         throw new Error("Reporter factory capture exceeded its size limit");

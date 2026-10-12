@@ -64,7 +64,7 @@ function fixture(screenshot?: "success" | "reject" | "stall", factoryCapture?: "
     } },
         "puppeteer-core": { __esModule: true, default: { launch: async (options: { args: string[]; }) => { launches.push(options); return browser; } } } };
     const source = readFileSync("scripts/generateReport.ts", "utf8").replace("void main();",
-        "printReport = async () => recordReport(); exports.audit = { main, finishReporter, handleConsole, handlePageError, report, captureFailedFactories, parseFactoryProbes };");
+        "printReport = async () => recordReport(); exports.audit = { main, finishReporter, handleConsole, handlePageError, report, captureFailedFactories, parseFactoryProbes, parseFactoryIds };");
     const code = transpileModule(source, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText;
     const reporter = runInNewContext(`${code}\nexports.audit;`, {
         exports: {}, process: processState, console: { log() {}, error() {} }, Buffer, TextEncoder, performance, ...globals,
@@ -284,9 +284,6 @@ test("factory diagnostics cap escaped UTF-8 output, module counts, and optional 
 });
 
 test("configured literal probes find only unique original factories without executing code or reading module cache", async () => {
-    const workflow = load(readFileSync(".github/workflows/client-smoke.yml", "utf8"));
-    const configured = workflow.jobs.reporter.steps.find(step => step.name === "Test logged-out Discord").env.REPORTER_FACTORY_PROBES;
-    assert.deepEqual(JSON.parse(configured), [".FORWARD_BREADCRUMB_CLICKED,{"]);
     const originalSymbol = Symbol("original");
     const sourceSymbol = Symbol("source");
     const original = function originalFactory() { assert.fail("Must not execute"); return ".FORWARD_BREADCRUMB_CLICKED,{ shared-literal"; };
@@ -301,7 +298,7 @@ test("configured literal probes find only unique original factories without exec
     const require = Object.assign(() => assert.fail("Must not require a module"), { m: factories });
     Object.defineProperty(require, "c", { get() { assert.fail("Must not read module cache"); } });
     const f = fixture(undefined, "success", { Vencord: { Webpack: { wreq: require }, WebpackPatcher: { SYM_PATCHED_SOURCE: sourceSymbol } } });
-    Object.assign(f.processState.env, { REPORTER_FACTORY_PROBES: JSON.stringify([...JSON.parse(configured), "shared-literal", ".*", "not-in-source"]) });
+    Object.assign(f.processState.env, { REPORTER_FACTORY_PROBES: JSON.stringify([".FORWARD_BREADCRUMB_CLICKED,{", "shared-literal", ".*", "not-in-source"]) });
     await f.reporter.main();
     f.reporter.report.badPatches.push({ id: "8" });
     f.processState.exitCode = 1;
@@ -314,6 +311,63 @@ test("configured literal probes find only unique original factories without exec
     assert.deepEqual(data.factories.map(factory => factory.id), ["8", "7"], "failed IDs retain capture priority");
     assert.equal(data.factories[1].original, String(original));
     assert.equal(data.factories[0].patched, second[sourceSymbol]);
+    assert.deepEqual(f.exits, [1]);
+});
+
+test("configured numeric factory requests capture known source without scanning or executing modules", async () => {
+    const workflow = load(readFileSync(".github/workflows/client-smoke.yml", "utf8"));
+    const configured = workflow.jobs.reporter.steps.find(step => step.name === "Test logged-out Discord").env;
+    assert.deepEqual(JSON.parse(configured.REPORTER_FACTORY_IDS), ["230797"]);
+    assert.equal(configured.REPORTER_FACTORY_PROBES, undefined);
+    const original = function knownFactory() { assert.fail("Must not execute a factory"); };
+    const reads: string[] = [];
+    const entries = Object.assign(Object.create({ "8": original }), { "7": original, "230797": original, "10": {} });
+    Object.defineProperty(entries, "9", { get() { throw new Error("Unavailable factory"); } });
+    const factories = new Proxy(entries, {
+        ownKeys() { return assert.fail("Known IDs must not enumerate the factory map"); },
+        get(target, key, receiver) { reads.push(String(key)); return Reflect.get(target, key, receiver); }
+    });
+    const require = Object.assign(() => assert.fail("Must not require a module"), { m: factories });
+    Object.defineProperty(require, "c", { get() { assert.fail("Must not read module cache"); } });
+    const f = fixture(undefined, "success", { Vencord: { Webpack: { wreq: require } } });
+    Object.assign(f.processState.env, { REPORTER_FACTORY_IDS: JSON.stringify([...JSON.parse(configured.REPORTER_FACTORY_IDS), "230797", "7", "8", "9", "10"]) });
+    await f.reporter.main();
+    f.reporter.report.badPatches.push({ id: "7" });
+    f.processState.exitCode = 1;
+    await f.reporter.finishReporter();
+    const data = JSON.parse(f.written[0]);
+    assert.deepEqual(data.factories.map(factory => [factory.id, factory.status]), [
+        ["7", "captured"], ["230797", "captured"], ["8", "missing"], ["9", "unavailable"], ["10", "missing"]
+    ]);
+    assert.equal(data.factories[1].original, String(original));
+    assert.deepEqual(data.requestedFactories.map(factory => factory.id), ["230797", "7", "8", "9", "10"]);
+    assert.deepEqual(reads, ["7", "230797", "9", "10"], "failed IDs come first and inherited values are not read");
+    assert.equal(data.probeScan, undefined);
+    assert.deepEqual(f.exits, [1]);
+});
+
+test("invalid numeric factory configuration preserves normal capture and the failed verdict", async () => {
+    const f = fixture(undefined, "success", { Vencord: { Webpack: { wreq: { m: { "7": function failedFactory() {} } } } } });
+    const parse = f.reporter.parseFactoryIds;
+    for (const value of ["", "[", "{}", '[null]', '[1]', '[""]', '["01"]', '["-1"]', '["1e3"]', '["__proto__"]', JSON.stringify(["1".repeat(17)]), JSON.stringify(Array(9).fill("7")), " ".repeat(1_025)]) {
+        const parsed = parse(value);
+        assert.equal(parsed.requestedIds.length, 0);
+        assert.match(parsed.requestedIdsError, /at most 8 canonical numeric strings/);
+        assert.ok(parsed.requestedIdsError.length < 200);
+    }
+    assert.equal(parse(undefined).requestedIds.length, 0);
+    assert.equal(parse("[]").requestedIdsError, undefined);
+    assert.equal(parse(JSON.stringify(Array(8).fill("7"))).requestedIds.length, 1);
+    assert.deepEqual(Array.from(parse('["0","9999999999999999"]').requestedIds), ["0", "9999999999999999"]);
+    Object.assign(f.processState.env, { REPORTER_FACTORY_IDS: '["__proto__"]' });
+    await f.reporter.main();
+    f.reporter.report.badPatches.push({ id: "7" });
+    f.processState.exitCode = 1;
+    await f.reporter.finishReporter();
+    const data = JSON.parse(f.written[0]);
+    assert.equal(data.factories[0].status, "captured");
+    assert.match(data.requestedIdsError, /REPORTER_FACTORY_IDS/);
+    assert.equal(data.requestedFactories, undefined);
     assert.deepEqual(f.exits, [1]);
 });
 
@@ -341,7 +395,7 @@ test("invalid or excessive probe configuration cannot discard failed-ID capture"
     assert.deepEqual(f.exits, [1]);
 });
 
-test("probe captures share the 100-factory and 8 MiB escaped UTF-8 limits with failed IDs", () => {
+test("probe and requested captures share the 100-factory and 8 MiB escaped UTF-8 limits with failed IDs", () => {
     const original = function target() { return "unique-probe"; };
     const factories = Object.fromEntries(Array.from({ length: 100 }, (_, id) => [String(id), function unrelated() {}]));
     factories["100"] = original;
@@ -350,11 +404,16 @@ test("probe captures share the 100-factory and 8 MiB escaped UTF-8 limits with f
     const limited = JSON.parse(f.reporter.captureFailedFactories(options));
     assert.equal(limited.factories.length, 100);
     assert.equal(limited.probes[0].status, "module-limit");
+    const requested = JSON.parse(f.reporter.captureFailedFactories({ ...options, requestedIds: ["100", "0"] }));
+    assert.equal(requested.factories.length, 100);
+    assert.deepEqual(requested.requestedFactories, [{ id: "100", status: "module-limit" }, { id: "0", status: "selected" }]);
     const duplicate = JSON.parse(f.reporter.captureFailedFactories({ ...options, ids: ["100"] }));
     assert.deepEqual(duplicate.factories.map(factory => factory.id), ["100"], "a probe and failure selecting one ID must not duplicate its source");
+    const shared = JSON.parse(f.reporter.captureFailedFactories({ ...options, ids: ["0"], requestedIds: ["100"] }));
+    assert.deepEqual(shared.factories.map(factory => factory.id), ["0", "100"], "requested and probe IDs share one source entry after failed IDs");
     const source = 'function large(){return "unique-probe' + "🙂".repeat(3 * 1024 * 1024) + '"}';
     original.toString = () => source;
-    const payload = f.reporter.captureFailedFactories({ ...options, ids: [] });
+    const payload = f.reporter.captureFailedFactories({ ...options, ids: [], requestedIds: ["100"] });
     assert.ok(Buffer.byteLength(payload, "utf8") <= options.maxBytes);
     const oversized = JSON.parse(payload);
     assert.equal(oversized.probes[0].status, "selected");
@@ -390,7 +449,7 @@ test("incomplete probe scans disclose unavailable factories and bounded time, en
 test("factory diagnostic failures, stalls, and oversized replies preserve the failed verdict and teardown", async () => {
     for (const mode of ["reject", "stall", "oversize", "write-fail"] as const) {
         const f = fixture("success", mode);
-        Object.assign(f.processState.env, { REPORTER_FACTORY_PROBES: '["fixture"]' });
+        Object.assign(f.processState.env, { REPORTER_FACTORY_PROBES: '["fixture"]', REPORTER_FACTORY_IDS: '["7"]' });
         await f.reporter.main();
         f.reporter.handlePageError(new Error("Startup failure"));
         await f.reporter.finishReporter();
@@ -399,7 +458,7 @@ test("factory diagnostic failures, stalls, and oversized replies preserve the fa
         assert.equal(f.written.length, 0);
     }
     const success = fixture(undefined, "success");
-    Object.assign(success.processState.env, { REPORTER_FACTORY_PROBES: '["fixture"]' });
+    Object.assign(success.processState.env, { REPORTER_FACTORY_PROBES: '["fixture"]', REPORTER_FACTORY_IDS: '["7"]' });
     await success.reporter.main();
     await success.reporter.finishReporter();
     assert.deepEqual(success.calls, ["close", "report", "exit"], "successful runs must not capture factories");
