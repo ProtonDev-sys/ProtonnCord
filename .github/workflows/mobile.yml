@@ -100,6 +100,7 @@ jobs:
                   printf '%s\n' '${{ github.sha }}' > build/dist/desktop-commit.txt
                   cd build/dist
                   sha256sum *.zip revenge.bundle > SHA256SUMS
+                  python3 -B ../../tools/validate_release.py .
             - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
               with:
                   name: protonncord-mobile
@@ -132,7 +133,7 @@ jobs:
               shell: bash
               run: |
                   set -euo pipefail
-                  tag='mobile-build-${{ github.run_id }}-${{ github.run_attempt }}'
+                  tag=$(python3 -B mobile/tools/validate_release.py dist)
                   gh release create "$tag" dist/* --target "$GITHUB_SHA" --prerelease --title "Mobile nightly $GITHUB_SHA" --notes "Android Secure Messaging built and tested against desktop revision $GITHUB_SHA."
                   runtime=$(node -p "require('./mobile/toolchain.json').runtimeRelease")
                   if ! gh release view "$runtime" >/dev/null 2>&1; then

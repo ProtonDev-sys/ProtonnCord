@@ -48,6 +48,8 @@ Changing only the JavaScript bundle cannot add the native plugin API to an older
 
 The [mobile workflow](../.github/workflows/mobile.yml) publishes the plugin ZIP, runtime, upstream runtime source/license, toolchain pins and checksums. Plugin builds are tagged `mobile-build-RUN_ID-ATTEMPT`; the `mobile-nightly` index follows the current build. Runtime releases are pinned separately. Preserve the plugin's stored data when updating: clearing app/plugin data loses locally held identities and history keys.
 
+Publication validates the downloaded build's version, immutable URL, checksums and desktop revision before writing a release. A publish-only retry retains that build's original tag and version. Existing immutable tags are never overwritten; if a previous attempt already created the tag before failing, start a new Mobile workflow run with **Run workflow** on `nightly` (`workflow_dispatch`). This gives the rebuilt package a new run ID and immutable tag. The full Test workflow must pass for the exact desktop revision in every case.
+
 ## Use Secure Messaging
 
 Open a DM or group DM. Both peers need a compatible Protonn Cord Secure Messaging implementation. These commands are handled locally, except `/pc announce`, which sends your signed public-key announcement to the conversation.
