@@ -653,7 +653,7 @@ export default plugin({
 											memberSnapshot(channelId, userId),
 										)
 									}
-									const options = args[3] as any
+									const options = args[3] ? { ...(args[3] as any) } : undefined
 									if (
 										message?.stickerIds?.length ||
 										message?.sticker_ids?.length ||
@@ -666,11 +666,11 @@ export default plugin({
 										throw new Error(
 											'Stickers and forwards are not supported in protected mobile conversations yet',
 										)
-									const uploads = Array.isArray(
-										(args[3] as any)?.attachmentsToUpload,
-									)
-										? ((args[3] as any).attachmentsToUpload as any[])
+									const uploads = Array.isArray(options?.attachmentsToUpload)
+										? [...options.attachmentsToUpload]
 										: []
+									if (options && Array.isArray(options.attachmentsToUpload))
+										options.attachmentsToUpload = uploads
 									const prepared = uploads.length
 										? await prepareEncryptedUploads(
 												uploads,
@@ -692,11 +692,18 @@ export default plugin({
 									await saveVault()
 									assertSendCurrent()
 									prepared?.apply()
-									return original.apply(this, [
+									const sendArgs = [
 										channelId,
 										{ ...message, content: encrypted },
 										...args.slice(2),
-									])
+									]
+									if (args.length > 3) sendArgs[3] = options
+									return Promise.resolve(original.apply(this, sendArgs)).then(
+										result => {
+											prepared?.complete()
+											return result
+										},
+									)
 								} catch (error) {
 									notice(
 										'Secure send blocked',

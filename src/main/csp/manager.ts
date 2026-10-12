@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { ipcMain } from "@main/ipc";
 import { NativeSettings } from "@main/settings";
 import { IpcEvents } from "@shared/IpcEvents";
-import { dialog, ipcMain, IpcMainInvokeEvent } from "electron";
+import { dialog, IpcMainInvokeEvent } from "electron";
 
 import { CspPolicies, ImageAndCssSrc } from ".";
 

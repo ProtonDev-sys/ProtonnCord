@@ -58,6 +58,8 @@ To use the same OneKey identity as your PC, connect a Classic 1S with a USB data
 
 This alpha sends protected text and attachments, and reads compatible desktop encrypted messages and attachment formats. It reads encrypted forwarded text and stickers from desktop; sending stickers/forwards and editing protected messages on mobile remain blocked. Calls, reactions, notifications and Discord metadata are not encrypted by the plugin. Encryption does not protect plaintext from other code already running inside the same Discord process.
 
+For an attachment retry, keep the same files, order, account and conversation. If Secure Messaging reports that the encrypted uploads changed or expired, remove those entries and attach the original files again. Locking/reloading clears retry keys; a cached `.pcaf` file cannot substitute for its original attachment.
+
 ## Build and test without a Discord account
 
 Use the package manager recorded in the root `package.json`, Bun from [toolchain.json](toolchain.json), and the committed lockfiles. Root dependencies are needed because the interoperability tests import the desktop implementation. From the repository root:
@@ -91,4 +93,4 @@ The plugin package is `build/dist/uk.co.protonn.secure-messaging.zip`. Its `plug
 
 Gradle requires the pinned Bun version for the plugin bundle and installs with `--frozen-lockfile`. Set `BUN` or pass `-PjsToolPath=/absolute/path/to/bun` if it is outside the usual locations. Deno is used separately for the upstream Hermes runtime; npm/Deno are not fallback package managers for this plugin.
 
-Unit tests, a compiled-bundle fixture and native compilation cover different failure modes. They do not establish device compatibility. Before claiming a device/Discord version is supported, record its Android and Discord versions, loader/runtime pins, and verify injection, plugin settings, reload/disable cleanup, Android Keystore round trips, attachment selection/rendering, and OneKey permission denial/cancel/disconnect. A signed-out device can check startup and loader behavior; successful encrypted delivery between live peers needs a separate, explicitly authorized account test.
+Unit tests, a compiled-bundle fixture and native compilation cover different failure modes. They do not establish device compatibility. Before claiming a device/Discord version is supported, record its Android and Discord versions, loader/runtime pins, and verify injection, plugin settings, reload/disable cleanup, Android Keystore round trips, attachment selection/rendering and failed-send retry, and OneKey permission denial/cancel/disconnect. A signed-out device can check startup and loader behavior; successful encrypted delivery between live peers needs a separate, explicitly authorized account test.

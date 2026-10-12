@@ -18,10 +18,10 @@
 
 import { randomUUID } from "node:crypto";
 
+import { ipcMain } from "@main/ipc";
 import { IpcEvents } from "@shared/IpcEvents";
 import { parseUpdaterBranch, type UpdaterBranch, type UpdaterDiagnostics } from "@shared/Updater";
 import { VENCORD_USER_AGENT } from "@shared/vencordUserAgent";
-import { ipcMain } from "electron";
 import { renameSync, unlinkSync, writeFileSync } from "original-fs";
 
 import gitHash from "~git-hash";

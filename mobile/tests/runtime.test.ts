@@ -49,7 +49,8 @@ function fixture(
 		cleanup?: () => Promise<void>
 		read?: () => Promise<string | null>
 		write?: () => Promise<void>
-		prepare?: () => Promise<unknown>
+		prepare?: (...args: any[]) => Promise<unknown>
+		send?: (...args: any[]) => unknown
 	} = {},
 ) {
 	let userId: string | undefined = USER
@@ -83,6 +84,7 @@ function fixture(
 	const actions = {
 		sendMessage(...args: any[]) {
 			sent.push(args)
+			return options.send?.(...args)
 		},
 		editMessage(...args: any[]) {
 			sent.push(args)
@@ -432,5 +434,91 @@ test('an account round trip during attachment preparation blocks the original ho
 	assert.equal(applied, false)
 	assert.equal(runtime.sent.length, 0)
 	assert.match(runtime.notices.at(-1)![1], /account changed/)
+	runtime.stop()
+})
+
+test('protected sends freeze the upload list and retire retry state only after host success', async () => {
+	const preparing = deferred<{
+		plaintext: string
+		apply(): void
+		complete(): void
+	}>()
+	const sending = deferred<string>()
+	const value = { id: 'encrypted source' }
+	let completed = 0
+	const runtime = fixture({
+		prepare: () => preparing.promise,
+		send: () => sending.promise,
+	})
+	await runtime.start()
+	const state = runtime.vault.account(USER)
+	state.trusted[PEER] = crypto.publicIdentity(crypto.generateIdentity(), PEER)
+	state.conversations[CHANNEL] = { members: [PEER], recipients: [PEER] }
+	await runtime.vault.save()
+	const options = { attachmentsToUpload: [value] }
+	const pending = runtime.actions.sendMessage(
+		CHANNEL,
+		{ content: 'private' },
+		{},
+		options,
+	)
+	await tick()
+	options.attachmentsToUpload.push({ id: 'later plaintext source' })
+	preparing.resolve({
+		plaintext: 'encrypted descriptor',
+		apply() {},
+		complete() {
+			completed++
+		},
+	})
+	await tick()
+	assert.equal(runtime.sent.length, 1)
+	assert.deepEqual(Array.from(runtime.sent[0][3].attachmentsToUpload), [value])
+	assert.notEqual(runtime.sent[0][3], options)
+	assert.equal(completed, 0)
+	sending.resolve('sent')
+	assert.equal(await pending, 'sent')
+	assert.equal(completed, 1)
+	runtime.stop()
+})
+
+test('a rejected host send preserves retry state and its original rejection', async () => {
+	let failed = true
+	let completed = 0
+	const runtime = fixture({
+		prepare: async () => ({
+			plaintext: 'encrypted descriptor',
+			apply() {},
+			complete() {
+				completed++
+			},
+		}),
+		send: () =>
+			failed
+				? Promise.reject(new Error('network unavailable'))
+				: Promise.resolve('sent'),
+	})
+	await runtime.start()
+	const state = runtime.vault.account(USER)
+	state.trusted[PEER] = crypto.publicIdentity(crypto.generateIdentity(), PEER)
+	state.conversations[CHANNEL] = { members: [PEER], recipients: [PEER] }
+	await runtime.vault.save()
+	const options = { attachmentsToUpload: [{}] }
+	await assert.rejects(
+		runtime.actions.sendMessage(CHANNEL, { content: 'private' }, {}, options),
+		/network unavailable/,
+	)
+	assert.equal(completed, 0)
+	failed = false
+	assert.equal(
+		await runtime.actions.sendMessage(
+			CHANNEL,
+			{ content: 'private' },
+			{},
+			options,
+		),
+		'sent',
+	)
+	assert.equal(completed, 1)
 	runtime.stop()
 })
