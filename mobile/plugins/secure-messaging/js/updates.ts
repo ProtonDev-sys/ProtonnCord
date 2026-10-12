@@ -1,12 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 
 import { callNativeMethod } from '@revenge-mod/modules/native'
-import {
-	exists,
-	getConstants,
-	readFile,
-	writeFile,
-} from '@revenge-mod/modules/native/fs'
 
 interface Repo {
 	url: string
@@ -39,16 +33,43 @@ declare module '@revenge-mod/modules/native' {
 			[plan: InstallPlan],
 			{ installed: string[]; pending: string[]; skipped: string[] },
 		]
+		'uk.co.protonn.secure-messaging.loader.runtimeUrl': [[], string]
+		'uk.co.protonn.secure-messaging.loader.configure': [[url: string], boolean]
 	}
 }
 
 export const NIGHTLY_REPOSITORY =
 	'https://github.com/ProtonDev-sys/ProtonnCord/releases/download/mobile-nightly'
-const RUNTIME_URL =
-	'https://github.com/ProtonDev-sys/ProtonnCord/releases/download/mobile-runtime-6f22fe1/revenge.bundle'
 const ID = 'uk.co.protonn.secure-messaging'
 
+async function checkRuntimeDownload(runtimeUrl: string) {
+	const controller = new AbortController()
+	let timer: ReturnType<typeof setTimeout> | undefined
+	try {
+		const response = await Promise.race([
+			fetch(runtimeUrl, { method: 'HEAD', signal: controller.signal }),
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => {
+					reject(new Error('The mobile runtime download check timed out'))
+					controller.abort()
+				}, 10_000)
+			}),
+		])
+		if (!response.ok)
+			throw new Error(
+				'The mobile runtime download is unavailable; the existing loader was kept',
+			)
+	} finally {
+		clearTimeout(timer)
+	}
+}
+
 export async function installNightlyUpdates(): Promise<boolean> {
+	const runtimeUrl = await callNativeMethod(
+		'uk.co.protonn.secure-messaging.loader.runtimeUrl',
+		[],
+	)
+	await checkRuntimeDownload(runtimeUrl)
 	const repos = await callNativeMethod('revenge.plugins.repos.list', [])
 	if (!repos.some(repo => repo.url === NIGHTLY_REPOSITORY && repo.enabled)) {
 		await callNativeMethod('revenge.plugins.repos.set', [
@@ -76,25 +97,10 @@ export async function installNightlyUpdates(): Promise<boolean> {
 			'The nightly update requested an unexpected plugin or repository',
 		)
 	const result = await callNativeMethod('revenge.plugins.install', [plan])
-	// Change the temporary loader only after both HTTPS endpoints are reachable.
-	const response = await fetch(RUNTIME_URL, { method: 'HEAD' })
-	if (!response.ok)
-		throw new Error(
-			'The mobile runtime download is unavailable; the existing loader was kept',
-		)
-	const path = `${getConstants().files}/pyoncord/loader.json`
-	const config = (await exists(path)) ? JSON.parse(await readFile(path)) : {}
-	if (!config || typeof config !== 'object' || Array.isArray(config))
-		throw new Error('The Revenge loader configuration is invalid')
-	if (!(await exists(`${path}.protonn-backup`)))
-		await writeFile(`${path}.protonn-backup`, JSON.stringify(config))
-	await writeFile(
-		path,
-		JSON.stringify({
-			...config,
-			customLoadUrl: { enabled: true, url: RUNTIME_URL },
-		}),
-	)
+	// The native bridge preserves unknown fields and commits with AtomicFile.
+	await callNativeMethod('uk.co.protonn.secure-messaging.loader.configure', [
+		runtimeUrl,
+	])
 	const configured = await callNativeMethod('revenge.plugins.repos.list', [])
 	const temporaryUrls = new Set([
 		'http://127.0.0.1:8080',

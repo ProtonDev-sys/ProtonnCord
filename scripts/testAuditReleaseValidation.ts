@@ -99,3 +99,24 @@ test("desktop and mobile publication require validation before any release mutat
         assert.equal(workflow.env?.GITHUB_TOKEN, undefined, "build tools must not inherit the publishing token");
     }
 });
+
+test("release validation requires the native and signed-out Android checks", () => {
+    const workflow = load(readFileSync(".github/workflows/test.yml", "utf8"));
+    const source = readFileSync(".github/workflows/android-smoke.yml", "utf8");
+    const android = load(source);
+    const job = workflow.jobs.Android;
+    assert.equal(job.uses, "./.github/workflows/android-smoke.yml");
+    assert.equal(job.if, undefined, "release branches must not skip Android validation");
+    assert.equal(job["continue-on-error"], undefined);
+    // yaml-js uses YAML 1.1, where an unquoted on key is parsed as true.
+    assert.ok(Object.hasOwn(android.on ?? android.true, "workflow_call"));
+    assert.equal(android.permissions.contents, "read");
+    assert.doesNotMatch(source, /\$\{\{\s*secrets\.|continue-on-error:|gh release/u);
+    const native = android.jobs["android-smoke"];
+    assert.equal(native.if, undefined);
+    assert.equal(native["continue-on-error"], undefined);
+    const emulator = native.steps.find((step: any) => step.uses?.startsWith("reactivecircus/android-emulator-runner@"));
+    assert.equal(emulator.with.script, "bash mobile/tools/run-android-smoke.sh");
+    const artifact = native.steps.find((step: any) => step.uses?.startsWith("actions/upload-artifact@"));
+    assert.doesNotMatch(artifact.with.path, /build\/dist|nonroot-|\.p12|\.apk|\.jks/u);
+});

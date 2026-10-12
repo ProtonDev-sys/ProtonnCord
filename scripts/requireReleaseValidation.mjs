@@ -12,7 +12,8 @@ export async function requireReleaseValidation({ repository, branch, sha, token 
     request = fetch,
     sleep = delay,
     now = Date.now,
-    timeoutMs = 15 * 60_000,
+    // The full suite includes a 45-minute Android job; allow its startup too.
+    timeoutMs = 50 * 60_000,
 } = {}) {
     if (!/^[\w.-]+\/[\w.-]+$/u.test(repository ?? "")
         || !["main", "staging", "nightly"].includes(branch)
