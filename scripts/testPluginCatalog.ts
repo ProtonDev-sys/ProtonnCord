@@ -12,7 +12,7 @@ import ts from "typescript";
 import { retiredPlugins } from "../src/shared/retiredPlugins";
 
 import { getEntryPoint, isPluginFile } from "./utils";
-import { getPluginTarget } from "./utils.mjs";
+import { compareBuildEntryNames, getPluginTarget } from "./utils.mjs";
 
 interface CatalogEntry {
     name: string;
@@ -172,8 +172,15 @@ function checkFailureDetection() {
     assert.deepEqual(compareCatalog(previous, [{ ...previous[0], settings: [...previous[0].settings!, "newOption"] }]), []);
 }
 
+function checkBuildEntryOrdering() {
+    const entries = ["ignoreCalls", "iconViewer", "iRememberYou"].map(name => ({ name }));
+    assert.deepEqual(entries.sort(compareBuildEntryNames).map(entry => entry.name),
+        ["iRememberYou", "iconViewer", "ignoreCalls"]);
+}
+
 async function main() {
     checkFailureDetection();
+    checkBuildEntryOrdering();
     const current = await sourceCatalog();
     if (process.argv.includes("--print-baseline")) {
         // Deliberately stdout-only: updating the compatibility contract requires a reviewed edit.
