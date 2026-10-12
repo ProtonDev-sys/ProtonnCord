@@ -17,9 +17,9 @@ export default definePlugin({
         {
             find: "unknownUserMentionPlaceholder:",
             replacement: {
-                // SimpleEmbedTypes.has(embed.type) && isEmbedInline(embed)
-                match: /\i\.has\(\i\.type\)&&\(0,\i\.\i\)\(\i\)/,
-                replace: "false",
+                // Keep link content when passing options to the AST transform.
+                match: /hideSimpleEmbedContent:\i(?=,formatInline:\i,toAST:\i\}\))/,
+                replace: "hideSimpleEmbedContent:false",
             }
         }
     ]

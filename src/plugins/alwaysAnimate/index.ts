@@ -67,12 +67,9 @@ export default definePlugin({
             // Some modules match the find but the replacement is returned untouched
             noWarn: true,
             replacement: {
-                match: /canAnimate:.+?([,}].*?\))/g,
-                replace: (m, rest) => {
-                    const destructuringMatch = rest.match(/}=.+/);
-                    if (destructuringMatch == null) return `canAnimate:!0${rest}`;
-                    return m;
-                }
+                // Select the first delimiter without retrying every later one on malformed tails.
+                match: /canAnimate:.[^,}\r\n\u2028\u2029]*([,}][^)\r\n\u2028\u2029]*\))/g,
+                replace: (m, rest) => rest.includes("}=") ? m : `canAnimate:!0${rest}`
             }
         },
         {
@@ -127,12 +124,8 @@ export default definePlugin({
             all: true,
             noWarn: true,
             replacement: {
-                match: /animateGradient:.+?([,}].*?\))/g,
-                replace: (m, rest) => {
-                    const destructuringMatch = rest.match(/}=.+/);
-                    if (destructuringMatch == null) return `animateGradient:!0${rest}`;
-                    return m;
-                }
+                match: /animateGradient:.[^,}\r\n\u2028\u2029]*([,}][^)\r\n\u2028\u2029]*\))/g,
+                replace: (m, rest) => rest.includes("}=") ? m : `animateGradient:!0${rest}`
             }
         },
     ]

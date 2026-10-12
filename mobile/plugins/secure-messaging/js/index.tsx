@@ -347,7 +347,7 @@ function SettingsComponent() {
 			assertApprovalCurrent()
 			if (result.status !== 'unlocked') throw new Error(result.message)
 			secret = decode64(result.secret, 32)
-			await mobileVault.useOneKey(secret, userId)
+			await mobileVault.unlockWithOneKey(secret, userId)
 			assertApprovalCurrent()
 			clearDecryptedContent()
 			notice(

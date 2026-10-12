@@ -502,7 +502,8 @@ export function initWs(isManual = false) {
             }
             case "allModules": {
                 loadLazyChunks()
-                    .then(() => {
+                    .then(loaded => {
+                        if (loaded === false) throw new Error("Could not load all modules");
                         replyData({
                             type: "moduleList",
                             data: {

@@ -391,6 +391,7 @@ interface activeNowNameProps {
     user: User | null | undefined;
     guildId?: string;
     isHovered: boolean;
+    isGroup?: boolean;
 }
 
 type colorStringsType = { primaryColor: string | null, secondaryColor: string | null, tertiaryColor: string | null; } | null | undefined;
@@ -416,10 +417,11 @@ function getTypingMemberListProfilesReactionsVoiceNameElement(props: memberListP
     return getTypingMemberListProfilesReactionsVoiceName(props)[1];
 }
 
-function getActiveNowNameElement({ user, guildId, isHovered }: activeNowNameProps): JSX.Element | string | null {
+function getActiveNowNameElement({ user, guildId, isHovered, isGroup }: activeNowNameProps): JSX.Element | string | null {
+    // Keep settings subscriptions in the same hook order when the group size changes.
     const name = getTypingMemberListProfilesReactionsVoiceNameText({ user, guildId, type: "membersList" });
 
-    if (!name) return null;
+    if (!name || isGroup) return null;
 
     const displayNameStyles: DisplayNameStyles | null = (
         AccessibilityStore.displayNameStylesEnabled
@@ -1343,13 +1345,13 @@ export default definePlugin({
             ],
         },
         {
-            find: '("NowPlayingHeader")',
+            find: ".Header,{priorityUser:",
             group: true,
             replacement: [
                 {
-                    // Replace the card title and apply its propagated hover state.
-                    match: /(?<=\.Header,\{priorityUser:(\i),guildId:(\i)\?\.id,title:)(\i)(?=,subtitle:.{0,200}?displayNameFont:1===\i\.length)/,
-                    replace: "$self.getActiveNowNameElement({user:$1.user,guildId:$2?.id,isHovered:arguments[0].smynHovered})??$3"
+                    // Format solo titles while preserving Discord's multi-person title.
+                    match: /(?<=\.Header,\{priorityUser:(\i),guildId:(\i)\?\.id,title:)(\i)(?=,subtitle:.{0,200}?displayNameFont:1===(\i)\.length)/,
+                    replace: "$self.getActiveNowNameElement({user:$1.user,guildId:$2?.id,isHovered:arguments[0].smynHovered,isGroup:1!==$4.length})??$3"
                 },
                 {
                     // Add local hover state to each Active Now card.
@@ -1363,7 +1365,7 @@ export default definePlugin({
                 },
                 {
                     // Update local hover state while preserving Discord's handlers.
-                    match: /(?<=\{\.\.\.(\i),ref:\i,)onMouseEnter:(\i)(?=,"aria-haspopup":"menu",className:)/,
+                    match: /(?<=\{\.\.\.(\i),ref:\i(?:=>\{\i\.current=\i\})?,)onMouseEnter:(\i)(?=,"aria-haspopup":"menu",className:)/g,
                     replace: "onMouseEnter:smynEvent=>{$2(smynEvent);setSmynHovered(!0)},onMouseLeave:smynEvent=>{$1.onMouseLeave?.(smynEvent);setSmynHovered(!1)}"
                 }
             ],

@@ -281,7 +281,7 @@ test('stopping while storage is loading keeps the vault unavailable without stal
 test('account transitions clear private content, lock OneKey, and reject an old unlock even after switching back', async () => {
 	const runtime = fixture()
 	await runtime.start()
-	await runtime.vault.useOneKey(randomBytes(32), USER)
+	await runtime.vault.unlockWithOneKey(randomBytes(32), USER)
 	const opening = runtime.button('Unlock with OneKey').onPress()
 	runtime.changeUser()
 	assert.equal(runtime.vault.locked, true)
@@ -319,7 +319,7 @@ for (const control of ['Lock Secure Messaging', 'Cancel']) {
 		const runtime = fixture()
 		await runtime.start()
 		const secret = randomBytes(32)
-		await runtime.vault.useOneKey(secret, USER)
+		await runtime.vault.unlockWithOneKey(secret, USER)
 		const opening = runtime.button('Unlock with OneKey').onPress()
 		runtime.button(control).onPress()
 		assert.equal(runtime.vault.locked, true)

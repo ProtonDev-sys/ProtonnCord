@@ -24,6 +24,7 @@ from patch_android import MOBILE, file_digest
 PLUGIN = "uk.co.protonn.secure-messaging"
 PROBE = "uk.co.protonn.android-smoke"
 DATA = "/data/user/0/com.discord"
+PIXEL_LAUNCHER = "com.google.android.apps.nexuslauncher"
 
 
 def command(args, binary=False, timeout=90):
@@ -96,6 +97,77 @@ def verify_inputs(options):
     return receipt, apks, f"https://github.com/ProtonDev-sys/ProtonnCord/releases/download/{toolchain['runtimeRelease']}/revenge.bundle"
 
 
+def wait_for_login_screen(adb, remote_ui, output, progress, original_pid, timeout=45):
+    started = time.monotonic()
+    deadline = started + timeout
+
+    def bounded_adb(*args, limit=10, **kwargs):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("Discord's signed-out login/register screen did not become ready; inspect screen.png")
+        return adb(*args, timeout=min(limit, remaining), **kwargs)
+
+    try:
+        if not re.fullmatch(r"\d+", original_pid):
+            raise RuntimeError("Discord's client process is missing or ambiguous")
+        while time.monotonic() < deadline:
+            progress["attempts"] = progress.get("attempts", 0) + 1
+            bounded_adb("shell", f"rm -f {remote_ui}")
+            # DumpCommand can exit zero without writing XML. Its idle wait alone takes up to 10 seconds.
+            dump = bounded_adb("shell", f"uiautomator dump {remote_ui} 2>&1", limit=20)
+            if f"UI hierchary dumped to: {remote_ui}" not in dump.splitlines():
+                progress["lastDumpError"] = dump[-1000:]
+                if not {"ERROR: null root node returned by UiTestAutomationBridge.",
+                        "ERROR: could not get idle state."}.intersection(dump.splitlines()):
+                    raise RuntimeError("Android did not confirm a fresh UI hierarchy dump")
+                time.sleep(min(2, max(0, deadline - time.monotonic())))
+                continue
+            hierarchy = bounded_adb("shell", f"cat {remote_ui}")
+            (output / "hierarchy.xml").write_text(hierarchy)
+            windows = bounded_adb("shell", "dumpsys window displays")
+            focuses = re.findall(r"^\s*mCurrentFocus=(.+)$", windows, re.MULTILINE)
+            focus = focuses[0].strip() if len(focuses) == 1 else ""
+            progress["lastFocus"] = focus
+            if bounded_adb("shell", "pidof com.discord") != original_pid:
+                raise RuntimeError("Discord's client process changed while waiting for the login screen")
+            nodes = list(ET.fromstring(hierarchy).iter("node"))
+
+            def system_node(resource_id, text, clickable=False):
+                matches = [node for node in nodes if node.get("resource-id") == resource_id]
+                return len(matches) == 1 and matches[0].get("package") == "android" \
+                    and matches[0].get("text") == text and matches[0].get("enabled") == "true" \
+                    and (not clickable or matches[0].get("clickable") == "true")
+
+            # Android's ANR window title identifies the process independently of its display name.
+            launcher_anr = re.fullmatch(r"Window\{[0-9a-f]+ u0 Application Not Responding: "
+                                        + re.escape(PIXEL_LAUNCHER) + r"\}", focus) \
+                and system_node("android:id/alertTitle", "Pixel Launcher isn't responding") \
+                and system_node("android:id/aerr_close", "Close app", True) \
+                and system_node("android:id/aerr_wait", "Wait", True)
+            error_dialog = any(node.get("resource-id", "").split(":")[-1] in
+                               {"id/alertTitle", "id/aerr_close", "id/aerr_wait", "id/aerr_restart"} for node in nodes)
+            if launcher_anr and "launcherRecovery" not in progress:
+                # run() has already verified a fresh emulator. Never tap a dialog button or restart Discord.
+                progress["launcherRecovery"] = {"package": PIXEL_LAUNCHER, "action": "force-stop",
+                                                "focus": focus, "hierarchy": hierarchy}
+                bounded_adb("shell", f"am force-stop --user 0 {PIXEL_LAUNCHER}")
+            elif error_dialog or "Application Not Responding:" in focus or "Application Error:" in focus:
+                raise RuntimeError("An unexpected or repeated Android error dialog covers Discord; inspect hierarchy.xml")
+            else:
+                labels = {node.get(field, "").casefold() for node in nodes
+                          if node.get("package") == "com.discord" and node.get("enabled") == "true"
+                          for field in ("text", "content-desc")}
+                if re.fullmatch(r"Window\{[0-9a-f]+ u0 com\.discord/[A-Za-z0-9_.$]+\}", focus) \
+                        and labels.intersection({"log in", "login"}) \
+                        and labels.intersection({"register", "sign up", "create an account"}):
+                    (output / "screen.png").write_bytes(bounded_adb("exec-out", "screencap", "-p", binary=True))
+                    return
+            time.sleep(min(2, max(0, deadline - time.monotonic())))
+        raise RuntimeError("Discord's signed-out login/register screen did not become ready; inspect screen.png")
+    finally:
+        progress["elapsedSeconds"] = round(time.monotonic() - started, 3)
+
+
 def run(options):
     receipt, apks, runtime_url = verify_inputs(options)
     if not re.fullmatch(r"emulator-\d+", options.serial):
@@ -161,6 +233,7 @@ def run(options):
             if not re.fullmatch(r"com\.discord/[A-Za-z0-9_.$]+", activity):
                 raise ValueError("Discord launcher activity was not resolved")
             adb("shell", f"am start -W -n {shlex.quote(activity)}")
+            client_pid = adb("shell", "pidof com.discord")
             deadline = time.monotonic() + 90
             smoke = None
             js_started = False
@@ -182,13 +255,8 @@ def run(options):
             if smoke != {"loader": {"name": "RevengeXposed", "version": "1.6.2"}, "signedOut": True,
                          "nativePlugin": PLUGIN, "vault": "absent", "runtimeUrl": runtime_url} or not js_started:
                 raise RuntimeError("The native probe and plugin start did not both succeed; inspect logcat.txt")
-            adb("shell", f"uiautomator dump {remote_ui}")
-            hierarchy = adb("shell", f"cat {remote_ui}")
-            (options.output / "hierarchy.xml").write_text(hierarchy)
-            (options.output / "screen.png").write_bytes(adb("exec-out", "screencap", "-p", binary=True))
-            labels = {node.get(field, "").casefold() for node in ET.fromstring(hierarchy).iter("node") for field in ("text", "content-desc")}
-            if not labels.intersection({"log in", "login"}) or not labels.intersection({"register", "sign up", "create an account"}):
-                raise RuntimeError("Discord's signed-out login/register screen is missing; inspect screen.png")
+            result["uiReadiness"] = {}
+            wait_for_login_screen(adb, remote_ui, options.output, result["uiReadiness"], client_pid)
             if not CachedRuntime.requests:
                 raise RuntimeError("The pinned runtime cache fixture was not used")
             adb("root")

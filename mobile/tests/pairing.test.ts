@@ -95,7 +95,7 @@ test('phone pairing survives a locked restart, preserves the mobile counter and 
 	}
 	const vault = new MobileVault(backing)
 	await vault.load()
-	await vault.useOneKey(secret, USER)
+	await vault.unlockWithOneKey(secret, USER)
 	const counter = vault.account(USER).counter
 	await vault.importPairing(token, USER)
 	assert.equal(vault.account(USER).counter, counter)
@@ -104,7 +104,7 @@ test('phone pairing survives a locked restart, preserves the mobile counter and 
 	const restarted = new MobileVault(backing)
 	await restarted.load()
 	assert.equal(restarted.locked, true)
-	await restarted.useOneKey(secret, USER)
+	await restarted.unlockWithOneKey(secret, USER)
 	assert.deepEqual(restarted.account(USER).trusted, payload.trusted)
 	const older = sealMobilePairing(root.key, root.fingerprint, USER, {
 		...payload,
@@ -284,7 +284,7 @@ test('pairing keeps phone-only contacts and retired keys readable after a change
 	}
 	const vault = new MobileVault(backing)
 	await vault.load()
-	await vault.useOneKey(secret, USER)
+	await vault.unlockWithOneKey(secret, USER)
 	const previousPeer = generateIdentity()
 	const previousPublic = publicIdentity(previousPeer, PEER)
 	const phoneOnly = publicIdentity(generateIdentity(), phoneOnlyId)
@@ -336,7 +336,7 @@ test('pairing keeps phone-only contacts and retired keys readable after a change
 	vault.lock()
 	const restarted = new MobileVault(backing)
 	await restarted.load()
-	await restarted.useOneKey(secret, USER)
+	await restarted.unlockWithOneKey(secret, USER)
 	const state = restarted.account(USER)
 	assert.deepEqual(state.trusted[phoneOnlyId], phoneOnly)
 	assert.equal(state.conversations[CHANNEL].needsReview, true)

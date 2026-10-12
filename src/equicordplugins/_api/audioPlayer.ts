@@ -24,15 +24,15 @@ export default definePlugin({
                     // Uses the audio as-is if external, otherwise checks for an internal Discord sound.
                     // Also force loads the internal sounds module to account for the second patch group below,
                     // as well as accounting for not calling the module in this patch when this.type is not DISCORD.
-                    match: /(let \i=class.{0,1000}?new Audio;\i.src=)((\i\(\d+\))(?:\(`\.\/\$\{|.{0,50}concat\())this.name(\}\.mp3`\))/,
+                    match: /(let \i=class[\s\S]+?new Audio;\i.src=)((\i\(\d+\))(?:\(`\.\/\$\{|.{0,50}concat\())this.name(\}\.mp3`\))/,
                     replace: "$3;$1this.type!==$self.AudioType.DISCORD?this.audio:$2this.audio$4"
                 },
                 {
                     // Adds an optional persistent boolean as well as a callback and error handler to the
                     // audio player which is called after the audio finishes playing and when an error occurs.
                     // Also processes the audio before playing to apply override functions set by plugins.
-                    match: /constructor\(((?:\i,){3}\i)([^)]*)\)\{[^}]+}/,
-                    replace: "constructor(options,$1$2){$self.buildPlayer(this,options,$1);}"
+                    match: /constructor\(((?:\i,){3}\i)([^)]*)\)\{([^}]+)}/,
+                    replace: "constructor(options,$1$2){$3;$self.buildPlayer(this,options,$1);}"
                 },
                 {
                     // Prevents an error from the source being cleared during destroyAudio().
@@ -43,6 +43,11 @@ export default definePlugin({
                     // Applies the playback rate passed through options.
                     match: /(?<=(\i).onloadeddata=\(\)=>{)/,
                     replace: "$1.playbackRate=this._speed,"
+                },
+                {
+                    // Replace gift playback before wrapping play() below, retaining Discord's volume conversion.
+                    match: /let (\i)=new Audio\((\(0,\i\.\i\)\(\i\))\);\1.volume=(\(0,\i\.\i\)\(\i\)),\1.play\(\)/,
+                    replace: "$self.playAudio($2,{volume:100*$3})"
                 },
                 {
                     // Prevents aborted audio starts from becoming uncaught promise rejections.
@@ -63,11 +68,6 @@ export default definePlugin({
                     // Makes use of the persists flag once the audio is stopped.
                     match: /(stop\()(\){)this.destroyAudio\(\)/,
                     replace: "$1restart$2$self.stopAudio(this,restart);"
-                },
-                {
-                    // Use our playAudio function in place of the default playGiftSound.
-                    match: /let \i=new Audio\((\(0,\i.\i\)\(\i\)).{0,35}?play\(\)/,
-                    replace: "$self.playAudio($1)"
                 }
             ]
         },
@@ -124,6 +124,7 @@ export default definePlugin({
 
     handlePlayPromise(player: AudioPlayerInternal, playPromise: Promise<void> | void) {
         playPromise?.catch(error => handleAudioError(player, error));
+        return playPromise;
     },
 
     processAudio(player: AudioPlayerInternal) {

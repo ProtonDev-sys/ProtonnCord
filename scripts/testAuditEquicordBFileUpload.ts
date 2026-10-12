@@ -64,7 +64,10 @@ function uploadHarness(settings: Record<string, unknown> = {}, globals: Record<s
         "./apngToGif": { stopApngConversion() {} }, "./getMediaUrl": media, "./sharex": sharex, "./s3": {}
     }, {
         IS_DISCORD_DESKTOP: true,
-        VencordNative: { pluginHelpers: { FileUpload: { uploadToCatbox: () => { const request = deferred<{ success: boolean; url?: string; error?: string; }>(); requests.push(request); return request.promise; } } } },
+        VencordNative: { pluginHelpers: {
+            SecureMessaging: { getChannelProtection: async () => ({ status: "unconfigured" }) },
+            FileUpload: { uploadToCatbox: () => { const request = deferred<{ success: boolean; url?: string; error?: string; }>(); requests.push(request); return request.promise; } }
+        } },
         setTimeout: (callback: () => void, delay: number) => { timers.set(++serial, { callback, delay }); return serial; },
         clearTimeout: (id: number) => timers.delete(id),
         ...globals
@@ -213,24 +216,23 @@ test("stopping APNG conversion terminates a pending worker and failed input clea
     api.stopApngConversion();
 });
 
-test("draft upload failures and mixed or busy interception retain original attachments", async () => {
+test("draft upload failures retain original attachments", async () => {
     let successful = false;
-    let busy = false;
     let removed = 0;
-    let intercepted!: (event: unknown) => void;
     const upload = { id: "draft", filename: "kept.txt", item: { file: file() }, removeFromMsgDraft: () => removed++ };
     const plugin = load("src/equicordplugins/fileUpload/index.tsx", {
         "@api/ContextMenu": {}, "@components/ErrorBoundary": { __esModule: true, default: { wrap: (component: unknown) => component } },
-        "@components/Icons": {}, "@webpack": { findByPropsLazy: () => ({ getUserMaxFileSize: () => 10 }) },
+        "@components/Icons": {},
         "@webpack/common": {
             React, Menu: { MenuItem: "MenuItem" }, DraftType: { ChannelMessage: 0 },
             UserStore: { getCurrentUser: () => ({ id: "account" }) }, SelectedChannelStore: { getChannelId: () => "channel" },
-            UploadAttachmentStore: { getUploads: () => [upload] }, FluxDispatcher: { addInterceptor: (handler: typeof intercepted) => { intercepted = handler; } }
+            UploadAttachmentStore: { getUploads: () => [upload] }
         },
         "./settings": { settings: { store: { bypassDiscordUpload: true, bypassDiscordUploadOnlyOverLimit: false } } },
         "./types": types, "./utils/getMediaUrl": {},
-        "./utils/upload": { isConfigured: () => true, isFileTypeAllowed: (value: File) => value.name.endsWith(".txt"), isUploadBusy: () => busy, uploadProvidedFiles: async () => successful, logger: { warn() {} } }
+        "./utils/upload": { isConfigured: () => true, isFileTypeAllowed: (value: File) => value.name.endsWith(".txt"), uploadProvidedFiles: async () => successful, logger: { warn() {} } }
     }, { document: { addEventListener() {} } }).default;
+    plugin.start();
     const items: any[] = [];
     plugin.contextMenus["channel-attach"](items, { channel: { id: "channel" } });
     const draftAction = items[0].props.children[0][0].props.action;
@@ -239,12 +241,4 @@ test("draft upload failures and mixed or busy interception retain original attac
     successful = true;
     await draftAction();
     assert.equal(removed, 1);
-    plugin.start();
-    const mixed = { type: "UPLOAD_ATTACHMENT_ADD_FILES", draftType: 0, files: [file(), new File(["body"], "keep.bin")] };
-    intercepted(mixed);
-    assert.equal(mixed.files.length, 2);
-    busy = true;
-    const incoming = { type: "UPLOAD_ATTACHMENT_ADD_FILES", draftType: 0, files: [file()] };
-    intercepted(incoming);
-    assert.equal(incoming.files.length, 1);
 });

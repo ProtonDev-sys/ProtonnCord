@@ -100,6 +100,21 @@ test("desktop and mobile publication require validation before any release mutat
     }
 });
 
+test("release validation includes both live Discord channels through the full Test workflow", () => {
+    const workflow = load(readFileSync(".github/workflows/test.yml", "utf8"));
+    const source = readFileSync(".github/workflows/client-smoke.yml", "utf8");
+    const client = load(source);
+    assert.equal(workflow.jobs.Discord.uses, "./.github/workflows/client-smoke.yml");
+    assert.equal(workflow.jobs.Discord.if, undefined, "a release branch must not skip the client gate");
+    assert.equal(workflow.jobs.Discord["continue-on-error"], undefined);
+    // yaml-js uses YAML 1.1, where an unquoted `on` key is parsed as true.
+    assert.ok(Object.hasOwn(client.on ?? client.true, "workflow_call"));
+    assert.deepEqual(client.jobs.reporter.strategy.matrix.channel, ["stable", "canary"]);
+    assert.equal(client.jobs.reporter["continue-on-error"], undefined);
+    assert.equal(client.permissions.contents, "read");
+    assert.doesNotMatch(source, /secrets\.|WEBHOOK_URL|continue-on-error:/u);
+});
+
 test("release validation requires the native and signed-out Android checks", () => {
     const workflow = load(readFileSync(".github/workflows/test.yml", "utf8"));
     const source = readFileSync(".github/workflows/android-smoke.yml", "utf8");

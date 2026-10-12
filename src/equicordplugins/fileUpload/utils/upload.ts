@@ -26,8 +26,9 @@ const Native = nativeHelpers && new Proxy(nativeHelpers, {
     get(target, property, receiver) {
         const value = Reflect.get(target, property, receiver);
         if (typeof value !== "function") return value;
-        return (...args: unknown[]) => {
-            assertUploadCurrent();
+        return async (...args: unknown[]) => {
+            const assertAllowed = await getExternalUploadGuard();
+            assertAllowed();
             return value.apply(target, args);
         };
     }
@@ -87,10 +88,40 @@ let uploadGeneration = 0;
 let activeUploadGeneration = 0;
 let activeUploadAccountId: string | undefined;
 let activeUploadChannelId: string | undefined;
+let activeUploadCheck: (() => boolean) | undefined;
 let resetTimer: ReturnType<typeof setTimeout> | undefined;
 
 export function isUploadBusy() {
     return isUploading;
+}
+
+export async function isExternalUploadAllowed(accountId: string | undefined, channelId: string | undefined): Promise<boolean> {
+    if (!accountId || !channelId) return false;
+    if (!IS_DISCORD_DESKTOP) return true;
+    try {
+        const secureMessaging = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("../../secureMessaging.desktop/native")>;
+        const protection = await secureMessaging.getChannelProtection(accountId, channelId);
+        return protection.status === "unconfigured" || protection.status === "disabled";
+    } catch {
+        return false;
+    }
+}
+
+class ExternalUploadBlockedError extends Error { }
+
+async function getExternalUploadGuard(): Promise<() => void> {
+    assertUploadCurrent();
+    const generation = activeUploadGeneration;
+    const accountId = activeUploadAccountId;
+    const channelId = activeUploadChannelId;
+    const canContinue = activeUploadCheck;
+    if (!await isExternalUploadAllowed(accountId, channelId))
+        throw new ExternalUploadBlockedError("Secure Messaging protects this conversation or its protection state is unavailable. Keep the attachment in Discord.");
+    // Recheck after the caller's final await, in the same turn as the transport dispatch.
+    return () => {
+        assertUploadCurrent();
+        if (generation !== activeUploadGeneration || SelectedChannelStore.getChannelId() !== channelId || canContinue && !canContinue()) throw new Error("Upload cancelled");
+    };
 }
 
 function assertUploadCurrent() {
@@ -98,7 +129,7 @@ function assertUploadCurrent() {
         || UserStore.getCurrentUser()?.id !== activeUploadAccountId) throw new Error("Upload cancelled");
 }
 
-function beginUpload() {
+function beginUpload(canContinue: () => boolean = isConfigured) {
     clearTimeout(resetTimer);
     resetTimer = undefined;
     isUploading = true;
@@ -106,12 +137,14 @@ function beginUpload() {
     activeUploadGeneration = ++uploadGeneration;
     activeUploadAccountId = UserStore.getCurrentUser()?.id;
     activeUploadChannelId = SelectedChannelStore.getChannelId();
+    activeUploadCheck = canContinue;
 }
 
 function finishUpload() {
     isUploading = false;
     activeAbortController = null;
     activeXhr = null;
+    activeUploadCheck = undefined;
     const generation = activeUploadGeneration;
     if (generation !== uploadGeneration) return;
     resetTimer = setTimeout(() => {
@@ -193,7 +226,8 @@ function getUploadTimeoutMs(): number {
 }
 
 async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
-    assertUploadCurrent();
+    const assertAllowed = await getExternalUploadGuard();
+    assertAllowed();
     const controller = new AbortController();
     activeAbortController = controller;
     const timeout = setTimeout(() => controller.abort(), getUploadTimeoutMs());
@@ -288,7 +322,8 @@ function setXhrUploadProgress(event: ProgressEvent) {
 }
 
 async function uploadRequestWithTimeout(url: string, options: RequestInit): Promise<XhrResponse> {
-    assertUploadCurrent();
+    const assertAllowed = await getExternalUploadGuard();
+    assertAllowed();
     const requestUrl = toProxyUrl(url);
 
     return new Promise((resolve, reject) => {
@@ -315,6 +350,7 @@ async function uploadRequestWithTimeout(url: string, options: RequestInit): Prom
             xhr.onloadend = cleanup;
             const { body } = options;
             if (body instanceof ReadableStream) throw new Error("Streaming upload bodies are not supported");
+            assertAllowed();
             xhr.send(body as XMLHttpRequestBodyInit | null);
         } catch (error) {
             cleanup();
@@ -1484,7 +1520,7 @@ async function uploadWithFallbacks(fileBlob: Blob, filename: string, primary: Se
 
             return uploadedUrl;
         } catch (error) {
-            if (isUploadCancelledError(error)) {
+            if (isUploadCancelledError(error) || error instanceof ExternalUploadBlockedError) {
                 throw error;
             }
 
@@ -1642,8 +1678,9 @@ export async function uploadFile(url: string): Promise<void> {
 export async function uploadPickedFile(): Promise<void> {
     const generation = uploadGeneration;
     const accountId = UserStore.getCurrentUser()?.id;
+    const channelId = SelectedChannelStore.getChannelId();
     const file = await chooseFile("*/*");
-    if (!file || generation !== uploadGeneration || UserStore.getCurrentUser()?.id !== accountId) return;
+    if (!file || generation !== uploadGeneration || UserStore.getCurrentUser()?.id !== accountId || SelectedChannelStore.getChannelId() !== channelId) return;
 
     if (!isFileTypeAllowed(file)) {
         showToast("File type not allowed by current filter", Toasts.Type.FAILURE);
@@ -1653,7 +1690,7 @@ export async function uploadPickedFile(): Promise<void> {
     await uploadProvidedFiles([file]);
 }
 
-export async function uploadProvidedFiles(files: readonly File[], forceSend?: boolean): Promise<boolean> {
+export async function uploadProvidedFiles(files: readonly File[], forceSend?: boolean, canContinue?: () => boolean): Promise<boolean> {
     if (isUploading) {
         showToast("Upload already in progress", Toasts.Type.MESSAGE);
         return false;
@@ -1669,7 +1706,7 @@ export async function uploadProvidedFiles(files: readonly File[], forceSend?: bo
     const uploadFiles = files.filter(file => Boolean(file) && isFileTypeAllowed(file));
     if (!uploadFiles.length) return false;
 
-    beginUpload();
+    beginUpload(() => isConfigured() && uploadFiles.every(isFileTypeAllowed) && (!canContinue || canContinue()));
 
     try {
         for (let i = 0; i < uploadFiles.length; i++) {

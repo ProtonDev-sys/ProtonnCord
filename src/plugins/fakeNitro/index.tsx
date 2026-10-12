@@ -265,7 +265,7 @@ export default definePlugin({
                 },
                 {
                     // Disallow the emoji for premium locked if the intention doesn't allow it
-                    match: /!(\i\.\i\.canUseEmojisEverywhere\(\i\))/,
+                    match: /!(?:\(\i\|\|\i\.\i\.canUseEmojisEverywhere\(\i\)\)|\i\.\i\.canUseEmojisEverywhere\(\i\))/,
                     replace: m => `(${m}&&!${IS_BYPASSEABLE_INTENTION})`
                 },
                 {
@@ -326,7 +326,7 @@ export default definePlugin({
         },
         // Allow users to use custom client themes
         {
-            find: '("custom_themes_editor_footer")',
+            find: ".CLIENT_THEMES_EDITOR?",
             replacement: {
                 match: /(?<=\i=)\(0,\i\.\i\)\(\i\.\i\.TIER_2\)(?=,|;)/g,
                 replace: "true"
