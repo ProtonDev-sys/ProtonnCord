@@ -17,10 +17,10 @@
 */
 
 import { IpcEvents } from "@shared/IpcEvents";
-import { ipcMain } from "electron";
 
 import PluginNatives from "~pluginNatives";
 
+import { ipcMain } from "./ipc";
 import { registerPluginNatives } from "./pluginNativeRegistry";
 
 export type { PluginIpcMappings } from "./pluginNativeRegistry";

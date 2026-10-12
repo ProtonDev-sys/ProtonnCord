@@ -79,7 +79,7 @@ async function testInstalledReleaseState(): Promise<void> {
         } },
         "@shared/Updater": { parseUpdaterBranch },
         "@shared/vencordUserAgent": { VENCORD_USER_AGENT: "Fixture" },
-        electron: { ipcMain: { handle: (event: IpcEvents, handler: (...args: unknown[]) => Promise<{ ok: boolean; value?: unknown; }>) => handlers.set(event, handler) } },
+        "@main/ipc": { ipcMain: { handle: (event: IpcEvents, handler: (...args: unknown[]) => Promise<{ ok: boolean; value?: unknown; }>) => handlers.set(event, handler) } },
         "original-fs": {}, "~git-hash": { __esModule: true, default: CURRENT_HASH }, "~git-remote": { __esModule: true, default: "Fixture/Fixture" },
         "./common": { ASAR_FILE }, "./ipc": { createOperationQueue, serializeErrors },
         "./httpOperations": {
