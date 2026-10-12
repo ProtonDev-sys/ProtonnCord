@@ -97,6 +97,8 @@ jobs:
                       https://github.com/electron/electron/releases/download/v41.2.1/electron-v41.2.1-linux-x64.zip
                   printf '%s  %s\n' '04cc7fd5400c08cd98e2cc5c5e5f60cebb4b72fa65020a8ae2a88d8f48328710' "$archive" | sha256sum --check --strict
                   unzip -q "$archive" -d "$RUNNER_TEMP/protonncord-electron"
+                  sudo chown root:root "$RUNNER_TEMP/protonncord-electron/chrome-sandbox"
+                  sudo chmod 4755 "$RUNNER_TEMP/protonncord-electron/chrome-sandbox"
 
             - name: Exercise desktop and sandboxed Equibop IPC without an account
               env:
