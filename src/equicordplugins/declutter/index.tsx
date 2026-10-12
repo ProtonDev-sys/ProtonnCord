@@ -360,15 +360,6 @@ export default definePlugin({
             predicate: () => settings.store.removeServerBoostInfo,
         },
         {
-            // Billing settings
-            find: ".BILLING_SECTION,",
-            replacement: {
-                match: /(\.BILLING_SECTION.{0,50}buildLayout:\(\)=>\[).{0,15}?\]/,
-                replace: "$1]",
-            },
-            predicate: () => settings.store.removeBillingSettings,
-        },
-        {
             // Gift button
             find: '"sticker")',
             replacement: {
