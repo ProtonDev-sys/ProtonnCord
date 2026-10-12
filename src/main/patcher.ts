@@ -46,11 +46,11 @@ function isDiscordOrigin(value?: string) {
 }
 
 function getPermissionOrigin(webContents: Electron.WebContents | null | undefined, details?: any, requestingOrigin?: string) {
-    return details?.requestingUrl
-        ?? details?.embeddingOrigin
-        ?? details?.securityOrigin
+    // An embedding page is not the requester; opaque origins also override URLs.
+    return details?.securityOrigin
+        ?? details?.requestingUrl
         ?? requestingOrigin
-        ?? webContents?.getURL?.();
+        ?? (details?.isMainFrame === true ? webContents?.getURL?.() : undefined);
 }
 
 function isDiscordMediaPermission(webContents: Electron.WebContents | null | undefined, permission: string, details?: any, requestingOrigin?: string) {
