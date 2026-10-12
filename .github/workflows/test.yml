@@ -45,8 +45,8 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
-            - name: Audit shipped dependencies
-              run: pnpm audit --prod
+            - name: Audit all dependencies, including development tools
+              run: pnpm audit
 
             - name: Test Secure Messaging crypto caches
               run: pnpm exec tsx scripts/testSecureMessagingCryptoCache.ts

@@ -147,7 +147,7 @@
         "p-limit": "^7.3.0",
         "puppeteer-core": "^25.2.1",
         "standalone-electron-types": "^41.2.1",
-        "stylelint": "^17.14.0",
+        "stylelint": "17.16.0",
         "stylelint-config-standard": "^40.0.0",
         "ts-patch": "^3.3.0",
         "ts-pattern": "^5.9.0",

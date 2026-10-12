@@ -150,10 +150,10 @@ export default definePlugin({
             ]
         },
         {
-            find: 'location:"ForwardFooter"',
+            find: ".FORWARD_BREADCRUMB_CLICKED,{",
             replacement: {
-                match: /let{message:\i,snapshot:\i,index:\i}=(\i)/,
-                replace: "return $self.renderForwardFooter($1);$&"
+                match: /(disableComponentInteractivity:\i\}\),!\i&&\(0,\i\.jsx\)\()\i(?=,\{message:\i,snapshot:\i,index:\i\}\))/,
+                replace: "$1$self.renderForwardFooter"
             }
         },
         {

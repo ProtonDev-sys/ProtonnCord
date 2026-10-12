@@ -10,7 +10,8 @@ import { runInNewContext } from "node:vm";
 
 import { canonicalizeMatch, canonicalizeReplace } from "../src/utils/patches";
 import { activityAndContactControls } from "./fixtures/discordActivityAndContactControls";
-import { jsx, React } from "./utils/discordClientFixture";
+import { registeredGameControls } from "./fixtures/discordRegisteredGames";
+import { jsx, pluginPatches, React } from "./utils/discordClientFixture";
 import { loadTestModule } from "./utils/loadTestModule";
 
 function apply(source: string, patch: any) {
@@ -41,17 +42,171 @@ function loadPlugin(file: string, imports: Record<string, unknown>) {
     return { plugin, settings };
 }
 
-function ignoreFixture() {
+interface RunningGame { id?: string; exePath: string; name: string; detectionEnabled?: boolean; }
+
+function ignoreFixture(games: RunningGame[] = []) {
     let recalculations = 0;
+    const detectionReads: RunningGame[] = [];
+    const dispatched: any[] = [];
+    const enableDetection: Record<string, boolean> = {};
+    const source = registeredGameControls.stable;
+    const detection = runInNewContext(`${source.detectionKey};${source.detection};({ key: eU, enabled: eV });`, {
+        eu: { enableDetection }, y: { n1: () => false }, V: { Un: () => assert.fail("These fixtures are ordinary games") }
+    });
+    for (const game of games) if (game.detectionEnabled !== undefined) enableDetection[detection.key(game)] = game.detectionEnabled;
     return {
         ...loadPlugin("src/plugins/ignoreActivities/index.tsx", {
             "@api/UserSettings": { getUserSettingLazy: () => ({ updateSetting: () => recalculations++ }) },
             "@components/Flex": {}, "@components/Heading": {}, "@components/Paragraph": {},
             "@plugins/customRPC": { __esModule: true, default: {} }, "@utils/margins": {},
-            "@webpack/common": { Tooltip: "tooltip", RunningGameStore: { getRunningGames: () => [] } }
+            "@webpack/common": {
+                Tooltip: "tooltip", Menu: { MenuCheckboxItem: "checkbox" },
+                FluxDispatcher: { dispatch: (event: any) => {
+                    dispatched.push(event);
+                    enableDetection[detection.key(event.game)] = !detection.enabled(event.game);
+                } },
+                RunningGameStore: {
+                    getRunningGames: () => games, getGamesSeen: () => games,
+                    isDetectionEnabled: (game: RunningGame) => { detectionReads.push(game); return detection.enabled(game); }
+                }
+            }
         }),
-        recalculations: () => recalculations
+        detectionReads, dispatched, recalculations: () => recalculations
     };
+}
+
+function registeredGameMenu(plugin: any, rawGame: RunningGame) {
+    const errors: unknown[] = [];
+    const api = loadTestModule("src/api/ContextMenu.ts", {
+        "@utils/Logger": { Logger: class { error(...args: unknown[]) { errors.push(args); } } },
+        "@webpack/common": {
+            Menu: { MenuItem: "item" }, React: {
+                isValidElement: (value: any) => value?.type != null && value?.props != null,
+                cloneElement: (element: any) => jsx(element.type, { ...element.props })
+            }
+        }
+    }, {});
+    const navId = "registered-game-overflow-menu";
+    const patch = plugin.contextMenus?.[navId];
+    assert.equal(typeof patch, "function", "registered games must expose the toggle through the current host context menu");
+    api.addContextMenuPatch(navId, patch);
+    const nativeAction = () => assert.fail("The plugin must not invoke a native menu action");
+    const native = Object.freeze(jsx("item", Object.freeze({ id: "native-action", action: nativeAction })));
+    const props = Object.freeze({ navId, children: Object.freeze([native]), contextMenuAPIArguments: [Object.freeze({ rawGame })] });
+    function render() {
+        const menu = api._usePatchContextMenu(props);
+        assert.deepEqual(errors, []);
+        assert.equal(props.children.length, 1, "frozen host children must remain unchanged");
+        assert.equal(menu.children[0].props.action, nativeAction);
+        return menu.children;
+    }
+    return { render, patchHost: (props: any) => api._usePatchContextMenu(props), stop: () => api.removeContextMenuPatch(navId, patch) };
+}
+
+test("registered-game menus update the activity filter immediately and preserve native items, settings and stale actions", async () => {
+    const game = Object.freeze({ id: "registered", exePath: "/games/registered", name: "Registered", detectionEnabled: false });
+    const f = ignoreFixture([game]);
+    const retained = { id: "embedded", name: "Saved Activity", type: 1, futureField: { keep: true } };
+    f.settings.store.ignoredActivities.push(retained);
+    await f.plugin.start();
+    const menu = registeredGameMenu(f.plugin, game);
+    const toggle = menu.render()[1];
+    assert.equal(toggle.type, "checkbox");
+    assert.equal(toggle.props.id, "ignore-activities-toggle-activity");
+    assert.equal(toggle.props.checked, true);
+    assert.equal(f.plugin.isActivityNotIgnored({ type: 0, application_id: game.id }), true);
+    toggle.props.action();
+    assert.equal(menu.render()[1].props.checked, false);
+    assert.equal(f.plugin.isActivityNotIgnored({ type: 0, application_id: game.id }), false);
+    assert.equal(f.settings.store.ignoredActivities[0], retained);
+    assert.equal(f.settings.store.ignoredActivities[1].type, 0);
+    assert.equal(f.recalculations(), 1);
+    assert.deepEqual(f.detectionReads, [], "hiding an activity must not change native game detection");
+    toggle.props.action(); // The menu may still hold a callback from before the settings changed.
+    assert.equal(menu.render()[1].props.checked, true);
+    assert.equal(f.plugin.isActivityNotIgnored({ type: 0, application_id: game.id }), true);
+    assert.equal(f.settings.store.ignoredActivities.length, 1);
+    assert.equal(f.settings.store.ignoredActivities[0], retained);
+    assert.equal(f.recalculations(), 2);
+    assert.equal(f.dispatched.length, 1);
+    assert.equal(f.dispatched[0].type, "RUNNING_GAME_TOGGLE_DETECTION");
+    assert.equal(f.dispatched[0].game, game);
+    assert.equal(menu.stop(), true);
+    assert.equal(menu.render().length, 1, "removing the lifecycle-managed callback restores the native menu");
+});
+
+test("registered games enable native detection only for the exact running game when it is disabled", async () => {
+    const rawGame = Object.freeze({ exePath: "/games/target", name: "Target" });
+    const wrong = Object.freeze({ exePath: "/games/other", name: "Other", detectionEnabled: false });
+    const correct = Object.freeze({ ...rawGame, detectionEnabled: false });
+    const cases: { raw: RunningGame; games: RunningGame[]; expected: RunningGame | string | undefined; }[] = [
+        { raw: rawGame, games: [wrong, correct], expected: correct },
+        { raw: rawGame, games: [wrong], expected: undefined },
+        { raw: rawGame, games: [], expected: undefined },
+        { raw: rawGame, games: [{ ...correct, detectionEnabled: true }], expected: undefined },
+        { raw: { ...rawGame, id: "registered" }, games: [{ ...correct, id: "different" }], expected: undefined },
+        { raw: { ...rawGame, id: "registered" }, games: [wrong, { ...correct, id: "registered" }], expected: "registered" },
+    ];
+    for (const { raw, games, expected } of cases) {
+        const f = ignoreFixture(games);
+        const menu = registeredGameMenu(f.plugin, Object.freeze(raw));
+        const action = menu.render()[1].props.action;
+        action();
+        action();
+        assert.equal(f.settings.store.ignoredActivities.length, 0);
+        assert.equal(f.dispatched.length, expected ? 1 : 0);
+        if (expected === correct) assert.equal(f.dispatched[0].game, correct, "undefined IDs must not match another running game");
+        if (expected === "registered") assert.equal(f.dispatched[0].game.id, "registered");
+        if (!games.length || games.every(game => game === wrong || game.id === "different")) assert.equal(f.detectionReads.length, 0);
+    }
+});
+
+for (const [channel, fixture] of Object.entries(registeredGameControls)) {
+    test(channel + ": playing custom overrides retain an activity menu while native report and remove guards stay intact", () => {
+        const contextPatch = pluginPatches("src/plugins/_api/contextMenu.ts")[0];
+        const rawGame = Object.freeze({ id: "registered", exePath: "/games/registered", name: "Registered", detectable: true });
+        for (const isOverride of [false, true]) for (const hasReported of [false, true]) for (const nowPlaying of [false, true]) for (const sameVisibleGame of [false, true]) {
+            const f = ignoreFixture([rawGame]);
+            const patch = f.plugin.patches.find((patch: any) => patch.find === 'navId:"registered-game-overflow-menu"');
+            const transformed = patch ? apply(fixture.row, patch) : fixture.row;
+            const injected = apply(transformed, contextPatch);
+            function render(source: string) {
+                let stateIndex = 0;
+                const styles = new Proxy({}, { get: (_target, key) => String(key) });
+                return runInNewContext(`(${source})`, {
+                    S: { jsx, jsxs: jsx, Fragment: "fragment" },
+                    T: { useState: (initial: unknown) => [stateIndex++ === 0 ? hasReported : initial, () => {}], useRef: () => ({ current: null }), useMemo: (read: Function) => read() },
+                    pF: { I() {} }, f: { cf: (_stores: unknown, read: Function) => read(), bG: (_stores: unknown, read: Function) => read() },
+                    i9: { xU: (game: unknown) => game, Es: (game: RunningGame) => game.exePath, Ay: { isDetectionEnabled: () => true, getVisibleGame: () => sameVisibleGame ? rawGame : null } },
+                    pQ: { A: {} }, tg: { A: {} }, pw: { A: {} }, hW: { n1: () => false },
+                    U: { intl: { string: (value: unknown) => value }, t: styles }, iE: () => () => "classes", SM: styles, SU: styles,
+                    Q: { E: "text" }, SG: { A: "tooltip" }, e4: { isWindows: () => false },
+                    [channel === "stable" ? "aA" : "am"]: { Y: "popout" }, gj: { W: "menu" }, tn: { rX: "group", Dr: "native-item" }, sm: { m: "tooltip" }, sE: { I: "detection" }
+                })(Object.freeze({ rawGame, isOverride, nowPlaying }));
+            }
+            const native = render(fixture.row);
+            const actual = render(injected);
+            const popout = actual.props.children[0].props.children[1];
+            const canReport = !isOverride && !hasReported;
+            const canRemove = !nowPlaying && !sameVisibleGame;
+            assert.equal(Boolean(popout), canReport || canRemove || (isOverride && !hasReported));
+            if (popout) {
+                const closePopout = () => {};
+                const host = popout.props.renderPopout({ closePopout });
+                assert.equal(host.props.contextMenuAPIArguments[0].rawGame, rawGame, "the actual ContextMenuAPI injection must capture SV's outer props through the arrow callback");
+                const menu = registeredGameMenu(f.plugin, rawGame).patchHost(host.props);
+                assert.equal(menu.onClose, closePopout);
+                assert.deepEqual(Array.from(menu.children[0].props.children).filter(Boolean).map((item: any) => item.props.id), [canReport && "report", canRemove && "remove"].filter(Boolean));
+                const toggle = menu.children[1];
+                assert.equal(toggle.props.checked, true);
+                toggle.props.action();
+                assert.equal(f.plugin.isActivityNotIgnored({ type: 0, application_id: rawGame.id }), false);
+            }
+            for (const tree of [native, actual]) tree.props.children[0].props.children[1] = null;
+            const serialise = (tree: unknown) => JSON.stringify(tree, (_key, value) => typeof value === "function" ? "[function]" : value);
+            assert.equal(serialise(actual), serialise(native), "all native content, detection controls and input props must remain unchanged");
+        }
+    });
 }
 
 function contactFixture() {
@@ -125,7 +280,7 @@ function friendsGlobals(fixture: typeof activityAndContactControls.stable | type
 for (const [channel, fixture] of Object.entries(activityAndContactControls)) {
     test(channel + ": activity controls toggle the actual filter without changing card content or launch affordances", () => {
         const { plugin, settings, recalculations } = ignoreFixture();
-        const source = apply(fixture.appCard, plugin.patches[3]);
+        const source = apply(fixture.appCard, plugin.patches.find((patch: any) => patch.find === "disableBannerFadeIn:"));
         const application = Object.freeze({ id: "activity", name: "Example Activity" });
         for (const look of ["row", "large_banner", "medium_banner"]) for (const promoted of [false, true]) for (const developer of [false, true]) {
             const globals = appGlobals(promoted, developer);
