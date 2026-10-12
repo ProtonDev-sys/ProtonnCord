@@ -38,25 +38,3 @@ test("video generation refuses an existing working directory before browser laun
     assert.equal(removals, 0);
     assert.equal(launches, 0);
 });
-
-test("reporter missing-browser validation reports the requested channel before exiting", () => {
-    const source = readFileSync(new URL("./generateReport.ts", import.meta.url), "utf8");
-    const start = source.indexOf("const CANARY =");
-    const end = source.indexOf("let metaData =");
-    assert.ok(start >= 0 && end > start);
-    const code = transpileModule(source.slice(start, end), {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 },
-    }).outputText;
-    for (const canary of [false, true]) {
-        const messages: unknown[][] = [];
-        const exited = new Error("fixture exit");
-        assert.throws(() => runInNewContext(code, {
-            process: {
-                env: canary ? { USE_CANARY: "true" } : {},
-                exit(status: number) { assert.equal(status, 1); throw exited; },
-            },
-            console: { error: (...args: unknown[]) => messages.push(args) },
-        }), error => error === exited);
-        assert.deepEqual(messages, [[`${canary ? "CANARY" : "STABLE"} ---`, "Missing environment variable CHROMIUM_BIN"]]);
-    }
-});

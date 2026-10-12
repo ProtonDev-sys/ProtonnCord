@@ -18,13 +18,6 @@ import { discordFilePaste, discordUploadPipeline } from "./fixtures/discordUploa
 import { declaration, React } from "./utils/discordClientFixture";
 import { loadTestModule } from "./utils/loadTestModule";
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
-    return { promise, resolve, reject };
-}
-
 const file = (size = 4, name = "kept.txt") => new File(["a".repeat(size)], name, { type: "text/plain" });
 const channel = (id = "channel", guild_id?: string, thread = false) => Object.freeze({
     id, guild_id, type: (thread ? 11 : 0) as number, getGuildId: () => guild_id, isThread: () => thread,
@@ -44,7 +37,7 @@ function harness(config: Record<string, unknown> = {}, desktop = true) {
     let selectedUploads: any[] = [];
     let onOpen = () => {};
     let freezeDispatch = false;
-    const requests: { bytes: ArrayBuffer; name: string; accountId?: string; result: ReturnType<typeof deferred<any>>; }[] = [];
+    const requests: { bytes: ArrayBuffer; name: string; accountId?: string; result: PromiseWithResolvers<any>; }[] = [];
     const fetches: string[] = [];
     const fetchAccounts: (string | undefined)[] = [];
     const xhrRequests: { url?: string; body?: unknown; accountId?: string; }[] = [];
@@ -94,7 +87,7 @@ function harness(config: Record<string, unknown> = {}, desktop = true) {
                     return { success: true, data: await file().arrayBuffer(), contentType: "text/plain" };
                 },
                 uploadToCatbox(bytes: ArrayBuffer, name: string) {
-                    const result = deferred<any>();
+                    const result = Promise.withResolvers<any>();
                     requests.push({ bytes, name, result, accountId: currentUser?.id });
                     return result.promise;
                 }
@@ -377,7 +370,7 @@ test("normalized files and thread-specific send permissions govern the external 
 test("late preparation cannot redirect uploads after stop, restart, logout, account, channel or settings changes", async () => {
     for (const scenario of ["stop", "restart", "logout", "account", "channel", "setting", "permission", "normalized-filter"]) {
         const h = harness({ bypassDiscordUploadOnlyOverLimit: false, uploadAllowedFileTypes: "txt" });
-        const pending = deferred<any>();
+        const pending = Promise.withResolvers<any>();
         let prepared: any;
         h.normalize(upload => { prepared = upload; return pending.promise; });
         const operation = h.run([file()], channel("channel", "guild"));
@@ -484,7 +477,7 @@ test("unknown, failed or unavailable protection checks retain native upload vali
 test("pending native protection reads cannot claim uploads after context, settings, filters, count or busy state changes", async () => {
     for (const scenario of ["stop", "restart", "logout", "account", "channel", "setting", "only-over-limit", "permission", "configuration", "filter", "count", "busy"]) {
         const h = harness({ bypassDiscordUploadOnlyOverLimit: false, uploadAllowedFileTypes: "txt" });
-        const pending = deferred<any>();
+        const pending = Promise.withResolvers<any>();
         h.protection(() => pending.promise);
         const files = Object.freeze([file()]);
         const operation = h.run(files, channel("channel", "guild"));
@@ -576,7 +569,7 @@ test("the native clipboard path keeps separate paste and general bypass settings
 
 test("disabling paste upload while native protection is pending restores the normal attachment path", async () => {
     const h = harness({ bypassDiscordUpload: false, autoUploadPastedFiles: true });
-    const pending = deferred<any>();
+    const pending = Promise.withResolvers<any>();
     h.protection(() => pending.promise);
     const original = file();
     const result = paste(h, { files: [original] });
@@ -626,7 +619,7 @@ test("manual file, picker, draft, image, message and renderer HTTP uploads share
 test("stale menu actions and file pickers cannot move an upload to another account, channel or lifecycle", async () => {
     for (const scenario of ["channel", "account", "logout", "restart", "picker-channel", "picker-account", "picker-stop"]) {
         const h = harness();
-        const pending = deferred<File | undefined>();
+        const pending = Promise.withResolvers<File | undefined>();
         h.pick(() => pending.promise);
         const action = h.menuAction("channel-attach", { channel: channel() }, "file-upload-manual");
         assert.ok(action);
@@ -647,7 +640,7 @@ test("stale menu actions and file pickers cannot move an upload to another accou
 test("the transport rechecks protection and automatic context after file preparation without retrying a blocked request on another host", async () => {
     for (const scenario of ["protection", "unknown", "account", "channel", "stop", "count", "filter", "permission", "configuration", "setting"]) {
         const h = harness({ bypassDiscordUploadOnlyOverLimit: false, uploadAllowedFileTypes: "txt", disableFallbacks: false });
-        const pending = deferred<any>();
+        const pending = Promise.withResolvers<any>();
         h.protection(async () => h.protectionReads.length === 1 ? { status: "unconfigured" } : pending.promise);
         const files = Object.freeze([file()]);
         await h.run(files, channel("channel", "guild"));

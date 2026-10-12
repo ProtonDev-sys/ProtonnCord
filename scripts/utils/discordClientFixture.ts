@@ -6,12 +6,6 @@ import ts from "typescript";
 import { canonicalizeMatch, canonicalizeReplace } from "../../src/utils/patches";
 import { loadTestModule } from "./loadTestModule";
 
-export const { filters } = loadTestModule("src/webpack/webpack.ts", {
-    "@debug/Tracer": { traceFunction: (_name: string, fn: Function) => fn },
-    "@utils/lazy": {}, "@utils/lazyReact": {}, "@utils/Logger": { Logger: class {} },
-    "@utils/patches": { canonicalizeMatch }, "@utils/text": {}
-}, { IS_REPORTER: false, IS_DEV: false });
-
 // Evaluate the real lookup/declaration independently of unrelated module startup.
 export function sourceNode(file: string, predicate: (node: ts.Node) => boolean) {
     const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
@@ -41,6 +35,19 @@ export function declaration(file: string, name: string, globals: Record<string, 
 export const jsx = (type: unknown, props: any) => ({ type, props });
 export const React = { createElement: (type: unknown, props: any, ...children: unknown[]) => jsx(type, children.length ? { ...props, children } : props) };
 
+export function elements(node: any): any[] {
+    if (Array.isArray(node)) return node.flatMap(elements);
+    return node && typeof node === "object" ? [node, ...elements(node.props?.children)] : [];
+}
+
+export function loadPlugin(file: string, imports: Record<string, unknown> = {}, globals: Record<string, unknown> = {}) {
+    return loadTestModule(file, {
+        "@utils/constants": { Devs: {}, EquicordDevs: {} },
+        "@utils/types": { __esModule: true, default: (plugin: unknown) => plugin, OptionType: {} },
+        ...imports
+    }, globals).default;
+}
+
 export function host(source: string, modules: Record<number, any> = {}, globals: Record<string, unknown> = {}) {
     const exports: Record<string, any> = {};
     const requireHost = Object.assign((id: number) => modules[id] ?? {}, {
@@ -53,23 +60,15 @@ export function host(source: string, modules: Record<number, any> = {}, globals:
     return exports;
 }
 
-export function findComponent(exports: Record<string, any>) {
-    return (...code: (string | RegExp)[]) => {
-        const matches = Object.values(exports).filter(filters.componentByCode(...code));
-        assert.equal(matches.length, 1, `Exactly one public component must match ${code}`);
-        return matches[0];
-    };
-}
-
 export function pluginPatches(file: string, globals: Record<string, unknown> = {}) {
     const code = sourceNode(file, node => ts.isPropertyAssignment(node) && node.name.getText() === "patches");
     return evaluate(`const plugin={${code}};plugin.patches;`, globals);
 }
 
-export function applyPatch(source: string, patch: any) {
+export function applyPatch(source: string, patch: any, path = "plugin") {
     const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
     return replacements.reduce((current: string, replacement: any) => {
-        const next = current.replace(canonicalizeMatch(replacement.match), canonicalizeReplace(replacement.replace, "plugin"));
+        const next = current.replace(canonicalizeMatch(replacement.match), canonicalizeReplace(replacement.replace, path));
         assert.notEqual(next, current, `Captured Discord code must match ${replacement.match}`);
         return next;
     }, source);

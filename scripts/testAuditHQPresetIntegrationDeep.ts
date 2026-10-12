@@ -2,15 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { loadTestModule } from "./utils/loadTestModule";
+import { elements as descendants } from "./utils/discordClientFixture";
 
 function element(type: unknown, props: object, ...children: unknown[]) {
     return { type, props: { ...props, children } };
-}
-
-function descendants(node: any): any[] {
-    if (Array.isArray(node)) return node.flatMap(descendants);
-    if (!node || typeof node !== "object") return [];
-    return [node, ...descendants(node.props?.children)];
 }
 
 function load(path: string, imports: Record<string, unknown>, globals: Record<string, unknown> = {}) {

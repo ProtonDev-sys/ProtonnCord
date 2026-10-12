@@ -9,13 +9,7 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
 import { messageReactions, typingIndicator } from "./fixtures/discordChatControls";
-import { applyPatch, declaration, jsx, pluginPatches } from "./utils/discordClientFixture";
-
-function elements(value: any): any[] {
-    if (!value || typeof value !== "object") return [];
-    if (Array.isArray(value)) return value.flatMap(elements);
-    return [value, ...elements(value.props?.children)];
-}
+import { applyPatch, declaration, elements, jsx, pluginPatches } from "./utils/discordClientFixture";
 
 test("SilentTyping hides current visual and accessible typing indicators while preserving slowmode and native hook order", () => {
     const path = "src/plugins/silentTyping/index.tsx";

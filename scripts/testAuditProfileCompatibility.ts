@@ -11,6 +11,7 @@ import { runInNewContext } from "node:vm";
 import { canonicalizeMatch, canonicalizeReplace } from "../src/utils/patches";
 import { discordProfileComponents } from "./fixtures/discordProfileComponents";
 import { loadTestModule } from "./utils/loadTestModule";
+import { elements as descendants } from "./utils/discordClientFixture";
 
 type Capture = typeof discordProfileComponents[number];
 type Element = { type: unknown; props: any; };
@@ -19,12 +20,6 @@ const React = { createElement: (type: unknown, props: any, ...children: unknown[
 const css = new Proxy({}, { get: (_, key) => String(key) });
 const sections = { ACTIVITY: "ACTIVITY", WIDGETS: "WIDGETS", WISHLIST: "WISHLIST", MUTUAL_FRIENDS: "MUTUAL_FRIENDS", MUTUAL_GUILDS: "MUTUAL_GUILDS" };
 const savedSettings = Object.freeze({ store: Object.freeze({ enabled: true, profileSongsLimit: 3, baseUrl: "https://decor.invalid", unknown: "preserve" }) });
-
-function descendants(node: any): Element[] {
-    if (Array.isArray(node)) return node.flatMap(descendants);
-    if (!node || typeof node !== "object") return [];
-    return [node, ...descendants(node.props?.children)];
-}
 
 function hooks() {
     let cursor = 0;

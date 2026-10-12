@@ -36,12 +36,6 @@ function load(file: string, overrides: Record<string, unknown>, globals: Record<
     });
 }
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>(done => { resolve = done; });
-    return { promise, resolve };
-}
-
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function uploadHarness(settings: Record<string, unknown> = {}, globals: Record<string, unknown> = {}) {
@@ -50,7 +44,7 @@ function uploadHarness(settings: Record<string, unknown> = {}, globals: Record<s
     let serial = 0;
     let copies = 0;
     let inserted = 0;
-    const requests: ReturnType<typeof deferred<{ success: boolean; url?: string; error?: string; }>>[] = [];
+    const requests: PromiseWithResolvers<{ success: boolean; url?: string; error?: string; }>[] = [];
     const timers = new Map<number, { callback: () => void; delay: number; }>();
     const store = { serviceType: types.ServiceType.CATBOX, disableFallbacks: true, autoCopy: true, autoSend: true, preserveOriginalFilename: true, corsProxyUrl: "none", ...settings };
     const api = load("src/equicordplugins/fileUpload/utils/upload.ts", {
@@ -66,7 +60,7 @@ function uploadHarness(settings: Record<string, unknown> = {}, globals: Record<s
         IS_DISCORD_DESKTOP: true,
         VencordNative: { pluginHelpers: {
             SecureMessaging: { getChannelProtection: async () => ({ status: "unconfigured" }) },
-            FileUpload: { uploadToCatbox: () => { const request = deferred<{ success: boolean; url?: string; error?: string; }>(); requests.push(request); return request.promise; } }
+            FileUpload: { uploadToCatbox: () => { const request = Promise.withResolvers<{ success: boolean; url?: string; error?: string; }>(); requests.push(request); return request.promise; } }
         } },
         setTimeout: (callback: () => void, delay: number) => { timers.set(++serial, { callback, delay }); return serial; },
         clearTimeout: (id: number) => timers.delete(id),
@@ -187,7 +181,7 @@ test("malformed or unreadable endpoint approval stores are preserved before any 
 });
 
 test("stopping APNG conversion terminates a pending worker and failed input cleanup still attempts output cleanup", async () => {
-    const pending = deferred<void>();
+    const pending = Promise.withResolvers<void>();
     const instances: any[] = [];
     let loads = 0;
     const api = load("src/equicordplugins/fileUpload/utils/apngToGif.ts", {

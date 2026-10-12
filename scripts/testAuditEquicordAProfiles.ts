@@ -33,13 +33,6 @@ function load(path: string, helpers = "", mocks: Record<string, any> = {}, globa
     return exports;
 }
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
-    return { promise, resolve, reject };
-}
-
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 
 test("PolishWording preserves literal placeholder text and inline code", () => {
@@ -86,12 +79,12 @@ test("CancelFriendRequest ignores absent users and catches rejected cancellation
 });
 
 test("PersistentAudioPlayback isolates replacement players from stale rejection and stop", async () => {
-    const plays: ReturnType<typeof deferred<void>>[] = [];
+    const plays: PromiseWithResolvers<void>[] = [];
     class AudioFixture {
         paused = false; ended = false; currentTime = 0; duration = NaN; muted = false; playbackRate = 1; volume = 1;
         constructor(public src: string) {}
         addEventListener() {} removeEventListener() {} pause() { this.paused = true; }
-        play() { const pending = deferred<void>(); plays.push(pending); return pending.promise; }
+        play() { const pending = Promise.withResolvers<void>(); plays.push(pending); return pending.promise; }
     }
     const plugin = load("persistentAudioPlayback/index.tsx", "\nexport { continueDetached, detachedPlayers, seek };", {
         "@webpack/common": { showToast() {}, Toasts: { Type: {} } }
@@ -143,7 +136,7 @@ test("ProfileSets validates stored/imported shapes and migrates legacy arrays", 
 });
 
 test("ProfileSets serializes immutable snapshots and rejects other account/section writes", async () => {
-    const first = deferred<void>();
+    const first = Promise.withResolvers<void>();
     const writes: any[] = [];
     const { storage, state } = storageFixture(new Map(), async (key, value) => {
         writes.push({ key, value });
@@ -170,7 +163,7 @@ test("ProfileSets serializes immutable snapshots and rejects other account/secti
 test("ProfileSets drops stale saves and refreshes all fields in one persistence call", async () => {
     const { storage } = storageFixture();
     await storage.loadPresets("main");
-    const pending = deferred<any>();
+    const pending = Promise.withResolvers<any>();
     const actions = load("profileSets/utils/actions.ts", "", {
         "./storage": storage, "./profile": { getCurrentProfile: () => pending.promise },
         "@webpack/common": { UserProfileSettingsStore: { getPendingChanges: () => ({}) } }
@@ -216,7 +209,7 @@ test("ProfileSets dismissed import prompts settle as cancelled once", () => {
 });
 
 test("QuickThemeSwitcher discards startup results after stop", async () => {
-    const pending = deferred<any[]>();
+    const pending = Promise.withResolvers<any[]>();
     let listeners = 0;
     const fixture = load("quickThemeSwitcher.discordDesktop/index.tsx", "\nexport { themeList };", {
         "@api/Settings": { definePluginSettings: () => ({ store: { includeLocal: true, includeOnline: false } }), Settings: {}, SettingsStore: { removeChangeListener() {} } },
@@ -276,7 +269,7 @@ test("ProfileSets applies only the latest selection and restores cleared prefere
 });
 
 test("Quoter ignores completed preview work after its modal is disposed", async () => {
-    const pending = deferred<Blob>();
+    const pending = Promise.withResolvers<Blob>();
     const effects: (() => void)[] = [];
     let timer: () => void = () => {};
     let created = 0;

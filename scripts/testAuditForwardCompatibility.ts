@@ -5,6 +5,7 @@ import { runInNewContext } from "node:vm";
 import { canonicalizeMatch, canonicalizeReplace } from "../src/utils/patches";
 import { discordForwardPreviews } from "./fixtures/discordForwardPreview";
 import { loadTestModule } from "./utils/loadTestModule";
+import { elements } from "./utils/discordClientFixture";
 
 const jsx = (type: unknown, props: any, ...children: unknown[]) => ({ type, props: children.length ? { ...props, children } : props });
 const React = { createElement: jsx };
@@ -21,12 +22,6 @@ function loadPlugin() {
         "../secureMessaging.desktop/forwarding": {}, "../secureMessaging.desktop/protocol": {},
         "./components": { ForwardPicker: "custom-picker" }
     }, {}).default;
-}
-
-function elements(value: any): any[] {
-    if (!value || typeof value !== "object") return [];
-    if (Array.isArray(value)) return value.flatMap(elements);
-    return [value, ...elements(value.props?.children)];
 }
 
 test("forward media picker preserves native text, thumbnails and checkpoint previews on both clients", () => {

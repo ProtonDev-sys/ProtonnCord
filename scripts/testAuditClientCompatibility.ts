@@ -2,26 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
-import { canonicalizeMatch, canonicalizeReplace } from "../src/utils/patches";
 import { discordConnectionStatusSource, discordDevtoolsWarningSource, discordScrollerSource } from "./fixtures/discordCoreComponents";
-import { loadTestModule } from "./utils/loadTestModule";
-
-function loadPlugin(file: string, imports: Record<string, unknown> = {}) {
-    return loadTestModule(file, {
-        "@utils/constants": { Devs: {}, EquicordDevs: {} },
-        "@utils/types": { __esModule: true, default: (plugin: unknown) => plugin, OptionType: {} },
-        ...imports
-    }, {}).default;
-}
-
-function applyPatch(source: string, patch: any) {
-    const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
-    return replacements.reduce((current: string, replacement: any) => {
-        const next = current.replace(canonicalizeMatch(replacement.match), canonicalizeReplace(replacement.replace, "plugin"));
-        assert.ok(next !== current, `captured Discord code must match ${replacement.match}`);
-        return next;
-    }, source);
-}
+import { applyPatch, loadPlugin } from "./utils/discordClientFixture";
 
 test("NoDevtoolsWarning disables the current host registration guard for web and desktop", () => {
     const plugin = loadPlugin("src/plugins/noDevtoolsWarning/index.ts");

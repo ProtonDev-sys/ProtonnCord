@@ -5,22 +5,6 @@ import { exactArrayBuffer } from "../src/equicordplugins/secureMessaging.desktop
 import { KeyReviewGate } from "../src/equicordplugins/secureMessaging.desktop/keyReviewGate";
 import { createTaskQueue } from "../src/equicordplugins/secureMessaging.desktop/taskQueue";
 
-interface Deferred<T = void> {
-    promise: Promise<T>;
-    resolve(value: T): void;
-    reject(error: unknown): void;
-}
-
-function deferred<T = void>(): Deferred<T> {
-    let resolve!: (value: T) => void;
-    let reject!: (error: unknown) => void;
-    const promise = new Promise<T>((nextResolve, nextReject) => {
-        resolve = nextResolve;
-        reject = nextReject;
-    });
-    return { promise, reject, resolve };
-}
-
 async function waitFor(predicate: () => boolean, label: string): Promise<void> {
     for (let attempt = 0; attempt < 200; attempt++) {
         if (predicate()) return;
@@ -31,7 +15,7 @@ async function waitFor(predicate: () => boolean, label: string): Promise<void> {
 
 async function testTaskQueue(): Promise<void> {
     const run = createTaskQueue(2);
-    const gates = Array.from({ length: 5 }, () => deferred());
+    const gates = Array.from({ length: 5 }, () => Promise.withResolvers<void>());
     const starts: number[] = [];
     let active = 0;
     let maximumActive = 0;
@@ -63,7 +47,7 @@ async function testTaskQueue(): Promise<void> {
     assert.equal(maximumActive, 2, "queued work never exceeded the configured concurrency");
 
     const single = createTaskQueue(1);
-    const rejectionGate = deferred();
+    const rejectionGate = Promise.withResolvers<void>();
     let secondStarted = false;
     const rejected = single(async () => {
         await rejectionGate.promise;

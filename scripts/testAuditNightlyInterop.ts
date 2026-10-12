@@ -34,12 +34,6 @@ function functionFixture(path: string, name: string, globals: Record<string, unk
     assert.ok(fn, name);
     return evaluate(`${fn.getText(source)}\nexports.fixture = ${name};`, globals).fixture;
 }
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
 function rendererEdit(originalCounter: number, nextCounter: number) {
     let encryptCalls = 0;
     const edit = functionFixture(DESKTOP + "index.tsx", "encryptEditedMessage", {
@@ -80,7 +74,7 @@ test("phone pairing checks the account before native work and again before clipb
     let currentUser = OTHER_PEER;
     let calls = 0;
     const copied: string[] = [];
-    const pending = deferred<{ status: string; token: string; }>();
+    const pending = Promise.withResolvers<{ status: string; token: string; }>();
     const action = evaluate(`exports.action = ${handler.getText(source)};`, {
         UserStore: { getCurrentUser: () => ({ id: currentUser }) }, context: { localUserId: USER },
         setBusy() {}, setError() {}, Native: { exportMobilePairing() { calls++; return pending.promise; } },
@@ -301,7 +295,7 @@ test("failed off/save cannot make a protected conversation fall through plaintex
 
 test("a pending off/save retains protection until the storage commit succeeds", async () => {
     const f = mobileFixture(); await f.vault.load();
-    const committed = deferred<void>();
+    const committed = Promise.withResolvers<void>();
     f.backing.write = async (value: string) => { await committed.promise; f.state.saved = value; };
     delete f.vault.account(USER).conversations[CHANNEL];
     const saving = f.vault.save();
@@ -326,7 +320,7 @@ test("an explicit successful save retry clears the failure latch after committin
 
 test("an already queued successful save cannot clear a preceding failure latch", async () => {
     const f = mobileFixture(); await f.vault.load();
-    const firstWrite = deferred<void>();
+    const firstWrite = Promise.withResolvers<void>();
     let writes = 0;
     f.backing.write = async (value: string) => { if (++writes === 1) await firstWrite.promise; f.state.saved = value; };
     const first = f.vault.save();

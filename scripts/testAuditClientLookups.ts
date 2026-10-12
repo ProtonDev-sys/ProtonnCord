@@ -4,7 +4,22 @@ import ts from "typescript";
 
 import { canonicalizeMatch, canonicalizeReplace } from "../src/utils/patches";
 import { discordChannelRouterSource, discordFocusLockSource, discordGuildlessSource, discordHeaderBarSource, discordProfileExportsSource, discordSearchBarSource, discordSettingsExportsSource, discordSwitchSource } from "./fixtures/discordClientLookups";
-import { declaration, evaluate, filters, findComponent, host, jsx, React, sourceNode } from "./utils/discordClientFixture";
+import { declaration, evaluate, host, jsx, React, sourceNode } from "./utils/discordClientFixture";
+import { loadTestModule } from "./utils/loadTestModule";
+
+const { filters } = loadTestModule("src/webpack/webpack.ts", {
+    "@debug/Tracer": { traceFunction: (_name: string, fn: Function) => fn },
+    "@utils/lazy": {}, "@utils/lazyReact": {}, "@utils/Logger": { Logger: class {} },
+    "@utils/patches": { canonicalizeMatch }, "@utils/text": {}
+}, { IS_REPORTER: false, IS_DEV: false });
+
+function findComponent(exports: Record<string, any>) {
+    return (...code: (string | RegExp)[]) => {
+        const matches = Object.values(exports).filter(filters.componentByCode(...code));
+        assert.equal(matches.length, 1, `Exactly one public component must match ${code}`);
+        return matches[0];
+    };
+}
 
 test("ChannelRouter resolves the channel action and preserves routing and voice-chat behavior", () => {
     const routes: unknown[][] = [];

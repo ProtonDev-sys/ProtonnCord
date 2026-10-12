@@ -25,13 +25,6 @@ function loadSource(file: string, mocks: Record<string, any> = {}, globals: Reco
     return exports;
 }
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((accept, decline) => { resolve = accept; reject = decline; });
-    return { promise, resolve, reject };
-}
-
 function hooks() {
     const states: any[] = [];
     const effects: Array<() => (() => void)> = [];
@@ -128,7 +121,7 @@ test("audio store notifies all subscribers only after committed writes and retri
 });
 
 test("mounted sound cards refresh together, ignore stale initial reads and unsubscribe", async () => {
-    const initial = deferred<any>();
+    const initial = Promise.withResolvers<any>();
     const listeners = new Set<(files: any) => void>();
     const cleanups: Array<() => void> = [];
     const renderers: Array<() => any> = [];
@@ -169,7 +162,7 @@ test("mounted sound cards refresh together, ignore stale initial reads and unsub
 test("parent deletion clears every reference and remounts cards only on success", async () => {
     const state = hooks();
     let fail = true;
-    const pending = deferred<void>();
+    const pending = Promise.withResolvers<void>();
     const definitions: any = {};
     const store: any = {};
     loadSource("customSounds/index.tsx", {
@@ -200,7 +193,7 @@ test("parent deletion clears every reference and remounts cards only on success"
 });
 
 test("clipboard reports completion, rejection, synchronous failure and missing URLs accurately", async () => {
-    const pending = deferred<void>();
+    const pending = Promise.withResolvers<void>();
     const toasts: any[] = [];
     let copy = () => pending.promise;
     const plugin = loadSource("copyUserMediaUrls/index.tsx", {

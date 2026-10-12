@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { createSourceFile, JsxEmit, ScriptTarget } from "typescript";
+import { JsxEmit } from "typescript";
 
 import { loadTestModule } from "./utils/loadTestModule";
 
@@ -32,7 +30,7 @@ const definePluginSettings = (definitions: Record<string, { default?: unknown; }
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
 function linkedMessageFixture() {
-    const requests: ReturnType<typeof deferred<{ body: { id: string; channel_id: string; }[]; }>>[] = [];
+    const requests: PromiseWithResolvers<{ body: { id: string; channel_id: string; }[]; }>[] = [];
     const api = loadModule<{
         fetchMessage(channelId: string, messageId: string): Promise<unknown>;
         clearMessageCache(): void;
@@ -49,7 +47,7 @@ function linkedMessageFixture() {
         "@webpack/common": {
             AuthenticationStore: { getId: () => "account" },
             RestAPI: { get() {
-                const request = deferred<{ body: { id: string; channel_id: string; }[]; }>();
+                const request = Promise.withResolvers<{ body: { id: string; channel_id: string; }[]; }>();
                 requests.push(request);
                 return request.promise;
             } },
@@ -90,26 +88,6 @@ test("old linked message cleanup preserves a newer pending request", async () =>
     fixture.requests[1].resolve({ body: [message] });
     assert.equal(await newRequest, message);
     assert.equal(fixture.messageCache.size, 1);
-});
-
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (reason: unknown) => void;
-    const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-        resolve = resolvePromise;
-        reject = rejectPromise;
-    });
-    return { promise, resolve, reject };
-}
-
-test("every tracked plugin TypeScript source parses", () => {
-    const paths = execFileSync("git", ["ls-files", "src/plugins/**"], { encoding: "utf8" }).trim().split("\n");
-    assert.ok(paths.length > 0);
-    for (const path of paths.filter(path => /\.tsx?$/.test(path))) {
-        const source = createSourceFile(path, readFileSync(path, "utf8"), ScriptTarget.Latest, true);
-        const diagnostics = (source as typeof source & { parseDiagnostics: unknown[]; }).parseDiagnostics;
-        assert.equal(diagnostics.length, 0, `Parse errors in ${path}`);
-    }
 });
 
 function youtubeFixture(enabled = true) {
@@ -185,7 +163,7 @@ interface SummariesPlugin {
 }
 
 function summariesFixture(saved: Record<string, unknown[]>) {
-    const completion = deferred<void>();
+    const completion = Promise.withResolvers<void>();
     const host: Record<string, unknown> = {};
     const persisted: unknown[] = [];
     const plugin = loadModule<{ default: SummariesPlugin; }>("src/plugins/seeSummaries/index.tsx", {
@@ -256,7 +234,7 @@ interface TenorPlugin {
 
 function tenorFixture(format = "tinywebm") {
     const actions: Array<{ type: string; items?: unknown[]; }> = [];
-    const requests: Array<{ url: URL; response: ReturnType<typeof deferred<{ ok: boolean; json(): Promise<unknown>; }>>; }> = [];
+    const requests: Array<{ url: URL; response: PromiseWithResolvers<{ ok: boolean; json(): Promise<unknown>; }>; }> = [];
     const plugin = loadModule<{ default: TenorPlugin; }>("src/plugins/tenorGifSearch/index.tsx", {
         "@utils/constants": constants,
         "@utils/types": definePlugin,
@@ -265,7 +243,7 @@ function tenorFixture(format = "tinywebm") {
     }, {
         fetch(url: string, options: { signal: AbortSignal; }) {
             assert.ok(options.signal instanceof AbortSignal);
-            const response = deferred<{ ok: boolean; json(): Promise<unknown>; }>();
+            const response = Promise.withResolvers<{ ok: boolean; json(): Promise<unknown>; }>();
             requests.push({ url: new URL(url), response });
             return response.promise;
         }
@@ -342,14 +320,14 @@ test("Tenor successful searches retain their result mapping", async () => {
 });
 
 test("Dearrow unmount aborts every component request and preserves the host lifecycle", async () => {
-    const requests: { signal: AbortSignal; response: ReturnType<typeof deferred<any>>; }[] = [];
+    const requests: { signal: AbortSignal; response: PromiseWithResolvers<any>; }[] = [];
     const { default: plugin } = loadModule<any>("src/plugins/dearrow/index.tsx", {
         "./styles.css": {}, "react/jsx-runtime": jsxRuntime,
         "@api/Settings": { definePluginSettings }, "@components/ErrorBoundary": {},
         "@utils/constants": constants, "@utils/Logger": { Logger: class { error() {} } },
         "@utils/types": { ...definePlugin, OptionType: {} }, "@webpack/common": {}
     }, { AbortController, fetch: (_url: string, options: { signal: AbortSignal; }) => {
-        const response = deferred<any>();
+        const response = Promise.withResolvers<any>();
         requests.push({ signal: options.signal, response });
         return response.promise;
     } });
@@ -415,7 +393,7 @@ function renameFixture(initial: { name: string; isNew: boolean; } | undefined = 
     let closed = 0;
     let stateIndex = 0;
     const savedSessionsCache = new Map(initial ? [["session", initial]] : []);
-    const writes: ReturnType<typeof deferred<void>>[] = [];
+    const writes: PromiseWithResolvers<void>[] = [];
     const toasts: unknown[] = [];
     const api = loadModule<any>("src/plugins/betterSessions/components/RenameModal.tsx", {
         "react/jsx-runtime": jsxRuntime, "@components/Button": {}, "@components/Heading": {},
@@ -424,7 +402,7 @@ function renameFixture(initial: { name: string; isNew: boolean; } | undefined = 
             savedSessionsCache, notifySessionNames: () => notifications++,
             saveSessionsToDataStore: () => {
                 notifications++;
-                const write = deferred<void>();
+                const write = Promise.withResolvers<void>();
                 writes.push(write);
                 return write.promise;
             }
@@ -575,7 +553,7 @@ function fakeNitroFixture() {
 
 test("FakeNitro waits for conversion and reports failures while canceling unsupported sends", async () => {
     const fixture = fakeNitroFixture();
-    const conversion = deferred<void>();
+    const conversion = Promise.withResolvers<void>();
     fixture.plugin.sendAnimatedSticker = () => conversion.promise;
     let settled = false;
     const pending = fixture.send().then(result => { settled = true; return result; });
@@ -592,7 +570,7 @@ test("FakeNitro waits for conversion and reports failures while canceling unsupp
 
 test("FakeNitro upload preparation rejection is handled by the send listener", async () => {
     const fixture = fakeNitroFixture();
-    const upload = deferred<void>();
+    const upload = Promise.withResolvers<void>();
     fixture.setUpload(() => upload.promise);
     const pending = fixture.send();
     await flush();

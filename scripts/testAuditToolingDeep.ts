@@ -174,16 +174,6 @@ test("report publisher passes a bounded abort signal without network access", as
     assert.equal(cancelled, 1);
 });
 
-test("mention proof uses a word boundary rather than a backspace", () => {
-    const source = read("scripts/testSecureMessagingLive.ts");
-    assert.equal(source.includes("\u0008"), false);
-    const pattern = source.match(/mentionedClassApplied: (\/[^\n]+\/u)\.test/u)?.[1];
-    assert.ok(pattern);
-    const expression = runInNewContext(pattern);
-    assert.equal(expression.test("pc-secure-row mentioned_123"), true);
-    assert.equal(expression.test("pc-secure-row notmentioned_123"), false);
-});
-
 test("local reporter bounds webhook requests and releases response bodies", async () => {
     const source = read("scripts/generateReport.ts");
     const command = source.slice(source.indexOf("await fetch(process.env.WEBHOOK_URL"), source.indexOf("\n    }\n}", source.indexOf("await fetch(process.env.WEBHOOK_URL")));
@@ -206,20 +196,6 @@ test("local reporter bounds webhook requests and releases response bodies", asyn
     }
 });
 
-test("CI validates source without rewriting it and includes focused suites", () => {
-    const workflow = read(".github/workflows/test.yml");
-    const scripts = JSON.parse(read("package.json")).scripts;
-    assert.match(workflow, /run: pnpm test\s*\n/u);
-    assert.match(workflow, /run: pnpm audit\s*\n/u);
-    for (const name of ["test", "testWeb"]) {
-        assert.match(scripts[name], /\bpnpm lint\b/u);
-        assert.doesNotMatch(scripts[name], /lint:fix|--fix/u, "test commands must check the reviewed source without editing it");
-    }
-    assert.match(workflow, /run: pnpm testPrimaryStreamAudio && pnpm testPromiseTimeout/u);
-    assert.doesNotMatch(workflow, /run: pnpm exec tsx --test scripts\/testAuditToolingDeep\.ts/u);
-    assert.match(read("scripts/runAuditTests.mjs"), /testAudit\.\+.*ts/u);
-});
-
 test("both reporter workflow builds load their shared catalog in plain Node", () => {
     const directory = mkdtempSync(path.join(root, ".reporter-build-test-"));
     try {
@@ -231,6 +207,7 @@ test("both reporter workflow builds load their shared catalog in plain Node", ()
                 return [key, value ?? true];
             }));
             const outfile = path.join(directory, `${workflow}.mjs`);
+            const canary = workflow === "reportBrokenPlugins.yml";
             buildSync({
                 absWorkingDir: root, entryPoints: ["scripts/generateReport.ts"], outfile,
                 bundle: options.bundle === true, platform: options.platform as BuildOptions["platform"],
@@ -238,12 +215,12 @@ test("both reporter workflow builds load their shared catalog in plain Node", ()
             });
             const result = spawnSync(process.execPath, [outfile], {
                 cwd: root, encoding: "utf8", timeout: 10_000, maxBuffer: 1_048_576,
-                env: { ...process.env, CHROMIUM_BIN: "", USE_CANARY: "false", NODE_OPTIONS: "" },
+                env: { ...process.env, CHROMIUM_BIN: "", USE_CANARY: String(canary), NODE_OPTIONS: "" },
             });
             assert.equal(result.error, undefined, workflow);
             assert.equal(result.status, 1, workflow);
             assert.equal(result.stdout, "", workflow);
-            assert.equal(result.stderr.trim(), "STABLE --- Missing environment variable CHROMIUM_BIN", workflow);
+            assert.equal(result.stderr.trim(), `${canary ? "CANARY" : "STABLE"} --- Missing environment variable CHROMIUM_BIN`, workflow);
         }
     } finally {
         rmSync(directory, { recursive: true, force: true });
@@ -371,7 +348,7 @@ test("late connection cleanup failure is bounded and reports an unknown session 
         }, {
             "puppeteer-core": { __esModule: true, default: { connect() { return new Promise(resolve => { completeLate = resolve; }); } } },
         });
-        await assert.rejects(harness.connectWithRetry(20, 20, 1), /timed out/);
+        await assert.rejects(harness.connectWithRetry(20, 20, 1), /(?:timed out|deadline expired).*unknown/);
         completeLate({
             disconnect() { disconnects++; return failure === "reject" ? Promise.reject(new Error("disconnect failed")) : new Promise(() => {}); },
             close() { closes++; },

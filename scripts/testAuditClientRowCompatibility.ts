@@ -2,33 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
-import { canonicalizeMatch, canonicalizeReplace } from "../src/utils/patches";
 import { discordThreadRowProps, discordVoiceIcons, discordVoiceLabel } from "./fixtures/discordClientRows";
-import { loadTestModule } from "./utils/loadTestModule";
+import { applyPatch, elements, loadPlugin as loadDiscordPlugin } from "./utils/discordClientFixture";
 
 const jsx = (type: unknown, props: any, key?: string) => ({ type, props, key });
 const React = { createElement: (type: unknown, props: any, ...children: unknown[]) => jsx(type, { ...props, children }) };
 const settings = { store: { allCallTimers: true, showWithoutHover: false, trackSelf: false } };
 
 function loadPlugin(path: string, imports: Record<string, unknown>) {
-    return loadTestModule(path, {
+    return loadDiscordPlugin(path, {
         "@api/Settings": { definePluginSettings: () => settings },
-        "@utils/constants": { Devs: {}, EquicordDevs: {} },
-        "@utils/types": { __esModule: true, default: (plugin: unknown) => plugin, OptionType: {} },
         ...imports
-    }, {}).default;
-}
-
-function patch(source: string, replacement: any) {
-    const result = source.replace(canonicalizeMatch(replacement.match), canonicalizeReplace(replacement.replace, "plugin"));
-    assert.notEqual(source, result, "current native row must match the patch");
-    return result;
-}
-
-function elements(value: any): any[] {
-    if (!value || typeof value !== "object") return [];
-    if (Array.isArray(value)) return value.flatMap(elements);
-    return [value, ...elements(value.props?.children)];
+    });
 }
 
 function timerPlugin() {
@@ -47,7 +32,7 @@ test("voice-row timers retain native indicators and keep untracked, self and dis
     const renderTimer = plugin.renderTimer.bind(plugin);
     plugin.renderTimer = (id: string) => { renderedIds.push(id); return renderTimer(id); };
     const nativeStream = Object.assign(() => {}, { Sizes: { SMALL: "small" } });
-    const render = runInNewContext(`(${patch(discordVoiceIcons, plugin.patches[0].replacement[0])})`, {
+    const render = runInNewContext(`(${applyPatch(discordVoiceIcons, { replacement: plugin.patches[0].replacement[0] })})`, {
         plugin, i: { jsx, jsxs: jsx }, a: () => () => "icons", et: {},
         G: { useConfig: () => ({ enabled: false }) }, P: { A: () => ({ previewUrl: null }) },
         ee: { f$: { XBOX: "xbox", PLAYSTATION: "playstation" } }, Y: { J7: { XBOX: "xbox", PLAYSTATION: "playstation", QUEST: "quest" } },
@@ -71,7 +56,7 @@ test("voice-row timers retain native indicators and keep untracked, self and dis
 
 test("always-visible timers preserve guest names, primary-guild props and collapsed row behavior", () => {
     const plugin = timerPlugin();
-    const source = patch(discordVoiceLabel, plugin.patches[0].replacement[1]);
+    const source = applyPatch(discordVoiceLabel, { replacement: plugin.patches[0].replacement[1] });
     const user = { id: "tracked", primaryGuild: { identityGuildId: "guild" } };
     for (const guest of [false, true]) for (const collapsed of [false, true]) {
         const label = runInNewContext(`(()=>{let n,r;return ${source};})()`, {
@@ -101,7 +86,7 @@ test("draggable thread links preserve native click, auxiliary click, focus props
     const ref = { current: "thread" };
     const originalProps = Object.freeze({ tabIndex: 0 });
     for (const fixture of discordThreadRowProps) {
-        const props = runInNewContext(`(${patch(fixture, plugin.patches[2].replacement)})`, {
+        const props = runInNewContext(`(${applyPatch(fixture, plugin.patches[2])})`, {
             plugin, r: { jsx, jsxs: jsx }, I: originalProps, b: ref, C: click, x: auxiliaryClick, G: "Thread name",
             n0: {}, n2: {}, eO: () => () => "thread", eP: () => () => "thread", e0: { E: "text" }, e1: { E: "text" },
             tB: { A: "name" }, tF: { A: "name" }, g: "Thread name", m: "Thread name", nP: {}, nk: {},
