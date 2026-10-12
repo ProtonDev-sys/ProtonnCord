@@ -43,6 +43,54 @@ function storage() {
 	}
 }
 
+test('locking clears an unprotected vault and invalidates a pending load', async () => {
+	const backing = storage()
+	const vault = new MobileVault(backing)
+	await vault.load()
+	vault.account(USER).conversations[CHANNEL] = {
+		members: [PEER],
+		recipients: [PEER],
+	}
+	await vault.save()
+	vault.lock()
+	assert.equal(vault.ready, false)
+	assert.throws(() => vault.account(USER), /unavailable/)
+
+	let finish!: (value: string | null) => void
+	backing.read = () =>
+		new Promise(resolve => {
+			finish = resolve
+		})
+	const loading = vault.load()
+	await new Promise(resolve => setImmediate(resolve))
+	vault.lock()
+	finish(backing.raw)
+	await assert.rejects(loading, /locked or reloaded/)
+	assert.equal(vault.ready, false)
+	assert.throws(() => vault.account(USER), /unavailable/)
+})
+
+test('a delayed older load cannot replace the current vault', async () => {
+	const reads: Array<(value: string | null) => void> = []
+	const vault = new MobileVault({
+		read: () =>
+			new Promise(resolve => {
+				reads.push(resolve)
+			}),
+		write: async () => {},
+	})
+	const first = vault.load()
+	await new Promise(resolve => setImmediate(resolve))
+	const second = vault.load()
+	await new Promise(resolve => setImmediate(resolve))
+	reads[1](null)
+	await second
+	const current = vault.account(USER)
+	reads[0](null)
+	await assert.rejects(first, /locked or reloaded/)
+	assert.equal(vault.account(USER), current)
+})
+
 test('legacy and incomplete identity backups preserve protected chats through restart and failed saves', async () => {
 	const backing = storage()
 	const vault = new MobileVault(backing)
