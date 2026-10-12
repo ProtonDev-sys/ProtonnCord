@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { definePluginSettings } from "@api/Settings";
+import { definePluginSettings, Settings } from "@api/Settings";
 import { BackupRestoreIcon, CloudIcon, MainSettingsIcon, PaintbrushIcon, PatchHelperIcon, PluginsIcon, UpdaterIcon } from "@components/Icons";
 import {
     BackupAndRestoreTab,
@@ -151,6 +151,9 @@ export default definePlugin({
     },
 
     buildLayout(originalLayoutBuilder: SettingsLayoutBuilder) {
+        const declutter = Settings.plugins.Declutter;
+        if (originalLayoutBuilder.key === "billing_section" && declutter?.enabled && declutter.removeBillingSettings) return [];
+
         const layout = originalLayoutBuilder.buildLayout();
         if (originalLayoutBuilder.key !== "$Root") return layout;
         if (!Array.isArray(layout)) return layout;
