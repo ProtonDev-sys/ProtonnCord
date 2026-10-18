@@ -4,6 +4,13 @@
  * client code retained as test data, not relicensed by the wrapper.
  */
 
+// Captured 2026-10-18 from original Stable module 926456 and Canary module 433552
+// in account-free Test run 39099786834 for PR 189, head 1f69b7aea2e18904488f5d31bee67d468556f294.
+export const questDiscoverySidebars = {
+    stable: "function(){let e=s0.useConfig({location:\"GlobalDiscoverySidebar\"}).enabled?s2.GLOBAL_DISCOVERY_TABS.filter(e=>e!==s2.GlobalDiscoveryTab.QUESTS):s2.GLOBAL_DISCOVERY_TABS;return(0,M.jsxs)(\"div\",{className:s6.kL,children:[(0,M.jsx)(\"div\",{className:s6.wx,children:(0,M.jsx)(sY.F,{forceLevel:1,children:(0,M.jsx)(sK.D,{variant:\"text-lg/semibold\",children:tL.intl.string(tL.t[\"1KqYnl\"])})})}),(0,M.jsx)(\"nav\",{className:s6.C$,role:\"tablist\",\"aria-orientation\":\"vertical\",children:e.map(e=>(0,M.jsx)(s7,{tab:e},e))})]})}",
+    canary: "function(){let e=sK.useConfig({location:\"GlobalDiscoverySidebar\"}).enabled?sz.GLOBAL_DISCOVERY_TABS.filter(e=>e!==sz.GlobalDiscoveryTab.QUESTS):sz.GLOBAL_DISCOVERY_TABS;return(0,P.jsxs)(\"div\",{className:sZ.kL,children:[(0,P.jsx)(\"div\",{className:sZ.wx,children:(0,P.jsx)(sx.F,{forceLevel:1,children:(0,P.jsx)(sk.D,{variant:\"text-lg/semibold\",children:tL.intl.string(tL.t[\"1KqYnl\"])})})}),(0,P.jsx)(\"nav\",{className:sZ.C$,role:\"tablist\",\"aria-orientation\":\"vertical\",children:e.map(e=>(0,P.jsx)(sJ,{tab:e},e))})]})}"
+};
+
 // Captured 2026-10-12 from Stable and Canary original module factories in the
 // account-free Test run 38209994939 for PR 179, head 56fc4bda8431ddb24a6ebdf63a635a53959f4c60.
 // The selected native functions are identical on both channels.
