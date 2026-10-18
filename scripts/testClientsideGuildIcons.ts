@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import {
     normalizeGuildIconFile,
@@ -53,4 +54,4 @@ async function main(): Promise<void> {
     console.log("clientsideGuildIcons storage checks passed");
 }
 
-void main();
+test("Clientside guild icons preserve and migrate stored image data", { timeout: 10_000 }, main);
