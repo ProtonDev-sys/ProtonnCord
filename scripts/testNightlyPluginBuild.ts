@@ -72,7 +72,17 @@ async function main() {
         const excluded = JSON.parse(match[1].replace(/,\s*\}/, "}"));
         assert.equal(excluded.MessageCompression, included ? undefined : "nightly", "stable exclusion must name the nightly target");
     }
-    console.log("Nightly channel resolution and production plugin-catalog boundaries passed.");
+    const releaseList = spawnSync(process.execPath, ["--import", "tsx", "scripts/generatePluginList.ts"], {
+        cwd: projectRoot, encoding: "utf8", timeout: 60_000, maxBuffer: 8 * 1024 * 1024,
+    });
+    assert.ifError(releaseList.error);
+    assert.equal(releaseList.status, 0, releaseList.stderr);
+    const publishedPlugin = JSON.parse(releaseList.stdout).find((plugin: { name: string; }) => plugin.name === "MessageCompression");
+    assert.ok(publishedPlugin, "release plugin lists retain the experimental plugin's identity");
+    assert.equal(publishedPlugin.target, "nightly", "release lists retain the nightly restriction");
+    assert.equal(publishedPlugin.enabledByDefault, false);
+
+    console.log("Nightly channel resolution, production catalogs and release plugin lists passed.");
 }
 
 main().catch(error => {
