@@ -14,7 +14,7 @@ import {
     encodeCompressedMessage,
     MAX_DECOMPRESSED_BYTES,
     MAX_WIRE_LENGTH,
-} from "../src/equicordplugins/messageCompression/codec";
+} from "../src/equicordplugins/messageCompression.nightly/codec";
 
 const HEADER_BYTES = 9;
 

@@ -60,7 +60,7 @@
         "testVoiceMessageTranscriber": "tsx scripts/testVoiceMessageTranscriber.ts",
         "testDiscordMcp": "tsx scripts/testDiscordMcp.ts",
         "testMessageEventsPriority": "tsx scripts/testMessageEventsPriority.ts",
-        "testMessageCompression": "tsx --test scripts/testMessageCompression.ts scripts/testMessageCompressionSession.ts scripts/testMessageCompressionIntegration.ts",
+        "testMessageCompression": "tsx --test scripts/testMessageCompression.ts scripts/testMessageCompressionSession.ts scripts/testMessageCompressionIntegration.ts scripts/testNightlyPluginBuild.ts",
         "testMainProcessStdio": "tsx scripts/testMainProcessStdio.ts",
         "testDevNativeBuild": "tsx scripts/testDevNativeBuild.ts",
         "testUserpluginUpdateReview": "tsx scripts/testUserpluginUpdateReview.ts",

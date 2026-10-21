@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import { runInNewContext } from "node:vm";
 
-import * as codec from "../src/equicordplugins/messageCompression/codec";
+import * as codec from "../src/equicordplugins/messageCompression.nightly/codec";
 import { discordLongPasteArguments, discordMessageContentConstructor, discordPartialContentUpdate } from "./fixtures/discordMessageCompression";
 import { applyPatch } from "./utils/discordClientFixture";
 import { loadTestModule } from "./utils/loadTestModule";
@@ -22,9 +22,9 @@ const GUILD = "200000000000000099";
 const SHORT = "This exact message has enough repeated structure to compress. ".repeat(16);
 const LONG = "This longer message must remain in the draft until its receiver is confirmed. ".repeat(60);
 const PREFIX = "PCMCAP1:";
-const indexFile = new URL("../src/equicordplugins/messageCompression/index.tsx", import.meta.url);
+const indexFile = new URL("../src/equicordplugins/messageCompression.nightly/index.tsx", import.meta.url);
 const eventsFile = new URL("../src/api/MessageEvents.ts", import.meta.url);
-const sessionFile = new URL("../src/equicordplugins/messageCompression/session.ts", import.meta.url);
+const sessionFile = new URL("../src/equicordplugins/messageCompression.nightly/session.ts", import.meta.url);
 
 class TestLogger {
     error() { }

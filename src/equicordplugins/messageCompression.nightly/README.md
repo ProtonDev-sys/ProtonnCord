@@ -4,6 +4,8 @@ MessageCompression is a standalone ProtonnCord plugin for automatically sending 
 
 The plugin has its own settings, wire format, compatibility exchange and decoder. It does not depend on SecureMessaging or change that plugin.
 
+It is packaged only in nightly and development builds. The repository may promote its source to staging or main, but those production builds exclude the `.nightly` plugin target. Changing release channels preserves saved plugin settings; reading compressed history still requires a build that includes the decoder.
+
 ## What happens in a conversation
 
 1. When a text message could shrink, the plugin checks whether the other client has recently confirmed support.
@@ -45,7 +47,7 @@ The ordinary Discord character limit is documented in [Sending Messages](https:/
 
 Compatibility controls use the separate `PCMCAP1:` prefix and are bound to the DM and both account IDs. Support is temporary, kept in memory, and reset on reconnect, logout or plugin stop. Discovery is rate limited and starts when sending a message that could benefit.
 
-Every client used to read compressed messages needs MessageCompression, including other devices signed in to the same Discord account. One compatible client can confirm support while another device remains unable to decode. This plugin is included in desktop and browser builds; the Android companion does not implement it.
+Every client used to read compressed messages needs MessageCompression, including other devices signed in to the same Discord account. One compatible client can confirm support while another device remains unable to decode. This plugin is included in desktop and browser nightly builds; the Android companion does not implement it.
 
 A client without MessageCompression sees compatibility messages and encoded message bodies. Installing the plugin later makes supported compressed history readable. Switching the recipient to another device without the plugin during a confirmed session can expose encoded messages on that device until the session expires.
 
@@ -63,4 +65,6 @@ pnpm build
 pnpm test
 ```
 
-The focused suite exercises the codec, peer negotiation and automatic send/decode integration without sending live Discord messages. Full release validation remains in the repository's existing workflows.
+The focused suite exercises the codec, peer negotiation, automatic send/decode integration and nightly/stable catalog generation without sending live Discord messages. Full release validation remains in the repository's existing workflows.
+
+Production builds derive their channel from the checked-out Git branch, or the GitHub branch/PR target in CI. For a local production preview from a feature branch, explicitly set `PROTONN_CORD_BUILD_CHANNEL=nightly` in the build environment. The override accepts `main`, `staging` or `nightly`; unknown channels, tags and detached checkouts exclude nightly plugins. Development and reporter builds include them for testing.

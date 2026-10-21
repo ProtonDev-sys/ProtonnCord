@@ -14,7 +14,7 @@ import {
     type PeerContext,
     PROBE_COOLDOWN_MS,
     RESPONSE_COOLDOWN_MS,
-} from "../src/equicordplugins/messageCompression/session";
+} from "../src/equicordplugins/messageCompression.nightly/session";
 
 const alice: PeerContext = { channelId: "100", localId: "1", peerId: "2" };
 const bob: PeerContext = { channelId: "100", localId: "2", peerId: "1" };

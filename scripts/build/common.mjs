@@ -54,6 +54,36 @@ export const IS_COMPANION_TEST = IS_REPORTER && process.argv.includes("--compani
 if (!IS_COMPANION_TEST && process.argv.includes("--companion-test"))
     console.error("--companion-test must be run with --reporter for any effect");
 
+/**
+ * Resolve the checked-out release channel, never the user's selected updater channel.
+ * @param {NodeJS.ProcessEnv} env
+ * @param {() => string} readLocalBranch
+ */
+export function getBuildChannel(env = process.env, readLocalBranch = () => execSync("git branch --show-current", {
+    encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"]
+}).trim()) {
+    /** @param {string | undefined} value */
+    const knownChannel = value => value === "main" || value === "staging" || value === "nightly" ? value : null;
+    if (env.PROTONN_CORD_BUILD_CHANNEL !== undefined) {
+        const channel = knownChannel(env.PROTONN_CORD_BUILD_CHANNEL);
+        if (!channel) throw new Error("PROTONN_CORD_BUILD_CHANNEL must be main, staging or nightly.");
+        return channel;
+    }
+    if (env.GITHUB_ACTIONS === "true") {
+        if (env.GITHUB_EVENT_NAME === "pull_request" || env.GITHUB_EVENT_NAME === "pull_request_target")
+            return knownChannel(env.GITHUB_BASE_REF);
+        return env.GITHUB_REF?.startsWith("refs/heads/") ? knownChannel(env.GITHUB_REF.slice(11)) : null;
+    }
+    if (env.CI) return null;
+    try {
+        return knownChannel(readLocalBranch());
+    } catch {
+        return null;
+    }
+}
+
+export const IS_NIGHTLY = getBuildChannel() === "nightly";
+
 export const IS_UPDATER_DISABLED = IS_DEV || process.argv.includes("--disable-updater");
 export const gitHash = process.env.PROTONN_CORD_HASH || process.env.EQUICORD_HASH || execSync("git rev-parse HEAD", { encoding: "utf-8" }).trim();
 
@@ -179,6 +209,7 @@ export const globPlugins = kind => ({
                     if (target && !IS_REPORTER) {
                         const excluded =
                             (target === "dev" && !IS_DEV) ||
+                            (target === "nightly" && !IS_NIGHTLY && !IS_DEV) ||
                             (target === "web" && kind === "discordDesktop") ||
                             (target === "browser" && kind !== "web") ||
                             (target === "desktop" && kind === "web") ||
