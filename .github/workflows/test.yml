@@ -18,7 +18,7 @@ on:
 jobs:
     Test:
         name: Test
-        runs-on: ubuntu-latest
+        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","desktop-3flaofg","ubuntu-24.04"]') || 'ubuntu-latest' }}
 
         steps:
             - uses: actions/checkout@v7
