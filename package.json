@@ -1,7 +1,7 @@
 {
     "name": "protonn-cord",
     "private": true,
-    "version": "1.15.1.13",
+    "version": "1.15.1.14",
     "description": "Protonn Cord, a Discord client mod",
     "homepage": "https://github.com/ProtonDev-sys/ProtonnCord#readme",
     "bugs": {
@@ -60,7 +60,8 @@
         "testVoiceMessageTranscriber": "tsx scripts/testVoiceMessageTranscriber.ts",
         "testDiscordMcp": "tsx scripts/testDiscordMcp.ts",
         "testMessageEventsPriority": "tsx scripts/testMessageEventsPriority.ts",
-        "testMessageCompression": "tsx --test scripts/testMessageCompression.ts scripts/testMessageCompressionSession.ts scripts/testMessageCompressionIntegration.ts scripts/testNightlyPluginBuild.ts",
+        "benchmarkMessageCompression": "tsx scripts/benchmarkMessageCompression.ts",
+        "testMessageCompression": "tsx --test scripts/testMessageCompression.ts scripts/testMessageCompressionIntegration.ts scripts/testNightlyPluginBuild.ts",
         "testMainProcessStdio": "tsx scripts/testMainProcessStdio.ts",
         "testDevNativeBuild": "tsx scripts/testDevNativeBuild.ts",
         "testUserpluginUpdateReview": "tsx scripts/testUserpluginUpdateReview.ts",

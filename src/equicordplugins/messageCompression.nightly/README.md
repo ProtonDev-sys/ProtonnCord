@@ -1,17 +1,18 @@
 # MessageCompression (nightly experiment)
 
-MessageCompression is a standalone ProtonnCord plugin for automatically sending smaller, lossless text messages in one-to-one DMs. Both people enable **MessageCompression** in Plugins, restart if prompted, and use the normal message composer.
+MessageCompression is a standalone ProtonnCord plugin for automatically sending smaller, lossless text messages in one-to-one DMs. Enable **MessageCompression** in Settings → Protonn Cord → Plugins, restart if prompted, and use the normal message composer. The first eligible message can compress immediately; no handshake or recipient response is required.
 
-The plugin has its own settings, wire format, compatibility exchange and decoder. It does not depend on SecureMessaging or change that plugin.
+The plugin has its own settings, wire format, preview and decoder. It does not depend on SecureMessaging or change that plugin.
 
 It is packaged only in nightly and development builds. The repository may promote its source to staging or main, but those production builds exclude the `.nightly` plugin target. Changing release channels preserves saved plugin settings; reading compressed history still requires a build that includes the decoder.
 
 ## What happens in a conversation
 
-1. When a text message could shrink, the plugin checks whether the other client has recently confirmed support.
-2. If support is unknown, it sends a short, visible compatibility message through the normal pre-send policies. An ordinary first message still sends as plain text. An oversized first message waits briefly for the other client to answer.
-3. After negotiation, the encoder searches a bounded set of exact representations and compares their complete wire sizes. It sends a compressed message only when it is smaller in both UTF-8 bytes and JavaScript string length, including the header and text-safe encoding.
-4. The recipient reconstructs the original text locally. Decoding happens at the message model boundary, so chat history, copy, the edit composer and reply previews use the same text.
+1. The encoder searches a bounded set of exact representations for each eligible outgoing message, including the first message in a DM.
+2. It compares complete wire sizes and sends a compressed message only when it is smaller in both UTF-8 bytes and JavaScript string length, including the header and text-safe encoding. It sends no compatibility or control messages.
+3. A client with the plugin reconstructs the original text locally. Decoding happens at the message model boundary, so chat history, copy, the edit composer and reply previews use the same text.
+
+Open the plugin's settings to use **Try compression**. Paste your own text and inspect the before/after byte counts, selected representation, percentage saved and exact transmitted text without sending anything. **Show savings** is on by default and reports the same message-body counts when sending or editing.
 
 Short messages and messages that do not shrink retain their original content. Links, mentions, custom emoji, replies, forwards, attachments, stickers, scheduled messages and text-to-speech retain normal sending so Discord can keep processing their metadata.
 
@@ -39,32 +40,45 @@ The encoder compares algorithmic recipes with an existing DEFLATE implementation
 - Maximum compressed Discord message: **2,000 ASCII characters**, including `PCMC1:`.
 - Each message is independently decodable after a restart or after earlier messages are deleted.
 - Malformed, corrupt, unsupported or over-limit envelopes remain visible as received.
-- Decode work and caches are bounded; stopping the plugin clears session state, caches and waiting tasks.
+- Decode work and caches are bounded; stopping the plugin clears its decode cache and removes its send/edit listeners.
 
 The ordinary Discord character limit is documented in [Sending Messages](https://support.discord.com/hc/en-us/articles/360034632292-Sending-Messages). The compressed wire limit stays at 2,000 even when the sender has a higher ordinary-text allowance.
 
 ## Compatibility and storage
 
-Compatibility controls use the separate `PCMCAP1:` prefix and are bound to the DM and both account IDs. Support is temporary, kept in memory, and reset on reconnect, logout or plugin stop. Discovery is rate limited and starts when sending a message that could benefit.
+Every client used to read compressed messages needs MessageCompression, including other devices signed in to the same Discord account. This experiment deliberately does not check for support before sending. It is included in desktop and browser nightly builds; the Android companion does not implement it.
 
-Every client used to read compressed messages needs MessageCompression, including other devices signed in to the same Discord account. One compatible client can confirm support while another device remains unable to decode. This plugin is included in desktop and browser nightly builds; the Android companion does not implement it.
-
-A client without MessageCompression sees compatibility messages and encoded message bodies. Installing the plugin later makes supported compressed history readable. Switching the recipient to another device without the plugin during a confirmed session can expose encoded messages on that device until the session expires.
+A client without MessageCompression sees encoded message bodies. Installing and enabling the plugin later makes supported compressed history readable. No shared session, previous messages, account pairing or recipient availability is required.
 
 Discord stores and indexes the encoded body. Server-side text search, push-notification previews, exports and other clients therefore see the encoded representation. Loaded messages are expanded in client memory; this does not rewrite old conversations or change Discord's underlying storage implementation.
 
-The optional **Show savings** setting reports the original and encoded **message-body** byte counts. Compatibility messages, HTTP/WebSocket framing, installed decoder code and Discord's own transport/storage compression are separate costs. A smaller body is not a measurement of total network traffic or server disk usage.
+The **Show savings** setting reports the original and encoded **message-body** byte counts. HTTP/WebSocket framing, installed decoder code and Discord's own transport/storage compression are separate costs. A smaller body is not a measurement of total network traffic or server disk usage.
 
 This format provides lossless compression and corruption detection. It provides no confidentiality or sender authentication.
+
+## Ordinary-text measurements
+
+The benchmark contains literal, hand-written messages, with no generated repetition. These results use the installed fflate dependency and include the complete `PCMC1:` packet:
+
+| Sample | Original bytes | Transmitted bytes | Saved |
+|---|---:|---:|---:|
+| Short chat | 80 | 80 (unchanged) | 0% |
+| Ordinary paragraph | 398 | 346 | 13.1% |
+| Three-paragraph conversation | 1,029 | 798 | 22.4% |
+| Technical update | 967 | 690 | 28.6% |
+| Long ordinary message | 2,462 | 1,674 | 32.0% |
+
+All compressed samples select DEFLATE and reconstruct the exact input. Algorithmic recipes remain useful for structured text; they do not guarantee better results for arbitrary prose. The long ordinary message fits in one 2,000-character message after encoding. Run `pnpm benchmarkMessageCompression` to reproduce the results.
 
 ## Development checks
 
 ```sh
 pnpm testMessageCompression
+pnpm benchmarkMessageCompression
 pnpm build
 pnpm test
 ```
 
-The focused suite exercises the codec, peer negotiation, automatic send/decode integration and nightly/stable catalog generation without sending live Discord messages. Full release validation remains in the repository's existing workflows.
+The focused suite exercises the codec, handshake-free send/edit/decode integration and nightly/stable catalog generation without sending live Discord messages. Full release validation remains in the repository's existing workflows.
 
 Production builds derive their channel from the checked-out Git branch, or the GitHub branch/PR target in CI. For a local production preview from a feature branch, explicitly set `PROTONN_CORD_BUILD_CHANNEL=nightly` in the build environment. The override accepts `main`, `staging` or `nightly`; unknown channels, tags and detached checkouts exclude nightly plugins. Development and reporter builds include them for testing.
