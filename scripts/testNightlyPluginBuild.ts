@@ -10,12 +10,18 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const generateCatalog = `
-const { globPlugins, IS_DEV, IS_REPORTER, IS_NIGHTLY } = await import("./scripts/build/common.mjs");
+const { globPlugins, gitHashPlugin, gitHash, IS_DEV, IS_REPORTER, IS_NIGHTLY } = await import("./scripts/build/common.mjs");
+const { build } = await import("esbuild");
+const metadataBuild = await build({
+    stdin: { contents: 'export { default as hash, buildChannel } from "~git-hash";', resolveDir: process.cwd() },
+    bundle: true, write: false, format: "esm", platform: "node", plugins: [gitHashPlugin],
+});
+const metadata = await import("data:text/javascript;base64," + Buffer.from(metadataBuild.outputFiles[0].contents).toString("base64"));
 let load;
 globPlugins("web").setup({ onResolve() {}, onLoad(_options, callback) { load = callback; } });
 if (!load) throw new Error("Production plugin loader was not registered");
 const { contents } = await load({ path: "~plugins", namespace: "import-plugins" });
-process.stdout.write(JSON.stringify({ contents, IS_DEV, IS_REPORTER, IS_NIGHTLY }));
+process.stdout.write(JSON.stringify({ contents, IS_DEV, IS_REPORTER, IS_NIGHTLY, metadata, gitHash }));
 `;
 
 async function main() {
@@ -62,6 +68,8 @@ async function main() {
         assert.equal(child.status, 0, `${channel} ${flags.join(" ")}: ${child.stderr}`);
         const result = JSON.parse(child.stdout);
         assert.equal(result.IS_NIGHTLY, channel === "nightly");
+        assert.equal(result.metadata.buildChannel, channel, "compiled build metadata records the actual build channel");
+        assert.equal(result.metadata.hash, result.gitHash, "compiled build metadata retains the source hash");
         assert.equal(result.IS_DEV, flags.includes("--dev"));
         assert.equal(result.IS_REPORTER, flags.includes("--reporter"));
         const path = '"./equicordplugins/messageCompression.nightly"';

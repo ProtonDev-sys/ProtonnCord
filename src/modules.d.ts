@@ -30,6 +30,7 @@ declare module "~plugins" {
 declare module "~git-hash" {
     const hash: string;
     export default hash;
+    export const buildChannel: import("./shared/Updater").UpdaterBranch | null;
 }
 declare module "~git-remote" {
     const remote: string;
