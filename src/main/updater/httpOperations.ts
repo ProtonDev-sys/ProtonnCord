@@ -122,8 +122,11 @@ export async function inspectHttpUpdates(
     currentHash: string,
     asarFile: string,
     branch: UpdaterBranch = "main",
+    installedBranch: UpdaterBranch | null = null,
 ): Promise<HttpUpdateInspection> {
-    const release = parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile);
+    // Channel-specific bundles can differ even when their source hash matches.
+    const switchingBranch = installedBranch !== null && installedBranch !== branch;
+    const release = parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile, switchingBranch);
     if (!release.pending) return { changes: [], pending: null };
 
     let comparison: unknown;
@@ -138,6 +141,11 @@ export async function inspectHttpUpdates(
         };
     }
     const parsedChanges = parseChanges(comparison);
+    // A local build may be ahead of its channel while publication is waiting for
+    // validation. Only a deliberate channel switch or repair may roll it back.
+    if (installedBranch === branch && record(comparison)?.status === "behind")
+        return { changes: [], pending: null };
+
     const changes = parsedChanges.length > 0
         ? parsedChanges
         : [{ author: "ProtonnCord", hash: release.hash, message: `Switch update branch to ${branch}` }];
@@ -150,8 +158,12 @@ export async function findHttpUpdate(
     asarFile: string,
     branch: UpdaterBranch = "main",
     force = false,
+    installedBranch: UpdaterBranch | null = null,
 ): Promise<PendingHttpUpdate | null> {
-    return parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile, force).pending;
+    if (force) return parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile, true).pending;
+    // Recheck the selected release here as well: callers can request an update
+    // directly, or the channel can move after its changelog was inspected.
+    return (await inspectHttpUpdates(request, currentHash, asarFile, branch, installedBranch)).pending;
 }
 
 export async function requestBytes(

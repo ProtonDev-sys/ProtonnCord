@@ -5,7 +5,6 @@
  */
 
 import {
-    _handlePreSend,
     addMessageLengthBypassListener,
     addMessagePreEditListener,
     addMessagePreSendListener,
@@ -19,66 +18,45 @@ import {
 import { definePluginSettings } from "@api/Settings";
 import { BaseText } from "@components/BaseText";
 import { EquicordDevs } from "@utils/constants";
-import { sendMessage } from "@utils/discord";
-import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
 import { ChannelStore, MessageStore, SelectedChannelStore, Toasts, UserStore } from "@webpack/common";
 
 import { COMPRESSED_MESSAGE_PREFIX, decodeCompressedMessage, encodeCompressedMessage, MAX_WIRE_LENGTH } from "./codec";
-import { CompressionSession, CONTROL_MESSAGE_PREFIX, type PeerContext } from "./session";
+import { CompressionPreview } from "./preview";
 
 // Runs after existing security and text-formatting hooks.
 const SEND_PRIORITY = -100;
-const HANDSHAKE_WAIT_MS = 2500;
-const MAX_PENDING_CONTROLS = 16;
 const MAX_DECODE_CACHE_BYTES = 1024 * 1024;
-const logger = new Logger("MessageCompression");
-const session = new CompressionSession();
 const decodeCache = new Map<string, string | null>();
 let decodedBytes = 0;
 let active = false;
-let generation = 0;
 let ownerId: string | undefined;
-let controls = { pending: 0, queue: Promise.resolve() };
-const readinessWaiters = new Set<(force?: boolean) => void>();
 
 const settings = definePluginSettings({
     showSavings: {
         type: OptionType.BOOLEAN,
         description: "Show how many message-body bytes were saved when a message is compressed.",
-        default: false,
+        default: true,
     },
 });
 
-function resetSession() {
-    generation++;
-    controls = { pending: 0, queue: Promise.resolve() };
-    session.clear();
+function clearDecodeCache() {
     decodeCache.clear();
     decodedBytes = 0;
-    for (const finish of readinessWaiters) finish(true);
-    readinessWaiters.clear();
 }
 
-function getPeer(channelId: string): PeerContext | null {
-    if (!active) return null;
+function isEligibleDM(channelId: string): boolean {
+    if (!active) return false;
     const currentId = UserStore.getCurrentUser()?.id;
     if (currentId !== ownerId) {
-        resetSession();
+        clearDecodeCache();
         ownerId = currentId;
     }
-    if (!currentId) return null;
+    if (!currentId) return false;
     const channel = ChannelStore.getChannel(channelId);
-    if (!channel?.isDM()) return null;
+    if (!channel?.isDM()) return false;
     const peerId = channel.getRecipientId();
-    if (!peerId || peerId === currentId || UserStore.getUser(peerId)?.bot) return null;
-    return { channelId, localId: currentId, peerId };
-}
-
-function isCurrent(peer: PeerContext, expectedGeneration: number) {
-    if (!active || generation !== expectedGeneration) return false;
-    const current = getPeer(peer.channelId);
-    return current?.localId === peer.localId && current.peerId === peer.peerId;
+    return !!peerId && peerId !== currentId && !UserStore.getUser(peerId)?.bot;
 }
 
 function nativeMessageLimit() {
@@ -88,7 +66,7 @@ function nativeMessageLimit() {
 function tooLong() {
     Toasts.show({
         id: "pc-message-compression-too-long",
-        message: "This message cannot fit yet. Both clients need MessageCompression, and the encoded message must fit in 2,000 characters. Your draft has been kept.",
+        message: "This message cannot fit. The compressed message must fit in 2,000 characters, or the original must fit your normal message limit. Your draft has been kept.",
         type: Toasts.Type.FAILURE,
     });
     return { cancel: true } as const;
@@ -101,76 +79,19 @@ function isPlainText(content: string) {
         && !/(?:<[@#]|<a?:[\w]+:\d+>|@(?:everyone|here)\b|https?:\/\/)/iu.test(content);
 }
 
-/** Control frames use the same send policies as the composer, without a plugin dependency. */
-function queueControl(peer: PeerContext, content: string): Promise<boolean> {
-    const queue = controls;
-    if (queue.pending >= MAX_PENDING_CONTROLS) return Promise.resolve(false);
-    const expectedGeneration = generation;
-    queue.pending++;
-    const task = queue.queue.then(async () => {
-        if (!isCurrent(peer, expectedGeneration)) return false;
-        const channel = ChannelStore.getChannel(peer.channelId);
-        const message: MessageObject = { content, invalidEmojis: [], validNonShortcutEmojis: [], tts: false };
-        const options = { channelId: peer.channelId, content, command: null, location: "MessageCompression" };
-        const cancelled = await _handlePreSend(peer.channelId, message, options, {
-            channel, content, hasAttachments: false, hasStickers: false,
-            openWarningPopout: () => undefined,
-        }, options);
-        if (cancelled || message.content !== content || !isCurrent(peer, expectedGeneration)) return false;
-        const result = await sendMessage(peer.channelId, message, true, {
-            allowedMentions: { parse: [], replied_user: false },
-        });
-        return result?.ok !== false && isCurrent(peer, expectedGeneration);
-    }).catch(error => {
-        logger.error("Compatibility message failed.", error);
-        return false;
-    }).finally(() => { queue.pending--; });
-    queue.queue = task.then(() => undefined);
-    return task;
-}
-
-function waitForPeer(peer: PeerContext, expectedGeneration: number): Promise<boolean> {
-    if (readinessWaiters.size >= MAX_PENDING_CONTROLS) return Promise.resolve(false);
-    return new Promise(resolve => {
-        const finish = (force = false) => {
-            if (!force && isCurrent(peer, expectedGeneration) && !session.isReady(peer)) return;
-            clearTimeout(timer);
-            readinessWaiters.delete(finish);
-            resolve(isCurrent(peer, expectedGeneration) && session.isReady(peer));
-        };
-        const timer = setTimeout(() => finish(true), HANDSHAKE_WAIT_MS);
-        readinessWaiters.add(finish);
-        if (session.isReady(peer)) finish();
-    });
-}
-
-async function prepareContent(channelId: string, message: MessageObject, canCompress: boolean) {
-    if (!active) return;
-    if (message.content.startsWith(CONTROL_MESSAGE_PREFIX)) return message.content.length > nativeMessageLimit() ? tooLong() : undefined;
-    const peer = getPeer(channelId);
-    if (!peer) return;
-    const expectedGeneration = generation;
+function prepareContent(channelId: string, message: MessageObject, canCompress: boolean) {
+    if (!isEligibleDM(channelId)) return;
     const original = message.content;
     const oversized = original.length > nativeMessageLimit();
     const candidate = canCompress && isPlainText(original) ? encodeCompressedMessage(original) : null;
 
     if (!candidate || candidate.content.length > MAX_WIRE_LENGTH) return oversized ? tooLong() : undefined;
 
-    if (!session.isReady(peer)) {
-        const probe = session.prepareProbe(peer);
-        if (probe) void queueControl(peer, probe);
-        // A normal first message is never held up by peer discovery.
-        if (!oversized) return;
-        await waitForPeer(peer, expectedGeneration);
-    }
-    if (!isCurrent(peer, expectedGeneration)) return { cancel: true };
-    if (!session.isReady(peer)) return oversized ? tooLong() : undefined;
-
     message.content = candidate.content;
     if (settings.store.showSavings) {
         Toasts.show({
             id: "pc-message-compression-savings",
-            message: `Compressed message body: ${candidate.originalBytes.toLocaleString()} → ${candidate.encodedBytes.toLocaleString()} bytes (${candidate.codec}).`,
+            message: `Compressed message body: ${candidate.originalBytes.toLocaleString()} → ${candidate.encodedBytes.toLocaleString()} bytes (${(100 * (1 - candidate.encodedBytes / candidate.originalBytes)).toFixed(1)}% saved, ${candidate.codec}).`,
             type: Toasts.Type.SUCCESS,
         });
     }
@@ -207,7 +128,7 @@ const editListener: MessageEditListener = (channelId, messageId, message) => {
 };
 
 function canBypassMessageLength(channelId = SelectedChannelStore.getChannelId()) {
-    return !!channelId && !!getPeer(channelId);
+    return !!channelId && isEligibleDM(channelId);
 }
 
 const bypassMessageLengthLimit = () => canBypassMessageLength();
@@ -235,14 +156,15 @@ function decodeContent(content: string): string {
 
 export default definePlugin({
     name: "MessageCompression",
-    description: "Automatically compresses text in one-to-one DMs between compatible clients using exact, self-contained recipes.",
+    description: "Automatically compresses text in one-to-one DMs and reconstructs its exact original content.",
     authors: [EquicordDevs.nobody],
     tags: ["Chat", "Utility"],
     dependencies: ["MessageEventsAPI"],
     settings,
     settingsAboutComponent: () => <>
-        <BaseText>Enable MessageCompression on every client used to read this DM, then chat normally. Compatibility is checked automatically with a short visible message when compression could help.</BaseText>
-        <BaseText>Compressed messages keep their exact text and reopen without earlier chat history. Other clients and Discord search see the encoded message. Links, mentions, attachments, stickers and replies keep normal sending.</BaseText>
+        <BaseText>Enable MessageCompression and chat normally in one-to-one DMs. Compression starts with your first eligible message; there is no handshake or waiting for the recipient.</BaseText>
+        <BaseText>Every device used to read compressed messages needs this plugin. Other clients and Discord search see the encoded text. Links, mentions, attachments, stickers and replies keep normal sending.</BaseText>
+        <CompressionPreview canCompress={isPlainText} />
     </>,
     patches: [{
         // Decode at the message model boundary, so history, copy, edits and replies agree.
@@ -269,33 +191,23 @@ export default definePlugin({
     decodeContent,
     canBypassMessageLength,
     flux: {
-        async MESSAGE_CREATE({ message, optimistic }) {
-            if (!active || optimistic || typeof message?.content !== "string" || !message.content.startsWith(CONTROL_MESSAGE_PREFIX)) return;
-            const peer = getPeer(message.channel_id);
-            if (!peer || message.author?.id !== peer.peerId || message.author?.bot || message.webhook_id || message.webhookId
-                || message.message_snapshots?.length || message.messageSnapshots?.length
-                || message.message_reference || message.messageReference) return;
-            const result = session.handleControl(message.content, peer);
-            if (result?.reply) await queueControl(peer, result.reply);
-            for (const finish of readinessWaiters) finish();
-        },
-        CONNECTION_OPEN() { resetSession(); },
+        CONNECTION_OPEN() { clearDecodeCache(); },
         LOGOUT() {
-            resetSession();
+            clearDecodeCache();
             ownerId = undefined;
         },
     },
     start() {
         active = true;
         ownerId = UserStore.getCurrentUser()?.id;
-        resetSession();
+        clearDecodeCache();
         addMessagePreSendListener(outgoingListener, { priority: SEND_PRIORITY, cancelOnError: true });
         addMessagePreEditListener(editListener, { priority: SEND_PRIORITY, cancelOnError: true });
         addMessageLengthBypassListener(bypassMessageLengthLimit);
     },
     stop() {
         active = false;
-        resetSession();
+        clearDecodeCache();
         ownerId = undefined;
         removeMessagePreSendListener(outgoingListener);
         removeMessagePreEditListener(editListener);

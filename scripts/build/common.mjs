@@ -82,7 +82,8 @@ export function getBuildChannel(env = process.env, readLocalBranch = () => execS
     }
 }
 
-export const IS_NIGHTLY = getBuildChannel() === "nightly";
+export const BUILD_CHANNEL = getBuildChannel();
+export const IS_NIGHTLY = BUILD_CHANNEL === "nightly";
 
 export const IS_UPDATER_DISABLED = IS_DEV || process.argv.includes("--disable-updater");
 export const gitHash = process.env.PROTONN_CORD_HASH || process.env.EQUICORD_HASH || execSync("git rev-parse HEAD", { encoding: "utf-8" }).trim();
@@ -263,7 +264,7 @@ export const gitHashPlugin = {
             namespace: "git-hash", path: args.path
         }));
         build.onLoad({ filter, namespace: "git-hash" }, () => ({
-            contents: `export default ${JSON.stringify(gitHash)}`
+            contents: `export default ${JSON.stringify(gitHash)}; export const buildChannel = ${JSON.stringify(BUILD_CHANNEL)};`
         }));
     }
 };

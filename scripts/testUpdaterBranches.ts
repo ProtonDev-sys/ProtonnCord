@@ -276,9 +276,11 @@ async function testHttpBranches(): Promise<void> {
     assert.equal(inspection.pending?.hash, targetHash);
     assert.match(inspection.changes[0].message, /Switch update branch to staging/u);
 
-    let nightlyEndpoint = "";
+    const nightlyEndpoints: string[] = [];
     const nightly = await findHttpUpdate(async endpoint => {
-        nightlyEndpoint = endpoint;
+        nightlyEndpoints.push(endpoint);
+        if (endpoint === `/compare/${currentHash}...${targetHash}`) return { status: "ahead", commits: [] };
+        assert.equal(endpoint, "/releases/tags/nightly");
         return {
             ...release,
             name: `Protonn Cord nightly ${targetHash}`,
@@ -289,7 +291,10 @@ async function testHttpBranches(): Promise<void> {
             }],
         };
     }, currentHash, "desktop.asar", "nightly");
-    assert.equal(nightlyEndpoint, "/releases/tags/nightly");
+    assert.deepEqual(nightlyEndpoints, [
+        "/releases/tags/nightly",
+        `/compare/${currentHash}...${targetHash}`,
+    ]);
     assert.equal(nightly?.hash, targetHash);
 }
 
