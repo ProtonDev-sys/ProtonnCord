@@ -1,10 +1,13 @@
 import { createPackage } from "@electron/asar";
+import { build } from "esbuild";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { runInNewContext } from "node:vm";
 
 import {
     applyPendingHttpUpdate,
@@ -60,6 +63,90 @@ function fileOperations(): AtomicFileOperations {
             writeFileSync(path, data, { flag: "wx", flush: true });
         },
     };
+}
+
+async function testWindowsBootstrap(root: string, validAsar: Buffer) {
+    const bundle = await build({
+        entryPoints: ["src/main/updater/asarBootstrap.ts"], bundle: true, write: false,
+        platform: "node", format: "cjs", external: ["original-fs"],
+    });
+    const nativeFs = await import("node:fs");
+    const nativeRequire = createRequire(import.meta.url);
+    const target = join(root, "windows.asar");
+    const pending = `${target}.pending`;
+    const temporary = () => `${target}.${process.pid}.${randomUUID()}.tmp`;
+    let failure: string | undefined = "EPERM";
+    let releaseOnWait = true;
+    let waits = 0;
+    let loads = 0;
+    const errors: unknown[] = [];
+    function bootModule() {
+        const fs = { ...nativeFs, renameSync(source: string, destination: string) {
+            if (destination === target && failure)
+                throw Object.assign(new Error("simulated archive lock"), { code: failure });
+            renameSync(source, destination);
+        } };
+        const module = { exports: {} as typeof import("../src/main/updater/asarBootstrap") };
+        runInNewContext(bundle.outputFiles[0].text, {
+            module, exports: module.exports, Buffer, Error, Int32Array, SharedArrayBuffer, TextDecoder,
+            process: { platform: "win32" }, console: { error: (...args: unknown[]) => errors.push(args) },
+            Atomics: { wait() { waits++; if (releaseOnWait) failure = undefined; } },
+            require(name: string) {
+                if (name === "original-fs") return fs;
+                if (name === `${target}/patcher.js`) { loads++; return {}; }
+                return nativeRequire(name);
+            },
+        });
+        return { fs, ...module.exports };
+    }
+
+    await writeFile(target, "working client");
+    const first = bootModule();
+    first.installAsarUpdateShim(target);
+    const download = temporary();
+    await writeFile(download, validAsar);
+    first.fs.renameSync(download, target);
+    assert.equal(await readFile(target, "utf8"), "working client", "the running archive must never be overwritten");
+    assert.deepEqual(await readFile(pending), validAsar);
+    assert.equal(existsSync(download), false);
+
+    const invalid = temporary();
+    await writeFile(invalid, "broken download");
+    assert.throws(() => first.fs.renameSync(invalid, target), /invalid header/iu);
+    assert.deepEqual(await readFile(pending), validAsar, "invalid updates cannot replace an already staged update");
+    assert.throws(() => first.fs.renameSync(join(root, "unrelated.tmp"), target), /simulated archive lock/iu);
+    failure = "EIO";
+    assert.throws(() => first.fs.renameSync(download, target), /simulated archive lock/iu);
+    failure = "EPERM";
+
+    await writeFile(join(root, "source", "main.js"), "module.exports = 'another channel';\n");
+    const nextArchive = join(root, "next.asar");
+    await createPackage(join(root, "source"), nextArchive);
+    const nextBytes = await readFile(nextArchive);
+    const secondDownload = temporary();
+    await writeFile(secondDownload, nextBytes);
+    first.fs.renameSync(secondDownload, target);
+    assert.deepEqual(await readFile(pending), nextBytes, "the last selected channel replaces the pending update");
+
+    bootModule().load(target);
+    assert.equal(waits, 1, "startup must wait for old renderer handles to close");
+    assert.deepEqual(await readFile(target), nextBytes);
+    assert.equal(existsSync(pending), false);
+    assert.equal(loads, 1);
+    assert.equal(errors.length, 0);
+
+    failure = "EPERM";
+    releaseOnWait = false;
+    await writeFile(pending, validAsar);
+    bootModule().load(target);
+    assert.equal(waits, 50, "lock retries must be bounded");
+    assert.deepEqual(await readFile(target), nextBytes);
+    assert.deepEqual(await readFile(pending), validAsar, "a failed startup install remains available for retry");
+    assert.equal(loads, 2, "an install failure must still load the working client");
+    await writeFile(pending, "invalid staged archive");
+    bootModule().load(target);
+    assert.deepEqual(await readFile(target), nextBytes);
+    assert.equal(errors.length, 2);
 }
 
 async function testInstalledReleaseState(): Promise<void> {
@@ -299,6 +386,8 @@ async function main(): Promise<void> {
     try {
         const validAsar = await createValidAsar(root);
         validateAsar(validAsar);
+
+        await testWindowsBootstrap(root, validAsar);
 
         const corruptedAsar = Buffer.from(validAsar);
         corruptedAsar[corruptedAsar.byteLength - 1] ^= 0xff;
