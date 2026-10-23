@@ -26,8 +26,8 @@ import {
 } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import { decodeBase64Url, parseEncryptedEnvelope } from "../src/equicordplugins/secureMessaging.desktop/protocol";
 
-const TEST_CHANNEL_ID = "123456789012345679";
-const EXPECTED_RECIPIENT_ID = "123456789012345678";
+const TEST_CHANNEL_ID = process.env.PROTONN_CORD_SECURE_MESSAGING_LIVE_CHANNEL_ID ?? "";
+const EXPECTED_RECIPIENT_ID = process.env.PROTONN_CORD_SECURE_MESSAGING_LIVE_RECIPIENT_ID ?? "";
 // Synthetic peer-announcement fixture; this snowflake decodes to 2026-01-01T00:00:00.000Z.
 // The announcement is never posted, so the fixture supplies stable Discord provenance without creating another live message.
 const SYNTHETIC_ANNOUNCEMENT_MESSAGE_ID = "1456074443980800000";
@@ -2209,6 +2209,8 @@ async function stopSecureMessagingPlugin(page: Page) {
 }
 
 async function main(): Promise<void> {
+    assert.match(TEST_CHANNEL_ID, /^[1-9]\d{16,19}$/, "Set PROTONN_CORD_SECURE_MESSAGING_LIVE_CHANNEL_ID to an authorized disposable DM");
+    assert.match(EXPECTED_RECIPIENT_ID, /^[1-9]\d{16,19}$/, "Set PROTONN_CORD_SECURE_MESSAGING_LIVE_RECIPIENT_ID to its authorized recipient");
     const expectedDataDir = requireDisposableDataDirectory();
     const pluginPrestarted = process.env[PRESTARTED_PLUGIN_ENV] === "1";
     const attachmentsOnly = process.env[ATTACHMENTS_ONLY_ENV] === "1";
