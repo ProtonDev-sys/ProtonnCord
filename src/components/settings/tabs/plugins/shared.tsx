@@ -27,14 +27,15 @@ export async function restartAfterSaving() {
     }
 }
 
-export const ExcludedReasons: Record<"web" | "browser" | "discordDesktop" | "vesktop" | "equibop" | "desktop" | "dev", string> = {
+export const ExcludedReasons: Record<"web" | "browser" | "discordDesktop" | "vesktop" | "equibop" | "desktop" | "dev" | "nightly", string> = {
     desktop: "Discord Desktop app or Vesktop/Equibop",
     discordDesktop: "Discord Desktop app",
     vesktop: "Vesktop/Equibop apps",
     equibop: "Vesktop/Equibop apps",
     web: "Vesktop/Equibop apps & Discord web",
     browser: "Discord web browser client",
-    dev: "Developer version of Protonn Cord"
+    dev: "Developer version of Protonn Cord",
+    nightly: "Nightly or developer version of Protonn Cord"
 };
 
 export function PluginDependencyList({ deps }: { deps: readonly string[]; }) {

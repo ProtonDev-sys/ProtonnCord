@@ -1,7 +1,7 @@
 {
     "name": "protonn-cord",
     "private": true,
-    "version": "1.15.1.12",
+    "version": "1.15.1.14",
     "description": "Protonn Cord, a Discord client mod",
     "homepage": "https://github.com/ProtonDev-sys/ProtonnCord#readme",
     "bugs": {
@@ -60,6 +60,8 @@
         "testVoiceMessageTranscriber": "tsx scripts/testVoiceMessageTranscriber.ts",
         "testDiscordMcp": "tsx scripts/testDiscordMcp.ts",
         "testMessageEventsPriority": "tsx scripts/testMessageEventsPriority.ts",
+        "benchmarkMessageCompression": "tsx scripts/benchmarkMessageCompression.ts",
+        "testMessageCompression": "tsx --test scripts/testMessageCompression.ts scripts/testMessageCompressionIntegration.ts scripts/testNightlyPluginBuild.ts",
         "testMainProcessStdio": "tsx scripts/testMainProcessStdio.ts",
         "testDevNativeBuild": "tsx scripts/testDevNativeBuild.ts",
         "testUserpluginUpdateReview": "tsx scripts/testUserpluginUpdateReview.ts",
@@ -90,7 +92,7 @@
         "testSecureMessagingLive": "tsx scripts/testSecureMessagingLive.ts",
         "createDiscordMcpVideo": "tsx scripts/createDiscordMcpVideo.ts",
         "benchmarkDiscord": "tsx scripts/benchmarkDiscord.ts",
-        "test": "pnpm testAudit && pnpm testNativeLifecycle && pnpm testDataStoreUpdates && pnpm testBrowser && pnpm testMoreStickersStorage && pnpm testClientsideGuildIcons && pnpm testServerReview && pnpm testMessageImage && pnpm testVoiceMessageTranscriber && pnpm testDiscordMcp && pnpm testCoreUtilities && pnpm testRenderPerformance && pnpm testDevNativeBuild && pnpm testUserpluginUpdateReview && pnpm testUserpluginPathSafety && pnpm testMessageLoggerNativeWrites && pnpm testMessageLoggerNativeDownloads && pnpm testFileUploadNativeBoundary && pnpm testZipPreviewSecurity && pnpm testExternalUrlBoundary && pnpm testDevCompanionSecurity && pnpm testInstallerSecurity && pnpm testExtensionPublishWorkflow && pnpm testChannelPromotion && pnpm testCspPolicyBoundary && pnpm testQuestifyNativeBoundary && pnpm testOrbolayBridgeSecurity && pnpm testCloudSyncPrivacy && pnpm testCloudDataStoreContract && pnpm testNavidromeAssetPrivacy && pnpm testReporterWorkflowIsolation && pnpm testUpdaterBranches && pnpm testPluginReleaseMarkers && pnpm testTsc && pnpm testUpdaterClassification && pnpm testUpdaterGit && pnpm testUpdaterHttp && pnpm testUpdaterRepository:built && pnpm testMessageEventsPriority && pnpm testMainProcessStdio && pnpm testSecureMessagingPerformance && pnpm testSecureMessagingEmbedUrls && pnpm testSecureMessagingOptimisticRendering && pnpm testSecureMessagingForwarding && pnpm testWebAuthnLargeBlob && pnpm testOneKeyIdentity && pnpm testSecureMessagingSecurityKey && pnpm testSecureMessagingRestGuard && pnpm testSecureMessagingHistory && pnpm testSecureMessagingConfiguration && pnpm testSecureMessagingPlaintextRendering && pnpm testSecureMessagingAttachments && pnpm testSecureMessaging && pnpm testSecureMessagingNative && pnpm lint && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
+        "test": "pnpm testAudit && pnpm testNativeLifecycle && pnpm testDataStoreUpdates && pnpm testBrowser && pnpm testMoreStickersStorage && pnpm testClientsideGuildIcons && pnpm testServerReview && pnpm testMessageImage && pnpm testVoiceMessageTranscriber && pnpm testDiscordMcp && pnpm testCoreUtilities && pnpm testRenderPerformance && pnpm testDevNativeBuild && pnpm testUserpluginUpdateReview && pnpm testUserpluginPathSafety && pnpm testMessageLoggerNativeWrites && pnpm testMessageLoggerNativeDownloads && pnpm testFileUploadNativeBoundary && pnpm testZipPreviewSecurity && pnpm testExternalUrlBoundary && pnpm testDevCompanionSecurity && pnpm testInstallerSecurity && pnpm testExtensionPublishWorkflow && pnpm testChannelPromotion && pnpm testCspPolicyBoundary && pnpm testQuestifyNativeBoundary && pnpm testOrbolayBridgeSecurity && pnpm testCloudSyncPrivacy && pnpm testCloudDataStoreContract && pnpm testNavidromeAssetPrivacy && pnpm testReporterWorkflowIsolation && pnpm testUpdaterBranches && pnpm testPluginReleaseMarkers && pnpm testTsc && pnpm testUpdaterClassification && pnpm testUpdaterGit && pnpm testUpdaterHttp && pnpm testUpdaterRepository:built && pnpm testMessageEventsPriority && pnpm testMessageCompression && pnpm testMainProcessStdio && pnpm testSecureMessagingPerformance && pnpm testSecureMessagingEmbedUrls && pnpm testSecureMessagingOptimisticRendering && pnpm testSecureMessagingForwarding && pnpm testWebAuthnLargeBlob && pnpm testOneKeyIdentity && pnpm testSecureMessagingSecurityKey && pnpm testSecureMessagingRestGuard && pnpm testSecureMessagingHistory && pnpm testSecureMessagingConfiguration && pnpm testSecureMessagingPlaintextRendering && pnpm testSecureMessagingAttachments && pnpm testSecureMessaging && pnpm testSecureMessagingNative && pnpm lint && pnpm lint-styles && pnpm lint:intl && pnpm lint:patches && pnpm generatePluginJson",
         "testWeb": "pnpm lint && pnpm buildWeb && pnpm testTsc",
         "testTsc": "tsc --noEmit",
         "testInstallerSecurity": "node scripts/testInstallerSecurity.mjs",
