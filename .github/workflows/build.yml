@@ -31,6 +31,14 @@ jobs:
               with:
                   fetch-depth: 0
                   persist-credentials: false
+                  ref: ${{ github.sha }}
+
+            - name: Set reproducible build timestamp
+              shell: bash
+              run: |
+                  epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+                  [[ "$epoch" =~ ^[0-9]+$ ]]
+                  printf 'SOURCE_DATE_EPOCH=%s\n' "$epoch" >> "$GITHUB_ENV"
 
             - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 

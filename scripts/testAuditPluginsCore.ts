@@ -9,18 +9,23 @@ function loadSupportHelper() {
     const check = Promise.withResolvers<boolean>();
     const restart = Promise.withResolvers<void>();
     const modals: unknown[] = [];
-    const state = { channelId: "support", userId: "self", updates: 0, restarts: 0 };
+    const state = { channelId: "support", userId: "self", updates: 0, restarts: 0,
+        updateBranch: "main", updateResult: true, onUpdate() {} };
     const settings = { store: {}, withPrivateSettings() { return this; } };
     const mocks: Record<string, object> = {
         "@api/UserSettings": { getUserSettingLazy: () => ({ getSetting: () => true }) },
-        "@api/Settings": { definePluginSettings: () => settings },
+        "@api/Settings": { definePluginSettings: () => settings, Settings: state },
         "@components/ErrorBoundary": { __esModule: true, default: { wrap: (component: unknown) => component } },
         "@utils/constants": { Devs: {}, SUPPORT_CHANNEL_IDS: ["support", "support-two"] },
         "@utils/misc": { isAnyPluginDev: () => false },
         "@utils/native": { relaunch: () => { state.restarts++; return restart.promise; } },
         "@utils/onlyOnce": { onlyOnce: (fn: () => Promise<unknown>) => fn },
         "@utils/types": { __esModule: true, default: (plugin: unknown) => plugin },
-        "@utils/updater": { checkForUpdates: () => check.promise, isOutdated: true, update: async () => { state.updates++; } },
+        "@utils/updater": { checkForUpdates: () => check.promise, isOutdated: true, update: async () => {
+            state.updates++;
+            state.onUpdate();
+            return state.updateResult;
+        } },
         "@webpack/common": {
             SelectedChannelStore: { getChannelId: () => state.channelId },
             UserStore: { getCurrentUser: () => state.userId ? { id: state.userId } : undefined },
@@ -74,4 +79,18 @@ test("support update waits for restart and propagates persistence errors", async
     assert.equal(state.restarts, 1);
     restart.reject(new Error("settings flush failed"));
     await failed;
+});
+
+test("support updates do not restart after failed installs or changed update branches", async () => {
+    for (const scenario of ["failed", "changed before install", "changed during install"]) {
+        const { forceUpdate, check, state } = loadSupportHelper();
+        state.updateResult = scenario !== "failed";
+        const pending = forceUpdate();
+        if (scenario === "changed before install") state.updateBranch = "nightly";
+        if (scenario === "changed during install") state.onUpdate = () => { state.updateBranch = "nightly"; };
+        check.resolve(true);
+        assert.equal(await pending, false);
+        assert.equal(state.restarts, 0);
+        assert.equal(state.updates, scenario === "changed before install" ? 0 : 1);
+    }
 });

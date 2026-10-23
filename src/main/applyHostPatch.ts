@@ -1,22 +1,26 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "original-fs";
+import { randomUUID } from "node:crypto";
+
+import { existsSync, lstatSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "original-fs";
 import { basename, dirname, join } from "path";
 
-const STUB_PACKAGE = JSON.stringify({ name: "discord", main: "index.js" });
+import { createHostInjector } from "./hostInjector";
+
 const VERSION_PREFIX = "app-";
 
-const makeStubIndex = (patcherPath: string) =>
-    `require(${JSON.stringify(patcherPath)});`;
+const injectorTarget = (patcherPath: string) => {
+    const loader = `${dirname(patcherPath)}.loader.cjs`;
+    return existsSync(loader) ? loader : patcherPath;
+};
 
 /** `_app.asar` next to `app.asar` marks any patched install. */
 export const isAlreadyPatched = (resources: string) =>
     existsSync(join(resources, "_app.asar"));
 
 /**
- * apply the folder-shim patch to a discord `resources/` directory.
+ * apply the ASAR shim patch to a discord `resources/` directory.
  *
- * renames vanilla `app.asar` to `_app.asar`, creates an `app/` folder
- * whose `index.js` requires the given patcher script. electron prefers
- * the folder over the asar of the same name and loads it first.
+ * renames vanilla `app.asar` to `_app.asar`, then installs a small packed
+ * injector compatible with the installer's repair and removal operations.
  *
  * idempotent. returns `false` if the directory is already patched or
  * has no vanilla `app.asar`. throws on partial failure after rolling
@@ -26,29 +30,24 @@ export const patchResourcesDir = (resources: string, patcherJsPath: string): boo
     const app = join(resources, "app.asar");
     const _app = join(resources, "_app.asar");
 
-    if (isAlreadyPatched(resources) || !existsSync(app) || existsSync(_app)) return false;
+    const backedUp = isAlreadyPatched(resources);
+    if (backedUp ? existsSync(app) : !existsSync(app)) return false;
     try {
-        if (lstatSync(app).isDirectory()) return false;
+        const stat = lstatSync(backedUp ? _app : app);
+        if (!stat.isFile() || stat.isSymbolicLink()) return false;
     } catch {
         return false;
     }
 
     const undo: Array<() => void> = [];
+    const temporary = `${app}.${randomUUID()}.tmp`;
     try {
-        renameSync(app, _app);
-        undo.push(() => renameSync(_app, app));
-
-        mkdirSync(app);
-        undo.push(() => {
-            const indexPath = join(app, "index.js");
-            const pkgPath = join(app, "package.json");
-            if (existsSync(indexPath)) unlinkSync(indexPath);
-            if (existsSync(pkgPath)) unlinkSync(pkgPath);
-            rmdirSync(app);
-        });
-
-        writeFileSync(join(app, "package.json"), STUB_PACKAGE);
-        writeFileSync(join(app, "index.js"), makeStubIndex(patcherJsPath));
+        writeFileSync(temporary, createHostInjector(injectorTarget(patcherJsPath)), { flag: "wx", flush: true });
+        if (!backedUp) {
+            renameSync(app, _app);
+            undo.push(() => renameSync(_app, app));
+        }
+        renameSync(temporary, app);
         return true;
     } catch (err) {
         for (let i = undo.length - 1; i >= 0; i--) {
@@ -59,6 +58,11 @@ export const patchResourcesDir = (resources: string, patcherJsPath: string): boo
             }
         }
         throw err;
+    } finally {
+        try { unlinkSync(temporary); } catch (error) {
+            if (!(error instanceof Error && "code" in error && error.code === "ENOENT"))
+                console.error("[Protonn Cord] Failed to remove the temporary injector", error);
+        }
     }
 };
 

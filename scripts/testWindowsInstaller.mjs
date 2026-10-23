@@ -48,7 +48,11 @@ try {
     const nativeSettings = join(data, "settings", "native-settings.json");
     writeFileSync(nativeSettings, '{"privateFixture":"keep unchanged"}\n');
 
-    const gui = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", String.raw`
+    if (process.argv.includes("--cli-only")) {
+        const installed = run(["--install", "stable"]);
+        assert.equal(installed.status, 0, installed.stderr || installed.stdout || "CLI installation must succeed.");
+    } else {
+        const gui = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", String.raw`
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing, Accessibility
 # Legacy .NET Framework controls expose their native button role through MSAA.
@@ -122,8 +126,11 @@ try {
 }`], { env, encoding: "utf8", timeout: 100000 });
     console.log(gui.stdout.trim());
     assert.equal(gui.status, 0, gui.error?.message ?? gui.stderr);
+    }
     assert.deepEqual(readFileSync(join(resources, "_app.asar")), original);
-    assert.equal(extractFile(app, "index.js").toString(), `require(${JSON.stringify(archive)})`);
+    assert.equal(extractFile(app, "index.js").toString(), `require(${JSON.stringify(`${archive}.loader.cjs`)})`);
+    assert.equal(hash(`${archive}.bootstrap.cjs`), metadata.bootstrapSha256);
+    assert.match(readFileSync(`${archive}.loader.cjs`, "utf8"), /\.load\(/u);
     assert.equal(hash(archive), metadata.archiveSha256);
     assert.equal(readFileSync(settings, "utf8"), after, "Only the updateBranch value may change.");
     assert.equal(readFileSync(nativeSettings, "utf8"), '{"privateFixture":"keep unchanged"}\n');
@@ -152,7 +159,7 @@ try {
     assert.equal(readFileSync(settings, "utf8"), before, "The override must not rewrite the default data directory.");
     assert.equal(run(["--uninstall", "stable"], { env: overrideEnv }).status, 0);
     assert.deepEqual(readFileSync(app), original);
-    console.log("PASS: GUI, real CLI injection/repair/removal, exact settings preservation, rollback, and data-directory override.");
+    console.log(`PASS: ${process.argv.includes("--cli-only") ? "CLI" : "GUI and CLI"} injection/repair/removal, exact settings preservation, rollback, and data-directory override.`);
 } finally {
     rmSync(root, { recursive: true, force: true });
 }

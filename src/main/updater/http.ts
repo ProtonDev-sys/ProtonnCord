@@ -118,5 +118,6 @@ ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors((branch: unkno
     backend: "http",
     branch: parseUpdaterBranch(branch),
     builtHead: lastInstalledHash,
+    installedBranch: lastInstalledBranch,
     sourceRoot: null,
 })));

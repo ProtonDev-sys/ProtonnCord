@@ -181,7 +181,8 @@ async function packExtension(source, destination) {
     }
     /** @type {Promise<Uint8Array>} */
     const archivePromise = new Promise((resolve, reject) => {
-        zip(entries, { level: 6 }, (error, data) => error ? reject(error) : resolve(data));
+        const sortedEntries = Object.fromEntries(Object.keys(entries).sort().map(name => [name, entries[name]]));
+        zip(sortedEntries, { level: 6, mtime: new Date(1980, 0, 1) }, (error, data) => error ? reject(error) : resolve(data));
     });
     await writeFile(join("dist", destination), await archivePromise);
     console.info("Packed extension written to dist/" + destination);

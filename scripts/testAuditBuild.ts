@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
-import { unzipSync, zip } from "fflate";
+import { type AsyncZippable, type AsyncZipOptions, type FlateCallback, unzipSync, zip } from "fflate";
 import ts from "typescript";
 
 function loadFunction(path: string, name: string, globals: Record<string, unknown>) {
@@ -78,6 +78,20 @@ test("extension packaging propagates archive-read and save failures and waits fo
     finishSave();
     await success;
     assert.deepEqual(packed, [join("dist", "fixture.zip")]);
+
+    const archives: Buffer[] = [];
+    for (const reversed of [false, true]) {
+        const items = [file, { ...file, name: "other.js" }];
+        await fixture({
+            readdir: async () => reversed ? items.reverse() : items,
+            zip(entries: AsyncZippable, options: AsyncZipOptions, callback: FlateCallback) {
+                assert.equal(new Date(String(options.mtime)).getFullYear(), 1980, "ZIP metadata must not use the wall clock");
+                zip(entries, options, callback);
+            },
+            writeFile: async (_path: string, data: Uint8Array) => { archives.push(Buffer.from(data)); },
+        })("fixture", "fixture.zip");
+    }
+    assert.deepEqual(archives[0], archives[1], "rebuilding the same extension produces identical bytes despite filesystem enumeration order");
 });
 
 test("managed styles retain literal template markers and replacement characters and watch their source", async () => {

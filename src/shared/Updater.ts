@@ -21,5 +21,6 @@ export interface UpdaterDiagnostics {
     backend: "disabled" | "git" | "http";
     branch: UpdaterBranch | null;
     builtHead: string;
+    installedBranch?: UpdaterBranch | null;
     sourceRoot: string | null;
 }

@@ -42,7 +42,12 @@ async function testUpdaterControls(): Promise<void> {
     let finishCheck: (() => void) | undefined;
     const createElement = (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]): Element => ({ type, props: props ?? {}, children });
     const common = {
-        React: { createElement, useEffect: () => undefined, Fragment: "Fragment" },
+        React: {
+            createElement, Fragment: "Fragment",
+            useEffect: (effect: () => void) => effect(),
+            useRef: (value: unknown) => ({ current: value }),
+            useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot(),
+        },
         useState(initial: unknown) {
             const index = cursor++;
             if (!(index in states)) states[index] = initial;
@@ -152,6 +157,8 @@ async function testUpdaterControls(): Promise<void> {
         await checking;
         await invoke(find(render(), "Button", "Update Now"), "onClick");
         assert.equal(find(render(), "Button", "Update Now"), undefined);
+        assert.ok(find(render(), "Button", "Restart Discord"), "deferring the restart leaves a persistent restart action");
+        assert.ok(find(render(), "Button", "Repair Installation"), "current builds can still be repaired");
     }
     assert.deepEqual(calls, ["check:nightly", "update:nightly", "build", "check:staging", "update:staging", "build"]);
     invoke(find(render(true), "Select"), "select", "main");

@@ -17,7 +17,7 @@
 */
 
 import { isPluginEnabled } from "@api/PluginManager";
-import { definePluginSettings } from "@api/Settings";
+import { definePluginSettings, Settings } from "@api/Settings";
 import { getUserSettingLazy } from "@api/UserSettings";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
@@ -72,13 +72,12 @@ interface clientData {
 }
 
 async function forceUpdate() {
+    const branch = Settings.updateBranch;
     const outdated = await checkForUpdates();
-    if (outdated) {
-        await update();
-        await relaunch();
-    }
-
-    return outdated;
+    if (!outdated || branch !== Settings.updateBranch) return false;
+    if (!await update() || branch !== Settings.updateBranch) return false;
+    await relaunch();
+    return true;
 }
 
 export function detectClient(): clientData {
