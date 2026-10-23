@@ -1,10 +1,14 @@
 import { createPackage } from "@electron/asar";
+import { build } from "esbuild";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { runInNewContext } from "node:vm";
 
 import {
     applyPendingHttpUpdate,
@@ -60,6 +64,127 @@ function fileOperations(): AtomicFileOperations {
             writeFileSync(path, data, { flag: "wx", flush: true });
         },
     };
+}
+
+async function testWindowsBootstrap(root: string, validAsar: Buffer) {
+    const bundle = await build({
+        entryPoints: ["src/main/updater/asarBootstrap.ts"], bundle: true, write: false,
+        platform: "node", format: "cjs", external: ["original-fs", "electron"],
+    });
+    const nativeFs = await import("node:fs");
+    const nativeRequire = createRequire(import.meta.url);
+    const target = join(root, "windows.asar");
+    const pending = `${target}.pending`;
+    const hostRoot = join(root, "Discord");
+    await mkdir(join(hostRoot, "app-1.0.1"), { recursive: true });
+    const temporary = () => `${target}.${process.pid}.${randomUUID()}.tmp`;
+    let failure: string | undefined = "EPERM";
+    let releaseOnWait = true;
+    let waits = 0;
+    let loads = 0;
+    let incompatiblePatcher = false;
+    const errors: unknown[] = [];
+    function bootModule() {
+        const app = new EventEmitter();
+        const childProcess = Object.assign(new EventEmitter(), { platform: "win32", execPath: join(hostRoot, "app-1.0.1", "Discord.exe") });
+        let tick: (() => void) | undefined;
+        const fs = { ...nativeFs, renameSync(source: string, destination: string) {
+            if (destination === target && failure)
+                throw Object.assign(new Error("simulated archive lock"), { code: failure });
+            renameSync(source, destination);
+        } };
+        const module = { exports: {} as typeof import("../src/main/updater/asarBootstrap") };
+        runInNewContext(bundle.outputFiles[0].text, {
+            module, exports: module.exports, Buffer, Error, Int32Array, SharedArrayBuffer, TextDecoder,
+            process: childProcess, console: { error: (...args: unknown[]) => errors.push(args) },
+            setInterval(callback: () => void) { tick = callback; return { unref() {} }; },
+            clearInterval() { tick = undefined; },
+            Atomics: { wait() { waits++; if (releaseOnWait) failure = undefined; } },
+            require(name: string) {
+                if (name === "original-fs") return fs;
+                if (name === "electron") return { app };
+                if (name === `${target}/patcher.js`) {
+                    if (incompatiblePatcher) throw new Error("incompatible mod startup");
+                    loads++; return {};
+                }
+                return nativeRequire(name);
+            },
+        });
+        return { fs, app, tick: () => tick?.(), ...module.exports };
+    }
+
+    await writeFile(target, "working client");
+    const first = bootModule();
+    first.installAsarUpdateShim(target);
+    const download = temporary();
+    await writeFile(download, validAsar);
+    first.fs.renameSync(download, target);
+    assert.equal(await readFile(target, "utf8"), "working client", "the running archive must never be overwritten");
+    assert.deepEqual(await readFile(pending), validAsar);
+    assert.equal(existsSync(download), false);
+
+    const invalid = temporary();
+    await writeFile(invalid, "broken download");
+    assert.throws(() => first.fs.renameSync(invalid, target), /invalid header/iu);
+    assert.deepEqual(await readFile(pending), validAsar, "invalid updates cannot replace an already staged update");
+    assert.throws(() => first.fs.renameSync(join(root, "unrelated.tmp"), target), /simulated archive lock/iu);
+    failure = "EIO";
+    assert.throws(() => first.fs.renameSync(download, target), /simulated archive lock/iu);
+    failure = "EPERM";
+
+    await writeFile(join(root, "source", "main.js"), "module.exports = 'another channel';\n");
+    const nextArchive = join(root, "next.asar");
+    await createPackage(join(root, "source"), nextArchive);
+    const nextBytes = await readFile(nextArchive);
+    const secondDownload = temporary();
+    await writeFile(secondDownload, nextBytes);
+    first.fs.renameSync(secondDownload, target);
+    assert.deepEqual(await readFile(pending), nextBytes, "the last selected channel replaces the pending update");
+
+    bootModule().load(target);
+    assert.equal(waits, 1, "startup must wait for old renderer handles to close");
+    assert.deepEqual(await readFile(target), nextBytes);
+    assert.equal(existsSync(pending), false);
+    assert.equal(loads, 1);
+    assert.equal(errors.length, 0);
+
+    failure = "EPERM";
+    releaseOnWait = false;
+    await writeFile(pending, validAsar);
+    bootModule().load(target);
+    assert.equal(waits, 50, "lock retries must be bounded");
+    assert.deepEqual(await readFile(target), nextBytes);
+    assert.deepEqual(await readFile(pending), validAsar, "a failed startup install remains available for retry");
+    assert.equal(loads, 2, "an install failure must still load the working client");
+    await writeFile(pending, "invalid staged archive");
+    bootModule().load(target);
+    assert.deepEqual(await readFile(target), nextBytes);
+    assert.equal(errors.length, 2);
+
+    // Host recovery is installed before the archived mod. It must survive a
+    // broken mod and must not require private Discord updater APIs to work.
+    await rm(pending);
+    failure = undefined;
+    incompatiblePatcher = true;
+    const host = bootModule();
+    assert.throws(() => host.load(target), /incompatible mod startup/iu);
+    const dispose = host.installHostRecovery(target);
+    assert.equal(host.app.listenerCount("will-quit"), 1, "recovery installation is idempotent");
+    const nextHost = join(hostRoot, "app-1.0.2", "resources");
+    await mkdir(nextHost, { recursive: true });
+    host.tick();
+    assert.equal(existsSync(join(nextHost, "_app.asar")), false, "an incomplete install remains untouched");
+    await writeFile(join(nextHost, "app.asar"), "original Discord");
+    host.tick();
+    assert.equal(await readFile(join(nextHost, "_app.asar"), "utf8"), "original Discord");
+    const expectedStub = `require(${JSON.stringify(`${target}.loader.cjs`)});`;
+    assert.equal(await readFile(join(nextHost, "app.asar", "index.js"), "utf8"), expectedStub);
+    await writeFile(join(nextHost, "app.asar", "index.js"), `require(${JSON.stringify(join(target, "patcher.js"))});`);
+    host.app.emit("will-quit");
+    assert.equal((await readFile(join(nextHost, "app.asar", "index.js"), "utf8")).trim(), expectedStub,
+        "a raw-archive stub written by an older main build is upgraded before relaunch");
+    dispose?.();
+    assert.equal(host.app.listenerCount("will-quit"), 0);
 }
 
 async function testInstalledReleaseState(): Promise<void> {
@@ -387,6 +512,8 @@ async function main(): Promise<void> {
     try {
         const validAsar = await createValidAsar(root);
         validateAsar(validAsar);
+
+        await testWindowsBootstrap(root, validAsar);
 
         const corruptedAsar = Buffer.from(validAsar);
         corruptedAsar[corruptedAsar.byteLength - 1] ^= 0xff;

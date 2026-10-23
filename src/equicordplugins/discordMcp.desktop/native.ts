@@ -7,6 +7,7 @@
 import { DATA_DIR } from "@main/utils/constants";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import type { IpcMainInvokeEvent } from "electron";
+import serverSource from "file://../../../tools/discord-mcp/server.mjs?trim=false";
 import { watch } from "fs";
 import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "fs/promises";
 import { basename, extname, join } from "path";
@@ -55,6 +56,7 @@ const REQUESTS_DIR = join(BRIDGE_DIR, "requests");
 const RESPONSES_DIR = join(BRIDGE_DIR, "responses");
 const DOWNLOADS_DIR = join(BRIDGE_DIR, "downloads");
 const CONFIG_PATH = join(BRIDGE_DIR, "config.json");
+const SERVER_PATH = join(BRIDGE_DIR, "server.mjs");
 const SENT_LEDGER_PATH = join(BRIDGE_DIR, "sent-messages.json");
 const MAX_REQUEST_SIZE = 64 * 1024;
 const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024;
@@ -187,6 +189,10 @@ async function ensureInitialized(): Promise<void> {
                 mkdir(DOWNLOADS_DIR, { recursive: true }),
             ]);
             bridgeSecret = (await readOrCreateConfig()).secret;
+            // MCP clients use this stable path rather than a source checkout.
+            // Refresh it with the client while keeping the bridge secret and queues.
+            if (await readFile(SERVER_PATH, "utf8").catch(() => null) !== serverSource)
+                await atomicWrite(SERVER_PATH, serverSource);
             await recoverInterruptedClaims();
             await Promise.all([loadSentLedger(), cleanupStaleQueueFiles()]);
         })().catch(error => {

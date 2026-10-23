@@ -97,6 +97,22 @@ test('phone pairing survives a locked restart, preserves the mobile counter and 
 	await vault.load()
 	await vault.unlockWithOneKey(secret, USER)
 	const counter = vault.account(USER).counter
+	const existingChannel = '100000000000000004'
+	const conversation = {
+		members: [PEER, '100000000000000005'],
+		recipients: [PEER],
+		needsReview: true,
+		futureConversation: { keep: [true, null, 1] },
+	}
+	vault.account(USER).conversations[existingChannel] = conversation
+	await vault.save()
+	const token = sealMobilePairing(root.key, root.fingerprint, USER, {
+		...payload,
+		conversations: {
+			...payload.conversations,
+			[existingChannel]: payload.conversations[CHANNEL],
+		},
+	})
 	await vault.importPairing(token, USER)
 	assert.equal(vault.account(USER).counter, counter)
 	assert.deepEqual(vault.account(USER).trusted, payload.trusted)
@@ -106,6 +122,14 @@ test('phone pairing survives a locked restart, preserves the mobile counter and 
 	assert.equal(restarted.locked, true)
 	await restarted.unlockWithOneKey(secret, USER)
 	assert.deepEqual(restarted.account(USER).trusted, payload.trusted)
+	assert.deepEqual(
+		restarted.account(USER).conversations[CHANNEL],
+		payload.conversations[CHANNEL],
+	)
+	assert.deepEqual(restarted.account(USER).conversations[existingChannel], {
+		...conversation,
+		...payload.conversations[CHANNEL],
+	})
 	const older = sealMobilePairing(root.key, root.fingerprint, USER, {
 		...payload,
 		createdAt: NOW - 1,

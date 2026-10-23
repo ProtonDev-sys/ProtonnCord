@@ -420,11 +420,13 @@ export default definePlugin({
     tags: ["Chat", "Utility", "Developers"],
     patches: [
         {
-            find: "codeBlock:{react(",
+            find: /codeBlock:\{react:?\(/,
             predicate: () => !isPluginEnabled(shikiCodeblocks.name),
             replacement: {
-                match: /codeBlock:\{react\((\i),(\i),(\i)\)\{/,
-                replace: "$&$1.lang=$self.resolveLanguage($1.lang,$1.content);"
+                match: /codeBlock:\{react\((\i),\i,\i\)\{|(?<=code:(\i)\.content,lang:)\2\.lang/,
+                replace: (match, legacyNode, node) => legacyNode
+                    ? `${match}${legacyNode}.lang=$self.resolveLanguage(${legacyNode}.lang,${legacyNode}.content);`
+                    : `$self.resolveLanguage(${node}.lang,${node}.content)`
             }
         },
         {
