@@ -164,6 +164,7 @@ test("HTTP branch selections survive checks and other selections, and failed ins
         "@shared/Updater": { parseUpdaterBranch },
         "@shared/vencordUserAgent": { VENCORD_USER_AGENT: "Fixture" },
         "@main/ipc": { ipcMain: { handle: (event: IpcEvents, handler: (...args: any[]) => Promise<any>) => handlers.set(event, handler) } },
+        "@main/settings": {}, "@main/utils/constants": {}, "electron": {},
         "original-fs": {}, "~git-hash": { default: "a".repeat(40) }, "~git-remote": { default: "Fixture/Fixture" },
         "./common": { ASAR_FILE: "desktop.asar" }, "./ipc": { createOperationQueue, serializeErrors },
         "./httpOperations": {
@@ -178,7 +179,7 @@ test("HTTP branch selections survive checks and other selections, and failed ins
                 installs.push(bytes.toString());
             },
         },
-    }, { __dirname: "fixture.asar", process: { pid: 1 }, fetch: () => assert.fail("No live network") });
+    }, { __dirname: "fixture.asar", IS_DEV: true, process: { pid: 1 }, fetch: () => assert.fail("No live network") });
     const invoke = (event: IpcEvents, ...args: unknown[]) => handlers.get(event)!({}, ...args);
     assert.equal((await invoke(IpcEvents.UPDATE, "main")).value, true);
     assert.equal((await invoke(IpcEvents.UPDATE, "nightly")).value, true);

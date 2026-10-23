@@ -206,6 +206,7 @@ async function testInstalledReleaseState(): Promise<void> {
         "@shared/Updater": { parseUpdaterBranch },
         "@shared/vencordUserAgent": { VENCORD_USER_AGENT: "Fixture" },
         "@main/ipc": { ipcMain: { handle: (event: IpcEvents, handler: (...args: unknown[]) => Promise<{ ok: boolean; value?: unknown; }>) => handlers.set(event, handler) } },
+        "@main/settings": {}, "@main/utils/constants": {}, "electron": {},
         "original-fs": {}, "~git-hash": { __esModule: true, default: CURRENT_HASH, buildChannel: "main" }, "~git-remote": { __esModule: true, default: "Fixture/Fixture" },
         "./common": { ASAR_FILE }, "./ipc": { createOperationQueue, serializeErrors },
         "./httpOperations": {
@@ -232,7 +233,7 @@ async function testInstalledReleaseState(): Promise<void> {
                 installed.push(data.toString());
             },
         },
-    }, { __dirname: "fixture.asar", process: { pid: 1 }, fetch: () => assert.fail("No live network") });
+    }, { __dirname: "fixture.asar", IS_DEV: true, process: { pid: 1 }, fetch: () => assert.fail("No live network") });
     const invoke = (event: IpcEvents, ...args: unknown[]) => handlers.get(event)!({}, ...args);
     const installedHash = async () => (await invoke(IpcEvents.GET_UPDATER_DIAGNOSTICS, "main")).value as { builtHead: string; };
 
