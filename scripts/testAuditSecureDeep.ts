@@ -324,6 +324,7 @@ for (const status of ["untrusted_author", "replay_detected", "decrypted"]) {
             downloadEncryptedAttachment: async () => ({ ciphertext, hadDownloadFailure: false }),
             decryptAttachmentBytes: async () => ({ data: bytes, metadata: { name: "fixture.txt", size: 3 } }),
             attachmentBundleRoot: async () => "root",
+            cachedAuthenticatedAttachment: () => null,
             cacheAuthenticatedAttachment: () => { cached++; },
             resolveDetachedMessageText: (_value: unknown, attachments: unknown) => ({ plaintext: "fixture", attachments }),
         });

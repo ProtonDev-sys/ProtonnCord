@@ -12,8 +12,8 @@ export const REPORTER_SOURCE_ONLY_FACTORIES = [
         "id": "33006",
         "reason": "native-capability-unavailable",
         "capability": "DiscordNative",
-        "originalSha256": "c01d865e01da5023c7db7aa6ff691fa4722f4e0e5ef768b7611893203d40861c",
-        "patchedSha256": "66133ee097aabaa4be7a31095cc6e6a4fc8fda00ea4cd7c44eaaa8e8c0b1a4b9"
+        "originalSha256": "b1c9d4408f877f373b25b3086101de8d2a0929119303922deb16e391d271ab21",
+        "patchedSha256": "40c0d9ab0f634ad68985c9bd525d44c8aa93f2155a13c67b4fa00f211320b179"
     },
     {
         "id": "438834",

@@ -140,6 +140,49 @@ test('legacy and incomplete identity backups preserve protected chats through re
 	)
 })
 
+test('identity backup imports preserve unknown saved fields while updating protected participants', async () => {
+	const backing = storage()
+	const initial = new MobileVault(backing)
+	await initial.load()
+	const state = initial.account(USER)
+	const peer = publicIdentity(generateIdentity(), PEER)
+	state.trusted[PEER] = peer
+	state.conversations[CHANNEL] = {
+		members: [PEER, OTHER],
+		recipients: [PEER],
+	}
+	await initial.save()
+	const saved = JSON.parse(backing.raw!)
+	saved.futureVault = { keep: [true, null, 1] }
+	saved.accounts[USER].futureAccount = { keep: 'account' }
+	saved.accounts[USER].conversations[CHANNEL].futureConversation = {
+		keep: 'conversation',
+	}
+	backing.raw = JSON.stringify(saved)
+	const vault = new MobileVault(backing)
+	await vault.load()
+	await vault.replace(USER, {
+		identity: state.identity,
+		trusted: state.trusted,
+		conversations: { [CHANNEL]: { members: [PEER], recipients: [PEER] } },
+	})
+	const restarted = new MobileVault(backing)
+	await restarted.load()
+	assert.deepEqual(restarted.account(USER).conversations[CHANNEL], {
+		members: [PEER],
+		recipients: [PEER],
+		needsReview: true,
+		futureConversation:
+			saved.accounts[USER].conversations[CHANNEL].futureConversation,
+	})
+	const imported = JSON.parse(backing.raw!)
+	assert.deepEqual(imported.futureVault, saved.futureVault)
+	assert.deepEqual(
+		imported.accounts[USER].futureAccount,
+		saved.accounts[USER].futureAccount,
+	)
+})
+
 test('historical identities and publication metadata are validated before a loaded vault is ready', async () => {
 	const identity = generateIdentity()
 	const valid: Account = {

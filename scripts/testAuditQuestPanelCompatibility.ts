@@ -2,10 +2,67 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
-import { questAccountPanel, questActionButton, questProgressRing } from "./fixtures/discordQuestPanel";
+import { questAccountPanel, questActionButton, questDiscoverySidebars, questProgressRing } from "./fixtures/discordQuestPanel";
 import { applyPatch, jsx, pluginPatches } from "./utils/discordClientFixture";
 
 const patches = pluginPatches("src/equicordplugins/questify/index.tsx");
+
+for (const [channel, source] of Object.entries(questDiscoverySidebars)) {
+    test(`Quest discovery hiding preserves ${channel} experiments and native navigation`, () => {
+        const settings = { disableQuestsEverything: false, disableRelocationNotices: false };
+        const patch = pluginPatches("src/equicordplugins/questify/index.tsx", { getQuestifySettings: () => settings })
+            .find((patch: any) => patch.find === "GLOBAL_DISCOVERY_SIDEBAR},");
+        const tabs = Object.freeze(["servers", "quests", "apps", "future"]);
+        let nativeEnabled = false;
+        let hookCalls = 0;
+        const config = { useConfig({ location }: any) {
+            assert.equal(location, "GlobalDiscoverySidebar");
+            hookCalls++;
+            return { enabled: nativeEnabled };
+        } };
+        const discovery = { GLOBAL_DISCOVERY_TABS: tabs, GlobalDiscoveryTab: { QUESTS: "quests" } };
+        const react = { jsx, jsxs: jsx };
+        const styles = { kL: "sidebar", wx: "header", C$: "navigation" };
+        const bindings = channel === "stable"
+            ? { s0: config, s2: discovery, M: react, s6: styles, sY: { F: "heading" }, sK: { D: "text" }, s7: "tab" }
+            : { sK: config, sz: discovery, P: react, sZ: styles, sx: { F: "heading" }, sk: { D: "text" }, sJ: "tab" };
+        const globals = { ...bindings, tL: { intl: { string: () => "Discovery" }, t: {} } };
+        const native = runInNewContext(`(${source})`, globals);
+        const patched = runInNewContext(`(${applyPatch(source, patch)})`, globals);
+        for (nativeEnabled of [false, true]) {
+            for (settings.disableQuestsEverything of [false, true]) {
+                for (settings.disableRelocationNotices of [false, true]) {
+                    hookCalls = 0;
+                    const node = (patch.predicate() ? patched : native)();
+                    const header = node.props.children[0].props.children;
+                    const nav = node.props.children[1];
+                    assert.equal(header.props.forceLevel, 1);
+                    assert.equal(header.props.children.props.children, "Discovery");
+                    assert.equal(nav.type, "nav");
+                    assert.equal(nav.props.className, "navigation");
+                    assert.equal(nav.props.role, "tablist");
+                    assert.equal(nav.props["aria-orientation"], "vertical");
+                    const expected = nativeEnabled || settings.disableQuestsEverything || settings.disableRelocationNotices
+                        ? ["servers", "apps", "future"] : [...tabs];
+                    assert.deepEqual(Array.from(nav.props.children, (child: any) => child.props.tab), expected);
+                    assert.ok(nav.props.children.every((child: any) => child.type === "tab"));
+                    assert.equal(hookCalls, 1);
+                }
+            }
+        }
+        assert.deepEqual(tabs, ["servers", "quests", "apps", "future"]);
+    });
+}
+
+test("Quest discovery hiding remains compatible with the legacy direct-map path", () => {
+    const patch = patches.find((patch: any) => patch.find === "GLOBAL_DISCOVERY_SIDEBAR},");
+    const tabs = Object.freeze(["servers", "quests", "apps"]);
+    const render = runInNewContext(`(${applyPatch("function(){return host.GLOBAL_DISCOVERY_TABS.map(tab=>tab)}", patch)})`, {
+        host: { GLOBAL_DISCOVERY_TABS: tabs }
+    });
+    assert.deepEqual(Array.from(render()), ["servers", "apps"]);
+    assert.deepEqual(tabs, ["servers", "quests", "apps"]);
+});
 
 test("Quest account-panel overrides keep native no-fill hooks and ad wrappers in order", () => {
     const patch = patches.find((patch: any) => patch.find === 'collapsed-with-rewards":"collapsed-without-rewards' && !Array.isArray(patch.replacement) && !String(patch.replacement.match).includes("SELECT"));

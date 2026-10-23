@@ -53,6 +53,9 @@ importers:
       gifuct-js:
         specifier: ^2.1.2
         version: 2.1.2
+      highlight.js:
+        specifier: 11.11.1
+        version: 11.11.1
       idb:
         specifier: 8.0.3
         version: 8.0.3
@@ -123,9 +126,6 @@ importers:
       eslint-plugin-unused-imports:
         specifier: ^4.4.1
         version: 4.4.1(@typescript-eslint/eslint-plugin@8.62.1(@typescript-eslint/parser@8.62.1(eslint@10.6.0(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3))(eslint@10.6.0(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3))(eslint@10.6.0(supports-color@10.2.2))
-      highlight.js:
-        specifier: 11.11.1
-        version: 11.11.1
       html-minifier-terser:
         specifier: ^7.2.0
         version: 7.2.0

@@ -251,7 +251,7 @@ async function main() {
             const result = await rpc("tools/call", { name, arguments: args }, timeoutMs);
             if (result.isError) throw new Error(result.content?.[0]?.text ?? `${name} failed`);
             lastToolContent.set(name, result.content ?? []);
-            return result.structuredContent;
+            return Array.isArray(result.structuredContent?.value) ? result.structuredContent.value : result.structuredContent;
         };
 
         const initialized = await rpc("initialize", {

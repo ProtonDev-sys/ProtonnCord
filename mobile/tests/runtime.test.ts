@@ -406,6 +406,32 @@ test('the host send hook encrypts protected text and keeps commands local', asyn
 	runtime.stop()
 })
 
+test('re-enabling a protected conversation preserves unknown fields and clears explicit review', async () => {
+	const runtime = fixture()
+	await runtime.start()
+	const state = runtime.vault.account(USER)
+	state.trusted[PEER] = crypto.publicIdentity(crypto.generateIdentity(), PEER)
+	const conversation = {
+		members: [PEER, '100000000000000004'],
+		recipients: [PEER],
+		needsReview: true,
+		futureConversation: { keep: [true, null, 1] },
+	}
+	state.conversations[CHANNEL] = conversation
+	await runtime.vault.save()
+	await runtime.actions.sendMessage(CHANNEL, { content: '/pc on' })
+	assert.equal(runtime.sent.length, 0)
+	assert.deepEqual(JSON.parse(JSON.stringify(state.conversations[CHANNEL])), {
+		...conversation,
+		members: [PEER],
+		needsReview: false,
+	})
+	assert.doesNotThrow(() =>
+		sendPolicy.captureSendPolicy(state, CHANNEL, [PEER]),
+	)
+	runtime.stop()
+})
+
 test('an account round trip during attachment preparation blocks the original host send', async () => {
 	const prepared = deferred<{ plaintext: string; apply(): void }>()
 	const runtime = fixture({ prepare: () => prepared.promise })
