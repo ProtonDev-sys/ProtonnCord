@@ -32,7 +32,7 @@ defaults:
 jobs:
     prepare:
         if: github.ref == 'refs/heads/main'
-        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","desktop-3flaofg","ubuntu-24.04"]') || 'ubuntu-latest' }}
+        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","server","ubuntu-24.04"]') || 'ubuntu-latest' }}
         timeout-minutes: 30
         permissions:
             contents: write
@@ -219,7 +219,7 @@ jobs:
     publish-chrome:
         needs: prepare
         if: needs.prepare.outputs.release == 'true' && vars.ACT == 'false' && (github.event_name != 'workflow_dispatch' || inputs.store == 'all' || inputs.store == 'chrome')
-        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","desktop-3flaofg","ubuntu-24.04"]') || 'ubuntu-latest' }}
+        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","server","ubuntu-24.04"]') || 'ubuntu-latest' }}
         timeout-minutes: 15
         environment: browser-extension-release-chrome
         permissions:
@@ -271,7 +271,7 @@ jobs:
     publish-firefox:
         needs: prepare
         if: needs.prepare.outputs.release == 'true' && vars.ACT == 'false' && (github.event_name != 'workflow_dispatch' || inputs.store == 'all' || inputs.store == 'firefox')
-        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","desktop-3flaofg","ubuntu-24.04"]') || 'ubuntu-latest' }}
+        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","server","ubuntu-24.04"]') || 'ubuntu-latest' }}
         timeout-minutes: 15
         environment: browser-extension-release-firefox
         permissions:
@@ -321,7 +321,7 @@ jobs:
     publish-edge:
         needs: prepare
         if: needs.prepare.outputs.release == 'true' && vars.ACT == 'false' && (github.event_name != 'workflow_dispatch' || inputs.store == 'all' || inputs.store == 'edge')
-        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","desktop-3flaofg","ubuntu-24.04"]') || 'ubuntu-latest' }}
+        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","server","ubuntu-24.04"]') || 'ubuntu-latest' }}
         timeout-minutes: 15
         environment: browser-extension-release-edge
         permissions:
