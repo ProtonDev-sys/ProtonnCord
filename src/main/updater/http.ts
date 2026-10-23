@@ -51,6 +51,7 @@ const pendingUpdates = new Map<UpdaterBranch, { update: PendingHttpUpdate; force
 let lastRequestedBranch: UpdaterBranch = "main";
 let lastInstalledHash = gitHash;
 let lastInstalledBranch: UpdaterBranch | null = buildChannel;
+let lastInstalledUpdate: PendingHttpUpdate | undefined;
 let installedRevision = 0;
 const enqueue = createOperationQueue();
 let rendererActive = false;
@@ -82,13 +83,18 @@ async function calculateGitChanges(branch: unknown) {
     return inspection.changes;
 }
 
-async function fetchUpdates(branch: unknown, force: unknown = false) {
+async function fetchUpdates(branch: unknown, force: unknown = false, requestRevision = installedRevision) {
     if (typeof force !== "boolean") throw new Error("Invalid repair option");
     const selectedBranch = parseUpdaterBranch(branch);
     const pending = await findHttpUpdate(githubGet, lastInstalledHash, ASAR_FILE, selectedBranch, force, lastInstalledBranch);
     lastRequestedBranch = selectedBranch;
     if (pending) pendingUpdates.set(selectedBranch, { update: pending, force, revision: installedRevision });
-    else pendingUpdates.delete(selectedBranch);
+    else if (!force && requestRevision !== installedRevision && lastInstalledUpdate && lastInstalledBranch === selectedBranch) {
+        // A manual UPDATE may have queued behind the fallback's download. Keep
+        // its UPDATE/BUILD handshake successful so the renderer offers Restart.
+        pendingUpdates.set(selectedBranch, { update: lastInstalledUpdate, force: false, revision: installedRevision - 1 });
+        return true;
+    } else pendingUpdates.delete(selectedBranch);
     return pending !== null;
 }
 
@@ -120,6 +126,7 @@ async function installUpdate(pending: PendingHttpUpdate, branch: UpdaterBranch, 
     if (!installed) return false;
     lastInstalledHash = pending.hash;
     lastInstalledBranch = branch;
+    lastInstalledUpdate = pending;
     installedRevision++;
     return true;
 }
@@ -148,7 +155,10 @@ async function applyUpdates(branch?: unknown) {
 
 ipcMain.handle(IpcEvents.GET_REPO, serializeErrors(() => `https://github.com/${gitRemote}`));
 ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors((branch: unknown) => enqueueRenderer(() => calculateGitChanges(branch))));
-ipcMain.handle(IpcEvents.UPDATE, serializeErrors((branch: unknown, force?: unknown) => enqueueRenderer(() => fetchUpdates(branch, force))));
+ipcMain.handle(IpcEvents.UPDATE, serializeErrors((branch: unknown, force?: unknown) => {
+    const revision = installedRevision;
+    return enqueueRenderer(() => fetchUpdates(branch, force, revision));
+}));
 ipcMain.handle(IpcEvents.BUILD, serializeErrors((branch?: unknown) => enqueueRenderer(() => applyUpdates(branch))));
 ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors((branch: unknown): UpdaterDiagnostics => ({
     backend: "http",

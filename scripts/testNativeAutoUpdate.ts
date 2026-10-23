@@ -217,7 +217,8 @@ test("renderer operations serialize behind a native download and do not redownlo
     const manual = f.invoke(IpcEvents.UPDATE, "main");
     assert.equal(f.requests.length, count, "manual metadata waits for native replacement");
     gate.resolve();
-    assert.equal((await manual).value, false);
+    assert.equal((await manual).value, true, "the renderer can finish its install and offer Restart");
+    assert.equal((await f.invoke(IpcEvents.BUILD, "main")).value, true);
     await f.drain();
     assert.equal(f.hooks.downloads, 1);
     assert.deepEqual(f.installs, [NEXT]);
