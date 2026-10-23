@@ -1,6 +1,16 @@
 # Discord MCP
 
-This local stdio MCP server talks to ProtonnCord's `DiscordMCP` plugin through a private file queue. Discord remains the process that accesses the authenticated account. Enable the plugin and keep Discord running, then configure an MCP client to run `node tools/discord-mcp/server.mjs` from this checkout (or use its absolute path).
+This local stdio MCP server talks to ProtonnCord's `DiscordMCP` plugin through a private file queue. Discord remains the process that accesses the authenticated account. Enable the plugin and keep Discord running. The plugin installs and refreshes `server.mjs` in its `discord-mcp` data directory on startup, keeping the server current with client updates and preserving its secret and queues.
+
+On Windows, register the stable installed path with Codex:
+
+```powershell
+codex mcp add protonncord_discord -- node "$env:APPDATA\ProtonnCord\discord-mcp\server.mjs"
+```
+
+Restart an existing MCP tool host to load the new registration. Other MCP clients can launch the same file with Node. For development, `node tools/discord-mcp/server.mjs` from this checkout still works.
+
+Object results are returned directly in `structuredContent`. Arrays and primitive results use `{ "value": ... }`, since MCP requires `structuredContent` to be an object. Text content retains the original result.
 
 The tool list is fixed. It offers server and channel metadata, scoped message reads and searches, subscriptions, attachment downloads, plain-text sends without parsed mentions, and deletion only of messages recorded as sent by this bridge. It has no generic REST, membership, role, relationship, or moderation operation.
 

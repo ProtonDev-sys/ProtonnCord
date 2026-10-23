@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
 
 const SERVER_NAME = "discord-mcp";
-const SERVER_VERSION = "0.2.0";
+const SERVER_VERSION = "0.2.1";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 const snowflake = {
@@ -461,7 +461,7 @@ async function handleRequest(message) {
                 id: message.id,
                 result: {
                     content: await toolContent(name, result),
-                    structuredContent: result && typeof result === "object" ? result : { value: result },
+                    structuredContent: result && typeof result === "object" && !Array.isArray(result) ? result : { value: result },
                 },
             });
         } catch (error) {

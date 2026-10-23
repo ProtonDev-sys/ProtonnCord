@@ -56,7 +56,7 @@ async function nativeFixture(t: { after(fn: () => Promise<void>): void; }, overr
         const output = transpileModule(readFileSync("src/equicordplugins/discordMcp.desktop/native.ts", "utf8"), {
             compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, esModuleInterop: false }
         }).outputText;
-        const modules = { "@main/utils/constants": { DATA_DIR: root }, "./policy": policy, "../fileUpload/nativeNetwork": nativeMedia, crypto, fs: { ...fs, watch(...args: any[]) {
+        const modules = { "@main/utils/constants": { DATA_DIR: root }, "file://../../../tools/discord-mcp/server.mjs?trim=false": { default: readFileSync("tools/discord-mcp/server.mjs", "utf8") }, "./policy": policy, "../fileUpload/nativeNetwork": nativeMedia, crypto, fs: { ...fs, watch(...args: any[]) {
             const watcher = (fs.watch as any)(...args) as fs.FSWatcher;
             watchers.add(watcher);
             watcher.on("close", () => watchers.delete(watcher));
@@ -82,6 +82,46 @@ async function nativeFixture(t: { after(fn: () => Promise<void>): void; }, overr
         async response(id: string) { return JSON.parse(await fsp.readFile(path.join(directory, "responses", `${id}.json`), "utf8")); }
     };
 }
+
+test("Discord MCP installs and refreshes its stable server path without rotating credentials or losing recorded sends", async t => {
+    const f = await nativeFixture(t);
+    const serverPath = path.join(f.directory, "server.mjs");
+    const source = readFileSync("tools/discord-mcp/server.mjs", "utf8");
+    assert.equal(await fsp.readFile(serverPath, "utf8"), source);
+    const config = await fsp.readFile(path.join(f.directory, "config.json"), "utf8");
+    const ledger = JSON.stringify(["123456789012345678:234567890123456789"]);
+    await fsp.writeFile(path.join(f.directory, "sent-messages.json"), ledger);
+    await fsp.writeFile(serverPath, "outdated server");
+    const updated = f.load();
+    await updated.initializeBridge(f.event, crypto.randomUUID());
+    assert.equal(await fsp.readFile(serverPath, "utf8"), source);
+    assert.equal(await fsp.readFile(path.join(f.directory, "config.json"), "utf8"), config);
+    assert.equal(await fsp.readFile(path.join(f.directory, "sent-messages.json"), "utf8"), ledger);
+});
+
+test("Discord MCP retries a failed server refresh while preserving the installed server and bridge credentials", async t => {
+    let locked = false;
+    const f = await nativeFixture(t, {
+        rename: async (from: string, to: string) => {
+            if (locked && path.basename(to) === "server.mjs") throw Object.assign(new Error("server locked"), { code: "EACCES" });
+            await fsp.rename(from, to);
+        }
+    });
+    const serverPath = path.join(f.directory, "server.mjs");
+    const configPath = path.join(f.directory, "config.json");
+    const config = await fsp.readFile(configPath, "utf8");
+    await fsp.writeFile(serverPath, "previous server");
+    locked = true;
+    const updated = f.load();
+    await assert.rejects(updated.initializeBridge(f.event, crypto.randomUUID()), /server locked/);
+    assert.equal(await fsp.readFile(serverPath, "utf8"), "previous server");
+    assert.equal(await fsp.readFile(configPath, "utf8"), config);
+    assert.equal((await fsp.readdir(f.directory)).some(name => name.endsWith(".tmp")), false);
+    locked = false;
+    await updated.initializeBridge(f.event, crypto.randomUUID());
+    assert.equal(await fsp.readFile(serverPath, "utf8"), readFileSync("tools/discord-mcp/server.mjs", "utf8"));
+    assert.equal(await fsp.readFile(configPath, "utf8"), config);
+});
 
 test("Discord MCP stop wakes native polling and an old session cannot claim or cancel its replacement", async t => {
     const f = await nativeFixture(t);
