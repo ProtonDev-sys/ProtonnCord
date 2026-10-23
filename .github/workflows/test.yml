@@ -28,7 +28,8 @@ jobs:
 
     Test:
         name: Test
-        runs-on: ubuntu-latest
+        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","server","ubuntu-24.04"]') || 'ubuntu-latest' }}
+        timeout-minutes: 45
 
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
