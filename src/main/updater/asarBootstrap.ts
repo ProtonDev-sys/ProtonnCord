@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
+import { findStaleSibling, patchResourcesDir } from "../applyHostPatch";
+import { bootstrapPaths, upgradeBootstrapInjector } from "./bootstrapFiles";
 import { validateAsar } from "./httpOperations";
 
 // This module must live outside the archive: opening any file inside it locks
@@ -13,6 +15,53 @@ import { validateAsar } from "./httpOperations";
 const files = require("original-fs") as typeof import("node:fs");
 const isLocked = (error: unknown) => error instanceof Error && "code" in error
     && ["EPERM", "EBUSY", "EACCES"].includes(String(error.code));
+
+const recoveryKey = Symbol.for("ProtonnCord.hostUpdateRecovery");
+
+export function installHostRecovery(archive: string) {
+    if (process.platform !== "win32") return;
+    const state = globalThis as typeof globalThis & { [recoveryKey]?: () => void; };
+    if (state[recoveryKey]) return state[recoveryKey];
+    const { app } = require("electron") as typeof import("electron");
+    const { loader } = bootstrapPaths(archive);
+    const sweep = () => {
+        try {
+            const resources = findStaleSibling(dirname(process.execPath));
+            if (!resources) return;
+            patchResourcesDir(resources, loader);
+            // An older channel's native hook may have injected the raw archive
+            // first. Upgrade only our exact known stub; leave other mods alone.
+            for (const name of ["app.asar", "app"]) {
+                const injector = join(resources, name, "index.js");
+                if (files.existsSync(injector)) {
+                    upgradeBootstrapInjector(injector, archive, files);
+                    break;
+                }
+            }
+        } catch (error) {
+            console.error("[Protonn Cord] Host update recovery will retry", error);
+        }
+    };
+    // The filesystem fallback does not depend on Discord's private updater
+    // APIs, plugin startup, or a compatible renderer. Quit hooks cover the
+    // immediate relaunch path; the timer retries versions still being written.
+    const timer = setInterval(sweep, 2_000);
+    timer.unref();
+    app.on("before-quit", sweep);
+    app.on("will-quit", sweep);
+    process.once("exit", sweep);
+    const dispose = () => {
+        clearInterval(timer);
+        app.removeListener("before-quit", sweep);
+        app.removeListener("will-quit", sweep);
+        process.removeListener("exit", sweep);
+        delete state[recoveryKey];
+    };
+    state[recoveryKey] = dispose;
+    app.once("quit", dispose);
+    sweep();
+    return dispose;
+}
 
 export function installAsarUpdateShim(archive: string) {
     const target = resolve(archive);
@@ -64,5 +113,6 @@ export function load(archive: string) {
     }
 
     installAsarUpdateShim(target);
+    installHostRecovery(target);
     require(`${target}/patcher.js`);
 }
