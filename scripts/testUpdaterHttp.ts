@@ -154,6 +154,7 @@ async function testInstalledReleaseState(): Promise<void> {
     const requests: string[] = [];
     const installed: string[] = [];
     let failInstall = true;
+    let nightlyReleaseHash = RELEASE_HASH;
     let finishDownload: (() => void) | undefined;
     let signalDownload: (() => void) | undefined;
     let downloadGate: Promise<void> | undefined;
@@ -167,18 +168,18 @@ async function testInstalledReleaseState(): Promise<void> {
         "@shared/Updater": { parseUpdaterBranch },
         "@shared/vencordUserAgent": { VENCORD_USER_AGENT: "Fixture" },
         "@main/ipc": { ipcMain: { handle: (event: IpcEvents, handler: (...args: unknown[]) => Promise<{ ok: boolean; value?: unknown; }>) => handlers.set(event, handler) } },
-        "original-fs": {}, "~git-hash": { __esModule: true, default: CURRENT_HASH }, "~git-remote": { __esModule: true, default: "Fixture/Fixture" },
+        "original-fs": {}, "~git-hash": { __esModule: true, default: CURRENT_HASH, buildChannel: "main" }, "~git-remote": { __esModule: true, default: "Fixture/Fixture" },
         "./common": { ASAR_FILE }, "./ipc": { createOperationQueue, serializeErrors },
         "./httpOperations": {
             applyPendingHttpUpdate, findHttpUpdate, inspectHttpUpdates,
             async requestJson(_fetch: unknown, url: string) {
                 const endpoint = url.slice("https://api.github.com/repos/Fixture/Fixture".length);
                 requests.push(endpoint);
-                if (endpoint.startsWith("/compare/")) return { commits: [] };
+                if (endpoint.startsWith("/compare/")) return { status: "behind", commits: [] };
                 const branch = endpoint === "/releases/latest" ? "main" : "nightly";
                 const data = archives[branch];
                 return {
-                    name: `Protonn Cord ${branch === "main" ? CURRENT_HASH : RELEASE_HASH}`,
+                    name: `Protonn Cord ${branch === "main" ? CURRENT_HASH : nightlyReleaseHash}`,
                     assets: [{ name: ASAR_FILE, browser_download_url: DOWNLOAD_URL.replace("/test/", `/${branch}/`),
                         digest: `sha256:${createHash("sha256").update(data).digest("hex")}`, size: data.length, state: "uploaded" }],
                 };
@@ -200,6 +201,8 @@ async function testInstalledReleaseState(): Promise<void> {
     assert.deepEqual(await invoke(IpcEvents.UPDATE, "nightly"), { ok: true, value: true });
     assert.equal((await invoke(IpcEvents.BUILD, "nightly")).ok, false);
     assert.equal((await installedHash()).builtHead, CURRENT_HASH, "a failed replacement cannot advance the installed hash");
+    const retryCheck = await invoke(IpcEvents.GET_UPDATES, "nightly");
+    assert.ok(Array.isArray(retryCheck.value) && retryCheck.value.length > 0, "a failed replacement cannot advance the installed branch either");
 
     failInstall = false;
     downloadGate = new Promise(resolve => { finishDownload = resolve; });
@@ -216,16 +219,101 @@ async function testInstalledReleaseState(): Promise<void> {
     assert.ok(requests.includes(`/compare/${RELEASE_HASH}...${CURRENT_HASH}`));
     assert.equal((await installedHash()).builtHead, RELEASE_HASH);
 
+    nightlyReleaseHash = CURRENT_HASH;
+    assert.deepEqual((await invoke(IpcEvents.GET_UPDATES, "nightly")).value, [], "an older release on the installed channel is not an automatic update");
+    assert.equal((await invoke(IpcEvents.UPDATE, "nightly")).value, false, "a direct update request cannot queue a same-channel downgrade");
+    assert.equal((await invoke(IpcEvents.BUILD, "nightly")).value, false, "a blocked downgrade cannot download or install an archive");
+    assert.equal((await installedHash()).builtHead, RELEASE_HASH);
+    assert.deepEqual(installed, ["nightly archive"]);
+    nightlyReleaseHash = RELEASE_HASH;
+
     assert.deepEqual((await invoke(IpcEvents.GET_UPDATES, "nightly")).value, []);
     assert.equal((await invoke(IpcEvents.UPDATE, "nightly")).value, false, "an installed release is not repeatedly downloaded before restart");
     assert.equal((await invoke(IpcEvents.UPDATE, "main")).value, true);
     assert.equal((await invoke(IpcEvents.BUILD, "main")).value, true);
     assert.equal((await installedHash()).builtHead, CURRENT_HASH);
     assert.deepEqual(installed, ["nightly archive", "main archive"]);
+    assert.equal((await invoke(IpcEvents.UPDATE, "main", true)).value, true, "forced repair can reinstall the current release");
+    assert.equal((await invoke(IpcEvents.BUILD, "main")).value, true);
+    assert.deepEqual(installed, ["nightly archive", "main archive", "main archive"]);
+
+    nightlyReleaseHash = CURRENT_HASH;
+    const sameHashSwitch = await invoke(IpcEvents.GET_UPDATES, "nightly");
+    assert.ok(Array.isArray(sameHashSwitch.value) && sameHashSwitch.value.length > 0, "channel-specific bundles can differ at the same commit");
+    assert.equal((await invoke(IpcEvents.UPDATE, "nightly")).value, true);
+    assert.equal((await invoke(IpcEvents.BUILD, "nightly")).value, true);
+    assert.equal((await installedHash()).builtHead, CURRENT_HASH);
+    const switchBack = await invoke(IpcEvents.GET_UPDATES, "main");
+    assert.ok(Array.isArray(switchBack.value) && switchBack.value.length > 0, "successful replacement advances the channel even when the source hash stays the same");
+    assert.deepEqual(installed, ["nightly archive", "main archive", "main archive", "nightly archive"]);
+}
+
+async function testSameChannelDowngradeProtection(): Promise<void> {
+    const requests: string[] = [];
+    const behind = async (endpoint: string) => {
+        requests.push(endpoint);
+        if (endpoint === "/releases/tags/nightly") return release(RELEASE_HASH);
+        assert.equal(endpoint, `/compare/${CURRENT_HASH}...${RELEASE_HASH}`);
+        return { status: "behind", commits: [] };
+    };
+    assert.deepEqual(await inspectHttpUpdates(behind, CURRENT_HASH, ASAR_FILE, "nightly", "nightly"),
+        { changes: [], pending: null }, "a locally newer build does not offer its channel's older release");
+    assert.equal(await findHttpUpdate(behind, CURRENT_HASH, ASAR_FILE, "nightly", false, "nightly"), null,
+        "direct acquisition applies the same rollback check");
+    assert.deepEqual(requests, [
+        "/releases/tags/nightly", `/compare/${CURRENT_HASH}...${RELEASE_HASH}`,
+        "/releases/tags/nightly", `/compare/${CURRENT_HASH}...${RELEASE_HASH}`,
+    ]);
+
+    const expectedPending = { hash: RELEASE_HASH, sha256: RELEASE_SHA256, size: RELEASE_SIZE, url: DOWNLOAD_URL };
+    const switched = await inspectHttpUpdates(behind, CURRENT_HASH, ASAR_FILE, "nightly", "main");
+    assert.deepEqual(switched, {
+        changes: [{ author: "ProtonnCord", hash: RELEASE_HASH, message: "Switch update branch to nightly" }],
+        pending: expectedPending,
+    }, "an explicit channel switch can select an ancestor release");
+    assert.deepEqual(await findHttpUpdate(behind, CURRENT_HASH, ASAR_FILE, "nightly", false, "main"), expectedPending);
+    assert.deepEqual(await findHttpUpdate(behind, CURRENT_HASH, ASAR_FILE, "nightly"), expectedPending,
+        "unknown build channels retain the previous branch-switch behavior");
+
+    const sameHash = async (endpoint: string) => endpoint.startsWith("/compare/")
+        ? { status: "identical", commits: [] } : release(CURRENT_HASH);
+    assert.deepEqual(await inspectHttpUpdates(sameHash, CURRENT_HASH, ASAR_FILE, "nightly", "nightly"),
+        { changes: [], pending: null }, "the installed channel at its published hash remains current");
+    assert.deepEqual(await inspectHttpUpdates(sameHash, CURRENT_HASH, ASAR_FILE, "nightly", "main"), {
+        changes: [{ author: "ProtonnCord", hash: CURRENT_HASH, message: "Switch update branch to nightly" }],
+        pending: { ...expectedPending, hash: CURRENT_HASH },
+    }, "switching channels installs the selected bundle even at an identical source commit");
+    assert.deepEqual(await findHttpUpdate(sameHash, CURRENT_HASH, ASAR_FILE, "nightly", false, "main"),
+        { ...expectedPending, hash: CURRENT_HASH });
+
+    requests.length = 0;
+    assert.deepEqual(await findHttpUpdate(behind, CURRENT_HASH, ASAR_FILE, "nightly", true, "nightly"), expectedPending,
+        "forced repair can intentionally restore the published channel release");
+    assert.deepEqual(requests, ["/releases/tags/nightly"], "repair does not require a comparison");
+
+    const ahead = async (endpoint: string) => endpoint === "/releases/tags/nightly" ? release(RELEASE_HASH) : {
+        status: "ahead",
+        commits: [{ sha: RELEASE_HASH, commit: { message: "New nightly release" } }],
+    };
+    const newer = await inspectHttpUpdates(ahead, CURRENT_HASH, ASAR_FILE, "nightly", "nightly");
+    assert.equal(newer.changes[0].message, "New nightly release");
+    assert.deepEqual(newer.pending, expectedPending);
+    assert.deepEqual(await findHttpUpdate(ahead, CURRENT_HASH, ASAR_FILE, "nightly", false, "nightly"), expectedPending);
+
+    for (const comparison of [
+        { status: "behind" },
+        { status: "behind", commits: "invalid" },
+        { status: "behind", commits: [{ sha: "invalid", commit: { message: "Malformed" } }] },
+    ]) {
+        const malformed = async (endpoint: string) => endpoint === "/releases/tags/nightly" ? release(RELEASE_HASH) : comparison;
+        await assert.rejects(inspectHttpUpdates(malformed, CURRENT_HASH, ASAR_FILE, "nightly", "nightly"), /invalid Protonn Cord changelog/iu);
+        await assert.rejects(findHttpUpdate(malformed, CURRENT_HASH, ASAR_FILE, "nightly", false, "nightly"), /invalid Protonn Cord changelog/iu);
+    }
 }
 
 async function main(): Promise<void> {
     await testInstalledReleaseState();
+    await testSameChannelDowngradeProtection();
     const currentRequests: string[] = [];
     const current = await inspectHttpUpdates(async endpoint => {
         currentRequests.push(endpoint);
@@ -261,7 +349,7 @@ async function main(): Promise<void> {
         assert.equal(endpoint, `/compare/${CURRENT_HASH}...${RELEASE_HASH}`);
         return requestJson(async () => new Response("missing comparison", { status: 404, statusText: "Not Found" }),
             `https://api.github.com/repos/ProtonDev-sys/ProtonnCord${endpoint}`, {}, 1_000, 100);
-    }, CURRENT_HASH, ASAR_FILE, "nightly");
+    }, CURRENT_HASH, ASAR_FILE, "nightly", "nightly");
     assert.deepEqual(rewritten, {
         changes: [{ author: "ProtonnCord", hash: RELEASE_HASH, message: "Update to the latest nightly release (previous build cannot be compared)" }],
         pending: { hash: RELEASE_HASH, sha256: RELEASE_SHA256, size: RELEASE_SIZE, url: DOWNLOAD_URL },
