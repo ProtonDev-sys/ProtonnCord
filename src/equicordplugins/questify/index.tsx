@@ -373,11 +373,11 @@ export default definePlugin({
         },
         {
             // Keeps Questify completion progress visible when Discord marks the native Quest bar dismissed.
-            find: "prevIsQuestAccepted:",
+            find: /isLoading:\i}=\(0,\i\.\i\)\(\),\i=\i\.useContext\(\i\.\i\),\i=\i\|\|\i&&/,
             predicate: () => !getQuestifySettings().disableQuestsEverything && !getQuestifySettings().disableAccountPanelQuestProgress,
             replacement: {
                 match: /(?<=isLoading:\i}=\(0,\i\.\i\)\(\),\i=\i\.useContext\(\i\.\i\),\i=\i\|\|\i&&)(\i)/,
-                replace: "($1||$self.shouldForceQuestPanelVisible(arguments[0].quest))"
+                replace: "($1||$self.shouldForceQuestPanelVisible(arguments[0].quest??arguments[0].creative?.quest??null))"
             }
         },
         {
