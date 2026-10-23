@@ -14,6 +14,10 @@ async function main() {
     const generate = workflow.slice(workflow.indexOf("    generate:"), workflow.indexOf("    publish:"));
     const publish = workflow.slice(workflow.indexOf("    publish:"));
 
+    assert.match(generate, /^        runs-on: ubuntu-latest$/mu,
+        "selectable source must run on a fresh hosted runner with Chrome");
+    assert.match(publish, /^        runs-on: ubuntu-latest$/mu,
+        "credentialed publication must use a separate fresh hosted runner");
     assert.match(generate, /persist-credentials: false/, "selectable code must not retain checkout credentials");
     assert.doesNotMatch(generate, /secrets\./, "selectable code must run without repository secrets");
     assert.match(generate, /REPORT_WEBHOOK_BODY_FILE=/, "reporting code must emit an inert artifact");

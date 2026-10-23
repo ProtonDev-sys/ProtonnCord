@@ -22,7 +22,7 @@ jobs:
     Build:
         name: Build Protonn Cord
         if: contains(fromJSON('["refs/heads/main", "refs/heads/staging", "refs/heads/nightly"]'), github.ref)
-        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","desktop-3flaofg","ubuntu-24.04"]') || 'ubuntu-latest' }}
+        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","server","ubuntu-24.04"]') || 'ubuntu-latest' }}
         timeout-minutes: 35
 
         steps:
