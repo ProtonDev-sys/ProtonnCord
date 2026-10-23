@@ -51,7 +51,7 @@ const pendingUpdates = new Map<UpdaterBranch, { update: PendingHttpUpdate; force
 let lastRequestedBranch: UpdaterBranch = "main";
 let lastInstalledHash = gitHash;
 let lastInstalledBranch: UpdaterBranch | null = buildChannel;
-let lastInstalledUpdate: PendingHttpUpdate | undefined;
+let automaticUpdate: PendingHttpUpdate | undefined;
 let installedRevision = 0;
 const enqueue = createOperationQueue();
 let rendererActive = false;
@@ -73,28 +73,38 @@ async function githubGet(endpoint: string): Promise<unknown> {
 }
 
 async function calculateGitChanges(branch: unknown) {
+    const selectedBranch = parseUpdaterBranch(branch);
+    const installed = automaticUpdateFor(selectedBranch);
+    if (installed) return [{ author: "ProtonnCord", hash: installed.hash, message: "Automatic update installed; restart to apply it" }];
     const inspection = await inspectHttpUpdates(
         githubGet,
         lastInstalledHash,
         ASAR_FILE,
-        parseUpdaterBranch(branch),
+        selectedBranch,
         lastInstalledBranch,
     );
     return inspection.changes;
 }
 
-async function fetchUpdates(branch: unknown, force: unknown = false, requestRevision = installedRevision) {
+function automaticUpdateFor(branch: UpdaterBranch) {
+    return lastInstalledBranch === branch && automaticUpdate?.hash === lastInstalledHash ? automaticUpdate : undefined;
+}
+
+async function fetchUpdates(branch: unknown, force: unknown = false) {
     if (typeof force !== "boolean") throw new Error("Invalid repair option");
     const selectedBranch = parseUpdaterBranch(branch);
+    const installed = !force && automaticUpdateFor(selectedBranch);
+    if (installed) {
+        // Preserve the renderer's successful UPDATE/BUILD handshake after the
+        // fallback completed, including when startup resumes during a download.
+        lastRequestedBranch = selectedBranch;
+        pendingUpdates.set(selectedBranch, { update: installed, force: false, revision: installedRevision });
+        return true;
+    }
     const pending = await findHttpUpdate(githubGet, lastInstalledHash, ASAR_FILE, selectedBranch, force, lastInstalledBranch);
     lastRequestedBranch = selectedBranch;
     if (pending) pendingUpdates.set(selectedBranch, { update: pending, force, revision: installedRevision });
-    else if (!force && requestRevision !== installedRevision && lastInstalledUpdate && lastInstalledBranch === selectedBranch) {
-        // A manual UPDATE may have queued behind the fallback's download. Keep
-        // its UPDATE/BUILD handshake successful so the renderer offers Restart.
-        pendingUpdates.set(selectedBranch, { update: lastInstalledUpdate, force: false, revision: installedRevision - 1 });
-        return true;
-    } else pendingUpdates.delete(selectedBranch);
+    else pendingUpdates.delete(selectedBranch);
     return pending !== null;
 }
 
@@ -126,7 +136,6 @@ async function installUpdate(pending: PendingHttpUpdate, branch: UpdaterBranch, 
     if (!installed) return false;
     lastInstalledHash = pending.hash;
     lastInstalledBranch = branch;
-    lastInstalledUpdate = pending;
     installedRevision++;
     return true;
 }
@@ -135,6 +144,11 @@ async function applyUpdates(branch?: unknown) {
     const selectedBranch = branch === undefined ? lastRequestedBranch : parseUpdaterBranch(branch);
     let pending = pendingUpdates.get(selectedBranch);
     if (!pending) return false;
+    if (!pending.force && automaticUpdateFor(selectedBranch)) {
+        pendingUpdates.delete(selectedBranch);
+        automaticUpdate = undefined;
+        return true;
+    }
     // UPDATE and BUILD are separate IPC calls. Revalidate selections after any
     // intervening installation, acknowledging already satisfied ordinary updates
     // while retaining an explicit repair's force flag.
@@ -149,16 +163,14 @@ async function applyUpdates(branch?: unknown) {
     }
     await installUpdate(pending.update, selectedBranch);
     pendingUpdates.delete(selectedBranch);
+    automaticUpdate = undefined;
 
     return true;
 }
 
 ipcMain.handle(IpcEvents.GET_REPO, serializeErrors(() => `https://github.com/${gitRemote}`));
 ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors((branch: unknown) => enqueueRenderer(() => calculateGitChanges(branch))));
-ipcMain.handle(IpcEvents.UPDATE, serializeErrors((branch: unknown, force?: unknown) => {
-    const revision = installedRevision;
-    return enqueueRenderer(() => fetchUpdates(branch, force, revision));
-}));
+ipcMain.handle(IpcEvents.UPDATE, serializeErrors((branch: unknown, force?: unknown) => enqueueRenderer(() => fetchUpdates(branch, force))));
 ipcMain.handle(IpcEvents.BUILD, serializeErrors((branch?: unknown) => enqueueRenderer(() => applyUpdates(branch))));
 ipcMain.handle(IpcEvents.GET_UPDATER_DIAGNOSTICS, serializeErrors((branch: unknown): UpdaterDiagnostics => ({
     backend: "http",
@@ -190,7 +202,7 @@ if (!IS_DEV && !IS_UPDATER_DISABLED && !IS_VANILLA) {
                 const current = () => !disposed && revision === settingsRevision && autoUpdateEnabled() && selectedBranch() === branch;
                 const pending = await findHttpUpdate(githubGet, lastInstalledHash, ASAR_FILE, branch, false, lastInstalledBranch);
                 // Yield to renderer operations that arrived during the lookup.
-                if (pending && !rendererActive && current()) await installUpdate(pending, branch, current);
+                if (pending && !rendererActive && current() && await installUpdate(pending, branch, current)) automaticUpdate = pending;
             });
         } catch (error) {
             console.error("[Protonn Cord] Native automatic update failed", error);

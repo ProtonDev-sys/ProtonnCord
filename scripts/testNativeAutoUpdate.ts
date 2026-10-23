@@ -260,6 +260,40 @@ test("intervening native installs revalidate other-channel selections and preser
     }
 });
 
+test("a manual update after native completion still offers Restart without another download", async () => {
+    const f = fixture();
+    const changes = await f.invoke(IpcEvents.GET_UPDATES, "main");
+    assert.ok((changes.value as unknown[]).length > 0);
+    await f.tick();
+    await f.tick();
+    assert.equal(f.hooks.downloads, 1);
+    assert.equal((await f.invoke(IpcEvents.UPDATE, "main")).value, true);
+    assert.equal((await f.invoke(IpcEvents.BUILD, "main")).value, true);
+    assert.equal(f.hooks.downloads, 1);
+    assert.deepEqual((await f.invoke(IpcEvents.GET_UPDATES, "main")).value, []);
+    f.app.emit("will-quit");
+});
+
+test("renderer startup during native installation receives the restart handshake", async () => {
+    const f = fixture();
+    const started = deferred();
+    const gate = deferred();
+    f.hooks.download = async () => { started.resolve(); await gate.promise; };
+    f.fire();
+    await started.promise;
+    const initialCheck = f.invoke(IpcEvents.GET_UPDATES, "main");
+    gate.resolve();
+    const changes = (await initialCheck).value as Array<{ hash: string; message: string; }>;
+    assert.equal(changes.length, 1);
+    assert.equal(changes[0].hash, NEXT);
+    assert.match(changes[0].message, /restart/iu);
+    assert.equal((await f.invoke(IpcEvents.UPDATE, "main")).value, true);
+    assert.equal((await f.invoke(IpcEvents.BUILD, "main")).value, true);
+    assert.equal(f.hooks.downloads, 1);
+    assert.deepEqual((await f.invoke(IpcEvents.GET_UPDATES, "main")).value, []);
+    f.app.emit("will-quit");
+});
+
 test("invalid saved branches fail closed and retry after settings are corrected", async () => {
     const f = fixture({ updateBranch: "invalid" });
     await f.tick();
