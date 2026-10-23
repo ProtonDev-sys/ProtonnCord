@@ -6,6 +6,7 @@
 
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
+import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
 import { build } from "esbuild";
@@ -304,4 +305,4 @@ async function main() {
     console.log("Server Review: history, storage retry, folder layout, and event checks passed.");
 }
 
-void main();
+test("Server Review preserves history, folder layout and lifecycle", { timeout: 10_000 }, main);

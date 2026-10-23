@@ -175,10 +175,6 @@ export async function moveGifToCollection(gifId: string, fromName: string, toNam
     });
 }
 
-export async function updateGif(gifId: string, updatedGif: Gif): Promise<void> {
-    await updateGifs(new Map([[gifId, updatedGif]]));
-}
-
 export async function updateGifs(updates: ReadonlyMap<string, Gif>): Promise<void> {
     return queueCollectionMutation(async () => {
         let changed = false;

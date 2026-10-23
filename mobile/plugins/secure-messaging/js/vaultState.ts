@@ -525,6 +525,7 @@ export class MobileVault {
 			throw new Error('Phone pairing would exceed the verified contact limit')
 		for (const [id, conversation] of Object.entries(pairing.conversations)) {
 			next.conversations[id] = {
+				...next.conversations[id],
 				...conversation,
 				...(next.conversations[id]?.needsReview ? { needsReview: true } : {}),
 			}
@@ -663,6 +664,7 @@ export class MobileVault {
 		}
 		for (const [channelId, conversation] of Object.entries(state.conversations))
 			value.conversations[channelId] = {
+				...value.conversations[channelId],
 				...conversation,
 				...(value.conversations[channelId]?.needsReview
 					? { needsReview: true }

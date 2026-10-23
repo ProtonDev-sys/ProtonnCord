@@ -22,6 +22,7 @@ jobs:
     Build:
         name: Build Protonn Cord
         if: contains(fromJSON('["refs/heads/main", "refs/heads/staging", "refs/heads/nightly"]'), github.ref)
+        # Release validation must remain independent of the single self-hosted Test runner.
         runs-on: ubuntu-latest
         timeout-minutes: 60
 

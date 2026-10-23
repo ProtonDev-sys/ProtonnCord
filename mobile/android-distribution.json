@@ -3,7 +3,7 @@
 		"packageName": "com.discord",
 		"versionCode": "348010",
 		"certificateSource": "https://discord.com/.well-known/assetlinks.json",
-		"certificateCheckedAt": "2026-10-12",
+		"certificateCheckedAt": "2026-10-20",
 		"certificateSha256": [
 			"3c39d23cf9367849a5c699395647fe0e5bfea5a1f1f40d8c717ddc70f8bfa113",
 			"9903caadd39cb40b6a3ecb33c42cb885651dc4a8eaae27cc66569de86bddfc62"
@@ -12,39 +12,39 @@
 			{
 				"file": "base.apk",
 				"split": "",
-				"url": "https://tracker.vendetta.rocks/tracker/download/348010/base",
-				"size": 107151139,
-				"sha256": "2331efbbb5e37fbd9b6184127bd53f401f3bb873b452d0595911f016cd51a519"
+				"url": "https://pool.apk.aptoide.com/aptoide-web/com-discord-348010-76990142-e2b0b21830ec0c8c15455e4fade9f557.apk",
+				"size": 119877411,
+				"sha256": "f55d93282953cb8cb5f0375a69e6358f5a33641a14c56d7a7b79692c064ea6e7"
 			},
 			{
 				"file": "split_config.arm64_v8a.apk",
 				"split": "config.arm64_v8a",
 				"abi": "arm64-v8a",
-				"url": "https://tracker.vendetta.rocks/tracker/download/348010/config.arm64_v8a",
+				"url": "https://pool.apk.aptoide.com/apps/com-discord-348010-76990142-ce4c33bb1aac6f71890d64afcd1c94a2-config-arm64-v8a.apk",
 				"size": 73842363,
-				"sha256": "ddd2d855f9e082be9f0cece67be9be4d241d11ffbc20191af0b7fb466f37b58c"
+				"sha256": "8deeff9123399b05ad0505f4e93888c593548a74621a988f3a0e3c811afe73ba"
 			},
 			{
 				"file": "split_config.x86_64.apk",
 				"split": "config.x86_64",
 				"abi": "x86_64",
-				"url": "https://tracker.vendetta.rocks/tracker/download/348010/config.x86_64",
+				"url": "https://pool.apk.aptoide.com/apps/com-discord-348010-76990142-76466e412b9e2875453b731b585443a7-config-x86-64.apk",
 				"size": 79519290,
 				"sha256": "08a8e3ca0a99f8129bf44c167c3289b6f69cd1264c6dea5ebef9ac90cb94ce7d"
 			},
 			{
 				"file": "split_config.en.apk",
 				"split": "config.en",
-				"url": "https://tracker.vendetta.rocks/tracker/download/348010/config.en",
+				"url": "https://pool.apk.aptoide.com/apps/com-discord-348010-76990142-6c0c27f0855031951dafa62273a048ca-config-en.apk",
 				"size": 70041,
-				"sha256": "da9d994bf3ae674360b8fab4400a34cb3a45a72b2cc432f24b8d7ff54a8a48d7"
+				"sha256": "2d660b787b47efe96d6ad3fcd577430eb0829e2d6632fffecd3c4dfc1fb100fe"
 			},
 			{
 				"file": "split_config.xxhdpi.apk",
 				"split": "config.xxhdpi",
-				"url": "https://tracker.vendetta.rocks/tracker/download/348010/config.xxhdpi",
+				"url": "https://pool.apk.aptoide.com/apps/com-discord-348010-76990142-9d5ebadf9433cf190c30f7587ea216d7-config-xxhdpi.apk",
 				"size": 11318405,
-				"sha256": "2cee2ccb0adf38fb4bf74f8f1f9f5bff7f633505c9c19d4b106665917207085f"
+				"sha256": "45d55754978d018ad5e980cf92a1d21ea04d1ea38f2d59e692c7998dff976127"
 			}
 		]
 	},

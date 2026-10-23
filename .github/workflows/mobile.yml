@@ -110,6 +110,7 @@ jobs:
     publish:
         if: github.repository == 'ProtonDev-sys/ProtonnCord' && github.ref == 'refs/heads/nightly' && github.event_name != 'pull_request'
         needs: build
+        # Release validation must remain independent of the single self-hosted Test runner.
         runs-on: ubuntu-latest
         timeout-minutes: 55
         permissions:

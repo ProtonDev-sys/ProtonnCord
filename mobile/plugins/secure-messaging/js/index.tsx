@@ -168,8 +168,10 @@ async function localCommand(
 					throw new Error(`User ${id} does not have a trusted key`)
 			}
 			state.conversations[channelId] = {
+				...state.conversations[channelId],
 				recipients,
 				members,
+				needsReview: false,
 			}
 			await saveVault()
 			notice(
