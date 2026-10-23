@@ -13,13 +13,6 @@ import { loadTestModule } from "./utils/loadTestModule";
 
 const prefix = "@equicordplugins/musicControls/";
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
-
 function load(file: string, modules: Record<string, any>, globals: Record<string, unknown> = {}) {
     return loadTestModule(`src/equicordplugins/musicControls/${file}`, modules, {
         AbortController, AbortSignal, SyntaxError, URL, console: { error() {} },
@@ -55,7 +48,7 @@ function timers() {
 
 function storeFixture(service: "spotify" | "tidal", getLyrics?: (...args: any[]) => Promise<any>) {
     const clock = timers();
-    const requests: Array<ReturnType<typeof deferred<any>> & { signal?: AbortSignal; }> = [];
+    const requests: Array<PromiseWithResolvers<any> & { signal?: AbortSignal; }> = [];
     const listeners = new Set<() => void>();
     let handlers: Record<string, (event: any) => Promise<void>>;
     let changes = 0;
@@ -69,7 +62,7 @@ function storeFixture(service: "spotify" | "tidal", getLyrics?: (...args: any[])
         [`${prefix}settings`]: { settings: { store: { lyricsProvider: Provider.Lrclib, lyricsConversion: Provider.None } } },
         [`${prefix}${service}/${service === "spotify" ? "SpotifyStore" : "TidalStore"}`]: service === "spotify" ? { SpotifyStore: player } : { TidalStore: player },
         [`${prefix}${service}/lyrics/api`]: { getLyrics: getLyrics ?? ((_: unknown, _retries: unknown, signal?: AbortSignal) => {
-            const request = { ...deferred<any>(), signal };
+            const request = { ...Promise.withResolvers<any>(), signal };
             requests.push(request);
             return request.promise;
         }) },

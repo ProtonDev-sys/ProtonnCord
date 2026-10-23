@@ -1,0 +1,85 @@
+{
+	"discord": {
+		"packageName": "com.discord",
+		"versionCode": "348010",
+		"certificateSource": "https://discord.com/.well-known/assetlinks.json",
+		"certificateCheckedAt": "2026-10-20",
+		"certificateSha256": [
+			"3c39d23cf9367849a5c699395647fe0e5bfea5a1f1f40d8c717ddc70f8bfa113",
+			"9903caadd39cb40b6a3ecb33c42cb885651dc4a8eaae27cc66569de86bddfc62"
+		],
+		"apks": [
+			{
+				"file": "base.apk",
+				"split": "",
+				"url": "https://pool.apk.aptoide.com/aptoide-web/com-discord-348010-76990142-e2b0b21830ec0c8c15455e4fade9f557.apk",
+				"size": 119877411,
+				"sha256": "f55d93282953cb8cb5f0375a69e6358f5a33641a14c56d7a7b79692c064ea6e7"
+			},
+			{
+				"file": "split_config.arm64_v8a.apk",
+				"split": "config.arm64_v8a",
+				"abi": "arm64-v8a",
+				"url": "https://pool.apk.aptoide.com/apps/com-discord-348010-76990142-ce4c33bb1aac6f71890d64afcd1c94a2-config-arm64-v8a.apk",
+				"size": 73842363,
+				"sha256": "8deeff9123399b05ad0505f4e93888c593548a74621a988f3a0e3c811afe73ba"
+			},
+			{
+				"file": "split_config.x86_64.apk",
+				"split": "config.x86_64",
+				"abi": "x86_64",
+				"url": "https://pool.apk.aptoide.com/apps/com-discord-348010-76990142-76466e412b9e2875453b731b585443a7-config-x86-64.apk",
+				"size": 79519290,
+				"sha256": "08a8e3ca0a99f8129bf44c167c3289b6f69cd1264c6dea5ebef9ac90cb94ce7d"
+			},
+			{
+				"file": "split_config.en.apk",
+				"split": "config.en",
+				"url": "https://pool.apk.aptoide.com/apps/com-discord-348010-76990142-6c0c27f0855031951dafa62273a048ca-config-en.apk",
+				"size": 70041,
+				"sha256": "2d660b787b47efe96d6ad3fcd577430eb0829e2d6632fffecd3c4dfc1fb100fe"
+			},
+			{
+				"file": "split_config.xxhdpi.apk",
+				"split": "config.xxhdpi",
+				"url": "https://pool.apk.aptoide.com/apps/com-discord-348010-76990142-9d5ebadf9433cf190c30f7587ea216d7-config-xxhdpi.apk",
+				"size": 11318405,
+				"sha256": "45d55754978d018ad5e980cf92a1d21ea04d1ea38f2d59e692c7998dff976127"
+			}
+		]
+	},
+	"lspatch": {
+		"file": "lspatch-v1.2-487-release.jar",
+		"revision": "0dc50f42503711b14f5e2bb217c2bdd6321ce5be",
+		"url": "https://github.com/JingMatrix/LSPatch/releases/download/v1.2/lspatch-v1.2-487-release.jar",
+		"size": 12106851,
+		"sha256": "d238fdc414d121b7fa454d8b4ccf420df3a8c97d563761861ff92bd9c5da2165"
+	},
+	"editor": {
+		"file": "APKEditor-1.4.9.jar",
+		"revision": "57d10e494cda9707fa6883aa84a62f833317c238",
+		"url": "https://github.com/REAndroid/APKEditor/releases/download/V1.4.9/APKEditor-1.4.9.jar",
+		"size": 7733037,
+		"sha256": "a9cd40df818845456be6d696de6110c89edf4b0a0580cb83438ed6b25a366e67"
+	},
+	"patcherSource": {
+		"file": "ApkPatcher.java",
+		"revision": "0dc50f42503711b14f5e2bb217c2bdd6321ce5be",
+		"url": "https://raw.githubusercontent.com/JingMatrix/LSPatch/0dc50f42503711b14f5e2bb217c2bdd6321ce5be/patch/src/main/java/org/lsposed/patch/ApkPatcher.java",
+		"size": 25553,
+		"sha256": "3daa648e6a2917a461c0fe4a5f16077c30fd20e1c59592d668c5e2d7b70d32e7"
+	},
+	"xposedApi": {
+		"file": "api-82.jar",
+		"url": "https://api.xposed.info/de/robv/android/xposed/api/82/api-82.jar",
+		"size": 25478,
+		"sha256": "f48c635f1c7469fdec0e00ad2ea0b7a6b2f5b55065784a35b7ca3a84615e8e25"
+	},
+	"loader": {
+		"file": "revenge-xposed-1602.apk",
+		"revision": "9a1426d0a3df000beb4174d0071d4d80e8be42fc",
+		"url": "https://github.com/revenge-mod/revenge-xposed/releases/download/1602/app-release.apk",
+		"size": 3123787,
+		"sha256": "eec7aac51419223cf631678fa640083645009ab58ebe2a20f6eb0e91ae651a25"
+	}
+}

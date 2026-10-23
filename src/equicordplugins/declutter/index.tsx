@@ -204,8 +204,8 @@ export default definePlugin({
                     predicate: () => settings.store.removeNameplate,
                 },
                 {
-                    match: /let\{ref:\i,speaking:\i,voiceDb:/,
-                    replace: "arguments[0].nameplate=null;$&",
+                    match: /let(\{ref:\i,speaking:\i,(?:playingSoundboard:\i,)?voiceDb:[^}]+\})=(\i)/,
+                    replace: "let$1={...$2,nameplate:null}",
                     predicate: () => settings.store.removeNameplate,
                 },
             ],
@@ -214,7 +214,7 @@ export default definePlugin({
             // Nameplate
             find: ".MINI_PREVIEW,[",
             replacement: {
-                match: /function \i\((\i)\)\{(?=let.{1,5}\{nameplate:\i,)/,
+                match: /function \i\((\i)\)\{(?=let.{0,5}\{nameplate:\i,hovered:)/,
                 replace:
                     '$&if($1.placement!=="preview"&&$1.placement!=="mini_preview")return null;',
             },
@@ -319,12 +319,12 @@ export default definePlugin({
                     predicate: () => settings.store.removeShopAboveDms,
                 },
                 {
-                    match: /\.QUEST_HOME\},"quests"\)/,
+                    match: /\.QUEST_HOME\)?\},"quests"\)/,
                     replace: "$&&&undefined",
                     predicate: () => settings.store.removeQuestsAboveDms,
                 },
                 {
-                    match: /\.APPLICATION_LIBRARY\},"library"\)/,
+                    match: /\.APPLICATION_LIBRARY\)?\},"library"\)/,
                     replace: "$&&&undefined",
                     predicate: () => settings.store.removeLibraryAboveDms,
                 },
@@ -358,15 +358,6 @@ export default definePlugin({
                 replace: "$1:null",
             },
             predicate: () => settings.store.removeServerBoostInfo,
-        },
-        {
-            // Billing settings
-            find: ".BILLING_SECTION,",
-            replacement: {
-                match: /(\.BILLING_SECTION.{0,50}buildLayout:\(\)=>\[).{0,15}?\]/,
-                replace: "$1]",
-            },
-            predicate: () => settings.store.removeBillingSettings,
         },
         {
             // Gift button

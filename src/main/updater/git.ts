@@ -16,10 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+import { ipcMain } from "@main/ipc";
 import { IpcEvents } from "@shared/IpcEvents";
 import { parseUpdaterBranch, type UpdaterDiagnostics } from "@shared/Updater";
 import { execFile as cpExecFile } from "child_process";
-import { ipcMain } from "electron";
 import * as originalFs from "original-fs";
 import { join, resolve } from "path";
 import { promisify } from "util";

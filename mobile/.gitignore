@@ -12,6 +12,7 @@ package-lock.json
 deno.lock
 
 # Misc
+__pycache__/
 .device-test/
 .toolchain/
 *.log

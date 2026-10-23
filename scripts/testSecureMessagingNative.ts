@@ -4,6 +4,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { build, type Plugin } from "esbuild";
@@ -799,6 +800,17 @@ async function testSelectiveAttachmentTransfers(native: NativeModule, dataDir: s
         assert.equal(eagerBytes, mixed.ciphertexts.reduce((total, ciphertext) => total + ciphertext.byteLength, 0));
 
         requests.length = 0;
+        const cachedLegacy = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, legacyInput, "all");
+        expectStatus(cachedLegacy, "decrypted", "legacy preview rerenders reuse the complete authenticated bundle");
+        assert.equal(requests.length, 0, "fully authenticated legacy files do not download again for previews");
+        assert.deepEqual(cachedLegacy.attachments.map(attachment => Buffer.from(attachment.data)), files.map(file => Buffer.from(file.data)));
+        cachedLegacy.attachments[0].data.fill(0);
+        const cachedLegacyDownload = await native.downloadIncomingAttachment(DISCORD_EVENT, BOB_ID, legacyInput, mixed.attachments[0].id);
+        expectStatus(cachedLegacyDownload, "saved", "legacy previews preserve independent cached download bytes");
+        assert.equal(requests.length, 0);
+        assert.deepEqual(await readFile(join(dataDir, "Downloads", cachedLegacyDownload.filename)), pngBytes);
+
+        requests.length = 0;
         const manifestInput = await mixed.sign();
         const preview = await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, manifestInput, "previews");
         expectStatus(preview, "decrypted", "only the manifest's previewable image is fetched while reading history");
@@ -877,6 +889,75 @@ async function testSelectiveAttachmentTransfers(native: NativeModule, dataDir: s
         expectStatus(await native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, badLegacyRoot, "all"), "invalid_message",
             "legacy explicit loads retain complete bundle-root authentication");
         assert.equal(requests.length, 3);
+
+        const immediateFetch = globalThis.fetch;
+        for (const mode of ["headers", "body", "progress", "single-source"] as const) {
+            const sourceFixture = await createFixture([files[0]]);
+            const sourceInput = await sourceFixture.sign();
+            if (mode === "single-source") sourceInput.attachments[0].proxyUrl = sourceInput.attachments[0].url;
+            const data = sourceFixture.ciphertexts[0];
+            let primarySignal!: AbortSignal;
+            let stream!: ReadableStreamDefaultController<Uint8Array>;
+            let releaseHeaders!: (value: Response) => void;
+            let notifyStarted!: () => void;
+            const started = new Promise<void>(resolve => { notifyStarted = resolve; });
+            let sourceRequests = 0;
+            globalThis.fetch = (input, init) => {
+                sourceRequests++;
+                if (String(input).startsWith("https://media.discordapp.net/"))
+                    return Promise.resolve(new Response(Buffer.from(data)));
+                assert.ok(init?.signal);
+                primarySignal = init.signal;
+                if (mode === "headers" || mode === "single-source") {
+                    return new Promise<Response>((resolve, reject) => {
+                        releaseHeaders = resolve;
+                        primarySignal.addEventListener("abort", () => reject(primarySignal.reason), { once: true });
+                        notifyStarted();
+                    });
+                }
+                return Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        stream = controller;
+                        primarySignal.addEventListener("abort", () => controller.error(primarySignal.reason), { once: true });
+                    },
+                    pull() { notifyStarted(); },
+                })));
+            };
+            mock.timers.enable({ apis: ["setTimeout"] });
+            try {
+                const loading = native.decryptIncomingAttachments(DISCORD_EVENT, BOB_ID, sourceInput, "previews");
+                await started;
+                await Promise.resolve();
+                if (mode === "progress") {
+                    mock.timers.tick(2_000);
+                    stream.enqueue(data.subarray(0, 1));
+                    await Promise.resolve();
+                    mock.timers.tick(2_000);
+                    assert.equal(primarySignal.aborted, false, "a progressing transfer keeps its full 60-second budget");
+                    stream.enqueue(data.subarray(1));
+                    stream.close();
+                } else if (mode === "single-source") {
+                    mock.timers.tick(3_001);
+                    assert.equal(primarySignal.aborted, false, "a source without a distinct fallback is not cut off early");
+                    releaseHeaders(new Response(Buffer.from(data)));
+                } else {
+                    mock.timers.tick(2_999);
+                    assert.equal(primarySignal.aborted, false);
+                    assert.equal(sourceRequests, 1);
+                    mock.timers.tick(1);
+                    assert.equal(primarySignal.aborted, true, `stalled ${mode} are cancelled before trying the alternate source`);
+                }
+                const loaded = await loading;
+                expectStatus(loaded, "decrypted", `${mode} transport behavior still returns authenticated bytes`);
+                assert.deepEqual(Buffer.from(loaded.attachments[0].data), pngBytes);
+                assert.equal(sourceRequests, mode === "headers" || mode === "body" ? 2 : 1);
+                mock.timers.tick(60_000);
+                assert.equal(sourceRequests, mode === "headers" || mode === "body" ? 2 : 1, "settled transports leave no retry timer");
+            } finally {
+                mock.timers.reset();
+                globalThis.fetch = immediateFetch;
+            }
+        }
 
         const longText = "Selective detached text with generic siblings. ".repeat(160);
         const textBytes = new TextEncoder().encode(longText);
@@ -1381,6 +1462,13 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         await rm(join(dataDir, "Downloads", cacheMissDownload.filename), { force: true });
 
         let mismatchedPrimaryAttempts = 0;
+        const fallbackMessage = await native.encryptOutgoing(DISCORD_EVENT, ALICE_ID, {
+            plaintext: serializeSecurePlaintext("uncached CDN fallback", {
+                ...incomingAttachmentMaterial.descriptor, root: incomingAttachmentRoot,
+            }),
+            snapshot: aliceDm,
+        });
+        expectStatus(fallbackMessage, "encrypted", "fallback fixture uses a separate authenticated envelope to miss the cache");
         globalThis.fetch = async input => {
             mismatchedPrimaryAttempts++;
             const bytes = String(input).startsWith("https://cdn.discordapp.com/")
@@ -1393,7 +1481,7 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
         const authenticatedProxyFallback = await native.decryptIncomingAttachments(
             DISCORD_EVENT,
             BOB_ID,
-            incomingAttachmentInput,
+            { ...incomingAttachmentInput, content: fallbackMessage.content, discordMessageId: messageId(500) },
         );
         expectStatus(
             authenticatedProxyFallback,

@@ -1038,6 +1038,7 @@ test("Discord MCP attachment readers release locks and cancel incomplete transfe
         let reads = 0;
         const api = loadModule("src/equicordplugins/discordMcp.desktop/native.ts", {
             "@main/utils/constants": { DATA_DIR: "fixture" }, crypto: {}, electron: {}, fs: {}, "fs/promises": {},
+            "file://../../../tools/discord-mcp/server.mjs?trim=false": { default: "fixture server" },
             path: { join: (...parts: string[]) => parts.join("/") },
             "../fileUpload/nativeNetwork": {}, "./policy": { DISCORD_MCP_TOOL_NAMES: [] }
         }, { Buffer, fetch: async () => ({ ok: true, status: 200, headers: new Headers(), body: {
@@ -1120,6 +1121,7 @@ test("all clip and bridge native entrypoints deny untrusted callers before side 
     const helper = mediaFixture(() => { throw new Error("Unexpected fetch"); });
     const imports = {
         "@main/utils/constants": { DATA_DIR: "fixture" }, "@main/utils/ensureSafePath": {},
+        "file://../../../tools/discord-mcp/server.mjs?trim=false": { default: "fixture server" },
         "../fileUpload/nativeNetwork": helper, crypto: {}, electron: {}, fs: {}, "fs/promises": {},
         path: { join: (...parts: string[]) => parts.join("/") },
         "./policy": { DISCORD_MCP_TOOL_NAMES: [] }

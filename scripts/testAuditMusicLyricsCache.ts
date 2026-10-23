@@ -14,12 +14,6 @@ import { parseSyncedLyrics } from "../src/equicordplugins/musicControls/parseSyn
 import { checkLyricsResponse } from "../src/equicordplugins/musicControls/spotify/lyrics/providers/response";
 import { Provider } from "../src/equicordplugins/musicControls/spotify/lyrics/providers/types";
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>(r => { resolve = r; });
-    return { promise, resolve };
-}
-
 function fixture(fallback = false, initial = new Map<string, any>()) {
     let now = 1_800_000_000_000;
     let failWrite = false;
@@ -68,7 +62,7 @@ function fixture(fallback = false, initial = new Map<string, any>()) {
     const api = load("api.tsx");
     return { api, cache: load("cache.ts"), data, reads, writes, fetchers, settings, advance: (ms: number) => { now += ms; }, failWrite: (value: boolean) => { failWrite = value; },
         pauseNextWrite() {
-            const started = deferred<void>(), release = deferred<void>();
+            const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
             beforeWrite = async () => { started.resolve(); await release.promise; };
             return { started: started.promise, release: () => release.resolve() };
         }
@@ -106,7 +100,7 @@ test("authoritative lyric misses expire, provider settings invalidate retry stat
     f.settings.store.spotifyLyricsApiUrl = "https://fixture.invalid";
     await f.api.getLyrics({ id: "miss" });
     assert.equal(calls, 3);
-    const pending = deferred<any>();
+    const pending = Promise.withResolvers<any>();
     f.fetchers.spotify = () => pending.promise;
     const request = f.api.getLyrics({ id: "pending" });
     await new Promise(resolve => setImmediate(resolve));
@@ -226,7 +220,7 @@ test("persisted lyrics respect entry, byte and age budgets without caching overs
 
 test("concurrent provider results retain edited versions and translation removal invalidates pending fetches", async () => {
     const f = fixture();
-    const pending = deferred<any>();
+    const pending = Promise.withResolvers<any>();
     f.fetchers.spotify = () => pending.promise;
     const request = f.api.getLyrics({ id: "same" });
     await new Promise(resolve => setImmediate(resolve));
@@ -236,7 +230,7 @@ test("concurrent provider results retain edited versions and translation removal
     assert.equal(result.useLyric, Provider.Translated);
     assert.equal(result.lyricsVersions.Spotify[0].text, "original");
     assert.equal(result.lyricsVersions.Translated[0].text, "translated");
-    const next = deferred<any>();
+    const next = Promise.withResolvers<any>();
     f.fetchers.spotify = () => next.promise;
     const outdated = f.api.getLyrics({ id: "other" });
     await new Promise(resolve => setImmediate(resolve));

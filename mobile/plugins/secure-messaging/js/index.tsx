@@ -2,7 +2,7 @@
 
 import Page from '@revenge-mod/components/Page'
 import { Design } from '@revenge-mod/discord/design'
-import { Stores } from '@revenge-mod/discord/flux'
+import { getStore, Stores } from '@revenge-mod/discord/flux'
 import { getModules } from '@revenge-mod/modules/finders'
 import { withName, withProps } from '@revenge-mod/modules/finders/filters'
 import {
@@ -54,6 +54,9 @@ import {
 } from './vault'
 
 const { Button, Stack, TableRow, TableRowGroup, Text, TextInput } = Design
+let running = false
+let sessionGeneration = 0
+let approvalGeneration = 0
 const receiver = new MessageReceiver(saveVault, state => {
 	const userId = currentUserId()
 	return !!userId && mobileVault.ready && account(userId) === state
@@ -80,6 +83,24 @@ function requireDm(channelId: string): void {
 
 function currentUserId(): string | undefined {
 	return (Stores.UserStore as any)?.getCurrentUser?.()?.id
+}
+
+function assertSessionCurrent(userId: string, generation: number): void {
+	if (
+		!running ||
+		generation !== sessionGeneration ||
+		currentUserId() !== userId
+	)
+		throw new Error('Secure Messaging stopped or the Discord account changed')
+}
+
+function cancelOneKey(): void {
+	approvalGeneration++
+	try {
+		callNativeMethodSync('uk.co.protonn.secure-messaging.onekey.cancel', [])
+	} catch {
+		// The native half may already have stopped. Session checks still reject its result.
+	}
 }
 
 function memberSnapshot(channelId: string, userId: string): string[] {
@@ -147,8 +168,10 @@ async function localCommand(
 					throw new Error(`User ${id} does not have a trusted key`)
 			}
 			state.conversations[channelId] = {
+				...state.conversations[channelId],
 				recipients,
 				members,
+				needsReview: false,
 			}
 			await saveVault()
 			notice(
@@ -309,6 +332,13 @@ function SettingsComponent() {
 	const own = userId && state ? ownPublicIdentity(userId) : undefined
 	const unlockOneKey = async () => {
 		if (!userId || unlocking) return
+		const generation = sessionGeneration
+		const approval = ++approvalGeneration
+		const assertApprovalCurrent = () => {
+			assertSessionCurrent(userId, generation)
+			if (approval !== approvalGeneration)
+				throw new Error('OneKey unlock was cancelled or superseded')
+		}
 		setUnlocking(true)
 		let secret: Uint8Array | undefined
 		try {
@@ -316,9 +346,11 @@ function SettingsComponent() {
 				'uk.co.protonn.secure-messaging.onekey.unlock',
 				[],
 			)
+			assertApprovalCurrent()
 			if (result.status !== 'unlocked') throw new Error(result.message)
 			secret = decode64(result.secret, 32)
-			await mobileVault.useOneKey(secret, userId)
+			await mobileVault.unlockWithOneKey(secret, userId)
+			assertApprovalCurrent()
 			clearDecryptedContent()
 			notice(
 				'OneKey unlocked',
@@ -419,6 +451,7 @@ function SettingsComponent() {
 							<Button
 								text="Lock Secure Messaging"
 								onPress={() => {
+									cancelOneKey()
 									mobileVault.lock()
 									clearDecryptedContent()
 								}}
@@ -427,12 +460,11 @@ function SettingsComponent() {
 						{unlocking && (
 							<Button
 								text="Cancel"
-								onPress={() =>
-									callNativeMethodSync(
-										'uk.co.protonn.secure-messaging.onekey.cancel',
-										[],
-									)
-								}
+								onPress={() => {
+									cancelOneKey()
+									if (mobileVault.configured) mobileVault.lock()
+									clearDecryptedContent()
+								}}
 							/>
 						)}
 					</TableRowGroup>
@@ -526,6 +558,16 @@ function SettingsComponent() {
 export default plugin({
 	SettingsComponent,
 	async start({ cleanup }) {
+		running = true
+		sessionGeneration++
+		let active = true
+		cleanup(() => {
+			active = false
+			running = false
+			sessionGeneration++
+			cancelOneKey()
+			mobileVault.lock()
+		})
 		setRandomSource(size =>
 			decode64(
 				callNativeMethodSync('uk.co.protonn.secure-messaging.random', [size]),
@@ -539,7 +581,25 @@ export default plugin({
 				setAttachmentPatcher(undefined)
 			}
 		})
-		cleanup(() => mobileVault.lock())
+		cleanup(
+			getStore<{ getCurrentUser(): { id: string } | undefined }>(
+				'UserStore',
+				store => {
+					let previous = store.getCurrentUser()?.id
+					const changed = () => {
+						const current = store.getCurrentUser()?.id
+						if (current === previous) return
+						previous = current
+						sessionGeneration++
+						cancelOneKey()
+						if (mobileVault.configured) mobileVault.lock()
+						clearDecryptedContent()
+					}
+					store.addChangeListener(changed)
+					cleanup(() => store.removeChangeListener(changed))
+				},
+			),
+		)
 		patchMessageRenderer(cleanup)
 		cleanup(
 			getModules(
@@ -558,7 +618,11 @@ export default plugin({
 								try {
 									const text =
 										typeof message?.content === 'string' ? message.content : ''
+									const userId = currentUserId()
+									if (!userId) throw new Error('Discord user is unavailable')
+									const generation = sessionGeneration
 									const command = await localCommand(channelId, text)
+									assertSessionCurrent(userId, generation)
 									if (command === null) return undefined
 									if (typeof command === 'string') {
 										return original.apply(this, [
@@ -567,8 +631,6 @@ export default plugin({
 											...args.slice(2),
 										])
 									}
-									const userId = currentUserId()
-									if (!userId) throw new Error('Discord user is unavailable')
 									if (!mobileVault.protectedChannel(userId, channelId))
 										return original.apply(this, args)
 									requireDm(channelId)
@@ -579,8 +641,8 @@ export default plugin({
 										memberSnapshot(channelId, userId),
 									)
 									const assertSendCurrent = () => {
+										assertSessionCurrent(userId, generation)
 										if (
-											currentUserId() !== userId ||
 											!mobileVault.ready ||
 											mobileVault.locked ||
 											account(userId) !== state
@@ -593,7 +655,7 @@ export default plugin({
 											memberSnapshot(channelId, userId),
 										)
 									}
-									const options = args[3] as any
+									const options = args[3] ? { ...(args[3] as any) } : undefined
 									if (
 										message?.stickerIds?.length ||
 										message?.sticker_ids?.length ||
@@ -606,11 +668,11 @@ export default plugin({
 										throw new Error(
 											'Stickers and forwards are not supported in protected mobile conversations yet',
 										)
-									const uploads = Array.isArray(
-										(args[3] as any)?.attachmentsToUpload,
-									)
-										? ((args[3] as any).attachmentsToUpload as any[])
+									const uploads = Array.isArray(options?.attachmentsToUpload)
+										? [...options.attachmentsToUpload]
 										: []
+									if (options && Array.isArray(options.attachmentsToUpload))
+										options.attachmentsToUpload = uploads
 									const prepared = uploads.length
 										? await prepareEncryptedUploads(
 												uploads,
@@ -632,11 +694,18 @@ export default plugin({
 									await saveVault()
 									assertSendCurrent()
 									prepared?.apply()
-									return original.apply(this, [
+									const sendArgs = [
 										channelId,
 										{ ...message, content: encrypted },
 										...args.slice(2),
-									])
+									]
+									if (args.length > 3) sendArgs[3] = options
+									return Promise.resolve(original.apply(this, sendArgs)).then(
+										result => {
+											prepared?.complete()
+											return result
+										},
+									)
 								} catch (error) {
 									notice(
 										'Secure send blocked',
@@ -667,13 +736,16 @@ export default plugin({
 		)
 		try {
 			await cleanupStoredAttachments()
+			if (!active) return
 			await loadVault()
+			if (!active) return
 			const userId = currentUserId()
 			if (userId && mobileVault.ready) {
 				account(userId)
 				await saveVault()
 			}
 		} catch {
+			if (!active) return
 			notice(
 				'Secure Messaging unavailable',
 				'The vault could not be loaded. Protected sends are blocked. Restart the app and check the plugin settings.',

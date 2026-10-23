@@ -116,11 +116,12 @@ export default definePlugin({
             find: ".WIDGETS?",
             replacement: [
                 {
-                    match: /items:(\i),initialSection:\i,onClose:\i\}=\i.{0,200}?(?=return.{0,30}?\(0,\i\.jsxs?\)\()/,
-                    replace: "$&$self.pushSection($1,arguments[0].user);"
+                    // Populate items before the initial selected section and badge state are computed.
+                    match: /(?<=items:\i,initialSection:\i,onClose:\i}=)(\i)(?=,)/,
+                    replace: "($self.pushSection($1.items,$1.user),$1)"
                 },
                 {
-                    match: /children:(?=.{0,100}?component:.+?section:(\i))/,
+                    match: /children:(?=.{0,100}?component:.{0,250}?section:(\i(?:\.section)?)(?=,|}))/,
                     replace: "$&$1==='MUTUAL_GDMS'?$self.renderMutualGDMs(arguments[0]):"
                 },
                 // Make the gap between each item smaller so our tab can fit.

@@ -43,6 +43,54 @@ function storage() {
 	}
 }
 
+test('locking clears an unprotected vault and invalidates a pending load', async () => {
+	const backing = storage()
+	const vault = new MobileVault(backing)
+	await vault.load()
+	vault.account(USER).conversations[CHANNEL] = {
+		members: [PEER],
+		recipients: [PEER],
+	}
+	await vault.save()
+	vault.lock()
+	assert.equal(vault.ready, false)
+	assert.throws(() => vault.account(USER), /unavailable/)
+
+	let finish!: (value: string | null) => void
+	backing.read = () =>
+		new Promise(resolve => {
+			finish = resolve
+		})
+	const loading = vault.load()
+	await new Promise(resolve => setImmediate(resolve))
+	vault.lock()
+	finish(backing.raw)
+	await assert.rejects(loading, /locked or reloaded/)
+	assert.equal(vault.ready, false)
+	assert.throws(() => vault.account(USER), /unavailable/)
+})
+
+test('a delayed older load cannot replace the current vault', async () => {
+	const reads: Array<(value: string | null) => void> = []
+	const vault = new MobileVault({
+		read: () =>
+			new Promise(resolve => {
+				reads.push(resolve)
+			}),
+		write: async () => {},
+	})
+	const first = vault.load()
+	await new Promise(resolve => setImmediate(resolve))
+	const second = vault.load()
+	await new Promise(resolve => setImmediate(resolve))
+	reads[1](null)
+	await second
+	const current = vault.account(USER)
+	reads[0](null)
+	await assert.rejects(first, /locked or reloaded/)
+	assert.equal(vault.account(USER), current)
+})
+
 test('legacy and incomplete identity backups preserve protected chats through restart and failed saves', async () => {
 	const backing = storage()
 	const vault = new MobileVault(backing)
@@ -89,6 +137,49 @@ test('legacy and incomplete identity backups preserve protected chats through re
 	assert.throws(
 		() => restarted.protectedChannel(USER, CHANNEL),
 		/could not be saved/,
+	)
+})
+
+test('identity backup imports preserve unknown saved fields while updating protected participants', async () => {
+	const backing = storage()
+	const initial = new MobileVault(backing)
+	await initial.load()
+	const state = initial.account(USER)
+	const peer = publicIdentity(generateIdentity(), PEER)
+	state.trusted[PEER] = peer
+	state.conversations[CHANNEL] = {
+		members: [PEER, OTHER],
+		recipients: [PEER],
+	}
+	await initial.save()
+	const saved = JSON.parse(backing.raw!)
+	saved.futureVault = { keep: [true, null, 1] }
+	saved.accounts[USER].futureAccount = { keep: 'account' }
+	saved.accounts[USER].conversations[CHANNEL].futureConversation = {
+		keep: 'conversation',
+	}
+	backing.raw = JSON.stringify(saved)
+	const vault = new MobileVault(backing)
+	await vault.load()
+	await vault.replace(USER, {
+		identity: state.identity,
+		trusted: state.trusted,
+		conversations: { [CHANNEL]: { members: [PEER], recipients: [PEER] } },
+	})
+	const restarted = new MobileVault(backing)
+	await restarted.load()
+	assert.deepEqual(restarted.account(USER).conversations[CHANNEL], {
+		members: [PEER],
+		recipients: [PEER],
+		needsReview: true,
+		futureConversation:
+			saved.accounts[USER].conversations[CHANNEL].futureConversation,
+	})
+	const imported = JSON.parse(backing.raw!)
+	assert.deepEqual(imported.futureVault, saved.futureVault)
+	assert.deepEqual(
+		imported.accounts[USER].futureAccount,
+		saved.accounts[USER].futureAccount,
 	)
 })
 
@@ -143,7 +234,7 @@ test('historical identities and publication metadata are validated before a load
 	const vault = new MobileVault(backing)
 	await vault.load()
 	assert.deepEqual(vault.account(USER), valid)
-	await vault.useOneKey(randomBytes(32), USER)
+	await vault.unlockWithOneKey(randomBytes(32), USER)
 	const restarted = new MobileVault(backing)
 	await restarted.load()
 	assert.equal(restarted.locked, true)
@@ -160,7 +251,7 @@ test('OneKey vault survives restart locked, retains history, and hides identity 
 		recipients: [PEER],
 	}
 	const secret = randomBytes(32)
-	await vault.useOneKey(secret, USER)
+	await vault.unlockWithOneKey(secret, USER)
 	const identity = vault.account(USER).identity
 	assert.notEqual(identity.signingPublicKey, previous.signingPublicKey)
 	assert.deepEqual(vault.account(USER).retiredIdentities, [previous])
@@ -177,11 +268,11 @@ test('OneKey vault survives restart locked, retains history, and hides identity 
 	assert.throws(() => restarted.account(USER), /Unlock/)
 	await assert.rejects(() => restarted.save(), /Unlock/)
 	await assert.rejects(
-		() => restarted.useOneKey(randomBytes(32), USER),
+		() => restarted.unlockWithOneKey(randomBytes(32), USER),
 		/different OneKey/,
 	)
 	assert.equal(restarted.locked, true)
-	await restarted.useOneKey(secret, USER)
+	await restarted.unlockWithOneKey(secret, USER)
 	assert.deepEqual(restarted.account(USER).identity, identity)
 	assert.deepEqual(restarted.account(USER).retiredIdentities, [previous])
 	assert.equal(restarted.account(USER).trusted[PEER].userId, PEER)
@@ -193,7 +284,7 @@ test('wrong backups cannot replace the OneKey identity and failed saves can be r
 	const backing = storage()
 	const vault = new MobileVault(backing)
 	await vault.load()
-	await vault.useOneKey(randomBytes(32), USER)
+	await vault.unlockWithOneKey(randomBytes(32), USER)
 	const identity = vault.account(USER).identity
 	await assert.rejects(
 		() =>
@@ -216,13 +307,13 @@ test('tampered protected conversation indexes cannot be unlocked', async () => {
 	const vault = new MobileVault(backing)
 	await vault.load()
 	const secret = randomBytes(32)
-	await vault.useOneKey(secret, USER)
+	await vault.unlockWithOneKey(secret, USER)
 	const stored = JSON.parse(backing.raw!)
 	stored.protectedChannels[USER] = [CHANNEL]
 	backing.raw = JSON.stringify(stored)
 	const restarted = new MobileVault(backing)
 	await restarted.load()
-	await assert.rejects(() => restarted.useOneKey(secret, USER))
+	await assert.rejects(() => restarted.unlockWithOneKey(secret, USER))
 	assert.equal(restarted.locked, true)
 	assert.throws(() => restarted.account(USER))
 })

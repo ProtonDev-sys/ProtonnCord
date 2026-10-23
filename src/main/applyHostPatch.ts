@@ -4,8 +4,10 @@ import { basename, dirname, join } from "path";
 const STUB_PACKAGE = JSON.stringify({ name: "discord", main: "index.js" });
 const VERSION_PREFIX = "app-";
 
-const makeStubIndex = (patcherPath: string) =>
-    `require(${JSON.stringify(patcherPath)});`;
+const makeStubIndex = (patcherPath: string) => {
+    const loader = `${dirname(patcherPath)}.loader.cjs`;
+    return `require(${JSON.stringify(existsSync(loader) ? loader : patcherPath)});`;
+};
 
 /** `_app.asar` next to `app.asar` marks any patched install. */
 export const isAlreadyPatched = (resources: string) =>

@@ -12,6 +12,38 @@ import { getBuildNumber, patches, patchTimings } from "@webpack/patcher";
 
 import { loadLazyChunks } from "./loadLazyChunks";
 import { reporterData } from "./reporterData";
+import { requireReporterFactory } from "./reporterFactoryPreflight";
+
+function describeLookupError(error: unknown) {
+    const parts: string[] = [];
+    const seen = new Set<unknown>();
+    for (let depth = 0; depth < 3; depth++) {
+        if (seen.has(error)) {
+            parts.push("[Circular cause]");
+            break;
+        }
+        seen.add(error);
+        if (error == null || (typeof error !== "object" && typeof error !== "function")) {
+            parts.push(String(error).slice(0, 2_000));
+            break;
+        }
+        const unreadable: string[] = [];
+        const read = (key: string) => {
+            try { return Reflect.get(error as object, key); }
+            catch { unreadable.push(key); }
+        };
+        const stack = read("stack"), name = read("name"), message = read("message"), cause = read("cause");
+        const detail = typeof stack === "string" && stack
+            ? stack
+            : `${typeof name === "string" ? name : "Error"}: ${typeof message === "string" ? message : "No message"}`;
+        parts.push(detail.slice(0, 2_000).split("\n").slice(0, 12).join("\n")
+            + (unreadable.length ? `\n[Unable to read error properties: ${unreadable.join(", ")}]` : ""));
+        if (cause === undefined) break;
+        error = cause;
+        if (depth === 2) parts.push("[Cause chain truncated]");
+    }
+    return parts.join("\nCaused by:\n").slice(0, 6_400);
+}
 
 async function runReporter() {
     const ReporterLogger = new Logger("Reporter");
@@ -19,7 +51,7 @@ async function runReporter() {
     try {
         ReporterLogger.log("Starting test...");
 
-        const { promise: loadLazyChunksDone, resolve: loadLazyChunksResolve } = Promise.withResolvers<void>();
+        const { promise: loadLazyChunksDone, resolve: loadLazyChunksResolve, reject: loadLazyChunksReject } = Promise.withResolvers<boolean>();
 
         // The main patch for starting the reporter chunk loading
         addPatch({
@@ -34,15 +66,16 @@ async function runReporter() {
         Vencord.Webpack._initReporter = function () {
             // initReporter is called in the patched entry point of Discord
             // setImmediate to only start searching for lazy chunks after Discord initialized the app
-            setTimeout(() => loadLazyChunks().then(loadLazyChunksResolve), 0);
+            setTimeout(() => loadLazyChunks().then(loadLazyChunksResolve, loadLazyChunksReject), 0);
         };
 
-        await loadLazyChunksDone;
+        if (await loadLazyChunksDone === false) return;
 
         // Manually require all modules to make sure all lazily required modules are patched
         for (const moduleId of Object.keys(Webpack.wreq.m)) {
             try {
-                Webpack.wreq(moduleId);
+                const preparation = requireReporterFactory(moduleId);
+                if (preparation) await preparation;
             } catch { }
         }
 
@@ -61,12 +94,19 @@ async function runReporter() {
             }
         }
 
-        for (const [plugin, moduleId, match, totalTime] of patchTimings) {
+        for (const [plugin, moduleId, match, totalTime, confirmation] of patchTimings) {
             if (totalTime > 10) {
+                ReporterLogger.log("Patch timing confirmation:", JSON.stringify({
+                    plugin, id: String(moduleId), match: String(match), initialMs: totalTime,
+                    ...confirmation ?? { status: "inconclusive", samplesMs: [], reason: "Confirmation was not recorded" }
+                }));
+                if (confirmation?.status === "outlier") continue;
                 new Logger("WebpackPatcher").warn(`Patch by ${plugin} took ${Math.round(totalTime * 100) / 100}ms (Module id is ${String(moduleId)}): ${match}`);
             }
         }
 
+        const lookupExceptions = new Map<string, { id: number; count: number; }>();
+        let omittedExceptions = 0;
         for (const [searchType, args] of Webpack.lazyWebpackSearchHistory) {
             let method = searchType;
 
@@ -117,9 +157,21 @@ async function runReporter() {
                 }
                 if (IS_COMPANION_TEST)
                     reporterData.failedWebpack[method].push(args.map(a => String(a)));
-                ReporterLogger.log("Webpack Find Fail:", logMessage);
+                const detail = describeLookupError(e);
+                let exception = lookupExceptions.get(detail);
+                if (!exception && lookupExceptions.size < 8) {
+                    exception = { id: lookupExceptions.size + 1, count: 0 };
+                    lookupExceptions.set(detail, exception);
+                }
+                if (exception) exception.count++;
+                else omittedExceptions++;
+                ReporterLogger.log("Webpack Find Fail:", logMessage, exception ? `[exception ${exception.id}]` : "[exception detail limit reached]");
             }
         }
+        for (const [detail, { id, count }] of lookupExceptions)
+            ReporterLogger.log("Webpack Find Exception:", `${id} (${count} lookups)\n${detail}`);
+        if (omittedExceptions)
+            ReporterLogger.log("Webpack Find Exception Limit:", `${omittedExceptions} additional exceptions; all lookup findings are retained`);
 
         // if we are running the reporter with companion integration, send the list to vscode as soon as we can
         if (IS_COMPANION_TEST)

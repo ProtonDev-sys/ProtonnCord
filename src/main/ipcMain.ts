@@ -22,7 +22,7 @@ import "./settings";
 
 import { debounce } from "@shared/debounce";
 import { IpcEvents } from "@shared/IpcEvents";
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell, systemPreferences, type WebContents } from "electron";
+import { app, BrowserWindow, dialog, nativeTheme, shell, systemPreferences, type WebContents } from "electron";
 import monacoHtml from "file://monacoWin.html?minify&base64";
 import { closeSync, FSWatcher, fsyncSync, mkdirSync, openSync, readFileSync, watch, writeFileSync } from "fs";
 import { open, readdir, readFile, unlink } from "fs/promises";
@@ -30,6 +30,7 @@ import { release } from "os";
 import { join } from "path";
 
 import { registerCspIpcHandlers } from "./csp/manager";
+import { ipcMain, registerQuickCssEditor } from "./ipc";
 import { getThemeInfo, stripBOM, UserThemeHeader } from "./themes";
 import { ALLOWED_PROTOCOLS, QUICK_CSS_PATH, SETTINGS_DIR, THEMES_DIR } from "./utils/constants";
 import { ensureSafePath } from "./utils/ensureSafePath";
@@ -239,6 +240,8 @@ ipcMain.handle(IpcEvents.OPEN_MONACO_EDITOR, async () => {
 
     editorCloseAllowed = false;
     const window = monacoWin;
+    const documentUrl = `data:text/html;base64,${monacoHtml}`;
+    registerQuickCssEditor(window.webContents, documentUrl);
     window.on("close", event => {
         if (editorCloseAllowed) return;
         event.preventDefault();
@@ -266,7 +269,7 @@ ipcMain.handle(IpcEvents.OPEN_MONACO_EDITOR, async () => {
 
     makeLinksOpenExternally(monacoWin);
 
-    await monacoWin.loadURL(`data:text/html;base64,${monacoHtml}`);
+    await monacoWin.loadURL(documentUrl);
 });
 
 let quitPromptPending = false;

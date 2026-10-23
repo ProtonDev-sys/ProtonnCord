@@ -48,7 +48,7 @@ function fixture(platform = "linux", flatpak = false) {
             }
             return { stdout: "", stderr: "" };
         } },
-        "electron": { ipcMain: { handle: (event: string, handler: (...args: unknown[]) => Promise<any>) => handlers.set(event, handler) } },
+        "@main/ipc": { ipcMain: { handle: (event: string, handler: (...args: unknown[]) => Promise<any>) => handlers.set(event, handler) } },
         path,
         "original-fs": { promises: {} },
         util: { promisify: (operation: unknown) => operation },

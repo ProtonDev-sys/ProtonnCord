@@ -84,7 +84,8 @@ test("tray patching is idempotent, keeps caller templates intact and routes acti
         "@shared/IpcEvents": { IpcEvents: { SET_TRAY_UPDATE_STATE: "state", TRAY_CHECK_UPDATES: "check", TRAY_REPAIR: "repair" } },
         "@shared/vencordUserAgent": { gitHashShort: "fixture" },
         "file://about.html?minify": { default: "" }, "file://../../browser/icon.png?base64": { default: "" }, "./utils/constants": {},
-        electron: { Menu, ipcMain: { on: (event: string, callback: (event: unknown, value: boolean) => void) => handlers.set(event, callback) },
+        "./ipc": { ipcMain: { on: (event: string, callback: (event: unknown, value: boolean) => void) => handlers.set(event, callback) } },
+        electron: { Menu,
             BrowserWindow: { getFocusedWindow: () => editor, getAllWindows: () => [editor, discord] }, shell: {} },
     }, { URL });
     api.patchTrayMenu();

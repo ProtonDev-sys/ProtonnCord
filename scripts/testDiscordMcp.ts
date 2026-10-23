@@ -25,9 +25,9 @@ import {
 } from "../src/equicordplugins/discordMcp.desktop/policy";
 import { deleteFolder, moveServers, reorderFolder, withField } from "../src/equicordplugins/discordMcp.desktop/folders";
 
-assert.equal(isDiscordSnowflake("123456789012345679"), true);
+assert.equal(isDiscordSnowflake("123456789012345678"), true);
 assert.equal(isDiscordSnowflake("invalid"), false);
-assert.equal(requireSnowflake("123456789012345679", "channel_id"), "123456789012345679");
+assert.equal(requireSnowflake("123456789012345678", "channel_id"), "123456789012345678");
 assert.throws(() => requireSnowflake("invalid", "channel_id"), /snowflake/);
 assert.equal(normalizeMessageLimit(undefined), 50);
 assert.equal(normalizeMessageLimit(100), 100);
@@ -51,9 +51,9 @@ assert.equal(normalizeFolderName("  Games  "), "Games");
 assert.throws(() => normalizeFolderName(" "), /1 to 100/);
 assert.equal(requireFolderId("42"), "42");
 assert.throws(() => requireFolderId("0"), /positive/);
-assert.deepEqual(normalizeGuildIds(["123456789012345679"]), ["123456789012345679"]);
+assert.deepEqual(normalizeGuildIds(["123456789012345678"]), ["123456789012345678"]);
 assert.throws(() => normalizeGuildIds([]), /1 to 1000/);
-assert.throws(() => normalizeGuildIds(["123456789012345679", "123456789012345679"]), /duplicates/);
+assert.throws(() => normalizeGuildIds(["123456789012345678", "123456789012345678"]), /duplicates/);
 
 const folderWithMetadata = { id: { value: "42" }, name: { value: "Games" }, color: { value: 12 }, guildIds: ["1", "2"] };
 const unknownField = Symbol("protobuf metadata");
@@ -71,9 +71,9 @@ assert.deepEqual(reorderFolder(layout, "42", 2, ["g:3", "f:42", "g:4"]).map(fold
 assert.deepEqual(reorderFolder([{ guildIds: ["hidden"] }, ...layout], "42", 2, ["g:3", "f:42", "g:4"]).map(folder => folder.guildIds), [["hidden"], ["3"], ["4"], ["1", "2"]], "hidden stored entries do not shift visible positions");
 assert.equal(Reflect.get(withField(folderWithMetadata, "name", { value: "Renamed" }), unknownField), "preserved");
 
-const sent = new Set([sentMessageKey("123456789012345679", "123456789012345678")]);
-assert.equal(canDeleteRecordedMessage(sent, "123456789012345679", "123456789012345678"), true);
-assert.equal(canDeleteRecordedMessage(sent, "123456789012345679", "999999999999999999"), false, "unrecorded messages cannot be deleted");
+const sent = new Set([sentMessageKey("123456789012345678", "123456789012345678")]);
+assert.equal(canDeleteRecordedMessage(sent, "123456789012345678", "123456789012345678"), true);
+assert.equal(canDeleteRecordedMessage(sent, "123456789012345678", "999999999999999999"), false, "unrecorded messages cannot be deleted");
 
 async function main() {
 const bridgeDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-test-"));
@@ -133,6 +133,7 @@ function rpc(method: string, params?: unknown): Promise<any> {
 
 let workerRunning = true;
 let folderCapabilities = true;
+let serverListResult: unknown = [];
 const observedRequests: any[] = [];
 const fakeWorker = (async () => {
     while (workerRunning) {
@@ -145,7 +146,9 @@ const fakeWorker = (async () => {
                 const request = JSON.parse(await readFile(claimed, "utf8"));
                 observedRequests.push(request);
                 assert.equal(request.secret, secret, "queue requests authenticate with the private bridge secret");
-                const result = request.tool === "connection_status"
+                const result = request.tool === "list_servers"
+                    ? serverListResult
+                    : request.tool === "connection_status"
                     ? { connected: true, channelAccess: "all_accessible_channels", capabilities: { serverFolders: folderCapabilities, serverActivity: folderCapabilities } }
                     : request.tool === "download_attachment"
                         ? {
@@ -191,9 +194,17 @@ try {
     assert.equal(status.structuredContent.connected, true);
     assert.equal(status.structuredContent.channelAccess, "all_accessible_channels");
     assert.equal(observedRequests[0].tool, "connection_status", "public tool names map to the fixed bridge operation");
+    for (const value of [[], [{ id: "123456789012345678", name: "server" }], null, false, 0, "result"]) {
+        serverListResult = value;
+        const list = await rpc("tools/call", { name: "discord_list_servers", arguments: {} });
+        assert.equal(list.isError, undefined);
+        assert.ok(list.structuredContent && typeof list.structuredContent === "object" && !Array.isArray(list.structuredContent), "MCP structuredContent must be an object even for list, empty or primitive results");
+        assert.deepEqual(list.structuredContent, { value });
+        assert.deepEqual(JSON.parse(list.content[0].text), value, "text content retains the bridge result unchanged");
+    }
     const folders = await rpc("tools/call", { name: "discord_list_server_folders", arguments: {} });
     assert.equal(folders.structuredContent.echoedTool, "list_server_folders");
-    const move = await rpc("tools/call", { name: "discord_move_servers", arguments: { guild_ids: ["123456789012345679"], folder_id: null } });
+    const move = await rpc("tools/call", { name: "discord_move_servers", arguments: { guild_ids: ["123456789012345678"], folder_id: null } });
     assert.equal(move.structuredContent.echoedTool, "move_servers");
     folderCapabilities = false;
     const stale = await rpc("tools/call", { name: "discord_list_server_activity", arguments: {} });
@@ -204,7 +215,7 @@ try {
     const imageDownload = await rpc("tools/call", {
         name: "discord_download_attachment",
         arguments: {
-            channel_id: "123456789012345679",
+            channel_id: "123456789012345678",
             message_id: "123456789012345678",
             attachment_id: "234567890123456789",
         },

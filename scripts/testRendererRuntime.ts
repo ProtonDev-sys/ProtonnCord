@@ -12,17 +12,10 @@ import ts from "typescript";
 
 import { createRendererRuntime, type RuntimeOptions, scheduleIdleTask } from "../src/runtime/bootstrap";
 
-function deferred<T = void>() {
-    let resolve!: (value: T | PromiseLike<T>) => void;
-    let reject!: (error: unknown) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
-
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 
 function runtimeFixture(domReady = false, configure?: (options: RuntimeOptions, calls: string[]) => void) {
-    const ready = deferred();
+    const ready = Promise.withResolvers<void>();
     const calls: string[] = [];
     const failures: string[] = [];
     const dom = new Set<() => void>();
@@ -156,7 +149,7 @@ test("service setup, async work, and cleanup failures remain isolated and status
 });
 
 test("runtime status is a frozen detached snapshot and late completion cannot reactivate disposal", async () => {
-    const work = deferred();
+    const work = Promise.withResolvers<void>();
     const f = runtimeFixture(false, options => {
         options.services = [{ name: "pending", start: () => ({ dispose() {}, runInitial: () => work.promise }) }];
     });
@@ -244,7 +237,7 @@ test("message listener snapshots survive removal and re-registration during awai
     const events = loadService<typeof import("../src/api/MessageEvents")>("../api/MessageEvents", {
         "@utils/Logger": { Logger: class { error() {} } }, "@webpack/common": {}
     }, {});
-    const gate = deferred();
+    const gate = Promise.withResolvers<void>();
     const calls: string[] = [];
     const first = async () => { calls.push("first"); await gate.promise; };
     const second = () => { calls.push("second"); };
@@ -333,7 +326,7 @@ test("cloud tracks local edits before deferred authorization and debounces pushe
 
 test("cloud disposal clears delayed work and prevents an in-flight authorization from starting a sync", async () => {
     const f = cloudFixture();
-    const lookup = deferred<{ scope: string; origin: string; }>();
+    const lookup = Promise.withResolvers<{ scope: string; origin: string; }>();
     f.setContext(() => lookup.promise);
     const service = f.createCloudSettingsService();
     f.change();
@@ -483,7 +476,7 @@ test("enabling automatic updates after startup activates periodic checks without
 
 test("a tray repair does not restart the app after the selected branch changes", async () => {
     const f = updateFixture();
-    const pending = deferred<boolean>();
+    const pending = Promise.withResolvers<boolean>();
     f.setRepair(() => pending.promise);
     const service = f.createUpdateService();
     const repairing = [...f.listeners.repair][0]();
@@ -530,7 +523,7 @@ test("manual tray actions preserve check/repair behavior and disposed async chec
     assert.equal(f.notices.length, 1);
     await [...f.listeners.repair][0]();
     assert.equal(f.state.relaunches, 1);
-    const check = deferred<boolean>();
+    const check = Promise.withResolvers<boolean>();
     f.setCheck(() => check.promise);
     const initial = service.runInitial!();
     service.dispose();
@@ -550,7 +543,7 @@ test("the public entry retains first plugin import and exposes only frozen runti
 
 test("updater drops stale branch notices and repair only restarts after success", async () => {
     const f = updateFixture(undefined, true);
-    const check = deferred<boolean>();
+    const check = Promise.withResolvers<boolean>();
     f.setCheck(() => check.promise);
     const service = f.createUpdateService();
     const initial = service.runInitial!();

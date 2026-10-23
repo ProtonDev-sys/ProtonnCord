@@ -10,12 +10,6 @@ const React = {
     cloneElement: (node: any, props: object, children: unknown) => ({ ...node, props: { ...node.props, ...props, children } })
 };
 const tick = () => new Promise(resolve => setImmediate(resolve));
-function deferred<T = any>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
 function definePluginSettings(defs: any) {
     const store = Object.fromEntries(Object.entries(defs).map(([key, value]: [string, any]) => [key, value.default ?? value.options?.find((option: any) => option.default)?.value]));
     const settings = { defs, store, use: () => store, withPrivateSettings: () => settings };
@@ -73,7 +67,7 @@ test("MoreUserTags keeps webhook tags when ordinary bot tags are disabled", () =
 test("NewPluginsManager retries failed persistence and deduplicates simultaneous modal requests", async () => {
     let writes = 0;
     let opens = 0;
-    const gate = deferred();
+    const gate = Promise.withResolvers<any>();
     const mocks: Record<string, unknown> = Object.fromEntries([
         "@components/BaseText", "@components/Link", "@components/Notice", "@components/settings/tabs/plugins/PluginCard", "@components/settings/tabs/plugins/shared", "@utils/ChangeList", "@utils/native", "@utils/react"
     ].map(name => [name, {}]));
@@ -102,7 +96,7 @@ function randomVoice() {
     let nextTimer = 0;
     let account = "self";
     let channel = "voice";
-    const sources = deferred();
+    const sources = Promise.withResolvers<any>();
     let streams = 0;
     const events = { addEventListener() {}, removeEventListener() {} };
     const api = load("randomVoice/index.tsx", {
@@ -147,7 +141,7 @@ test("RandomVoice discards desktop-source selection completed after plugin stop"
 });
 
 function recorderHarness() {
-    const capture = deferred();
+    const capture = Promise.withResolvers<any>();
     const menus = new Map<string, Function>();
     let stops = 0;
     let uploads = 0;
@@ -238,7 +232,7 @@ test("Snowfall recycles each transition node only once", () => {
 });
 
 test("SidebarChat ignores stale DM resolutions and uses existing private channel IDs directly", async () => {
-    const pending = deferred();
+    const pending = Promise.withResolvers<any>();
     let handlers: any;
     let calls = 0;
     class Store {
@@ -280,11 +274,11 @@ test("ToneIndicators preserves frozen React input and empty custom descriptions"
 test("Translate+ keeps the newest mounted setter and rejects out-of-order translations", async () => {
     const effects: Function[] = [];
     const changes: any[][] = [];
-    const replies: ReturnType<typeof deferred>[] = [];
+    const replies: PromiseWithResolvers<unknown>[] = [];
     const api = load("translatePlus/utils/accessory.tsx", {
         "@equicordplugins/translatePlus/misc/languages": { languages: {} },
         "@equicordplugins/translatePlus/misc/types": { cl: (value: string) => value },
-        "./icon": {}, "./translator": { translate: () => { const value = deferred(); replies.push(value); return value.promise; } },
+        "./icon": {}, "./translator": { translate: () => { const value = Promise.withResolvers<any>(); replies.push(value); return value.promise; } },
         "@webpack/common": { useEffect: (callback: Function) => effects.push(callback), useState: () => { const values: any[] = []; changes.push(values); return [undefined, (value: any) => values.push(value)]; } }
     });
     const message = { id: "message", content: "hello" };
@@ -367,7 +361,7 @@ test("VoiceButtons targets the selected other user without toggling the moderato
 });
 
 test("VoiceChannelLog drops activity metadata completed after stop", async () => {
-    const application = deferred();
+    const application = Promise.withResolvers<any>();
     const entries: unknown[] = [];
     const plugin = load("voiceChannelLog/index.tsx", {
         "@vencord/discord-types/enums": { ChannelType: {} },

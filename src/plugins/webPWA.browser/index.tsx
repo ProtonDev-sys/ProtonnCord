@@ -187,8 +187,8 @@ export default definePlugin({
         {
             find: "#{intl::KEYBIND_IN_BROSWER_NOTICE}",
             replacement: {
-                match: /,{type:"info",children:(?=.{0,50}?#{intl::KEYBIND_IN_BROSWER_NOTICE})/,
-                replace: ',{type:"info",children:$self.renderKeybindsButton(),_children:',
+                match: /(,{type:"info",message:)\i\.intl\.format\(\i\.t#{intl::KEYBIND_IN_BROSWER_NOTICE},{downloadLink:\i\.\i\.DOWNLOAD}\)/,
+                replace: "$1$self.renderKeybindsButton()",
                 predicate: () => !IS_USERSCRIPT
             }
         }

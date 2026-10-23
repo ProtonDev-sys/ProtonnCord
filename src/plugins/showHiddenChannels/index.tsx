@@ -398,37 +398,33 @@ export default definePlugin({
             ]
         },
         {
-            find: '"HasBeenInStageChannel"',
+            // The onboarding and boost-upsell helpers are separate modules from the stage layout.
+            find: ".STAGE_CHANNEL_CALL)",
             replacement: [
                 {
                     // Render our HiddenChannelLockScreen component instead of the main stage channel component
-                    match: /screenMessage:(\i)\?.+?children:(?=!\1)(?<=let \i,{channel:(\i).+?)/,
-                    replace: (m, _isPopoutOpen, channel) => `${m}$self.isHiddenChannel(${channel})?$self.HiddenChannelLockScreen(${channel}):`
+                    match: /(screenMessage:(\i)\?.{0,160}?children:)(?=!\2&&)/,
+                    replace: "$1$self.isHiddenChannel(arguments[0]?.channel)?$self.HiddenChannelLockScreen(arguments[0]?.channel):"
                 },
                 {
-                    // Disable useless components for the HiddenChannelLockScreen of stage channels
-                    match: /render(?:BottomLeft|BottomCenter|BottomRight|ChatToasts):\(\)=>(?<=let \i,{channel:(\i).+?)/g,
-                    replace: (m, channel) => `${m}$self.isHiddenChannel(${channel})?null:`
+                    // Select callbacks here so both arrow and regular functions retain their host behavior.
+                    match: /render(?:BottomLeft|BottomCenter|BottomRight|ChatToasts):/g,
+                    replace: "$&$self.isHiddenChannel(arguments[0]?.channel)?()=>null:"
                 },
                 {
                     // Disable gradients for the HiddenChannelLockScreen of stage channels
-                    match: /"124px".+?disableGradients:(?<=let \i,{channel:(\i).+?)/,
-                    replace: (m, channel) => `${m}$self.isHiddenChannel(${channel})||`
+                    match: /(?<=paddingTop:\i},disableGradients:)/,
+                    replace: "$self.isHiddenChannel(arguments[0]?.channel)||"
                 },
                 {
                     // Disable strange styles applied to the header for the HiddenChannelLockScreen of stage channels
-                    match: /"124px".+?style:(?<=let \i,{channel:(\i).+?)/,
-                    replace: (m, channel) => `${m}$self.isHiddenChannel(${channel})?void 0:`
-                }
-            ]
-        },
-        {
-            find: "#{intl::STAGE_FULL_MODERATOR_TITLE}",
-            replacement: [
+                    match: /style:(?={height:`calc\(100% - \$\{)/,
+                    replace: "$&$self.isHiddenChannel(arguments[0]?.channel)?void 0:"
+                },
                 {
                     // Remove the divider and amount of users in stage channel components for the HiddenChannelLockScreen
-                    match: /\(0,\i\.jsx\)\(\i\.\i\.Divider.+?}\)]}\)(?=.+?:(\i)\.guild_id)/,
-                    replace: (m, channel) => `$self.isHiddenChannel(${channel})?null:(${m})`
+                    match: /(\(0,\i\.jsx\)\(\i\.\i\.Divider,{[^{}]*}\)),(\(0,\i\.jsxs\)\(\i\.\i\.Title,{children:\[.{0,800}?\]}\))/,
+                    replace: "$self.isHiddenChannel(arguments[0]?.channel)?null:$1,$self.isHiddenChannel(arguments[0]?.channel)?null:$2"
                 },
                 {
                     // Remove the open chat button for the HiddenChannelLockScreen

@@ -9,10 +9,10 @@ on:
 
 env:
     FORCE_COLOR: true
-    GITHUB_TOKEN: ${{ github.token }}
 
 permissions:
     contents: write
+    actions: read
 
 concurrency:
     group: protonn-cord-release-${{ github.ref }}
@@ -24,17 +24,18 @@ jobs:
         if: contains(fromJSON('["refs/heads/main", "refs/heads/staging", "refs/heads/nightly"]'), github.ref)
         # Release validation must remain independent of the single self-hosted Test runner.
         runs-on: ubuntu-latest
-        timeout-minutes: 35
+        timeout-minutes: 60
 
         steps:
-            - uses: actions/checkout@v7
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   fetch-depth: 0
+                  persist-credentials: false
 
-            - uses: pnpm/action-setup@v6
+            - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
             - name: Use Node.js 24
-              uses: actions/setup-node@v6
+              uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
               with:
                   node-version: 24
                   cache: "pnpm"
@@ -42,15 +43,13 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
-            - name: Verify update channel atomicity offline
-              run: pnpm exec tsx --test scripts/testAuditReleaseAtomicityDeep.ts scripts/testAuditUpdater.ts scripts/testAuditUpdaterBuild.ts scripts/testAuditUpdaterGit.ts scripts/testRendererRuntime.ts
-
-            - name: Verify updater backends and branch handling offline
+            - name: Verify repository privacy before publishing
               run: |
-                  pnpm testUpdaterGit
-                  pnpm testUpdaterHttp
-                  pnpm testUpdaterBranches
-                  pnpm testUpdaterClassification
+                  pnpm checkPrivacy
+                  bash scripts/scanReleaseSecrets.sh git .
+
+            - name: Verify update channel atomicity offline
+              run: pnpm exec tsx --test scripts/testAuditReleaseAtomicityDeep.ts
 
             - name: Build web
               run: pnpm buildWebStandalone
@@ -64,6 +63,13 @@ jobs:
                   pnpm generateEquicordPluginJson dist/equicordplugins.json
                   pnpm generateVencordPluginJson dist/vencordplugins.json
                   pnpm generateDevsList dist/devs.json
+
+            - name: Package user downloads for the stable channel
+              if: github.ref == 'refs/heads/main'
+              run: |
+                  pnpm packageRelease
+                  pnpm testPublicRelease
+                  bash scripts/scanReleaseSecrets.sh dir dist/public-release
 
             - name: Collect files to be released
               run: |
@@ -80,6 +86,9 @@ jobs:
                   fi
 
                   cp desktop/* release
+                  if [[ -d public-release ]]; then
+                      cp public-release/* release
+                  fi
                   for file in equibop/*; do
                     filename=$(basename "$file")
                     cp "$file" "release/equibop${filename^}"
@@ -88,8 +97,16 @@ jobs:
                   find release -type f -size 0 -delete
                   rm -f release/package.json release/*.map
 
+            - name: Require full validation for this revision
+              if: github.repository == 'ProtonDev-sys/ProtonnCord' && vars.ACT != 'true'
+              run: node scripts/requireReleaseValidation.mjs
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+
             - name: Upload Protonn Cord update channel
               if: github.repository == 'ProtonDev-sys/ProtonnCord' && vars.ACT != 'true'
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
               shell: bash
               run: |
                   set -euo pipefail

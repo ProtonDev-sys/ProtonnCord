@@ -25,13 +25,6 @@ const nativeMedia = loadTestModule("src/equicordplugins/fileUpload/nativeNetwork
     "node:dns/promises": {}, "node:http": {}, "node:https": {}, "node:net": {}
 }, { URL, Blob, Uint8Array, AbortController, AbortSignal });
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
-
 function loadRenderer(native: object, common: object = {}) {
     const output = transpileModule(readFileSync("src/equicordplugins/discordMcp.desktop/index.ts", "utf8")
         + "\nexport { generateAttachmentWaveform, waveformCache, executeTool, handleBridgeRequest, bridgeLoop, inFlightRequests, serializeMessage };", {
@@ -63,7 +56,7 @@ async function nativeFixture(t: { after(fn: () => Promise<void>): void; }, overr
         const output = transpileModule(readFileSync("src/equicordplugins/discordMcp.desktop/native.ts", "utf8"), {
             compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, esModuleInterop: false }
         }).outputText;
-        const modules = { "@main/utils/constants": { DATA_DIR: root }, "./policy": policy, "../fileUpload/nativeNetwork": nativeMedia, crypto, fs: { ...fs, watch(...args: any[]) {
+        const modules = { "@main/utils/constants": { DATA_DIR: root }, "file://../../../tools/discord-mcp/server.mjs?trim=false": { default: readFileSync("tools/discord-mcp/server.mjs", "utf8") }, "./policy": policy, "../fileUpload/nativeNetwork": nativeMedia, crypto, fs: { ...fs, watch(...args: any[]) {
             const watcher = (fs.watch as any)(...args) as fs.FSWatcher;
             watchers.add(watcher);
             watcher.on("close", () => watchers.delete(watcher));
@@ -89,6 +82,46 @@ async function nativeFixture(t: { after(fn: () => Promise<void>): void; }, overr
         async response(id: string) { return JSON.parse(await fsp.readFile(path.join(directory, "responses", `${id}.json`), "utf8")); }
     };
 }
+
+test("Discord MCP installs and refreshes its stable server path without rotating credentials or losing recorded sends", async t => {
+    const f = await nativeFixture(t);
+    const serverPath = path.join(f.directory, "server.mjs");
+    const source = readFileSync("tools/discord-mcp/server.mjs", "utf8");
+    assert.equal(await fsp.readFile(serverPath, "utf8"), source);
+    const config = await fsp.readFile(path.join(f.directory, "config.json"), "utf8");
+    const ledger = JSON.stringify(["123456789012345678:234567890123456789"]);
+    await fsp.writeFile(path.join(f.directory, "sent-messages.json"), ledger);
+    await fsp.writeFile(serverPath, "outdated server");
+    const updated = f.load();
+    await updated.initializeBridge(f.event, crypto.randomUUID());
+    assert.equal(await fsp.readFile(serverPath, "utf8"), source);
+    assert.equal(await fsp.readFile(path.join(f.directory, "config.json"), "utf8"), config);
+    assert.equal(await fsp.readFile(path.join(f.directory, "sent-messages.json"), "utf8"), ledger);
+});
+
+test("Discord MCP retries a failed server refresh while preserving the installed server and bridge credentials", async t => {
+    let locked = false;
+    const f = await nativeFixture(t, {
+        rename: async (from: string, to: string) => {
+            if (locked && path.basename(to) === "server.mjs") throw Object.assign(new Error("server locked"), { code: "EACCES" });
+            await fsp.rename(from, to);
+        }
+    });
+    const serverPath = path.join(f.directory, "server.mjs");
+    const configPath = path.join(f.directory, "config.json");
+    const config = await fsp.readFile(configPath, "utf8");
+    await fsp.writeFile(serverPath, "previous server");
+    locked = true;
+    const updated = f.load();
+    await assert.rejects(updated.initializeBridge(f.event, crypto.randomUUID()), /server locked/);
+    assert.equal(await fsp.readFile(serverPath, "utf8"), "previous server");
+    assert.equal(await fsp.readFile(configPath, "utf8"), config);
+    assert.equal((await fsp.readdir(f.directory)).some(name => name.endsWith(".tmp")), false);
+    locked = false;
+    await updated.initializeBridge(f.event, crypto.randomUUID());
+    assert.equal(await fsp.readFile(serverPath, "utf8"), readFileSync("tools/discord-mcp/server.mjs", "utf8"));
+    assert.equal(await fsp.readFile(configPath, "utf8"), config);
+});
 
 test("Discord MCP stop wakes native polling and an old session cannot claim or cancel its replacement", async t => {
     const f = await nativeFixture(t);
@@ -135,8 +168,8 @@ test("Discord MCP response write failures never replace a completed result with 
 
 for (const blocked of [false, true]) {
     test(`Discord MCP stop cancels every unstarted ${blocked ? "capacity-blocked" : "late claimed"} request`, async () => {
-        const batch = deferred<any[]>();
-        const completed = deferred<void>();
+        const batch = Promise.withResolvers<any[]>();
+        const completed = Promise.withResolvers<void>();
         const responses: any[] = [];
         const f = loadRenderer({
             initializeBridge: async () => {}, cancelRequests: async () => {},
@@ -358,7 +391,7 @@ test("Discord MCP REST rejection remains a failed send without recording deletio
 });
 
 test("Discord MCP stop cannot replace an already-started send's confirmed result with cancellation", async () => {
-    const post = deferred<object>();
+    const post = Promise.withResolvers<object>();
     const responses: any[] = [];
     let records = 0;
     const renderer = loadRenderer({
@@ -427,9 +460,9 @@ test("Discord MCP confirms deletion despite ledger failure and retries only trac
 
 for (const resolved of [false, true]) {
     test(`Discord MCP evicted waveform failures preserve ${resolved ? "completed" : "pending"} replacements`, async () => {
-        const requests: ReturnType<typeof deferred<any>>[] = [];
+        const requests: PromiseWithResolvers<any>[] = [];
         const f = loadRenderer({ fetchDiscordAttachment() {
-            const request = deferred<any>();
+            const request = Promise.withResolvers<any>();
             requests.push(request);
             return request.promise;
         } });

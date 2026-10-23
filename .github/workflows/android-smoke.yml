@@ -1,0 +1,162 @@
+name: Android account-free smoke
+
+on:
+    workflow_call:
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    android-smoke:
+        name: Android 15 storage and signed-out client
+        runs-on: ubuntu-24.04
+        timeout-minutes: 45
+        env:
+            PROTONNCORD_KEY_ALIAS: protonncord-ci
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+              with:
+                  node-version: 24
+            - name: Read pinned JavaScript tools
+              id: toolchain
+              run: |
+                  node <<'NODE'
+                  const { appendFileSync, readFileSync } = require('node:fs');
+                  const pins = JSON.parse(readFileSync('mobile/toolchain.json', 'utf8'));
+                  for (const [output, key] of [['bun', 'bunVersion'], ['deno', 'denoVersion']]) {
+                      if (!/^\d+\.\d+\.\d+$/.test(pins[key])) throw new Error(`Invalid ${key}`);
+                      appendFileSync(process.env.GITHUB_OUTPUT, `${output}=${pins[key]}\n`);
+                  }
+                  for (const key of ['revengeNativeRevision', 'revengeRuntimeRevision']) {
+                      if (!/^[a-f0-9]{40}$/.test(pins[key])) throw new Error(`Invalid ${key}`);
+                  }
+                  NODE
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+              with:
+                  bun-version: ${{ steps.toolchain.outputs.bun }}
+            - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+              with:
+                  deno-version: ${{ steps.toolchain.outputs.deno }}
+            - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+              with:
+                  distribution: temurin
+                  java-version: |
+                      21
+                      25
+            - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+              with:
+                  packages: platform-tools
+            - run: sdkmanager 'platforms;android-36' 'platforms;android-37.0' 'build-tools;36.0.0'
+            - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+            - name: Build pinned Revenge API
+              working-directory: mobile
+              run: |
+                  set -euo pipefail
+                  mkdir -p .toolchain
+                  revision=$(node -p "require('./toolchain.json').revengeNativeRevision")
+                  git clone --filter=blob:none --no-checkout https://github.com/revenge-mod/revenge-xposed.git .toolchain/revenge-xposed
+                  git -C .toolchain/revenge-xposed checkout --detach "$revision"
+                  cd .toolchain/revenge-xposed
+                  bash gradlew :api:publishToMavenLocal --console=plain
+            - name: Build this plugin and the native test APK
+              working-directory: mobile
+              run: |
+                  bash gradlew packageSecureMessaging :plugins:secure-messaging:assembleDebugAndroidTest --console=plain
+                  bun run test:bundle
+            - name: Build pinned Revenge Next runtime
+              working-directory: mobile
+              env:
+                  REVENGE_DISCORD_SERVER_URL: https://discord.com/invite/ddcQf3s2Uq
+                  REVENGE_DEFAULT_PLUGIN_REPOSITORY_URL: https://github.com/ProtonDev-sys/ProtonnCord/releases/download/mobile-nightly
+              run: |
+                  set -euo pipefail
+                  revision=$(node -p "require('./toolchain.json').revengeRuntimeRevision")
+                  git clone --filter=blob:none --no-checkout https://github.com/revenge-mod/revenge-bundle-next.git .toolchain/revenge-bundle-next
+                  git -C .toolchain/revenge-bundle-next checkout --detach "$revision"
+                  export REVENGE_SOURCE_REPOSITORY_URL="https://github.com/revenge-mod/revenge-bundle-next/tree/$revision"
+                  export REVENGE_LICENSE_URL="https://raw.githubusercontent.com/revenge-mod/revenge-bundle-next/$revision/LICENSE"
+                  cd .toolchain/revenge-bundle-next
+                  deno install --frozen
+                  node ../../tools/link-runtime-workspaces.mjs "$PWD"
+                  deno run --unstable-bare-node-builtins --permission-set=build scripts/build.ts 2>&1 | tee ../runtime-build.log
+                  if rg -q 'UNRESOLVED_IMPORT|MISSING_GLOBAL_NAME' ../runtime-build.log; then
+                      echo 'Runtime dependencies were not bundled correctly.'
+                      exit 1
+                  fi
+                  cp dist/revenge.bundle ../../build/dist/revenge.bundle
+            - name: Check Android input and harness policies
+              run: python3 -B -m unittest discover -s mobile/tools -p 'test_*.py' -v
+            - name: Create a temporary signing identity for the emulator fixture
+              run: |
+                  python3 -B <<'PY'
+                  import os, secrets
+                  password = secrets.token_hex(32)
+                  print(f"::add-mask::{password}")
+                  with open(os.environ['GITHUB_ENV'], 'a') as output:
+                      output.write(f"PROTONNCORD_STORE_PASS={password}\nPROTONNCORD_KEY_PASS={password}\n")
+                      output.write(f"PROTONNCORD_KEYSTORE={os.environ['RUNNER_TEMP']}/protonncord-ci.p12\n")
+                  PY
+            - name: Build and verify the standalone client fixture
+              env:
+                  JAVA_HOME: ${{ env.JAVA_HOME_21_X64 }}
+              run: |
+                  "$JAVA_HOME/bin/keytool" -genkeypair -storetype PKCS12 -keyalg RSA -keysize 3072 -validity 2 \
+                    -storepass:env PROTONNCORD_STORE_PASS -keypass:env PROTONNCORD_KEY_PASS \
+                    -alias "$PROTONNCORD_KEY_ALIAS" -keystore "$PROTONNCORD_KEYSTORE" -dname 'CN=ProtonnCord CI Fixture'
+                  python3 -B mobile/tools/patch_android.py --universal \
+                    --plugin mobile/build/dist/uk.co.protonn.secure-messaging.zip \
+                    --runtime mobile/build/dist/revenge.bundle \
+                    --build-tools "$ANDROID_HOME/build-tools/36.0.0" --output mobile/build/standalone
+            - name: Enable emulator hardware acceleration
+              run: |
+                  echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+                  sudo udevadm control --reload-rules
+                  sudo udevadm trigger --name-match=kvm
+            - name: Run native storage tests and the signed-out client
+              uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+              with:
+                  api-level: 35
+                  target: google_apis
+                  arch: x86_64
+                  profile: pixel_7_pro
+                  ram-size: 4096M
+                  disk-size: 4096M
+                  emulator-build: 16428233 # Android Emulator 37.2.12
+                  emulator-port: 5554
+                  force-avd-creation: true
+                  disable-linux-hw-accel: false
+                  disable-animations: true
+                  emulator-options: -no-window -gpu software -accel on -no-snapshot -noaudio -no-boot-anim -camera-back none
+                  pre-emulator-launch-script: |
+                      mkdir -p mobile/build/reports/android-smoke
+                      sdkmanager --list_installed > mobile/build/reports/android-smoke/sdk-packages.txt
+                      "$ANDROID_HOME/emulator/emulator" -no-window -noaudio -version > mobile/build/reports/android-smoke/emulator-version.txt 2>&1
+                  script: bash mobile/tools/run-android-smoke.sh
+            - name: Retain test reports and diagnostics
+              if: always()
+              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+              with:
+                  name: android-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+                  retention-days: 14
+                  if-no-files-found: warn
+                  path: |
+                      mobile/build/reports/android-smoke/*.txt
+                      mobile/build/reports/android-smoke/inputs.sha256
+                      mobile/build/reports/android-client/logcat.txt
+                      mobile/build/reports/android-client/screen.png
+                      mobile/build/reports/android-client/hierarchy.xml
+                      mobile/build/reports/android-client/result.json
+                      mobile/build/reports/android-client/first-launch/
+                      mobile/build/reports/android-client/failure-*.txt
+                      mobile/build/reports/android-client/failure-*.png
+                      mobile/build/standalone/build-receipt.json
+                      mobile/plugins/secure-messaging/build/reports/androidTests/connected/
+                      mobile/plugins/secure-messaging/build/outputs/androidTest-results/connected/
+                      mobile/.toolchain/runtime-build.log
+            - name: Remove temporary signing material
+              if: always()
+              run: rm -f "$RUNNER_TEMP/protonncord-ci.p12"

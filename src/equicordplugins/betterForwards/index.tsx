@@ -131,7 +131,7 @@ export default definePlugin({
                     replace: "$self.renderWrapper(__state,$&)"
                 },
                 {
-                    match: /(?<=#{intl::CHECKPOINT_2025}.{50,100}?)\i>0&&\(.{200,250}?\}\)\]\}\)/,
+                    match: /(?<=compact:\i\}\),)\i>0&&\(.{200,250}?\}\)\]\}\)/,
                     replace: "$self.renderForwardPicker()"
                 },
                 {
@@ -150,10 +150,10 @@ export default definePlugin({
             ]
         },
         {
-            find: 'location:"ForwardFooter"',
+            find: ".FORWARD_BREADCRUMB_CLICKED,{",
             replacement: {
-                match: /let{message:\i,snapshot:\i,index:\i}=(\i)/,
-                replace: "return $self.renderForwardFooter($1);$&"
+                match: /(disableComponentInteractivity:\i\}\),!\i&&\(0,\i\.jsx\)\()\i(?=,\{message:\i,snapshot:\i,index:\i\}\))/,
+                replace: "$1$self.renderForwardFooter"
             }
         },
         {

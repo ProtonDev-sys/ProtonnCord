@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
-import { createSourceFile, ScriptTarget, transpileModule } from "typescript";
+import { ScriptTarget, transpileModule } from "typescript";
 
 import { loadTestModule } from "./utils/loadTestModule";
 
@@ -187,7 +186,7 @@ test("overlapping webpack protection restores the original descriptor only after
 test("musiclink completion cannot post after stop, restart or account switch", async () => {
     for (const mode of ["stop", "restart", "switch", "normal", "failure"] as const) {
         let account = "owner";
-        const lookup = deferred<{ links: { spotify: { url: string; }; }; }>();
+        const lookup = Promise.withResolvers<{ links: { spotify: { url: string; }; }; }>();
         const sent: unknown[] = [];
         const notices: unknown[] = [];
         const plugin = loadModule<{ default: { start(): void; stop(): void; commands: { execute(opts: unknown[], ctx: unknown): Promise<void>; }[]; }; }>(
@@ -295,18 +294,6 @@ test("Song Spotlight sign-out only removes the mounted current account's authori
     signOut.props.onClick();
     assert.deepEqual(tokens, { other: "other-token" });
     assert.equal(notices.length, 1);
-});
-
-test("all tracked owned R-Z TypeScript sources parse", () => {
-    const paths = execFileSync("git", ["ls-files", "src/equicordplugins/*"], { encoding: "utf8" }).trim().split("\n")
-        .filter(path => /^src\/equicordplugins\/[r-z]/i.test(path)
-            && !/^src\/equicordplugins\/(secureMessaging\.desktop|secureMessagingForwarding\.desktop)\//.test(path));
-    assert.ok(paths.length > 200);
-    for (const path of paths.filter(path => /\.tsx?$/.test(path))) {
-        const source = createSourceFile(path, readFileSync(path, "utf8"), ScriptTarget.Latest, true);
-        const diagnostics = (source as typeof source & { parseDiagnostics: unknown[]; }).parseDiagnostics;
-        assert.equal(diagnostics.length, 0, path);
-    }
 });
 
 function themeFixture(response: Response, failRename = false) {
@@ -486,19 +473,12 @@ test("automatic voice status restores only its own account and applied value", (
     assert.deepEqual(switchedVoice.writes, ["dnd"]);
 });
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (reason?: unknown) => void;
-    const promise = new Promise<T>((fulfill, fail) => { resolve = fulfill; reject = fail; });
-    return { promise, resolve, reject };
-}
-
 async function flushMicrotasks() {
     for (let attempt = 0; attempt < 20; attempt++) await Promise.resolve();
 }
 
 test("scheduled plugin stop invalidates pending startup and an older restarted startup", async () => {
-    const loads: { pending: ReturnType<typeof deferred<void>>; isCurrent: () => boolean; }[] = [];
+    const loads: { pending: PromiseWithResolvers<void>; isCurrent: () => boolean; }[] = [];
     let starts = 0;
     let recreates = 0;
     let changeInterval = () => {};
@@ -521,7 +501,7 @@ test("scheduled plugin stop invalidates pending startup and an older restarted s
         "./components/ViewScheduledModal": {},
         "./utils": {
             loadScheduledMessages: (isCurrent: () => boolean) => {
-                const pending = deferred<void>();
+                const pending = Promise.withResolvers<void>();
                 loads.push({ pending, isCurrent });
                 return pending.promise;
             },
@@ -739,7 +719,7 @@ test("logged-out scheduler keeps a bounded check and resumes only for the owning
 });
 
 test("stopped storage loads cannot replace the queue", async () => {
-    const pending = deferred<QueueFixtureMessage[]>();
+    const pending = Promise.withResolvers<QueueFixtureMessage[]>();
     const fixture = schedulerFixture([], { get: () => pending.promise });
     let current = true;
     const load = fixture.loadScheduledMessages(() => current);
@@ -783,7 +763,7 @@ test("reentrant stop during phantom removal cannot start a message post", async 
 });
 
 test("restart during an in-flight post does not duplicate it or send the next message from the old run", async () => {
-    const posted = deferred<void>();
+    const posted = Promise.withResolvers<void>();
     const fixture = schedulerFixture([queued("first"), queued("second")], { post: posted.promise });
     await fixture.loadScheduledMessages();
     fixture.startScheduler();
@@ -802,7 +782,7 @@ test("restart during an in-flight post does not duplicate it or send the next me
 
 test("inactive failed sends retain the queue after stop or account switch", async () => {
     for (const cancellation of ["stop", "account-switch"]) {
-        const posted = deferred<void>();
+        const posted = Promise.withResolvers<void>();
         const fixture = schedulerFixture([queued(cancellation)], { post: posted.promise });
         await fixture.loadScheduledMessages();
         fixture.startScheduler();
@@ -833,7 +813,7 @@ test("stop clears reaction waits and prevents a reaction retry", async () => {
 });
 
 test("stop suppresses phantom dispatch after message history finishes loading", async () => {
-    const history = deferred<void>();
+    const history = Promise.withResolvers<void>();
     const fixture = schedulerFixture([], { showPhantoms: true, fetchMessages: history.promise });
     await fixture.createPhantomMessage(queued("phantom"));
     fixture.stopScheduler();
@@ -971,7 +951,7 @@ test("AudioBookShelf credentials cannot follow redirects or use ambient cookies"
 test("split messages do not send further chunks after stop/start or account switch", async () => {
     for (const cancellation of ["restart", "account-switch", "ordinary-failure"]) {
         let accountId = "owner";
-        const firstPost = deferred<void>();
+        const firstPost = Promise.withResolvers<void>();
         const posts: string[] = [];
         const restored: string[] = [];
         const api = loadModule<{ default: { start(): void; stop(): void; onBeforeMessageSend(channel: string, message: { content: string; }): Promise<{ cancel: boolean; }>; }; }>(

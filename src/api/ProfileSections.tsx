@@ -6,8 +6,9 @@
 
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Logger } from "@utils/Logger";
-import { useEffect, useState } from "@webpack/common";
 import type { ReactNode } from "react";
+
+import { createComponentRegistry } from "./componentRegistry";
 
 const logger = new Logger("ProfileSectionsAPI");
 
@@ -18,8 +19,7 @@ export interface ProfileSectionData {
     priority: number;
 }
 
-const profileSections = new Map<string, ProfileSectionData>();
-const profileSectionListeners = new Set<() => void>();
+const profileSections = createComponentRegistry<ProfileSectionData>("descending");
 
 /**
  * Adds a section to the user profile panel near the 'Member Since' area.
@@ -36,7 +36,6 @@ const profileSectionListeners = new Set<() => void>();
  */
 export function addProfileSection(id: string, render: ProfileSectionFactory, priority = 0) {
     profileSections.set(id, { render, priority });
-    profileSectionListeners.forEach(listener => listener());
 }
 
 /**
@@ -46,20 +45,10 @@ export function addProfileSection(id: string, render: ProfileSectionFactory, pri
  */
 export function removeProfileSection(id: string) {
     profileSections.delete(id);
-    profileSectionListeners.forEach(listener => listener());
 }
 
 function ProfileSections({ userId, isSideBar }: { userId: string; isSideBar: boolean; }) {
-    const [, forceUpdate] = useState(0);
-
-    useEffect(() => {
-        const listener = () => forceUpdate(n => n + 1);
-        profileSectionListeners.add(listener);
-        return () => { profileSectionListeners.delete(listener); };
-    }, []);
-
-    return Array.from(profileSections)
-        .sort(([, a], [, b]) => b.priority - a.priority)
+    return profileSections.useEntries()
         .map(([id, { render: Section }]) => (
             <ErrorBoundary noop key={id} onError={e => logger.error(`Failed to render profile section: ${id}`, e.error)}>
                 <Section userId={userId} isSideBar={isSideBar} />

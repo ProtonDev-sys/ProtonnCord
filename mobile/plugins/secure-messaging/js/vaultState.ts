@@ -259,6 +259,7 @@ export class MobileVault {
 	private queue: Promise<void> = Promise.resolve()
 	private saveFailed = false
 	private saveFailureVersion = 0
+	private generation = 0
 	private savedProtectedChannels: Record<string, string[]> = {}
 	private readonly listeners = new Set<() => void>()
 	constructor(private readonly storage: VaultStorage) {}
@@ -290,6 +291,7 @@ export class MobileVault {
 	}
 
 	async load(): Promise<void> {
+		const generation = ++this.generation
 		this.root?.fill(0)
 		this.root = null
 		this.rootFingerprint = null
@@ -297,6 +299,8 @@ export class MobileVault {
 		this.value = null
 		await this.queue.catch(() => {})
 		const raw = await this.storage.read()
+		if (generation !== this.generation)
+			throw new Error('Secure Messaging was locked or reloaded while loading')
 		if (raw === null) this.value = { version: 1, accounts: {} }
 		else {
 			const parsed: unknown = JSON.parse(raw)
@@ -407,7 +411,7 @@ export class MobileVault {
 			)
 	}
 
-	async useOneKey(secret: Uint8Array, userId: string): Promise<void> {
+	async unlockWithOneKey(secret: Uint8Array, userId: string): Promise<void> {
 		const derived = deriveOneKeyRoot(secret)
 		let installed = false
 		try {
@@ -478,7 +482,7 @@ export class MobileVault {
 	}
 
 	lock(): void {
-		if (!this.configured) return
+		this.generation++
 		this.root?.fill(0)
 		this.root = null
 		this.rootFingerprint = null
@@ -521,6 +525,7 @@ export class MobileVault {
 			throw new Error('Phone pairing would exceed the verified contact limit')
 		for (const [id, conversation] of Object.entries(pairing.conversations)) {
 			next.conversations[id] = {
+				...next.conversations[id],
 				...conversation,
 				...(next.conversations[id]?.needsReview ? { needsReview: true } : {}),
 			}
@@ -659,6 +664,7 @@ export class MobileVault {
 		}
 		for (const [channelId, conversation] of Object.entries(state.conversations))
 			value.conversations[channelId] = {
+				...value.conversations[channelId],
 				...conversation,
 				...(value.conversations[channelId]?.needsReview
 					? { needsReview: true }

@@ -15,13 +15,6 @@ import { parseUpdaterBranch, type UpdaterBranch } from "../src/shared/Updater";
 import { classifyUpdateChanges } from "../src/utils/updateClassification";
 import { loadTestModule } from "./utils/loadTestModule";
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: unknown) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
-
 function load<T>(path: string, mocks: Record<string, unknown>, globals: Record<string, unknown>): T {
     return loadTestModule<T>(path, mocks, {
         ...globals,
@@ -79,7 +72,7 @@ test("source checks classify against the installed build after a deferred restar
 
 test("late branch responses, reset checks, and older overlapping checks cannot overwrite updater state", async () => {
     const f = rendererFixture();
-    const delayed = deferred<{ hash: string; author: string; message: string; }[]>();
+    const delayed = Promise.withResolvers<{ hash: string; author: string; message: string; }[]>();
     f.setCheck(() => delayed.promise);
     const old = f.updater.checkForUpdates();
     f.settings.updateBranch = "nightly";
@@ -89,7 +82,7 @@ test("late branch responses, reset checks, and older overlapping checks cannot o
     assert.equal(await old, false);
     assert.equal(f.updater.changes.length, 0);
 
-    const reset = deferred<{ hash: string; author: string; message: string; }[]>();
+    const reset = Promise.withResolvers<{ hash: string; author: string; message: string; }[]>();
     f.setCheck(() => reset.promise);
     const pending = f.updater.checkForUpdates();
     f.updater.resetUpdateState();
@@ -97,7 +90,7 @@ test("late branch responses, reset checks, and older overlapping checks cannot o
     assert.equal(await pending, false);
     assert.equal(f.updater.isOutdated, false);
 
-    const older = deferred<{ hash: string; author: string; message: string; }[]>();
+    const older = Promise.withResolvers<{ hash: string; author: string; message: string; }[]>();
     f.setCheck(() => older.promise);
     const overlapping = f.updater.checkForUpdates();
     f.setCheck(async () => [{ hash: "d".repeat(40), author: "Fixture", message: "Newest" }]);
@@ -110,7 +103,7 @@ test("late branch responses, reset checks, and older overlapping checks cannot o
 test("simultaneous installs share one operation and another branch cannot report its result as success", async () => {
     const f = rendererFixture();
     await f.updater.checkForUpdates();
-    const pending = deferred<boolean>();
+    const pending = Promise.withResolvers<boolean>();
     f.setUpdate(() => pending.promise);
     const first = f.updater.update();
     const second = f.updater.update();
@@ -136,7 +129,7 @@ test("repair forces a release lookup and rebuild even when the current version h
 
 test("native operation queue preserves order and continues after a failure", async () => {
     const enqueue = createOperationQueue();
-    const pending = deferred<void>();
+    const pending = Promise.withResolvers<void>();
     const calls: string[] = [];
     const first = enqueue(async () => { calls.push("first"); await pending.promise; throw new Error("Fixture failure"); });
     const rejected = assert.rejects(first, /Fixture failure/u);
@@ -170,7 +163,7 @@ test("HTTP branch selections survive checks and other selections, and failed ins
         } },
         "@shared/Updater": { parseUpdaterBranch },
         "@shared/vencordUserAgent": { VENCORD_USER_AGENT: "Fixture" },
-        electron: { ipcMain: { handle: (event: IpcEvents, handler: (...args: any[]) => Promise<any>) => handlers.set(event, handler) } },
+        "@main/ipc": { ipcMain: { handle: (event: IpcEvents, handler: (...args: any[]) => Promise<any>) => handlers.set(event, handler) } },
         "original-fs": {}, "~git-hash": { default: "a".repeat(40) }, "~git-remote": { default: "Fixture/Fixture" },
         "./common": { ASAR_FILE: "desktop.asar" }, "./ipc": { createOperationQueue, serializeErrors },
         "./httpOperations": {

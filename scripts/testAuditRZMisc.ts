@@ -17,12 +17,6 @@ function load(file: string, mocks: Record<string, unknown>, globals: Record<stri
         ...mocks
     }, { React, URL, URLSearchParams, AbortSignal, console, File, Uint8Array, ...globals }, expose);
 }
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>(yes => { resolve = yes; });
-    return { promise, resolve };
-}
-
 test("RZ8-03/04: resolved role/everyone mentions and DM allowlist retain global restrictions", () => {
     let channel: any = { id: "12345678901234567", guild_id: "guild" };
     let resolved: any;
@@ -104,7 +98,7 @@ test("RZ8-09: remote-only avatars have no removal action; local overrides can be
 });
 
 test("RZ8-10: reverse concurrent unfurls merge latest embeds and abandon deleted messages", async () => {
-    const requests: ReturnType<typeof deferred<any>>[] = [];
+    const requests: PromiseWithResolvers<any>[] = [];
     const captured = { id: "message", channel_id: "channel", content: "https://example.invalid/a https://example.invalid/b", embeds: [] };
     let current: any = captured;
     const api = load("showMessageEmbeds/index.tsx", {
@@ -112,7 +106,7 @@ test("RZ8-10: reverse concurrent unfurls merge latest embeds and abandon deleted
         "@api/MessageUpdater": { updateMessage: (_channel: string, _id: string, fields: object) => { current = { ...current, ...fields }; } },
         "@webpack": { findByCodeLazy: () => (_channel: string, _id: string, embed: unknown) => embed },
         "@webpack/common": { ChannelStore: { getChannel: () => ({ id: "channel" }) }, MessageStore: { getMessage: () => current },
-            Constants: { Endpoints: {} }, RestAPI: { post: () => { const request = deferred<any>(); requests.push(request); return request.promise; } } }
+            Constants: { Endpoints: {} }, RestAPI: { post: () => { const request = Promise.withResolvers<any>(); requests.push(request); return request.promise; } } }
     }, {}, "\nexport { unfurlEmbed };\n");
     const one = api.unfurlEmbed("https://example.invalid/a", captured);
     const two = api.unfurlEmbed("https://example.invalid/b", captured);

@@ -18,13 +18,13 @@
 
 import { randomUUID } from "node:crypto";
 
+import { ipcMain } from "@main/ipc";
 import { IpcEvents } from "@shared/IpcEvents";
 import { parseUpdaterBranch, type UpdaterBranch, type UpdaterDiagnostics } from "@shared/Updater";
 import { VENCORD_USER_AGENT } from "@shared/vencordUserAgent";
-import { ipcMain } from "electron";
 import { renameSync, unlinkSync, writeFileSync } from "original-fs";
 
-import gitHash from "~git-hash";
+import gitHash, { buildChannel } from "~git-hash";
 import gitRemote from "~git-remote";
 
 import { ASAR_FILE } from "./common";
@@ -47,6 +47,7 @@ const DOWNLOAD_SIZE_LIMIT = 64 * 1024 * 1024;
 const pendingUpdates = new Map<UpdaterBranch, PendingHttpUpdate>();
 let lastRequestedBranch: UpdaterBranch = "main";
 let lastInstalledHash = gitHash;
+let lastInstalledBranch: UpdaterBranch | null = buildChannel;
 const enqueue = createOperationQueue();
 
 async function githubGet(endpoint: string): Promise<unknown> {
@@ -66,6 +67,7 @@ async function calculateGitChanges(branch: unknown) {
         lastInstalledHash,
         ASAR_FILE,
         parseUpdaterBranch(branch),
+        lastInstalledBranch,
     );
     return inspection.changes;
 }
@@ -73,7 +75,7 @@ async function calculateGitChanges(branch: unknown) {
 async function fetchUpdates(branch: unknown, force: unknown = false) {
     if (typeof force !== "boolean") throw new Error("Invalid repair option");
     const selectedBranch = parseUpdaterBranch(branch);
-    const pending = await findHttpUpdate(githubGet, lastInstalledHash, ASAR_FILE, selectedBranch, force);
+    const pending = await findHttpUpdate(githubGet, lastInstalledHash, ASAR_FILE, selectedBranch, force, lastInstalledBranch);
     lastRequestedBranch = selectedBranch;
     if (pending) pendingUpdates.set(selectedBranch, pending);
     else pendingUpdates.delete(selectedBranch);
@@ -102,6 +104,7 @@ async function applyUpdates(branch?: unknown) {
         }),
     );
     lastInstalledHash = pending.hash;
+    lastInstalledBranch = selectedBranch;
     pendingUpdates.delete(selectedBranch);
 
     return true;

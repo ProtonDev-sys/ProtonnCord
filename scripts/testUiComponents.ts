@@ -39,6 +39,127 @@ function loadComponent(path: string, hooks: Record<string, unknown> = {}, additi
     });
 }
 
+function componentRegistryFixture() {
+    const hooks: { subscribe(listener: () => void): () => void; getSnapshot(): readonly unknown[]; }[] = [];
+    const errors: unknown[][] = [];
+    const common = { React: { useSyncExternalStore(subscribe: (listener: () => void) => () => void, getSnapshot: () => readonly unknown[]) {
+        hooks.push({ subscribe, getSnapshot });
+        return getSnapshot();
+    } } };
+    const logger = { Logger: class { error(...args: unknown[]) { errors.push(args); } } };
+    const api = loadComponent("src/api/componentRegistry.ts", common, { "@utils/Logger": logger });
+    function load(path: string) {
+        return loadComponent(path, common, {
+            "./componentRegistry": api,
+            "@components/ErrorBoundary": { __esModule: true, default: "error-boundary" },
+            "@utils/Logger": logger,
+            "@webpack": { findComponentByCodeLazy: () => "component", findCssClassesLazy: () => ({}) }
+        });
+    }
+    return { api, hooks, errors, load };
+}
+
+test("component registries keep stable snapshots, preserve tie order, and expose changes before subscription", () => {
+    const { api, hooks } = componentRegistryFixture();
+    const registry = api.createComponentRegistry();
+    const read = () => registry.useEntries() as [string, { priority: number; }][];
+    const empty = read();
+    const firstHook = hooks.at(-1)!;
+    registry.set("second", { priority: 2 });
+    registry.set("first", { priority: 1 });
+    registry.set("tie", { priority: 1 });
+    const snapshot = read();
+    assert.deepEqual(Array.from(snapshot, ([id]) => id), ["first", "tie", "second"]);
+    assert.equal(read(), snapshot, "repeated renders must not sort or allocate another snapshot");
+    assert.notEqual(firstHook.getSnapshot(), empty, "React can detect registration between rendering and subscribing");
+    assert.equal(firstHook.getSnapshot(), snapshot);
+    assert.equal(hooks.at(-1)!.subscribe, firstHook.subscribe);
+    let changes = 0;
+    const removeListener = firstHook.subscribe(() => changes++);
+    registry.delete("missing");
+    assert.equal(changes, 0);
+    assert.equal(read(), snapshot);
+    registry.set("second", { priority: 1 });
+    assert.equal(changes, 1);
+    assert.deepEqual(Array.from(read(), ([id]) => id), ["second", "first", "tie"], "replacement retains the original registration order");
+    assert.deepEqual(Array.from(snapshot, ([id]) => id), ["first", "tie", "second"], "an older render's snapshot stays unchanged");
+    registry.delete("first");
+    registry.set("first", { priority: 1 });
+    assert.deepEqual(Array.from(read(), ([id]) => id), ["second", "tie", "first"]);
+    removeListener();
+    registry.delete("first");
+    assert.equal(changes, 3, "unmount releases the original subscription");
+});
+
+test("component registry subscriber failures cannot strand entries or block other subscribers", () => {
+    const { api, hooks, errors } = componentRegistryFixture();
+    const registry = api.createComponentRegistry("descending");
+    registry.useEntries();
+    const { subscribe } = hooks[0];
+    const removeFailure = subscribe(() => { throw new Error("Subscriber failed"); });
+    let updates = 0;
+    const removeHealthy = subscribe(() => updates++);
+    assert.doesNotThrow(() => registry.set("one", { priority: 1 }));
+    registry.set("two", { priority: 2 });
+    assert.deepEqual(Array.from(registry.useEntries(), ([id]: [string]) => id), ["two", "one"]);
+    assert.doesNotThrow(() => registry.delete("two"));
+    assert.equal(updates, 3);
+    assert.equal(errors.length, 3);
+    removeFailure(); removeHealthy();
+    registry.delete("one");
+    assert.equal(registry.useEntries().length, 0);
+    assert.equal(updates, 3);
+    assert.equal(errors.length, 3);
+});
+
+for (const { path, add, remove, render, descending } of [
+    { path: "HeaderBar", add: "addHeaderBarButton", remove: "removeHeaderBarButton", render: "_addHeaderBarButtons", descending: false },
+    { path: "HeaderBar", add: "addChannelToolbarButton", remove: "removeChannelToolbarButton", render: "_addChannelToolbarButtons", descending: false },
+    { path: "ProfileSections", add: "addProfileSection", remove: "removeProfileSection", render: "renderProfileSections", descending: true },
+    { path: "ProfileCollections", add: "addProfileCollection", remove: "removeProfileCollection", render: "renderProfileCollections", descending: true }
+]) test(`${add} preserves rendering, priorities, replacement and removal`, () => {
+    const { load, hooks } = componentRegistryFixture();
+    const api = load(`src/api/${path}.tsx`);
+    const props = { userId: "user", currentUser: { id: "user" }, isSideBar: true, hostProp: "preserved" };
+    function output() {
+        const toolbar: any[] = [];
+        const root = render === "_addChannelToolbarButtons" ? (api[render](toolbar), toolbar[0])
+            : path === "HeaderBar" ? api[render]()[0] : api[render](props);
+        return root.type(root.props) as any[];
+    }
+    const low = () => null;
+    const high = () => null;
+    api[add]("low", low, -1);
+    api[add]("high", high, 2);
+    const result = output();
+    assert.deepEqual(Array.from(result, item => item.props.key), descending ? ["high", "low"] : ["low", "high"]);
+    assert.ok(result.every(item => item.type === "error-boundary" && item.props.noop === true));
+    const child = result[0].props.children[0];
+    assert.equal(child.type, descending ? high : low);
+    if (path === "ProfileSections") {
+        assert.equal(child.props.userId, props.userId);
+        assert.equal(child.props.isSideBar, props.isSideBar);
+    } else if (path === "ProfileCollections") {
+        assert.equal(child.props.user, props.currentUser);
+        assert.equal(child.props.isSideBar, props.isSideBar);
+        assert.equal(child.props.hostProp, props.hostProp);
+    }
+    const replacement = () => null;
+    let updates = 0;
+    const unsubscribe = hooks.at(-1)!.subscribe(() => updates++);
+    api[add]("low", replacement, 3);
+    const replacementResult = output();
+    assert.equal(replacementResult.find(item => item.props.key === "low").props.children[0].type, replacement);
+    assert.deepEqual(Array.from(replacementResult, item => item.props.key), descending ? ["low", "high"] : ["high", "low"]);
+    api[remove]("high");
+    assert.deepEqual(Array.from(output(), item => item.props.key), ["low"]);
+    assert.equal(updates, 2);
+    unsubscribe();
+    api[remove]("low");
+    assert.equal(output().length, 0);
+    assert.equal(updates, 2);
+});
+
 test("intl hashing preserves zero, negative and byte-boundary digests", () => {
     let digest = 0n;
     const { runtimeHashMessageKey } = loadComponent("src/utils/intlHash.ts", {}, { "@intrnl/xxhash64": { hash: () => digest } });

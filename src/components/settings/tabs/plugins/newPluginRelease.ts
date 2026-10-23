@@ -10,8 +10,8 @@ export interface NewPluginRelease {
 }
 
 export const NEW_PLUGIN_RELEASE = {
-    plugins: [],
-    version: "1.15.1.8",
+    plugins: ["MessageCompression"],
+    version: "1.15.1.14",
 } as const satisfies NewPluginRelease;
 
 export function getReleaseNewPlugins(

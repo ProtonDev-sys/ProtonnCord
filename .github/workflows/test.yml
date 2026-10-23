@@ -7,7 +7,6 @@ on:
             - dev
             - nightly
             - staging
-            - "agent/**"
     pull_request:
         branches:
             - main
@@ -19,19 +18,27 @@ permissions:
     contents: read
 
 jobs:
+    Discord:
+        name: Discord client smoke
+        uses: ./.github/workflows/client-smoke.yml
+
+    Android:
+        name: Android client and storage
+        uses: ./.github/workflows/android-smoke.yml
+
     Test:
         name: Test
-        runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && vars.CI_SERVER_LINUX == 'true' && fromJSON('["self-hosted","Linux","X64","server","ubuntu-24.04"]') || 'ubuntu-latest' }}
+        runs-on: ${{ vars.CI_SERVER_LINUX == 'true' && (contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == github.repository_owner && github.actor == github.repository_owner)) && fromJSON('["self-hosted","Linux","X64","server","ubuntu-24.04"]') || 'ubuntu-latest' }}
         timeout-minutes: 45
 
         steps:
-            - uses: actions/checkout@v7
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
-            - uses: pnpm/action-setup@v6
+            - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
             - name: Use Node.js 24
-              uses: actions/setup-node@v6
+              uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
               with:
                   node-version: 24
                   cache: "pnpm"
@@ -39,20 +46,14 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
+            - name: Audit all dependencies, including development tools
+              run: pnpm audit
+
             - name: Test Secure Messaging crypto caches
               run: pnpm exec tsx scripts/testSecureMessagingCryptoCache.ts
 
-            - name: Test Secure Messaging cache lifecycle
-              run: pnpm exec tsx --test scripts/testSecureMessagingCaches.ts
-
-            - name: Test Secure Messaging attachment metadata
-              run: pnpm exec tsx --test scripts/testSecureMessagingAttachmentMetadata.ts
-
             - name: Test Secure Messaging layout stability
               run: pnpm exec tsx scripts/testSecureMessagingLayoutStability.ts
-
-            - name: Test Secure Messaging performance boundaries
-              run: pnpm testSecureMessagingPerformance
 
             - name: Benchmark Secure Messaging
               run: pnpm exec tsx scripts/benchmarkSecureMessaging.ts
@@ -60,8 +61,8 @@ jobs:
             - name: Build production desktop test inputs
               run: pnpm build
 
-            - name: Lint & Test if desktop version compiles
-              run: pnpm lint && pnpm test
+            - name: Test desktop, lint, and regression suites
+              run: pnpm test
 
             - name: Test primary stream audio and promise timeouts
               run: pnpm testPrimaryStreamAudio && pnpm testPromiseTimeout
@@ -69,10 +70,56 @@ jobs:
             - name: Test if web version compiles
               run: pnpm buildWeb
 
-            - name: Test if plugin structure is valid
-              run: pnpm generatePluginJson
-
             - name: Test the generated API type package
               run: |
                   pnpm generateTypes
                   pnpm --dir packages/vencord-types test
+
+    Electron:
+        name: Electron IPC smoke (${{ matrix.electron }})
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - electron: 41.2.1
+                      sha256: 04cc7fd5400c08cd98e2cc5c5e5f60cebb4b72fa65020a8ae2a88d8f48328710
+                    - electron: 42.11.12
+                      sha256: 1f17c115389c6395ce4b19b29ee2ec4be2208257514d61e269f1c0a7323bd45d
+
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+              with:
+                  node-version: 24
+                  cache: pnpm
+
+            - name: Install dependencies and build actual preloads
+              run: |
+                  pnpm install --frozen-lockfile
+                  pnpm build
+
+            - name: Install verified Electron test runtime
+              env:
+                  ELECTRON_VERSION: ${{ matrix.electron }}
+                  ELECTRON_SHA256: ${{ matrix.sha256 }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  archive="$RUNNER_TEMP/electron-v$ELECTRON_VERSION-linux-x64.zip"
+                  curl --fail --location --retry 3 --max-time 120 --proto '=https' --tlsv1.2 \
+                      --output "$archive" \
+                      "https://github.com/electron/electron/releases/download/v$ELECTRON_VERSION/electron-v$ELECTRON_VERSION-linux-x64.zip"
+                  printf '%s  %s\n' "$ELECTRON_SHA256" "$archive" | sha256sum --check --strict
+                  unzip -q "$archive" -d "$RUNNER_TEMP/protonncord-electron"
+                  sudo chown root:root "$RUNNER_TEMP/protonncord-electron/chrome-sandbox"
+                  sudo chmod 4755 "$RUNNER_TEMP/protonncord-electron/chrome-sandbox"
+
+            - name: Exercise desktop and sandboxed Equibop IPC without an account
+              env:
+                  ELECTRON_BIN: ${{ runner.temp }}/protonncord-electron/electron
+              run: xvfb-run -a node scripts/testElectronIpc.mjs

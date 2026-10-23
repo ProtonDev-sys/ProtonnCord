@@ -7,12 +7,6 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
 const identity = (value: unknown) => value;
 const defaultExport = (value: unknown) => ({ __esModule: true, default: value });
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((accept, fail) => { resolve = accept; reject = fail; });
-    return { promise, resolve, reject };
-}
 function defineSettings(definitions: Record<string, any>) {
     const store = Object.fromEntries(Object.entries(definitions).map(([key, definition]) => [key,
         structuredClone(definition.default ?? definition.options?.find((option: any) => option.default)?.value)
@@ -130,7 +124,7 @@ test("VoiceRejoin preserves an already active call and disposes heartbeat and pe
 test("VoiceRejoin rejects deferred reads after stop and account change", async () => {
     for (const boundary of ["stop", "account"]) {
         const fixture = rejoinHarness();
-        const pending = deferred<boolean>();
+        const pending = Promise.withResolvers<boolean>();
         fixture.storage.get = () => pending.promise;
         const opening = fixture.plugin.flux.CONNECTION_OPEN();
         await tick();
@@ -195,7 +189,7 @@ test("VoiceStats retains failed snapshots across stop/restart and retries only t
 
 test("VoiceStats discards a deferred old-account load", async () => {
     const fixture = statsHarness();
-    const pending = deferred<Record<string, number>>();
+    const pending = Promise.withResolvers<Record<string, number>>();
     fixture.storage.get = key => key.endsWith(":alice") ? pending.promise : Promise.resolve({ friend: 3 });
     const starting = fixture.plugin.start();
     await tick();
@@ -228,7 +222,7 @@ test("VoiceStats fails closed on storage read failure and retries on the next ac
 function sidebarHarness() {
     const timers = clock();
     const state = { account: "alice" };
-    const pendingDm = deferred<string>();
+    const pendingDm = Promise.withResolvers<string>();
     const windows = new Set<string>();
     const channels = new Map<string, any>([["dm", { id: "dm", isPrivate: () => true, name: "DM" }]]);
     let handlers: any;

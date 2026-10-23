@@ -115,6 +115,15 @@ const buildConfigs = hosts.flatMap(host => {
     ];
 });
 
+// The installed copy runs outside desktop.asar, before Windows opens the
+// archive. Keep it in the archive too so every client update refreshes it.
+buildConfigs.push({
+    ...nodeCommonOpts,
+    entryPoints: [join(sourceDirectory, "main/updater/asarBootstrap.ts")],
+    outfile: outputPath("desktop", "bootstrap.js"),
+    define: defines,
+});
+
 await buildOrWatchAll(buildConfigs);
 
 await Promise.all(hosts.map(host =>
