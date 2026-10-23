@@ -15,7 +15,7 @@ import { build } from "esbuild";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { IpcEvents } from "../src/shared/IpcEvents";
-import { classifyUpdateChanges } from "../src/utils/updateClassification";
+import { classifyUpdateChanges, hashesReferToSameCommit } from "../src/utils/updateClassification";
 
 async function compileUpdater(standalone: boolean, disabled = false) {
     const result = await build({
@@ -113,7 +113,7 @@ test("renderer update status follows the native backend instead of the standalon
                 "~git-hash": { __esModule: true, default: currentHash },
                 "./Logger": { Logger: class { } },
                 "./native": { relaunch() { assert.fail("The fixture must never restart Discord"); } },
-                "./updateClassification": { classifyUpdateChanges },
+                "./updateClassification": { classifyUpdateChanges, hashesReferToSameCommit },
             };
             const updater = runInNewContext(`${outputText}\nexports;`, {
                 exports: {}, IS_STANDALONE: standalone,

@@ -134,6 +134,14 @@ jobs:
               if: steps.check.outputs.build == 'true'
               run: pnpm install --frozen-lockfile
 
+            # Reuse the source revision's timestamp when retrying a build.
+            - name: Set reproducible build timestamp
+              if: steps.check.outputs.build == 'true'
+              run: |
+                  epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+                  [[ "$epoch" =~ ^[0-9]+$ ]]
+                  printf 'SOURCE_DATE_EPOCH=%s\n' "$epoch" >> "$GITHUB_ENV"
+
             - name: Build web
               if: steps.check.outputs.build == 'true'
               run: pnpm buildWebStandalone

@@ -215,6 +215,8 @@ internal static class ProtonnCordSetup
             ?? (!String.IsNullOrEmpty(discordData) ? Path.GetFullPath(Path.Combine(discordData, "..", "ProtonnCordData")) : Path.Combine(appData, "ProtonnCord"));
         if (String.IsNullOrWhiteSpace(directory) || !Path.IsPathRooted(directory)) throw new IOException("The ProtonnCord settings override is not an absolute path.");
         string archive = Path.Combine(directory, "desktop.asar");
+        string bootstrap = archive + ".bootstrap.cjs";
+        string loader = archive + ".loader.cjs";
         string settings = Path.Combine(directory, "settings", "settings.json");
         Directory.CreateDirectory(directory);
         string settingsText = "{}\n";
@@ -231,8 +233,8 @@ internal static class ProtonnCordSetup
 
         string temporary = Path.Combine(directory, ".setup-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporary);
-        string archiveBackup = null, settingsBackup = null;
-        bool archiveActivated = false, settingsActivated = false, processRunning = false, completed = false;
+        string archiveBackup = null, settingsBackup = null, bootstrapBackup = null, loaderBackup = null;
+        bool archiveActivated = false, settingsActivated = false, bootstrapActivated = false, loaderActivated = false, processRunning = false, completed = false;
         try
         {
             string cli = Path.Combine(temporary, "EquilotlCli.exe");
@@ -241,19 +243,27 @@ internal static class ProtonnCordSetup
             {
                 string stagedArchive = Path.Combine(temporary, "desktop.asar");
                 string stagedSettings = Path.Combine(temporary, "settings.json");
+                string stagedBootstrap = Path.Combine(temporary, "bootstrap.cjs");
+                string stagedLoader = Path.Combine(temporary, "loader.cjs");
                 Extract("desktop.asar", stagedArchive, (string)Metadata["archiveSha256"]);
+                Extract("bootstrap.cjs", stagedBootstrap, (string)Metadata["bootstrapSha256"]);
+                WriteStaged(stagedLoader, Utf8.GetBytes("require(" + Json.Serialize(bootstrap) + ").load(" + Json.Serialize(archive) + ");\n"));
                 WriteStaged(stagedSettings, Utf8.GetBytes(settingsText));
                 RequireDiscordClosed();
                 archiveBackup = Activate(stagedArchive, archive);
                 archiveActivated = true;
                 settingsBackup = Activate(stagedSettings, settings);
                 settingsActivated = true;
+                bootstrapBackup = Activate(stagedBootstrap, bootstrap);
+                bootstrapActivated = true;
+                loaderBackup = Activate(stagedLoader, loader);
+                loaderActivated = true;
             }
 
             var start = new ProcessStartInfo(cli, (uninstall ? "--uninstall" : "--install") + " --branch " + branch) {
                 UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
             };
-            start.EnvironmentVariables["EQUICORD_DIRECTORY"] = archive;
+            start.EnvironmentVariables["EQUICORD_DIRECTORY"] = uninstall ? archive : loader;
             start.EnvironmentVariables["EQUICORD_USER_DATA_DIR"] = directory;
             // This skips only the CLI's upstream downloader. desktop.asar remains a
             // standalone release with its own enabled ProtonnCord HTTP updater.
@@ -286,6 +296,10 @@ internal static class ProtonnCordSetup
         {
             if (processRunning) throw new IOException("Installer could not be stopped; files and backups were retained in " + directory, failure);
             var errors = new List<Exception> { failure };
+            if (loaderActivated)
+                try { Restore(loader, loaderBackup, false); } catch (Exception error) { errors.Add(error); }
+            if (bootstrapActivated)
+                try { Restore(bootstrap, bootstrapBackup, false); } catch (Exception error) { errors.Add(error); }
             if (settingsActivated)
                 try { Restore(settings, settingsBackup, true); } catch (Exception error) { errors.Add(error); }
             // Keep a newly extracted archive if upstream recovery itself failed;
@@ -301,6 +315,9 @@ internal static class ProtonnCordSetup
             {
                 if (archiveBackup != null) Cleanup(() => File.Delete(archiveBackup));
                 if (settingsBackup != null) Cleanup(() => File.Delete(settingsBackup));
+                if (bootstrapBackup != null) Cleanup(() => File.Delete(bootstrapBackup));
+                if (loaderBackup != null) Cleanup(() => File.Delete(loaderBackup));
+                if (!uninstall) Cleanup(() => File.Delete(archive + ".pending"));
             }
             if (!processRunning) Cleanup(() => Directory.Delete(temporary, true));
         }

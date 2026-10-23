@@ -107,14 +107,13 @@ const currentVersionDir = (): string => {
  * directly to get fresh state.
  */
 const resolveCommittedVersion = (updater: DiscordHostUpdater): number[] | undefined => {
-    if (Array.isArray(updater.committedHostVersion)) return updater.committedHostVersion;
     try {
         const versions = updater.queryCurrentVersionsSync?.();
         if (Array.isArray(versions?.current_host)) return versions.current_host;
     } catch (err) {
         error("queryCurrentVersionsSync failed", err);
     }
-    return undefined;
+    return Array.isArray(updater.committedHostVersion) ? updater.committedHostVersion : undefined;
 };
 
 const retainProtonnCord = (updater: DiscordHostUpdater, reason: string) => {

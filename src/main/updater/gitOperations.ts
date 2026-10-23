@@ -59,7 +59,7 @@ async function localBranchExists(git: GitRunner, branch: string): Promise<boolea
     return refs.includes(`refs/heads/${branch}`);
 }
 
-async function requireCleanTree(git: GitRunner): Promise<void> {
+export async function requireCleanTree(git: GitRunner): Promise<void> {
     const dirty = (await git("status", "--porcelain=v1", "--untracked-files=all")).stdout.trim();
     if (dirty)
         throw new Error("The Protonn Cord source tree has uncommitted changes; commit or stash them before updating");
@@ -160,36 +160,80 @@ export async function pullGitUpdates(
     selectedBranch?: UpdaterBranch,
 ): Promise<boolean> {
     const state = await fetchUpdateBranch(git, repository, selectedBranch);
-    const before = (await git("rev-parse", "HEAD")).stdout.trim();
-    const beforeBranch = await currentBranch(git);
-    if (before !== state.currentHead || beforeBranch !== state.currentBranch)
-        throw new Error("The source checkout changed while checking for updates. Check for updates again.");
+    const before = state.currentHead;
+    const beforeBranch = state.currentBranch;
+    const verifyCheckout = async () => {
+        if ((await git("rev-parse", "HEAD")).stdout.trim() !== before || await currentBranch(git) !== beforeBranch)
+            throw new Error("The source checkout changed while checking for updates. Check for updates again.");
+    };
+    const restoreCheckout = async (error: unknown, expectedHead: string) => {
+        // Never reset or discard work to recover a failed switch/fast-forward.
+        try {
+            const branch = await currentBranch(git);
+            const head = (await git("rev-parse", "HEAD")).stdout.trim();
+            if (branch === state.branch && head === expectedHead) {
+                await requireCleanTree(git);
+                if (beforeBranch) {
+                    if ((await git("rev-parse", `refs/heads/${beforeBranch}`)).stdout.trim() !== before)
+                        throw new Error("The original branch changed during the update");
+                    await git("switch", "--no-overwrite-ignore", beforeBranch);
+                } else {
+                    await git("switch", "--no-overwrite-ignore", "--detach", before);
+                }
+            } else if (branch !== beforeBranch || head !== before) {
+                throw new Error("The source checkout changed during the update");
+            }
+        } catch (rollbackError) {
+            throw new Error("The update failed and the original source branch could not be restored. Check the source checkout before retrying.", {
+                cause: new AggregateError([error, rollbackError], "Source branch update and rollback failed")
+            });
+        }
+        throw error;
+    };
+    await verifyCheckout();
 
     if (state.currentBranch === state.branch) {
         if (state.remoteOnly > 0) {
             await requireCleanTree(git);
-            await git("merge", "--ff-only", state.targetHead);
+            await verifyCheckout();
+            await git("merge", "--ff-only", "--no-overwrite-ignore", state.targetHead);
         }
     } else {
         await requireCleanTree(git);
         if (await localBranchExists(git, state.branch)) {
+            const targetBefore = (await git("rev-parse", `refs/heads/${state.branch}`)).stdout.trim();
             const targetDirection = parseDirection((await git(
                 "rev-list",
                 "--left-right",
                 "--count",
-                `refs/heads/${state.branch}...${state.targetHead}`,
+                `${targetBefore}...${state.targetHead}`,
             )).stdout);
             if (targetDirection.localOnly > 0)
                 throw new Error(`Local branch ${state.branch} has unpublished or divergent commits; reconcile it manually before switching update branches`);
 
-            await git("switch", state.branch);
-            if (targetDirection.remoteOnly > 0) await git("merge", "--ff-only", state.targetHead);
+            await verifyCheckout();
+            try {
+                await git("switch", "--no-overwrite-ignore", state.branch);
+                if ((await git("rev-parse", "HEAD")).stdout.trim() !== targetBefore)
+                    throw new Error("The source branch changed while switching update branches. Check the source checkout before retrying.");
+                if (targetDirection.remoteOnly > 0) await git("merge", "--ff-only", "--no-overwrite-ignore", state.targetHead);
+            } catch (error) {
+                // A failed fast-forward after switching must not leave the user
+                // on a different branch.
+                await restoreCheckout(error, targetBefore);
+            }
         } else {
-            await git("switch", "--create", state.branch, state.targetHead);
+            await verifyCheckout();
+            try {
+                await git("switch", "--no-overwrite-ignore", "--create", state.branch, state.targetHead);
+            } catch (error) {
+                // post-checkout hooks can fail after Git has created the branch.
+                await restoreCheckout(error, state.targetHead);
+            }
         }
     }
 
     const after = (await git("rev-parse", "HEAD")).stdout.trim();
     const afterBranch = await currentBranch(git);
-    return before !== after || beforeBranch !== afterBranch || lastBuiltHead !== after;
+    return before !== after || beforeBranch !== afterBranch || (lastBuiltHead !== after && await resolveBuiltHead(git, lastBuiltHead) !== after);
 }
