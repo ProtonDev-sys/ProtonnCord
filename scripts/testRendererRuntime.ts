@@ -395,21 +395,52 @@ test("cloud sync preferences preserve pull notifications and manual mode", async
 function updateFixture(flags = { web: false, disabled: false, dev: false }, silent = false) {
     const listeners = { check: new Set<() => Promise<void>>(), repair: new Set<() => Promise<void>>() };
     const intervals = new Set<() => void>();
+    const updateListeners = new Set<() => void>();
     const notices: string[] = [];
+    const noticeActions: (() => void)[] = [];
     const trayStates: boolean[] = [];
     const state = { checks: 0, updates: 0, relaunches: 0, repairSucceeds: true };
+    const updaterState = { isOutdated: false, isNewer: false, needsRestart: false };
     let check = async () => true;
     let repair = async () => state.repairSucceeds;
-    const settings = { autoUpdate: silent, autoUpdateNotification: !silent, updateBranch: "main" };
+    let update = async () => true;
+    let relaunch = async () => { state.relaunches++; };
+    const publish = () => { for (const listener of updateListeners) listener(); };
+    const settings = new Proxy({ autoUpdate: silent, autoUpdateNotification: !silent, updateBranch: "main" }, {
+        set(target, key, value) {
+            const changed = Reflect.get(target, key) !== value;
+            Reflect.set(target, key, value);
+            if (changed && key === "updateBranch") {
+                updaterState.isOutdated = false;
+                updaterState.isNewer = false;
+                publish();
+            }
+            return true;
+        }
+    });
     const module = loadService<typeof import("../src/runtime/updates")>("updates", {
-        "@api/Notices": { popNotice() {}, showNotice: (message: string) => { notices.push(message); } },
+        "@api/Notices": { popNotice() {}, showNotice: (message: string, _button: string, action: () => void) => {
+            notices.push(message); noticeActions.push(action);
+        } },
         "@api/Settings": { Settings: settings },
         "@components/settings": { openSettingsTabModal() {}, UpdaterTab: {} },
-        "@utils/native": { relaunch: () => { state.relaunches++; } },
+        "@utils/native": { relaunch: () => relaunch() },
         "@utils/updater": {
-            checkForUpdates: () => { state.checks++; return check(); },
-            isOutdated: false,
-            update: async () => { state.updates++; return true; },
+            checkForUpdates: async () => {
+                state.checks++;
+                const branch = settings.updateBranch;
+                const outdated = await check();
+                if (branch === settings.updateBranch) { updaterState.isOutdated = outdated; publish(); }
+                return outdated;
+            },
+            getUpdateState: () => updaterState,
+            subscribeToUpdates: (listener: () => void) => { updateListeners.add(listener); return () => updateListeners.delete(listener); },
+            update: async () => {
+                state.updates++;
+                const result = await update();
+                if (result) { updaterState.isOutdated = false; updaterState.needsRestart = true; publish(); }
+                return result;
+            },
             repair: async () => { state.updates++; return repair(); },
             UpdateLogger: { error() {} },
         },
@@ -423,7 +454,8 @@ function updateFixture(flags = { web: false, disabled: false, dev: false }, sile
         setInterval(callback: () => void, delay: number) { assert.equal(delay, 30 * 60_000); intervals.add(callback); return callback; },
         clearInterval(callback: () => void) { intervals.delete(callback); },
     });
-    return { ...module, listeners, intervals, notices, trayStates, state, settings,
+    return { ...module, listeners, intervals, notices, noticeActions, trayStates, state, updaterState, updateListeners, settings,
+        publish, setUpdate(resolver: typeof update) { update = resolver; }, setRelaunch(resolver: typeof relaunch) { relaunch = resolver; },
         setCheck(resolver: typeof check) { check = resolver; }, setRepair(resolver: typeof repair) { repair = resolver; } };
 }
 
@@ -440,7 +472,7 @@ test("automatic updates with notifications recover after an offline startup and 
     for (const callback of f.intervals) callback();
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(f.state.updates, 1);
-    assert.deepEqual(f.notices, ["Protonn Cord has been updated!"]);
+    assert.deepEqual(f.notices, ["Protonn Cord could not check for or install updates. Open Updates to retry.", "Protonn Cord has been updated!"]);
 
     f.settings.autoUpdate = false;
     const checks = f.state.checks;
@@ -452,7 +484,7 @@ test("automatic updates with notifications recover after an offline startup and 
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(f.state.checks, checks + 1, "automatic updates can resume without restarting Discord");
     service.dispose();
-    assert.equal(f.intervals.size, 0);
+    assert.equal(f.intervals.size + f.updateListeners.size, 0);
 });
 
 test("enabling automatic updates after startup activates periodic checks without duplicating timers", async () => {
@@ -556,5 +588,108 @@ test("updater drops stale branch notices and repair only restarts after success"
     f.state.repairSucceeds = false;
     await [...f.listeners.repair][0]();
     assert.equal(f.state.relaunches, 0);
+    service.dispose();
+});
+
+test("shared updater state keeps the tray current through manual installs and branch changes", () => {
+    const f = updateFixture();
+    const service = f.createUpdateService();
+    f.updaterState.isOutdated = true;
+    f.publish();
+    f.publish();
+    f.settings.updateBranch = "nightly";
+    assert.deepEqual(f.trayStates, [false, true, false]);
+    assert.equal(f.updateListeners.size, 1);
+    service.dispose();
+    assert.equal(f.updateListeners.size, 0);
+    f.updaterState.isOutdated = true;
+    f.publish();
+    assert.deepEqual(f.trayStates, [false, true, false]);
+});
+
+test("tray actions deduplicate pending work and surface repair and restart failures", async () => {
+    const f = updateFixture();
+    const service = f.createUpdateService();
+    const repair = [...f.listeners.repair][0];
+    const pending = Promise.withResolvers<boolean>();
+    f.setRepair(() => pending.promise);
+    const repairing = repair();
+    await repair();
+    assert.equal(f.state.updates, 1);
+    pending.resolve(false);
+    await repairing;
+    assert.equal(f.state.relaunches, 0);
+    assert.match(f.notices.at(-1)!, /Failed to repair/u);
+    f.setRepair(async () => { throw new Error("Permission denied"); });
+    await repair();
+    assert.equal(f.notices.length, 2);
+    f.setRepair(async () => true);
+    f.setRelaunch(async () => { throw new Error("Flush failed"); });
+    await repair();
+    assert.match(f.notices.at(-1)!, /Restart Discord manually/u);
+
+    const pendingCheck = Promise.withResolvers<boolean>();
+    f.setCheck(() => pendingCheck.promise);
+    const check = [...f.listeners.check][0];
+    const checking = check();
+    await check();
+    assert.equal(f.state.checks, 1);
+    pendingCheck.resolve(true);
+    await checking;
+    assert.equal(f.notices.length, 4, "a duplicate tray click must not enqueue another notice");
+    service.dispose();
+});
+
+test("automatic install failures notify once, remain retryable, and recover after success", async () => {
+    const f = updateFixture(undefined, true);
+    f.settings.autoUpdateNotification = true;
+    f.setUpdate(async () => false);
+    const service = f.createUpdateService();
+    await service.runInitial!();
+    await service.runInitial!();
+    assert.equal(f.state.updates, 2);
+    assert.equal(f.notices.length, 1, "repeated background failures must not flood notices");
+    assert.match(f.notices[0], /could not check for or install/u);
+    f.setUpdate(async () => true);
+    await service.runInitial!();
+    assert.equal(f.notices.at(-1), "Protonn Cord has been updated!");
+    f.setUpdate(async () => { throw new Error("Offline again"); });
+    await service.runInitial!();
+    assert.equal(f.notices.length, 3, "a later failure after recovery is actionable again");
+    service.dispose();
+});
+
+test("tray distinguishes local commits and pending restarts and stale restart notices cannot relaunch", async () => {
+    const f = updateFixture();
+    f.setCheck(async () => false);
+    const service = f.createUpdateService();
+    const check = [...f.listeners.check][0];
+    f.updaterState.isNewer = true;
+    await check();
+    assert.match(f.notices.at(-1)!, /commits outside/u);
+    f.updaterState.isNewer = false;
+    f.updaterState.needsRestart = true;
+    await check();
+    assert.match(f.notices.at(-1)!, /Restart Discord to apply/u);
+    const restart = f.noticeActions.at(-1)!;
+    f.settings.updateBranch = "nightly";
+    restart();
+    assert.equal(f.state.relaunches, 0);
+    await check();
+    f.noticeActions.at(-1)!();
+    await settle();
+    assert.equal(f.state.relaunches, 1);
+    service.dispose();
+    f.noticeActions.at(-1)!();
+    assert.equal(f.state.relaunches, 1);
+});
+
+test("changing the update branch allows its own update notice", async () => {
+    const f = updateFixture();
+    const service = f.createUpdateService();
+    await service.runInitial!();
+    f.settings.updateBranch = "nightly";
+    await service.runInitial!();
+    assert.equal(f.notices.length, 2);
     service.dispose();
 });

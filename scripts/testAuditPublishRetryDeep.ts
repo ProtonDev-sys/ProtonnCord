@@ -88,6 +88,40 @@ gh() {
 }
 `;
 
+test("both release workflows reuse the source commit timestamp before every build", () => {
+    const desktop = load(readFileSync(new URL("../.github/workflows/build.yml", import.meta.url), "utf8")) as { jobs: Record<string, Job>; };
+    for (const job of [desktop.jobs.Build, prepare]) {
+        const timestampIndex = job.steps.findIndex(step => step.name === "Set reproducible build timestamp");
+        assert.ok(timestampIndex > job.steps.findIndex(step => step.uses?.startsWith("actions/checkout@")));
+        for (const name of ["Build web", "Build"]) {
+            const index = job.steps.findIndex(step => step.name === name);
+            if (index >= 0) assert.ok(timestampIndex < index, `${name} must inherit the timestamp`);
+        }
+        const { root } = fixture();
+        const git = (args: string[], input?: string) => {
+            const result = spawnSync("git", args, { cwd: root, input, encoding: "utf8", timeout: 10000 });
+            assert.ifError(result.error);
+            assert.equal(result.status, 0, result.stderr);
+            return result.stdout.trim();
+        };
+        try {
+            git(["init", "--quiet"]);
+            const tree = git(["hash-object", "-w", "-t", "tree", "--stdin"], "");
+            const commit = git(["hash-object", "-w", "-t", "commit", "--stdin"], `tree ${tree}\nauthor Offline Test <offline@example.invalid> 1600000000 +0000\ncommitter Offline Test <offline@example.invalid> 1700000000 +0000\n\nfixture\n`);
+            for (const attempt of ["1", "2"]) {
+                const result = run(root, script(job, "Set reproducible build timestamp"), {
+                    GITHUB_SHA: commit, GITHUB_ENV: "build-env.txt", GITHUB_RUN_ATTEMPT: attempt, SOURCE_DATE_EPOCH: "9999999999",
+                });
+                assert.equal(result.status, 0, result.stderr);
+            }
+            const expected = "SOURCE_DATE_EPOCH=1700000000\n".repeat(2);
+            assert.equal(readFileSync(join(root, "build-env.txt"), "utf8"), expected);
+            assert.notEqual(run(root, script(job, "Set reproducible build timestamp"), { GITHUB_SHA: otherSha, GITHUB_ENV: "build-env.txt" }).status, 0);
+            assert.equal(readFileSync(join(root, "build-env.txt"), "utf8"), expected, "failed resolution cannot export a fallback clock time");
+        } finally { rmSync(root, { recursive: true, force: true }); }
+    }
+});
+
 function outputs(root: string) {
     return existsSync(join(root, "outputs.txt")) ? readFileSync(join(root, "outputs.txt"), "utf8") : "";
 }

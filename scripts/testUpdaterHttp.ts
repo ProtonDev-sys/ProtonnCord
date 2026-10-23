@@ -10,6 +10,8 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { runInNewContext } from "node:vm";
 
+import { createHostInjector, readHostInjector } from "../src/main/hostInjector";
+import { bootstrapPaths, isBootstrapInjector, upgradeBootstrapInjector, writeBootstrapFiles } from "../src/main/updater/bootstrapFiles";
 import {
     applyPendingHttpUpdate,
     type AtomicFileOperations,
@@ -128,19 +130,18 @@ async function testWindowsBootstrap(root: string, validAsar: Buffer) {
     assert.throws(() => first.fs.renameSync(invalid, target), /invalid header/iu);
     assert.deepEqual(await readFile(pending), validAsar, "invalid updates cannot replace an already staged update");
     assert.throws(() => first.fs.renameSync(join(root, "unrelated.tmp"), target), /simulated archive lock/iu);
-    failure = "EIO";
-    assert.throws(() => first.fs.renameSync(download, target), /simulated archive lock/iu);
-    failure = "EPERM";
-
     await writeFile(join(root, "source", "main.js"), "module.exports = 'another channel';\n");
     const nextArchive = join(root, "next.asar");
     await createPackage(join(root, "source"), nextArchive);
     const nextBytes = await readFile(nextArchive);
     const secondDownload = temporary();
     await writeFile(secondDownload, nextBytes);
+    failure = undefined;
     first.fs.renameSync(secondDownload, target);
     assert.deepEqual(await readFile(pending), nextBytes, "the last selected channel replaces the pending update");
+    assert.equal(await readFile(target, "utf8"), "working client", "a newly unlocked target cannot leave an older pending channel to install later");
 
+    failure = "EPERM";
     bootModule().load(target);
     assert.equal(waits, 1, "startup must wait for old renderer handles to close");
     assert.deepEqual(await readFile(target), nextBytes);
@@ -177,14 +178,28 @@ async function testWindowsBootstrap(root: string, validAsar: Buffer) {
     await writeFile(join(nextHost, "app.asar"), "original Discord");
     host.tick();
     assert.equal(await readFile(join(nextHost, "_app.asar"), "utf8"), "original Discord");
-    const expectedStub = `require(${JSON.stringify(`${target}.loader.cjs`)});`;
-    assert.equal(await readFile(join(nextHost, "app.asar", "index.js"), "utf8"), expectedStub);
-    await writeFile(join(nextHost, "app.asar", "index.js"), `require(${JSON.stringify(join(target, "patcher.js"))});`);
+    const expectedStub = `require(${JSON.stringify(`${target}.loader.cjs`)})`;
+    assert.equal(readHostInjector(await readFile(join(nextHost, "app.asar"))), expectedStub);
+    await writeFile(join(nextHost, "app.asar"), createHostInjector(join(target, "patcher.js")));
     host.app.emit("will-quit");
-    assert.equal((await readFile(join(nextHost, "app.asar", "index.js"), "utf8")).trim(), expectedStub,
+    assert.equal(readHostInjector(await readFile(join(nextHost, "app.asar"))), expectedStub,
         "a raw-archive stub written by an older main build is upgraded before relaunch");
     dispose?.();
     assert.equal(host.app.listenerCount("will-quit"), 0);
+
+    writeBootstrapFiles(target, bundle.outputFiles[0].contents, nativeFs);
+    const injector = join(nextHost, "app.asar", "index.js");
+    await writeFile(dirname(injector), createHostInjector(target));
+    upgradeBootstrapInjector(injector, target, nativeFs);
+    assert.equal(readHostInjector(await readFile(dirname(injector))), expectedStub, "the packed installer shim can migrate without native reads inside its ASAR");
+    upgradeBootstrapInjector(injector, target, nativeFs);
+    assert.ok(isBootstrapInjector(`require(${JSON.stringify(target)})`, target));
+    assert.ok(isBootstrapInjector(`require(${JSON.stringify(join(target, "patcher.js"))});`, target));
+    const unrelated = createHostInjector(join(root, "another-mod.js"));
+    await writeFile(dirname(injector), unrelated);
+    assert.throws(() => upgradeBootstrapInjector(injector, target, nativeFs), /does not match this archive/iu);
+    assert.deepEqual(await readFile(dirname(injector)), unrelated);
+    assert.ok(existsSync(bootstrapPaths(target).loader));
 }
 
 async function testInstalledReleaseState(): Promise<void> {

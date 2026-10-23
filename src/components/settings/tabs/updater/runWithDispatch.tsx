@@ -11,6 +11,7 @@ import { ConfirmModal, openModal, Parser } from "@webpack/common";
 function getErrorMessage(e: any) {
     if (!e?.code || !e.cmd) {
         if (typeof e?.message === "string" && e.message.trim()) return e.message;
+        if (typeof e === "string" && e.trim()) return e;
         return "An unknown error occurred.\nPlease try again or see the console for more info.";
     }
 
@@ -24,14 +25,18 @@ function getErrorMessage(e: any) {
     return `An error occurred while running \`${cmd}\`:\n${extra}`;
 }
 
-export function runWithDispatch(dispatch: React.Dispatch<React.SetStateAction<boolean>>, action: () => any) {
+export function runWithDispatch(dispatch: React.Dispatch<React.SetStateAction<boolean>>, action: () => any, isActive = () => true) {
+    let running = false;
     return async () => {
+        if (running || !isActive()) return;
+        running = true;
         dispatch(true);
 
         try {
             await action();
         } catch (e: any) {
             UpdateLogger.error(e);
+            if (!isActive()) return;
 
             const err = getErrorMessage(e);
 
@@ -50,7 +55,8 @@ export function runWithDispatch(dispatch: React.Dispatch<React.SetStateAction<bo
                 </ConfirmModal>
             ));
         } finally {
-            dispatch(false);
+            running = false;
+            if (isActive()) dispatch(false);
         }
     };
 }

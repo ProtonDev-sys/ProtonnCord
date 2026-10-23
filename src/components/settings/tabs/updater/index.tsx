@@ -108,7 +108,7 @@ function Updater() {
                 <Paragraph>Updates are disabled in this build. Use a release build to select an update branch and install updates here.</Paragraph>
             ) : (
                 <>
-                    <Updatable key={settings.updateBranch} repo={repo} repoPending={repoPending} disabled={repoPending || Boolean(error)} />
+                    <Updatable key={settings.updateBranch} repo={repo} repoPending={repoPending || Boolean(error)} />
                     <UpdatePreferences />
                 </>
             )}
