@@ -451,15 +451,19 @@ export default definePlugin({
                     replace: "const silentTypingShouldHideChatBarTypingIndicators=$self.shouldHideChatBarTypingIndicators();$1"
                 },
                 {
-                    match: /("stop-animation".{0,100}?ref:\i,children:)/,
+                    match: /(\{className:\i\.\i,ref:\i,children:)(?=\[\i\.length>0)/,
                     replace: "$1silentTypingShouldHideChatBarTypingIndicators?[]:"
+                },
+                {
+                    match: /("aria-live":"polite","aria-atomic":!0,children:)(\i)(?=\})/,
+                    replace: '$1silentTypingShouldHideChatBarTypingIndicators?"":$2'
                 }
             ]
         },
         {
             find: ",{avatarCutoutX",
             replacement: {
-                match: /isTyping:(\i)=!1(,typingIndicatorRef:\i,isSpeaking:)/,
+                match: /isTyping:(\i)=!1(,typingIndicatorRef:\i,)/,
                 replace: "silentTypingIsTyping:$1=$self.shouldHideMembersListTypingIndicators()?false:(arguments[0].isTyping??false)$2"
             }
         },

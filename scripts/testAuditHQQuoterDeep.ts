@@ -11,13 +11,6 @@ const compile = (file: string) => transpileModule(readFileSync(path.join(root, f
     compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
 }).outputText;
 
-function deferred<Value>() {
-    let resolve!: (value: Value) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<Value>((onResolve, onReject) => { resolve = onResolve; reject = onReject; });
-    return { promise, resolve, reject };
-}
-
 async function flush() {
     for (let turn = 0; turn < 20; turn++) await Promise.resolve();
 }
@@ -97,9 +90,9 @@ const quoteOptions = {
 };
 
 test("selected and author fonts await readiness and their own loads beyond 300 ms", async () => {
-    const ready = deferred<void>();
-    const loads: ReturnType<typeof deferred<{ status: string; }[]>>[] = [];
-    const harness = loadQuoter({ ready: ready.promise, load: () => { const pending = deferred<{ status: string; }[]>(); loads.push(pending); return pending.promise; } });
+    const ready = Promise.withResolvers<void>();
+    const loads: PromiseWithResolvers<{ status: string; }[]>[] = [];
+    const harness = loadQuoter({ ready: ready.promise, load: () => { const pending = Promise.withResolvers<{ status: string; }[]>(); loads.push(pending); return pending.promise; } });
     let completed = false;
     const result = harness.api.ensureFontLoaded(harness.types.QuoteFont.Merriweather, "quoted glyphs", "author glyphs").then((fonts: object) => { completed = true; return fonts; });
     await flush();
@@ -121,7 +114,7 @@ test("selected and author fonts await readiness and their own loads beyond 300 m
 });
 
 test("an existing stylesheet does not bypass font loading; concurrent matching loads share work", async () => {
-    const pending = deferred<{ status: string; }[]>();
+    const pending = Promise.withResolvers<{ status: string; }[]>();
     const harness = loadQuoter({ existingStyle: true, load: () => pending.promise });
     const first = harness.api.ensureFontLoaded(harness.types.QuoteFont.Lora);
     const second = harness.api.ensureFontLoaded(harness.types.QuoteFont.Lora);
@@ -147,7 +140,7 @@ test("font readiness rejection, missing faces and unloaded faces select an expli
 
 test("never-settling font loads time out, clean timers and allow a later independent retry", async () => {
     let stalled = true;
-    const late = deferred<{ status: string; }[]>();
+    const late = Promise.withResolvers<{ status: string; }[]>();
     const harness = loadQuoter({ load: () => stalled ? late.promise : Promise.resolve([{ status: "loaded" }]) });
     const pending = harness.api.ensureFontLoaded(harness.types.QuoteFont.Lora);
     await flush();
@@ -161,7 +154,7 @@ test("never-settling font loads time out, clean timers and allow a later indepen
 });
 
 test("late stylesheet readiness does not initiate font loads after its deadline", async () => {
-    const ready = deferred<void>();
+    const ready = Promise.withResolvers<void>();
     const harness = loadQuoter({ ready: ready.promise });
     const pending = harness.api.ensureFontLoaded();
     harness.expire();
@@ -173,8 +166,8 @@ test("late stylesheet readiness does not initiate font loads after its deadline"
 });
 
 test("reset separates old pending font work from a replacement cache entry", async () => {
-    const oldLoad = deferred<{ status: string; }[]>();
-    const newLoad = deferred<{ status: string; }[]>();
+    const oldLoad = Promise.withResolvers<{ status: string; }[]>();
+    const newLoad = Promise.withResolvers<{ status: string; }[]>();
     let replacement = false;
     const harness = loadQuoter({ load: () => replacement ? newLoad.promise : oldLoad.promise });
     const old = harness.api.ensureFontLoaded(harness.types.QuoteFont.Lora);
@@ -221,7 +214,7 @@ test("custom emoji order survives wrapping and blank paragraphs without duplicat
 });
 
 test("image rendering waits for selected and author fonts then uses explicit fallback families", async () => {
-    const pending = deferred<{ status: string; }[]>();
+    const pending = Promise.withResolvers<{ status: string; }[]>();
     const harness = loadQuoter({ load: () => pending.promise });
     const rendering = harness.api.createQuoteImage(quoteOptions);
     await flush();

@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -12,22 +6,16 @@ import { test } from "node:test";
 import { loadTestModule } from "./utils/loadTestModule";
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>(yes => { resolve = yes; });
-    return { promise, resolve };
-}
-
 function renderer(visible = true, holdDecode = false) {
-    const downloads: { id: string; gate: ReturnType<typeof deferred<Uint8Array>>; }[] = [];
+    const downloads: { id: string; gate: PromiseWithResolvers<Uint8Array>; }[] = [];
     const cancelled: string[] = [];
-    const contexts: { closed: boolean; gate: ReturnType<typeof deferred<any>>; }[] = [];
+    const contexts: { closed: boolean; gate: PromiseWithResolvers<any>; }[] = [];
     let effects: (() => void | (() => void))[] = [];
     let values: unknown[] = [];
     let callbacks: Function[] = [];
     const decoded = { length: 2, numberOfChannels: 2, getChannelData: (channel: number) => new Float32Array(channel ? [0, 1] : [1, 0]) };
     class AudioContext {
-        state = { closed: false, gate: deferred<any>() };
+        state = { closed: false, gate: Promise.withResolvers<any>() };
         constructor() { contexts.push(this.state); }
         decodeAudioData() { return holdDecode ? this.state.gate.promise : Promise.resolve(decoded); }
         close() { this.state.closed = true; return Promise.resolve(); }
@@ -69,7 +57,7 @@ function renderer(visible = true, holdDecode = false) {
         React: { createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props, children }) },
         VencordNative: { pluginHelpers: { VoiceMessageTranscriber: {
             fetchAudio: (_src: string, id: string) => {
-                const gate = deferred<Uint8Array>();
+                const gate = Promise.withResolvers<Uint8Array>();
                 downloads.push({ id, gate });
                 return gate.promise;
             },

@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { cl } from "@equicordplugins/songSpotlight.desktop/lib/utils";
 import { AppleMusicIcon, SoundcloudIcon, SpotifyIcon, TidalIcon } from "@equicordplugins/songSpotlight.desktop/ui/common";
 import { getServiceLabel } from "@song-spotlight/api/util";

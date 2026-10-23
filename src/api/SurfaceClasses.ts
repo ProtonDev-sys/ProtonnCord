@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { Logger } from "@utils/Logger";
 import { useForceUpdater } from "@utils/react";
 import { useEffect } from "@webpack/common";
@@ -134,7 +128,8 @@ function mergeSurfaceProvidedProps(target: SurfaceProvidedProps, source: Surface
     return target;
 }
 
-function getSurfaceProps(surfaceId: SurfaceId) {
+/** @internal Injected by SurfaceClassesAPI patch (do NOT call directly) */
+export function _getSurfaceProps(surfaceId: SurfaceId) {
     const props: SurfaceProvidedProps = {};
 
     for (const provider of propsProviders.get(surfaceId) ?? []) {
@@ -152,7 +147,8 @@ function getSurfaceProps(surfaceId: SurfaceId) {
     return props;
 }
 
-function notifyOneSurface(surfaceId: SurfaceId) {
+/** Re-renders a surface after the state backing one of its providers changed. */
+export function notifySurfaceClassesChanged(surfaceId: SurfaceId) {
     const surfaceInstance = surfaceInstances.get(surfaceId)?.deref();
     if (surfaceInstance) {
         try {
@@ -175,21 +171,11 @@ function notifyOneSurface(surfaceId: SurfaceId) {
 
 export function addSurfacePropsProvider(surfaceId: SurfaceId, provider: SurfacePropsProvider) {
     getOrCreateSet(propsProviders, surfaceId).add(provider);
-    notifyOneSurface(surfaceId);
+    notifySurfaceClassesChanged(surfaceId);
 
     return () => {
-        if (propsProviders.get(surfaceId)?.delete(provider)) notifyOneSurface(surfaceId);
+        if (propsProviders.get(surfaceId)?.delete(provider)) notifySurfaceClassesChanged(surfaceId);
     };
-}
-
-/** Re-renders a surface after the state backing one of its providers changed. */
-export function notifySurfaceClassesChanged(surfaceId: SurfaceId) {
-    notifyOneSurface(surfaceId);
-}
-
-/** @internal Injected by SurfaceClassesAPI patch (do NOT call directly) */
-export function _getSurfaceProps(surfaceId: SurfaceId) {
-    return getSurfaceProps(surfaceId);
 }
 
 /** @internal Injected by SurfaceClassesAPI patch (do NOT call directly) */
@@ -203,7 +189,7 @@ export function _useSurfaceProps(surfaceId: SurfaceId) {
         return () => { listeners.get(surfaceId)?.delete(listener); };
     }, [surfaceId]);
 
-    return getSurfaceProps(surfaceId);
+    return _getSurfaceProps(surfaceId);
 }
 
 /**

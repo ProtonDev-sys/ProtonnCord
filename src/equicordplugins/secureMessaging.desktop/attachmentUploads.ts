@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import type { CloudUpload } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 
@@ -27,6 +21,7 @@ import {
     serializeSecurePlaintext,
 } from "./attachments";
 import { exactArrayBuffer } from "./exactArrayBuffer";
+import { formatUploadBytes } from "./uploadLimits";
 
 interface MutableCloudUpload extends CloudUpload {
     allowOptimization: boolean;
@@ -66,10 +61,34 @@ export class EncryptedAttachmentUploadLimitError extends Error {
         public readonly filename: string,
         public readonly encryptedBytes: number,
         public readonly limitBytes: number,
+        public readonly limitSource: "discord" | "secure-messaging" = "discord",
     ) {
-        super(`Encrypted attachment ${filename} requires ${encryptedBytes} bytes but Discord allows ${limitBytes}`);
+        super(`Encrypted ${filename} requires at least ${formatUploadBytes(encryptedBytes)}; ${limitSource === "discord" ? "Discord allows" : "Secure Messaging's safety limit is"} ${formatUploadBytes(limitBytes)} per file.`);
         this.name = "EncryptedAttachmentUploadLimitError";
     }
+}
+
+export class EncryptedAttachmentTotalLimitError extends Error {
+    constructor(public readonly encryptedBytes: number) {
+        super(`Encrypted attachments require at least ${formatUploadBytes(encryptedBytes)} total; Secure Messaging's per-message safety limit is ${formatUploadBytes(MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES)}.`);
+        this.name = "EncryptedAttachmentTotalLimitError";
+    }
+}
+
+export function assertEncryptedUploadSizes(files: Array<{ filename: string; size: number; }>, discordLimitBytes: number): void {
+    if (!Number.isSafeInteger(discordLimitBytes) || discordLimitBytes < 21)
+        throw new Error("Discord's encrypted attachment upload limit is invalid");
+    const limitBytes = Math.min(discordLimitBytes, MAX_ATTACHMENT_CIPHERTEXT_BYTES);
+    const limitSource = discordLimitBytes <= MAX_ATTACHMENT_CIPHERTEXT_BYTES ? "discord" : "secure-messaging";
+    let totalBytes = 0;
+    for (const file of files) {
+        if (!Number.isSafeInteger(file.size) || file.size < 21) throw new Error("Invalid encrypted attachment size");
+        if (file.size > limitBytes)
+            throw new EncryptedAttachmentUploadLimitError(file.filename, file.size, limitBytes, limitSource);
+        totalBytes += file.size;
+    }
+    if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES)
+        throw new EncryptedAttachmentTotalLimitError(totalBytes);
 }
 
 function assertUpload(upload: CloudUpload): asserts upload is MutableCloudUpload {
@@ -310,20 +329,11 @@ export async function prepareEncryptedAttachments(
 ): Promise<PreparedEncryptedAttachments> {
     if (uploads.length < 1 || uploads.length > MAX_ATTACHMENT_COUNT)
         throw new Error(`Secure Messaging supports 1 to ${MAX_ATTACHMENT_COUNT} attachments per message`);
-    if (!Number.isSafeInteger(maxEncryptedFileBytes) || maxEncryptedFileBytes < 21 ||
-        maxEncryptedFileBytes > MAX_ATTACHMENT_CIPHERTEXT_BYTES)
-        throw new Error("Discord's encrypted attachment upload limit is invalid");
     uploads = [...uploads];
     for (const upload of uploads) assertUpload(upload);
     const inputFiles = uploads.map(upload => upload.item.file);
     const sources = uploads.map(sourceForUpload);
-    for (const source of sources) {
-        const minimumSize = source.file.size + 20;
-        if (minimumSize > maxEncryptedFileBytes)
-            throw new EncryptedAttachmentUploadLimitError(source.filename, minimumSize, maxEncryptedFileBytes);
-    }
-    if (sources.reduce((total, source) => total + source.file.size + 20, 0) > MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES)
-        throw new Error("Encrypted attachments exceed the total size limit");
+    assertEncryptedUploadSizes(sources.map(source => ({ filename: source.filename, size: source.file.size + 20 })), maxEncryptedFileBytes);
 
     if (detachedTextIndex !== null && (!Number.isInteger(detachedTextIndex) ||
         detachedTextIndex < 0 || detachedTextIndex >= uploads.length || sources[detachedTextIndex].file.size > MAX_DETACHED_TEXT_BYTES))
@@ -343,16 +353,8 @@ export async function prepareEncryptedAttachments(
         };
     }
     const plannedSizes = metadata.map(encryptedAttachmentCiphertextSize);
-    const oversizedIndex = plannedSizes.findIndex(size => size > maxEncryptedFileBytes);
-    if (oversizedIndex !== -1)
-        throw new EncryptedAttachmentUploadLimitError(
-            metadata[oversizedIndex].name,
-            plannedSizes[oversizedIndex],
-            maxEncryptedFileBytes,
-        );
+    assertEncryptedUploadSizes(metadata.map((file, index) => ({ filename: file.name, size: plannedSizes[index] })), maxEncryptedFileBytes);
     const totalUploadBytes = plannedSizes.reduce((total, size) => total + size, 0);
-    if (!Number.isSafeInteger(totalUploadBytes) || totalUploadBytes > MAX_TOTAL_ATTACHMENT_CIPHERTEXT_BYTES)
-        throw new Error("Secure Messaging encrypted attachments exceed the 500 MiB per-message safety limit");
     const { descriptor, keyBytes } = generateAttachmentBundleMaterial(uploads.length);
     const ciphertexts: Uint8Array[] = [];
     try {

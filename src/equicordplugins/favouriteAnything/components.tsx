@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { BaseText } from "@components/BaseText";
 import { Button } from "@components/Button";
 import { LazyComponentWrapper } from "@utils/lazyReact";
@@ -21,7 +15,7 @@ export const EmbedContext = proxyLazyWebpack(() => React.createContext<null | Em
 export const EmbedMosaicContext = proxyLazyWebpack(() => React.createContext<null | number>(null));
 const AttachmentContext = proxyLazyWebpack(() => React.createContext<null | AttachmentItem>(null));
 
-const ManaSearchBar = findComponentByCodeLazy<ManaSearchBarProps>("#{intl::SEARCH}),ref");
+const ManaSearchBar = findComponentByCodeLazy<ManaSearchBarProps>(".SEARCH,inputRef:", "clearable:");
 const FavoriteButton = findComponentByCodeLazy<FavoriteButtonProps>("#{intl::GIF_TOOLTIP_ADD_TO_FAVORITES}");
 const SendIcon = findComponentByCodeLazy("M6.6 10.02 14 11.4a.6.6");
 

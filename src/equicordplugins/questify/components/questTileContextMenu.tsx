@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { copyToClipboard } from "@utils/index";
 import type { Quest } from "@vencord/discord-types";
 import { Menu } from "@webpack/common";

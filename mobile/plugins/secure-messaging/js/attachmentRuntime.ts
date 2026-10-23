@@ -76,7 +76,23 @@ interface DiscordUpload {
 
 export interface PreparedEncryptedUploads {
 	apply(): void
+	complete(): void
 	plaintext: string
+}
+
+interface EncryptedUpload {
+	filename: string
+	id: string
+	size: number
+	uri: string
+}
+
+interface UploadBatch {
+	channelId: string
+	senderUserId: string
+	generation: number
+	descriptor: AttachmentBundleDescriptor | undefined
+	files: EncryptedUpload[]
 }
 
 interface ReadyState {
@@ -102,15 +118,125 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024
 const MAX_TOTAL_BYTES = 128 * 1024 * 1024
 const DOWNLOAD_TIMEOUT_MS = 60_000
 const DOWNLOAD_RETRY_MS = 30_000
+const MAX_UPLOAD_RETRIES = 32
 class AttachmentDownloadError extends Error {}
 const cache = new Map<string, CacheState>()
 const files = new Set<string>()
 const renderedMessages = new Map<string, MessageLike>()
 const downloads = new Set<AbortController>()
 const removals = new Map<string, Promise<void>>()
+// Retry descriptors retain only ciphertext metadata. Weak bindings do not keep
+// removed Discord uploads alive; the descriptor set also has a fixed cap.
+const uploadRetries = new Set<UploadBatch>()
+let encryptedUploads = new WeakMap<
+	DiscordUpload,
+	{ batch: UploadBatch; index: number }
+>()
 let cacheGeneration = 0
 let cacheReady = false
 let patchAttachments: PatchAttachments | undefined
+
+function retireUploadBatch(batch: UploadBatch): void {
+	uploadRetries.delete(batch)
+	batch.descriptor = undefined
+	batch.files = []
+}
+
+function invalidUploadBatch(batch: UploadBatch): never {
+	retireUploadBatch(batch)
+	throw new Error(
+		'These encrypted attachments changed or expired. Remove and attach the original files again.',
+	)
+}
+
+function assertUploadBatch(
+	batch: UploadBatch,
+	uploads: DiscordUpload[],
+	channelId: string,
+	senderUserId: string,
+): void {
+	if (batch.generation !== cacheGeneration)
+		throw new Error('Secure Messaging was locked')
+	if (
+		!batch.descriptor ||
+		batch.channelId !== channelId ||
+		batch.senderUserId !== senderUserId ||
+		batch.files.length !== uploads.length ||
+		uploads.some((upload, index) => {
+			const binding = encryptedUploads.get(upload)
+			return (
+				binding?.batch !== batch ||
+				binding.index !== index ||
+				upload.item.uri !== batch.files[index]!.uri
+			)
+		})
+	)
+		invalidUploadBatch(batch)
+}
+
+function preparedUploadBatch(
+	batch: UploadBatch,
+	uploads: DiscordUpload[],
+	text: string,
+	sources?: Array<{ upload: DiscordUpload; uri: string }>,
+): PreparedEncryptedUploads {
+	return {
+		plaintext: serializeSecurePlaintext(text, batch.descriptor!),
+		// Host completion can precede file consumption on some Discord versions.
+		// Retire the retry key here; owned files follow the existing cache cleanup.
+		complete: () => retireUploadBatch(batch),
+		apply() {
+			if (batch.generation !== cacheGeneration)
+				throw new Error('Secure Messaging was locked')
+			if (!batch.descriptor) invalidUploadBatch(batch)
+			if (sources) {
+				if (
+					uploads.length !== sources.length ||
+					uploads.some(
+						(upload, index) =>
+							upload !== sources![index]!.upload ||
+							upload.item.uri !== sources![index]!.uri ||
+							encryptedUploads.has(upload),
+					)
+				)
+					invalidUploadBatch(batch)
+			} else
+				assertUploadBatch(batch, uploads, batch.channelId, batch.senderUserId)
+			uploadRetries.add(batch)
+			while (uploadRetries.size > MAX_UPLOAD_RETRIES)
+				retireUploadBatch(uploadRetries.values().next().value!)
+			for (let index = 0; index < uploads.length; index++) {
+				const upload = uploads[index]!
+				const replacement = batch.files[index]!
+				encryptedUploads.set(upload, { batch, index })
+				Object.assign(upload.item, {
+					id: replacement.id,
+					uri: replacement.uri,
+					originalUri: replacement.uri,
+					filename: replacement.filename,
+					mimeType: 'application/octet-stream',
+					width: undefined,
+					height: undefined,
+				})
+				upload.id = replacement.id
+				upload.spoiler = false
+				upload.setFilename(replacement.filename)
+				upload.mimeType = 'application/octet-stream'
+				upload.allowOptimization = false
+				upload.isImage = false
+				upload.isVideo = false
+				upload.description = undefined
+				upload.durationSecs = undefined
+				upload.waveform = undefined
+				upload.currentSize = replacement.size
+				upload.preCompressionSize = replacement.size
+				upload.postCompressionSize = undefined
+				upload.reactNativeFilePrepped = false
+			}
+			sources = undefined
+		},
+	}
+}
 
 function removeCachedFile(path: string): Promise<void> {
 	const pending = removals.get(path)
@@ -197,6 +323,14 @@ async function readUploadSources(uploads: DiscordUpload[]) {
 				throw new Error(
 					'Secure Messaging can only encrypt pending local attachments',
 				)
+			const uri = new URL(upload.item.uri)
+			if (
+				uri.protocol === 'file:' &&
+				/\/protonn-cord\/uploads\/[^/]+\.pcaf$/.test(uri.pathname)
+			)
+				throw new Error(
+					'This encrypted upload is no longer available for retry. Remove and attach the original file again.',
+				)
 			const encoded = await callNativeMethod(
 				'uk.co.protonn.secure-messaging.attachment.read',
 				[upload.item.uri],
@@ -260,29 +394,33 @@ export async function prepareEncryptedUploads(
 	requireSnowflake(channelId, 'attachment channel')
 	requireSnowflake(senderUserId, 'attachment sender')
 
-	const sources = await readUploadSources(uploads)
+	const retry = uploads
+		.map(upload => encryptedUploads.get(upload)?.batch)
+		.find(Boolean)
+	if (retry) {
+		assertUploadBatch(retry, uploads, channelId, senderUserId)
+		return preparedUploadBatch(retry, uploads, text)
+	}
+	const originals = uploads.map(upload => ({ upload, uri: upload.item?.uri }))
+	const sources = await readUploadSources(
+		originals.map(source => source.upload),
+	)
 	let keyBytes: Uint8Array | undefined
 	const ciphertexts: Uint8Array[] = []
 	const createdPaths: string[] = []
-	const replacements: Array<{
-		filename: string
-		id: string
-		size: number
-		upload: DiscordUpload
-		uri: string
-	}> = []
+	const replacements: EncryptedUpload[] = []
 	try {
 		if (generation !== cacheGeneration)
 			throw new Error('Secure Messaging was locked')
-		const material = generateAttachmentBundleMaterial(uploads.length)
+		const material = generateAttachmentBundleMaterial(originals.length)
 		const { descriptor } = material
 		keyBytes = material.keyBytes
-		for (let index = 0; index < uploads.length; index++) {
+		for (let index = 0; index < originals.length; index++) {
 			const source = sources[index]!
 			const ciphertext = encryptAttachmentBytes({
 				bundleId: descriptor.id,
 				channelId,
-				count: uploads.length,
+				count: originals.length,
 				data: source.data,
 				index,
 				masterKey: keyBytes,
@@ -310,44 +448,22 @@ export async function prepareEncryptedUploads(
 				filename,
 				id: `${uri}${ciphertext.length}`,
 				size: ciphertext.length,
-				upload: uploads[index]!,
 				uri,
 			})
 		}
 		const root = attachmentBundleRoot(descriptor.id, ciphertexts)
-		return {
-			plaintext: serializeSecurePlaintext(text, { ...descriptor, root }),
-			apply() {
-				if (generation !== cacheGeneration)
-					throw new Error('Secure Messaging was locked')
-				for (const replacement of replacements) {
-					const { upload } = replacement
-					Object.assign(upload.item, {
-						id: replacement.id,
-						uri: replacement.uri,
-						originalUri: replacement.uri,
-						filename: replacement.filename,
-						mimeType: 'application/octet-stream',
-						width: undefined,
-						height: undefined,
-					})
-					upload.id = replacement.id
-					upload.spoiler = false
-					upload.setFilename(replacement.filename)
-					upload.mimeType = 'application/octet-stream'
-					upload.allowOptimization = false
-					upload.isImage = false
-					upload.isVideo = false
-					upload.description = undefined
-					upload.durationSecs = undefined
-					upload.waveform = undefined
-					upload.currentSize = replacement.size
-					upload.preCompressionSize = replacement.size
-					upload.postCompressionSize = undefined
-					upload.reactNativeFilePrepped = false
-				}
+		return preparedUploadBatch(
+			{
+				channelId,
+				senderUserId,
+				generation,
+				descriptor: { ...descriptor, root },
+				files: replacements,
 			},
-		}
+			uploads,
+			text,
+			originals,
+		)
 	} catch (error) {
 		await Promise.all(createdPaths.map(removeCachedFile))
 		throw error
@@ -780,6 +896,8 @@ export function renderAttachments(
 
 export function clearAttachmentCache(): void {
 	cacheGeneration++
+	for (const batch of uploadRetries) retireUploadBatch(batch)
+	encryptedUploads = new WeakMap()
 	for (const controller of downloads) controller.abort()
 	downloads.clear()
 	cache.clear()

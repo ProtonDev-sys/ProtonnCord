@@ -16,7 +16,7 @@ export function createUpdateService(): RendererService {
     if (IS_WEB || IS_UPDATER_DISABLED) return { dispose() {} };
 
     let disposed = false;
-    let notified = false;
+    let notified: "available" | "installed" | undefined;
     let checking = false;
     let interval: ReturnType<typeof setInterval> | undefined;
     const listeners: Dispose[] = [];
@@ -34,12 +34,12 @@ export function createUpdateService(): RendererService {
                 const didUpdate = await update();
                 if (disposed || branch !== Settings.updateBranch || !didUpdate) return;
                 if (IS_DISCORD_DESKTOP) VencordNative.tray.setUpdateState(false);
-                if (Settings.autoUpdateNotification && !notified) {
-                    notified = true;
+                if (Settings.autoUpdateNotification && notified !== "installed") {
+                    notified = "installed";
                     showNotice("Protonn Cord has been updated!", "Restart", relaunch);
                 }
             } else if (!notified) {
-                notified = true;
+                notified = "available";
                 showNotice("A new version of Protonn Cord is available!", "View Update", () => openSettingsTabModal(UpdaterTab!));
             }
         } catch (error) {
@@ -69,9 +69,10 @@ export function createUpdateService(): RendererService {
 
     async function repairFromTray() {
         if (disposed) return;
+        const branch = Settings.updateBranch;
         try {
             const repaired = await repair();
-            if (!disposed && repaired) await relaunch();
+            if (!disposed && branch === Settings.updateBranch && repaired) await relaunch();
         } catch (error) {
             UpdateLogger.error("Failed to repair Protonn Cord", error);
         }
@@ -104,9 +105,11 @@ export function createUpdateService(): RendererService {
         ...(!IS_DEV && {
             runInitial() {
                 if (disposed) return;
-                // Retain periodic checks only for silent automatic updates.
-                if (Settings.autoUpdate && !Settings.autoUpdateNotification)
-                    interval = setInterval(() => { void runUpdateCheck(); }, 30 * 60_000);
+                // Retry transient startup failures regardless of notification preferences,
+                // and read the current setting so enabling automatic updates takes effect.
+                interval ??= setInterval(() => {
+                    if (Settings.autoUpdate) void runUpdateCheck();
+                }, 30 * 60_000);
                 return runUpdateCheck();
             },
         }),

@@ -25,16 +25,9 @@ const nativeMedia = loadTestModule("src/equicordplugins/fileUpload/nativeNetwork
     "node:dns/promises": {}, "node:http": {}, "node:https": {}, "node:net": {}
 }, { URL, Blob, Uint8Array, AbortController, AbortSignal });
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
-
 function loadRenderer(native: object, common: object = {}) {
     const output = transpileModule(readFileSync("src/equicordplugins/discordMcp.desktop/index.ts", "utf8")
-        + "\nexport { generateAttachmentWaveform, waveformCache, executeTool, handleBridgeRequest, bridgeLoop, inFlightRequests };", {
+        + "\nexport { generateAttachmentWaveform, waveformCache, executeTool, handleBridgeRequest, bridgeLoop, inFlightRequests, serializeMessage };", {
         compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, esModuleInterop: false }
     }).outputText;
     const modules = {
@@ -43,13 +36,13 @@ function loadRenderer(native: object, common: object = {}) {
         "@utils/constants": { EquicordDevs: {} },
         "@utils/Logger": { Logger: class { error() {} } },
         "@webpack/common": common,
-        "@vencord/discord-types/enums": { MessageFlags: { IS_VOICE_MESSAGE: 8192 } },
+        "@vencord/discord-types/enums": { MessageFlags: { IS_VOICE_MESSAGE: 8192 }, MessageReferenceType: { DEFAULT: 0, FORWARD: 1 } },
         "@plugins/voiceMessages/waveform": { generateWaveform: () => "waveform" },
         "../voiceMessageTranscriber.desktop/utils": { decodeAudio: async () => [] }
     };
     return runInNewContext(`${output}\nexports;`, {
         exports: {}, VencordNative: { pluginHelpers: { DiscordMCP: native } },
-        Blob, Uint8Array, setTimeout, clearTimeout, AbortController, crypto,
+        Blob, Uint8Array, URLSearchParams, setTimeout, clearTimeout, AbortController, crypto,
         require: (name: string) => modules[name] ?? {}
     });
 }
@@ -63,7 +56,7 @@ async function nativeFixture(t: { after(fn: () => Promise<void>): void; }, overr
         const output = transpileModule(readFileSync("src/equicordplugins/discordMcp.desktop/native.ts", "utf8"), {
             compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, esModuleInterop: false }
         }).outputText;
-        const modules = { "@main/utils/constants": { DATA_DIR: root }, "./policy": policy, "../fileUpload/nativeNetwork": nativeMedia, crypto, fs: { ...fs, watch(...args: any[]) {
+        const modules = { "@main/utils/constants": { DATA_DIR: root }, "file://../../../tools/discord-mcp/server.mjs?trim=false": { default: readFileSync("tools/discord-mcp/server.mjs", "utf8") }, "./policy": policy, "../fileUpload/nativeNetwork": nativeMedia, crypto, fs: { ...fs, watch(...args: any[]) {
             const watcher = (fs.watch as any)(...args) as fs.FSWatcher;
             watchers.add(watcher);
             watcher.on("close", () => watchers.delete(watcher));
@@ -89,6 +82,46 @@ async function nativeFixture(t: { after(fn: () => Promise<void>): void; }, overr
         async response(id: string) { return JSON.parse(await fsp.readFile(path.join(directory, "responses", `${id}.json`), "utf8")); }
     };
 }
+
+test("Discord MCP installs and refreshes its stable server path without rotating credentials or losing recorded sends", async t => {
+    const f = await nativeFixture(t);
+    const serverPath = path.join(f.directory, "server.mjs");
+    const source = readFileSync("tools/discord-mcp/server.mjs", "utf8");
+    assert.equal(await fsp.readFile(serverPath, "utf8"), source);
+    const config = await fsp.readFile(path.join(f.directory, "config.json"), "utf8");
+    const ledger = JSON.stringify(["123456789012345678:234567890123456789"]);
+    await fsp.writeFile(path.join(f.directory, "sent-messages.json"), ledger);
+    await fsp.writeFile(serverPath, "outdated server");
+    const updated = f.load();
+    await updated.initializeBridge(f.event, crypto.randomUUID());
+    assert.equal(await fsp.readFile(serverPath, "utf8"), source);
+    assert.equal(await fsp.readFile(path.join(f.directory, "config.json"), "utf8"), config);
+    assert.equal(await fsp.readFile(path.join(f.directory, "sent-messages.json"), "utf8"), ledger);
+});
+
+test("Discord MCP retries a failed server refresh while preserving the installed server and bridge credentials", async t => {
+    let locked = false;
+    const f = await nativeFixture(t, {
+        rename: async (from: string, to: string) => {
+            if (locked && path.basename(to) === "server.mjs") throw Object.assign(new Error("server locked"), { code: "EACCES" });
+            await fsp.rename(from, to);
+        }
+    });
+    const serverPath = path.join(f.directory, "server.mjs");
+    const configPath = path.join(f.directory, "config.json");
+    const config = await fsp.readFile(configPath, "utf8");
+    await fsp.writeFile(serverPath, "previous server");
+    locked = true;
+    const updated = f.load();
+    await assert.rejects(updated.initializeBridge(f.event, crypto.randomUUID()), /server locked/);
+    assert.equal(await fsp.readFile(serverPath, "utf8"), "previous server");
+    assert.equal(await fsp.readFile(configPath, "utf8"), config);
+    assert.equal((await fsp.readdir(f.directory)).some(name => name.endsWith(".tmp")), false);
+    locked = false;
+    await updated.initializeBridge(f.event, crypto.randomUUID());
+    assert.equal(await fsp.readFile(serverPath, "utf8"), readFileSync("tools/discord-mcp/server.mjs", "utf8"));
+    assert.equal(await fsp.readFile(configPath, "utf8"), config);
+});
 
 test("Discord MCP stop wakes native polling and an old session cannot claim or cancel its replacement", async t => {
     const f = await nativeFixture(t);
@@ -135,8 +168,8 @@ test("Discord MCP response write failures never replace a completed result with 
 
 for (const blocked of [false, true]) {
     test(`Discord MCP stop cancels every unstarted ${blocked ? "capacity-blocked" : "late claimed"} request`, async () => {
-        const batch = deferred<any[]>();
-        const completed = deferred<void>();
+        const batch = Promise.withResolvers<any[]>();
+        const completed = Promise.withResolvers<void>();
         const responses: any[] = [];
         const f = loadRenderer({
             initializeBridge: async () => {}, cancelRequests: async () => {},
@@ -219,6 +252,90 @@ test("Discord MCP retries interrupted-claim recovery on a later writable poll wi
 const channelId = "123456789012345678";
 const messageId = "234567890123456789";
 const sent = { id: messageId, channel_id: channelId, content: "fixture text", author: { id: "345678901234567890" } };
+
+const forwarded = {
+    ...sent, content: "", flags: 16384,
+    message_reference: { type: 1, message_id: "456789012345678901", channel_id: "567890123456789012", guild_id: "678901234567890123" },
+    message_snapshots: [{ message: {
+        content: "forwarded text", timestamp: "2026-10-11T01:24:00Z", edited_timestamp: "2026-10-11T01:24:01Z", type: 0, flags: 8192,
+        attachments: [{ id: "789012345678901234", filename: "voice.ogg", content_type: "audio/ogg", duration_secs: 2.5, url: "https://cdn.discordapp.com/attachments/fixture/voice.ogg" }],
+        embeds: [{ title: "forwarded embed", description: "snapshot description", image: { url: "https://example.com/image.png" } }],
+    } }],
+};
+
+test("Discord MCP serializes REST and client forwards without inventing snapshot identity or treating them as replies", () => {
+    const f = loadRenderer({});
+    const rest = f.serializeMessage(forwarded);
+    const client = f.serializeMessage({ ...sent, content: "", flags: forwarded.flags,
+        messageReference: forwarded.message_reference, messageSnapshots: forwarded.message_snapshots });
+    assert.equal(JSON.stringify(client), JSON.stringify(rest));
+    assert.equal(rest.content, "", "the forwarding envelope keeps its own content");
+    assert.equal(rest.author.id, sent.author.id);
+    assert.equal(rest.isForwarded, true);
+    assert.equal(rest.replyToMessageId, null);
+    assert.equal(rest.messageReference.channelId, forwarded.message_reference.channel_id);
+    assert.equal(rest.messageReference.guildId, forwarded.message_reference.guild_id);
+    const snapshot = rest.messageSnapshots[0].message;
+    assert.equal(snapshot.content, "forwarded text");
+    assert.equal(snapshot.editedTimestamp, forwarded.message_snapshots[0].message.edited_timestamp);
+    assert.equal(snapshot.embeds[0].title, "forwarded embed");
+    assert.equal(snapshot.attachments[0].durationSeconds, 2.5);
+    for (const field of ["id", "channelId", "author"]) assert.equal(field in snapshot, false);
+    const reply = f.serializeMessage({ ...sent, message_reference: { message_id: messageId } });
+    assert.equal(reply.isForwarded, false);
+    assert.equal(reply.replyToMessageId, messageId);
+    assert.equal(reply.messageReference.type, 0);
+    assert.equal(reply.messageSnapshots.length, 0);
+    assert.equal(f.serializeMessage(sent).messageReference, null);
+    assert.equal(f.serializeMessage({ ...sent, message_snapshots: [null, {}, { message: null }] }).messageSnapshots.length, 0);
+});
+
+test("Discord MCP reads, searches, and subscriptions retain forwarded snapshots and source references", async () => {
+    const f = loadRenderer({}, {
+        ChannelStore: { getChannel: () => ({ id: channelId }) },
+        Constants: { Endpoints: { MESSAGES: () => "fixture-messages" } },
+        RestAPI: { get: async ({ url }: { url: string; }) => ({ body: url.includes("/search")
+            ? { total_results: 1, messages: [[{ ...forwarded, hit: true }]] } : [forwarded] }) },
+    });
+    const read = await f.executeTool("read_messages", { channel_id: channelId });
+    const bulk = await f.executeTool("bulk_read_messages", { channel_ids: [channelId], limit_per_channel: 1 });
+    const search = await f.executeTool("search_messages", { channel_id: channelId, has: ["snapshot"] });
+    const subscription = await f.executeTool("subscribe_channel", { channel_id: channelId });
+    f.default.flux.MESSAGE_CREATE({ type: "MESSAGE_CREATE", message: forwarded });
+    const waited = await f.executeTool("wait_for_message", { subscription_id: subscription.id });
+    for (const message of [read[0], bulk.channels[0].messages[0], search.messages[0], waited.message]) {
+        assert.equal(message.messageSnapshots[0].message.content, "forwarded text");
+        assert.equal(message.messageReference.messageId, forwarded.message_reference.message_id);
+        assert.equal(message.replyToMessageId, null);
+    }
+});
+
+test("Discord MCP generates forwarded voice waveforms and downloads attachments from the snapshot using the envelope ID", async () => {
+    let downloads = 0;
+    const f = loadRenderer({
+        fetchDiscordAttachment: async () => ({ data: new Uint8Array(), contentType: "audio/ogg" }),
+        downloadDiscordAttachment: async (url: string, filename: string) => {
+            assert.equal(url, forwarded.message_snapshots[0].message.attachments[0].url);
+            assert.equal(filename, "voice.ogg");
+            downloads++;
+            return { data: new Uint8Array(), contentType: "audio/ogg", path: "fixture-download" };
+        },
+    }, {
+        ChannelStore: { getChannel: () => ({ id: channelId }) },
+        Constants: { Endpoints: { MESSAGES: () => "fixture-messages" } },
+        RestAPI: { get: async () => ({ body: [forwarded] }) },
+    });
+    const message = await f.executeTool("get_message", { channel_id: channelId, message_id: messageId });
+    assert.equal(message.isVoiceMessage, false);
+    assert.equal(message.messageSnapshots[0].message.attachments[0].waveform, "waveform");
+    const args = { channel_id: channelId, message_id: messageId, attachment_id: "789012345678901234" };
+    const downloaded = await f.executeTool("download_attachment", args);
+    assert.equal(downloaded.messageId, messageId);
+    assert.equal(downloaded.attachment.waveformSource, "generated");
+    await assert.rejects(f.executeTool("download_attachment", { ...args, attachment_id: "999999999999999999" }), /not found/);
+    assert.equal(downloads, 1, "only attachments present in the fetched envelope or snapshot can be downloaded");
+});
+
 function messageCommon(post: () => Promise<unknown>) {
     return {
         ChannelStore: { getChannel: () => ({ id: channelId }) },
@@ -274,7 +391,7 @@ test("Discord MCP REST rejection remains a failed send without recording deletio
 });
 
 test("Discord MCP stop cannot replace an already-started send's confirmed result with cancellation", async () => {
-    const post = deferred<object>();
+    const post = Promise.withResolvers<object>();
     const responses: any[] = [];
     let records = 0;
     const renderer = loadRenderer({
@@ -343,9 +460,9 @@ test("Discord MCP confirms deletion despite ledger failure and retries only trac
 
 for (const resolved of [false, true]) {
     test(`Discord MCP evicted waveform failures preserve ${resolved ? "completed" : "pending"} replacements`, async () => {
-        const requests: ReturnType<typeof deferred<any>>[] = [];
+        const requests: PromiseWithResolvers<any>[] = [];
         const f = loadRenderer({ fetchDiscordAttachment() {
-            const request = deferred<any>();
+            const request = Promise.withResolvers<any>();
             requests.push(request);
             return request.promise;
         } });

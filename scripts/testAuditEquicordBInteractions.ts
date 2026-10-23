@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -41,12 +35,6 @@ function load(file: string, overrides: Record<string, unknown>, globals: Record<
     });
 }
 
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>(done => { resolve = done; });
-    return { promise, resolve };
-}
-
 test("custom color writes preserve unknown records, serialize updates and recover after failed persistence", async () => {
     let stored: Record<string, any> = { original: "000000", future: { opaque: true } };
     let fail = false;
@@ -78,7 +66,7 @@ test("black custom colors remain black and modal persistence failures leave the 
     let closed = 0;
     let updates = 0;
     let toasted = 0;
-    const pending = deferred<void>();
+    const pending = Promise.withResolvers<void>();
     const component = load("src/equicordplugins/customUserColors/SetColorModal.tsx", {
         "@components/Heading": {}, "@utils/margins": { Margins: {} },
         "@webpack/common": { React, useState: React.useState, showToast: () => toasted++, ColorPicker: "ColorPicker", Modal: "Modal" },
@@ -161,7 +149,7 @@ test("pending drag text does not reach a different channel, account or a stopped
     for (const scenario of ["channel", "account", "stop"]) {
         selected = "original";
         account = "account";
-        const pending = deferred<string>();
+        const pending = Promise.withResolvers<string>();
         plugin.buildText = () => pending.promise;
         const drop = plugin.handleDropEntity({ kind: "guild", id: "guild" }, { id: "original" });
         if (scenario === "channel") selected = "other";
@@ -178,13 +166,13 @@ test("pending drag text does not reach a different channel, account or a stopped
 test("invite cache ignores responses completed after stop and account changes", async () => {
     let account = "one";
     let gets = 0;
-    const pending: ReturnType<typeof deferred<{ body: { code: string; }; }>>[] = [];
+    const pending: PromiseWithResolvers<{ body: { code: string; }; }>[] = [];
     const channel = { id: "channel", guild_id: "guild", isDM: () => false, isGroupDM: () => false, isMultiUserDM: () => false, isCategory: () => false, isThread: () => false };
     const api = load("src/equicordplugins/dragify/invite.ts", {
         "@webpack/common": {
             UserStore: { getCurrentUser: () => ({ id: account }) }, PermissionStore: { can: () => true }, PermissionsBits: {}, showToast() {}, Toasts: { Type: {} },
             RestAPI: {
-                post: () => { const result = deferred<{ body: { code: string; }; }>(); pending.push(result); return result.promise; },
+                post: () => { const result = Promise.withResolvers<{ body: { code: string; }; }>(); pending.push(result); return result.promise; },
                 get: async () => { gets++; return { body: [{ code: "fresh", max_uses: 0 }] }; }
             }
         }

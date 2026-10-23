@@ -7,6 +7,7 @@ import { runInNewContext } from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { requestBytes } from "../src/main/updater/httpOperations";
+import { isDiscordRendererOrigin } from "../src/shared/rendererOrigin";
 
 function compile(source: string) {
     return transpileModule(source, {
@@ -141,11 +142,13 @@ test("Monaco receives only its editor bridge and contains failed CSS saves", asy
         } };
         runInNewContext(compile(source("src/preload.ts")), {
             exports: {}, location: { protocol }, IS_DISCORD_DESKTOP: false,
+            window: { origin: protocol === "data:" ? "null" : "https://discord.com" }, process: { isMainFrame: true },
             setTimeout: (callback: () => void) => { callback(); return 1; }, clearTimeout() { },
             console: { error: (...args: unknown[]) => errors.push(args) },
             require(name: string) {
                 if (name === "@shared/debounce") return { debounce: (callback: unknown) => callback };
                 if (name === "@shared/IpcEvents") return { IpcEvents: {} };
+                if (name === "@shared/rendererOrigin") return { isDiscordRendererOrigin };
                 if (name === "electron/renderer") return {
                     ipcRenderer: { on() { } },
                     contextBridge: { exposeInMainWorld: (key: string, value: any) => exposed.set(key, value) }

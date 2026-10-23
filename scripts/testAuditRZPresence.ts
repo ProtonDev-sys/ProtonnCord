@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -20,12 +14,6 @@ function load(file: string, imports: Record<string, unknown>, globals: Record<st
     }, expose, { mockImports: false });
 }
 
-function deferred<T = any>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const logger = { Logger: class { warn() {} error() {} } };
 
@@ -75,7 +63,7 @@ const nowPlaying = (entry: any) => ({ ok: true, json: async () => ({ "subsonic-r
 
 test("RZ5-01 cancels old Navidrome configuration and unregisters its listener", async () => {
     for (const key of ["nd_username", "nd_serverUrl", "nd_albumArtMode", "nd_detailsString"]) {
-        const pending = deferred();
+        const pending = Promise.withResolvers<any>();
         let firstSignal: AbortSignal | undefined;
         let calls = 0;
         const h = navidrome((_: string, options: any) => {
@@ -101,7 +89,7 @@ test("RZ5-01 cancels old Navidrome configuration and unregisters its listener", 
 });
 
 test("RZ5-01 snapshot rejects changes even without a delivered settings notification", async () => {
-    const pending = deferred();
+    const pending = Promise.withResolvers<any>();
     let calls = 0;
     const h = navidrome(() => ++calls === 1 ? pending.promise : Promise.resolve(nowPlaying(null)));
     h.api.start();
@@ -134,7 +122,7 @@ test("RZ5-02 retries failed Last.fm artwork on the same unchanged track", async 
 });
 
 test("RZ5-01 disabling artwork cancels an outstanding Last.fm lookup", async () => {
-    const pending = deferred();
+    const pending = Promise.withResolvers<any>();
     let signal: AbortSignal | undefined;
     const h = navidrome((url: string, options: any) => {
         if (!url.includes("audioscrobbler")) return Promise.resolve(nowPlaying(track()));
@@ -194,7 +182,7 @@ const game = (title: string, set = 1) => ({
 });
 
 test("RZ5-04 slow older tosu messages cannot overwrite the newest activity", async () => {
-    const pending = deferred<string>();
+    const pending = Promise.withResolvers<string>();
     const h = tosu(() => pending.promise, async () => ({ ok: true }));
     h.message(game("old"));
     await tick();
@@ -210,7 +198,7 @@ test("RZ5-04 slow older tosu messages cannot overwrite the newest activity", asy
 });
 
 test("RZ5-05 stopping tosu aborts cover HEAD work", async () => {
-    const pending = deferred();
+    const pending = Promise.withResolvers<any>();
     let signal: AbortSignal | undefined;
     const h = tosu(async () => "mp:cover", (_: string, options: any) => { signal = options.signal; return pending.promise; });
     h.message(game("old"));

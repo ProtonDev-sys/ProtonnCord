@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -19,6 +13,7 @@ import type { DecryptIncomingAttachmentsInput, DecryptIncomingAttachmentsResult,
 import { createTaskQueue } from "../src/equicordplugins/secureMessaging.desktop/taskQueue";
 
 type AttachmentCache = typeof import("../src/equicordplugins/secureMessaging.desktop/attachmentCache");
+type AttachmentSelection = NonNullable<Parameters<AttachmentCache["decryptIncomingAttachmentsCached"]>[2]>;
 const source = readFileSync(new URL("../src/equicordplugins/secureMessaging.desktop/attachmentCache.ts", import.meta.url), "utf8");
 const userId = "100000000000000001";
 
@@ -45,19 +40,21 @@ function fixture(options: {
     filesOnly?: boolean;
     expiredUrls?: boolean;
     inspect?: () => Promise<DecryptIncomingResult>;
-    load?: (selection: string) => Promise<DecryptIncomingAttachmentsResult>;
-    download?: () => Promise<DownloadIncomingAttachmentResult>;
+    load?: (selection: AttachmentSelection, input: DecryptIncomingAttachmentsInput) => Promise<DecryptIncomingAttachmentsResult>;
+    download?: (input: DecryptIncomingAttachmentsInput) => Promise<DownloadIncomingAttachmentResult>;
     refresh?: (urls: string[]) => Promise<object>;
     updateMessage?: () => void;
     document?: unknown;
     maxCacheBytes?: number;
+    createObjectUrl?: (blob: Blob) => void;
 } = {}) {
     let currentUserId = userId;
-    const metrics = { inspections: 0, loads: 0, downloads: 0, refreshes: 0, selections: [] as string[], refreshRequests: [] as string[][], inputs: [] as DecryptIncomingAttachmentsInput[] };
+    const metrics = { inspections: 0, loads: 0, downloads: 0, refreshes: 0, selections: [] as AttachmentSelection[], refreshRequests: [] as string[][], inputs: [] as DecryptIncomingAttachmentsInput[] };
     const blobs = new Map<string, Blob>();
     let nextUrl = 0;
     class LocalURL extends URL {
         static createObjectURL(blob: Blob) {
+            options.createObjectUrl?.(blob);
             const url = `blob:https://discord.com/fixture-${++nextUrl}`;
             blobs.set(url, blob);
             return url;
@@ -87,11 +84,11 @@ function fixture(options: {
                 }
             };
         },
-        async decryptIncomingAttachments(_userId: string, input: DecryptIncomingAttachmentsInput, selection: string): Promise<DecryptIncomingAttachmentsResult> {
+        async decryptIncomingAttachments(_userId: string, input: DecryptIncomingAttachmentsInput, selection: AttachmentSelection): Promise<DecryptIncomingAttachmentsResult> {
             metrics.loads++;
             metrics.selections.push(selection);
             metrics.inputs.push(input);
-            return options.load ? options.load(selection) : {
+            return options.load ? options.load(selection, input) : {
                 status: "decrypted", plaintext: "",
                 attachments: options.legacy || options.filesOnly ? [] : [{
                     id: message.attachments[1].id, data: new Uint8Array([1, 2, 3, 4]),
@@ -108,7 +105,7 @@ function fixture(options: {
             assert.equal(attachmentId, message.attachments[0].id);
             metrics.downloads++;
             metrics.inputs.push(input);
-            return options.download ? options.download() : { status: "saved", filename: "archive.zip" };
+            return options.download ? options.download(input) : { status: "saved", filename: "archive.zip" };
         }
     };
     const mocks: Record<string, object> = {
@@ -179,12 +176,14 @@ function videoFixture(videoCount = 2, maxCacheBytes?: number) {
         inspect: async () => ({ status: "decrypted", plaintext: "", stickers: [], detachedTextIndex: null, counter: 1, envelopeId: "fixture",
             attachmentBundle: { id: "A".repeat(22), key: "A".repeat(43), root: "A".repeat(43), count: ids.length,
                 manifest: ids.map(() => ({ digest: "A".repeat(43), preview: true, spoiler: false, size: 4, name: null })) } }),
-        load: async () => ({ status: "decrypted", plaintext: "", attachments: ids.map((id, index) => ({
+        load: async selection => ({ status: "decrypted", plaintext: "", attachments: ids.map((id, index) => ({
             id, data: new Uint8Array([1, 2, 3, 4]), metadata: {
                 name: index === 1 ? "photo.png" : "clip.mp4", mimeType: index === 1 ? "image/png" : "video/mp4", size: 4,
                 width: 640, height: 480, duration: index === 1 ? null : 1, description: null, waveform: null, spoiler: false,
             },
-        })) }),
+        })).filter(file => typeof selection !== "object" || file.id === selection.attachmentId),
+        deferredAttachments: ids.filter(id => typeof selection === "object" && id !== selection.attachmentId)
+            .map(id => ({ id, size: 4, name: null, spoiler: false })) }),
     });
     h.message.attachments = ids.map(id => ({ ...h.message.attachments[1], id, size: 100,
         url: `https://cdn.discordapp.com/attachments/${h.message.channel_id}/${id}/encrypted.pcaf`,
@@ -459,15 +458,19 @@ for (const legacy of [false, true]) {
     });
 }
 
-test("preview refresh includes only selected media URLs while native input retains every reference", async t => {
-    const { api, message, metrics } = fixture({ expiredUrls: true });
+test("a cold expired preview refreshes only selected media after the native cache miss", async t => {
+    const { api, message, metrics } = fixture({ expiredUrls: true, load: async (_selection, input) =>
+        input.attachments[1].url.includes("ex=1") ? { status: "failed", error: "attachment_download_failed" }
+            : { status: "decrypted", plaintext: "", attachments: [] } });
     t.after(api.clearEncryptedAttachmentCache);
     api.encryptedAttachmentStatus(message);
     await setImmediate();
     assert.equal(api.encryptedAttachmentStatus(message).status, "ready");
     const [file, preview] = message.attachments;
     assert.deepEqual(metrics.refreshRequests, [[preview.url, preview.proxy_url]]);
-    const [input] = metrics.inputs;
+    assert.equal(metrics.loads, 2);
+    assert.equal(metrics.inputs[0].attachments[1].url, preview.url, "native gets the opportunity to serve its authenticated cache first");
+    const input = metrics.inputs[1];
     assert.deepEqual(Array.from(input.attachments, attachment => attachment.id), message.attachments.map(attachment => attachment.id));
     assert.equal(input.attachments[0].url, file.url);
     assert.equal(input.attachments[0].proxyUrl, file.proxy_url);
@@ -476,14 +479,17 @@ test("preview refresh includes only selected media URLs while native input retai
 });
 
 for (const legacy of [false, true]) {
-    test(`${legacy ? "legacy" : "manifest"} explicit downloads refresh ${legacy ? "all authenticated bundle references" : "only the clicked file"}`, async t => {
-        const { api, message, metrics } = fixture({ legacy, filesOnly: true, expiredUrls: true });
+    test(`${legacy ? "legacy" : "manifest"} cold downloads refresh ${legacy ? "all authenticated bundle references" : "only the clicked file"}`, async t => {
+        const { api, message, metrics } = fixture({ legacy, filesOnly: true, expiredUrls: true, download: async input =>
+            input.attachments[0].url.includes("ex=1") ? { status: "failed", error: "attachment_download_failed" }
+                : { status: "saved", filename: "archive.zip" } });
         t.after(api.clearEncryptedAttachmentCache);
         api.encryptedAttachmentStatus(message);
         await setImmediate();
         assert.equal(metrics.refreshes, 0);
         const url = api.patchEncryptedMessageAttachments(message, { forceUpdate() {} }).attachments[0].url;
         assert.equal((await api.downloadEncryptedAttachmentUrl(url))?.status, "saved");
+        assert.equal(metrics.downloads, 2);
         const refreshed = legacy ? message.attachments : message.attachments.slice(0, 1);
         assert.deepEqual(metrics.refreshRequests, [refreshed.flatMap(attachment => [attachment.url, attachment.proxy_url])]);
         const input = metrics.inputs.at(-1);
@@ -546,7 +552,7 @@ for (const name of ["notes.txt", "README.MD", "settings.json", "data.csv", "conf
         assert.equal(await blobs.get(file.url.split("#")[0])?.text(), "<script>inert document</script>");
         assert.equal(api.isEncryptedAttachmentMediaUrl(file.url), false);
         assert.equal(api.isEncryptedAttachmentDownloadUrl(file.url), true);
-        assert.deepEqual(metrics.refreshRequests, [message.attachments.flatMap(attachment => [attachment.url, attachment.proxy_url])]);
+        assert.deepEqual(metrics.refreshRequests, [], "authenticated native cache hits need no signed-URL refresh");
         for (let i = 0; i < 100; i++) api.patchEncryptedMessageAttachments(message, owner);
         assert.equal(metrics.loads, 1);
         assert.equal(metrics.downloads, 0);
@@ -616,3 +622,246 @@ test("an updated optimistic nonce cannot reuse a cached replay failure", async t
     await setImmediate();
     assert.equal(metrics.inspections, 2, "Changed authentication inputs must be checked again");
 });
+
+function independentPreviews(options: {
+    count?: number;
+    createObjectUrl?: (blob: Blob) => void;
+    detached?: boolean;
+    download?: () => Promise<DownloadIncomingAttachmentResult>;
+} = {}) {
+    const files = Array.from({ length: options.count ?? 2 }, (_, index) => ({
+        id: String(400000000000000001n + BigInt(index)), data: new Uint8Array([1, 2, 3, 4]),
+        metadata: { name: `image-${index}.png`, mimeType: "image/png", size: 4, spoiler: false,
+            description: null, duration: null, height: 1, width: 1, waveform: null }
+    }));
+    const gates = files.map(() => Promise.withResolvers<DecryptIncomingAttachmentsResult>());
+    const h = fixture({
+        createObjectUrl: options.createObjectUrl,
+        download: options.download,
+        inspect: async () => ({ status: "decrypted", plaintext: "", stickers: [], counter: 1, envelopeId: "fixture",
+            detachedTextIndex: options.detached ? files.length - 1 : null,
+            attachmentBundle: { id: "A".repeat(22), key: "A".repeat(43), root: "A".repeat(43), count: files.length,
+                manifest: files.map(file => ({ digest: "A".repeat(43), name: file.metadata.name, preview: true, size: 4, spoiler: false })) } }),
+        load: selection => {
+            assert.equal(typeof selection, "object");
+            const id = (selection as { attachmentId: string; }).attachmentId;
+            assert.notEqual(options.detached ? files.at(-1)?.id : null, id, "detached message text is expanded separately");
+            return gates[files.findIndex(file => file.id === id)].promise;
+        }
+    });
+    h.message.attachments = files.map((file, index) => ({ ...h.message.attachments[1], id: file.id, size: 100 * (files.length - index),
+        url: `https://cdn.discordapp.com/attachments/${h.message.channel_id}/${file.id}/encrypted.pcaf`,
+        proxy_url: `https://media.discordapp.net/attachments/${h.message.channel_id}/${file.id}/encrypted.pcaf` }));
+    const result = (index: number): DecryptIncomingAttachmentsResult => ({ status: "decrypted", plaintext: "", attachments: [files[index]],
+        deferredAttachments: files.filter((file, other) => other !== index && (!options.detached || other !== files.length - 1))
+            .map(file => ({ id: file.id, name: file.metadata.name, size: 4, spoiler: false })) });
+    const owner = { forceUpdate() {} };
+    return { ...h, files, gates, result, render: () => h.api.patchEncryptedMessageAttachments(h.message, owner) };
+}
+
+test("small authenticated previews render before a slow sibling, with ordered downloads and no replaced blob leaks", async t => {
+    const h = independentPreviews();
+    t.after(h.api.clearEncryptedAttachmentCache);
+    h.render();
+    await setImmediate();
+    assert.deepEqual(h.metrics.selections.map(value => typeof value === "object" && value.attachmentId), [h.files[1].id, h.files[0].id]);
+    h.gates[1].resolve(h.result(1));
+    await setImmediate();
+    assert.equal(h.api.encryptedAttachmentStatus(h.message).status, "loading");
+    const [pending, ready] = h.render().attachments;
+    assert.ok(pending.url.includes("#pc-secure-deferred="));
+    assert.equal(ready.content_type, "image/png");
+    assert.equal(h.api.isEncryptedAttachmentDownloadUrl(pending.url), true);
+    assert.equal(h.api.isEncryptedAttachmentDownloadUrl(ready.url), true);
+    h.gates[0].resolve(h.result(0));
+    await setImmediate();
+    assert.equal(h.api.encryptedAttachmentStatus(h.message).status, "ready");
+    assert.deepEqual(Array.from(h.render().attachments, attachment => attachment.id), h.files.map(file => file.id));
+    assert.equal(h.blobs.size, 2, "the zero-byte placeholder is revoked when its authenticated image arrives");
+    assert.equal(h.api.isEncryptedAttachmentDownloadUrl(pending.url), false);
+    assert.equal(h.render().attachments[1].url, ready.url, "a sibling completion retains the first image's URL");
+});
+
+test("a failed sibling keeps healthy previews and retry downloads only the missing file", async t => {
+    const h = independentPreviews();
+    t.after(h.api.clearEncryptedAttachmentCache);
+    h.render();
+    h.gates[1].resolve(h.result(1));
+    h.gates[0].resolve({ status: "invalid_message" });
+    await setImmediate();
+    assert.equal(h.api.encryptedAttachmentStatus(h.message).status, "failed");
+    const readyUrl = h.render().attachments[1].url;
+    h.gates[0] = Promise.withResolvers<DecryptIncomingAttachmentsResult>();
+    assert.equal(h.api.retryEncryptedAttachmentLoad(h.message), true);
+    await setImmediate();
+    assert.equal(h.metrics.loads, 3, "the authenticated sibling is reused during retry");
+    assert.equal(h.render().attachments[1].url, readyUrl);
+    h.gates[0].resolve(h.result(0));
+    await setImmediate();
+    assert.equal(h.api.encryptedAttachmentStatus(h.message).status, "ready");
+    assert.equal(h.blobs.size, 2);
+});
+
+test("downloads wait for their in-flight preview and keep singleflight across the placeholder upgrade", async t => {
+    const save = Promise.withResolvers<DownloadIncomingAttachmentResult>();
+    const h = independentPreviews({ download: () => save.promise });
+    t.after(h.api.clearEncryptedAttachmentCache);
+    h.render();
+    h.gates[1].resolve(h.result(1));
+    await setImmediate();
+    const placeholder = h.render().attachments[0].url;
+    const first = h.api.downloadEncryptedAttachmentUrl(placeholder);
+    await setImmediate();
+    assert.equal(h.metrics.downloads, 0, "the clicked preview is already downloading, so do not start another native transfer");
+    h.gates[0].resolve(h.result(0));
+    await setImmediate();
+    assert.equal(h.metrics.downloads, 1);
+    const second = h.api.downloadEncryptedAttachmentUrl(h.render().attachments[0].url);
+    await setImmediate();
+    assert.equal(h.metrics.downloads, 1, "replacement URLs share the pending save");
+    save.resolve({ status: "saved", filename: "image-0.png" });
+    assert.deepEqual(await first, await second);
+});
+
+test("pending preview downloads do not occupy the save queue or survive cache clear", async t => {
+    const h = independentPreviews({ count: 3 });
+    t.after(() => {
+        h.api.clearEncryptedAttachmentCache();
+        h.gates.forEach((gate, index) => gate.resolve(h.result(index)));
+    });
+    h.render();
+    h.gates[0].resolve(h.result(0));
+    await setImmediate();
+    const [ready, ...loading] = h.render().attachments;
+    const pending = loading.map(attachment => h.api.downloadEncryptedAttachmentUrl(attachment.url));
+    await setImmediate();
+    assert.equal(h.metrics.downloads, 0);
+    const saved = h.api.downloadEncryptedAttachmentUrl(ready.url);
+    await setImmediate();
+    assert.equal(h.metrics.downloads, 1, "an unrelated cached download starts while both previews are pending");
+    assert.equal((await saved)?.status, "saved");
+    h.api.clearEncryptedAttachmentCache();
+    h.gates[1].resolve(h.result(1));
+    h.gates[2].resolve(h.result(2));
+    assert.deepEqual(await Promise.all(pending), [null, null]);
+    assert.equal(h.metrics.downloads, 1, "clearing the cache cancels queued saves before they enter native");
+});
+
+test("trust loss hides already rendered previews immediately and blocks a later sibling", async t => {
+    const h = independentPreviews({ count: 3 });
+    t.after(h.api.clearEncryptedAttachmentCache);
+    let rendered: Message;
+    const owner = { forceUpdate: () => { rendered = h.api.patchEncryptedMessageAttachments(h.message, owner); } };
+    owner.forceUpdate();
+    h.gates[0].resolve(h.result(0));
+    await setImmediate();
+    assert.equal(rendered!.attachments[0].content_type, "image/png");
+    h.gates[1].resolve({ status: "untrusted_author" });
+    await setImmediate();
+    assert.equal(rendered!.attachments.length, 0, "the renderer is refreshed before the third transfer finishes");
+    assert.equal(h.blobs.size, 0);
+    h.gates[2].resolve(h.result(2));
+    await setImmediate();
+    assert.equal(h.api.encryptedAttachmentStatus(h.message).status, "failed");
+    assert.equal(h.blobs.size, 0, "late authenticated bytes cannot undo trust invalidation");
+});
+
+test("a blob allocation failure waits for outstanding siblings before allowing retry", async t => {
+    let fail = true;
+    const h = independentPreviews({ createObjectUrl: blob => {
+        if (blob.size > 0 && fail) { fail = false; throw new Error("allocation failed"); }
+    } });
+    t.after(h.api.clearEncryptedAttachmentCache);
+    h.render();
+    h.gates[0].resolve(h.result(0));
+    await setImmediate();
+    assert.equal(h.api.encryptedAttachmentStatus(h.message).status, "loading");
+    assert.equal(h.api.retryEncryptedAttachmentLoad(h.message), false);
+    h.gates[1].resolve(h.result(1));
+    await setImmediate();
+    assert.equal(h.api.encryptedAttachmentStatus(h.message).status, "failed");
+    assert.equal(h.render().attachments[1].content_type, "image/png");
+});
+
+test("detached text does not hold a manifest image preview behind message expansion", async t => {
+    const h = independentPreviews({ detached: true });
+    t.after(h.api.clearEncryptedAttachmentCache);
+    h.render();
+    h.gates[0].resolve(h.result(0));
+    await setImmediate();
+    assert.equal(h.metrics.loads, 1);
+    assert.equal(h.render().attachments.length, 1);
+    assert.equal(h.render().attachments[0].content_type, "image/png");
+});
+
+test("clearing partially loaded previews suppresses late plaintext and restores cache capacity", async () => {
+    const h = independentPreviews();
+    h.render();
+    h.gates[0].resolve(h.result(0));
+    await setImmediate();
+    h.api.clearEncryptedAttachmentCache();
+    h.gates[1].resolve(h.result(1));
+    await setImmediate();
+    assert.equal(h.blobs.size, 0);
+    h.render();
+    await setImmediate();
+    assert.equal(h.api.encryptedAttachmentStatus(h.message).status, "ready");
+    assert.equal(h.blobs.size, 2);
+    h.api.clearEncryptedAttachmentCache();
+});
+
+test("legacy media and small inert text appear only after whole-bundle authentication while downloads remain available", async t => {
+    const gate = Promise.withResolvers<DecryptIncomingAttachmentsResult>();
+    const h = fixture({ legacy: true, load: async selection => selection === "previews"
+        ? { status: "decrypted", plaintext: "", attachments: [], deferredAttachments: h.message.attachments.map(file => ({ id: file.id, name: null, size: file.size })) }
+        : gate.promise });
+    t.after(h.api.clearEncryptedAttachmentCache);
+    h.message.attachments[0].size = 100;
+    h.api.encryptedAttachmentStatus(h.message);
+    await setImmediate();
+    const before = h.api.patchEncryptedMessageAttachments(h.message, { forceUpdate() {} }).attachments;
+    assert.equal(before.length, 2);
+    assert.ok([...h.blobs.values()].every(blob => blob.size === 0));
+    assert.equal(h.api.isEncryptedAttachmentDownloadUrl(before[0].url), true);
+    assert.deepEqual(h.metrics.selections, ["previews", "all"]);
+    const metadata = { size: 4, spoiler: false, description: null, duration: null, height: null, width: null, waveform: null };
+    gate.resolve({ status: "decrypted", plaintext: "", attachments: [
+        { id: before[0].id, data: new Uint8Array([1, 2, 3, 4]), metadata: { ...metadata, name: "photo.png", mimeType: "image/png" } },
+        { id: before[1].id, data: new TextEncoder().encode("<script>inert</script>"), metadata: { ...metadata, name: "notes.txt", mimeType: "text/html" } }
+    ] });
+    await setImmediate();
+    const after = h.api.patchEncryptedMessageAttachments(h.message, { forceUpdate() {} }).attachments;
+    assert.equal(after[0].content_type, "image/png");
+    assert.equal(after[1].content_type, "text/plain");
+    assert.equal(h.blobs.size, 2);
+    assert.equal((await h.api.downloadEncryptedAttachmentUrl(after[0].url))?.status, "saved");
+});
+
+test("warm previews and downloads bypass a pending expired-URL refresh", async t => {
+    const refresh = Promise.withResolvers<object>();
+    const h = fixture({ expiredUrls: true, refresh: () => refresh.promise });
+    t.after(h.api.clearEncryptedAttachmentCache);
+    const unrelated = h.api.encryptedAttachmentInput(h.message);
+    h.api.encryptedAttachmentStatus(h.message);
+    await setImmediate();
+    assert.equal(h.api.encryptedAttachmentStatus(h.message).status, "ready");
+    const file = h.api.patchEncryptedMessageAttachments(h.message, { forceUpdate() {} }).attachments[0];
+    assert.equal((await h.api.downloadEncryptedAttachmentUrl(file.url))?.status, "saved");
+    assert.equal(h.metrics.refreshes, 1, "the cache hits make no additional refresh request");
+    refresh.resolve({});
+    await unrelated;
+});
+
+for (const failure of [{ status: "invalid_message" }, { status: "failed", error: "attachment_download_failed" }] as const) {
+    test(`${failure.status} never repeats native work with unchanged or unvalidated refreshed URLs`, async t => {
+        const h = fixture({ expiredUrls: true, load: async () => failure, refresh: async urls => ({
+            body: { refreshed_urls: urls.map(original => ({ original, refreshed: "https://untrusted.example/file" })) }
+        }) });
+        t.after(h.api.clearEncryptedAttachmentCache);
+        h.api.encryptedAttachmentStatus(h.message);
+        await setImmediate();
+        assert.equal(h.metrics.loads, 1);
+        assert.equal(h.metrics.refreshes, failure.status === "invalid_message" ? 0 : 1);
+        assert.equal(h.blobs.size, 0);
+    });
+}

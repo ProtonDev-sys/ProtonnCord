@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import "./style.css";
 
 import ErrorBoundary from "@components/ErrorBoundary";
@@ -28,8 +22,8 @@ export default definePlugin({
         {
             find: ".MUTUAL_GUILDS})),",
             replacement: {
-                match: /(\i).push\({text.{0,50}.ACTIVITY\}\);/,
-                replace: '$&$1.push({text:"Song Spotlight",section:"SONG_SPOTLIGHT"});',
+                match: /(\i)\.push\({text:.{0,80}?,section:\i\.\i\.ACTIVITY}\)/,
+                replace: '($&,$1.push({text:"Song Spotlight",section:"SONG_SPOTLIGHT"}))',
             },
         },
         {

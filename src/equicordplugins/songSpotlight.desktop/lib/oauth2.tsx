@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { ApplicationIntegrationType } from "@vencord/discord-types/enums";
 import { OAuth2AuthorizeModal, openModal,showToast, Toasts, UserStore } from "@webpack/common";
 

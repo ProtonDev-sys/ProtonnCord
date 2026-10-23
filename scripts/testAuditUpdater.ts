@@ -5,53 +5,43 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { applyPendingHttpUpdate, findHttpUpdate } from "../src/main/updater/httpOperations";
 import { createOperationQueue, serializeErrors } from "../src/main/updater/ipc";
 import { IpcEvents } from "../src/shared/IpcEvents";
 import { parseUpdaterBranch, type UpdaterBranch } from "../src/shared/Updater";
 import { classifyUpdateChanges } from "../src/utils/updateClassification";
-
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: unknown) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
+import { loadTestModule } from "./utils/loadTestModule";
 
 function load<T>(path: string, mocks: Record<string, unknown>, globals: Record<string, unknown>): T {
-    const { outputText } = transpileModule(readFileSync(path, "utf8"), {
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 },
-    });
-    return runInNewContext(`${outputText}\nexports;`, {
-        exports: {}, ...globals,
+    return loadTestModule<T>(path, mocks, {
+        ...globals,
         require(name: string) {
             assert.ok(Object.hasOwn(mocks, name), `Unexpected updater import: ${name}`);
             return mocks[name];
         },
-    });
+    }, "", { compilerOptions: { jsx: undefined }, mockImports: false });
 }
 
 function rendererFixture() {
     const settings = { updateBranch: "main" as UpdaterBranch };
     const calls: unknown[][] = [];
     let check = async (_branch: UpdaterBranch) => [{ hash: "b".repeat(40), author: "Fixture", message: "Update" }];
+    let diagnostics = { backend: "http", builtHead: "a".repeat(40) };
     let nativeUpdate = async () => true;
     let build = async () => true;
     const updater = load<typeof import("../src/utils/updater")>("src/utils/updater.ts", {
         "@api/Settings": { Settings: settings },
-        "~git-hash": { default: "a".repeat(40) },
+        "~git-hash": { __esModule: true, default: "a".repeat(40) },
         "./Logger": { Logger: class {} },
         "./native": { relaunch: () => assert.fail("Must not restart Discord") },
         "./updateClassification": { classifyUpdateChanges },
     }, {
         VencordNative: { updater: {
             getUpdates: async (branch: UpdaterBranch) => ({ ok: true, value: await check(branch) }),
-            getDiagnostics: async () => ({ ok: true, value: { backend: "http" } }),
+            getDiagnostics: async () => ({ ok: true, value: diagnostics }),
             update: async (branch: UpdaterBranch, force: boolean) => {
                 calls.push(["update", branch, force]);
                 return { ok: true, value: await nativeUpdate() };
@@ -63,12 +53,26 @@ function rendererFixture() {
         } },
     });
     return { updater, settings, calls, setCheck(value: typeof check) { check = value; },
+        setDiagnostics(value: typeof diagnostics) { diagnostics = value; },
         setUpdate(value: typeof nativeUpdate) { nativeUpdate = value; }, setBuild(value: typeof build) { build = value; } };
 }
 
+test("source checks classify against the installed build after a deferred restart", async () => {
+    const f = rendererFixture();
+    f.setCheck(async () => {
+        // A queued build can finish while the native update check is in progress.
+        await Promise.resolve();
+        f.setDiagnostics({ backend: "git", builtHead: "b".repeat(40) });
+        return [{ hash: "a".repeat(40), author: "Fixture", message: "Switch back to main" }];
+    });
+    f.setDiagnostics({ backend: "git", builtHead: "a".repeat(40) });
+    assert.equal(await f.updater.checkForUpdates(), true);
+    assert.equal(f.updater.isNewer, false, "the old running renderer must not block restoring its previous branch");
+});
+
 test("late branch responses, reset checks, and older overlapping checks cannot overwrite updater state", async () => {
     const f = rendererFixture();
-    const delayed = deferred<{ hash: string; author: string; message: string; }[]>();
+    const delayed = Promise.withResolvers<{ hash: string; author: string; message: string; }[]>();
     f.setCheck(() => delayed.promise);
     const old = f.updater.checkForUpdates();
     f.settings.updateBranch = "nightly";
@@ -78,7 +82,7 @@ test("late branch responses, reset checks, and older overlapping checks cannot o
     assert.equal(await old, false);
     assert.equal(f.updater.changes.length, 0);
 
-    const reset = deferred<{ hash: string; author: string; message: string; }[]>();
+    const reset = Promise.withResolvers<{ hash: string; author: string; message: string; }[]>();
     f.setCheck(() => reset.promise);
     const pending = f.updater.checkForUpdates();
     f.updater.resetUpdateState();
@@ -86,7 +90,7 @@ test("late branch responses, reset checks, and older overlapping checks cannot o
     assert.equal(await pending, false);
     assert.equal(f.updater.isOutdated, false);
 
-    const older = deferred<{ hash: string; author: string; message: string; }[]>();
+    const older = Promise.withResolvers<{ hash: string; author: string; message: string; }[]>();
     f.setCheck(() => older.promise);
     const overlapping = f.updater.checkForUpdates();
     f.setCheck(async () => [{ hash: "d".repeat(40), author: "Fixture", message: "Newest" }]);
@@ -99,7 +103,7 @@ test("late branch responses, reset checks, and older overlapping checks cannot o
 test("simultaneous installs share one operation and another branch cannot report its result as success", async () => {
     const f = rendererFixture();
     await f.updater.checkForUpdates();
-    const pending = deferred<boolean>();
+    const pending = Promise.withResolvers<boolean>();
     f.setUpdate(() => pending.promise);
     const first = f.updater.update();
     const second = f.updater.update();
@@ -125,7 +129,7 @@ test("repair forces a release lookup and rebuild even when the current version h
 
 test("native operation queue preserves order and continues after a failure", async () => {
     const enqueue = createOperationQueue();
-    const pending = deferred<void>();
+    const pending = Promise.withResolvers<void>();
     const calls: string[] = [];
     const first = enqueue(async () => { calls.push("first"); await pending.promise; throw new Error("Fixture failure"); });
     const rejected = assert.rejects(first, /Fixture failure/u);
@@ -141,6 +145,7 @@ test("native operation queue preserves order and continues after a failure", asy
 test("HTTP repair selects the current release archive while ordinary checks remain current", async () => {
     const hash = "a".repeat(40);
     const release = { name: `Protonn Cord ${hash}`, assets: [{ name: "desktop.asar",
+        digest: `sha256:${"d".repeat(64)}`, size: 128, state: "uploaded",
         browser_download_url: "https://github.com/ProtonDev-sys/ProtonnCord/releases/download/latest/desktop.asar" }] };
     assert.equal(await findHttpUpdate(async () => release, hash, "desktop.asar"), null);
     assert.equal((await findHttpUpdate(async () => release, hash, "desktop.asar", "main", true))?.hash, hash);
@@ -158,12 +163,14 @@ test("HTTP branch selections survive checks and other selections, and failed ins
         } },
         "@shared/Updater": { parseUpdaterBranch },
         "@shared/vencordUserAgent": { VENCORD_USER_AGENT: "Fixture" },
-        electron: { ipcMain: { handle: (event: IpcEvents, handler: (...args: any[]) => Promise<any>) => handlers.set(event, handler) } },
+        "@main/ipc": { ipcMain: { handle: (event: IpcEvents, handler: (...args: any[]) => Promise<any>) => handlers.set(event, handler) } },
         "original-fs": {}, "~git-hash": { default: "a".repeat(40) }, "~git-remote": { default: "Fixture/Fixture" },
         "./common": { ASAR_FILE: "desktop.asar" }, "./ipc": { createOperationQueue, serializeErrors },
         "./httpOperations": {
             applyPendingHttpUpdate,
-            findHttpUpdate: async (_request: unknown, _hash: string, _asar: string, branch: UpdaterBranch) => ({ hash: branch, url: branch }),
+            findHttpUpdate: async (_request: unknown, _hash: string, _asar: string, branch: UpdaterBranch) => ({
+                hash: branch, sha256: createHash("sha256").update(branch).digest("hex"), size: branch.length, url: branch,
+            }),
             inspectHttpUpdates: async () => ({ changes: [], pending: null }),
             requestBytes: async (_fetch: unknown, url: string) => Buffer.from(url),
             replaceAsarAtomically: (_target: string, _temporary: string, bytes: Buffer) => {

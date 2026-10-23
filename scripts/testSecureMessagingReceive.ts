@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -71,12 +65,6 @@ function message(overrides: Partial<Message> = {}): Message {
     } as Message;
 }
 
-function deferred<T>() {
-    let complete: (value: T) => void = () => { throw new Error("Promise not initialized"); };
-    const promise = new Promise<T>(resolve => { complete = resolve; });
-    return { promise, resolve: (value: T) => complete(value) };
-}
-
 function harness(options: { rejectNative?: boolean; } = {}) {
     const records = new Map<string, Message>();
     const calls: Array<{ userId: string; request: NativeRequest; settled: boolean; resolve(result: DecryptIncomingResult): void; }> = [];
@@ -91,7 +79,7 @@ function harness(options: { rejectNative?: boolean; } = {}) {
     let channelAvailable = true;
     const native = {
         decryptIncoming(accountId: string, request: NativeRequest): Promise<DecryptIncomingResult> {
-            const pending = deferred<DecryptIncomingResult>();
+            const pending = Promise.withResolvers<DecryptIncomingResult>();
             const call = {
                 userId: accountId,
                 request: structuredClone(request),
@@ -463,7 +451,7 @@ test("only same-account reconnects retain unfurls while every reconnect reauthen
         [null, null, false],
     ] as const) {
         const clears: string[] = [];
-        const lock = deferred<void>();
+        const lock = Promise.withResolvers<void>();
         const context = {
             secureRuntimeUserId: previousAccount as string | null,
             secureOperationGeneration: 1,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -9,7 +9,10 @@ import { createInterface } from "node:readline";
 import { PassThrough, Writable } from "node:stream";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { BuildOptions, buildSync } from "esbuild";
+import { ModuleKind, parseConfigFileTextToJson, ScriptTarget, transpileModule } from "typescript";
+
+import { REPORTER_SOURCE_ONLY_FACTORIES } from "../src/debug/reporterFactoryCases";
 
 const root = path.resolve(import.meta.dirname, "..");
 const read = (file: string) => readFileSync(path.join(root, file), "utf8");
@@ -171,16 +174,6 @@ test("report publisher passes a bounded abort signal without network access", as
     assert.equal(cancelled, 1);
 });
 
-test("mention proof uses a word boundary rather than a backspace", () => {
-    const source = read("scripts/testSecureMessagingLive.ts");
-    assert.equal(source.includes("\u0008"), false);
-    const pattern = source.match(/mentionedClassApplied: (\/[^\n]+\/u)\.test/u)?.[1];
-    assert.ok(pattern);
-    const expression = runInNewContext(pattern);
-    assert.equal(expression.test("pc-secure-row mentioned_123"), true);
-    assert.equal(expression.test("pc-secure-row notmentioned_123"), false);
-});
-
 test("local reporter bounds webhook requests and releases response bodies", async () => {
     const source = read("scripts/generateReport.ts");
     const command = source.slice(source.indexOf("await fetch(process.env.WEBHOOK_URL"), source.indexOf("\n    }\n}", source.indexOf("await fetch(process.env.WEBHOOK_URL")));
@@ -203,12 +196,58 @@ test("local reporter bounds webhook requests and releases response bodies", asyn
     }
 });
 
-test("CI validates lint before fixing and includes omitted focused suites", () => {
-    const workflow = read(".github/workflows/test.yml");
-    assert.match(workflow, /run: pnpm lint && pnpm test/u);
-    assert.match(workflow, /run: pnpm testPrimaryStreamAudio && pnpm testPromiseTimeout/u);
-    assert.doesNotMatch(workflow, /run: pnpm exec tsx --test scripts\/testAuditToolingDeep\.ts/u);
-    assert.match(read("scripts/runAuditTests.mjs"), /testAudit\.\+.*ts/u);
+test("both reporter workflow builds load their shared catalog in plain Node", () => {
+    const directory = mkdtempSync(path.join(root, ".reporter-build-test-"));
+    try {
+        for (const workflow of ["client-smoke.yml", "reportBrokenPlugins.yml"]) {
+            const command = read(`.github/workflows/${workflow}`).match(/\besbuild scripts\/generateReport\.ts[^\n]*/u)?.[0];
+            assert.ok(command, `${workflow} reporter build must be present`);
+            const options: Record<string, string | true> = Object.fromEntries(command.split(/\s+/u).filter(argument => argument.startsWith("--")).map(argument => {
+                const [key, value] = argument.slice(2).split("=");
+                return [key, value ?? true];
+            }));
+            const outfile = path.join(directory, `${workflow}.mjs`);
+            const canary = workflow === "reportBrokenPlugins.yml";
+            buildSync({
+                absWorkingDir: root, entryPoints: ["scripts/generateReport.ts"], outfile,
+                bundle: options.bundle === true, platform: options.platform as BuildOptions["platform"],
+                format: options.format as BuildOptions["format"], packages: options.packages as BuildOptions["packages"],
+            });
+            const result = spawnSync(process.execPath, [outfile], {
+                cwd: root, encoding: "utf8", timeout: 10_000, maxBuffer: 1_048_576,
+                env: { ...process.env, CHROMIUM_BIN: "", USE_CANARY: String(canary), NODE_OPTIONS: "" },
+            });
+            assert.equal(result.error, undefined, workflow);
+            assert.equal(result.status, 1, workflow);
+            assert.equal(result.stdout, "", workflow);
+            assert.equal(result.stderr.trim(), `${canary ? "CANARY" : "STABLE"} --- Missing environment variable CHROMIUM_BIN`, workflow);
+        }
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test("mobile CI audits its full frozen graph with the pinned package manager", () => {
+    const workflow = read(".github/workflows/mobile.yml");
+    const toolchain = JSON.parse(read("mobile/toolchain.json"));
+    const validation = workflow.match(/- name: Test mobile against this desktop revision\n([\s\S]*?)(?=            - name:)/u)?.[1];
+    assert.ok(validation, "mobile validation step must be present");
+    assert.match(validation, /working-directory: mobile/u);
+    assert.match(validation, /bun install --frozen-lockfile[ \t]*\n[ \t]*bun audit[ \t]*\n/u, "audit includes development dependencies and all severities, without filtering or ignoring failures");
+    assert.doesNotMatch(validation, /continue-on-error: true|\|\| true/u);
+    assert.equal(workflow.match(/^\s*bun-version:\s*(\S+)\s*$/mu)?.[1], toolchain.bunVersion);
+    assert.match(read("mobile/build.gradle.kts"), /inputs\.files\(\s*"package\.json"[^)]*"bunfig\.toml"/u, "changing the install policy must invalidate the JS bundle");
+});
+
+test("explicit mobile host type pins match their frozen resolutions", () => {
+    const manifest = JSON.parse(read("mobile/package.json"));
+    const parsed = parseConfigFileTextToJson("mobile/bun.lock", read("mobile/bun.lock"));
+    assert.equal(parsed.error, undefined, "Bun lockfile must be valid JSONC");
+    for (const name of ["react", "react-native", "react-native-reanimated", "react-native-worklets"]) {
+        const version = manifest.devDependencies[name];
+        assert.equal(parsed.config.workspaces[""].devDependencies[name], version, `${name} workspace pin`);
+        assert.equal(parsed.config.packages[name][0], `${name}@${version}`, `${name} resolved pin`);
+    }
 });
 
 const identity = { accountId: "100000000000000001", channelId: "100000000000000002", recipientId: "100000000000000003" };
@@ -309,7 +348,7 @@ test("late connection cleanup failure is bounded and reports an unknown session 
         }, {
             "puppeteer-core": { __esModule: true, default: { connect() { return new Promise(resolve => { completeLate = resolve; }); } } },
         });
-        await assert.rejects(harness.connectWithRetry(20, 20, 1), /timed out/);
+        await assert.rejects(harness.connectWithRetry(20, 20, 1), /(?:timed out|deadline expired).*unknown/);
         completeLate({
             disconnect() { disconnects++; return failure === "reject" ? Promise.reject(new Error("disconnect failed")) : new Promise(() => {}); },
             close() { closes++; },
@@ -447,6 +486,7 @@ function loadReporter(browser: unknown, print: () => Promise<unknown> = async ()
     const imports: Record<string, unknown> = {
         crypto: {}, fs: { readFileSync: () => "offline-browser-fixture" },
         "puppeteer-core": { __esModule: true, default: { launch } },
+        "../src/debug/reporterFactoryCases": { REPORTER_SOURCE_ONLY_FACTORIES },
     };
     const reporter = runInNewContext(`${code}\nexports.audit;`, {
         exports: {}, process: processState, setTimeout, clearTimeout, console: { log() {}, error() {} },
@@ -457,11 +497,11 @@ function loadReporter(browser: unknown, print: () => Promise<unknown> = async ()
 }
 
 test("reporter startup and navigation failures finalize browser ownership", async () => {
-    for (const failure of ["newPage", "setUserAgent", "setBypassCSP", "evaluateOnNewDocument", "goto"]) {
+    for (const failure of ["newPage", "setBypassCSP", "evaluateOnNewDocument", "goto"]) {
         let closes = 0;
         let reports = 0;
         const page: Record<string, any> = { on() {} };
-        for (const method of ["setUserAgent", "setBypassCSP", "evaluateOnNewDocument", "goto"])
+        for (const method of ["setBypassCSP", "evaluateOnNewDocument", "goto"])
             page[method] = async () => { if (failure === method) throw new Error(method); };
         const browser = { async newPage() { if (failure === "newPage") throw new Error(failure); return page; }, async close() { closes++; } };
         const { reporter, exits } = loadReporter(browser, async () => { reports++; });

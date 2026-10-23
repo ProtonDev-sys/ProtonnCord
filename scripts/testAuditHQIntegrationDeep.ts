@@ -3,14 +3,9 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { elements as descendants } from "./utils/discordClientFixture";
 
 const element = (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props: { ...props as object, children } });
-
-function descendants(node: any): any[] {
-    if (Array.isArray(node)) return node.flatMap(descendants);
-    if (!node || typeof node !== "object") return [];
-    return [node, ...descendants(node.props?.children)];
-}
 
 test("remembered users shared across collections render once in search", () => {
     const first = { id: "shared", tag: "friend", username: "friend" };

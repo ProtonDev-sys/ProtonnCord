@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 const DISCORD_ATTACHMENT_ID = /^\d{17,20}$/u;
 
 export function unchangedEncryptedAttachmentIds(value: unknown, originalIds: readonly string[]): boolean {

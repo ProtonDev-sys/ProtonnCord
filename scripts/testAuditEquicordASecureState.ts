@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import * as nodeCrypto from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -29,12 +23,6 @@ function load(file: string, helpers = "", mocks: Record<string, any> = {}, globa
         ...globals
     });
     return exports;
-}
-
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>(done => { resolve = done; });
-    return { promise, resolve };
 }
 
 const event = { senderFrame: { url: "https://discord.com/channels/@me" } };
@@ -77,8 +65,8 @@ test("reading a full authenticated attachment cache retains entries until an ins
 
 test("SecureMessaging discards a native operation completed after session lock", async () => {
     const native = nativeFixture();
-    const started = deferred<void>();
-    const complete = deferred<void>();
+    const started = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<void>();
     const pending = native.runTestOperation(async () => { started.resolve(); await complete.promise; return { status: "fixture_complete" }; });
     await started.promise;
     const locking = native.lockSecurityKeyVault(event);
@@ -90,8 +78,8 @@ test("SecureMessaging discards a native operation completed after session lock",
 });
 
 test("SecureMessaging clears late attachment results without repopulating its cache", async () => {
-    const waiting = deferred<Response>();
-    const started = deferred<void>();
+    const waiting = Promise.withResolvers<Response>();
+    const started = Promise.withResolvers<void>();
     const ciphertext = new Uint8Array(32).fill(3);
     const plaintext = new Uint8Array([1, 2, 3]);
     const digest = nodeCrypto.createHash("sha256").update(ciphertext).digest("base64url");
@@ -193,7 +181,7 @@ test("SecureMessaging visibility subscriber catches changes between render and e
 });
 
 test("SecureMessaging obsolete announcement review keeps its replacement pending", async () => {
-    const pending = deferred<any>();
+    const pending = Promise.withResolvers<any>();
     const reviews = new Set();
     let generation = 1;
     let finishes = 0;

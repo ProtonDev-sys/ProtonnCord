@@ -10,6 +10,7 @@ import * as fflate from "fflate";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { ensureSafePath } from "../src/main/utils/ensureSafePath";
+import { isDiscordRendererOrigin } from "../src/shared/rendererOrigin";
 
 const source = (path: string) => readFileSync(path, "utf8");
 const compile = (code: string) => transpileModule(code, {
@@ -88,7 +89,7 @@ function editorFixture() {
     const saveSource = mainSource.slice(mainSource.indexOf("ipcMain.handle(IpcEvents.SET_QUICK_CSS"), mainSource.indexOf("ipcMain.handle(IpcEvents.GET_THEMES_LIST"));
     const context = createContext({
         ...clock, IpcEvents, app, BrowserWindow: Window, __dirname: "/fixture", join,
-        nativeTheme: { shouldUseDarkColors: true }, monacoHtml: "", makeLinksOpenExternally() { },
+        nativeTheme: { shouldUseDarkColors: true }, monacoHtml: "", makeLinksOpenExternally() { }, registerQuickCssEditor() { },
         ipcMain: { handle(name: string, handler: (...args: any[]) => any) { handlers.set(name, handler); } },
         dialog: { async showMessageBox() { events.push("prompt"); return { response }; } },
         console: { error() { events.push("error"); } }, QUICK_CSS_PATH: "fixture-css",
@@ -115,9 +116,11 @@ function editorFixture() {
     } };
     runInNewContext(compile(source("src/preload.ts")), {
         ...clock, exports: {}, location: { protocol: "data:" },
+        window: { origin: "null" }, process: { isMainFrame: true }, IS_DISCORD_DESKTOP: false,
         console: { error() { events.push("error"); } },
         require(name: string) {
             if (name === "@shared/IpcEvents") return { IpcEvents };
+            if (name === "@shared/rendererOrigin") return { isDiscordRendererOrigin };
             if (name === "electron/renderer") return {
                 ipcRenderer: renderer,
                 contextBridge: { exposeInMainWorld(key: string, value: (...args: any[]) => any) { exposed.set(key, value); } }
@@ -380,15 +383,21 @@ test("stored entry and aggregate compressed allocations are bounded before unzip
     }
 });
 
-test("installed fflate DEFLATE paths allocate declared-size buffers without output growth", () => {
-    const library = source("node_modules/fflate/lib/node.cjs");
-    assert.match(library, /inflateSync\(infl, \{ out: new u8\(su\) \}\)/);
-    assert.match(library, /inflate\(infl, \{ size: su \}, cbl\)/);
-    assert.match(library, /out: o\.size && new u8\(o\.size\)/);
-    assert.match(library, /inflateSync\(ev\.data\[0\], gopt\(ev\.data\[1\]\)\)/);
-    assert.match(library, /return inflt\(data, \{ i: 2 \}, opts && opts\.out/);
-    assert.match(library, /var resize = noBuf \|\| st\.i != 2/);
-    assert.match(library, /if \(su < 524288 \|\| sc > 0\.8 \* su\)/);
+test("installed fflate bounds forged ZIP output on synchronous and worker paths", async () => {
+    const archive = zipSync({ "file.js": new Uint8Array(2 * 1024 * 1024) }, { level: 9 });
+    const directory = new DataView(archive.buffer, archive.byteOffset).getUint32(archive.length - 6, true);
+    for (const declared of [1, 600_000]) {
+        const data = archive.slice();
+        const view = new DataView(data.buffer);
+        // Forge both ZIP headers without changing the compressed payload.
+        view.setUint32(22, declared, true);
+        view.setUint32(directory + 24, declared, true);
+        assert.equal(fflate.unzipSync(data)["file.js"].length, declared);
+        const files = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
+            fflate.unzip(data, (error, files) => error ? reject(error) : resolve(files));
+        });
+        assert.equal(files["file.js"].length, declared);
+    }
 });
 
 test("real small ordinary ZIP works, and actual output bounds/size mismatches fail before writes", async () => {

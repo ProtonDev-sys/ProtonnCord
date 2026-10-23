@@ -1,27 +1,17 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { win32 } from "node:path";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 const React = { Fragment: "fragment", createElement: (type: unknown, props: any, ...children: unknown[]) => ({ type, props: props ?? {}, children }) };
 
 function load(path: string, mocks: Record<string, any>, globals: Record<string, unknown> = {}, expose = "") {
     const modules = { "@utils/constants": { Devs: {} },
         "@utils/types": { __esModule: true, default: (value: unknown) => value, OptionType: {} }, ...mocks };
-    const code = transpileModule(readFileSync(path, "utf8") + expose, {
-        fileName: path,
-        compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React }
-    }).outputText;
-    return runInNewContext(code + "\nexports;", { exports: {}, React, Blob, Uint8Array, ...globals, require: (name: string) => modules[name] });
+    return loadTestModule(path, modules, { React, Blob, Uint8Array, ...globals, require: (name: string) => modules[name] },
+        expose, { fileName: path, mockImports: false });
 }
 
 function hooks() {

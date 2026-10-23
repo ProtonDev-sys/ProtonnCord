@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { setImmediate } from "node:timers/promises";
@@ -11,19 +5,11 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
-function deferred<T>() {
-    let resolve: ((value: T) => void) | undefined;
-    let reject: ((reason: Error) => void) | undefined;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    assert.ok(resolve && reject);
-    return { promise, resolve, reject };
-}
-
 function fixture() {
     let account: string | undefined = "account-a";
-    const reads: { key: string; result: ReturnType<typeof deferred<unknown>>; }[] = [];
-    const writes: { key: string; value: Map<string, { name: string; isNew: boolean; }>; result: ReturnType<typeof deferred<void>>; }[] = [];
-    const requests: ReturnType<typeof deferred<object>>[] = [];
+    const reads: { key: string; result: PromiseWithResolvers<unknown>; }[] = [];
+    const writes: { key: string; value: Map<string, { name: string; isNew: boolean; }>; result: PromiseWithResolvers<void>; }[] = [];
+    const requests: PromiseWithResolvers<object>[] = [];
     const notices: object[] = [];
     const errors: unknown[][] = [];
     const toasts: object[] = [];
@@ -54,8 +40,8 @@ function fixture() {
     };
     const mocks: Record<string, object> = {
         "@api/DataStore": {
-            get(key: string) { const result = deferred<unknown>(); reads.push({ key, result }); return result.promise; },
-            set(key: string, value: Map<string, { name: string; isNew: boolean; }>) { const result = deferred<void>(); writes.push({ key, value, result }); return result.promise; }
+            get(key: string) { const result = Promise.withResolvers<unknown>(); reads.push({ key, result }); return result.promise; },
+            set(key: string, value: Map<string, { name: string; isNew: boolean; }>) { const result = Promise.withResolvers<void>(); writes.push({ key, value, result }); return result.promise; }
         },
         "@api/Settings": { definePluginSettings: (def: object) => ({ def, store }) },
         "@api/Notifications": { showNotification: (notice: object) => notices.push(notice) },
@@ -72,7 +58,7 @@ function fixture() {
             React, UserStore: { getCurrentUser: () => account ? { id: account } : undefined },
             useStateFromStores: (_stores: unknown, callback: () => unknown) => callback(),
             Constants: { Endpoints: { AUTH_SESSIONS: "fixture-sessions" } },
-            RestAPI: { get() { const request = deferred<object>(); requests.push(request); return request.promise; } },
+            RestAPI: { get() { const request = Promise.withResolvers<object>(); requests.push(request); return request.promise; } },
             AuthSessionsStore: { getSessions: () => [] },
             Modal: "modal", TextInput: "input", Toasts: { genId: () => "toast", Type: { FAILURE: "failure" }, show: (toast: object) => toasts.push(toast) }
         },

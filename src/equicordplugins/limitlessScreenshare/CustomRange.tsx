@@ -1,10 +1,4 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
-import { lodash, Menu, useEffect, useMemo, useState } from "@webpack/common";
+import { lodash, Menu, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
 import { COOLDOWN_MS } from "./settings";
 import { denormalize, normalize } from "./utils";
@@ -22,7 +16,9 @@ export const CustomRange = ({ onChange, initialValue, minMax, group, id, suffix 
     const [value, setValue] = useState(initialValue);
     const [minValue, maxValue] = minMax;
 
-    const changeStreamSettings = useMemo(() => lodash.throttle((value: number) => onChange(value), COOLDOWN_MS), []);
+    const onChangeRef = useRef(onChange);
+    onChangeRef.current = onChange;
+    const changeStreamSettings = useMemo(() => lodash.throttle((value: number) => onChangeRef.current(value), COOLDOWN_MS), []);
     useEffect(() => () => {
         changeStreamSettings.flush();
         changeStreamSettings.cancel();

@@ -13,6 +13,7 @@ import { AnyModuleFactory } from "@webpack/types";
 import pLimit from "p-limit";
 
 import { withTimeout } from "./promiseTimeout";
+import { requireReporterFactory } from "./reporterFactoryPreflight";
 
 const CHUNK_OPERATION_TIMEOUT_MS = 15_000;
 const CHUNK_SEARCH_TIMEOUT_MS = 90_000;
@@ -39,176 +40,228 @@ function getWebpackChunkMap() {
     return chunksMap as Record<PropertyKey, string> | null;
 }
 
-export async function loadLazyChunks() {
+export async function loadLazyChunks(): Promise<boolean> {
     const LazyChunkLoaderLogger = new Logger("LazyChunkLoader");
-    const queue = pLimit(50);
+    const queue = pLimit({ concurrency: 50, rejectOnClear: true });
+    const discoveredChunks = new Set<string>();
+    const loadedChunks = new Set<PropertyKey>();
+    const invalidChunks = new Set<PropertyKey>();
+    const inspections = new Map<PropertyKey, Promise<boolean>>();
+    const failedInspections = new Set<PropertyKey>();
+    const loads = new Map<PropertyKey, Promise<void>>();
+    const controllers = new Set<AbortController>();
+    const pendingSearches = new Set<Promise<void>>();
+    const searchErrors: unknown[] = [];
+    const reportedErrors = new Set<unknown>();
+    const { promise: chunksSearchingDone, resolve: chunksSearchingResolve } = Promise.withResolvers<void>();
+    let searchCheckTimer: ReturnType<typeof setTimeout> | undefined;
+    let remainingChunksPromise: Promise<unknown> | undefined;
+    let mappedChunks: string[] | undefined;
+    let closed = false;
+    let failed = false;
+    let failure: unknown;
+    const isRunning = () => !closed;
+
+    // Only match direct bound entry points; broader matching also loads every language pack and slows webpack finds testing.
+    const PartialLazyChunkRegex = canonicalizeMatch(/(?:(?:Promise\.all\(\[)?((?:\i\.e\("?[^)]+?"?\),?)+?)(?:\]\))?)\.then\(\i\.bind\(\i,"?([^)]+?)"?\)\)/g);
+
+    function assertRunning() {
+        if (closed) throw new Error("Chunk loading was stopped");
+    }
+
+    function warnOnce(error: unknown) {
+        if (closed || reportedErrors.has(error)) return;
+        reportedErrors.add(error);
+        LazyChunkLoaderLogger.warn(error);
+    }
+
+    async function settleOperations<T>(operations: Promise<T>[]) {
+        const results = await Promise.allSettled(operations);
+        for (const result of results) if (result.status === "rejected") warnOnce(result.reason);
+        return results;
+    }
+
+    function inspectChunk(id: PropertyKey) {
+        let inspection = inspections.get(id);
+        if (!inspection) {
+            inspection = queue(async () => {
+                assertRunning();
+                const controller = new AbortController();
+                controllers.add(controller);
+                try {
+                    const isWorker = await withTimeout(
+                        fetch(wreq.p + wreq.u(id), { signal: controller.signal })
+                            .then(response => {
+                                if (!response.ok) throw new Error(`Failed inspecting chunk ${String(id)}: HTTP ${response.status}`);
+                                return response.text();
+                            })
+                            .then(text => /importScripts\(|self\.postMessage/.test(text)),
+                        CHUNK_OPERATION_TIMEOUT_MS,
+                        `Timed out inspecting chunk ${String(id)}`,
+                    );
+                    assertRunning();
+                    if (isWorker) invalidChunks.add(id);
+                    return isWorker;
+                } finally {
+                    controller.abort();
+                    controllers.delete(controller);
+                }
+            }).catch(error => {
+                failedInspections.add(id);
+                throw error;
+            });
+            inspections.set(id, inspection);
+        }
+        return inspection;
+    }
+
+    function loadChunk(id: PropertyKey) {
+        let load = loads.get(id);
+        if (!load) {
+            load = queue(async () => {
+                assertRunning();
+                await withTimeout(wreq.e(id), CHUNK_OPERATION_TIMEOUT_MS, `Timed out loading chunk ${String(id)}`);
+                assertRunning();
+                loadedChunks.add(id);
+            });
+            loads.set(id, load);
+        }
+        return load;
+    }
+
+    async function searchAndLoadLazyChunks(factoryCode: string) {
+        const validChunkGroups: Array<[chunkIds: PropertyKey[], entryPoint: PropertyKey]> = [];
+        await settleOperations(Array.from(factoryCode.matchAll(PartialLazyChunkRegex)).map(async ([, rawChunkIds, entryPoint]) => {
+            const chunkIds = rawChunkIds?.matchAll(Webpack.ChunkIdsRegex).map(m => {
+                const numChunkId = Number(m[1]);
+                return Number.isNaN(numChunkId) ? m[1] : String(numChunkId);
+            }).toArray() ?? [];
+            if (chunkIds.length === 0) return;
+
+            const inspectableChunkIds = chunkIds.filter(id => {
+                const filename = wreq.u(id);
+                return filename != null && filename !== "undefined.js";
+            });
+            for (const id of inspectableChunkIds) discoveredChunks.add(id);
+            let invalidChunkGroup = false;
+            for (const id of inspectableChunkIds) {
+                if (await inspectChunk(id)) invalidChunkGroup = true;
+            }
+            if (!invalidChunkGroup) {
+                const numEntryPoint = Number(entryPoint);
+                validChunkGroups.push([chunkIds, Number.isNaN(numEntryPoint) ? entryPoint : String(numEntryPoint)]);
+            }
+        }));
+        if (closed) return;
+
+        // Every sibling must settle before this search drains or its entries run.
+        const groupsLoaded = await Promise.all(validChunkGroups.map(async ([chunkIds]) =>
+            (await settleOperations(chunkIds.map(loadChunk))).every(result => result.status === "fulfilled")
+        ));
+        for (let i = 0; i < validChunkGroups.length; i++) {
+            if (closed) return;
+            if (!groupsLoaded[i]) continue;
+            const [, entryPoint] = validChunkGroups[i];
+            try {
+                if (wreq.m[entryPoint]) {
+                    if (IS_REPORTER) {
+                        const preparation = requireReporterFactory(entryPoint, isRunning);
+                        if (preparation) await preparation;
+                    } else wreq(entryPoint);
+                }
+            } catch (error) {
+                if (!IS_REPORTER && error instanceof TypeError && error.message.includes("reading 'nativeModules'")) continue;
+                console.error(error);
+            }
+        }
+    }
+
+    function factoryListener(factory: AnyModuleFactory | ModuleFactory) {
+        if (closed) return;
+        clearTimeout(searchCheckTimer);
+        let search: Promise<void>;
+        try { search = searchAndLoadLazyChunks(String(factory)); }
+        catch (error) { search = Promise.reject(error); }
+        const pending = search.catch(error => {
+            searchErrors.push(error);
+            warnOnce(error);
+        }).finally(() => {
+            pendingSearches.delete(pending);
+            if (closed || pendingSearches.size !== 0) return;
+            searchCheckTimer = setTimeout(() => {
+                if (pendingSearches.size === 0) chunksSearchingResolve();
+            }, 0);
+        });
+        pendingSearches.add(pending);
+    }
 
     try {
         LazyChunkLoaderLogger.log("Loading all chunks...");
-
-        const validChunks = new Set<PropertyKey>();
-        const invalidChunks = new Set<PropertyKey>();
-
-        const { promise: chunksSearchingDone, resolve: chunksSearchingResolve } = Promise.withResolvers<void>();
-
-        let pendingChunkSearches = 0;
-
-        // Only match direct bound entry points; broader matching also loads every language pack and slows webpack finds testing.
-        const PartialLazyChunkRegex = canonicalizeMatch(/(?:(?:Promise\.all\(\[)?((?:\i\.e\("?[^)]+?"?\),?)+?)(?:\]\))?)\.then\(\i\.bind\(\i,"?([^)]+?)"?\)\)/g);
-
-        async function searchAndLoadLazyChunks(factoryCode: string) {
-            const lazyChunks = factoryCode.matchAll(PartialLazyChunkRegex);
-            const validChunkGroups = new Set<[chunkIds: PropertyKey[], entryPoint: PropertyKey]>();
-
-            await Promise.all(Array.from(lazyChunks).map(async ([, rawChunkIds, entryPoint]) => {
-                const chunkIds = rawChunkIds
-                    ?.matchAll(Webpack.ChunkIdsRegex)
-                    .map(m => {
-                        const numChunkId = Number(m[1]);
-                        return Number.isNaN(numChunkId) ? m[1] : String(numChunkId);
-                    })
-                    .toArray()
-                    ?? [];
-
-                if (chunkIds.length === 0) {
-                    return;
-                }
-
-                let invalidChunkGroup = false;
-
-                for (const id of chunkIds) {
-                    if (wreq.u(id) == null || wreq.u(id) === "undefined.js") continue;
-
-                    const isWorkerAsset = await queue(() => withTimeout(
-                        fetch(wreq.p + wreq.u(id))
-                            .then(r => r.text())
-                            .then(t => /importScripts\(|self\.postMessage/.test(t)),
-                        CHUNK_OPERATION_TIMEOUT_MS,
-                        `Timed out inspecting chunk ${String(id)}`,
-                    ));
-
-                    if (isWorkerAsset) {
-                        invalidChunks.add(id);
-                        invalidChunkGroup = true;
-                        continue;
-                    }
-
-                    validChunks.add(id);
-                }
-
-                if (!invalidChunkGroup) {
-                    const numEntryPoint = Number(entryPoint);
-                    validChunkGroups.add([chunkIds, Number.isNaN(numEntryPoint) ? entryPoint : String(numEntryPoint)]);
-                }
-            }));
-
-            // Loads all found valid chunk groups
-            await Promise.all(
-                Array.from(validChunkGroups)
-                    .map(([chunkIds]) =>
-                        Promise.all(chunkIds.map(id => withTimeout(
-                            wreq.e(id),
-                            CHUNK_OPERATION_TIMEOUT_MS,
-                            `Timed out loading chunk ${String(id)}`,
-                        )))
-                    )
-            );
-
-            // Requires the entry points for all valid chunk groups
-            for (const [, entryPoint] of validChunkGroups) {
-                try {
-                    if (wreq.m[entryPoint]) wreq(entryPoint);
-                } catch (err) {
-                    if (err instanceof TypeError && err.message.includes("reading 'nativeModules'")) {
-                        continue;
-                    }
-
-                    console.error(err);
-                }
-            }
-
-        }
-
-        function factoryListener(factory: AnyModuleFactory | ModuleFactory) {
-            pendingChunkSearches++;
-            searchAndLoadLazyChunks(String(factory))
-                .catch(() => {})
-                .finally(() => {
-                    if (--pendingChunkSearches === 0) {
-                        setTimeout(() => {
-                            if (pendingChunkSearches === 0) chunksSearchingResolve();
-                        }, 0);
-                    }
-                });
-        }
-
         Webpack.factoryListeners.add(factoryListener);
-        for (const moduleId in wreq.m) {
-            factoryListener(wreq.m[moduleId]);
-        }
-        if (pendingChunkSearches === 0) chunksSearchingResolve();
-
+        for (const moduleId in wreq.m) factoryListener(wreq.m[moduleId]);
+        if (pendingSearches.size === 0) chunksSearchingResolve();
         try {
-            await withTimeout(
-                chunksSearchingDone,
-                CHUNK_SEARCH_TIMEOUT_MS,
-                "Timed out searching for lazy chunks",
-            );
-        } catch (error) {
-            LazyChunkLoaderLogger.warn(error);
+            await withTimeout(chunksSearchingDone, CHUNK_SEARCH_TIMEOUT_MS, "Timed out searching for lazy chunks");
         } finally {
             Webpack.factoryListeners.delete(factoryListener);
         }
+        if (searchErrors.length) throw new AggregateError(searchErrors, "Failed inspecting webpack factory sources");
 
-        // All chunks Discord has mapped to asset files, even if they are not used anymore
+        // Also inspect mapped assets that no discovered entry references.
         const chunksMap = getWebpackChunkMap();
         if (!chunksMap) throw new Error("Failed to get chunk map");
-
-        const allChunks = Object.keys(chunksMap);
-        if (allChunks.length === 0) throw new Error("Failed to get all chunks");
-
-        // Chunks which our regex could not catch to load
-        // It will always contain WebWorker assets, and also currently contains some language packs which are loaded differently
-        const chunksLeft = allChunks.filter(id => {
-            return !(validChunks.has(id) || invalidChunks.has(id));
-        });
-
-        const remainingChunksPromise = Promise.all(chunksLeft.map(async id => queue(async () => {
-            try {
-                const isWorkerAsset = await withTimeout(
-                    fetch(wreq.p + wreq.u(id))
-                        .then(r => r.text())
-                        .then(t => /importScripts\(|self\.postMessage/.test(t)),
-                    CHUNK_OPERATION_TIMEOUT_MS,
-                    `Timed out inspecting remaining chunk ${String(id)}`,
-                );
-
-                // Loads the chunk. Currently this only happens with the language packs which are loaded differently
-                if (!isWorkerAsset) {
-                    await withTimeout(
-                        wreq.e(id),
-                        CHUNK_OPERATION_TIMEOUT_MS,
-                        `Timed out loading remaining chunk ${String(id)}`,
-                    );
-                }
-            } catch (error) {
-                LazyChunkLoaderLogger.warn(error);
-            }
-        })));
-
+        mappedChunks = Object.keys(chunksMap);
+        if (mappedChunks.length === 0) throw new Error("Failed to get all chunks");
+        // Discord also has literal filename branches outside the fallback map.
+        const allChunks = Array.from(new Set([...mappedChunks, ...discoveredChunks]));
+        const chunksLeft = allChunks.filter(id => !loadedChunks.has(id) && !invalidChunks.has(id));
+        for (const id of chunksLeft) {
+            // The existing remaining pass gets one retry for failed operations.
+            // Successful inspections stay shared; only actual loads count as done.
+            if (failedInspections.delete(id)) inspections.delete(id);
+            loads.delete(id);
+        }
+        remainingChunksPromise = settleOperations(chunksLeft.map(async id => {
+            if (!await inspectChunk(id)) await loadChunk(id);
+        }));
+        await withTimeout(remainingChunksPromise, REMAINING_CHUNKS_TIMEOUT_MS, "Timed out loading remaining chunks");
+        const unresolved = allChunks.filter(id => !loadedChunks.has(id) && !invalidChunks.has(id));
+        if (unresolved.length)
+            throw new Error(`Failed loading ${unresolved.length} chunks: ${unresolved.slice(0, 20).map(id => id.slice(0, 64)).join(", ")}${unresolved.length > 20 ? ", …" : ""}`);
+    } catch (error) {
+        failed = true;
+        failure = error;
+    } finally {
+        // Native imports have no abort API. Stop their continuations and drain the bounded waiters.
+        closed = true;
+        Webpack.factoryListeners.delete(factoryListener);
+        clearTimeout(searchCheckTimer);
+        queue.clearQueue();
+        for (const controller of controllers) controller.abort();
         try {
             await withTimeout(
-                remainingChunksPromise,
-                REMAINING_CHUNKS_TIMEOUT_MS,
-                "Timed out loading remaining chunks",
+                Promise.allSettled([...pendingSearches, ...(remainingChunksPromise ? [remainingChunksPromise] : [])]),
+                CHUNK_OPERATION_TIMEOUT_MS,
+                "Timed out draining chunk operations",
             );
         } catch (error) {
-            queue.clearQueue();
-            LazyChunkLoaderLogger.warn(error);
+            if (!failed) failure = error;
+            failed = true;
         }
-
-        LazyChunkLoaderLogger.log("Finished loading all chunks!");
-    } catch (e) {
-        LazyChunkLoaderLogger.log("A fatal error occurred:", e);
     }
+
+    LazyChunkLoaderLogger.log("Chunk coverage:", JSON.stringify({
+        mapped: mappedChunks?.length ?? null,
+        discovered: discoveredChunks.size,
+        loaded: loadedChunks.size,
+        workersExcluded: invalidChunks.size,
+        workerIds: Array.from(invalidChunks).slice(0, 20).map(id => String(id).slice(0, 64)),
+        omittedWorkerIds: Math.max(0, invalidChunks.size - 20)
+    }));
+    if (failed) {
+        LazyChunkLoaderLogger.log("A fatal error occurred:", failure);
+        return false;
+    }
+    LazyChunkLoaderLogger.log("Finished loading all chunks!");
+    return true;
 }

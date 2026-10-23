@@ -19,11 +19,6 @@ function extracted(name: string, functionName: string, globals: Record<string, u
         compilerOptions: { target: ScriptTarget.ES2022, module: ModuleKind.CommonJS },
     }).outputText, globals);
 }
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>(complete => { resolve = complete; });
-    return { promise, resolve };
-}
 function caches(native: Record<string, unknown>) {
     const modules = new Map<string, Record<string, any>>();
     let localUserId = "100000000000000001";
@@ -64,7 +59,7 @@ test("forwarded metadata and resolved labels cannot restore mention syntax", () 
 });
 
 test("a changed message cannot publish cached plaintext under its previous key", async () => {
-    const completion = deferred<ReturnType<typeof decrypted>>();
+    const completion = Promise.withResolvers<ReturnType<typeof decrypted>>();
     const runtime = caches({ decryptIncoming: () => completion.promise });
     const cache = runtime.load("decryptCache");
     const fixture = message();
@@ -77,7 +72,7 @@ test("a changed message cannot publish cached plaintext under its previous key",
 });
 
 test("pending decryption admissions remain bounded while native work stalls", async () => {
-    const completion = deferred<ReturnType<typeof decrypted>>();
+    const completion = Promise.withResolvers<ReturnType<typeof decrypted>>();
     const runtime = caches({ decryptIncoming: () => completion.promise });
     const cache = runtime.load("decryptCache");
     const pending = Array.from({ length: 512 }, (_, index) => cache.decryptCachedMessage("100000000000000001", message(index)));
@@ -88,7 +83,7 @@ test("pending decryption admissions remain bounded while native work stalls", as
 });
 
 test("edited announcements cancel stale reviews and permit a fresh review", async () => {
-    const completion = deferred<{ status: string }>();
+    const completion = Promise.withResolvers<{ status: string }>();
     let calls = 0;
     const runtime = caches({ reviewAnnouncement: () => { calls++; return completion.promise; } });
     const cache = runtime.load("announcementReviewCache");
@@ -103,7 +98,7 @@ test("edited announcements cancel stale reviews and permit a fresh review", asyn
 });
 
 test("pending announcement admissions remain bounded", async () => {
-    const completion = deferred<{ status: string }>();
+    const completion = Promise.withResolvers<{ status: string }>();
     const runtime = caches({ reviewAnnouncement: () => completion.promise });
     const cache = runtime.load("announcementReviewCache");
     const pending = Array.from({ length: 256 }, (_, index) => cache.reviewAnnouncementCached("100000000000000001", message(index)));
@@ -115,7 +110,7 @@ test("pending announcement admissions remain bounded", async () => {
 
 for (const invalidation of ["clear", "account", "edit"] as const) {
     test("attachment completion zeroes stale bytes after " + invalidation, async () => {
-        const completion = deferred<any>();
+        const completion = Promise.withResolvers<any>();
         const runtime = caches({ decryptIncomingAttachments: () => completion.promise });
         const cache = runtime.load("attachmentCache");
         const fixture = message();
@@ -226,7 +221,7 @@ test("oversized uploads are rejected before metadata decoding", async () => {
 });
 
 test("security-key ceremony deadline also covers stalled page loading", async () => {
-    const timeout = deferred<void>();
+    const timeout = Promise.withResolvers<void>();
     let windowDestroyed = false;
     let storageCleared = false;
     let serverCloses = 0;
@@ -329,6 +324,7 @@ for (const status of ["untrusted_author", "replay_detected", "decrypted"]) {
             downloadEncryptedAttachment: async () => ({ ciphertext, hadDownloadFailure: false }),
             decryptAttachmentBytes: async () => ({ data: bytes, metadata: { name: "fixture.txt", size: 3 } }),
             attachmentBundleRoot: async () => "root",
+            cachedAuthenticatedAttachment: () => null,
             cacheAuthenticatedAttachment: () => { cached++; },
             resolveDetachedMessageText: (_value: unknown, attachments: unknown) => ({ plaintext: "fixture", attachments }),
         });
@@ -347,7 +343,7 @@ for (const status of ["untrusted_author", "replay_detected", "decrypted"]) {
 test("future-window document loads reconcile after queued screenshot operations", async () => {
     const app = new EventEmitter();
     const contents = new EventEmitter();
-    const pendingTransition = deferred<void>();
+    const pendingTransition = Promise.withResolvers<void>();
     const hidden: boolean[] = [];
     const globals = { newWindowHookInstalled: false, app, screenCaptureProtectionEnabled: true,
         screenCaptureProtectionTransitioning: false,
@@ -388,7 +384,7 @@ test("media teardown exceptions do not leak URLs or leave metadata unresolved", 
 
 test("windows created during screenshot transitions hide before final reconciliation", async () => {
     const app = new EventEmitter();
-    const transition = deferred<void>();
+    const transition = Promise.withResolvers<void>();
     const hidden: boolean[] = [];
     const globals = { newWindowHookInstalled: false, app, screenCaptureProtectionEnabled: true,
         screenCaptureProtectionHealthy: true, screenCaptureProtectionTransitioning: true,
@@ -414,7 +410,7 @@ test("ceremony server shutdown closes lingering connections", async () => {
 });
 
 test("attachment singleflight admissions stay bounded while pending", async () => {
-    const completion = deferred<any>();
+    const completion = Promise.withResolvers<any>();
     const runtime = caches({ decryptIncomingAttachments: () => completion.promise });
     const cache = runtime.load("attachmentCache");
     const pending = Array.from({ length: 128 }, (_, index) => cache.decryptIncomingAttachmentsCached("100000000000000001", message(index), "all"));

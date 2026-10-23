@@ -11,7 +11,7 @@ import { access, readFile, readdir } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import ts from "typescript";
 
-import { getPluginTarget } from "../utils.mjs";
+import { compareBuildEntryNames, getPluginTarget } from "../utils.mjs";
 
 const PLUGIN_DIRECTORIES = ["plugins", "equicordplugins", "userplugins"];
 
@@ -111,7 +111,7 @@ export function createPluginNativesPlugin({ resolvePluginName, isDev, isReporter
                 for (const dir of PLUGIN_DIRECTORIES) {
                     const directory = join(sourceRoot, dir);
                     if (!await exists(directory)) continue;
-                    for (const plugin of await readdir(directory, { withFileTypes: true })) {
+                    for (const plugin of (await readdir(directory, { withFileTypes: true })).sort(compareBuildEntryNames)) {
                         if (!plugin.isDirectory()) continue;
                         const candidates = ["native.ts", "native/index.ts"].map(file => join(directory, plugin.name, file));
                         candidates.forEach(path => watchFiles.add(path));

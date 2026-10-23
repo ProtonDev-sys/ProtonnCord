@@ -5,31 +5,19 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { parseSyncedLyrics } from "../src/equicordplugins/musicControls/parseSyncedLyrics";
 import { Provider } from "../src/equicordplugins/musicControls/spotify/lyrics/providers/types";
+import { loadTestModule } from "./utils/loadTestModule";
 
 const prefix = "@equicordplugins/musicControls/";
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
-
 function load(file: string, modules: Record<string, any>, globals: Record<string, unknown> = {}) {
-    const output = transpileModule(readFileSync(`src/equicordplugins/musicControls/${file}`, "utf8"), {
-        fileName: file, compilerOptions: { target: ScriptTarget.ES2022, module: ModuleKind.CommonJS, jsx: JsxEmit.React, esModuleInterop: false }
-    }).outputText;
-    return runInNewContext(`${output}\nexports;`, {
-        exports: {}, AbortController, AbortSignal, SyntaxError, URL, console: { error() {} },
+    return loadTestModule(`src/equicordplugins/musicControls/${file}`, modules, {
+        AbortController, AbortSignal, SyntaxError, URL, console: { error() {} },
         require: (name: string) => modules[name] ?? {}, ...globals
-    });
+    }, "", { fileName: file, compilerOptions: { esModuleInterop: false }, mockImports: false });
 }
 
 function timers() {
@@ -60,7 +48,7 @@ function timers() {
 
 function storeFixture(service: "spotify" | "tidal", getLyrics?: (...args: any[]) => Promise<any>) {
     const clock = timers();
-    const requests: Array<ReturnType<typeof deferred<any>> & { signal?: AbortSignal; }> = [];
+    const requests: Array<PromiseWithResolvers<any> & { signal?: AbortSignal; }> = [];
     const listeners = new Set<() => void>();
     let handlers: Record<string, (event: any) => Promise<void>>;
     let changes = 0;
@@ -74,7 +62,7 @@ function storeFixture(service: "spotify" | "tidal", getLyrics?: (...args: any[])
         [`${prefix}settings`]: { settings: { store: { lyricsProvider: Provider.Lrclib, lyricsConversion: Provider.None } } },
         [`${prefix}${service}/${service === "spotify" ? "SpotifyStore" : "TidalStore"}`]: service === "spotify" ? { SpotifyStore: player } : { TidalStore: player },
         [`${prefix}${service}/lyrics/api`]: { getLyrics: getLyrics ?? ((_: unknown, _retries: unknown, signal?: AbortSignal) => {
-            const request = { ...deferred<any>(), signal };
+            const request = { ...Promise.withResolvers<any>(), signal };
             requests.push(request);
             return request.promise;
         }) },

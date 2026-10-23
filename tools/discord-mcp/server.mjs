@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
 
 const SERVER_NAME = "discord-mcp";
-const SERVER_VERSION = "0.2.0";
+const SERVER_VERSION = "0.2.1";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 const snowflake = {
@@ -105,7 +105,7 @@ export const TOOLS = [
     },
     {
         name: "discord_read_messages",
-        description: "Read up to 100 messages from any channel visible to the authenticated account, including image/audio/voice-message metadata and duration. Use discord_get_message or discord_download_attachment to generate a waveform when Discord omits it.",
+        description: "Read up to 100 messages from any channel visible to the authenticated account, including forwarded content in messageSnapshots and image/audio/voice-message metadata and duration. Use discord_get_message or discord_download_attachment to generate a waveform when Discord omits it.",
         inputSchema: {
             type: "object",
             properties: {
@@ -170,7 +170,7 @@ export const TOOLS = [
     },
     {
         name: "discord_get_message",
-        description: "Get one message from any channel visible to the authenticated account. If Discord omits a voice waveform, this tool downloads and decodes that voice attachment to generate one.",
+        description: "Get one message from any channel visible to the authenticated account, including forwarded content in messageSnapshots. If Discord omits a voice waveform, this tool downloads and decodes that voice attachment to generate one, including inside forwarded snapshots.",
         inputSchema: {
             type: "object",
             properties: messageLocationProperties,
@@ -180,7 +180,7 @@ export const TOOLS = [
     },
     {
         name: "discord_download_attachment",
-        description: "Download one attachment from a message in any visible channel to a private local directory. Downloads are capped at 25 MB and return path, MIME type, size, and SHA-256.",
+        description: "Download one attachment from a message or its forwarded snapshots in any visible channel to a private local directory. Use the forwarding envelope's channel/message IDs for snapshot attachments. Downloads are capped at 25 MB and return path, MIME type, size, and SHA-256.",
         inputSchema: {
             type: "object",
             properties: {
@@ -461,7 +461,7 @@ async function handleRequest(message) {
                 id: message.id,
                 result: {
                     content: await toolContent(name, result),
-                    structuredContent: result && typeof result === "object" ? result : { value: result },
+                    structuredContent: result && typeof result === "object" && !Array.isArray(result) ? result : { value: result },
                 },
             });
         } catch (error) {

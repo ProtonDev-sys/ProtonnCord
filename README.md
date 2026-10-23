@@ -10,7 +10,7 @@ On Windows, download `ProtonnCord-<version>-Windows.zip`, extract it, fully quit
 
 On Linux x86-64, download the Linux ZIP, extract it, quit Discord and run `bash install.sh`. Run `bash install.sh uninstall` to remove it. Snap installations are unsupported. See the included `README.txt` for installation paths that require administrator access.
 
-Windows downloads are unsigned and can trigger SmartScreen. Compare the download's SHA-256 with `SHA256SUMS` before running it. Discord must already be installed. Discord updates may require reinstalling the mod.
+Windows downloads are unsigned and can trigger SmartScreen. Compare the download's SHA-256 with `SHA256SUMS` before running it. Discord must already be installed. On Windows, the independent loader carries ProtonnCord forward to new Discord installations and applies downloaded channel updates on restart. Recovery runs before plugin startup; individual plugins can still need compatibility fixes when Discord changes.
 
 ## Browser and Android
 

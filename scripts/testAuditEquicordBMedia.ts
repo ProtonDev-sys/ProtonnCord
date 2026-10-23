@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { test } from "node:test";
@@ -59,10 +53,12 @@ test("FindReply ignores obsolete paginator positions", () => {
     const jumps: unknown[] = [];
     const ui = load("src/equicordplugins/findReply/ReplyNavigator.tsx", {
         "@components/ErrorBoundary": {}, "@plugins/reviewDB/components/ReviewModal": { Paginator: "paginator", requirePaginator() {} },
-        "@webpack": { findComponentByCodeLazy: () => "close", findCssClassesLazy: () => ({}) },
+        "@webpack": { findComponentByCodeLazy: () => "close" },
         "@webpack/common": { React: { ...React, useEffect() {} }, useRef: () => ({ current: null }), useState: (value: unknown) => [value, () => {}] },
         "./index": { jumper: { jumpToMessage: (args: unknown) => jumps.push(args) } }
     }).default({ replies: [{ id: "reply", channel_id: "channel" }] });
+    assert.equal(ui.props.children[0].props.className, "vc-findreply-div");
+    assert.equal(ui.props.children[0].props.style.display, "flex");
     const changePage = ui.props.children[0].props.children[0].props.onPageChange;
     [0, -1, 2, 1.5, NaN].forEach(changePage);
     assert.equal(jumps.length, 0);

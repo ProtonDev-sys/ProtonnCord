@@ -150,8 +150,9 @@ export default definePlugin({
             find: '("UserProfileModalV2EditingPanel")',
             replacement: [
                 {
-                    match: /"inline"===.{0,100}bannerErrorMessage:\i\}\)/,
-                    replace: "$self.ExperimentDecorSection(),$&"
+                    // Stay inside the host privacy guard and honor its editing-disabled state.
+                    match: /\(0,\i\.jsx\)\(\i,{user:\i,guildId:\i,disabled:(\i\|\|\i),avatarErrorMessage:\i,avatarDecorationErrorMessage:\i}\)/,
+                    replace: "$&,$self.ExperimentDecorSection({disabled:$1})"
                 }
             ]
         }

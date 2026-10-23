@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -396,12 +390,6 @@ function pendingCancellableResponse(init: ResponseInit = {}): Response {
     }), init);
 }
 
-function deferred<T>() {
-    let resolve!: (value: T | PromiseLike<T>) => void;
-    const promise = new Promise<T>(res => { resolve = res; });
-    return { promise, resolve };
-}
-
 async function checksumBytes(bytes: Uint8Array): Promise<string> {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes)));
     return Array.from(digest.subarray(0, 8), byte => byte.toString(16).padStart(2, "0")).join("");
@@ -608,8 +596,8 @@ async function testDownloadsPreserveEditsDuringRequest(sync: CloudSyncModule) {
             const runtime = makeRuntime();
             runtime.dataStore.set(API_VERSION_STORE_KEY, { [ORIGIN_A]: version });
             useRuntime(runtime);
-            const started = deferred<void>();
-            const response = deferred<Response>();
+            const started = Promise.withResolvers<void>();
+            const response = Promise.withResolvers<Response>();
             runtime.fetchHandler = async () => { started.resolve(); return response.promise; };
             const remote = { settings: { plugins: { SafePlugin: { safeNumber: 9 } } }, quickCss: ".download {}" };
             const downloads = [
@@ -651,8 +639,8 @@ async function testDownloadsPreserveEditsDuringCommit(sync: CloudSyncModule) {
             runtime.fetchHandler = async () => version === "v1"
                 ? new Response(deflateSync(new TextEncoder().encode(JSON.stringify(remote))), { headers: { ETag: "1" } })
                 : jsonResponse({ downloads, errors: [], uploaded: [], server_manifest: downloads.map(({ checksum, key, version }) => ({ checksum, key, version })) });
-            const reached = deferred<void>();
-            const release = deferred<void>();
+            const reached = Promise.withResolvers<void>();
+            const release = Promise.withResolvers<void>();
             runtime[phase] = async () => { reached.resolve(); await release.promise; };
             const pending = sync.getCloudSettings(true, true);
             await reached.promise;
@@ -674,8 +662,8 @@ async function testDownloadsPreserveEditsDuringCommit(sync: CloudSyncModule) {
     useRuntime(runtime);
     const downloads = [await downloadEntry("settings", JSON.stringify({ plugins: { SafePlugin: { safeNumber: 9 } } }))];
     runtime.fetchHandler = async () => jsonResponse({ downloads, errors: [], uploaded: [], server_manifest: downloads.map(({ checksum, key, version }) => ({ checksum, key, version })) });
-    const reached = deferred<void>();
-    const release = deferred<void>();
+    const reached = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
     const originalDigest = crypto.subtle.digest;
     crypto.subtle.digest = async function (...args: Parameters<SubtleCrypto["digest"]>) {
         reached.resolve();
@@ -1120,8 +1108,8 @@ async function testDelayedAccountResponsesAreDiscarded(sync: CloudSyncModule): P
     const v2Secrets = v2Runtime.dataStore.get(SECRET_STORE_KEY) as Record<string, string>;
     v2Secrets[cloudScope(ORIGIN_A, USER_B)] = `${AUTH_SECRET}-b`;
     useRuntime(v2Runtime);
-    const startedV2 = deferred<void>();
-    const responseV2 = deferred<Response>();
+    const startedV2 = Promise.withResolvers<void>();
+    const responseV2 = Promise.withResolvers<Response>();
     const remoteDownload = await downloadEntry("settings", JSON.stringify({ autoUpdate: true }), 5);
     v2Runtime.fetchHandler = async () => {
         startedV2.resolve();
@@ -1146,8 +1134,8 @@ async function testDelayedAccountResponsesAreDiscarded(sync: CloudSyncModule): P
     v1Secrets[cloudScope(ORIGIN_A, USER_B)] = `${AUTH_SECRET}-b`;
     v1Runtime.dataStore.set(API_VERSION_STORE_KEY, { [ORIGIN_A]: "v1" });
     useRuntime(v1Runtime);
-    const startedV1 = deferred<void>();
-    const responseV1 = deferred<Response>();
+    const startedV1 = Promise.withResolvers<void>();
+    const responseV1 = Promise.withResolvers<Response>();
     v1Runtime.fetchHandler = async () => {
         startedV1.resolve();
         return await responseV1.promise;
@@ -1168,8 +1156,8 @@ async function testInFlightLocalChangesStayDirty(sync: CloudSyncModule): Promise
     const v2 = makeRuntime();
     v2.localStorage.Vencord_settingsDirty = "true";
     useRuntime(v2);
-    const v2Started = deferred<RequestRecord>();
-    const v2Response = deferred<Response>();
+    const v2Started = Promise.withResolvers<RequestRecord>();
+    const v2Response = Promise.withResolvers<Response>();
     v2.fetchHandler = async request => {
         if (requestPath(request) === "/v2/manifest") return verifyV2Manifest(request);
         v2Started.resolve(request);
@@ -1186,8 +1174,8 @@ async function testInFlightLocalChangesStayDirty(sync: CloudSyncModule): Promise
     v1.dataStore.set(API_VERSION_STORE_KEY, { [ORIGIN_A]: "v1" });
     v1.localStorage.Vencord_settingsDirty = "true";
     useRuntime(v1);
-    const v1Started = deferred<void>();
-    const v1Response = deferred<Response>();
+    const v1Started = Promise.withResolvers<void>();
+    const v1Response = Promise.withResolvers<Response>();
     v1.fetchHandler = async () => {
         v1Started.resolve();
         return await v1Response.promise;
@@ -1204,8 +1192,8 @@ async function testInFlightLocalChangesStayDirty(sync: CloudSyncModule): Promise
     zeroUpload.dataStore.set(MANIFEST_STORE_KEY, { [cloudScope()]: oldManifest });
     zeroUpload.localStorage.Vencord_settingsDirty = "true";
     useRuntime(zeroUpload);
-    const zeroStarted = deferred<void>();
-    const zeroResponse = deferred<Response>();
+    const zeroStarted = Promise.withResolvers<void>();
+    const zeroResponse = Promise.withResolvers<Response>();
     zeroUpload.fetchHandler = async request => {
         if (requestPath(request) === "/v2/manifest") return verifyV2Manifest(request, oldManifest);
         assert.deepEqual(parseV2Request(request).uploads, []);
@@ -1224,8 +1212,8 @@ async function testInFlightMetadataDirtyEventsStayDirty(sync: CloudSyncModule): 
     const duringPost = makeRuntime();
     duringPost.localStorage.Vencord_settingsDirty = "true";
     useRuntime(duringPost);
-    const postStarted = deferred<RequestRecord>();
-    const postResponse = deferred<Response>();
+    const postStarted = Promise.withResolvers<RequestRecord>();
+    const postResponse = Promise.withResolvers<Response>();
     duringPost.fetchHandler = async request => {
         if (requestPath(request) === "/v2/manifest") return verifyV2Manifest(request);
         postStarted.resolve(request);
@@ -1241,8 +1229,8 @@ async function testInFlightMetadataDirtyEventsStayDirty(sync: CloudSyncModule): 
     const duringVerification = makeRuntime();
     duringVerification.localStorage.Vencord_settingsDirty = "true";
     useRuntime(duringVerification);
-    const verificationStarted = deferred<void>();
-    const verificationResponse = deferred<Response>();
+    const verificationStarted = Promise.withResolvers<void>();
+    const verificationResponse = Promise.withResolvers<Response>();
     duringVerification.fetchHandler = async request => {
         if (requestPath(request) === "/v2/manifest") {
             verificationStarted.resolve();
@@ -1262,8 +1250,8 @@ async function testInFlightMetadataDirtyEventsStayDirty(sync: CloudSyncModule): 
     duringV1.dataStore.set(API_VERSION_STORE_KEY, { [ORIGIN_A]: "v1" });
     duringV1.localStorage.Vencord_settingsDirty = "true";
     useRuntime(duringV1);
-    const v1Started = deferred<void>();
-    const v1Response = deferred<Response>();
+    const v1Started = Promise.withResolvers<void>();
+    const v1Response = Promise.withResolvers<Response>();
     duringV1.fetchHandler = async () => {
         v1Started.resolve();
         return await v1Response.promise;
@@ -1468,8 +1456,8 @@ async function testOAuthContextRaces(setup: CloudSetupModule): Promise<void> {
     for (const race of ["backend", "account", "cancel"] as const) {
         const runtime = makeUnauthenticatedRuntime();
         useRuntime(runtime);
-        const callbackStarted = deferred<void>();
-        const callbackResponse = deferred<Response>();
+        const callbackStarted = Promise.withResolvers<void>();
+        const callbackResponse = Promise.withResolvers<Response>();
         runtime.fetchHandler = async request => {
             if (requestPath(request) === "/v1/oauth/settings") return oauthConfiguration();
             if (requestPath(request) === "/oauth/callback") {
@@ -1503,8 +1491,8 @@ async function testStaleOnlyOAuthCancellationRemovesWrite(setup: CloudSetupModul
     };
     await setup.authorizeCloud();
 
-    const updateStored = deferred<void>();
-    const releaseUpdate = deferred<void>();
+    const updateStored = Promise.withResolvers<void>();
+    const releaseUpdate = Promise.withResolvers<void>();
     let paused = false;
     runtime.afterUpdate = async key => {
         if (key !== SECRET_STORE_KEY || paused) return;
@@ -1528,7 +1516,7 @@ async function testStaleOnlyOAuthCancellationRemovesWrite(setup: CloudSetupModul
 async function settleOlderOAuth(setup: CloudSetupModule, newerSecret: string, olderSecret: string, beforeOlder?: (runtime: Runtime) => void): Promise<Runtime> {
     const runtime = makeUnauthenticatedRuntime();
     useRuntime(runtime);
-    const oldResponse = deferred<Response>();
+    const oldResponse = Promise.withResolvers<Response>();
     runtime.fetchHandler = async request => {
         if (requestPath(request) === "/v1/oauth/settings") return oauthConfiguration();
         const code = new URL(request.url).searchParams.get("code");
@@ -1589,8 +1577,8 @@ async function testQueuedOAuthWriteInterleaves(setup: CloudSetupModule): Promise
 
         await setup.authorizeCloud();
         const oldCallback = oauthCallback(runtime);
-        const oldWriteStored = deferred<void>();
-        const releaseOldWrite = deferred<void>();
+        const oldWriteStored = Promise.withResolvers<void>();
+        const releaseOldWrite = Promise.withResolvers<void>();
         let paused = false;
         runtime.afterUpdate = async key => {
             if (key !== SECRET_STORE_KEY || paused) return;
@@ -1775,8 +1763,8 @@ async function testDeletionCapturedAccountState(sync: CloudSyncModule): Promise<
     deletionSecrets[cloudScope(ORIGIN_A, USER_B)] = `${AUTH_SECRET}-b`;
     deletion.settings.cloud.settingsSync = false;
     useRuntime(deletion);
-    const manifestStarted = deferred<void>();
-    const releaseManifest = deferred<void>();
+    const manifestStarted = Promise.withResolvers<void>();
+    const releaseManifest = Promise.withResolvers<void>();
     deletion.fetchHandler = async request => {
         assert.equal(request.headers.get("Authorization"), btoa(`${AUTH_SECRET}:${USER_A}`));
         if (requestPath(request) === "/v2/manifest") {
@@ -1804,8 +1792,8 @@ async function testDeletionCapturedAccountState(sync: CloudSyncModule): Promise<
     erasureSecrets[cloudScope(ORIGIN_A, USER_B)] = `${AUTH_SECRET}-b`;
     erasure.settings.cloud.settingsSync = false;
     useRuntime(erasure);
-    const eraseStarted = deferred<void>();
-    const eraseResponse = deferred<Response>();
+    const eraseStarted = Promise.withResolvers<void>();
+    const eraseResponse = Promise.withResolvers<Response>();
     erasure.fetchHandler = async request => {
         assert.equal(`${request.method} ${requestPath(request)}`, "DELETE /v1/");
         assert.equal(request.headers.get("Authorization"), btoa(`${AUTH_SECRET}:${USER_A}`));

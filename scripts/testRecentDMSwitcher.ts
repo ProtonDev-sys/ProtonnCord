@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { setImmediate } from "node:timers/promises";
@@ -14,14 +8,6 @@ import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 const A = "111111111111111111";
 const B = "222222222222222222";
 const C = "333333333333333333";
-
-function deferred<T>() {
-    let resolve: ((value: T) => void) | undefined;
-    let reject: ((error: Error) => void) | undefined;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    assert.ok(resolve && reject);
-    return { promise, resolve, reject };
-}
 
 interface TestPlugin {
     start(): Promise<void>;
@@ -34,8 +20,8 @@ function fixture(mac = false) {
     let userId = "account-a";
     let selected = A;
     const channels = new Set([A, B, C]);
-    const reads: { key: string; result: ReturnType<typeof deferred<unknown>>; }[] = [];
-    const writes: { key: string; ids: string[]; result: ReturnType<typeof deferred<void>>; }[] = [];
+    const reads: { key: string; result: PromiseWithResolvers<unknown>; }[] = [];
+    const writes: { key: string; ids: string[]; result: PromiseWithResolvers<void>; }[] = [];
     const errors: unknown[][] = [], toasts: object[] = [], transitions: string[] = [];
     const listeners = new Map<string, (event?: object) => void>();
     const modals: { key: string; onCloseCallback(): void; }[] = [];
@@ -52,8 +38,8 @@ function fixture(mac = false) {
     const mocks: Record<string, object> = {
         "./styles.css": {},
         "@api/DataStore": {
-            get(key: string) { const result = deferred<unknown>(); reads.push({ key, result }); return result.promise; },
-            set(key: string, ids: string[]) { const result = deferred<void>(); writes.push({ key, ids: [...ids], result }); return result.promise; }
+            get(key: string) { const result = Promise.withResolvers<unknown>(); reads.push({ key, result }); return result.promise; },
+            set(key: string, ids: string[]) { const result = Promise.withResolvers<void>(); writes.push({ key, ids: [...ids], result }); return result.promise; }
         },
         "@api/Settings": { definePluginSettings: (def: object) => ({ def, store, use: () => store }) },
         "@components/ErrorBoundary": { __esModule: true, default: { wrap: (component: unknown) => component } },

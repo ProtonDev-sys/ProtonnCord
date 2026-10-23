@@ -10,6 +10,7 @@ import { Settings } from "@api/Settings";
 import { BaseText } from "@components/BaseText";
 import { Flex } from "@components/Flex";
 import { ImageIcon, LinkIcon, OpenExternalIcon } from "@components/Icons";
+import { followPlaybackPosition } from "@equicordplugins/musicControls/playbackPosition";
 import { SeekBar } from "@equicordplugins/musicControls/spotify/SeekBar";
 import { copyWithToast, openImageModal } from "@utils/discord";
 import { classes } from "@utils/misc";
@@ -158,19 +159,7 @@ function TdlSeekBar() {
 
     const [position, setPosition] = useState<number>(storePosition);
 
-    useEffect(() => {
-        setPosition(storePosition);
-    }, [videoId, songDuration, storePosition]);
-
-    useEffect(() => {
-        if (isPlaying) {
-            setPosition(TidalStore.position);
-            const interval = setInterval(() => {
-                setPosition(p => Math.min(p + 1000, durationMs));
-            }, 1000);
-            return () => clearInterval(interval);
-        }
-    }, [durationMs, storePosition, isPlaying]);
+    useEffect(() => followPlaybackPosition(TidalStore, durationMs, setPosition), [durationMs, storePosition, isPlaying, videoId]);
 
     const onChange = (v: number) => {
         setPosition(v);

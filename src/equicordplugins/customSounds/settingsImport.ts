@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { makeEmptyOverride, SoundOverride } from "./types";
 
 const reservedIds = new Set(["enabled", "isFavorite", "overrides", "__proto__", "constructor", "prototype"]);

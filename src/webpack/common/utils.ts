@@ -165,12 +165,12 @@ export const NavigationRouter: t.NavigationRouter = mapMangledModuleLazy("transi
     forward: filters.byCode("goForward()"),
 });
 export const ChannelRouter: t.ChannelRouter = mapMangledModuleLazy('"Thread must have a parent ID."', {
-    transitionToChannel: filters.byCode(".preload"),
+    transitionToChannel: filters.byCode(".openTextInVoiceIfVoiceChannel"),
     transitionToThread: filters.byCode('"Thread must have a parent ID."')
 });
 
 export let SettingsRouter: any;
-waitFor(["openUserSettings", "USER_SETTINGS_MODAL_KEY"], m => SettingsRouter = m);
+waitFor("openUserSettings", m => SettingsRouter = m);
 
 export const PermissionsBits: t.PermissionsBits = findLazy(m => typeof m.ADMINISTRATOR === "bigint");
 
@@ -184,7 +184,7 @@ export const { zustandPersist } = mapMangledModuleLazy(".onRehydrateStorage)?", 
 
 export const MessageActions = findByPropsLazy("editMessage", "sendMessage");
 export const MessageCache = findByPropsLazy("clearCache", "_channelMessages");
-export const UserProfileActions = findByPropsLazy("openUserProfileModal", "closeUserProfileModal");
+export const UserProfileActions = findByPropsLazy("openUserProfileModal");
 export const InviteActions = findByPropsLazy("resolveInvite");
 export const ChannelActionCreators = findByPropsLazy("openPrivateChannel");
 

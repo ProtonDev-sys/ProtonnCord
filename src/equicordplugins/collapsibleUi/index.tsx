@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { ChannelToolbarButton } from "@api/HeaderBar";
 import { addSurfacePropsProvider, notifySurfaceClassesChanged, type SurfaceId, type SurfaceProvidedProps } from "@api/SurfaceClasses";
 import ErrorBoundary from "@components/ErrorBoundary";

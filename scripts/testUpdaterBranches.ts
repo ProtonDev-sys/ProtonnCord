@@ -259,6 +259,7 @@ async function testHttpBranches(): Promise<void> {
         name: `Protonn Cord staging ${targetHash}`,
         assets: [{
             name: "desktop.asar",
+            digest: `sha256:${"d".repeat(64)}`, size: 128, state: "uploaded",
             browser_download_url: "https://github.com/ProtonDev-sys/ProtonnCord/releases/download/staging/desktop.asar",
         }],
     };
@@ -275,19 +276,25 @@ async function testHttpBranches(): Promise<void> {
     assert.equal(inspection.pending?.hash, targetHash);
     assert.match(inspection.changes[0].message, /Switch update branch to staging/u);
 
-    let nightlyEndpoint = "";
+    const nightlyEndpoints: string[] = [];
     const nightly = await findHttpUpdate(async endpoint => {
-        nightlyEndpoint = endpoint;
+        nightlyEndpoints.push(endpoint);
+        if (endpoint === `/compare/${currentHash}...${targetHash}`) return { status: "ahead", commits: [] };
+        assert.equal(endpoint, "/releases/tags/nightly");
         return {
             ...release,
             name: `Protonn Cord nightly ${targetHash}`,
             assets: [{
                 name: "desktop.asar",
+                digest: `sha256:${"d".repeat(64)}`, size: 128, state: "uploaded",
                 browser_download_url: "https://github.com/ProtonDev-sys/ProtonnCord/releases/download/nightly/desktop.asar",
             }],
         };
     }, currentHash, "desktop.asar", "nightly");
-    assert.equal(nightlyEndpoint, "/releases/tags/nightly");
+    assert.deepEqual(nightlyEndpoints, [
+        "/releases/tags/nightly",
+        `/compare/${currentHash}...${targetHash}`,
+    ]);
     assert.equal(nightly?.hash, targetHash);
 }
 

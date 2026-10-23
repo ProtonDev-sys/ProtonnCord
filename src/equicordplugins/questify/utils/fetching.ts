@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { playAudio } from "@api/AudioPlayer";
 import { showNotification } from "@api/Notifications";
 import { sleep } from "@utils/misc";

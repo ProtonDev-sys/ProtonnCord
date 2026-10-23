@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 const MAX_EXTERNAL_URL_LENGTH = 4096;
 const FORBIDDEN_URL_CHARACTERS = /[\\\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
 

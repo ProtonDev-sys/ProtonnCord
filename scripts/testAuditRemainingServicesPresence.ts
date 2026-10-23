@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -14,12 +8,6 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const React = { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) };
 function load(file: string, imports: Record<string, unknown>, globals: Record<string, unknown> = {}, expose = "") {
     return loadTestModule(file, imports, { React, URL, AbortController, console, ...globals }, expose);
-}
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
 }
 const logger = { Logger: class { error() {} warn() {} info() {} } };
 const presencePath = "src/equicordplugins/richPresence/";
@@ -110,9 +98,9 @@ test("RichPresence isolates partial service failure and removes callbacks before
 });
 
 test("evicted asset rejection cannot delete the replacement request", async () => {
-    const requests: ReturnType<typeof deferred<string[]>>[] = [];
+    const requests: PromiseWithResolvers<string[]>[] = [];
     const api = load(presencePath + "services/assetCache.ts", {
-        "@webpack/common": { ApplicationAssetUtils: { fetchAssetIds() { const request = deferred<string[]>(); requests.push(request); return request.promise; } } }
+        "@webpack/common": { ApplicationAssetUtils: { fetchAssetIds() { const request = Promise.withResolvers<string[]>(); requests.push(request); return request.promise; } } }
     });
     const first = api.getCachedApplicationAsset("app", "first");
     const rejection = assert.rejects(first, /old request/);
@@ -132,9 +120,9 @@ test("evicted asset rejection cannot delete the replacement request", async () =
 });
 
 test("AudioBookShelf discards a login completed after stop and uses only the new session", async () => {
-    const requests: { url: string; init: RequestInit; response: ReturnType<typeof deferred<any>>; }[] = [];
+    const requests: { url: string; init: RequestInit; response: PromiseWithResolvers<any>; }[] = [];
     const fixture = serviceFixture("services/audiobookshelf.ts", { abs_serverUrl: "https://abs.invalid", abs_username: "user", abs_password: "fixture" }, {}, {
-        fetch: (url: string, init: RequestInit) => { const response = deferred<any>(); requests.push({ url, init, response }); return response.promise; }
+        fetch: (url: string, init: RequestInit) => { const response = Promise.withResolvers<any>(); requests.push({ url, init, response }); return response.promise; }
     });
     fixture.api.start();
     fixture.api.stop();
@@ -198,8 +186,8 @@ test("Jellyfin privacy mode hides media labels and normal playback retains posit
 
 type PollingService = "jellyfin" | "statsfm" | "audiobookshelf";
 function pollingFixture(service: PollingService) {
-    const requests: { url: string; init: RequestInit; response: ReturnType<typeof deferred<any>>; }[] = [];
-    const assets: ReturnType<typeof deferred<string[]>>[] = [];
+    const requests: { url: string; init: RequestInit; response: PromiseWithResolvers<any>; }[] = [];
+    const assets: PromiseWithResolvers<string[]>[] = [];
     const errors: unknown[][] = [];
     const configs = {
         jellyfin: { jf_serverUrl: "https://jf.invalid", jf_apiKey: "fixture-key", jf_userId: "fixture-user", jf_privacyMode: false, jf_showPausedState: true, jf_nameDisplay: "full", jf_overrideType: "off" },
@@ -208,7 +196,7 @@ function pollingFixture(service: PollingService) {
     };
     const cache = load(presencePath + "services/assetCache.ts", {
         "@webpack/common": { ApplicationAssetUtils: { fetchAssetIds() {
-            const request = deferred<string[]>();
+            const request = Promise.withResolvers<string[]>();
             assets.push(request);
             return request.promise;
         } } }
@@ -220,7 +208,7 @@ function pollingFixture(service: PollingService) {
         "./assetCache": cache
     }, {
         fetch(url: string, init: RequestInit = {}) {
-            const response = deferred<any>();
+            const response = Promise.withResolvers<any>();
             requests.push({ url, init, response });
             return response.promise;
         }
@@ -314,7 +302,7 @@ for (const service of ["jellyfin", "statsfm", "audiobookshelf"] as const) {
 
     for (const stage of ["fetch", "body", "artwork"] as const) test(`${service} deadlines recover from stalled ${stage} work`, async () => {
         const f = pollingFixture(service);
-        const body = deferred<any>();
+        const body = Promise.withResolvers<any>();
         f.api.start();
         if (stage === "body") {
             f.requests[0].response.resolve({ ok: true, headers: { get: () => "application/json" }, json: () => body.promise });

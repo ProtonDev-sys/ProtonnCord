@@ -29,7 +29,7 @@ import { minify as minifyHtml } from "html-minifier-terser";
 import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 
-import { getPluginTarget } from "../utils.mjs";
+import { compareBuildEntryNames, getPluginTarget } from "../utils.mjs";
 import { createPluginManifestAnalyzer } from "./pluginManifest.mjs";
 
 const PackageJSON = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../package.json"), "utf-8"));
@@ -53,6 +53,37 @@ export const IS_STANDALONE = process.argv.includes("--standalone");
 export const IS_COMPANION_TEST = IS_REPORTER && process.argv.includes("--companion-test");
 if (!IS_COMPANION_TEST && process.argv.includes("--companion-test"))
     console.error("--companion-test must be run with --reporter for any effect");
+
+/**
+ * Resolve the checked-out release channel, never the user's selected updater channel.
+ * @param {NodeJS.ProcessEnv} env
+ * @param {() => string} readLocalBranch
+ */
+export function getBuildChannel(env = process.env, readLocalBranch = () => execSync("git branch --show-current", {
+    encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"]
+}).trim()) {
+    /** @param {string | undefined} value */
+    const knownChannel = value => value === "main" || value === "staging" || value === "nightly" ? value : null;
+    if (env.PROTONN_CORD_BUILD_CHANNEL !== undefined) {
+        const channel = knownChannel(env.PROTONN_CORD_BUILD_CHANNEL);
+        if (!channel) throw new Error("PROTONN_CORD_BUILD_CHANNEL must be main, staging or nightly.");
+        return channel;
+    }
+    if (env.GITHUB_ACTIONS === "true") {
+        if (env.GITHUB_EVENT_NAME === "pull_request" || env.GITHUB_EVENT_NAME === "pull_request_target")
+            return knownChannel(env.GITHUB_BASE_REF);
+        return env.GITHUB_REF?.startsWith("refs/heads/") ? knownChannel(env.GITHUB_REF.slice(11)) : null;
+    }
+    if (env.CI) return null;
+    try {
+        return knownChannel(readLocalBranch());
+    } catch {
+        return null;
+    }
+}
+
+export const BUILD_CHANNEL = getBuildChannel();
+export const IS_NIGHTLY = BUILD_CHANNEL === "nightly";
 
 export const IS_UPDATER_DISABLED = IS_DEV || process.argv.includes("--disable-updater");
 export const gitHash = process.env.PROTONN_CORD_HASH || process.env.EQUICORD_HASH || execSync("git rev-parse HEAD", { encoding: "utf-8" }).trim();
@@ -139,18 +170,6 @@ export async function exists(path) {
         .catch(() => false);
 }
 
-// https://github.com/evanw/esbuild/issues/619#issuecomment-751995294
-/**
- * @type {import("esbuild").Plugin}
- */
-export const makeAllPackagesExternalPlugin = {
-    name: "make-all-packages-external",
-    setup(build) {
-        const filter = /^[^./]|^\.[^./]|^\.\.[^/]/; // Must not start with "/" or "./" or "../"
-        build.onResolve({ filter }, args => ({ path: args.path, external: true }));
-    }
-};
-
 /**
  * @type {(kind: "web" | "discordDesktop" | "vesktop" | "equibop") => import("esbuild").Plugin}
  */
@@ -179,7 +198,7 @@ export const globPlugins = kind => ({
 
                 const fullDir = `./src/${dir}`;
                 if (!await exists(fullDir)) continue;
-                const files = await readdir(fullDir, { withFileTypes: true });
+                const files = (await readdir(fullDir, { withFileTypes: true })).sort(compareBuildEntryNames);
                 for (const file of files) {
                     const fileName = file.name;
                     if (fileName.startsWith("_") || fileName.startsWith(".")) continue;
@@ -191,6 +210,7 @@ export const globPlugins = kind => ({
                     if (target && !IS_REPORTER) {
                         const excluded =
                             (target === "dev" && !IS_DEV) ||
+                            (target === "nightly" && !IS_NIGHTLY && !IS_DEV) ||
                             (target === "web" && kind === "discordDesktop") ||
                             (target === "browser" && kind !== "web") ||
                             (target === "desktop" && kind === "web") ||
@@ -244,7 +264,7 @@ export const gitHashPlugin = {
             namespace: "git-hash", path: args.path
         }));
         build.onLoad({ filter, namespace: "git-hash" }, () => ({
-            contents: `export default ${JSON.stringify(gitHash)}`
+            contents: `export default ${JSON.stringify(gitHash)}; export const buildChannel = ${JSON.stringify(BUILD_CHANNEL)};`
         }));
     }
 };

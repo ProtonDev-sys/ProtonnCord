@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -44,12 +38,6 @@ function loadPlugin(path: string, helpers = "", mocks: Record<string, any> = {},
         ...globals
     });
     return { ...exports, settings };
-}
-
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>(r => { resolve = r; });
-    return { promise, resolve };
 }
 
 test("GlobalBadges avoids settings work for users without badges", () => {
@@ -94,7 +82,7 @@ function hiddenServers(dataStore: any) {
 }
 
 test("HideServers stop before loading completes does not overwrite persisted guilds", async () => {
-    const pending = deferred<string[]>();
+    const pending = Promise.withResolvers<string[]>();
     const writes: any[] = [];
     const store = hiddenServers({ get: () => pending.promise, set: (_: string, value: any) => writes.push(value) });
     const loading = store.load();
@@ -107,7 +95,7 @@ test("HideServers stop before loading completes does not overwrite persisted gui
 });
 
 test("HideServers orders pending saves before reset and reload", async () => {
-    const writing = deferred<void>();
+    const writing = Promise.withResolvers<void>();
     const operations: string[] = [];
     const store = hiddenServers({
         get: () => { operations.push("get"); return []; },
@@ -126,7 +114,7 @@ test("HideServers orders pending saves before reset and reload", async () => {
 });
 
 test("IRememberYou preserves changes made during a save and does not save an unloaded collection", async () => {
-    const pending = deferred<void>();
+    const pending = Promise.withResolvers<void>();
     const writes: any[] = [];
     const { Data } = loadPlugin("iRememberYou/components/data.tsx", "", {
         "@api/DataStore": { set: (_: string, value: any) => { writes.push(value); return writes.length === 1 ? pending.promise : Promise.resolve(); } }
@@ -188,7 +176,7 @@ function keywordPlugin(dataStore: any, dispatcher: any = {}) {
 }
 
 test("KeywordNotify does not install its interceptor after a pending startup is stopped", async () => {
-    const reading = deferred<any[]>();
+    const reading = Promise.withResolvers<any[]>();
     let added = 0;
     const { default: plugin } = keywordPlugin({ get: () => reading.promise }, { addInterceptor: () => added++ });
     const starting = plugin.start();

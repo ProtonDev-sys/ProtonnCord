@@ -1,15 +1,10 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { IpcEvents } from "@shared/IpcEvents";
 import { gitHashShort } from "@shared/vencordUserAgent";
-import { BrowserWindow, ipcMain, Menu, MenuItemConstructorOptions, shell } from "electron";
+import { BrowserWindow, Menu, MenuItemConstructorOptions, shell } from "electron";
 import iconBase64 from "file://../../browser/icon.png?base64";
 import aboutHtml from "file://about.html?minify";
 
+import { ipcMain } from "./ipc";
 import { SETTINGS_DIR, THEMES_DIR } from "./utils/constants";
 
 let cachedUpdateAvailable = false;

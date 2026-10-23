@@ -40,10 +40,12 @@ export default definePlugin({
 
     patches: [
         {
-            find: "codeBlock:{react(",
+            find: /codeBlock:\{react:?\(/,
             replacement: {
-                match: /codeBlock:\{react\((\i),(\i),(\i)\)\{/,
-                replace: "$&return $self.renderHighlighter($1,$2,$3);"
+                match: /codeBlock:\{react(?::\((\i),(\i),(\i)\)=>|\((\i),(\i),(\i)\)\{)/,
+                replace: (match, a, b, c, d, e, f) => a
+                    ? `${match}$self.renderHighlighter(${a},${b},${c})??`
+                    : `${match}return $self.renderHighlighter(${d},${e},${f});`
             }
         },
         {

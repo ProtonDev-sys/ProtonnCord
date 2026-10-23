@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -202,6 +196,7 @@ test("manifest envelopes respect Discord's actual cap for one, two, and nine sel
             channelId: "200000000000000001", MAX_DISCORD_MESSAGE_LENGTH: 2_000, MAX_ATTACHMENT_COUNT: 10,
             plaintext: scenario.caption, uploads, detachedTextIndex: null, generatedDetachedUpload: null,
             preparedAttachments: { plaintext: preparedPlaintext }, stickers: [], uploadLimitBytes: 100_000,
+            discordUploadLimitBytes: () => 100_000,
             secureOperationIsCurrent: () => true, encryptedMentionedUserIds: () => [],
             parseSecurePlaintext, serializeSecurePlaintext,
             setAttachmentStatus: (stage: string) => stages.push(stage),

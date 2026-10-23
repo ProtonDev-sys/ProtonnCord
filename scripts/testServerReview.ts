@@ -6,19 +6,13 @@
 
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
+import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
 import { build } from "esbuild";
 
 import { moveToFolder } from "../src/equicordplugins/serverReview/folders";
 import { ActivityHistory, DAY, HistoryData, readHistory, reviewGroup } from "../src/equicordplugins/serverReview/history";
-
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
 
 async function historyChecks() {
     const now = 100 * DAY;
@@ -32,7 +26,7 @@ async function historyChecks() {
     assert.equal(reviewGroup({ since: now + DAY }, 30, now), "recent", "clock rollback does not make a server unused");
 
     const old: HistoryData = { version: 1, reminderAfter: 1, customField: "preserved", guilds: { guild: { since: DAY, visit: 2 * DAY, keep: true, extra: 42 }, rejoined: { since: DAY, keep: true } } };
-    const read = deferred<unknown>();
+    const read = Promise.withResolvers<unknown>();
     const writes: HistoryData[] = [];
     const history = new ActivityHistory({ read: () => read.promise, write: async data => { writes.push(data); } });
     const loading = history.load();
@@ -78,7 +72,7 @@ async function historyChecks() {
     assert.throws(() => readHistory({ ...old, version: 2 }), /untouched/);
     assert.throws(() => readHistory({ ...old, guilds: { bad: { since: NaN } } }), /untouched/);
 
-    const firstWrite = deferred<void>();
+    const firstWrite = Promise.withResolvers<void>();
     const snapshots: HistoryData[] = [];
     const serial = new ActivityHistory({ read: async () => undefined, write: async data => {
         snapshots.push(data);
@@ -152,7 +146,7 @@ async function runtimeChecks() {
     let guildScans = 0;
     const guilds = Object.fromEntries(["visited", "emoji-source", "sticker-source", "sound-source", "ignored"].map(id => [id, { id, name: id }]));
     const stored = new Map<string, HistoryData>();
-    const pendingReads = new Map<string, ReturnType<typeof deferred<HistoryData | undefined>>>();
+    const pendingReads = new Map<string, PromiseWithResolvers<HistoryData | undefined>>();
     const notifications: unknown[] = [];
     const timers = new Map<number, { fn: () => void; delay: number; }>();
     let nextTimer = 0;
@@ -286,7 +280,7 @@ async function runtimeChecks() {
     await settle();
 
     user = "account-loading";
-    const pending = deferred<HistoryData | undefined>();
+    const pending = Promise.withResolvers<HistoryData | undefined>();
     pendingReads.set("ServerReview:v1:account-loading", pending);
     plugin.start();
     plugin.flux.EMOJI_TRACK_USAGE({ emojiUsed: [{ id: "111", guildId: "emoji-source" }] });
@@ -311,4 +305,4 @@ async function main() {
     console.log("Server Review: history, storage retry, folder layout, and event checks passed.");
 }
 
-void main();
+test("Server Review preserves history, folder layout and lifecycle", { timeout: 10_000 }, main);

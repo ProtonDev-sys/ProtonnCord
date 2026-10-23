@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { setImmediate } from "node:timers/promises";
@@ -96,17 +90,9 @@ test("RPC presets retain legacy activity values and propagate storage failures f
     assert.deepEqual(state.value, [{ name: "new", config: {} }, { name: "old", config: { appName: "Legacy" } }]);
 });
 
-function deferred<T>() {
-    let resolve: ((value: T) => void) | undefined;
-    let reject: ((reason: Error) => void) | undefined;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    assert.ok(resolve && reject);
-    return { promise, resolve, reject };
-}
-
 function fixture(platform: "browser" | "equibop" | "vesktop" | "legcord" = "browser") {
     const actions: { type: string; socketId: string; activity: { name: string; } | null; }[] = [];
-    const assets: { applicationId: string; keys: string[]; result: ReturnType<typeof deferred<string[]>>; }[] = [];
+    const assets: { applicationId: string; keys: string[]; result: PromiseWithResolvers<string[]>; }[] = [];
     const notices: (() => void)[] = [];
     const errors: unknown[] = [];
     const sockets: FakeSocket[] = [];
@@ -130,7 +116,7 @@ function fixture(platform: "browser" | "equibop" | "vesktop" | "legcord" = "brow
         "@utils/types": { __esModule: true, default: (plugin: object) => plugin, ReporterTestable: {} },
         "@webpack/common": {
             ApplicationAssetUtils: { fetchAssetIds(applicationId: string, keys: string[]) {
-                const result = deferred<string[]>(); assets.push({ applicationId, keys, result }); return result.promise;
+                const result = Promise.withResolvers<string[]>(); assets.push({ applicationId, keys, result }); return result.promise;
             } },
             fetchApplicationsRPC: async (socket: { application?: { name: string; }; }, id: string) => { socket.application = { name: `Application ${id}` }; },
             FluxDispatcher: { dispatch(action: typeof actions[number]) {
@@ -276,7 +262,7 @@ function loadMusicSource(file: string, mocks: Record<string, object>, globals: R
 }
 
 function appleFixture() {
-    const tracks: ReturnType<typeof deferred<object | null>>[] = [];
+    const tracks: PromiseWithResolvers<object | null>[] = [];
     const actions: { socketId: string; activity: { details: string; } | null; }[] = [];
     const settings: Record<string, unknown> = {};
     const intervals = new Map<number, number>();
@@ -303,7 +289,7 @@ function appleFixture() {
         }
     }, {
         VencordNative: { pluginHelpers: { AppleMusicRichPresence: { fetchTrackData() {
-            const request = deferred<object | null>(); tracks.push(request); return request.promise;
+            const request = Promise.withResolvers<object | null>(); tracks.push(request); return request.promise;
         } } } },
         setInterval: (_callback: unknown, delay: number) => { intervals.set(++intervalId, delay); return intervalId; },
         clearInterval: (id: number) => intervals.delete(id)
@@ -413,7 +399,7 @@ function customRpcFixture() {
     const timers = new Map<number, { callback: () => void; delay: number; at: number; }>();
     let timerId = 0;
     const actions: { activity: { name: string; application_id: string; timestamps?: { start?: number; end?: number; }; buttons?: string[]; metadata?: { button_urls: string[]; }; assets?: { large_image?: string; small_image?: string; }; } | null; }[] = [];
-    const assets: { appId: string; keys: string[]; result: ReturnType<typeof deferred<string[]>>; }[] = [];
+    const assets: { appId: string; keys: string[]; result: PromiseWithResolvers<string[]>; }[] = [];
     const errors: unknown[][] = [];
     const mocks: Record<string, object> = {
         "@api/Settings": { SettingsStore: store, definePluginSettings: () => settings },
@@ -427,7 +413,7 @@ function customRpcFixture() {
         "@webpack": { findByCodeLazy: () => {}, findComponentByCodeLazy: () => {} },
         "@webpack/common": {
             ApplicationAssetUtils: { fetchAssetIds(appId: string, keys: string[]) {
-                const result = deferred<string[]>(); assets.push({ appId, keys, result }); return result.promise;
+                const result = Promise.withResolvers<string[]>(); assets.push({ appId, keys, result }); return result.promise;
             } },
             UserStore: { getCurrentUser: () => state.userId ? { id: state.userId } : undefined },
             FluxDispatcher: { dispatch: (action: typeof actions[number]) => actions.push(action) }

@@ -12,17 +12,10 @@ import ts from "typescript";
 
 import { createRendererRuntime, type RuntimeOptions, scheduleIdleTask } from "../src/runtime/bootstrap";
 
-function deferred<T = void>() {
-    let resolve!: (value: T | PromiseLike<T>) => void;
-    let reject!: (error: unknown) => void;
-    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    return { promise, resolve, reject };
-}
-
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 
 function runtimeFixture(domReady = false, configure?: (options: RuntimeOptions, calls: string[]) => void) {
-    const ready = deferred();
+    const ready = Promise.withResolvers<void>();
     const calls: string[] = [];
     const failures: string[] = [];
     const dom = new Set<() => void>();
@@ -156,7 +149,7 @@ test("service setup, async work, and cleanup failures remain isolated and status
 });
 
 test("runtime status is a frozen detached snapshot and late completion cannot reactivate disposal", async () => {
-    const work = deferred();
+    const work = Promise.withResolvers<void>();
     const f = runtimeFixture(false, options => {
         options.services = [{ name: "pending", start: () => ({ dispose() {}, runInitial: () => work.promise }) }];
     });
@@ -244,7 +237,7 @@ test("message listener snapshots survive removal and re-registration during awai
     const events = loadService<typeof import("../src/api/MessageEvents")>("../api/MessageEvents", {
         "@utils/Logger": { Logger: class { error() {} } }, "@webpack/common": {}
     }, {});
-    const gate = deferred();
+    const gate = Promise.withResolvers<void>();
     const calls: string[] = [];
     const first = async () => { calls.push("first"); await gate.promise; };
     const second = () => { calls.push("second"); };
@@ -333,7 +326,7 @@ test("cloud tracks local edits before deferred authorization and debounces pushe
 
 test("cloud disposal clears delayed work and prevents an in-flight authorization from starting a sync", async () => {
     const f = cloudFixture();
-    const lookup = deferred<{ scope: string; origin: string; }>();
+    const lookup = Promise.withResolvers<{ scope: string; origin: string; }>();
     f.setContext(() => lookup.promise);
     const service = f.createCloudSettingsService();
     f.change();
@@ -406,6 +399,7 @@ function updateFixture(flags = { web: false, disabled: false, dev: false }, sile
     const trayStates: boolean[] = [];
     const state = { checks: 0, updates: 0, relaunches: 0, repairSucceeds: true };
     let check = async () => true;
+    let repair = async () => state.repairSucceeds;
     const settings = { autoUpdate: silent, autoUpdateNotification: !silent, updateBranch: "main" };
     const module = loadService<typeof import("../src/runtime/updates")>("updates", {
         "@api/Notices": { popNotice() {}, showNotice: (message: string) => { notices.push(message); } },
@@ -416,7 +410,7 @@ function updateFixture(flags = { web: false, disabled: false, dev: false }, sile
             checkForUpdates: () => { state.checks++; return check(); },
             isOutdated: false,
             update: async () => { state.updates++; return true; },
-            repair: async () => { state.updates++; return state.repairSucceeds; },
+            repair: async () => { state.updates++; return repair(); },
             UpdateLogger: { error() {} },
         },
     }, {
@@ -429,8 +423,69 @@ function updateFixture(flags = { web: false, disabled: false, dev: false }, sile
         setInterval(callback: () => void, delay: number) { assert.equal(delay, 30 * 60_000); intervals.add(callback); return callback; },
         clearInterval(callback: () => void) { intervals.delete(callback); },
     });
-    return { ...module, listeners, intervals, notices, trayStates, state, settings, setCheck(resolver: typeof check) { check = resolver; } };
+    return { ...module, listeners, intervals, notices, trayStates, state, settings,
+        setCheck(resolver: typeof check) { check = resolver; }, setRepair(resolver: typeof repair) { repair = resolver; } };
 }
+
+test("automatic updates with notifications recover after an offline startup and honor preference changes", async () => {
+    const f = updateFixture();
+    f.settings.autoUpdate = true;
+    f.setCheck(async () => { throw new Error("Offline"); });
+    const service = f.createUpdateService();
+    await service.runInitial!();
+    assert.equal(f.intervals.size, 1, "notification preferences must not disable retry checks");
+    assert.equal(f.state.updates, 0);
+
+    f.setCheck(async () => true);
+    for (const callback of f.intervals) callback();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.state.updates, 1);
+    assert.deepEqual(f.notices, ["Protonn Cord has been updated!"]);
+
+    f.settings.autoUpdate = false;
+    const checks = f.state.checks;
+    for (const callback of f.intervals) callback();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.state.checks, checks, "turning off automatic updates stops periodic requests");
+    f.settings.autoUpdate = true;
+    for (const callback of f.intervals) callback();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.state.checks, checks + 1, "automatic updates can resume without restarting Discord");
+    service.dispose();
+    assert.equal(f.intervals.size, 0);
+});
+
+test("enabling automatic updates after startup activates periodic checks without duplicating timers", async () => {
+    const f = updateFixture();
+    const service = f.createUpdateService();
+    await service.runInitial!();
+    await service.runInitial!();
+    assert.equal(f.intervals.size, 1);
+    const checks = f.state.checks;
+    for (const callback of f.intervals) callback();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.state.checks, checks);
+    f.settings.autoUpdate = true;
+    for (const callback of f.intervals) callback();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.state.updates, 1);
+    assert.deepEqual(f.notices, ["A new version of Protonn Cord is available!", "Protonn Cord has been updated!"],
+        "an available-update notice must not suppress the later installation notice");
+    service.dispose();
+});
+
+test("a tray repair does not restart the app after the selected branch changes", async () => {
+    const f = updateFixture();
+    const pending = Promise.withResolvers<boolean>();
+    f.setRepair(() => pending.promise);
+    const service = f.createUpdateService();
+    const repairing = [...f.listeners.repair][0]();
+    f.settings.updateBranch = "nightly";
+    pending.resolve(true);
+    await repairing;
+    assert.equal(f.state.relaunches, 0);
+    service.dispose();
+});
 
 test("updater build flags retain desktop tray support without background checks in dev/web/disabled builds", () => {
     for (const flags of [{ web: true, disabled: false, dev: false }, { web: false, disabled: true, dev: false }]) {
@@ -468,7 +523,7 @@ test("manual tray actions preserve check/repair behavior and disposed async chec
     assert.equal(f.notices.length, 1);
     await [...f.listeners.repair][0]();
     assert.equal(f.state.relaunches, 1);
-    const check = deferred<boolean>();
+    const check = Promise.withResolvers<boolean>();
     f.setCheck(() => check.promise);
     const initial = service.runInitial!();
     service.dispose();
@@ -488,7 +543,7 @@ test("the public entry retains first plugin import and exposes only frozen runti
 
 test("updater drops stale branch notices and repair only restarts after success", async () => {
     const f = updateFixture(undefined, true);
-    const check = deferred<boolean>();
+    const check = Promise.withResolvers<boolean>();
     f.setCheck(() => check.promise);
     const service = f.createUpdateService();
     const initial = service.runInitial!();

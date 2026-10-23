@@ -1,15 +1,8 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
-import { runInNewContext } from "node:vm";
-import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+
+import { loadTestModule } from "./utils/loadTestModule";
 
 const root = "src/equicordplugins/remix/";
 interface Element {
@@ -28,19 +21,14 @@ function elements(value: unknown, type: string): Element[] {
     return [...(element.type === type ? [element] : []), ...elements(element.props.children, type)];
 }
 function load<T>(path: string, mocks: Record<string, unknown>, globals: Record<string, unknown> = {}): T {
-    const code = transpileModule(readFileSync(root + path, "utf8"), {
-        fileName: path,
-        compilerOptions: { jsx: JsxEmit.React, module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, esModuleInterop: true }
-    }).outputText;
-    return runInNewContext(code + "\nexports;", {
-        exports: {}, React, File, AbortController, ...globals,
+    return loadTestModule<T>(root + path, mocks, {
+        React, File, AbortController, ...globals,
         require(name: string) {
             assert.ok(name in mocks, `Unexpected import: ${name}`);
             return mocks[name];
         }
-    });
+    }, "", { fileName: path, compilerOptions: { esModuleInterop: true }, mockImports: false });
 }
-function deferred<T>() { return Promise.withResolvers<T>(); }
 async function settled<T>(promise: Promise<T>): Promise<T> {
     return Promise.race([promise, setImmediate().then(() => { throw new Error("Promise remained pending"); })]);
 }
@@ -356,15 +344,15 @@ test("Remix toolbar effects own activation, repeated clicks, switching, replay a
 
 function editorFixture() {
     const h = hooks();
-    const requests: { signal: AbortSignal; work: ReturnType<typeof deferred<ImageStub>>; }[] = [];
-    const conversions: ReturnType<typeof deferred<File>>[] = [];
+    const requests: { signal: AbortSignal; work: PromiseWithResolvers<ImageStub>; }[] = [];
+    const conversions: PromiseWithResolvers<File>[] = [];
     const module = load<{ Editor(props: { url?: string; }): Element; }>("editor/Editor.tsx", {
         "@webpack/common": h.api, "@webpack": { findComponentByCodeLazy: () => "upload" },
         "@components/Paragraph": { Paragraph: "p" }, "./components/Canvas": { Canvas: "canvas" },
         "./components/Toolbar": { Toolbar: "toolbar" },
         "./utils/canvas": {
-            urlToImage(_url: string, signal: AbortSignal) { const work = deferred<ImageStub>(); requests.push({ signal, work }); return work.promise; },
-            imageToBlob() { const work = deferred<File>(); conversions.push(work); return work.promise; }
+            urlToImage(_url: string, signal: AbortSignal) { const work = Promise.withResolvers<ImageStub>(); requests.push({ signal, work }); return work.promise; },
+            imageToBlob() { const work = Promise.withResolvers<File>(); conversions.push(work); return work.promise; }
         }
     });
     const render = (url = "first-image") => { const tree = h.render(() => module.Editor({ url })); h.flush(); return tree; };
@@ -417,14 +405,14 @@ interface ModalProps {
 }
 function modalFixture() {
     const h = hooks();
-    const exports: ReturnType<typeof deferred<Blob>>[] = [];
+    const exports: PromiseWithResolvers<Blob>[] = [];
     const uploads: Blob[] = [];
     let closeCount = 0;
     let uploadFailure = false;
     const module = load<{ default(props: { modalProps: object; close(): void; }): Element; }>("RemixModal.tsx", {
         "@webpack/common": { ...h.api, React, Modal: "modal", SelectedChannelStore: { getChannelId: () => "channel" } },
         ".": { sendRemix(blob: Blob) { if (uploadFailure) return Promise.reject(new Error("upload")); uploads.push(blob); } },
-        "./editor/components/Canvas": { exportImg() { const work = deferred<Blob>(); exports.push(work); return work.promise; } },
+        "./editor/components/Canvas": { exportImg() { const work = Promise.withResolvers<Blob>(); exports.push(work); return work.promise; } },
         "./editor/Editor": { Editor: "editor" }, "./icons/SendIcon": { SendIcon: "send-icon" },
         "./editor/tools/crop": { resetBounds() { } }
     });
@@ -527,7 +515,7 @@ test("Remix menu entry points share a modal key, stop closes it and upload prepa
     const opened: { render(props: object): Element; key?: string; }[] = [];
     const closed: string[] = [];
     const group: Element[] = [{ type: "item", props: { id: "copy-text" } }];
-    const upload = deferred<void>();
+    const upload = Promise.withResolvers<void>();
     const module = load<{
         sendRemix(blob: Blob): Promise<void>;
         default: { contextMenus: Record<string, (children: Element[], props: Record<string, unknown>) => void>; stop(): void; };

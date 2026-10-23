@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { DATA_DIR } from "@main/utils/constants";
 import { createHash, randomUUID } from "crypto";
 import { app, BrowserWindow, dialog, type IpcMainInvokeEvent, type MessageBoxOptions, safeStorage } from "electron";
@@ -380,6 +374,7 @@ let authenticatedAttachmentCacheCleanupTimer: NodeJS.Timeout | null = null;
 let staleTemporaryFilesCleaned = false;
 const ALLOWED_ATTACHMENT_HOSTS = new Set(["cdn.discordapp.com", "media.discordapp.net"]);
 const ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 60_000;
+const ATTACHMENT_SOURCE_STALL_TIMEOUT_MS = 3_000;
 const MAX_ATTACHMENT_REDIRECTS = 3;
 
 const pendingReviews = new Map<string, PendingReview>();
@@ -1348,43 +1343,65 @@ async function downloadAttachmentUrl(
     channelId: string,
     attachmentId: string,
     deadline: number,
+    hasFallback: boolean,
 ): Promise<Uint8Array> {
-    let current = initialUrl;
-    for (let redirect = 0; redirect <= MAX_ATTACHMENT_REDIRECTS; redirect++) {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) throw new Error("Encrypted attachment download timed out");
-        const response = await fetch(current, {
-            redirect: "manual",
-            signal: AbortSignal.timeout(remaining),
-        });
-        if ([301, 302, 303, 307, 308].includes(response.status)) {
-            const location = response.headers.get("location");
-            const next = location ? validateAttachmentUrl(new URL(location, current).toString(), channelId, attachmentId) : null;
-            if (!next || redirect === MAX_ATTACHMENT_REDIRECTS) throw new Error("Unsafe encrypted attachment redirect");
-            current = next;
-            continue;
-        }
-        if (!response.ok || !response.body) throw new Error("Encrypted attachment download failed");
-        const declaredLength = response.headers.get("content-length");
-        if (declaredLength !== null && Number(declaredLength) !== expectedSize)
-            throw new Error("Encrypted attachment length changed");
-        const result = new Uint8Array(expectedSize);
-        const reader = response.body.getReader();
-        let length = 0;
-        while (true) {
-            const chunk = await reader.read();
-            if (chunk.done) break;
-            length += chunk.value.byteLength;
-            if (length > expectedSize) {
-                await reader.cancel();
-                throw new Error("Encrypted attachment exceeded its declared size");
+    const controller = new AbortController();
+    let stallTimer: NodeJS.Timeout | undefined;
+    const resetStallTimer = () => {
+        clearTimeout(stallTimer);
+        // Let progressing large transfers use the full deadline, but leave time
+        // for the alternate Discord source when this one stops delivering bytes.
+        if (hasFallback) stallTimer = setTimeout(() => controller.abort(), ATTACHMENT_SOURCE_STALL_TIMEOUT_MS);
+    };
+    try {
+        resetStallTimer();
+        let current = initialUrl;
+        for (let redirect = 0; redirect <= MAX_ATTACHMENT_REDIRECTS; redirect++) {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) throw new Error("Encrypted attachment download timed out");
+            const response = await fetch(current, {
+                redirect: "manual",
+                signal: AbortSignal.any([controller.signal, AbortSignal.timeout(remaining)]),
+            });
+            resetStallTimer();
+            if ([301, 302, 303, 307, 308].includes(response.status)) {
+                const location = response.headers.get("location");
+                const next = location ? validateAttachmentUrl(new URL(location, current).toString(), channelId, attachmentId) : null;
+                await response.body?.cancel();
+                if (!next || redirect === MAX_ATTACHMENT_REDIRECTS) throw new Error("Unsafe encrypted attachment redirect");
+                current = next;
+                continue;
             }
-            result.set(chunk.value, length - chunk.value.byteLength);
+            if (!response.ok || !response.body) throw new Error("Encrypted attachment download failed");
+            const declaredLength = response.headers.get("content-length");
+            if (declaredLength !== null && Number(declaredLength) !== expectedSize)
+                throw new Error("Encrypted attachment length changed");
+            const result = new Uint8Array(expectedSize);
+            const reader = response.body.getReader();
+            try {
+                let length = 0;
+                while (true) {
+                    const chunk = await reader.read();
+                    if (chunk.done) break;
+                    length += chunk.value.byteLength;
+                    if (length > expectedSize) {
+                        await reader.cancel();
+                        throw new Error("Encrypted attachment exceeded its declared size");
+                    }
+                    result.set(chunk.value, length - chunk.value.byteLength);
+                    if (chunk.value.byteLength > 0) resetStallTimer();
+                }
+                if (length !== expectedSize) throw new Error("Encrypted attachment was truncated");
+                return result;
+            } finally {
+                reader.releaseLock();
+            }
         }
-        if (length !== expectedSize) throw new Error("Encrypted attachment was truncated");
-        return result;
+        throw new Error("Encrypted attachment redirected too many times");
+    } finally {
+        clearTimeout(stallTimer);
+        controller.abort();
     }
-    throw new Error("Encrypted attachment redirected too many times");
 }
 
 interface DownloadedEncryptedAttachment {
@@ -1413,7 +1430,7 @@ async function downloadEncryptedAttachment(
         if (!url) continue;
         try {
             return {
-                ciphertext: await downloadAttachmentUrl(url, reference.size, channelId, reference.id, deadline),
+                ciphertext: await downloadAttachmentUrl(url, reference.size, channelId, reference.id, deadline, index + 1 < urls.length),
                 hadDownloadFailure,
                 nextCandidateIndex: index + 1,
             };
@@ -3029,7 +3046,7 @@ export async function decryptIncomingAttachments(
             ? [{ id: attachment.id, name: bundle.manifest?.[index].name ?? null,
                 size: bundle.manifest?.[index].size ?? attachment.size, spoiler: bundle.manifest?.[index].spoiler ?? false }]
             : []);
-    if (!bundle.manifest && decrypted.detachedTextIndex !== null && selectedIndexes.length === attachments.length) {
+    if (!bundle.manifest && selectedIndexes.length === attachments.length) {
         const cachedAttachments: Array<{ data: Uint8Array; id: string; metadata: AttachmentMetadata; }> = [];
         for (const attachment of attachments) {
             const cached = cachedAuthenticatedAttachment(user.value, checkedInput.value, attachment.id);

@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { playAudio } from "@api/AudioPlayer";
 import { addServerListElement, removeServerListElement, ServerListRenderPosition } from "@api/ServerList";
 import { PlainSettings, Settings } from "@api/Settings";
@@ -153,7 +147,7 @@ export default definePlugin({
             // Exports the guildless server list item component used by the Quest button.
             find: '="DOWNLOAD_APPS";function',
             replacement: {
-                match: /(?=\i:\(\)=>\i.{0,30000}?asContainer:!\i.{0,50};let (\i)=\i.forwardRef\(function)/,
+                match: /(?<=\i\.d\(\i,\{)(?=.{0,30000}?asContainer:!\i.{0,50};let (\i)=(?:\i\.forwardRef\()?function)/,
                 replace: "GuildlessServerListItemComponent:()=>$1,"
             }
         },
@@ -193,14 +187,14 @@ export default definePlugin({
             predicate: () => getQuestifySettings().disableQuestsEverything || getQuestifySettings().disableRelocationNotices,
             replacement: [
                 {
-                    match: /(GLOBAL_DISCOVERY_TABS).map/,
-                    replace: '$1.filter(tab=>tab!=="quests").map'
+                    match: /(\.GLOBAL_DISCOVERY_TABS)\b/g,
+                    replace: '$1.filter(tab=>tab!=="quests")'
                 }
             ]
         },
         {
             // Hides Quests tab in the DMs tab list.
-            find: ".QUEST_HOME):",
+            find: 'tutorialId:"direct-messages"',
             predicate: () => getQuestifySettings().disableQuestsEverything,
             replacement: [
                 {
@@ -225,8 +219,8 @@ export default definePlugin({
             predicate: () => !getQuestifySettings().disableQuestsEverything && getQuestifySettings().disableOrbsAndQuestsBadges,
             replacement: [
                 {
-                    match: /(,\{badges:\i)(?=,displayProfile:\i)/,
-                    replace: '$1.filter(badge=>!["quest_completed","orb_profile_badge"].includes(badge.id))',
+                    match: /(?=if\(0===(\i)\.length&&!\i\)return null;)/,
+                    replace: '$1=$1.filter(badge=>!["quest_completed","orb_profile_badge"].includes(badge.id));',
                 }
             ]
         },
@@ -235,8 +229,8 @@ export default definePlugin({
             find: "collapsed-with-rewards\":\"collapsed-without-rewards",
             predicate: () => getQuestifySettings().disableAccountPanelPromo || !getQuestifySettings().disableAccountPanelQuestProgress,
             replacement: {
-                match: /(?<=function\(\){)(let (\i)=\(0,\i.\i\)\(\);)/,
-                replace: "void $self.useQuestRerender();$1$2=$self.getQuestPanelOverride($2);"
+                match: /(?<=function\(\)\{let \i=)(\(0,\i\.\i\)\(\))(?=,\i=\(0,\i\.\i\)\(\i\.\i\.DESKTOP_ACCOUNT_PANEL_AREA,)/,
+                replace: "($self.useQuestRerender(),$self.getQuestPanelOverride($1))"
             }
         },
         {
@@ -262,7 +256,7 @@ export default definePlugin({
             find: ",{progressTextAnimation:",
             predicate: () => !getQuestifySettings().disableQuestsEverything,
             replacement: {
-                match: /(let{percentComplete:.{0,115}?children:\i,useAltStyle:\i=!1}=)(\i)/,
+                match: /(let{percentComplete:.{0,115}?children:\i,useAltStyle:\i=!1(?:,ref:\i)?}=)(\i)/,
                 replace: "const questifyProgress=$self.getQuestPanelPercentComplete({...$2,quest:$2.children?.props?.quest});$1Object.assign({},$2,questifyProgress??{})"
             }
         },
@@ -331,7 +325,7 @@ export default definePlugin({
             replacement: [
                 {
                     // Subscribes the Quest page sort/filter state to Questify rerenders.
-                    match: /(let \i,\i,\i,\i,\i=\i\.useRef\(null\),)/,
+                    match: /(let \i,\i,\i,\i,(?:\{ref:\i,\.\.\.\i\}=\i,)?\i=\i\.useRef\(null\),)/,
                     replace: "$1questRerenderTrigger=$self.useQuestRerender(),"
                 },
                 {
@@ -363,7 +357,7 @@ export default definePlugin({
                 },
                 {
                     // Overwrite button props for ENROLLED/INCOMPLETE Quests.
-                    match: /(case \i\.\i\.(?:ENROLLED|INCOMPLETE):return)(?=\(0,\i\.jsx\)\(\i,\{quest:(\i),taskType:\i\.type,size:(\i),)/g,
+                    match: /(case \i\.\i\.(?:ENROLLED|INCOMPLETE):return)(?=\(0,\i\.jsx\)\(\i,\{quest:(\i),taskType:\i(?:\.type)?,size:(\i),)/g,
                     replace: "$1 $self.enrolledIncompleteButton({quest:$2,size:$3})||"
                 }
             ]
@@ -379,11 +373,11 @@ export default definePlugin({
         },
         {
             // Keeps Questify completion progress visible when Discord marks the native Quest bar dismissed.
-            find: "prevIsQuestAccepted:",
+            find: /isLoading:\i}=\(0,\i\.\i\)\(\),\i=\i\.useContext\(\i\.\i\),\i=\i\|\|\i&&/,
             predicate: () => !getQuestifySettings().disableQuestsEverything && !getQuestifySettings().disableAccountPanelQuestProgress,
             replacement: {
                 match: /(?<=isLoading:\i}=\(0,\i\.\i\)\(\),\i=\i\.useContext\(\i\.\i\),\i=\i\|\|\i&&)(\i)/,
-                replace: "($1||$self.shouldForceQuestPanelVisible(arguments[0].quest))"
+                replace: "($1||$self.shouldForceQuestPanelVisible(arguments[0].quest??arguments[0].creative?.quest??null))"
             }
         },
         {
@@ -469,7 +463,7 @@ export default definePlugin({
         },
         {
             // Adds the Questify sort option to Discord's Quest sort enum.
-            find: "SUGGESTED=\"suggested\",",
+            find: 'RECENTLY_ENROLLED="recently_enrolled"',
             predicate: () => !getQuestifySettings().disableQuestsEverything,
             replacement: {
                 match: /(?<=\(\((\i)=\{\}\))(?=\.SUGGESTED="suggested",)/,

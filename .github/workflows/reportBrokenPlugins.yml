@@ -66,7 +66,7 @@ jobs:
                   export PATH="$PWD/node_modules/.bin:$PATH"
                   export CHROMIUM_BIN=/usr/bin/google-chrome
 
-                  esbuild scripts/generateReport.ts > dist/report.mjs
+                  esbuild scripts/generateReport.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/report.mjs
 
                   stable_output_file=$(mktemp)
                   canary_output_file=$(mktemp)

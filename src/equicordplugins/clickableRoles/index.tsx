@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import "./style.css";
 
 import ErrorBoundary from "@components/ErrorBoundary";
@@ -203,8 +197,8 @@ export default definePlugin({
         {
             find: 'tutorialId:"whos-online"',
             replacement: {
-                match: /\((function\(\i\)\{let\{id:.*?#{intl::CHANNEL_MEMBERS_A11Y_LABEL}.*?\}\))\}\);/,
-                replace: "($self.wrapRoleGroup($1}));",
+                match: /(\i)\.memo(?=\(function\(\i\)\{let\{id:\i,label:\i,count:\i,guildId:)/,
+                replace: "(render=>$1.memo($self.wrapRoleGroup(render)))",
             },
         },
     ],

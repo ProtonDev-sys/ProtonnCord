@@ -1,12 +1,6 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import { createHash } from "node:crypto";
 
-import { type UpdaterBranch,updaterReleaseEndpoint } from "@shared/Updater";
+import { type UpdaterBranch, updaterReleaseEndpoint } from "@shared/Updater";
 
 export interface HttpChange {
     author: string;
@@ -16,6 +10,8 @@ export interface HttpChange {
 
 export interface PendingHttpUpdate {
     hash: string;
+    sha256: string;
+    size: number;
     url: string;
 }
 
@@ -77,7 +73,7 @@ function parseRelease(value: unknown, currentHash: string, asarFile: string, for
 
     const asset = record(release.assets.find(candidate => record(candidate)?.name === asarFile));
     const downloadUrl = asset?.browser_download_url;
-    if (typeof downloadUrl !== "string")
+    if (!asset || typeof downloadUrl !== "string")
         throw new Error(`The latest Protonn Cord release is missing ${asarFile}`);
 
     let parsedUrl: URL;
@@ -86,10 +82,17 @@ function parseRelease(value: unknown, currentHash: string, asarFile: string, for
     } catch {
         throw new Error(`The latest Protonn Cord release has an invalid ${asarFile} download URL`);
     }
-    if (parsedUrl.protocol !== "https:" || parsedUrl.hostname !== "github.com")
+    const path = parsedUrl.pathname.split("/");
+    if (parsedUrl.origin !== "https://github.com" || parsedUrl.username || parsedUrl.password || parsedUrl.search || parsedUrl.hash ||
+        path.length !== 7 || !path[1] || !path[2] || path[3] !== "releases" || path[4] !== "download" || !path[5] || path[6] !== asarFile)
         throw new Error(`The latest Protonn Cord release has an invalid ${asarFile} download URL`);
 
-    return { hash, pending: { hash, url: parsedUrl.href } };
+    const { digest, size, state } = asset;
+    if (state !== "uploaded" || typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0 ||
+        typeof digest !== "string" || !/^sha256:[a-f0-9]{64}$/iu.test(digest))
+        throw new Error(`The latest Protonn Cord release has invalid ${asarFile} integrity metadata`);
+
+    return { hash, pending: { hash, sha256: digest.slice(7).toLowerCase(), size, url: parsedUrl.href } };
 }
 
 function parseChanges(value: unknown): HttpChange[] {
@@ -119,8 +122,11 @@ export async function inspectHttpUpdates(
     currentHash: string,
     asarFile: string,
     branch: UpdaterBranch = "main",
+    installedBranch: UpdaterBranch | null = null,
 ): Promise<HttpUpdateInspection> {
-    const release = parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile);
+    // Channel-specific bundles can differ even when their source hash matches.
+    const switchingBranch = installedBranch !== null && installedBranch !== branch;
+    const release = parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile, switchingBranch);
     if (!release.pending) return { changes: [], pending: null };
 
     let comparison: unknown;
@@ -135,6 +141,11 @@ export async function inspectHttpUpdates(
         };
     }
     const parsedChanges = parseChanges(comparison);
+    // A local build may be ahead of its channel while publication is waiting for
+    // validation. Only a deliberate channel switch or repair may roll it back.
+    if (installedBranch === branch && record(comparison)?.status === "behind")
+        return { changes: [], pending: null };
+
     const changes = parsedChanges.length > 0
         ? parsedChanges
         : [{ author: "ProtonnCord", hash: release.hash, message: `Switch update branch to ${branch}` }];
@@ -147,8 +158,12 @@ export async function findHttpUpdate(
     asarFile: string,
     branch: UpdaterBranch = "main",
     force = false,
+    installedBranch: UpdaterBranch | null = null,
 ): Promise<PendingHttpUpdate | null> {
-    return parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile, force).pending;
+    if (force) return parseRelease(await request(updaterReleaseEndpoint(branch)), currentHash, asarFile, true).pending;
+    // Recheck the selected release here as well: callers can request an update
+    // directly, or the channel can move after its changelog was inspected.
+    return (await inspectHttpUpdates(request, currentHash, asarFile, branch, installedBranch)).pending;
 }
 
 export async function requestBytes(
@@ -351,6 +366,9 @@ export async function applyPendingHttpUpdate(
 ): Promise<PendingHttpUpdate | null> {
     if (!pending) return null;
     const data = await download(pending.url);
+    // Channel URLs can change between selecting a release and downloading its archive.
+    if (data.byteLength !== pending.size || createHash("sha256").update(data).digest("hex") !== pending.sha256)
+        throw new Error("The downloaded Protonn Cord archive does not match the selected release. Check for updates and try again.");
     install(data);
     return null;
 }

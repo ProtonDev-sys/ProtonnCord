@@ -5,6 +5,7 @@
  */
 
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
 import { build } from "esbuild";
@@ -84,4 +85,4 @@ async function main() {
     console.log("MessageImage: unchanged screenshot bytes, unscaled composition, censor coordinates, zoom handling and native validation passed.");
 }
 
-void main();
+test("Message images preserve screenshot data and enforce native boundaries", { timeout: 10_000 }, main);

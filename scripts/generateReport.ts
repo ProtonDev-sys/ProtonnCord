@@ -23,6 +23,8 @@ import { createHmac } from "crypto";
 import { readFileSync, writeFileSync } from "fs";
 import pup, { Browser, ConsoleMessage, JSHandle, Page } from "puppeteer-core";
 
+import { REPORTER_SOURCE_ONLY_FACTORIES } from "../src/debug/reporterFactoryCases";
+
 const CANARY = process.env.USE_CANARY === "true";
 const logStderr = (...data: any[]) => console.error(`${CANARY ? "CANARY" : "STABLE"} ---`, ...data);
 
@@ -47,6 +49,12 @@ async function maybeGetError(handle: JSHandle): Promise<string | undefined> {
         .catch(() => undefined);
 }
 
+async function getFactoryErrorDetails(handle: JSHandle): Promise<string> {
+    const [message, stack] = await Promise.all(["message", "stack"].map(property => handle?.getProperty(property)
+        .then(value => value?.jsonValue()).catch(() => undefined)));
+    return describeError({ message: typeof message === "string" ? message : "Unknown factory error", stack: typeof stack === "string" ? stack : undefined });
+}
+
 interface PatchInfo {
     plugin: string;
     type: string;
@@ -55,9 +63,68 @@ interface PatchInfo {
     error?: string;
 };
 
+interface PatchTimingConfirmation {
+    plugin: string;
+    id: string;
+    match: string;
+    initialMs: number;
+    samplesMs: number[];
+    status: "outlier" | "slow" | "inconclusive";
+    reason?: string;
+}
+
+interface SourceOnlyFactory {
+    id: string;
+    reason: "native-capability-unavailable" | "host-module-unavailable";
+    originalSha256: string;
+    patchedSha256: string;
+    capability?: "DiscordNative";
+    missingDependency?: string;
+}
+
+function parseSourceOnlyFactory(value: unknown): SourceOnlyFactory {
+    if (typeof value !== "string" || value.length > 1_024) throw new Error("Invalid source-only factory diagnostic");
+    const data = JSON.parse(value);
+    const isId = (id: unknown) => typeof id === "string" && /^(?:0|[1-9]\d{0,15})$/.test(id);
+    const isHash = (hash: unknown) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash);
+    if (!data || typeof data !== "object" || Array.isArray(data)
+        || Object.keys(data).some(key => !["id", "reason", "originalSha256", "patchedSha256", "capability", "missingDependency"].includes(key))
+        || !isId(data.id) || !isHash(data.originalSha256) || !isHash(data.patchedSha256)
+        || !(data.reason === "native-capability-unavailable" && data.capability === "DiscordNative" && data.missingDependency === undefined
+            || data.reason === "host-module-unavailable" && isId(data.missingDependency) && data.capability === undefined))
+        throw new Error("Invalid source-only factory diagnostic");
+    const { id, reason, originalSha256, patchedSha256, capability, missingDependency } = data;
+    const finding = { id, reason, originalSha256, patchedSha256, ...(capability === undefined ? { missingDependency } : { capability }) };
+    const expected = REPORTER_SOURCE_ONLY_FACTORIES.find(candidate => candidate.id === id);
+    if (!expected || expected.reason !== reason || expected.originalSha256 !== originalSha256 || expected.patchedSha256 !== patchedSha256
+        || ("capability" in expected ? expected.capability !== capability : expected.missingDependency !== missingDependency))
+        throw new Error("Unreviewed source-only factory diagnostic");
+    return finding;
+}
+
+function parsePatchTimingConfirmation(value: unknown): PatchTimingConfirmation {
+    if (typeof value !== "string" || value.length > 32_768) throw new Error("Invalid patch timing confirmation");
+    const data = JSON.parse(value);
+    if (!data || typeof data !== "object" || Array.isArray(data)
+        || typeof data.plugin !== "string" || data.plugin.length > 200
+        || typeof data.id !== "string" || !/^(?:0|[1-9]\d{0,15})$/.test(data.id)
+        || typeof data.match !== "string" || data.match.length > 16_384
+        || !Number.isFinite(data.initialMs) || data.initialMs <= 10
+        || !Array.isArray(data.samplesMs) || data.samplesMs.length > 2
+        || data.samplesMs.some((sample: unknown) => typeof sample !== "number" || !Number.isFinite(sample) || sample < 0)
+        || !["outlier", "slow", "inconclusive"].includes(data.status)
+        || data.reason !== undefined && (typeof data.reason !== "string" || data.reason.length > 512)
+        || data.status === "outlier" && (data.initialMs > 100 || data.samplesMs.length !== 2 || data.samplesMs.some((sample: number) => sample > 10)))
+        throw new Error("Invalid patch timing confirmation");
+    const { plugin, id, match, initialMs, samplesMs, status, reason } = data;
+    return { plugin, id, match, initialMs, samplesMs, status, ...(reason === undefined ? {} : { reason }) };
+}
+
 const report = {
     badPatches: [] as PatchInfo[],
     slowPatches: [] as PatchInfo[],
+    patchTimingConfirmations: [] as PatchTimingConfirmation[],
+    sourceOnlyFactories: [] as SourceOnlyFactory[],
     badStarts: [] as {
         plugin: string;
         error: string;
@@ -105,6 +172,36 @@ async function printReport() {
         console.log(`  - Match: ${toCodeBlock(p.match, "  - Match: ".length)}`);
         if (p.error) console.log(`  - Error: ${toCodeBlock(p.error, "  - Error: ".length)}`);
     });
+
+    console.log();
+
+    console.log("## Slow Patches");
+    report.slowPatches.forEach(p => {
+        console.log(`- ${p.plugin} (${p.type})`);
+        console.log(`  - ID: \`${p.id}\``);
+        console.log(`  - Match: ${toCodeBlock(p.match, "  - Match: ".length)}`);
+    });
+
+    console.log();
+
+    console.log("## Patch Timing Confirmations");
+    report.patchTimingConfirmations.forEach(p => {
+        console.log(`- ${p.plugin} (ID: \`${p.id}\`): ${p.status}`);
+        console.log(`  - Initial: ${p.initialMs}ms; confirmation samples: ${p.samplesMs.length ? p.samplesMs.map(sample => `${sample}ms`).join(", ") : "not sampled"}`);
+        if (p.reason) console.log(`  - Reason: ${p.reason}`);
+    });
+
+    console.log();
+
+    console.log("## Source-only Factories");
+    if (report.sourceOnlyFactories.length) {
+        console.log("Exact source and patches were checked. The listed host prerequisites were unavailable, so synthetic factory execution was skipped.");
+        report.sourceOnlyFactories.forEach(p => {
+            console.log(`- ID: \`${p.id}\`; ${p.reason}: \`${p.capability ?? p.missingDependency}\``);
+            console.log(`  - Original SHA-256: \`${p.originalSha256}\``);
+            console.log(`  - Patched SHA-256: \`${p.patchedSha256}\``);
+        });
+    }
 
     console.log();
 
@@ -239,12 +336,136 @@ let isFinishing = false;
 let reporterTimeout: ReturnType<typeof setTimeout> | undefined;
 let finishing: Promise<void> | undefined;
 
-function waitForReporterCleanup<Value>(promise: Promise<Value>, timeoutMs: number): Promise<Value> {
+function waitForReporterCleanup<Value>(promise: Promise<Value>, timeoutMs: number, message = "Reporter browser cleanup timed out"): Promise<Value> {
     let timeout: ReturnType<typeof setTimeout>;
     return Promise.race([
         promise,
-        new Promise<never>((_resolve, reject) => { timeout = setTimeout(() => reject(new Error("Reporter browser cleanup timed out")), timeoutMs); }),
+        new Promise<never>((_resolve, reject) => { timeout = setTimeout(() => reject(new Error(message)), timeoutMs); }),
     ]).finally(() => clearTimeout(timeout));
+}
+
+// Runs in the page, reading source only. The patcher's toString proxy returns
+// the original factory without invoking it or reading its exports/cache.
+function captureFailedFactories({ ids, omittedModuleCount, maxBytes, probes = [], probeError, requestedIds = [], requestedIdsError }: {
+    ids: string[]; omittedModuleCount: number; maxBytes: number; probes?: string[]; probeError?: string; requestedIds?: string[]; requestedIdsError?: string;
+}) {
+    const factories = globalThis.Vencord?.Webpack?.wreq?.m;
+    const patchedSource = globalThis.Vencord?.WebpackPatcher?.SYM_PATCHED_SOURCE;
+    const selected = new Set(ids.slice(0, 100));
+    const requestedFactories = requestedIds.map(id => {
+        const status = selected.has(id) || selected.size < 100 ? "selected" : "module-limit";
+        if (status === "selected") selected.add(id);
+        return { id, status };
+    });
+    const result = {
+        version: 1, omittedModuleCount: omittedModuleCount + Math.max(0, ids.length - 100),
+        factories: [] as Array<Record<string, string | number>>,
+        ...(requestedFactories.length ? { requestedFactories } : {}),
+        ...(requestedIdsError ? { requestedIdsError } : {}),
+        ...(probeError ? { probeError } : {}),
+        ...(probes.length ? {
+            probes: probes.map(literal => ({ literal, status: "not-found", matchCount: 0, matches: [] as string[] })),
+            probeScan: { complete: false, status: "complete", examinedEntries: 0, searchedCharacters: 0, unavailableFactories: 0 }
+        } : {})
+    };
+
+    if (result.probes && result.probeScan) {
+        const scan = result.probeScan;
+        const deadline = performance.now() + 2_000;
+        if (!factories) scan.status = "unavailable";
+        // These limits bound literal comparisons as well as the number of factory
+        // reads. An incomplete scan must never claim a unique or absent match.
+        for (const id in factories) {
+            if (performance.now() >= deadline) { scan.status = "time-limit"; break; }
+            if (scan.examinedEntries >= 50_000) { scan.status = "entry-limit"; break; }
+            scan.examinedEntries++;
+            if (!Object.hasOwn(factories, id) || !/^(?:0|[1-9]\d{0,15})$/.test(id)) continue;
+            try {
+                const factory = factories[id];
+                if (typeof factory !== "function") continue;
+                const source = String(factory);
+                const work = source.length * probes.length;
+                if (work > 128 * 1024 * 1024 - scan.searchedCharacters) { scan.status = "character-limit"; break; }
+                scan.searchedCharacters += work;
+                for (const probe of result.probes) {
+                    if (!source.includes(probe.literal)) continue;
+                    probe.matchCount++;
+                    if (probe.matches.length < 2) probe.matches.push(id);
+                }
+            } catch { scan.unavailableFactories++; }
+        }
+        scan.complete = scan.status === "complete" && scan.unavailableFactories === 0;
+        if (scan.status === "complete" && !scan.complete) scan.status = "unavailable";
+        for (const probe of result.probes) {
+            if (probe.matchCount > 1) probe.status = "ambiguous";
+            else if (!scan.complete) probe.status = "incomplete";
+            else if (probe.matchCount === 1) {
+                const [id] = probe.matches;
+                probe.status = selected.has(id) || selected.size < 100 ? "selected" : "module-limit";
+                if (probe.status === "selected") selected.add(id);
+            }
+        }
+    }
+    const byteLength = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+    let bytes = byteLength(result) + 64; // Reserve space for a growing omitted count.
+
+    for (const id of selected) {
+        let entry: Record<string, string | number> = { id, status: "missing" };
+        try {
+            const factory = factories && Object.hasOwn(factories, id) ? factories[id] : undefined;
+            if (typeof factory === "function") {
+                const original = String(factory);
+                entry = { id, status: "size-limit", characters: original.length };
+                if (original.length < maxBytes - bytes) {
+                    const candidate = { id, status: "captured", original };
+                    if (bytes + byteLength(candidate) + 1 <= maxBytes) entry = candidate;
+                }
+                if (entry.status === "captured" && typeof patchedSource === "symbol") {
+                    const patched = factory[patchedSource];
+                    if (typeof patched === "string") {
+                        const candidate = { ...entry, patched };
+                        if (patched.length < maxBytes - bytes && bytes + byteLength(candidate) + 1 <= maxBytes) entry = candidate;
+                        else entry.patchedStatus = "size-limit";
+                    }
+                }
+            }
+        } catch {
+            entry = { id, status: "unavailable" };
+        }
+        const size = byteLength(entry) + 1;
+        if (bytes + size > maxBytes) result.omittedModuleCount++;
+        else {
+            bytes += size;
+            result.factories.push(entry);
+        }
+    }
+    return JSON.stringify(result);
+}
+
+function parseFactoryProbes(value: string | undefined): { probes: string[]; probeError?: string; } {
+    if (value === undefined) return { probes: [] };
+    try {
+        if (value.length > 8_192) throw new Error();
+        const probes: unknown = JSON.parse(value);
+        if (!Array.isArray(probes) || probes.length > 8 || probes.some(probe => typeof probe !== "string" || !probe.length || probe.length > 128))
+            throw new Error();
+        return { probes: [...new Set(probes)] };
+    } catch {
+        return { probes: [], probeError: "REPORTER_FACTORY_PROBES must be a JSON array of at most 8 nonempty literal strings of at most 128 characters (8192 characters total)." };
+    }
+}
+
+function parseFactoryIds(value: string | undefined): { requestedIds: string[]; requestedIdsError?: string; } {
+    if (value === undefined) return { requestedIds: [] };
+    try {
+        if (value.length > 1_024) throw new Error();
+        const ids: unknown = JSON.parse(value);
+        if (!Array.isArray(ids) || ids.length > 8 || ids.some(id => typeof id !== "string" || !/^(?:0|[1-9]\d{0,15})$/.test(id)))
+            throw new Error();
+        return { requestedIds: [...new Set(ids)] };
+    } catch {
+        return { requestedIds: [], requestedIdsError: "REPORTER_FACTORY_IDS must be a JSON array of at most 8 canonical numeric strings of at most 16 digits (1024 characters total)." };
+    }
 }
 
 function terminateReporterBrowser() {
@@ -271,6 +492,32 @@ function finishReporter(timedOut = false, closeTimeoutMs = 10_000, finalTimeoutM
             process.exit(1);
         }, finalTimeoutMs);
         try {
+            const factoryPath = process.env.REPORTER_FACTORY_PATH;
+            if (factoryPath && page && process.exitCode) {
+                try {
+                    const failedPatches = [...report.badPatches, ...report.slowPatches, ...report.patchTimingConfirmations.filter(patch => patch.status !== "outlier")];
+                    const ids = [...new Set(failedPatches.map(patch => patch.id).filter(id => /^(?:0|[1-9]\d{0,15})$/.test(id)))];
+                    const maxBytes = 8 * 1024 * 1024;
+                    const payload = await waitForReporterCleanup(page.evaluate(captureFailedFactories, {
+                        ids: ids.slice(0, 100), omittedModuleCount: Math.max(0, ids.length - 100), maxBytes,
+                        ...parseFactoryProbes(process.env.REPORTER_FACTORY_PROBES),
+                        ...parseFactoryIds(process.env.REPORTER_FACTORY_IDS)
+                    }), 5_000, "Reporter factory capture timed out");
+                    if (typeof payload !== "string" || Buffer.byteLength(payload, "utf8") > maxBytes)
+                        throw new Error("Reporter factory capture exceeded its size limit");
+                    writeFileSync(factoryPath, payload, { encoding: "utf8", flag: "wx" });
+                } catch (error) {
+                    logStderr("Could not capture failed reporter factories", describeError(error));
+                }
+            }
+            const screenshotPath = process.env.REPORTER_SCREENSHOT_PATH;
+            if (screenshotPath && page && process.exitCode) {
+                try {
+                    await waitForReporterCleanup(page.screenshot({ path: screenshotPath, type: "png", fullPage: false }), 5_000, "Reporter screenshot timed out");
+                } catch (error) {
+                    logStderr("Could not capture reporter screenshot", describeError(error));
+                }
+            }
             try {
                 if (browser) await waitForReporterCleanup(browser.close(), closeTimeoutMs);
             } catch (error) {
@@ -294,7 +541,7 @@ function finishReporter(timedOut = false, closeTimeoutMs = 10_000, finalTimeoutM
 
 async function failReporter(error: unknown) {
     if (!isFinishing) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = describeError(error);
         logStderr("Reporter failed", message);
         report.otherErrors.push(message);
         process.exitCode = 1;
@@ -323,7 +570,7 @@ async function handleConsole(e: ConsoleMessage) {
 
     const firstArg = await rawArgs[0]?.jsonValue();
 
-    const isEquicord = firstArg === "[Equicord]" || firstArg === "[ProtonnCord]";
+    const isMod = firstArg === "[Protonn Cord]" || firstArg === "[Equicord]" || firstArg === "[ProtonnCord]";
     const isDebug = firstArg === "[PUP_DEBUG]";
     const isReporterMeta = firstArg === "[REPORTER_META]";
 
@@ -333,7 +580,7 @@ async function handleConsole(e: ConsoleMessage) {
     }
 
     outer:
-    if (isEquicord) {
+    if (isMod) {
         try {
             var args = await Promise.all(e.args().map(a => a.jsonValue()));
         } catch {
@@ -344,6 +591,14 @@ async function handleConsole(e: ConsoleMessage) {
 
         switch (tag) {
             case "WebpackPatcher:":
+                if (message.startsWith("Error in patched module factory:") || message.startsWith("Error in patched module factory (Module id is ")) {
+                    process.exitCode = 1;
+                    const error = await getFactoryErrorDetails(e.args()[3]);
+                    const id = message.match(/^Error in patched module factory \(Module id is (0|[1-9]\d{0,15})\):/)?.[1] ?? "-";
+                    logStderr(message, error);
+                    report.badPatches.push({ plugin: "Webpack module", type: "factory execution error", id, match: "(runtime)", error });
+                    break;
+                }
                 const patchFailMatch = message.match(/Patch by (.+?) (had no effect|errored|found no module) \(Module id is (.+?)\): (.+)/);
                 const patchSlowMatch = message.match(/Patch by (.+?) (took [\d.]+?ms) \(Module id is (.+?)\): (.+)/);
                 const match = patchFailMatch ?? patchSlowMatch;
@@ -398,6 +653,24 @@ async function handleConsole(e: ConsoleMessage) {
                         process.exitCode = 1;
                         report.badWebpackFinds.push(otherMessage);
                         break;
+                    case "Patch timing confirmation:": {
+                        if (report.patchTimingConfirmations.length >= 100) throw new Error("Too many patch timing confirmations");
+                        const confirmation = parsePatchTimingConfirmation(otherMessage);
+                        report.patchTimingConfirmations.push(confirmation);
+                        if (confirmation.status !== "outlier") process.exitCode = 1;
+                        break;
+                    }
+                    case "Source-only factory:": {
+                        const finding = parseSourceOnlyFactory(otherMessage);
+                        const existing = report.sourceOnlyFactories.find(p => p.id === finding.id);
+                        if (existing) {
+                            if (JSON.stringify(existing) !== JSON.stringify(finding)) throw new Error("Conflicting source-only factory diagnostics");
+                        } else {
+                            if (report.sourceOnlyFactories.length >= 3) throw new Error("Too many source-only factory diagnostics");
+                            report.sourceOnlyFactories.push(finding);
+                        }
+                        break;
+                    }
                     case "Finished test":
                         await finishReporter();
                 }
@@ -415,20 +688,26 @@ async function handleConsole(e: ConsoleMessage) {
             } else {
                 logStderr("[Unexpected Error]", text);
                 report.otherErrors.push(text);
+                process.exitCode = 1;
             }
         }
     }
 }
 
-function handlePageError(e: any) {
-    if (e.message.includes("Sentry successfully disabled")) return;
+function describeError(error: unknown): string {
+    const details = error as { message?: unknown; stack?: unknown; } | null;
+    const message = typeof details?.message === "string" ? details.message : String(error);
+    const stack = typeof details?.stack === "string" ? details.stack : message;
+    return stack.split("\n", 25).join("\n").slice(0, 8_000);
+}
 
-    if (!e.message.startsWith("Object") && !e.message.includes("Cannot find module") && !/^.{1,2}$/.test(e.message)) {
-        logStderr("[Page Error]", e.message);
-        report.otherErrors.push(e.message);
-    } else {
-        report.ignoredErrors.push(e.message);
-    }
+function handlePageError(error: unknown) {
+    const details = describeError(error);
+    if (details.includes("Sentry successfully disabled")) return;
+
+    logStderr("[Page Error]", details);
+    report.otherErrors.push(details);
+    process.exitCode = 1;
 }
 
 async function main() {
@@ -436,13 +715,16 @@ async function main() {
         browser = await pup.launch({
             headless: true,
             executablePath: process.env.CHROMIUM_BIN,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            args: ["--disable-dev-shm-usage", ...(process.platform === "linux" && process.getuid?.() === 0 ? ["--no-sandbox"] : [])]
         });
         reporterTimeout = setTimeout(() => void finishReporter(true), reporterTimeoutMs);
         page = await browser.newPage();
-        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36");
         await page.setBypassCSP(true);
-        page.on("console", e => { void handleConsole(e).catch(failReporter); });
+        let consoleMessages = Promise.resolve();
+        page.on("console", e => {
+            // Keep the completion marker behind earlier asynchronous finding reads.
+            consoleMessages = consoleMessages.then(() => handleConsole(e)).catch(failReporter);
+        });
         page.on("error", e => { void failReporter(e); });
         page.on("pageerror", handlePageError);
         await page.evaluateOnNewDocument(`

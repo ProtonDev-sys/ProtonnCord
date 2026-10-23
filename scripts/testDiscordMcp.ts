@@ -133,6 +133,7 @@ function rpc(method: string, params?: unknown): Promise<any> {
 
 let workerRunning = true;
 let folderCapabilities = true;
+let serverListResult: unknown = [];
 const observedRequests: any[] = [];
 const fakeWorker = (async () => {
     while (workerRunning) {
@@ -145,7 +146,9 @@ const fakeWorker = (async () => {
                 const request = JSON.parse(await readFile(claimed, "utf8"));
                 observedRequests.push(request);
                 assert.equal(request.secret, secret, "queue requests authenticate with the private bridge secret");
-                const result = request.tool === "connection_status"
+                const result = request.tool === "list_servers"
+                    ? serverListResult
+                    : request.tool === "connection_status"
                     ? { connected: true, channelAccess: "all_accessible_channels", capabilities: { serverFolders: folderCapabilities, serverActivity: folderCapabilities } }
                     : request.tool === "download_attachment"
                         ? {
@@ -191,6 +194,14 @@ try {
     assert.equal(status.structuredContent.connected, true);
     assert.equal(status.structuredContent.channelAccess, "all_accessible_channels");
     assert.equal(observedRequests[0].tool, "connection_status", "public tool names map to the fixed bridge operation");
+    for (const value of [[], [{ id: "123456789012345678", name: "server" }], null, false, 0, "result"]) {
+        serverListResult = value;
+        const list = await rpc("tools/call", { name: "discord_list_servers", arguments: {} });
+        assert.equal(list.isError, undefined);
+        assert.ok(list.structuredContent && typeof list.structuredContent === "object" && !Array.isArray(list.structuredContent), "MCP structuredContent must be an object even for list, empty or primitive results");
+        assert.deepEqual(list.structuredContent, { value });
+        assert.deepEqual(JSON.parse(list.content[0].text), value, "text content retains the bridge result unchanged");
+    }
     const folders = await rpc("tools/call", { name: "discord_list_server_folders", arguments: {} });
     assert.equal(folders.structuredContent.echoedTool, "list_server_folders");
     const move = await rpc("tools/call", { name: "discord_move_servers", arguments: { guild_ids: ["123456789012345678"], folder_id: null } });

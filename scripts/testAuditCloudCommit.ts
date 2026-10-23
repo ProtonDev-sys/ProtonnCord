@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -17,11 +11,6 @@ const code = transpileModule(readFileSync("src/api/SettingsSync/offline.ts", "ut
 }).outputText;
 const load = runInThisContext(`(function(exports, require, VencordNative) { ${code}; return exports; })`);
 const tick = () => new Promise(resolve => setImmediate(resolve));
-function deferred() {
-    let resolve!: () => void;
-    const promise = new Promise<void>(done => { resolve = done; });
-    return { promise, resolve };
-}
 function fixture() {
     const plain = { plugins: { Demo: { enabled: true, value: "original", size: 1, privateKey: "local-only" } }, cloud: { authenticated: true } };
     const snapshots: typeof plain[] = [];
@@ -43,7 +32,7 @@ const backup = JSON.stringify({ settings: { plugins: { Demo: { value: "imported"
 
 test("an import coalesced behind an active save rejects instead of publishing data that was not saved", async () => {
     const f = fixture();
-    const firstWrite = deferred();
+    const firstWrite = Promise.withResolvers<void>();
     f.setBeforeWrite(() => f.snapshots.length === 1 ? firstWrite.promise : Promise.resolve());
     const first = f.persistence.set(f.plain);
     await tick();
@@ -63,7 +52,7 @@ test("an import coalesced behind an active save rejects instead of publishing da
 
 test("an edit made while the import itself is persisting remains authoritative on disk and in memory", async () => {
     const f = fixture();
-    const importWrite = deferred();
+    const importWrite = Promise.withResolvers<void>();
     f.setBeforeWrite(() => f.snapshots.length === 1 ? importWrite.promise : Promise.resolve());
     const importing = f.api.importSettings(backup, "plugins");
     const rejected = assert.rejects(importing, /settings changed during the import/);
@@ -80,7 +69,7 @@ test("an edit made while the import itself is persisting remains authoritative o
 
 test("a stale cloud account guard restores live settings after the pending write settles", async () => {
     const f = fixture();
-    const write = deferred();
+    const write = Promise.withResolvers<void>();
     let currentAccount = true;
     f.setBeforeWrite(() => f.snapshots.length === 1 ? write.promise : Promise.resolve());
     const importing = f.api.importSettings(backup, "plugins", { canApply: () => currentAccount });

@@ -1,0 +1,444 @@
+diff --git a/lib/augmentConfig.mjs b/lib/augmentConfig.mjs
+--- a/lib/augmentConfig.mjs
++++ b/lib/augmentConfig.mjs
+@@ -1,9 +1,8 @@
+-import { dirname, isAbsolute } from 'node:path';
+-
+-import { globby } from 'globby';
+-import globjoin from 'globjoin';
+-import micromatch from 'micromatch';
++import { dirname, isAbsolute, join } from 'node:path';
++
++import { glob } from 'tinyglobby';
+ import normalizePath from 'normalize-path';
++import picomatch from 'picomatch';
+ 
+ import { assert, isFunction, isObject, isString } from './utils/validateTypes.mjs';
+ import { ConfigurationError } from './utils/errors.mjs';
+@@ -16,24 +15,18 @@
+ 
+ /** @import {Config as StylelintConfig, CosmiconfigResult as StylelintCosmiconfigResult, InternalApi as StylelintInternalApi} from 'stylelint' */
+ 
+-// TODO: micromatch.matcher() accepts arrays at runtime, but the types don't
+-// reflect this. Remove the cast and func when and if upstream types are fixed.
+-// Ref: https://github.com/micromatch/micromatch/pull/234
+-const createMatcher =
+-	/** @type {(pattern: string | string[], options?: micromatch.Options) => (str: string) => boolean} */ (
+-		micromatch.matcher
+-	);
+-
+-/**
+- * @param {string} glob
++/**
++ * @param {string} pattern
+  * @param {string} basedir
+  * @returns {string}
+  */
+-function absolutizeGlob(glob, basedir) {
+-	const result = isAbsolute(glob.replace(/^!/, '')) ? glob : globjoin(basedir, glob);
+-
+-	// Glob patterns for micromatch should be in POSIX-style
+-	return normalizePath(result);
++function absolutizeGlob(pattern, basedir) {
++	const negated = pattern.startsWith('!');
++	const positive = negated ? pattern.slice(1) : pattern;
++	const absolutePattern = isAbsolute(positive) ? positive : join(basedir, positive);
++
++	// Glob patterns for picomatch should be in POSIX-style
++	return normalizePath(negated ? `!${absolutePattern}` : absolutePattern);
+ }
+ 
+ /**
+@@ -176,7 +169,9 @@
+  */
+ function absolutizePaths(config, configDir, cwd) {
+ 	if (config.ignoreFiles) {
+-		config.ignoreFiles = [config.ignoreFiles].flat().map((glob) => absolutizeGlob(glob, configDir));
++		config.ignoreFiles = [config.ignoreFiles]
++			.flat()
++			.map((pattern) => absolutizeGlob(pattern, configDir));
+ 	}
+ 
+ 	/** @type {<T>(lookup: T) => (string | T)} */
+@@ -208,7 +203,7 @@
+ 
+ 			if (isObject(entry)) {
+ 				return {
+-					files: [entry.files].flat().map((glob) => absolutizeGlob(glob, configDir)),
++					files: [entry.files].flat().map((pattern) => absolutizeGlob(pattern, configDir)),
+ 					customSyntax:
+ 						isString(entry.customSyntax) && isPathLike(entry.customSyntax)
+ 							? getModulePath(configDir, entry.customSyntax, cwd)
+@@ -504,7 +499,7 @@
+ 
+ 		assert(Array.isArray(entry.files));
+ 		const patterns = entry.files;
+-		const files = await globby(patterns, { absolute: true });
++		const files = await glob(patterns, { absolute: true });
+ 
+ 		if (files.length === 0) {
+ 			throw new ConfigurationError(
+@@ -565,18 +560,18 @@
+ 		const absoluteGlobs = [];
+ 		const nonNegatedFiles = [];
+ 
+-		for (const glob of fileList) {
+-			absoluteGlobs.push(absolutizeGlob(glob, rootConfigDir));
+-
+-			if (!glob.startsWith('!')) {
+-				nonNegatedFiles.push(glob);
++		for (const pattern of fileList) {
++			absoluteGlobs.push(absolutizeGlob(pattern, rootConfigDir));
++
++			if (!pattern.startsWith('!')) {
++				nonNegatedFiles.push(pattern);
+ 			}
+ 		}
+ 
+-		const absoluteMatcher = createMatcher(absoluteGlobs, { dot: true });
++		const absoluteMatcher = picomatch(absoluteGlobs, { dot: true });
+ 		const basenameMatcher =
+ 			nonNegatedFiles.length > 0
+-				? createMatcher(nonNegatedFiles, { dot: true, basename: true })
++				? picomatch(nonNegatedFiles, { dot: true, basename: true })
+ 				: () => false;
+ 
+ 		return {
+diff --git a/lib/cli.mjs b/lib/cli.mjs
+--- a/lib/cli.mjs
++++ b/lib/cli.mjs
+@@ -35,8 +35,8 @@
+ 
+     Input: Files(s), glob(s), or nothing to use stdin.
+ 
+-      If an input argument is wrapped in quotation marks, it will be passed to
+-      globby for cross-platform glob support. "node_modules" are always ignored.
++      If an input argument is wrapped in quotation marks, it will be expanded
++      as a glob for cross-platform support. "node_modules" are always ignored.
+       You can also pass no input and use stdin, instead.
+ 
+     Options:
+@@ -214,7 +214,9 @@
+ 
+       --globby-options, --go <json>
+ 
+-        Options in JSON format passed to globby.
++        Options in JSON format used to match the input globs. Supported options are
++        "braceExpansion", "caseSensitiveMatch", "dot", "extglob", "followSymbolicLinks"
++        and "ignore".
+ 
+       --version, -v
+ 
+diff --git a/lib/isPathIgnored.mjs b/lib/isPathIgnored.mjs
+--- a/lib/isPathIgnored.mjs
++++ b/lib/isPathIgnored.mjs
+@@ -1,5 +1,5 @@
+ import { isAbsolute, relative, resolve } from 'node:path';
+-import micromatch from 'micromatch';
++import picomatch from 'picomatch';
+ 
+ import filterFilePaths from './utils/filterFilePaths.mjs';
+ import getConfigForFile from './getConfigForFile.mjs';
+@@ -34,7 +34,7 @@
+ 		normalizeFilePath(String(glob)),
+ 	);
+ 
+-	if (micromatch([normalizedAbsolutePath], normalizedIgnoreFiles).length > 0) {
++	if (isMatchedByGlobs(normalizedAbsolutePath, normalizedIgnoreFiles)) {
+ 		return true;
+ 	}
+ 
+@@ -46,3 +46,33 @@
+ 
+ 	return false;
+ }
++
++/**
++ * @param {string} glob
++ * @returns {boolean}
++ */
++function isNegatedGlob(glob) {
++	return glob.startsWith('!');
++}
++
++/**
++ * Whether the path matches the globs as a list: a negated glob removes a match
++ * made by an earlier glob, a later glob restores it, and a list of only negated
++ * globs matches every path that none of them excludes.
++ *
++ * @param {string} filePath
++ * @param {string[]} globs
++ * @returns {boolean}
++ */
++function isMatchedByGlobs(filePath, globs) {
++	if (globs.length === 0) return false;
++
++	// picomatch matches a negated glob against the paths it keeps
++	return globs.reduce(
++		(matched, glob) =>
++			isNegatedGlob(glob)
++				? matched && picomatch.isMatch(filePath, glob)
++				: matched || picomatch.isMatch(filePath, glob),
++		globs.every(isNegatedGlob),
++	);
++}
+diff --git a/lib/printConfig.mjs b/lib/printConfig.mjs
+--- a/lib/printConfig.mjs
++++ b/lib/printConfig.mjs
+@@ -1,9 +1,8 @@
+ import process from 'node:process';
+ 
+-import { isDynamicPattern } from 'globby';
++import { isDynamicPattern } from 'tinyglobby';
+ 
+ import resolveConfig from './resolveConfig.mjs';
+-import toPath from './utils/toPath.mjs';
+ 
+ /** @import {Config as StylelintConfig} from 'stylelint' */
+ 
+@@ -17,7 +16,6 @@
+ 	config,
+ 	configBasedir,
+ 	configFile,
+-	globbyOptions,
+ 	files,
+ }) {
+ 	const isCodeNotFile = code !== undefined;
+@@ -35,7 +33,7 @@
+ 
+ 	return (
+ 		(await resolveConfig(filePath, {
+-			cwd: toPath(globbyOptions?.cwd) || cwd,
++			cwd,
+ 			config,
+ 			configBasedir,
+ 			configFile,
+diff --git a/lib/standalone.mjs b/lib/standalone.mjs
+--- a/lib/standalone.mjs
++++ b/lib/standalone.mjs
+@@ -4,10 +4,9 @@
+ import createDebug from 'debug';
+ const debug = createDebug('stylelint:standalone');
+ 
+-import fastGlob from 'fast-glob';
+-import { globby } from 'globby';
+-import micromatch from 'micromatch';
++import { escapePath, glob } from 'tinyglobby';
+ import normalizePath from 'normalize-path';
++import picomatch from 'picomatch';
+ import writeFileAtomic from 'write-file-atomic';
+ 
+ import {
+@@ -31,9 +30,10 @@
+ import prepareReturnValue from './prepareReturnValue.mjs';
+ import resolveFilePath from './utils/resolveFilePath.mjs';
+ import resolveOptionValue from './utils/resolveOptionValue.mjs';
+-import toPath from './utils/toPath.mjs';
++import validateGlobbyOptions from './utils/validateGlobbyOptions.mjs';
+ 
+ const ALWAYS_IGNORED_GLOBS = ['**/node_modules/**'];
++const isAlwaysIgnored = picomatch(ALWAYS_IGNORED_GLOBS, { dot: true });
+ 
+ /** @import {InternalApi, LintResult} from 'stylelint' */
+ 
+@@ -86,6 +86,8 @@
+ 		);
+ 	}
+ 
++	validateGlobbyOptions(globbyOptions);
++
+ 	// The ignorer will be used to filter file paths after the glob is checked,
+ 	// before any files are actually read
+ 	/** @type {import('ignore').Ignore} */
+@@ -142,8 +144,7 @@
+ 		if (
+ 			absoluteCodeFilename &&
+ 			(!filterFilePaths(ignorer, [relative(cwd, absoluteCodeFilename)]).length ||
+-				(!disableDefaultIgnores &&
+-					micromatch.isMatch(absoluteCodeFilename, ALWAYS_IGNORED_GLOBS, { dot: true })))
++				(!disableDefaultIgnores && isAlwaysIgnored(absoluteCodeFilename)))
+ 		) {
+ 			return prepareReturnValue({
+ 				results: [],
+@@ -206,12 +207,11 @@
+ 
+ 	let fileList = await Promise.all(
+ 		(typeof files === 'string' ? [files] : files).map(async (entry) => {
+-			const globCWD = toPath(globbyOptions?.cwd) || cwd;
+-			const absolutePath = !isAbsolute(entry) ? join(globCWD, entry) : normalize(entry);
++			const absolutePath = !isAbsolute(entry) ? join(cwd, entry) : normalize(entry);
+ 
+ 			if (await pathExists(absolutePath)) {
+ 				// This path points to a file. Return an escaped path to avoid globbing
+-				return fastGlob.escapePath(normalizePath(entry));
++				return escapePath(normalizePath(entry));
+ 			}
+ 
+ 			return entry;
+@@ -219,7 +219,7 @@
+ 	);
+ 
+ 	if (!disableDefaultIgnores) {
+-		fileList = fileList.concat(ALWAYS_IGNORED_GLOBS.map((glob) => `!${glob}`));
++		fileList = fileList.concat(ALWAYS_IGNORED_GLOBS.map((ignoredGlob) => `!${ignoredGlob}`));
+ 	}
+ 
+ 	const useCache = await resolveOptionValue({ stylelint, name: 'cache', default: false });
+@@ -228,15 +228,9 @@
+ 		stylelint._fileCache.destroy();
+ 	}
+ 
+-	const effectiveGlobbyOptions = {
+-		cwd,
+-		...(globbyOptions || {}),
+-		absolute: true,
+-	};
+-
+-	const globCWD = toPath(effectiveGlobbyOptions.cwd);
+-
+-	let filePaths = await globby(fileList, effectiveGlobbyOptions);
++	// The abort signal is checked per file below rather than passed as tinyglobby's
++	// `signal` option, which resolves with a partial file list instead of rejecting
++	let filePaths = await glob(fileList, { ...globbyOptions, cwd, absolute: true });
+ 
+ 	// Record the length of filePaths before ignore operation
+ 	// Prevent prompting "No files matching the pattern 'xx' were found." when .stylelintignore ignore all input files
+@@ -245,14 +239,14 @@
+ 	// The ignorer filter needs to check paths relative to cwd
+ 	filePaths = filterFilePaths(
+ 		ignorer,
+-		filePaths.map((p) => relative(globCWD, p)),
++		filePaths.map((p) => relative(cwd, p)),
+ 	);
+ 
+ 	let stylelintResults;
+ 
+ 	if (filePaths.length) {
+ 		const absoluteFilePaths = filePaths.map((filePath) =>
+-			isAbsolute(filePath) ? normalize(filePath) : join(globCWD, filePath),
++			isAbsolute(filePath) ? normalize(filePath) : join(cwd, filePath),
+ 		);
+ 
+ 		const getStylelintResults = absoluteFilePaths.map(async (absoluteFilepath) => {
+diff --git a/lib/utils/toPath.mjs b/lib/utils/toPath.mjs
+deleted file mode 100644
+--- a/lib/utils/toPath.mjs
++++ /dev/null
+@@ -1,23 +0,0 @@
+-import { fileURLToPath } from 'node:url';
+-
+-/**
+- * Converts a URL to a file path string, or returns the string as-is.
+- *
+- * @overload
+- * @param {string | URL} cwd
+- * @returns {string}
+- *
+- * @overload
+- * @param {undefined} cwd
+- * @returns {undefined}
+- *
+- * @overload
+- * @param {string | URL | undefined} cwd
+- * @returns {string | undefined}
+- *
+- * @param {string | URL | undefined} cwd
+- * @returns {string | undefined}
+- */
+-export default function toPath(cwd) {
+-	return cwd instanceof URL ? fileURLToPath(cwd) : cwd;
+-}
+diff --git a/lib/utils/validateGlobbyOptions.mjs b/lib/utils/validateGlobbyOptions.mjs
+new file mode 100644
+--- /dev/null
++++ b/lib/utils/validateGlobbyOptions.mjs
+@@ -0,0 +1,38 @@
++import { ConfigurationError } from './errors.mjs';
++import { isPlainObject } from './validateTypes.mjs';
++
++const supportedOptions = new Set([
++	'braceExpansion',
++	'caseSensitiveMatch',
++	'dot',
++	'extglob',
++	'followSymbolicLinks',
++	'ignore',
++]);
++
++/**
++ * Validate the `globbyOptions` linter option. Only a subset of globby's options
++ * is supported, and any other option throws rather than being silently ignored.
++ *
++ * @param {unknown} globbyOptions
++ * @returns {void}
++ */
++export default function validateGlobbyOptions(globbyOptions) {
++	if (globbyOptions === undefined) return;
++
++	if (!isPlainObject(globbyOptions)) {
++		throw new ConfigurationError(
++			`Invalid globbyOptions configuration: expected an object. Got "${globbyOptions}".`,
++		);
++	}
++
++	const unknownOption = Object.keys(globbyOptions).find((name) => !supportedOptions.has(name));
++
++	if (unknownOption) {
++		const names = [...supportedOptions].map((name) => `"${name}"`).join(', ');
++
++		throw new ConfigurationError(
++			`Invalid globbyOptions configuration: unknown option "${unknownOption}". Supported options: ${names}.`,
++		);
++	}
++}
+diff --git a/types/stylelint/index.d.ts b/types/stylelint/index.d.ts
+--- a/types/stylelint/index.d.ts
++++ b/types/stylelint/index.d.ts
+@@ -1,5 +1,4 @@
+ import type * as PostCSS from 'postcss';
+-import type { Options as GlobbyOptions } from 'globby';
+ import type { cosmiconfig, TransformSync as CosmiconfigTransformSync } from 'cosmiconfig';
+ 
+ type ConfigExtends = string | string[];
+@@ -1173,6 +1172,41 @@
+ 		existingPostcssResult?: PostCSS.Result;
+ 		cache?: boolean;
+ 		abortSignal?: AbortSignal;
++	};
++
++	/**
++	 * Options for matching `files`, a subset of globby's options.
++	 */
++	export type GlobbyOptions = {
++		/**
++		 * Whether to expand braces, e.g. `{a,b}`.
++		 * Defaults to `true`.
++		 */
++		braceExpansion?: boolean;
++		/**
++		 * Whether to match case-sensitively.
++		 * Defaults to `true`.
++		 */
++		caseSensitiveMatch?: boolean;
++		/**
++		 * Whether to match files and directories whose names begin with a dot.
++		 * Defaults to `false`.
++		 */
++		dot?: boolean;
++		/**
++		 * Whether to support extglobs, e.g. `+(a|b)`.
++		 * Defaults to `true`.
++		 */
++		extglob?: boolean;
++		/**
++		 * Whether to traverse symbolic links to directories.
++		 * Defaults to `true`.
++		 */
++		followSymbolicLinks?: boolean;
++		/**
++		 * Globs of files to exclude, relative to `cwd`.
++		 */
++		ignore?: OneOrMany<string>;
+ 	};
+ 
+ 	/**

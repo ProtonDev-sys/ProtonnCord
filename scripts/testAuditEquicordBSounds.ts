@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -12,6 +6,7 @@ import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 import { parseImportedOverrides } from "../src/equicordplugins/customSounds/settingsImport";
 import * as types from "../src/equicordplugins/customSounds/types";
+import { elements as descendants } from "./utils/discordClientFixture";
 
 const React = {
     createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }),
@@ -40,18 +35,6 @@ function load(file: string, overrides: Record<string, unknown>, globals: Record<
         },
         ...globals
     });
-}
-
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>(done => { resolve = done; });
-    return { promise, resolve };
-}
-
-function descendants(node: any): any[] {
-    if (Array.isArray(node)) return node.flatMap(descendants);
-    if (!node || typeof node !== "object") return [];
-    return [node, ...descendants(node.props?.children)];
 }
 
 function audioStore(initial: Record<string, any>, failFirstWrite = false) {
@@ -123,9 +106,9 @@ function indexModule(store: Record<string, any>, getAudioDataURI: (id: string) =
 }
 
 test("stopping or deleting a sound invalidates in-flight loads and concurrent readers share one load", async () => {
-    const pending: ReturnType<typeof deferred<string>>[] = [];
+    const pending: PromiseWithResolvers<string>[] = [];
     const api = indexModule({ call_calling: JSON.stringify({ enabled: true, selectedSound: "custom", selectedFileId: "file", volume: 50 }) }, () => {
-        const load = deferred<string>();
+        const load = Promise.withResolvers<string>();
         pending.push(load);
         return load.promise;
     });
@@ -173,7 +156,7 @@ test("invalid imports preserve saved settings while valid imports preload existi
 
 test("sound preview Stop and component unmount cancel pending playback and stop active audio", async () => {
     const effects: (() => unknown)[] = [];
-    const pending: ReturnType<typeof deferred<string>>[] = [];
+    const pending: PromiseWithResolvers<string>[] = [];
     let plays = 0;
     let stops = 0;
     const component = load("src/equicordplugins/customSounds/SoundOverrideComponent.tsx", {
@@ -183,7 +166,7 @@ test("sound preview Stop and component unmount cancel pending playback and stop 
         "@utils/react": { useForceUpdater: () => () => {} },
         "@webpack/common": { React: { ...React, useEffect: (effect: () => unknown) => effects.push(effect) }, showToast() {} },
         "./audioStore": { getAllAudio: async () => ({}), subscribeAudioFiles: () => () => {} },
-        "./index": { ensureDataURICached: () => { const load = deferred<string>(); pending.push(load); return load.promise; } }
+        "./index": { ensureDataURICached: () => { const load = Promise.withResolvers<string>(); pending.push(load); return load.promise; } }
     }).SoundOverrideComponent;
     const view = component({ type: { id: "call_calling" }, override: { enabled: true, selectedSound: "custom", selectedFileId: "file", volume: 20 }, onChange: async () => {} });
     const cleanup = effects[0]() as () => void;

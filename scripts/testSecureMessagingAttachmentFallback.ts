@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -67,6 +61,7 @@ function fixture(options: {
         MAX_DISCORD_MESSAGE_LENGTH, MAX_ATTACHMENT_COUNT: 10,
         generation: 1, context, conversation: {}, plaintext: text, channelId,
         uploads: Array.from({ length: bundle.count }, () => ({})), stickers: [], uploadLimitBytes: 500 * 1024 * 1024,
+        discordUploadLimitBytes: () => 500 * 1024 * 1024,
         detachedTextIndex: null, generatedDetachedUpload: null,
         preparedAttachments: { plaintext: serializeSecurePlaintext(text, bundle) },
         parseSecurePlaintext, serializeSecurePlaintext,

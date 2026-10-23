@@ -1,9 +1,3 @@
-/*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
@@ -36,12 +30,6 @@ function load(file: string, overrides: Record<string, unknown>, globals: Record<
         },
         ...globals
     });
-}
-
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>(done => { resolve = done; });
-    return { promise, resolve };
 }
 
 function utilityModule(common: Record<string, unknown> = {}, overrides: Record<string, unknown> = {}, globals: Record<string, unknown> = {}) {
@@ -89,7 +77,7 @@ test("base64url fallback handles byte-array tails, whitespace and invalid paddin
 
 test("sending one favourite leaves every other draft attachment in place and cancels after an account switch", async () => {
     let account = "one";
-    const fetched = deferred<{ data: ArrayBuffer; filename: string; type: string; }>();
+    const fetched = Promise.withResolvers<{ data: ArrayBuffer; filename: string; type: string; }>();
     let uploads: any[] = [{ id: "before", item: {} }];
     let sent: any;
     const api = utilityModule({
@@ -162,7 +150,7 @@ test("batched favorite requests use the configured batch size and clear queued o
 
 test("favorite signed-URL responses cannot repopulate cleared or switched-account caches", async () => {
     let account = "one";
-    const pending = deferred<{ body: { refreshed_urls: { original: string; refreshed: string; }[]; }; }>();
+    const pending = Promise.withResolvers<{ body: { refreshed_urls: { original: string; refreshed: string; }[]; }; }>();
     const api = load("src/equicordplugins/favouriteAnything/stores.ts", {
         "@webpack": { proxyLazyWebpack: (factory: () => unknown) => factory() },
         "@webpack/common": {

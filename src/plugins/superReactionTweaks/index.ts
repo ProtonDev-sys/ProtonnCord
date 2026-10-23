@@ -54,8 +54,8 @@ export default definePlugin({
         {
             find: ".EMOJI_PICKER_CONSTANTS_EMOJI_CONTAINER_PADDING_HORIZONTAL)",
             replacement: {
-                match: /(openPopoutType:void 0(?=.+?isBurstReaction:(\i).+?;(\i===\i\.\i\.REACTION)&&\i\.push\().+?\[\2,\i\]=\i\.useState\()!1\)/,
-                replace: (_, rest, _isBurstReactionVariable, isReactionIntention) => `${rest}$self.shouldSuperReactByDefault&&${isReactionIntention})`
+                match: /(openPopoutType:void 0(?=.+?isBurstReaction:(\i).+?\.intention===(\i\.\i\.REACTION)).+?\[\2,\i\]=\i\.useState\()!1\)(?<=pickerIntention:(\i).+?)/,
+                replace: (_, rest, _isBurstReactionVariable, reactionIntention, pickerIntention) => `${rest}$self.shouldSuperReactByDefault&&${pickerIntention}===${reactionIntention})`
             }
         }
     ],
