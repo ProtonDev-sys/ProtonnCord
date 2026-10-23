@@ -21,12 +21,15 @@ const cli = await ensureCachedArtifact(artifact);
 const output = resolve("dist/windows");
 mkdirSync(output, { recursive: true });
 const hash = file => createHash("sha256").update(readFileSync(file)).digest("hex");
+const bootstrap = join(output, "bootstrap.cjs");
+writeFileSync(bootstrap, extractFile(archive, "bootstrap.js"));
 const metadata = {
     repository,
     commit,
     version: JSON.parse(readFileSync("package.json", "utf8")).version,
     updateBranch: "nightly",
     archiveSha256: hash(archive),
+    bootstrapSha256: hash(bootstrap),
     installerSha256: artifact.sha256,
     installerSource: `https://github.com/Equicord/Equilotl/tree/${EQUILOTL_RELEASE.commit}`,
     installerVersion: EQUILOTL_RELEASE.tag
@@ -37,7 +40,7 @@ const executable = join(output, "ProtonnCordSetup.exe");
 execFileSync(join(process.env.WINDIR, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"), [
     "/nologo", "/target:winexe", "/platform:x64", "/optimize+", "/checked+", "/warnaserror+", "/codepage:65001",
     "/reference:System.Windows.Forms.dll", "/reference:System.Drawing.dll", "/reference:System.Web.Extensions.dll",
-    `/resource:${archive},desktop.asar`, `/resource:${cli},EquilotlCli.exe`, `/resource:${manifest},installer.json`,
+    `/resource:${archive},desktop.asar`, `/resource:${bootstrap},bootstrap.cjs`, `/resource:${cli},EquilotlCli.exe`, `/resource:${manifest},installer.json`,
     `/out:${executable}`, resolve("scripts/windows/ProtonnCordSetup.cs")
 ], { stdio: "inherit" });
 copyFileSync("LICENSE", join(output, "ProtonnCordSetup-LICENSE.txt"));

@@ -43,6 +43,8 @@ async function main(): Promise<void> {
         assert.equal(await pullGitUpdates(runner(current), remote, initialHead), false);
         assert.deepEqual((await inspectGitUpdates(runner(current), remote, initialHead.slice(0, 7))).changes, [],
             "abbreviated build hashes resolve to the same installed commit");
+        assert.equal(await pullGitUpdates(runner(current), remote, initialHead.slice(0, 7)), false,
+            "an abbreviated installed hash must not request a redundant rebuild");
         const missingBuiltHead = "0".repeat(40);
         const missingBuild = await inspectGitUpdates(runner(current), remote, missingBuiltHead);
         assert.equal(missingBuild.changes.length, 1);
@@ -154,6 +156,77 @@ async function main(): Promise<void> {
         assert.equal((await run(concurrentCheckout, "branch", "--show-current")).stdout.trim(), "work-in-progress");
         assert.equal((await run(concurrentCheckout, "rev-parse", "HEAD")).stdout.trim(), checkoutBuiltHead,
             "updates never merge into a branch selected by another Git client during the fetch");
+
+        const statusRace = await clone("status-race");
+        const statusBuiltHead = (await run(statusRace, "rev-parse", "HEAD")).stdout.trim();
+        await commitFile(seed, "status-race.txt", "remote\n", "status race update");
+        await run(seed, "push", "origin", "main");
+        await assert.rejects(pullGitUpdates(async (...args) => {
+            const result = await run(statusRace, ...args);
+            if (args[0] === "status") await run(statusRace, "switch", "-c", "editing");
+            return result;
+        }, remote, statusBuiltHead, "main"), /checkout changed/u);
+        assert.equal((await run(statusRace, "rev-parse", "HEAD")).stdout.trim(), statusBuiltHead);
+
+        const ignored = await clone("ignored-merge");
+        const ignoredHead = (await run(ignored, "rev-parse", "HEAD")).stdout.trim();
+        await writeFile(join(ignored, ".git", "info", "exclude"), "ignored-*.txt\n");
+        await writeFile(join(ignored, "ignored-merge.txt"), "precious ignored work\n");
+        await commitFile(seed, "ignored-merge.txt", "remote tracked content\n", "new tracked file");
+        await run(seed, "push", "origin", "main");
+        await assert.rejects(pullGitUpdates(runner(ignored), remote, ignoredHead, "main"), /overwritten|untracked/u);
+        assert.equal(await readFile(join(ignored, "ignored-merge.txt"), "utf8"), "precious ignored work\n");
+        assert.equal((await run(ignored, "rev-parse", "HEAD")).stdout.trim(), ignoredHead);
+
+        const ignoredSwitch = await clone("ignored-switch");
+        const switchHead = (await run(ignoredSwitch, "rev-parse", "HEAD")).stdout.trim();
+        await writeFile(join(ignoredSwitch, ".git", "info", "exclude"), "ignored-*.txt\n");
+        await writeFile(join(ignoredSwitch, "ignored-switch.txt"), "precious branch work\n");
+        await run(seed, "switch", "nightly");
+        await commitFile(seed, "ignored-switch.txt", "nightly tracked content\n", "nightly tracked file");
+        await run(seed, "push", "origin", "nightly");
+        await run(seed, "switch", "main");
+        await assert.rejects(pullGitUpdates(runner(ignoredSwitch), remote, switchHead, "nightly"), /overwritten|untracked/u);
+        assert.equal(await readFile(join(ignoredSwitch, "ignored-switch.txt"), "utf8"), "precious branch work\n");
+        assert.equal((await run(ignoredSwitch, "branch", "--show-current")).stdout.trim(), "main");
+
+        const rollback = await clone("branch-rollback");
+        const rollbackHead = (await run(rollback, "rev-parse", "HEAD")).stdout.trim();
+        await run(rollback, "branch", "nightly", initialHead);
+        for (const detached of [false, true]) {
+            if (detached) await run(rollback, "switch", "--detach");
+            const busyMerge = async (...args: string[]) => {
+                if (args[0] === "merge") throw new Error("fixture fast-forward failed: locked source file");
+                return run(rollback, ...args);
+            };
+            await assert.rejects(pullGitUpdates(busyMerge, remote, rollbackHead, "nightly"), /locked source file/u);
+            assert.equal((await run(rollback, "branch", "--show-current")).stdout.trim(), detached ? "" : "main");
+            assert.equal((await run(rollback, "rev-parse", "HEAD")).stdout.trim(), rollbackHead);
+            assert.equal((await run(rollback, "rev-parse", "refs/heads/nightly")).stdout.trim(), initialHead);
+        }
+
+        await assert.rejects(pullGitUpdates(async (...args) => {
+            if (args[0] === "merge") {
+                await writeFile(join(rollback, "state.txt"), "precious concurrent edits\n");
+                throw new Error("fixture merge failed after concurrent edits");
+            }
+            return run(rollback, ...args);
+        }, remote, rollbackHead, "nightly"), /original source branch could not be restored/u);
+        assert.equal(await readFile(join(rollback, "state.txt"), "utf8"), "precious concurrent edits\n",
+            "branch recovery never discards edits made by another Git client");
+        assert.equal((await run(rollback, "rev-parse", "refs/heads/main")).stdout.trim(), rollbackHead);
+
+        await run(seed, "branch", "staging");
+        await run(seed, "push", "origin", "staging");
+        const checkoutHook = await clone("failed-checkout-hook");
+        const hookHead = (await run(checkoutHook, "rev-parse", "HEAD")).stdout.trim();
+        await assert.rejects(pullGitUpdates(async (...args) => {
+            const result = await run(checkoutHook, ...args);
+            if (args[0] === "switch" && args.includes("--create")) throw new Error("fixture post-checkout hook failed");
+            return result;
+        }, remote, hookHead, "staging"), /post-checkout hook failed/u);
+        assert.equal((await run(checkoutHook, "branch", "--show-current")).stdout.trim(), "main");
+        assert.equal((await run(checkoutHook, "rev-parse", "HEAD")).stdout.trim(), hookHead);
 
         console.log("git updater repository-state matrix passed");
     } finally {

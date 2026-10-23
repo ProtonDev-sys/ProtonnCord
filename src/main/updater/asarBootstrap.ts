@@ -32,8 +32,9 @@ export function installHostRecovery(archive: string) {
             // An older channel's native hook may have injected the raw archive
             // first. Upgrade only our exact known stub; leave other mods alone.
             for (const name of ["app.asar", "app"]) {
-                const injector = join(resources, name, "index.js");
-                if (files.existsSync(injector)) {
+                const container = join(resources, name);
+                const injector = join(container, "index.js");
+                if (files.existsSync(container) && (files.statSync(container).isFile() || files.existsSync(injector))) {
                     upgradeBootstrapInjector(injector, archive, files);
                     break;
                 }
@@ -69,22 +70,17 @@ export function installAsarUpdateShim(archive: string) {
     const rename = files.renameSync;
 
     files.renameSync = (source, destination) => {
-        try {
-            rename(source, destination);
-        } catch (error) {
-            // Older main/nightly releases already use this atomic-write path.
-            // Keep the shim outside their archives so switching to them retains
-            // the repair, without changing unrelated filesystem operations.
-            if (process.platform !== "win32" || !isLocked(error)
-                || typeof source !== "string" || typeof destination !== "string"
-                || resolve(destination) !== target || dirname(resolve(source)) !== dirname(target)
-                || !resolve(source).startsWith(`${target}.`)
-                || !/^\d+\.[a-f0-9-]{36}\.tmp$/iu.test(resolve(source).slice(target.length + 1)))
-                throw error;
+        // Keep the active archive unchanged until the next process starts,
+        // including when an earlier staged update could not yet be installed.
+        if (process.platform !== "win32"
+            || typeof source !== "string" || typeof destination !== "string"
+            || resolve(destination) !== target || dirname(resolve(source)) !== dirname(target)
+            || !resolve(source).startsWith(`${target}.`)
+            || !/^\d+\.[a-f0-9-]{36}\.tmp$/iu.test(resolve(source).slice(target.length + 1)))
+            return rename(source, destination);
 
-            validateAsar(files.readFileSync(source));
-            rename(source, pending);
-        }
+        validateAsar(files.readFileSync(source));
+        rename(source, pending);
     };
 
     return () => { files.renameSync = rename; };

@@ -16,7 +16,7 @@ import { UPDATER_BRANCHES, type UpdaterBranch } from "@shared/Updater";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
 import { relaunch } from "@utils/native";
-import { changes, checkForUpdates, isNewer, resetUpdateState, update } from "@utils/updater";
+import { changes, checkForUpdates, getUpdateState, repair, subscribeToUpdates, update } from "@utils/updater";
 import { ConfirmModal, openModal, React, Select, Toasts, useState } from "@webpack/common";
 
 import { runWithDispatch } from "./runWithDispatch";
@@ -72,27 +72,63 @@ export function Changes({ updates, repo, repoPending }: CommonProps & { updates:
     );
 }
 
-export function Newer(props: CommonProps) {
+export function Newer({ updates, ...props }: CommonProps & { updates: typeof changes; }) {
     return (
         <>
             <Paragraph>
                 Your local branch contains commits that are not on the selected remote branch. Review these differences before updating.
             </Paragraph>
-            <Changes {...props} updates={changes} />
+            <Changes {...props} updates={updates} />
         </>
     );
 }
 
 export function Updatable(props: CommonProps & { disabled?: boolean; }) {
     const settings = useSettings(["updateBranch"]);
-    const [updates, setUpdates] = useState(changes);
-    const [isChecking, setIsChecking] = useState(false);
-    const [isUpdating, setIsUpdating] = useState(false);
-    const [hasChecked, setHasChecked] = useState(false);
-    const busy = isUpdating || isChecking;
+    const state = React.useSyncExternalStore(subscribeToUpdates, getUpdateState);
+    const { changes: updates, isOutdated, isNewer, hasChecked, needsRestart } = state;
+    const [isActing, setIsActing] = useState(false);
+    const mounted = React.useRef(false);
+    React.useEffect(() => {
+        mounted.current = true;
+        return () => { mounted.current = false; };
+    }, []);
+    const isCurrent = () => mounted.current && state.branch === settings.updateBranch;
+    const busy = isActing || state.isInstalling || state.isChecking;
     const disabled = props.disabled || busy;
 
-    const isOutdated = updates.length > 0;
+    const installUpdate = (action: () => Promise<boolean>) => runWithDispatch(setIsActing, async () => {
+        const updated = await action();
+        if (!isCurrent()) return;
+        if (!updated) {
+            Toasts.show({
+                message: "The update could not be installed. Check for updates and try again.",
+                id: Toasts.genId(),
+                type: Toasts.Type.FAILURE
+            });
+            return;
+        }
+
+        await new Promise<void>((resolve, reject) => {
+            let confirmed = false;
+            openModal(props => (
+                <ConfirmModal
+                    {...props}
+                    title="Update Success!"
+                    subtitle="Successfully updated. Restart now to apply the changes?"
+                    confirmText="Restart"
+                    cancelText="Not now!"
+                    variant="primary"
+                    onConfirm={() => {
+                        confirmed = true;
+                        if (!isCurrent()) return resolve();
+                        return relaunch().then(resolve, reject);
+                    }}
+                    onCancel={resolve}
+                />
+            ), { onCloseCallback: () => { if (!confirmed) resolve(); } });
+        });
+    }, isCurrent);
 
     return (
         <>
@@ -107,7 +143,6 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                 closeOnSelect={true}
                 select={(branch: UpdaterBranch) => {
                     if (disabled || settings.updateBranch === branch) return;
-                    resetUpdateState();
                     settings.updateBranch = branch;
                 }}
                 isSelected={branch => branch === settings.updateBranch}
@@ -116,17 +151,10 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
             <Flex className={classes(Margins.top16, Margins.bottom8)} gap="8px">
                 <Button
                     disabled={disabled}
-                    onClick={runWithDispatch(setIsChecking, async () => {
-                        const branch = settings.updateBranch;
+                    onClick={runWithDispatch(setIsActing, async () => {
                         const outdated = await checkForUpdates();
-                        if (settings.updateBranch !== branch) return;
-                        setHasChecked(true);
-
-                        if (outdated || isNewer) {
-                            setUpdates(changes);
-                        } else {
-                            setUpdates([]);
-
+                        if (!isCurrent()) return;
+                        if (!outdated && !getUpdateState().isNewer) {
                             Toasts.show({
                                 message: "No updates found!",
                                 id: Toasts.genId(),
@@ -136,7 +164,7 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                                 }
                             });
                         }
-                    })}
+                    }, isCurrent)}
                 >
                     Check for Updates
                 </Button>
@@ -145,45 +173,22 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
                         size="small"
                         variant="primary"
                         disabled={disabled}
-                        onClick={runWithDispatch(setIsUpdating, async () => {
-                            const branch = settings.updateBranch;
-                            const updated = await update();
-                            if (settings.updateBranch !== branch) return;
-                            if (updated) {
-                                setUpdates([]);
-
-                                await new Promise<void>((r, reject) => {
-                                    let confirmed = false;
-                                    openModal(props => (
-                                        <ConfirmModal
-                                            {...props}
-                                            title="Update Success!"
-                                            subtitle="Successfully updated. Restart now to apply the changes?"
-                                            confirmText="Restart"
-                                            cancelText="Not now!"
-                                            variant="primary"
-                                            onConfirm={() => {
-                                                confirmed = true;
-                                                return relaunch().then(r, reject);
-                                            }}
-                                            onCancel={r}
-                                        />
-                                    ), { onCloseCallback: () => { if (!confirmed) r(); } });
-                                });
-                            } else {
-                                Toasts.show({
-                                    message: "The update could not be installed. Check for updates and try again.",
-                                    id: Toasts.genId(),
-                                    type: Toasts.Type.FAILURE
-                                });
-                            }
-                        })}
+                        onClick={installUpdate(update)}
                     >
                         Update Now
                     </Button>
                 )}
+                <Button disabled={disabled} onClick={installUpdate(repair)}>
+                    Repair Installation
+                </Button>
+                {needsRestart && (
+                    <Button disabled={disabled} onClick={runWithDispatch(setIsActing, relaunch, isCurrent)}>
+                        Restart Discord
+                    </Button>
+                )}
             </Flex>
-            {isNewer ? <Newer {...props} /> : isOutdated ? (
+            {needsRestart && <Paragraph>An update has been installed. Restart Discord to apply it.</Paragraph>}
+            {isNewer ? <Newer {...props} updates={updates} /> : isOutdated ? (
                 <>
                     <Paragraph>
                         There {updates.length === 1 ? "is 1 update" : `are ${updates.length} updates`} available. Click the button above to download and install.
@@ -193,7 +198,9 @@ export function Updatable(props: CommonProps & { disabled?: boolean; }) {
             ) : (
                 <Paragraph>
                     {hasChecked
-                        ? `You're running the latest available version on ${settings.updateBranch}.`
+                        ? needsRestart
+                            ? `The latest available version on ${settings.updateBranch} is installed.`
+                            : `You're running the latest available version on ${settings.updateBranch}.`
                         : `Check for updates to see what's available on ${settings.updateBranch}.`}
                 </Paragraph>
             )}

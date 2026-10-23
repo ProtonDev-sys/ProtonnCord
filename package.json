@@ -56,7 +56,7 @@
         "testPromiseTimeout": "tsx scripts/testPromiseTimeout.ts",
         "testUpdaterClassification": "tsx scripts/testUpdaterClassification.ts",
         "testUpdaterGit": "tsx scripts/testUpdaterBackend.ts && tsx scripts/testUpdaterGit.ts",
-        "testUpdaterHttp": "tsx scripts/testUpdaterHttp.ts",
+        "testUpdaterHttp": "tsx scripts/testUpdaterHttp.ts && tsx --test scripts/testNativeAutoUpdate.ts",
         "testUpdaterRepository": "pnpm buildStandalone && pnpm testUpdaterRepository:built",
         "testUpdaterRepository:built": "tsx scripts/testUpdaterRepository.ts",
         "testUpdaterLive": "tsx scripts/testUpdaterLive.ts",
