@@ -21,7 +21,7 @@ if [[ "$mode" == validate ]]; then
         [[ -x "$electron" ]]
         ELECTRON_BIN="$electron" xvfb-run -a node scripts/testElectronIpc.mjs
     done
-    pnpm test
+    PROTONN_CI_NATIVE_NETNS=1 pnpm test
     pnpm buildWebStandalone
     pnpm generateTypes
     pnpm --dir packages/vencord-types test

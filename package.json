@@ -92,7 +92,7 @@
         "testSecureMessagingPerformance": "tsx scripts/testSecureMessagingPerformance.ts && tsx scripts/testSecureMessagingReceive.ts",
         "testSecureMessagingCryptoCache": "tsx scripts/testSecureMessagingCryptoCache.ts",
         "testSecureMessagingLayoutStability": "tsx scripts/testSecureMessagingLayoutStability.ts",
-        "testSecureMessagingNative": "tsx scripts/testSecureMessagingNative.ts",
+        "testSecureMessagingNative": "node scripts/ci/native-test.mjs",
         "testSecureMessagingLive": "tsx scripts/testSecureMessagingLive.ts",
         "createDiscordMcpVideo": "tsx scripts/createDiscordMcpVideo.ts",
         "benchmarkDiscord": "tsx scripts/benchmarkDiscord.ts",
