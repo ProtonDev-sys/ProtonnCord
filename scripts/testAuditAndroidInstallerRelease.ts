@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, TestContext } from "node:test";
-import { publishAndroidInstaller } from "./publishAndroidInstaller.mjs";
+import { publishAndroidInstaller, validateAndroidInstaller } from "./publishAndroidInstaller.mjs";
 
 async function fixture(t: TestContext) {
     const directory = await mkdtemp(join(tmpdir(), "android-release-"));
@@ -33,6 +33,14 @@ async function fixture(t: TestContext) {
     };
     return { directory, env, data, receipt, smoke, save, stopped, calls, api };
 }
+
+test("local APK validation needs neither publishing credentials nor a GitHub request", async t => {
+    const build = await fixture(t);
+    const installer = await validateAndroidInstaller(build);
+    assert.equal(installer.tag, "android-42-1");
+    assert.deepEqual(installer.data, build.data);
+    assert.deepEqual(build.calls, []);
+});
 
 test("APK publish-only retry selects the tested build's immutable tag before any mutation", async t => {
     const build = await fixture(t);

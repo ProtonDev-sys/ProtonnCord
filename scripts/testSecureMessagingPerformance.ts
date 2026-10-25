@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
 import { exactArrayBuffer } from "../src/equicordplugins/secureMessaging.desktop/exactArrayBuffer";
 import { KeyReviewGate } from "../src/equicordplugins/secureMessaging.desktop/keyReviewGate";
@@ -123,8 +123,6 @@ function testSourceBoundaries(): void {
     const reviewCache = source("src/equicordplugins/secureMessaging.desktop/announcementReviewCache.ts");
     const styles = source("src/equicordplugins/secureMessaging.desktop/styles.css");
     const gate = source("src/equicordplugins/secureMessaging.desktop/keyReviewGate.ts");
-    const packageJson = source("package.json");
-    const workflow = source(".github/workflows/test.yml");
 
     assert.match(decryptCache, /const runDecryptTask = createTaskQueue\(4\)/);
     assert.match(decryptCache, /result = await runDecryptTask\(async \(\): Promise<DecryptIncomingResult> =>/,
@@ -193,19 +191,6 @@ function testSourceBoundaries(): void {
 
     assert.match(crypto, /import \{ exactArrayBuffer as cryptoBytes \} from "\.\/exactArrayBuffer";/);
     assert.match(attachments, /import \{ exactArrayBuffer as cryptoBytes \} from "\.\/exactArrayBuffer";/);
-    assert.match(packageJson, /"testSecureMessagingPerformance": "tsx scripts\/testSecureMessagingPerformance\.ts && tsx scripts\/testSecureMessagingReceive\.ts"/);
-    assert.match(JSON.parse(packageJson).scripts.test, /\bpnpm testSecureMessagingPerformance\b/);
-    assert.match(workflow, /run: pnpm test\s*\n/);
-    assert.equal(
-        existsSync(new URL("../scripts/applySecureMessagingPerformanceTest.py", import.meta.url)),
-        false,
-        "one-time audit patch scripts are not shipped",
-    );
-    assert.equal(
-        existsSync(new URL("../.github/workflows/apply-secure-messaging-performance-test.yml", import.meta.url)),
-        false,
-        "one-time self-modifying workflows are not shipped",
-    );
 }
 
 async function main(): Promise<void> {

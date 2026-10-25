@@ -7,7 +7,7 @@ import { isDeepStrictEqual } from "node:util";
 import { publishInstaller } from "./publishInstaller.mjs";
 import { createGithubApi } from "./releaseUpdateChannel.mjs";
 
-export async function publishAndroidInstaller({ directory = "mobile/build", env = process.env, api } = {}) {
+export async function validateAndroidInstaller({ directory = "mobile/build", env = process.env } = {}) {
     const requireState = (condition, message) => { if (!condition) throw new Error(message); };
     const number = value => typeof value === "string" && /^[1-9][0-9]{0,18}$/u.test(value);
     const repository = "ProtonDev-sys/ProtonnCord";
@@ -15,7 +15,7 @@ export async function publishAndroidInstaller({ directory = "mobile/build", env 
     requireState(env.GITHUB_REPOSITORY === repository && env.GITHUB_REF_NAME === "nightly"
         && /^[a-f0-9]{40}$/u.test(sha ?? "") && number(env.GITHUB_RUN_ID)
         && number(env.GITHUB_RUN_NUMBER) && number(env.GITHUB_RUN_ATTEMPT),
-    "Android publication requires an exact nightly workflow identity.");
+    "Android publication requires an exact nightly build identity.");
     requireState(/^[a-f0-9]{64}$/u.test(env.ANDROID_SIGNER_SHA256 ?? ""), "Configure the expected production ANDROID_SIGNER_SHA256.");
     const boundedFile = async (path, maximum) => {
         const stat = await lstat(path);
@@ -34,7 +34,7 @@ export async function publishAndroidInstaller({ directory = "mobile/build", env 
     "The APK source, package or production signing certificate does not match this release.");
     requireState(built?.repository === repository && built.runId === env.GITHUB_RUN_ID
         && built.runNumber === env.GITHUB_RUN_NUMBER && number(built.attempt)
-        && BigInt(built.attempt) <= BigInt(env.GITHUB_RUN_ATTEMPT), "The APK belongs to a different workflow build.");
+        && BigInt(built.attempt) <= BigInt(env.GITHUB_RUN_ATTEMPT), "The APK belongs to a different job build.");
     requireState(smoke.status === "passed" && smoke.firstLaunch?.status === "passed"
         && smoke.firstLaunch.verifiedBeforeTestWrites === true && smoke.restart?.status === "passed"
         && smoke.restart.cacheRemovedBeforeLaunch === true && smoke.restart.cacheRestored === true
@@ -51,8 +51,12 @@ export async function publishAndroidInstaller({ directory = "mobile/build", env 
         + "This uses Discord's package name with a separate signing key; an existing differently signed Discord installation must be removed first.\n\n"
         + `[Source and license](https://github.com/${repository}/tree/${sha})\n\n`
         + `APK SHA-256: \`${checksum}\`\n\nSigning certificate SHA-256: \`${receipt.signerSha256}\`\n`;
-    await publishInstaller({ api: api ?? createGithubApi(env.GITHUB_TOKEN, fetch, { timeoutMs: 180_000 }),
-        repository, sha, tag, name, data, checksum, title: "ProtonnCord — Android nightly", body, platform: "Android" });
+    return { repository, sha, tag, name, data, checksum, title: "ProtonnCord — Android nightly", body, platform: "Android" };
+}
+
+export async function publishAndroidInstaller({ directory, env = process.env, api } = {}) {
+    const installer = await validateAndroidInstaller({ directory, env });
+    await publishInstaller({ ...installer, api: api ?? createGithubApi(env.GITHUB_TOKEN, fetch, { timeoutMs: 180_000 }) });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) publishAndroidInstaller().catch(error => {

@@ -68,12 +68,10 @@ for (const platform of ["Windows", "Linux"]) {
     }
     if (platform !== "Windows" || process.platform !== "win32") continue;
     // The upstream installer terminates Discord by process name, even for a fake path.
-    // Never execute it on a developer's Windows machine or a self-hosted runner.
+    // Execute only when explicitly opted in on a disposable Windows environment.
     if (process.env.PROTONN_CORD_TEST_WINDOWS_INSTALLER !== "1"
-        || process.env.GITHUB_ACTIONS !== "true"
-        || process.env.RUNNER_OS !== "Windows"
-        || process.env.RUNNER_ENVIRONMENT !== "github-hosted") {
-        console.log("Windows installer execution skipped; it requires an explicit GitHub-hosted CI job.");
+        || process.env.PROTONN_CORD_DISPOSABLE_WINDOWS !== "1") {
+        console.log("Windows installer execution skipped; it requires an explicit disposable Windows environment.");
         continue;
     }
     const processes = spawnSync("powershell.exe", ["-NoProfile", "-Command", "if (Get-Process Discord,DiscordPTB,DiscordCanary,DiscordDevelopment -ErrorAction SilentlyContinue) { exit 1 }"], { encoding: "utf8" });

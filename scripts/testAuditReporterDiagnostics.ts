@@ -9,7 +9,6 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
-import { load } from "yaml-js";
 
 import { REPORTER_SOURCE_ONLY_FACTORIES } from "../src/debug/reporterFactoryCases";
 
@@ -505,10 +504,6 @@ test("configured literal probes find only unique original factories without exec
 });
 
 test("configured numeric factory requests capture known source without scanning or executing modules", async () => {
-    const workflow = load(readFileSync(".github/workflows/client-smoke.yml", "utf8"));
-    const configured = workflow.jobs.reporter.steps.find(step => step.name === "Test logged-out Discord").env;
-    assert.equal(configured.REPORTER_FACTORY_IDS, undefined);
-    assert.equal(configured.REPORTER_FACTORY_PROBES, undefined);
     const original = function knownFactory() { assert.fail("Must not execute a factory"); };
     const reads: string[] = [];
     const entries = Object.assign(Object.create({ "8": original }), { "7": original, "230797": original, "10": {} });

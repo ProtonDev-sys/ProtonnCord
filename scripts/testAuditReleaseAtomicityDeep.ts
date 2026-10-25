@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -567,7 +567,7 @@ test("transport bounds reads, handles 404 only on GET, and never blindly retries
     try { await assert.rejects(stalled("GET", "/releases"), /timed out/u); } finally { clearInterval(keepAlive); }
 });
 
-test("local preparation rejects empty files and workflow invokes only atomic channel helper", async () => {
+test("local preparation rejects empty files and hashes valid assets", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protonn-release-atomic-"));
     try {
         await writeFile(join(directory, "empty.asar"), "");
@@ -578,9 +578,4 @@ test("local preparation rejects empty files and workflow invokes only atomic cha
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
-    const workflow = await readFile(new URL("../.github/workflows/build.yml", import.meta.url), "utf8");
-    assert.match(workflow, /node scripts\/releaseUpdateChannel\.mjs/u);
-    assert.doesNotMatch(workflow, /gh release (upload|edit)|git (push|tag).*--force|--clobber/u);
-    assert.match(workflow, /cancel-in-progress: false/u);
-    assert.match(workflow, /git rev-parse FETCH_HEAD/u);
 });

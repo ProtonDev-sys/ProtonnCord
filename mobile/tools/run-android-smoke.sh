@@ -2,8 +2,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
 
-if [[ "${ANDROID_SERIAL:-}" != "emulator-5554" ]]; then
-    echo 'The smoke suite requires its fresh emulator on port 5554.' >&2
+if [[ ! "${ANDROID_SERIAL:-}" =~ ^emulator-([1-9][0-9]{3})$ ]]; then
+    echo 'The smoke suite requires an explicit fresh emulator serial.' >&2
+    exit 1
+fi
+emulator_port=${BASH_REMATCH[1]}
+if (( emulator_port < 5554 || emulator_port > 5682 || emulator_port % 2 != 0 )); then
+    echo 'The smoke suite requires an even emulator port between 5554 and 5682.' >&2
     exit 1
 fi
 

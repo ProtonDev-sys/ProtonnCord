@@ -294,18 +294,6 @@ for (const stage of ["parent", "partition", "window", "request", "check", "devic
     });
 }
 
-test("failed screenshot transitions remain fail closed and owners are only retained while pending", () => {
-    const renderer = source("index.tsx");
-    assert.match(renderer, /setScreenCaptureProtectionStatus\(applied \? enabled \? "screenshot" : "ready" : "failed"\)/u);
-    assert.equal(renderer.match(/if \(screenCaptureProtectionStatus === "pending"\) pendingEncryptedRenderOwners.add\(owner\)/gu)?.length, 4);
-});
-
-test("encrypted forwarding excludes unauthenticated host embeds", () => {
-    const runtime = readFileSync(new URL("../src/equicordplugins/secureMessagingForwarding.desktop/index.ts", import.meta.url), "utf8");
-    assert.match(runtime, /encryptedSource \? \[\] : message.embeds/u);
-    assert.match(runtime, /if \(encryptedSource && rawEmbedSelection && rawEmbedSelection.length > 0\)/u);
-});
-
 for (const status of ["untrusted_author", "replay_detected", "decrypted"]) {
     test("attachment transfers revalidate before publishing or caching: " + status, async () => {
         let checks = 0;

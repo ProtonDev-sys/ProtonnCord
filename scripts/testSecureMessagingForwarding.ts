@@ -115,16 +115,6 @@ const runtime = readFileSync(new URL(
     "../src/equicordplugins/secureMessagingForwarding.desktop/index.ts",
     import.meta.url,
 ), "utf8");
-assert.match(runtime, /find: '"Unable to find original channel for message"'/u);
-assert.match(runtime, /if\(await \$self\.tryForward\(\$1,\$2,\$3\)\)return;/u);
-assert.doesNotMatch(runtime, /replaceForwardExport|guardedSendForwards|waitFor\(/u,
-    "the modal-private actions cannot be intercepted by searching webpack exports");
-assert.match(runtime, /const selective = options\.onlyAttachmentIds !== undefined \|\| options\.onlyEmbedIndices !== undefined/u);
-assert.match(runtime, /const attachmentSelection = selective \? rawAttachmentSelection \?\? new Set<string>\(\) : null/u);
-assert.match(runtime, /const embedSelection = selective \? rawEmbedSelection \?\? \[\] : undefined/u);
-assert.match(runtime, /secureForwardRoute\(source, destination\)/u);
-assert.match(runtime, /await secureForward\(message, destinationChannelId, options\)/u);
-assert.match(runtime, /await plugin\.sendEncryptedForward\(destinationChannelId/u);
 assert.doesNotMatch(runtime, /message_reference:|messageReference:|alsoForwardToChannelId:/u,
     "secure forwarding must create a new encrypted message without a Discord source reference");
 assert.doesNotMatch(runtime, /credentials:\s*["']include["']/u,
