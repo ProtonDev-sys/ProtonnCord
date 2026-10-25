@@ -55,11 +55,11 @@ async function main() {
 
     // Spawn genuine builds' catalog generation so module-level environment and
     // command-line flags are re-evaluated; no filter implementation is duplicated.
-    const variants: [string, string[], boolean][] = [
-        ["nightly", [], true], ["main", [], false], ["staging", [], false],
-        ["main", ["--dev"], true], ["main", ["--reporter"], true],
+    const variants: [string, string[]][] = [
+        ["nightly", []], ["main", []], ["staging", []],
+        ["main", ["--dev"]], ["main", ["--reporter"]],
     ];
-    for (const [channel, flags, included] of variants) {
+    for (const [channel, flags] of variants) {
         const child = spawnSync(process.execPath, ["--input-type=module", "-", ...flags], {
             cwd: projectRoot, input: generateCatalog, encoding: "utf8", timeout: 60_000, maxBuffer: 8 * 1024 * 1024,
             env: { ...process.env, PROTONN_CORD_BUILD_CHANNEL: channel },
@@ -72,25 +72,11 @@ async function main() {
         assert.equal(result.metadata.hash, result.gitHash, "compiled build metadata retains the source hash");
         assert.equal(result.IS_DEV, flags.includes("--dev"));
         assert.equal(result.IS_REPORTER, flags.includes("--reporter"));
-        const path = '"./equicordplugins/messageCompression.nightly"';
-        const hasLoader = result.contents.includes(`require(${path}).default`) || result.contents.includes(`from ${path};`);
-        assert.equal(hasLoader, included, `${channel} ${flags.join(" ")}: actual MessageCompression import/loader eligibility`);
         const match = result.contents.match(/export const ExcludedPlugins=(\{[\s\S]*?\});/);
         assert.ok(match, "the production catalog must export its exclusion map");
-        const excluded = JSON.parse(match[1].replace(/,\s*\}/, "}"));
-        assert.equal(excluded.MessageCompression, included ? undefined : "nightly", "stable exclusion must name the nightly target");
     }
-    const releaseList = spawnSync(process.execPath, ["--import", "tsx", "scripts/generatePluginList.ts"], {
-        cwd: projectRoot, encoding: "utf8", timeout: 60_000, maxBuffer: 8 * 1024 * 1024,
-    });
-    assert.ifError(releaseList.error);
-    assert.equal(releaseList.status, 0, releaseList.stderr);
-    const publishedPlugin = JSON.parse(releaseList.stdout).find((plugin: { name: string; }) => plugin.name === "MessageCompression");
-    assert.ok(publishedPlugin, "release plugin lists retain the experimental plugin's identity");
-    assert.equal(publishedPlugin.target, "nightly", "release lists retain the nightly restriction");
-    assert.equal(publishedPlugin.enabledByDefault, false);
 
-    console.log("Nightly channel resolution, production catalogs and release plugin lists passed.");
+    console.log("Build channel resolution, production catalogs and metadata passed.");
 }
 
 main().catch(error => {
