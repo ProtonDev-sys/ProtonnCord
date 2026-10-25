@@ -20,6 +20,30 @@ const stores = {
 const numericVersion = /^v?[0-9]+(?:\.[0-9]+){2,3}$/u;
 const requireState = (condition, message) => { if (!condition) throw new Error(message); };
 
+async function checkedHash(path) {
+    const stat = await lstat(path);
+    requireState(stat.isFile() && !stat.isSymbolicLink() && stat.size > 0 && stat.size <= 512 * 1024 * 1024, "Invalid release asset file.");
+    const hash = createHash("sha256");
+    for await (const chunk of createReadStream(path)) hash.update(chunk);
+    return hash.digest("hex");
+}
+
+export function planDraftResume(assets) {
+    const uploaded = [];
+    const placeholders = [];
+    const seen = new Set();
+    for (const asset of assets) {
+        requireState(files.includes(asset.name) && !seen.has(asset.name), "Unexpected or duplicate durable release asset.");
+        seen.add(asset.name);
+        if (asset.state === "uploaded" && Number.isSafeInteger(asset.size) && asset.size > 0 && asset.size <= 512 * 1024 * 1024) uploaded.push(asset.name);
+        else {
+            requireState(asset.state === "starter" && asset.size === 0 && Number.isSafeInteger(asset.id) && asset.id > 0, "Invalid incomplete release asset; existing uploaded assets cannot be replaced.");
+            placeholders.push(asset.id);
+        }
+    }
+    return { uploaded, placeholders, missing: files.filter(name => !uploaded.includes(name)) };
+}
+
 export function compareVersions(left, right) {
     requireState(numericVersion.test(left) && numericVersion.test(right), "Invalid numeric version.");
     const a = left.replace(/^v/u, "").split(".").map(BigInt);
@@ -50,9 +74,7 @@ export async function verifyArchives(directory, sha) {
     requireState(lines.length === 4 && lines[3] === "", "Invalid archive checksum manifest.");
     for (const [i, name] of archiveNames.entries()) {
         requireState(new RegExp(`^[a-f0-9]{64}  ${name.replaceAll(".", "\\.")}$`, "u").test(lines[i]), `Invalid checksum entry: ${name}`);
-        const hash = createHash("sha256");
-        for await (const chunk of createReadStream(join(directory, name))) hash.update(chunk);
-        requireState(lines[i] === `${hash.digest("hex")}  ${name}`, `Archive checksum mismatch: ${name}`);
+        requireState(lines[i] === `${await checkedHash(join(directory, name))}  ${name}`, `Archive checksum mismatch: ${name}`);
     }
 }
 
@@ -128,21 +150,63 @@ async function main() {
     try {
         const archives = join(scratch, "archives");
         await mkdir(archives);
-        if (durable) {
-            gh("release", "download", artifactTag, "--repo", `github.com/${repository}`, "--dir", archives,
-                ...files.flatMap(name => ["--pattern", name]));
-        } else {
+        const download = (directory, names) => {
+            if (names.length) gh("release", "download", artifactTag, "--repo", `github.com/${repository}`, "--dir", directory,
+                ...names.flatMap(name => ["--pattern", name]));
+        };
+        async function copyInput(directory) {
             const input = resolve(values.archives);
             await verifyArchives(input, sha);
-            for (const name of files) await copyFile(join(input, name), join(archives, name));
+            for (const name of files) await copyFile(join(input, name), join(directory, name));
+            await verifyArchives(directory, sha);
         }
-        await verifyArchives(archives, sha);
-        if (!durable) {
+        if (durable) {
+            requireState(Number.isSafeInteger(durable.id) && durable.id > 0, "Invalid durable release identity.");
+            const { uploaded, placeholders, missing } = planDraftResume(pages(`repos/${repository}/releases/${durable.id}/assets?per_page=100`));
+            if (missing.length) {
+                requireState(durable.draft === true && !existingTag, "A tagged or published release must have complete durable archives; replacing assets is prohibited.");
+                const snapshot = join(scratch, "retained");
+                await mkdir(snapshot);
+                await copyInput(snapshot);
+                // Validate all existing bytes before making any recovery writes.
+                await download(archives, uploaded);
+                for (const name of uploaded)
+                    requireState(await checkedHash(join(archives, name)) === await checkedHash(join(snapshot, name)), `Retained archives differ from existing asset: ${name}`);
+                for (const id of placeholders) {
+                    // GitHub leaves zero-byte "starter" placeholders after some
+                    // interrupted uploads. They contain no durable archive bytes.
+                    const placeholder = api(`repos/${repository}/releases/assets/${id}`);
+                    requireState(placeholder.id === id && placeholder.state === "starter" && placeholder.size === 0 && files.includes(placeholder.name), "Failed-upload placeholder changed; retry after the upload settles.");
+                    assertCurrentHead();
+                    gh("api", "--hostname", "github.com", "--method", "DELETE", `repos/${repository}/releases/assets/${id}`);
+                }
+                assertCurrentHead();
+                gh("release", "upload", artifactTag, "--repo", `github.com/${repository}`, ...missing.map(name => join(snapshot, name)));
+                // Download again to prove completeness, including resumed assets.
+                const restored = join(scratch, "restored");
+                await mkdir(restored);
+                download(restored, files);
+                await verifyArchives(restored, sha);
+                for (const name of files) {
+                    requireState(await checkedHash(join(restored, name)) === await checkedHash(join(snapshot, name)), `Recovered asset differs from retained archive: ${name}`);
+                    await copyFile(join(restored, name), join(archives, name));
+                }
+                console.log(`Resumed incomplete draft ${artifactTag} without replacing uploaded assets.`);
+            } else download(archives, files);
+        } else {
+            await copyInput(archives);
             assertCurrentHead();
             gh("release", "create", artifactTag, "--repo", `github.com/${repository}`, "--draft", "--target", sha,
                 "--title", artifactTag, "--notes", "Exact browser extension archives; do not replace assets.", ...files.map(name => join(archives, name)));
-            console.log(`Durable browser archives saved as ${artifactTag}.`);
-        } else console.log(`Restored durable archives from ${artifactTag}.`);
+            const restored = join(scratch, "restored");
+            await mkdir(restored);
+            download(restored, files);
+            await verifyArchives(restored, sha);
+            for (const name of files)
+                requireState(await checkedHash(join(restored, name)) === await checkedHash(join(archives, name)), `Uploaded asset differs from validated archive: ${name}`);
+        }
+        await verifyArchives(archives, sha);
+        console.log(`Verified durable archives in ${artifactTag}.`);
         if (!existingTag) {
             assertCurrentHead();
             const tag = api("--method", "POST", `repos/${repository}/git/tags`, "-f", `tag=${version}`, "-f", `message=Version ${version}`, "-f", `object=${sha}`, "-f", "type=commit");

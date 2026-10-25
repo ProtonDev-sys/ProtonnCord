@@ -190,7 +190,7 @@ export ANDROID_AVD_HOME=$scratch/avd
 mkdir -p "$ANDROID_AVD_HOME"
 export ANDROID_ADB_SERVER_PORT
 ANDROID_ADB_SERVER_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
-export ADB_SERVER_SOCKET=tcp:127.0.0.1:$ANDROID_ADB_SERVER_PORT
+export ADB_SERVER_SOCKET=tcp:localhost:$ANDROID_ADB_SERVER_PORT
 emulator_port=${PROTONN_CORD_EMULATOR_PORT:-5580}
 [[ "$emulator_port" =~ ^[1-9][0-9]{3}$ ]] && (( emulator_port >= 5554 && emulator_port <= 5682 && emulator_port % 2 == 0 )) || die 'PROTONN_CORD_EMULATOR_PORT must be even, between 5554 and 5682.'
 python3 - "$emulator_port" <<'PY'

@@ -57,7 +57,8 @@ rebuilds archives or installs dependencies. GitHub authentication uses the
 controller's `gh` login or a publication-only `GH_TOKEN`/`GITHUB_TOKEN`.
 
 A newer numeric package version persists the five immutable files in the draft
-GitHub release `browser-extension-v<version>` before creating `v<version>`.
+GitHub release `browser-extension-v<version>` and downloads them again for
+verification before creating `v<version>`.
 Every remote write and store submission checks that `main` still names the job
 SHA. Existing version tags must name that same SHA. A superseded build fails
 without advancing publication. The controller must hold its release lock across
@@ -80,7 +81,11 @@ working directory to avoid loading `.env.submit` from the checkout. Provider
 response output is suppressed because errors may contain request headers.
 
 After a failed submission, use `--retry --store firefox` (or `chrome`/`edge`) to
-retry only that store. Retry always downloads and verifies the durable archives,
-regardless of local build output. It refuses missing archives, mismatched SHA,
+retry only that store. Completed archive sets are always downloaded and verified,
+regardless of local build output. If an interrupted upload left an untagged draft
+at this exact SHA, retain the original five local files: recovery checks existing
+uploaded bytes against them, removes only empty failed-upload placeholders, and
+uploads missing files without replacing existing assets. It verifies the complete
+remote set before tagging. No archive is rebuilt. Retry refuses mismatched SHA,
 older versions and a moved `main`. Keep the same validated SHA and existing
-version tag; never delete a tag or replace release assets to retry.
+version tag; never delete a tag or replace uploaded release assets to retry.

@@ -103,6 +103,7 @@ const metadata = JSON.parse(read(names[2]));
 assert.equal(metadata.repository, "ProtonDev-sys/ProtonnCord");
 assert.equal(metadata.commit, sha);
 assert.equal(metadata.updateBranch, "nightly");
+assert.match(metadata.version, /^[0-9]+(?:\.[0-9]+){2,3}$/u);
 assert.equal(metadata.version, JSON.parse(readFileSync("package.json")).version);
 assert.equal(metadata.archiveSha256, payloadHash);
 assert.equal(hash(readFileSync("dist/desktop.asar")), payloadHash);
