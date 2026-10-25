@@ -2,10 +2,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createHash } from "node:crypto";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, symlink, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canPromote, canPublish, selectJobs, verifyArtifacts } from "./worker.mjs";
+import { canPromote, canPublish, readBuildArtifact, selectJobs, verifyArtifacts } from "./worker.mjs";
+import { planDraftResume, planVersion, processEnvironment } from "./publish-browser.mjs";
 
 const sha = "a".repeat(40);
 const heads = { main: sha, staging: sha, nightly: sha };
@@ -36,6 +37,45 @@ test("a failed retry cannot promote a previously published job", () => {
     assert.equal(canPromote(passed), true);
     for (const failure of [{ failed: true }, { complete: false }, { validated: false }, { published: false }])
         assert.equal(canPromote({ ...passed, ...failure }), false);
+});
+
+test("untrusted artifact links cannot disclose files outside their build root", { skip: process.platform !== "linux" }, async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ci-build-read-"));
+    const root = join(directory, "build");
+    try {
+        await mkdir(root);
+        await writeFile(join(directory, "private"), "outside build");
+        await writeFile(join(root, "payload"), "validated");
+        assert.equal((await readBuildArtifact(root, "payload")).toString(), "validated");
+        await symlink(join(directory, "private"), join(root, "link"));
+        await assert.rejects(readBuildArtifact(root, "link"));
+        await symlink(directory, join(root, "parent"));
+        await assert.rejects(readBuildArtifact(root, "parent/private"), /escapes/u);
+        await assert.rejects(readBuildArtifact(root, "payload", 1), /Invalid/u);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("browser retries preserve uploaded archives and reject unexpected remote files", () => {
+    const uploaded = { id: 1, name: "extension-chrome.zip", state: "uploaded", size: 50 };
+    const placeholder = { id: 2, name: "extension-firefox.zip", state: "starter", size: 0 };
+    const plan = planDraftResume([uploaded, placeholder]);
+    assert.deepEqual(plan.uploaded, [uploaded.name]);
+    assert.deepEqual(plan.placeholders, [2]);
+    assert.ok(!plan.missing.includes(uploaded.name));
+    assert.throws(() => planDraftResume([uploaded, uploaded]), /duplicate/u);
+    assert.throws(() => planDraftResume([{ ...uploaded, name: "unexpected" }]), /Unexpected/u);
+    assert.throws(() => planDraftResume([{ ...placeholder, size: 1 }]), /Invalid/u);
+});
+
+test("unchanged package versions skip publication while explicit retries bind the original SHA", () => {
+    const tags = [{ name: "v1.2.3", commit: { sha } }];
+    assert.equal(planVersion(tags, "v1.2.3", "b".repeat(40), false).skip, true);
+    assert.throws(() => planVersion(tags, "v1.2.3", "b".repeat(40), true), /different commit/u);
+    assert.equal(planVersion(tags, "v1.2.4", "b".repeat(40), false).skip, false);
+    const environment = processEnvironment({ PATH: "/tools", GH_TOKEN: "private", FIREFOX_JWT_SECRET: "private" });
+    assert.equal(environment.PATH, "/tools");
+    assert.equal(environment.GH_TOKEN, undefined);
+    assert.equal(environment.FIREFOX_JWT_SECRET, undefined);
 });
 
 test("publication needs successful validation of the same current branch SHA", () => {

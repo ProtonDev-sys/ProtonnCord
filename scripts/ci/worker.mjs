@@ -2,8 +2,8 @@
 // Installed controller: credentials stay with this user; builds use a separate account.
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { constants, createWriteStream } from "node:fs";
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -33,6 +33,26 @@ export function canPromote(record) {
 
 const digest = data => createHash("sha256").update(data).digest("hex");
 
+export async function readBuildArtifact(source, name, maximum = 512 * 1024 * 1024) {
+    if (await realpath(source) !== resolve(source)) throw new Error("Build artifact root cannot be a link");
+    const handle = await open(join(source, name), constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+        const actual = await realpath(`/proc/self/fd/${handle.fd}`);
+        if (!actual.startsWith(resolve(source) + sep)) throw new Error("Artifact escapes the build checkout");
+        const info = await handle.stat();
+        if (!info.isFile() || info.size < 1 || info.size > maximum) throw new Error(`Invalid artifact: ${name}`);
+        const bytes = Buffer.alloc(info.size + 1);
+        let offset = 0;
+        while (offset < bytes.length) {
+            const result = await handle.read(bytes, offset, bytes.length - offset, offset);
+            if (!result.bytesRead) break;
+            offset += result.bytesRead;
+        }
+        if (offset !== info.size) throw new Error("Artifact changed while copying");
+        return bytes.subarray(0, offset);
+    } finally { await handle.close(); }
+}
+
 export async function verifyArtifacts(root, manifest) {
     if (!manifest || !Object.keys(manifest).length) throw new Error("Missing protected artifact evidence");
     for (const [name, hash] of Object.entries(manifest)) {
@@ -43,19 +63,13 @@ export async function verifyArtifacts(root, manifest) {
     }
 }
 
-async function snapshotArtifacts(source, destination, mobile) {
+async function snapshotArtifacts(source, destination, mobile, nativeSource) {
     const manifest = {};
     let total = 0;
-    const sourceRoot = await realpath(source);
-    async function copy(name) {
-        const from = join(source, name);
-        if (!(await realpath(from)).startsWith(sourceRoot + sep)) throw new Error("Artifact escapes the build checkout");
-        const info = await lstat(from);
-        if (info.isSymbolicLink() || !info.isFile() || info.size < 1 || info.size > 512 * 1024 * 1024) throw new Error(`Invalid artifact: ${name}`);
-        total += info.size;
+    async function copy(name, origin = source, input = name) {
+        const bytes = await readBuildArtifact(origin, input);
+        total += bytes.length;
         if (total > 1024 * 1024 * 1024) throw new Error("Artifact snapshot exceeds its budget");
-        const bytes = await readFile(from);
-        if (bytes.length !== info.size) throw new Error("Artifact changed while copying");
         await mkdir(dirname(join(destination, name)), { recursive: true, mode: 0o700 });
         await writeFile(join(destination, name), bytes, { mode: 0o600 });
         manifest[name] = digest(bytes);
@@ -76,7 +90,27 @@ async function snapshotArtifacts(source, destination, mobile) {
         await directory("mobile/build/dist");
         for (const name of ["ProtonnCord.apk", "build-receipt.json"]) await copy(`mobile/build/standalone/${name}`);
         await copy("mobile/build/reports/android-client/result.json");
-        for (const name of ["ProtonnCordSetup.exe", "ProtonnCordSetup.json", "ProtonnCordSetup.exe.sha256", "ProtonnCordSetup-LICENSE.txt"]) await copy(`dist/windows/${name}`);
+        for (const name of ["ProtonnCordSetup.exe", "ProtonnCordSetup.json", "ProtonnCordSetup.exe.sha256", "ProtonnCordSetup-LICENSE.txt", "windows.sha256", "windows-build.json", "bootstrap.cjs"])
+            await copy(`dist/windows/${name}`, nativeSource, name);
+        const metadata = JSON.parse(await readFile(join(destination, "dist/windows/ProtonnCordSetup.json"), "utf8"));
+        const receipt = JSON.parse(await readFile(join(destination, "dist/windows/windows-build.json"), "utf8"));
+        const executable = await readFile(join(destination, "dist/windows/ProtonnCordSetup.exe"));
+        const payloadHash = digest(await readFile(join(destination, "dist/release/desktop.asar")));
+        const expected = `${digest(executable)}  ProtonnCordSetup.exe\n`;
+        if (metadata.commit !== (await readFile(join(destination, "dist/release-sha.txt"), "utf8")).trim()
+            || metadata.updateBranch !== "nightly" || metadata.archiveSha256 !== payloadHash
+            || receipt.commit !== metadata.commit || receipt.payloadSha256 !== payloadHash || receipt.installerSmoke !== "not-run"
+            || executable.subarray(0, 2).toString() !== "MZ"
+            || await readFile(join(destination, "dist/windows/ProtonnCordSetup.exe.sha256"), "utf8") !== expected)
+            throw new Error("Private Windows artifact identity mismatch");
+        const checksums = (await readFile(join(destination, "dist/windows/windows.sha256"), "utf8")).trim().split("\n");
+        const expectedNames = ["ProtonnCordSetup.exe", "ProtonnCordSetup.exe.sha256", "ProtonnCordSetup.json", "ProtonnCordSetup-LICENSE.txt", "bootstrap.cjs"];
+        const actualNames = checksums.map(entry => entry.slice(66));
+        if (actualNames.length !== expectedNames.length || new Set(actualNames).size !== expectedNames.length || !expectedNames.every(name => actualNames.includes(name))) throw new Error("Windows output manifest is incomplete");
+        for (const entry of checksums) {
+            const match = /^([a-f0-9]{64})  ([A-Za-z0-9._-]+)$/u.exec(entry);
+            if (!match || match[2] === "windows.sha256" || digest(await readFile(join(destination, "dist/windows", match[2]))) !== match[1]) throw new Error("Private Windows output checksum mismatch");
+        }
     }
     await verifyArtifacts(destination, manifest);
     return manifest;
@@ -86,7 +120,7 @@ async function windowsBuild(config, checkout, record, sha) {
     if (!config.windowsInbox || !config.windowsOutput) throw new Error("Windows release queue is not configured");
     const inbox = join(config.windowsInbox, record.runId);
     await mkdir(inbox, { recursive: true });
-    const payload = await readFile(join(checkout, "dist/desktop.asar"));
+    const payload = await readBuildArtifact(checkout, "dist/desktop.asar", 128 * 1024 * 1024);
     await writeFile(join(inbox, "desktop.asar"), payload);
     await writeFile(join(inbox, "desktop.asar.sha256"), `${digest(payload)}  desktop.asar\n`);
     await save(join(inbox, "request.json"), { sha, runId: record.runId });
@@ -94,9 +128,7 @@ async function windowsBuild(config, checkout, record, sha) {
     let receipt;
     while (!(receipt = await readJson(join(inbox, "result.json"), null)) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5_000));
     if (receipt?.sha !== sha || receipt?.success !== true) throw new Error(receipt?.error ?? "Windows installer build did not complete");
-    await mkdir(join(checkout, "dist/windows"), { recursive: true });
-    for (const name of ["ProtonnCordSetup.exe", "ProtonnCordSetup.json", "ProtonnCordSetup.exe.sha256", "ProtonnCordSetup-LICENSE.txt"])
-        await copyFile(join(config.windowsOutput, record.runId, name), join(checkout, "dist/windows", name));
+    return join(config.windowsOutput, record.runId);
 }
 
 function api(path, method = "GET", body) {
@@ -121,7 +153,7 @@ async function run(command, args, { cwd, env, log, timeout = 90 * 60_000 } = {})
     await new Promise((accept, reject) => {
         const output = log ? createWriteStream(log, { flags: "a" }) : null;
         const child = spawn(command, args, { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
-        for (const stream of [child.stdout, child.stderr]) stream.on("data", data => { process.stdout.write(data); output?.write(data); });
+        for (const stream of [child.stdout, child.stderr]) stream.on("data", data => { if (output) output.write(data); else process.stdout.write(data); });
         const timer = setTimeout(() => { try { process.kill(-child.pid, "SIGKILL"); } catch {} }, timeout);
         child.on("error", error => { clearTimeout(timer); output?.end(); reject(error); });
         child.on("exit", (code, signal) => {
@@ -154,12 +186,14 @@ export async function tick(config, { retry = false, only = config.only } = {}) {
     for (const job of jobs) {
         const key = `${job.key}-${job.sha}`;
         let record = state.jobs[key];
-        if ((record?.complete && !retry) || (record?.failed && !retry)) continue;
+        const needsPublication = job.publish && config.publish !== false && !record?.published;
+        if ((record?.complete && !retry && !needsPublication) || (record?.failed && !retry)) continue;
         // Failed validation always gets fresh build and native output directories.
-        if (!record || (!record.validated && retry)) record = state.jobs[key] = { sha: job.sha, runId: String(Date.now()), number: String(state.nextNumber++), attempt: "1" };
+        if (!record?.validated) record = state.jobs[key] = { sha: job.sha, runId: String(Date.now()), number: String(state.nextNumber++), attempt: "1" };
         record.failed = false;
         record.published = false;
         record.complete = false;
+        delete record.error;
         await save(statePath, state);
         const checkout = join(workRoot, `${key}-${record.runId}`);
         if (dirname(checkout) !== workRoot) throw new Error("Unsafe checkout path");
@@ -173,19 +207,32 @@ export async function tick(config, { retry = false, only = config.only } = {}) {
             ...(config.buildEnv ?? {}),
         };
         // No inherited HOME, SSH agent, GitHub token, or repository credential helper.
-        const build = (command, args, cwd = checkout) => run("sudo", ["-n", "-u", config.buildUser, "env", "-i", ...Object.entries(env).map(([key, value]) => `${key}=${value}`), command, ...args], { cwd, log });
+        const build = (command, args, cwd = checkout) => {
+            const sandbox = ["-n", "-u", config.buildUser, "bwrap", "--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
+                "--ro-bind", "/", "/", "--tmpfs", "/mnt", "--tmpfs", "/run", "--tmpfs", "/home", "--tmpfs", "/tmp", "--proc", "/proc", "--dev-bind", "/dev", "/dev",
+                "--bind", config.buildHome, config.buildHome];
+            if (env.ANDROID_HOME) sandbox.push("--ro-bind", env.ANDROID_HOME, env.ANDROID_HOME);
+            sandbox.push("--cap-drop", "ALL", "--chdir", cwd, "--clearenv");
+            for (const [key, value] of Object.entries(env)) sandbox.push("--setenv", key, value);
+            return run("sudo", [...sandbox, command, ...args], { log });
+        };
         const script = (name, mode) => build("bash", [join(controller, name), mode]);
         let phase = "ci";
         try {
             status(job, phase, "pending", "Validating on the local build PC");
+            console.log(`Validating ${key}; log ${log}`);
             if (!record.validated) {
                 if (!await stat(checkout).catch(() => null)) await build("git", ["clone", "--filter=blob:none", "--no-checkout", `https://github.com/${REPOSITORY}.git`, checkout], workRoot);
                 await build("git", ["-c", "credential.helper=", "fetch", "--no-tags", "origin", job.ref]);
                 await build("git", ["checkout", "--force", "--detach", job.sha]);
                 await script("desktop.sh", "validate");
+                let nativeSource;
                 if (job.channel === "nightly") {
+                    // WSL recreates this device at startup; grant only the build account.
+                    if (!/^[a-z_][a-z0-9_-]*$/u.test(config.buildUser)) throw new Error("Invalid build account");
+                    await run("sudo", ["-n", "setfacl", "-m", `u:${config.buildUser}:rw`, "/dev/kvm"], { log });
                     await script("mobile.sh", "build");
-                    await windowsBuild(config, checkout, record, job.sha);
+                    nativeSource = await windowsBuild(config, checkout, record, job.sha);
                 }
                 // Fetch executable publication code independently of the build account.
                 // Only validated inert artifacts cross into this private source snapshot.
@@ -195,26 +242,29 @@ export async function tick(config, { retry = false, only = config.only } = {}) {
                 await run("git", ["-c", "credential.helper=", "fetch", "--no-tags", "origin", job.sha], { cwd: record.snapshot, env: publicEnv, log });
                 await run("git", ["checkout", "--detach", job.sha], { cwd: record.snapshot, env: publicEnv, log });
                 await run("pnpm", ["install", "--frozen-lockfile", "--ignore-scripts"], { cwd: record.snapshot, env: publicEnv, log });
-                record.manifest = await snapshotArtifacts(checkout, record.snapshot, job.channel === "nightly");
+                record.manifest = await snapshotArtifacts(checkout, record.snapshot, job.channel === "nightly", nativeSource);
                 record.validated = true;
                 await save(statePath, state);
             }
             if (dirname(record.snapshot ?? "") !== stateRoot) throw new Error("Invalid protected publication snapshot");
             await verifyArtifacts(record.snapshot, record.manifest);
             status(job, phase, "success", "Local build and behavioral checks passed");
+            console.log(`${key}: validation passed`);
             if (job.publish && config.publish !== false) {
                 phase = "release";
                 status(job, phase, "pending", "Publishing validated artifacts from the build PC");
                 if (canPublish(job, record, api(`branches/${job.channel}`).commit.sha)) {
                     const token = execFileSync("gh", ["auth", "token"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-                    const releaseEnv = { ...process.env, ...env, HOME: process.env.HOME, GITHUB_TOKEN: token, GH_TOKEN: token };
+                    const releaseEnv = { ...process.env, ...env, HOME: process.env.HOME, PROTONN_CI_RETRY: retry ? "1" : "0", GITHUB_TOKEN: token, GH_TOKEN: token };
                     await run("bash", [join(controller, "desktop.sh"), "release"], { cwd: record.snapshot, env: releaseEnv, log });
                     if (job.channel === "nightly") {
                         await run("bash", [join(controller, "mobile.sh"), "publish"], { cwd: record.snapshot, env: releaseEnv, log });
                         await run("node", ["scripts/publishWindowsInstaller.mjs"], { cwd: record.snapshot, env: releaseEnv, log });
                     }
+                    if (api(`branches/${job.channel}`).commit.sha !== job.sha) throw new Error("Branch advanced during publication; promotion is blocked");
                     record.published = true;
                     status(job, phase, "success", "Validated release artifacts published");
+                    console.log(`${key}: release published`);
                 } else status(job, phase, "error", "Branch advanced; stale build was not published");
             }
             record.complete = true;

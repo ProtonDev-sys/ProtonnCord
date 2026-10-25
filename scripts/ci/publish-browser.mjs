@@ -93,6 +93,7 @@ async function main() {
         archives: { type: "string", default: "dist" },
         store: { type: "string", default: "all" },
         retry: { type: "boolean", default: false },
+        "recover-if-matching": { type: "boolean", default: false },
         help: { type: "boolean", default: false }
     } });
     if (values.help) {
@@ -136,16 +137,18 @@ async function main() {
         requireState(ref.object?.type === "commit" && ref.object.sha === sha, "Superseded browser release: main has moved. No further publication is allowed.");
     }
     assertCurrentHead();
-    const { existingTag, latest, skip } = planVersion(pages(`repos/${repository}/tags?per_page=100`), version, sha, values.retry);
+    const retained = values["recover-if-matching"] ? pages(`repos/${repository}/releases?per_page=100`).filter(release => release.tag_name === artifactTag) : null;
+    const retry = values.retry || Boolean(retained?.length === 1 && retained[0].target_commitish === sha);
+    const { existingTag, latest, skip } = planVersion(pages(`repos/${repository}/tags?per_page=100`), version, sha, retry);
     if (skip) {
         console.log(`No new browser version to publish (${version}; latest ${latest}). Use --retry only for this exact version's failed store.`);
         return;
     }
-    const releases = pages(`repos/${repository}/releases?per_page=100`).filter(release => release.tag_name === artifactTag);
+    const releases = retained ?? pages(`repos/${repository}/releases?per_page=100`).filter(release => release.tag_name === artifactTag);
     requireState(releases.length <= 1, "Duplicate durable browser releases.");
     const durable = releases[0];
     requireState(!durable || durable.target_commitish === sha, "Durable archives belong to a different commit.");
-    requireState(durable || (!existingTag && !values.retry), "An existing version or retry requires durable archives; rebuilding is prohibited.");
+    requireState(durable || (!existingTag && !retry), "An existing version or retry requires durable archives; rebuilding is prohibited.");
     const scratch = await mkdtemp(join(tmpdir(), "protonn-browser-release-"));
     try {
         const archives = join(scratch, "archives");

@@ -16,6 +16,11 @@ if [[ "$mode" == validate ]]; then
     pnpm install --frozen-lockfile
     pnpm checkPrivacy
     pnpm buildStandalone
+    IFS=: read -r -a electron_binaries <<< "${PROTONN_CI_ELECTRON_BINS:?Configure pinned Electron runtimes on the build host}"
+    for electron in "${electron_binaries[@]}"; do
+        [[ -x "$electron" ]]
+        ELECTRON_BIN="$electron" xvfb-run -a node scripts/testElectronIpc.mjs
+    done
     pnpm test
     pnpm buildWebStandalone
     pnpm generateTypes
@@ -53,6 +58,8 @@ elif [[ "$mode" == release ]]; then
     [[ -n ${GITHUB_TOKEN:-} ]] || { echo 'Publishing credential required' >&2; exit 1; }
     node scripts/releaseUpdateChannel.mjs
     if [[ "$PROTONN_CORD_BUILD_CHANNEL" == main ]]; then
-        node scripts/ci/publish-browser.mjs --sha "$GITHUB_SHA" --store "${PROTONN_CI_BROWSER_STORES:-none}"
+        retry_flags=()
+        [[ ${PROTONN_CI_RETRY:-0} != 1 ]] || retry_flags+=(--recover-if-matching)
+        node scripts/ci/publish-browser.mjs --sha "$GITHUB_SHA" --store "${PROTONN_CI_BROWSER_STORES:-all}" "${retry_flags[@]}"
     fi
 fi
