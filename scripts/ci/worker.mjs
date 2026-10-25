@@ -6,6 +6,7 @@ import { constants, createWriteStream } from "node:fs";
 import { lstat, mkdir, open, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { verifyWindowsPayload } from "./windows-payload.mjs";
 
 export const CHANNELS = ["main", "staging", "nightly"];
 const REPOSITORY = "ProtonDev-sys/ProtonnCord";
@@ -35,7 +36,7 @@ const digest = data => createHash("sha256").update(data).digest("hex");
 
 export async function readBuildArtifact(source, name, maximum = 512 * 1024 * 1024) {
     if (await realpath(source) !== resolve(source)) throw new Error("Build artifact root cannot be a link");
-    const handle = await open(join(source, name), constants.O_RDONLY | constants.O_NOFOLLOW);
+    const handle = await open(join(source, name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
         const actual = await realpath(`/proc/self/fd/${handle.fd}`);
         if (!actual.startsWith(resolve(source) + sep)) throw new Error("Artifact escapes the build checkout");
@@ -95,7 +96,9 @@ async function snapshotArtifacts(source, destination, mobile, nativeSource) {
         const metadata = JSON.parse(await readFile(join(destination, "dist/windows/ProtonnCordSetup.json"), "utf8"));
         const receipt = JSON.parse(await readFile(join(destination, "dist/windows/windows-build.json"), "utf8"));
         const executable = await readFile(join(destination, "dist/windows/ProtonnCordSetup.exe"));
-        const payloadHash = digest(await readFile(join(destination, "dist/release/desktop.asar")));
+        const payload = await readFile(join(destination, "dist/release/desktop.asar"));
+        verifyWindowsPayload(executable, payload);
+        const payloadHash = digest(payload);
         const expected = `${digest(executable)}  ProtonnCordSetup.exe\n`;
         if (metadata.commit !== (await readFile(join(destination, "dist/release-sha.txt"), "utf8")).trim()
             || metadata.updateBranch !== "nightly" || metadata.archiveSha256 !== payloadHash
@@ -166,6 +169,7 @@ async function run(command, args, { cwd, env, log, timeout = 90 * 60_000 } = {})
 export async function tick(config, { retry = false, only = config.only } = {}) {
     const stateRoot = resolve(config.stateRoot);
     const workRoot = resolve(config.workRoot);
+    const resolver = await realpath("/etc/resolv.conf");
     const controller = dirname(fileURLToPath(import.meta.url));
     await mkdir(stateRoot, { recursive: true, mode: 0o700 });
     if ((await stat(stateRoot)).mode & 0o077) throw new Error("Controller state must be private (mode 700)");
@@ -211,6 +215,8 @@ export async function tick(config, { retry = false, only = config.only } = {}) {
             const sandbox = ["-n", "-u", config.buildUser, "bwrap", "--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
                 "--ro-bind", "/", "/", "--tmpfs", "/mnt", "--tmpfs", "/run", "--tmpfs", "/home", "--tmpfs", "/tmp", "--proc", "/proc", "--dev-bind", "/dev", "/dev",
                 "--bind", config.buildHome, config.buildHome];
+            // WSL links resolv.conf into /mnt; expose this one inert file only.
+            if (resolver !== "/etc/resolv.conf") sandbox.push("--dir", dirname(resolver), "--ro-bind", resolver, resolver);
             if (env.ANDROID_HOME) sandbox.push("--ro-bind", env.ANDROID_HOME, env.ANDROID_HOME);
             sandbox.push("--cap-drop", "ALL", "--chdir", cwd, "--clearenv");
             for (const [key, value] of Object.entries(env)) sandbox.push("--setenv", key, value);

@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, symlink, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { canPromote, canPublish, readBuildArtifact, selectJobs, verifyArtifacts } from "./worker.mjs";
 import { planDraftResume, planVersion, processEnvironment } from "./publish-browser.mjs";
 
@@ -52,6 +53,8 @@ test("untrusted artifact links cannot disclose files outside their build root", 
         await symlink(directory, join(root, "parent"));
         await assert.rejects(readBuildArtifact(root, "parent/private"), /escapes/u);
         await assert.rejects(readBuildArtifact(root, "payload", 1), /Invalid/u);
+        execFileSync("mkfifo", [join(root, "pipe")]);
+        await assert.rejects(readBuildArtifact(root, "pipe"), /Invalid/u);
     } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

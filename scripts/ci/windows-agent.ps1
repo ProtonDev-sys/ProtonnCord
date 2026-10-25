@@ -76,7 +76,10 @@ try {
                         Stop-ScheduledTask -TaskName $settings.BuildTask
                         throw "Native build exceeded its $nativeTimeoutSeconds second deadline and was stopped."
                     }
-                    if ($info.LastRunTime -eq $previousRun -and [DateTime]::UtcNow -gt $startDeadline) { throw 'Native build task did not start.' }
+                    if ($info.LastRunTime -eq $previousRun -and [DateTime]::UtcNow -gt $startDeadline) {
+                        if ($task.State -in @('Running', 'Queued')) { Stop-ScheduledTask -TaskName $settings.BuildTask }
+                        throw 'Native build task did not start.'
+                    }
                 } while ($task.State -in @('Running', 'Queued') -or $info.LastRunTime -eq $previousRun)
                 if ($info.LastTaskResult -ne 0) { throw "Native build failed with exit code $($info.LastTaskResult); see its per-attempt log." }
                 $receipt.success = $true

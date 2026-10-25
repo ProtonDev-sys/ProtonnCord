@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -217,9 +217,18 @@ async function main() {
             assertCurrentHead();
             api("--method", "POST", `repos/${repository}/git/refs`, "-f", `ref=refs/tags/${version}`, "-f", `sha=${tag.sha}`);
         }
+        const receiptPath = resolve(git("rev-parse", "--git-path", "protonn-browser-store-results.json"));
+        let receipt = { sha, version, completed: [] };
+        try {
+            const saved = JSON.parse(await readFile(receiptPath, "utf8"));
+            requireState(saved.sha === sha && saved.version === version && Array.isArray(saved.completed)
+                && saved.completed.every(store => Object.hasOwn(stores, store)) && new Set(saved.completed).size === saved.completed.length, "Invalid retained browser publication receipt.");
+            receipt = saved;
+        } catch (error) { if (error.code !== "ENOENT") throw error; }
         const failures = [];
         for (const [store, names] of Object.entries(stores)) {
             if (values.store !== "all" && values.store !== store) continue;
+            if (receipt.completed.includes(store)) { console.log(`Reusing confirmed ${store} publication for ${version}.`); continue; }
             const present = names.filter(name => process.env[name]?.trim());
             if (!present.length && values.store === "all") {
                 console.log(`Skipping ${store}: credentials are not configured.`);
@@ -251,7 +260,12 @@ async function main() {
             // importing credentials belonging to other stores from the checkout.
             const result = spawnSync(process.execPath, [cli, ...args], { cwd: storeDirectory, env: environment, timeout: 15 * 60_000, encoding: "utf8", maxBuffer: 4 * 1024 * 1024, windowsHide: true });
             if (result.error || result.status !== 0) failures.push(`${store}: publisher failed (${result.error?.code ?? result.status}); retry --retry --store ${store}`);
-            else console.log(`Published ${store} ${version}.`);
+            else {
+                receipt.completed.push(store);
+                await writeFile(`${receiptPath}.tmp`, JSON.stringify(receipt) + "\n", { mode: 0o600 });
+                await rename(`${receiptPath}.tmp`, receiptPath);
+                console.log(`Published ${store} ${version}.`);
+            }
             // Provider responses can contain request headers. Do not print them.
         }
         requireState(!failures.length, `Browser publication incomplete; durable archives are retained. ${failures.join("; ")}`);
