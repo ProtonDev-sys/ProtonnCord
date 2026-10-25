@@ -317,11 +317,6 @@ async function main(): Promise<void> {
     await testHttpBranches();
     await testUpdaterControls();
 
-    const workflow = await readFile(new URL("../.github/workflows/build.yml", import.meta.url), "utf8");
-    assert.match(workflow, /- main[\s\S]*- staging[\s\S]*- nightly/u);
-    assert.match(workflow, /tag="latest"/u);
-    assert.match(workflow, /--prerelease/u);
-
     const updatesPage = await readFile(new URL(
         "../src/components/settings/tabs/updater/index.tsx",
         import.meta.url,

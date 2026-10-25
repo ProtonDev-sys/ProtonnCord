@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { createInterface } from "node:readline";
 import { PassThrough, Writable } from "node:stream";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
-import { BuildOptions, buildSync } from "esbuild";
 import { ModuleKind, parseConfigFileTextToJson, ScriptTarget, transpileModule } from "typescript";
 
 import { REPORTER_SOURCE_ONLY_FACTORIES } from "../src/debug/reporterFactoryCases";
@@ -97,83 +94,6 @@ test("successful benchmark sampling stops profiler exactly once", async () => {
     assert.deepEqual(commands, ["Profiler.enable", "Profiler.start", "Profiler.stop", "detach"]);
 });
 
-test("release gate skips stale builds before creating tags or publishing", () => {
-    const workflow = read(".github/workflows/publish.yml");
-    assert.match(workflow, /release: \$\{\{ steps\.release\.outputs\.release \}\}/u);
-    assert.match(workflow, /git archive --format=zip --output=dist\/extension-sources\.zip "\$GITHUB_SHA"/u);
-    const persistenceStart = workflow.indexOf("current_sha=$(gh api", workflow.indexOf("- name: Persist durable release archives"));
-    const tagStart = workflow.indexOf("current_sha=$(gh api", workflow.indexOf("- name: Create Tag"));
-    assert.ok(persistenceStart >= 0 && tagStart > persistenceStart);
-    const gates = [
-        { name: "archives", command: workflow.slice(persistenceStart, workflow.indexOf("\n            - name: Store release archives", persistenceStart)), staleStatus: 1 },
-        { name: "tag", command: workflow.slice(tagStart, workflow.indexOf("\n    publish-chrome:", tagStart)), staleStatus: 0 },
-    ];
-    const directory = mkdtempSync(path.join(tmpdir(), "tooling-release-test-"));
-    try {
-        for (const gate of gates) for (const current of ["stale", "expected"]) {
-            const output = path.join(directory, `${gate.name}-${current}.txt`).replaceAll("\\", "/");
-            writeFileSync(output, "");
-            const mock = `gh() { if [[ "$*" == *branches/main* ]]; then echo "$CURRENT_SHA"; else echo mutation; fi; }\n`;
-            let result = "";
-            let status = 0;
-            try {
-                result = execFileSync(process.platform === "win32" ? "C:/Program Files/Git/bin/bash.exe" : "bash", ["-s"], {
-                    input: `set -euo pipefail\n${mock}${gate.command.replace(/^ {18}/gmu, "")}`,
-                    encoding: "utf8",
-                    timeout: 10_000,
-                    stdio: "pipe",
-                    env: { ...process.env, CURRENT_SHA: current, GITHUB_SHA: "expected", GITHUB_REPOSITORY: "fixture/repository", GITHUB_OUTPUT: output, ARTIFACT_TAG: "fixture-archives", PACKAGE_VERSION: "v1.0.0" },
-                });
-            } catch (error) {
-                const failure = error as { status: number; stdout: string; stderr: string; };
-                status = failure.status;
-                result = failure.stdout;
-                assert.match(failure.stderr, /Superseded release build/u);
-            }
-            assert.equal(status, current === "stale" ? gate.staleStatus : 0);
-            assert.equal(readFileSync(output, "utf8").trim(), gate.name === "tag" ? `release=${current === "expected"}` : "");
-            assert.equal(result.includes("mutation"), current === "expected");
-        }
-    } finally {
-        rmSync(directory, { recursive: true, force: true });
-    }
-});
-
-test("report publisher passes a bounded abort signal without network access", async () => {
-    const workflow = read(".github/workflows/reportBrokenPlugins.yml");
-    assert.match(workflow, /publish:\s+name: Publish validated report\s+timeout-minutes: 5/u);
-    const inline = workflow.slice(workflow.indexOf('const { createHmac } = require("node:crypto");'), workflow.lastIndexOf("main().catch(error =>"))
-        .replace(/^ {18}/gmu, "");
-    const payload = JSON.stringify({ username: "Protonn Cord Reporter", embeds: [{ description: "fixture" }] });
-    const signal = {};
-    let sent = 0;
-    let cancelled = 0;
-    await runInNewContext(`${inline}\nmain();`, {
-        URL,
-        process: { env: { WEBHOOK_URL: "https://report.invalid/endpoint", PAYLOAD_DIR: path.resolve("/fixture") } },
-        require(name: string) {
-            if (name === "node:crypto") return {};
-            if (name === "node:path") return path;
-            if (name === "node:fs/promises") return {
-                realpath: async (value: string) => value,
-                readdir: async () => ["report-stable.json"],
-                lstat: async () => ({ size: Buffer.byteLength(payload), isFile: () => true, isSymbolicLink: () => false }),
-                readFile: async () => payload,
-            };
-            throw new Error(`Unexpected publisher import: ${name}`);
-        },
-        AbortSignal: { timeout(milliseconds: number) { assert.equal(milliseconds, 30_000); return signal; } },
-        async fetch(_endpoint: URL, options: { signal: unknown; redirect: string; }) {
-            sent++;
-            assert.equal(options.signal, signal);
-            assert.equal(options.redirect, "error");
-            return { ok: true, body: { async cancel() { cancelled++; } } };
-        },
-    });
-    assert.equal(sent, 1);
-    assert.equal(cancelled, 1);
-});
-
 test("local reporter bounds webhook requests and releases response bodies", async () => {
     const source = read("scripts/generateReport.ts");
     const command = source.slice(source.indexOf("await fetch(process.env.WEBHOOK_URL"), source.indexOf("\n    }\n}", source.indexOf("await fetch(process.env.WEBHOOK_URL")));
@@ -194,49 +114,6 @@ test("local reporter bounds webhook requests and releases response bodies", asyn
         });
         assert.equal(cancelled, 1);
     }
-});
-
-test("both reporter workflow builds load their shared catalog in plain Node", () => {
-    const directory = mkdtempSync(path.join(root, ".reporter-build-test-"));
-    try {
-        for (const workflow of ["client-smoke.yml", "reportBrokenPlugins.yml"]) {
-            const command = read(`.github/workflows/${workflow}`).match(/\besbuild scripts\/generateReport\.ts[^\n]*/u)?.[0];
-            assert.ok(command, `${workflow} reporter build must be present`);
-            const options: Record<string, string | true> = Object.fromEntries(command.split(/\s+/u).filter(argument => argument.startsWith("--")).map(argument => {
-                const [key, value] = argument.slice(2).split("=");
-                return [key, value ?? true];
-            }));
-            const outfile = path.join(directory, `${workflow}.mjs`);
-            const canary = workflow === "reportBrokenPlugins.yml";
-            buildSync({
-                absWorkingDir: root, entryPoints: ["scripts/generateReport.ts"], outfile,
-                bundle: options.bundle === true, platform: options.platform as BuildOptions["platform"],
-                format: options.format as BuildOptions["format"], packages: options.packages as BuildOptions["packages"],
-            });
-            const result = spawnSync(process.execPath, [outfile], {
-                cwd: root, encoding: "utf8", timeout: 10_000, maxBuffer: 1_048_576,
-                env: { ...process.env, CHROMIUM_BIN: "", USE_CANARY: String(canary), NODE_OPTIONS: "" },
-            });
-            assert.equal(result.error, undefined, workflow);
-            assert.equal(result.status, 1, workflow);
-            assert.equal(result.stdout, "", workflow);
-            assert.equal(result.stderr.trim(), `${canary ? "CANARY" : "STABLE"} --- Missing environment variable CHROMIUM_BIN`, workflow);
-        }
-    } finally {
-        rmSync(directory, { recursive: true, force: true });
-    }
-});
-
-test("mobile CI audits its full frozen graph with the pinned package manager", () => {
-    const workflow = read(".github/workflows/mobile.yml");
-    const toolchain = JSON.parse(read("mobile/toolchain.json"));
-    const validation = workflow.match(/- name: Test mobile against this desktop revision\n([\s\S]*?)(?=            - name:)/u)?.[1];
-    assert.ok(validation, "mobile validation step must be present");
-    assert.match(validation, /working-directory: mobile/u);
-    assert.match(validation, /bun install --frozen-lockfile[ \t]*\n[ \t]*bun audit[ \t]*\n/u, "audit includes development dependencies and all severities, without filtering or ignoring failures");
-    assert.doesNotMatch(validation, /continue-on-error: true|\|\| true/u);
-    assert.equal(workflow.match(/^\s*bun-version:\s*(\S+)\s*$/mu)?.[1], toolchain.bunVersion);
-    assert.match(read("mobile/build.gradle.kts"), /inputs\.files\(\s*"package\.json"[^)]*"bunfig\.toml"/u, "changing the install policy must invalidate the JS bundle");
 });
 
 test("explicit mobile host type pins match their frozen resolutions", () => {

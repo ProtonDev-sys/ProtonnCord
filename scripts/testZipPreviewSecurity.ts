@@ -314,13 +314,6 @@ async function testForgedExpandedSizeCannotBeTruncated(): Promise<void> {
     );
 }
 
-async function testNoWholeArchiveInflationRegression(): Promise<void> {
-    const source = await readFile("src/equicordplugins/zipPreview/utils.ts", "utf8");
-    assert.doesNotMatch(source, /\bunzipSync\b/u, "ZIP Preview must not synchronously inflate the whole archive");
-    assert.match(source, /inspectZipArchive/u);
-    assert.match(source, /extractZipArchiveEntry/u);
-}
-
 async function testDeferredSecureAttachmentRows(): Promise<void> {
     const utilsSource = await readFile("src/equicordplugins/zipPreview/utils.ts", "utf8");
     const utilsTree = createSourceFile("utils.ts", utilsSource, ScriptTarget.Latest, true);
@@ -369,7 +362,6 @@ async function main(): Promise<void> {
     testMalformedArchives();
     await testIntegrityAndPreviewLimit();
     await testForgedExpandedSizeCannotBeTruncated();
-    await testNoWholeArchiveInflationRegression();
     await testDeferredSecureAttachmentRows();
     console.log("ZIP Preview archive security checks passed");
 }

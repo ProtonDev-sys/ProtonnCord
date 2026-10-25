@@ -45,7 +45,7 @@ This section is for developers; installing a published APK does not require thes
 sdkmanager 'build-tools;36.0.0' 'platform-tools'
 ```
 
-Supply the compiled plugin and pinned Hermes runtime from the **same reviewed Mobile build**. The eight-file Mobile artifact's `desktop-commit.txt`, manifest, toolchain and checksums establish their source identity. Build those inputs using the [mobile workflow](../.github/workflows/mobile.yml) or the commands in the [development guide](README.md#build-and-test-without-a-discord-account).
+Supply the compiled plugin and pinned Hermes runtime from the **same reviewed Mobile build**. The eight-file Mobile artifact's `desktop-commit.txt`, manifest, toolchain and checksums establish their source identity. Build those inputs using the [independent mobile pipeline](../scripts/ci/mobile.sh) or the commands in the [development guide](README.md#build-and-test-without-a-discord-account).
 
 Create a private PKCS12 keystore once, keep it outside the repository and retain it for later updates. Skip generation if you already have that key:
 
@@ -81,7 +81,7 @@ Use `--universal --verify-only` to authenticate the five original APKs without s
 
 ## Account-free Android validation
 
-The [Android smoke workflow](../.github/workflows/android-smoke.yml) builds this commit's plugin, the pinned runtime and one standalone APK with a disposable test identity. Its existing fresh Android 15 `google_apis` x86-64 emulator runs the 13 native storage tests and the following client check; there is no second emulator suite. Test APKs and signing material are excluded from diagnostic uploads.
+The [local mobile pipeline](../scripts/ci/mobile.sh) builds this commit's plugin, the pinned runtime and one standalone APK. One fresh Android 15 `google_apis` x86-64 emulator runs the 13 native storage tests and the following client check. Pull requests use a disposable test identity; publication uses the retained production key. Private signing material stays outside release artifacts and diagnostics.
 
 ```sh
 python3 -B mobile/tools/test_android_client.py \
@@ -99,6 +99,6 @@ For one subsequent restart, the test adds an observer of the original plugin's a
 
 ## Release signing configuration
 
-Production builds require one retained private signing identity. Configure GitHub Actions secrets `ANDROID_SIGNING_KEYSTORE_B64` (the base64 PKCS12 file) and `ANDROID_SIGNING_PASSWORD`, using alias `protonncord`. Set repository variable `ANDROID_SIGNER_SHA256` to its lowercase, 64-hex certificate SHA-256 fingerprint. The release workflow verifies that certificate before signing and checks it again against the finished APK.
+Production builds require one retained private signing identity. Keep the PKCS12 keystore and password file in a private host directory configured with `PROTONN_CORD_ANDROID_SIGNING_DIR`, using alias `protonncord`. Set `ANDROID_SIGNER_SHA256` in the private CI configuration to its lowercase, 64-hex certificate SHA-256 fingerprint. The local release pipeline verifies that certificate before signing and checks it again against the finished APK. Signing files are never committed.
 
 A missing or mismatched identity stops production publication. The disposable emulator key is never a production fallback. The final APK receives the same install/launch/restart check before publication, using the already validated Mobile payload; it does not rebuild Bun, Gradle or the native storage test suite. Supporting receipts remain CI artifacts, while each immutable `android-RUN_ID-ATTEMPT` release contains only `ProtonnCord.apk`.

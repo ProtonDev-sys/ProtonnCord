@@ -33,4 +33,6 @@ Packaging uses an explicit file list and verifies pinned installer binaries. It 
 
 Live Secure Messaging tests require an explicitly authorized disposable profile, `PROTONN_CORD_SECURE_MESSAGING_LIVE_CHANNEL_ID` and `PROTONN_CORD_SECURE_MESSAGING_LIVE_RECIPIENT_ID`. Offline tests use synthetic identifiers. Never commit account data or local `.env` files.
 
+Tests and releases run on an independently managed build PC. GitHub Actions is disabled; GitHub remains the source and download host. See [CI setup and operation](scripts/ci/README.md).
+
 Licensed under GPL-3.0-or-later. Upstream notices and third-party license files are retained.

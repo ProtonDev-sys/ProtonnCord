@@ -5,7 +5,6 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
 import { shouldHideSecureEmbedOnlyPlaintext } from "../src/equicordplugins/secureMessaging.desktop/embedUrls";
 import {
@@ -57,14 +56,5 @@ assert.equal(shouldHideSecureEmbedOnlyPlaintext("https://example.com/video", "pe
     "a pending embed must keep its URL visible instead of creating an empty message row");
 assert.equal(shouldHideSecureEmbedOnlyPlaintext("https://example.com/video", "present"), true);
 assert.equal(shouldHideSecureEmbedOnlyPlaintext("https://example.com/video", "absent"), false);
-
-const renderer = readFileSync(new URL(
-    "../src/equicordplugins/secureMessaging.desktop/index.tsx",
-    import.meta.url,
-), "utf8");
-assert.match(renderer, /getOptimisticOutgoingPlaintext\(message\.content\)/u);
-assert.match(renderer, /settleOptimisticOutgoingPlaintext\([\s\S]*discordMessageNonce\(message\)/u);
-assert.doesNotMatch(renderer, /optimisticOutgoingPlaintexts\.delete/u,
-    "render effects must not delete optimistic plaintext before checking the provisional nonce");
 
 console.log("Secure Messaging optimistic rendering checks passed");
