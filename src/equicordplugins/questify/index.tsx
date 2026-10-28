@@ -228,10 +228,17 @@ export default definePlugin({
             // Overrides the account panel Quest popup and progress display.
             find: "collapsed-with-rewards\":\"collapsed-without-rewards",
             predicate: () => getQuestifySettings().disableAccountPanelPromo || !getQuestifySettings().disableAccountPanelQuestProgress,
-            replacement: {
-                match: /(?<=function\(\)\{let \i=)(\(0,\i\.\i\)\(\))(?=,\i=\(0,\i\.\i\)\(\i\.\i\.DESKTOP_ACCOUNT_PANEL_AREA,)/,
-                replace: "($self.useQuestRerender(),$self.getQuestPanelOverride($1))"
-            }
+            group: true,
+            replacement: [
+                {
+                    match: /(?<=function\(\)\{let \i=)(\(0,\i\.\i\)\(\))(?=,\i=\(0,\i\.\i\)\(\i\.\i\.DESKTOP_ACCOUNT_PANEL_AREA,)/,
+                    replace: "($self.useQuestRerender(),$1)"
+                },
+                {
+                    match: /(?<=DESKTOP_ACCOUNT_PANEL_AREA.{0,200})switch\((\i)\.type\)\{case (\i\.\i)\.QUEST:/,
+                    replace: "switch(($1=$self.getQuestPanelOverride($1,$2.QUEST))?.type){case $2.QUEST:"
+                }
+            ]
         },
         {
             // Prevents fetching Quests.

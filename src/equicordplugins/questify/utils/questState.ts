@@ -209,7 +209,12 @@ function getMostRecentlyCompletedUnclaimedQuest(): Quest | null {
         })[0] ?? null;
 }
 
-export function getQuestPanelOverride(quest: Quest | null): Quest | null {
+interface QuestPanelCreative {
+    type: unknown;
+    quest?: Quest;
+}
+
+export function getQuestPanelOverride(creative: QuestPanelCreative | null, questType: unknown): QuestPanelCreative | null {
     const panelState = useQuestifySettings(["disableQuestsEverything", "disableAccountPanelPromo", "disableAccountPanelQuestProgress"]);
 
     if (panelState.disableQuestsEverything) {
@@ -221,12 +226,16 @@ export function getQuestPanelOverride(quest: Quest | null): Quest | null {
     }
 
     if (panelState.disableAccountPanelQuestProgress) {
-        return quest;
+        return creative;
     }
 
     const nextQuest = getAutoCompleteShowcaseQuest() ?? getMostRecentlyCompletedUnclaimedQuest();
 
-    return nextQuest ?? (panelState.disableAccountPanelPromo ? null : quest);
+    if (nextQuest) {
+        return { type: questType, quest: nextQuest };
+    }
+
+    return panelState.disableAccountPanelPromo && creative?.type === questType ? null : creative;
 }
 
 export function shouldForceQuestPanelVisible(quest: Quest | null): boolean {

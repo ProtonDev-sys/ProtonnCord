@@ -4,6 +4,7 @@ import { runInNewContext } from "node:vm";
 
 import { questAccountPanel, questActionButton, questDiscoverySidebars, questProgressRing } from "./fixtures/discordQuestPanel";
 import { applyPatch, jsx, pluginPatches } from "./utils/discordClientFixture";
+import { loadTestModule } from "./utils/loadTestModule";
 
 const patches = pluginPatches("src/equicordplugins/questify/index.tsx");
 
@@ -65,14 +66,14 @@ test("Quest discovery hiding remains compatible with the legacy direct-map path"
 });
 
 test("Quest account-panel overrides keep native no-fill hooks and ad wrappers in order", () => {
-    const patch = patches.find((patch: any) => patch.find === 'collapsed-with-rewards":"collapsed-without-rewards' && !Array.isArray(patch.replacement) && !String(patch.replacement.match).includes("SELECT"));
+    const patch = patches.find((patch: any) => patch.find === 'collapsed-with-rewards":"collapsed-without-rewards' && Array.isArray(patch.replacement));
     const calls: string[] = [];
     const native = Object.freeze({ type: "quest", quest: Object.freeze({ id: "quest" }) });
     const noFill = { decisionId: "no-fill" };
     let override: any = native;
     const render = runInNewContext(`(${applyPatch(questAccountPanel, patch)})`, {
-        plugin: { useQuestRerender: () => calls.push("subscribe"), getQuestPanelOverride(value: unknown) {
-            calls.push("override"); assert.equal(value, native); return override;
+        plugin: { useQuestRerender: () => calls.push("subscribe"), getQuestPanelOverride(value: unknown, questType: unknown) {
+            calls.push("override"); assert.equal(value, native); assert.equal(questType, "quest"); return override;
         } },
         R: { wo: () => { calls.push("native"); return native; } },
         h: { A: (location: string, source: string) => { calls.push("no-fill"); assert.equal(location, "account"); assert.equal(source, "useNoFillAd"); return noFill; } },
@@ -80,7 +81,7 @@ test("Quest account-panel overrides keep native no-fill hooks and ad wrappers in
         s: { jsx }, S: { y5: "ad-wrapper" }, P: { rE: { QUESTS_BAR: "quest-bar" } }, tJ: "quest-panel", t0: "no-fill-panel"
     });
     const node = render();
-    assert.deepEqual(calls, ["subscribe", "native", "override", "no-fill"]);
+    assert.deepEqual(calls, ["subscribe", "native", "no-fill", "override"]);
     assert.equal(node.type, "ad-wrapper");
     assert.equal(node.props.adCreativeId, "quest");
     assert.equal(node.props.source, "quest-bar");
@@ -89,7 +90,41 @@ test("Quest account-panel overrides keep native no-fill hooks and ad wrappers in
     assert.equal(render().props.noFillDecision, noFill);
     override = { type: "bounty" };
     assert.equal(render(), null);
+    override = null;
+    assert.equal(render(), undefined);
     assert.equal(native.type, "quest");
+});
+
+test("Questify account-panel override returns Discord creatives and hides only quest promos", () => {
+    const settings = { disableQuestsEverything: false, disableAccountPanelPromo: true, disableAccountPanelQuestProgress: false, ignoredQuestIDs: { ids: [] } };
+    const quests = new Map<string, any>();
+    const entries: any[] = [];
+    const types = new Proxy({}, { get: (_target, property) => property });
+    const { getQuestPanelOverride } = loadTestModule("src/equicordplugins/questify/utils/questState.ts", {
+        "@vencord/discord-types/enums": { QuestTaskType: types },
+        "@webpack/common": { QuestStore: { quests, getQuest: (id: string) => quests.get(id) } },
+        "../settings/access": { useQuestifySettings: () => settings, getQuestifySettings: () => settings },
+        "../settings/def": { ignoredQuestIDsKey: "ids" },
+        "./completion": { getActiveAutoCompletes: () => entries, getAutoCompleteQuestTarget: () => ({ adjusted: 10 }) },
+        "./filtering": {}
+    }, {});
+    const promo = { type: "quest", quest: { id: "promo" } };
+    const noFill = { type: "no-fill" };
+    assert.equal(getQuestPanelOverride(promo, "quest"), null);
+    assert.equal(getQuestPanelOverride(noFill, "quest"), noFill);
+    assert.equal(getQuestPanelOverride(null, "quest"), null);
+    settings.disableAccountPanelPromo = false;
+    assert.equal(getQuestPanelOverride(promo, "quest"), promo);
+    const quest = { id: "active" };
+    quests.set(quest.id, quest);
+    entries.push({ questId: quest.id, task: {}, status: "running", progress: 2 });
+    const override = getQuestPanelOverride(noFill, "quest");
+    assert.equal(override.type, "quest");
+    assert.equal(override.quest, quest);
+    settings.disableAccountPanelQuestProgress = true;
+    assert.equal(getQuestPanelOverride(promo, "quest"), promo);
+    settings.disableAccountPanelPromo = true;
+    assert.equal(getQuestPanelOverride(promo, "quest"), null);
 });
 
 test("Quest progress overrides preserve current ref props, native accessibility and frozen inputs", () => {
