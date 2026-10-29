@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 
 test("release retains the Equibop package manifest without publishing the desktop manifest", async () => {
-    const root = await mkdtemp(join(tmpdir(), "desktop-release-"));
+    const root = await mkdtemp(join(tmpdir(), "release-desktop-"));
     const dist = join(root, "dist");
     try {
         await mkdir(dist);
