@@ -40,10 +40,10 @@ if [[ "$mode" == validate ]]; then
 import { copyFile, mkdir, readdir, stat } from 'node:fs/promises';
 const output = 'dist/release';
 await mkdir(output, { recursive: true });
-async function collect(directory, rename = name => name, filter = () => true) {
+async function collect(directory, rename = name => name, filter = () => true, includePackage = false) {
     for (const name of await readdir(directory)) {
         const path = `${directory}/${name}`;
-        if (!filter(name) || name.endsWith('.map') || name === 'package.json') continue;
+        if (!filter(name) || name.endsWith('.map') || (!includePackage && name === 'package.json')) continue;
         const entry = await stat(path);
         if (entry.isFile() && entry.size) await copyFile(path, `${output}/${rename(name)}`);
     }
@@ -51,7 +51,7 @@ async function collect(directory, rename = name => name, filter = () => true) {
 await collect('dist', n => n, n => /\.(json|zip|asar)$/.test(n) || /^ProtonnCord\.user\.(js|js\.LEGAL\.txt)$/.test(n));
 await collect('dist/browser', n => n, n => n.startsWith('browser.'));
 await collect('dist/desktop');
-await collect('dist/equibop', n => `equibop${n[0].toUpperCase()}${n.slice(1)}`);
+await collect('dist/equibop', n => `equibop${n[0].toUpperCase()}${n.slice(1)}`, () => true, true);
 if (process.env.PROTONN_CORD_BUILD_CHANNEL === 'main') await collect('dist/public-release');
 JS
 elif [[ "$mode" == release ]]; then

@@ -177,11 +177,14 @@ test("channel toolbar buttons preserve tooltip placement, badges and disabled cl
     assert.equal(tooltip.props.children.props.children[0].props.badge, undefined);
 });
 
-test("Questify exports the current guildless button and preserves mouse actions, ref, selection and badge props", () => {
+for (const [layout, source] of Object.entries({
+    inlineTooltip: discordGuildlessSource,
+    importedTooltip: discordGuildlessSource.replace(/function tL\(e\).*?(?=var ty=n\(93776\))/, 'var tL="tooltip";')
+})) test(`Questify exports the guildless button with ${layout} and preserves its props`, () => {
     const patchSource = sourceNode("src/equicordplugins/questify/index.tsx", node => ts.isObjectLiteralExpression(node) && node.properties.some(property => ts.isPropertyAssignment(property) && property.name.getText() === "find" && ts.isStringLiteral(property.initializer) && property.initializer.text === '=\"DOWNLOAD_APPS\";function'));
     const patch = evaluate(`const patch=${patchSource};patch;`, {});
-    const patched = discordGuildlessSource.replace(canonicalizeMatch(patch.replacement.match), canonicalizeReplace(patch.replacement.replace, "plugin"));
-    assert.notEqual(patched, discordGuildlessSource, "the public export patch must match the current React ref signature");
+    const patched = source.replace(canonicalizeMatch(patch.replacement.match), canonicalizeReplace(patch.replacement.replace, "plugin"));
+    assert.notEqual(patched, source, "the public export patch must match the current React ref signature");
     const exports = host(patched, { 93776: {} }, {
         rg() {}, a: { jsx, jsxs: jsx }, s: { useState: () => [false, () => {}] }, _: { Vd: () => ({ role: "treeitem" }) },
         F: { c: "container" }, k: { A: "pill" }, M: { Q: "mask" }, tO: { D: "clickable" }, o: () => () => "button"
