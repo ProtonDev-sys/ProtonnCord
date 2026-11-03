@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
-import { accountProps, avatarProps, canaryProxyTicketFactory, markdownRule, proxyTicketFactory, voiceMemo } from "./fixtures/discordClientOctober";
+import { accountProps, avatarProps, canaryProxyTicketFactory, markdownRule, novemberProxyTicketFactory, proxyTicketFactory, unrelatedTicketFactory, voiceMemo } from "./fixtures/discordClientOctober";
 import { applyPatch, declaration, elements, host, jsx, pluginPatches } from "./utils/discordClientFixture";
 
 test("SilentTyping handles the current avatar fields without changing frozen caller props or voice state", () => {
@@ -87,7 +87,7 @@ test("voice recording and detached playback capture the same current native play
     assert.equal(playback.NativeVoiceMessage, player);
 });
 
-for (const [channel, factory] of Object.entries({ stable: proxyTicketFactory, canary: canaryProxyTicketFactory })) {
+for (const [channel, factory] of Object.entries({ stable: proxyTicketFactory, canary: canaryProxyTicketFactory, november: novemberProxyTicketFactory })) {
     test(`Questify resolves ${channel} cached proxy tickets and retains request and account isolation`, async () => {
         let user = "first-user";
         const requests: any[] = [];
@@ -98,8 +98,10 @@ for (const [channel, factory] of Object.entries({ stable: proxyTicketFactory, ca
             652215: { Rsh: { APPLICATION_PROXY_TICKET: (id: string) => `/applications/${id}/proxy-tickets` } }
         });
         const getTicket = declaration("src/equicordplugins/questify/utils/completion.ts", "getApplicationProxyTicket", {
-            findByCodeLazy: (...needles: RegExp[]) => {
-                const matches = Object.values(api).filter(fn => typeof fn === "function" && needles.every(needle => needle.test(String(fn))));
+            findByCodeLazy: (...needles: (string | RegExp)[]) => {
+                const unrelated = host(unrelatedTicketFactory);
+                const matches = [...Object.values(unrelated), ...Object.values(api)].filter(fn => typeof fn === "function"
+                    && needles.every(needle => typeof needle === "string" ? String(fn).includes(needle) : needle.test(String(fn))));
                 assert.equal(matches.length, 1);
                 return matches[0];
             }
