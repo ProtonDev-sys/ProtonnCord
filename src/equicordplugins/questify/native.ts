@@ -200,7 +200,7 @@ async function progress(appId: string, token: string, questTarget: number, quest
         appId,
         "progress",
         getActivityHeaders(questId, token, activityReferrer),
-        JSON.stringify({ progress: questTarget }),
+        JSON.stringify({ progress: questTarget, quest_id: questId }),
         async response => {
             await response.body?.cancel();
             return response.ok;

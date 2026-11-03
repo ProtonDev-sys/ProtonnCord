@@ -136,6 +136,10 @@ async function testValidFlow(native: NativeModule): Promise<void> {
         const url = fetchUrl(input);
         calls.push({ init, url });
         if (new URL(url).pathname === "/.proxy/acf/authorize") return jsonResponse({ token: ACTIVITY_TOKEN });
+        // The activity server requires the quest ID in the body, even with the header set.
+        if (JSON.parse(String(init?.body)).quest_id !== QUEST_ID) {
+            return jsonResponse({ status: "error", message: "quest_id missing in request body" }, 400);
+        }
         return new Response(null, { status: 204 });
     }) as typeof fetch;
     try {
@@ -161,7 +165,7 @@ async function testValidFlow(native: NativeModule): Promise<void> {
         }
 
         assert.equal(authorization.init?.body, JSON.stringify({ code: AUTH_CODE }));
-        assert.equal(progress.init?.body, JSON.stringify({ progress: QUEST_TARGET }));
+        assert.equal(progress.init?.body, JSON.stringify({ progress: QUEST_TARGET, quest_id: QUEST_ID }));
         const authorizationHeaders = headerRecord(authorization.init);
         const progressHeaders = headerRecord(progress.init);
         assert.deepEqual(authorizationHeaders, {
