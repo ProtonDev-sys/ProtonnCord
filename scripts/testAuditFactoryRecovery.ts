@@ -13,7 +13,41 @@ import { declaration, evaluate } from "./utils/discordClientFixture";
 
 type Factory = (this: any, module: any, exports: any, require: any) => unknown;
 
-function fixture(initialExports: any = {}, moduleExports: any = initialExports) {
+test("Webpack exports support direct classes alongside live getters after the host runtime update", () => {
+    const source = ts.createSourceFile("patchWebpack.ts", readFileSync("src/webpack/patchWebpack.ts", "utf8"), ts.ScriptTarget.Latest, true);
+    let definition: ts.FunctionExpression | undefined;
+    function visit(node: ts.Node) {
+        if (ts.isBinaryExpression(node) && node.left.getText(source) === "this.d" && ts.isFunctionExpression(node.right))
+            definition = node.right;
+        ts.forEachChild(node, visit);
+    }
+    visit(source);
+    assert.ok(definition);
+    const define = evaluate(`(${definition.getText(source)});`, {});
+    const exports: any = {};
+    class Logger { constructor(public name: string) {} }
+    let current = "first";
+    define(exports, { live: () => current }, { A: Logger, zero: 0, disabled: false });
+    assert.equal(new exports.A("libdiscore").name, "libdiscore", "startup logger class must remain constructible");
+    assert.equal(exports.live, "first");
+    current = "second";
+    assert.equal(exports.live, "second");
+    assert.equal(exports.zero, 0);
+    assert.equal(exports.disabled, false);
+    define(exports, { live: () => "replacement" }, { A: null, live: "value" });
+    assert.equal(exports.A, Logger, "duplicate definitions do not overwrite existing exports");
+    assert.equal(exports.live, "second", "getter exports take precedence over direct values");
+    define(exports, Object.create({ inheritedGetter: () => 1 }), Object.create({ inheritedValue: 2 }));
+    assert.equal(Object.hasOwn(exports, "inheritedGetter"), false);
+    assert.equal(Object.hasOwn(exports, "inheritedValue"), false);
+    assert.equal(Object.getOwnPropertyDescriptor(exports, "A")?.configurable, true);
+    assert.equal(Object.getOwnPropertyDescriptor(exports, "A")?.enumerable, true);
+    const legacy: any = {};
+    define(legacy, { A: () => Logger });
+    assert.equal(new legacy.A("legacy").name, "legacy");
+});
+
+function fixture(initialExports: any = {}, moduleExports: any = initialExports, hostMarksLoaded = true) {
     const original = Symbol("originalFactory");
     const source = ts.createSourceFile("patchWebpack.ts", readFileSync("src/webpack/patchWebpack.ts", "utf8"), ts.ScriptTarget.Latest, true);
     const functions = source.statements.filter(s => ts.isFunctionDeclaration(s)
@@ -55,11 +89,25 @@ function fixture(initialExports: any = {}, moduleExports: any = initialExports) 
         invoke(patched: Factory, native: Factory = patched) {
             Object.assign(patched, { [original]: native });
             const result = run(patched, initialExports, [module, initialExports, require]);
-            module.loaded = true; // The host only marks a module loaded after a successful wrapper return.
+            if (hostMarksLoaded) module.loaded = true;
             return result;
         }
     };
 }
+
+test("completed factories remain searchable when the host omits the legacy loaded flag", () => {
+    const namespace = {};
+    const f = fixture(namespace, namespace, false);
+    Reflect.deleteProperty(f.module, "loaded");
+    f.invoke((_module, exports) => { exports.connectStores = () => {}; });
+    assert.equal(f.module.loaded, true);
+    assert.equal(f.find((value: any) => typeof value.connectStores === "function"), namespace);
+
+    const failed = fixture({}, undefined, false);
+    Reflect.deleteProperty(failed.module, "loaded");
+    assert.throws(() => failed.invoke(() => { throw new Error("initialization failed"); }), /initialization failed/);
+    assert.equal(Object.hasOwn(failed.module, "loaded"), false, "failed factories must not be marked complete");
+});
 
 test("native recovery replaces a stale TDZ getter before loaded-module lookups and delivers listeners once", () => {
     const f = fixture();
