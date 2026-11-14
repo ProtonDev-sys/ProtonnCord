@@ -191,7 +191,7 @@ export default definePlugin({
         {
             find: "discarding speculative database",
             replacement: {
-                match: /await \i\(\i\)(?=;.{0,15}this\.databases)/,
+                match: /(?<=let \i=)await .{1,60}?(?=;.{0,15}this\.databases)/,
                 replace: "$&.catch(()=>null)"
             }
         },
@@ -314,21 +314,21 @@ export default definePlugin({
             find: '"refresh-title-bar-small"',
             replacement: [
                 {
-                    match: /\i===\i\.PlatformTypes\.WINDOWS/g,
+                    match: /\i===\i\.\i\.WINDOWS/g,
                     replace: "false"
                 },
                 {
-                    match: /\i===\i\.PlatformTypes\.WEB/g,
+                    match: /\i===\i\.\i\.WEB/g,
                     replace: "true"
                 }
             ],
             predicate: () => Settings.winNativeTitleBar,
         },
         {
-            find: "DirectMessage: getSpringConfigs()",
+            find: '"guild-list-unread-dms"',
             replacement: [
                 {
-                    match: /("data-drop-hovering".{0,100}selected:(?:\i|!0),upperBadge:)(\i)(?=,lowerBadge:\i)/g,
+                    match: /("data-drop-hovering".{0,100}selected:(?:\i|!0),(?:maskShape:[^,]{1,20},)?upperBadge:)(\i)(?=,lowerBadge:\i)/g,
                     replace: "$1$self.hasUnmutedVoiceChannel(arguments[0]?.guild?.id)?$2:null"
                 },
                 {

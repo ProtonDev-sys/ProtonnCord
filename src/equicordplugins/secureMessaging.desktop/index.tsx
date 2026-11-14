@@ -3256,7 +3256,7 @@ export default definePlugin({
 
     patches: [
         {
-            find: ".hideAccessories",
+            find: /\.hideAccessories\?void 0:.{0,40}childrenMessageContent:\i\?\?/,
             group: true,
             replacement: [
                 {
@@ -3281,7 +3281,7 @@ export default definePlugin({
             group: true,
             replacement: [
                 {
-                    match: /function \i\((\i),\i,(\i)\)\{(?=if\()/,
+                    match: /(?:function \i|\i:function)\((\i),\i,(\i)\)\{(?=if\()/,
                     replace: "$&$2=$self.encryptedImageMenuOptions($1,$2);const vcSecureImageMenuGuard=$self.encryptedMediaActionGuard($1,false);",
                 },
                 {
@@ -3289,7 +3289,7 @@ export default definePlugin({
                     replace: "($self.canUseEncryptedImage($1)??$&)",
                 },
                 {
-                    match: /\(0,\i\.XW\)\((\i),\i\?\.contentType,\i\?\.originalContentType,\i\.N7\)/,
+                    match: /\(0,\i\.XW\)\((\i),\i\?\.contentType,\i\?\.originalContentType,(?:\i\.N7|"png")\)/,
                     replace: "($self.encryptedImageMenuUrl($1)??$&)",
                 },
                 {
@@ -3297,11 +3297,11 @@ export default definePlugin({
                     replace: "($self.canUseEncryptedImage($1,true)??$&)",
                 },
                 {
-                    match: /(?<=async function \i\(\)\{try\{)(await \i\.Ay\.copyImage\()/,
+                    match: /(?<=async function(?: \i)?\(\)\{try\{)(await \i\.Ay\.copyImage\()/,
                     replace: "vcSecureImageMenuGuard?.();$1",
                 },
                 {
-                    match: /(?<=async function \i\(\)\{try\{)(let \i=await \i\.Ay\.saveImage\()/,
+                    match: /(?<=async function(?: \i)?\(\)\{try\{)(let \i=await \i\.Ay\.saveImage\()/,
                     replace: "vcSecureImageMenuGuard?.();$1",
                 },
             ],
@@ -3353,7 +3353,7 @@ export default definePlugin({
                     replace: "($self.canUseEncryptedImage($1,true)??$&)",
                 },
                 {
-                    match: /\(0,\i\.XW\)\((\i),\i\.contentType,\i\.originalContentType,\i\.N7\)/g,
+                    match: /\(0,\i\.XW\)\((\i),\i\.contentType,\i\.originalContentType,(?:\i\.N7|"png")\)/g,
                     replace: "($self.encryptedImageMenuUrl($1,true)??$&)",
                 },
                 {
@@ -3361,7 +3361,7 @@ export default definePlugin({
                     replace: "$1vcSecureViewerGuard=$self.encryptedMediaActionGuard($2,false),",
                 },
                 {
-                    match: /async function \i\(\)\{(?=if\(\i\.l\.markActionPerformed\(\i\.N\.SAVE_MEDIA_PRESSED)/,
+                    match: /async function(?: \i)?\(\)\{(?=if\(\i\.l\.markActionPerformed\(\i\.N\.SAVE_MEDIA_PRESSED)/,
                     replace: "$&try{vcSecureViewerGuard?.()}catch{return;}",
                 },
                 {

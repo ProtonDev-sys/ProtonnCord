@@ -181,7 +181,7 @@ for (const [layout, source] of Object.entries({
     inlineTooltip: discordGuildlessSource,
     importedTooltip: discordGuildlessSource.replace(/function tL\(e\).*?(?=var ty=n\(93776\))/, 'var tL="tooltip";')
 })) test(`Questify exports the guildless button with ${layout} and preserves its props`, () => {
-    const patchSource = sourceNode("src/equicordplugins/questify/index.tsx", node => ts.isObjectLiteralExpression(node) && node.properties.some(property => ts.isPropertyAssignment(property) && property.name.getText() === "find" && ts.isStringLiteral(property.initializer) && property.initializer.text === '=\"DOWNLOAD_APPS\";function'));
+    const patchSource = sourceNode("src/equicordplugins/questify/index.tsx", node => ts.isObjectLiteralExpression(node) && node.properties.some(property => ts.isPropertyAssignment(property) && property.name.getText() === "find" && ts.isStringLiteral(property.initializer) && property.initializer.text === '=\"DOWNLOAD_APPS\"'));
     const patch = evaluate(`const patch=${patchSource};patch;`, {});
     const patched = source.replace(canonicalizeMatch(patch.replacement.match), canonicalizeReplace(patch.replacement.replace, "plugin"));
     assert.notEqual(patched, source, "the public export patch must match the current React ref signature");
