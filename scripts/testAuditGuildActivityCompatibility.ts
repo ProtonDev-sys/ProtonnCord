@@ -9,7 +9,7 @@ import { applyPatch, evaluate, pluginPatches, sourceNode } from "./utils/discord
 const file = "src/equicordplugins/equicordHelper/index.tsx";
 
 test("guild activity filtering preserves native voice and stream filters and hides muted stage and embedded activity users", () => {
-    const patch = pluginPatches(file).find((patch: any) => patch.find === "DirectMessage: getSpringConfigs()");
+    const patch = pluginPatches(file).find((patch: any) => patch.find === '"guild-list-unread-dms"');
     const source = applyPatch(guildActivitySource, { replacement: patch.replacement.filter((replacement: any) => !String(replacement.match).includes("data-drop-hovering")) });
     const muted = new Set(["voice-muted", "stream-muted", "stage-muted", "stage-current", "activity-muted", "activity-current"]);
     const pluginCalls: unknown[][] = [], nativeCalls: unknown[][] = [], participantQueries: string[] = [];

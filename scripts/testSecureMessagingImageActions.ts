@@ -14,7 +14,7 @@ import { createSourceFile, isArrayLiteralExpression, isFunctionDeclaration, isMe
 
 import { safeDownloadFilename } from "../src/equicordplugins/secureMessaging.desktop/downloadFilename";
 import { canonicalizeMatch } from "../src/utils/patches";
-import { discordImageHelpersSource, discordImageMenuSource, discordMediaViewerAnalyticsSource, discordMediaViewerSource, discordNativeImageSource } from "./fixtures/discordImageActions";
+import { discordCurrentImageMenuSource, discordImageHelpersSource, discordImageMenuSource, discordMediaViewerAnalyticsSource, discordMediaViewerSource, discordNativeImageSource } from "./fixtures/discordImageActions";
 
 const source = createSourceFile("index.tsx", readFileSync(new URL("../src/equicordplugins/secureMessaging.desktop/index.tsx", import.meta.url), "utf8"), ScriptTarget.Latest, true);
 const methodNames = new Set(["encryptedImageMenuOptions", "canUseEncryptedImage", "encryptedImageMenuUrl", "encryptedMediaActionGuard", "encryptedImageFilename"]);
@@ -74,13 +74,16 @@ function patched(source: string, find: string): string {
 function moduleExports(source: string, modules: Record<number, unknown>, globals: Record<string, unknown> = {}) {
     const exports: Record<string, any> = {};
     const require = Object.assign((id: number) => modules[id] ?? {}, {
-        d: (target: object, entries: Record<string, () => unknown>) => Object.entries(entries).forEach(([key, get]) => Object.defineProperty(target, key, { get })),
+        d: (target: object, entries: Record<string, () => unknown>, values: Record<string, unknown> = {}) => {
+            Object.entries(entries).forEach(([key, get]) => Object.defineProperty(target, key, { get }));
+            Object.assign(target, values);
+        },
     });
     runInNewContext(`(${source.replace(/^\d+\(/, "function(")})`, globals)({}, exports, require);
     return exports;
 }
 
-function fixture(guarded = true, modernDialog = true) {
+function fixture(guarded = true, modernDialog = true, currentMenu = false) {
     const image = "blob:https://discord.com/secure-image#private-photo.png";
     const registry = new Map([[image, { filename: "private-photo.png", contentType: "image/png" }]]);
     const calls = { clipboard: [] as Array<{ name: string; bytes: number; }>, saves: [] as string[], directories: [] as unknown[], fetches: [] as string[], downloads: [] as string[], links: [] as string[], transcodes: 0 };
@@ -133,8 +136,12 @@ function fixture(guarded = true, modernDialog = true) {
         998218: { A: { toURLSafe: (url: string) => new URL(url), isDiscordAssetUrl: (url: string) => /^https:\/\/(?:cdn\.discordapp\.com|media\.discordapp\.net)\//.test(url) } },
         19575: { Ay: native }, 229531: types,
     });
-    const menuSource = patched(discordImageMenuSource, 'id:"copy-image"');
-    const menuExports = moduleExports(menuSource, {
+    const menuExports = currentMenu ? moduleExports(patched(discordCurrentImageMenuSource, 'id:"copy-image"'), {
+        477900: { jsx: (_type: unknown, props: any) => props }, 858899: { P0() {} }, 477782: { Dr: "MenuItem" }, 191023: { ImageIcon: "ImageIcon" },
+        803316: helpers, 207133: { A: () => blockedChannel }, 129230: { default: { track() {} } }, 723702: { isPlatformEmbedded: true },
+        856383: { A: { captureException() {} } }, 253400: { Ay: native, _0: { SAVED: "saved", ERRORED: "errored", CANCELED: "canceled" } },
+        179581: { N: () => ({}) }, 652215: { HAw: {} }, 792996: { intl: { string: (key: string) => key }, t: {} },
+    }, { $self: plugin }) : moduleExports(patched(discordImageMenuSource, 'id:"copy-image"'), {
         477900: { jsx: (_type: unknown, props: any) => props }, 691540: { P0() {} }, 857250: { o() {} }, 97483: { Ck: {} },
         477782: { Dr: "MenuItem" }, 191023: { ImageIcon: "ImageIcon" }, 803316: helpers, 207133: { A: () => blockedChannel },
         174459: { default: { track() {} } }, 723702: { isPlatformEmbedded: true }, 38405: { A: { captureException() {} } },
@@ -209,8 +216,8 @@ test("held viewer Download and More Copy controls cannot run after registry revo
     assert.deepEqual(h.calls.clipboard, []);
 });
 
-test("registered images retain native copy/save items, exact blob URLs and authenticated MIME", async () => {
-    const h = fixture();
+for (const currentMenu of [false, true]) test(`registered images retain native copy/save items, exact blob URLs and authenticated MIME${currentMenu ? " in the current menu" : ""}`, async () => {
+    const h = fixture(true, true, currentMenu);
     const menu = h.menu();
     assert.deepEqual(Array.from(menu, (item: any) => item?.id), ["copy-image", "save-image"]);
     await menu[0].action();
@@ -234,8 +241,8 @@ test("native WebP conversion is retained and GIF keeps only the native save acti
     assert.equal(h.menu()[1].id, "save-image");
 });
 
-test("unregistered URLs delegate unchanged while hidden or non-image media stay excluded", () => {
-    const h = fixture();
+for (const currentMenu of [false, true]) test(`unregistered URLs delegate unchanged while hidden or non-image media stay excluded${currentMenu ? " in the current menu" : ""}`, () => {
+    const h = fixture(true, true, currentMenu);
     assert.equal(h.menu("blob:https://discord.com/spoof#image.png"), null);
     assert.equal(h.plugin.canUseEncryptedImage("https://cdn.discordapp.com/image.png"), null);
     assert.equal(h.plugin.encryptedImageMenuUrl("https://cdn.discordapp.com/image.png"), null);
@@ -249,8 +256,8 @@ test("unregistered URLs delegate unchanged while hidden or non-image media stay 
     assert.equal(h.plugin.encryptedImageMenuUrl(h.image), null);
 });
 
-test("a failed native guard patch cannot expose secure image menu actions", () => {
-    const h = fixture(false);
+for (const currentMenu of [false, true]) test(`a failed native guard patch cannot expose secure image menu actions${currentMenu ? " in the current menu" : ""}`, () => {
+    const h = fixture(false, true, currentMenu);
     assert.equal(h.menu(), null);
     assert.equal(h.menu("https://cdn.discordapp.com/image.png")[0].id, "copy-image");
 });

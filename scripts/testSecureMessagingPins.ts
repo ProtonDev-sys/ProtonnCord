@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
-import { createSourceFile, isFunctionDeclaration, isObjectLiteralExpression, isPropertyAssignment, isStringLiteral, isVariableStatement, JsxEmit, ModuleKind, type Node, ScriptTarget, transpileModule } from "typescript";
+import { createSourceFile, isFunctionDeclaration, isObjectLiteralExpression, isPropertyAssignment, isRegularExpressionLiteral, isVariableStatement, JsxEmit, ModuleKind, type Node, ScriptTarget, transpileModule } from "typescript";
 
 import { canonicalizeMatch } from "../src/utils/patches";
 
@@ -20,11 +20,12 @@ const functions = source.statements.filter(node =>
 ).map(node => node.getText(source)).join("\n");
 const compiled = transpileModule(functions, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, jsx: JsxEmit.React } }).outputText;
 let replacements: { match: RegExp; replace: string; }[] = [];
+let find: RegExp | undefined;
 function visit(node: Node) {
     if (isObjectLiteralExpression(node) && node.properties.some(property =>
         isPropertyAssignment(property) && property.name.getText(source) === "find" &&
-        isStringLiteral(property.initializer) && property.initializer.text === ".hideAccessories"
-    )) replacements = runInNewContext(`(${node.getText(source)})`).replacement;
+        isRegularExpressionLiteral(property.initializer) && property.initializer.text.includes("hideAccessories")
+    )) ({ find, replacement: replacements } = runInNewContext(`(${node.getText(source)})`));
     node.forEachChild(visit);
 }
 visit(source);
@@ -35,6 +36,15 @@ const previewSource = `function Preview(e){let{message:t,inlineEditor:G}=e;retur
 childrenAccessories:e.hideAccessories?void 0:(0,C.J)(e,z,J),
 childrenMessageContent:G??(Q?(0,_.A)(e,V):(0,v.A)(e,V)),childrenSystemMessage:(0,j.A)({...e})
 })}`;
+
+test("the preview patch selects the message row with a replaceable content slot", () => {
+    assert.ok(find);
+    const selector = canonicalizeMatch(new RegExp(find.source, find.flags));
+    const factory = previewSource.replaceAll("\n", "");
+    assert.match(factory, selector);
+    assert.doesNotMatch(factory.replace("childrenMessageContent:G??", "childrenMessageContent:"), selector,
+        "rows without the inline-editor content slot must not consume the patch");
+});
 
 function fixture() {
     let previewContext = false;

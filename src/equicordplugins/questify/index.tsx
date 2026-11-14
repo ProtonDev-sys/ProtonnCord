@@ -145,7 +145,7 @@ export default definePlugin({
         },
         {
             // Exports the guildless server list item component used by the Quest button.
-            find: '="DOWNLOAD_APPS";function',
+            find: '="DOWNLOAD_APPS"',
             replacement: {
                 match: /(?<=\i\.d\(\i,\{)(?=.{0,30000}?;let (\i)=(?:\i\.forwardRef\()?function\([^)]*\)\{(?=.{0,300}tooltip:.{0,100}lowerBadgeSize:))/,
                 replace: "GuildlessServerListItemComponent:()=>$1,"
@@ -187,8 +187,8 @@ export default definePlugin({
             predicate: () => getQuestifySettings().disableQuestsEverything || getQuestifySettings().disableRelocationNotices,
             replacement: [
                 {
-                    match: /(\.GLOBAL_DISCOVERY_TABS)\b/g,
-                    replace: '$1.filter(tab=>tab!=="quests")'
+                    match: /(?<=\.filter\((\i)=>)(?=\(\1!==(\i\.GlobalDiscoveryTab)\.QUESTS\|\|)/,
+                    replace: "$1!==$2.QUESTS&&"
                 }
             ]
         },
@@ -253,7 +253,7 @@ export default definePlugin({
                 },
                 {
                     // QUESTS_FETCH_QUEST_TO_DELIVER_BEGIN
-                    match: /(?=let \i=Date.now\(\);\i.recordQuestRequestAttempt.{0,50}QUESTS_FETCH_QUEST_TO_DELIVER_BEGIN)/,
+                    match: /(?=let (?:[^;]{0,120}?,)?\i=Date\.now\(\)[,;][^;]{0,20}?recordQuestRequestAttempt.{0,100}?QUESTS_FETCH_QUEST_TO_DELIVER_BEGIN)/,
                     replace: "return;"
                 }
             ]
@@ -309,16 +309,7 @@ export default definePlugin({
         },
         {
             // Prevent Video Quests from pausing on lost focus.
-            find: "[QV] | Pausing video | playerState:",
-            predicate: () => !getQuestifySettings().disableQuestsEverything && getQuestifySettings().preventVideoQuestsPausing,
-            replacement: {
-                match: /(?<=setCaptionEnabled\),)({focused:)(\i)/,
-                replace: "$2=true,$1questifyFocused"
-            }
-        },
-        {
-            // Prevent Video Quests from pausing on lost focus.
-            find: ",listenForHlsErrors:!1",
+            find: "onTrackQuestContentClick:",
             predicate: () => !getQuestifySettings().disableQuestsEverything && getQuestifySettings().preventVideoQuestsPausing,
             replacement: {
                 match: /(?<=pauseOnLostVisibility:)!\i/,
@@ -415,7 +406,7 @@ export default definePlugin({
             ]
         },
         {
-            find: 'STEP_2_CLICKED_INTERNAL,"quest_embed_card_footer',
+            find: ".GameProfileSources.QuestEmbed",
             group: true,
             predicate: () => !getQuestifySettings().disableQuestsEverything,
             replacement: [
@@ -443,7 +434,7 @@ export default definePlugin({
             replacement: [
                 {
                     // Subscribes each Quest tile to Questify's manual rerender trigger.
-                    match: /(?=return\(0,\i\.\i\)\("article",\{id:)/,
+                    match: /(?=return\(0,\i\.\i\)\((?:\i\.Provider,\{value:\i,children:\(0,\i\.\i\)\()?"article",\{id:)/,
                     replace: "void $self.useQuestRerender();"
                 },
                 {
@@ -533,7 +524,7 @@ export default definePlugin({
         {
             // Allow non-shareable Quests to embed in chat and to have
             // their share URLs copyable from the embed context menu.
-            find: "NOT_SHAREABLE}function",
+            find: ".sharePolicy!==",
             group: true,
             predicate: () => !getQuestifySettings().disableQuestsEverything,
             replacement: {
@@ -543,7 +534,7 @@ export default definePlugin({
         },
         {
             // Adds a maxDigits prop to the LowerBadge component which allows for not truncating, or for truncating at a specific threshold.
-            find: ".BADGE_NOTIFICATION_BACKGROUND.css,disableColor",
+            find: /\{count:\i,color:\i=\i\.\i\.colors\.BADGE_NOTIFICATION_BACKGROUND\.css,disableColor/,
             group: true,
             replacement: [
                 {

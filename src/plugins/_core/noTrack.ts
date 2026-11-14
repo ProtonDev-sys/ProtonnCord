@@ -64,7 +64,9 @@ export default definePlugin({
             ]
         },
         {
-            find: ".BetterDiscord||null!=",
+            // Discord ships hasClientMods in two modules; Sentry's filter only shares the BetterDiscord check.
+            find: /let \i=window;return null!=\i\.jQuery/,
+            all: true,
             replacement: {
                 // Make hasClientMods return false
                 match: /(?=let \i=window;)/,
