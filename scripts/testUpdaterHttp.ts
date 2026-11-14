@@ -326,8 +326,8 @@ async function testSameChannelDowngradeProtection(): Promise<void> {
         pending: expectedPending,
     }, "an explicit channel switch can select an ancestor release");
     assert.deepEqual(await findHttpUpdate(behind, CURRENT_HASH, ASAR_FILE, "nightly", false, "main"), expectedPending);
-    assert.deepEqual(await findHttpUpdate(behind, CURRENT_HASH, ASAR_FILE, "nightly"), expectedPending,
-        "unknown build channels retain the previous branch-switch behavior");
+    assert.equal(await findHttpUpdate(behind, CURRENT_HASH, ASAR_FILE, "nightly"), null,
+        "a build without a channel is not rolled back to an older release");
 
     const sameHash = async (endpoint: string) => endpoint.startsWith("/compare/")
         ? { status: "identical", commits: [] } : release(CURRENT_HASH);
