@@ -134,6 +134,8 @@ export async function inspectHttpUpdates(
         comparison = await request(`/compare/${currentHash}...${release.hash}`);
     } catch (error) {
         if (!(error instanceof HttpRequestError) || error.status !== 404) throw error;
+        // A channelless build from unpublished commits cannot be ordered against the release, so keep it.
+        if (installedBranch === null) return { changes: [], pending: null };
         // Rewritten or unrelated histories can lack a comparison while the release remains installable.
         return {
             changes: [{ author: "ProtonnCord", hash: release.hash, message: `Update to the latest ${branch} release (previous build cannot be compared)` }],
@@ -142,8 +144,9 @@ export async function inspectHttpUpdates(
     }
     const parsedChanges = parseChanges(comparison);
     // A local build may be ahead of its channel while publication is waiting for
-    // validation. Only a deliberate channel switch or repair may roll it back.
-    if (installedBranch === branch && record(comparison)?.status === "behind")
+    // validation. Only a deliberate channel switch or repair may roll it back;
+    // builds from feature branches have no channel and must not be downgraded.
+    if (!switchingBranch && record(comparison)?.status === "behind")
         return { changes: [], pending: null };
 
     const changes = parsedChanges.length > 0

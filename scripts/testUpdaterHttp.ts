@@ -326,8 +326,8 @@ async function testSameChannelDowngradeProtection(): Promise<void> {
         pending: expectedPending,
     }, "an explicit channel switch can select an ancestor release");
     assert.deepEqual(await findHttpUpdate(behind, CURRENT_HASH, ASAR_FILE, "nightly", false, "main"), expectedPending);
-    assert.deepEqual(await findHttpUpdate(behind, CURRENT_HASH, ASAR_FILE, "nightly"), expectedPending,
-        "unknown build channels retain the previous branch-switch behavior");
+    assert.equal(await findHttpUpdate(behind, CURRENT_HASH, ASAR_FILE, "nightly"), null,
+        "a build without a channel is not rolled back to an older release");
 
     const sameHash = async (endpoint: string) => endpoint.startsWith("/compare/")
         ? { status: "identical", commits: [] } : release(CURRENT_HASH);
@@ -398,12 +398,15 @@ async function main(): Promise<void> {
         pending: { hash: RELEASE_HASH, sha256: RELEASE_SHA256, size: RELEASE_SIZE, url: DOWNLOAD_URL },
     });
 
-    const rewritten = await inspectHttpUpdates(async endpoint => {
+    const missingComparison = async (endpoint: string) => {
         if (endpoint === "/releases/tags/nightly") return release(RELEASE_HASH);
         assert.equal(endpoint, `/compare/${CURRENT_HASH}...${RELEASE_HASH}`);
         return requestJson(async () => new Response("missing comparison", { status: 404, statusText: "Not Found" }),
             `https://api.github.com/repos/ProtonDev-sys/ProtonnCord${endpoint}`, {}, 1_000, 100);
-    }, CURRENT_HASH, ASAR_FILE, "nightly", "nightly");
+    };
+    assert.deepEqual(await inspectHttpUpdates(missingComparison, CURRENT_HASH, ASAR_FILE, "nightly"), { changes: [], pending: null },
+        "an unpublished local build is not replaced by a release it cannot be compared with");
+    const rewritten = await inspectHttpUpdates(missingComparison, CURRENT_HASH, ASAR_FILE, "nightly", "nightly");
     assert.deepEqual(rewritten, {
         changes: [{ author: "ProtonnCord", hash: RELEASE_HASH, message: "Update to the latest nightly release (previous build cannot be compared)" }],
         pending: { hash: RELEASE_HASH, sha256: RELEASE_SHA256, size: RELEASE_SIZE, url: DOWNLOAD_URL },
