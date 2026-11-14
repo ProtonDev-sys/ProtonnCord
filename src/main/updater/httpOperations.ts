@@ -134,6 +134,8 @@ export async function inspectHttpUpdates(
         comparison = await request(`/compare/${currentHash}...${release.hash}`);
     } catch (error) {
         if (!(error instanceof HttpRequestError) || error.status !== 404) throw error;
+        // A channelless build from unpublished commits cannot be ordered against the release, so keep it.
+        if (installedBranch === null) return { changes: [], pending: null };
         // Rewritten or unrelated histories can lack a comparison while the release remains installable.
         return {
             changes: [{ author: "ProtonnCord", hash: release.hash, message: `Update to the latest ${branch} release (previous build cannot be compared)` }],

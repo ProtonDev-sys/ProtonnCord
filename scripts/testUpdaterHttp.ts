@@ -398,12 +398,15 @@ async function main(): Promise<void> {
         pending: { hash: RELEASE_HASH, sha256: RELEASE_SHA256, size: RELEASE_SIZE, url: DOWNLOAD_URL },
     });
 
-    const rewritten = await inspectHttpUpdates(async endpoint => {
+    const missingComparison = async (endpoint: string) => {
         if (endpoint === "/releases/tags/nightly") return release(RELEASE_HASH);
         assert.equal(endpoint, `/compare/${CURRENT_HASH}...${RELEASE_HASH}`);
         return requestJson(async () => new Response("missing comparison", { status: 404, statusText: "Not Found" }),
             `https://api.github.com/repos/ProtonDev-sys/ProtonnCord${endpoint}`, {}, 1_000, 100);
-    }, CURRENT_HASH, ASAR_FILE, "nightly", "nightly");
+    };
+    assert.deepEqual(await inspectHttpUpdates(missingComparison, CURRENT_HASH, ASAR_FILE, "nightly"), { changes: [], pending: null },
+        "an unpublished local build is not replaced by a release it cannot be compared with");
+    const rewritten = await inspectHttpUpdates(missingComparison, CURRENT_HASH, ASAR_FILE, "nightly", "nightly");
     assert.deepEqual(rewritten, {
         changes: [{ author: "ProtonnCord", hash: RELEASE_HASH, message: "Update to the latest nightly release (previous build cannot be compared)" }],
         pending: { hash: RELEASE_HASH, sha256: RELEASE_SHA256, size: RELEASE_SIZE, url: DOWNLOAD_URL },
