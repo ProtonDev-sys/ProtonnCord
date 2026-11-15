@@ -40,7 +40,7 @@ function harness() {
     const channel = { id: "channel", recipients: ["peer"] };
     const snapshot = { channelId: channel.id, kind: "DM", participantIds: ["peer"] };
     const conversation = { status: "disabled", snapshot, participants: [{ status: "trusted", identity }], selectedRecipientIds: ["peer"] };
-    const calls = { announcements: 0, closed: 0, refreshes: 0, reviews: [] as unknown[][], sent: 0, trusted: [] as unknown[][], toasts: [] as unknown[] };
+    const calls = { announcements: 0, closed: 0, refreshes: 0, reviews: [] as unknown[][], sent: 0, trusted: [] as unknown[][], toasts: [] as unknown[], warnings: [] as unknown[][] };
     let userId = "self";
     const buckets = new Map<string, { values: Map<number, any>; effects: Map<number, { dependencies: unknown[]; cleanup?: () => void; }>; }>();
     let hooks!: ReturnType<typeof buckets.get> & {};
@@ -60,6 +60,7 @@ function harness() {
         createAnnouncement: async () => { calls.announcements++; return { status: "created", content: "synthetic announcement" }; },
     };
     const context = {
+        console: { warn: (...args: unknown[]) => calls.warnings.push(args) },
         UploadLimits: { getUserMaxFileSize: (_user: unknown): unknown => 1024 * 1024 * 1024 },
         encryptedUploadLimitsDescription, readDiscordUploadLimit,
         settings: { store: { externalLinkPreviews: false }, use: () => context.settings.store },
@@ -238,6 +239,42 @@ test("same-chat saves update the chatbar status through settled access state", a
     await setImmediate();
     const button = h.render("SecureMessagingButton", h.props.button);
     assert.equal(button.props.tooltip, "Secure Messaging: encrypted");
+});
+
+for (const enabled of [true, false]) test(`saving encryption ${enabled ? "enabled" : "disabled"} succeeds when the notification throws`, async () => {
+    const h = harness();
+    h.context.showToast = () => { throw new Error("Toast module unavailable"); };
+    h.render("ConversationManager", h.props.manager);
+    await setImmediate();
+    let modal = h.render("ConversationManager", h.props.manager);
+    elements(modal).find(element => element.type === "Checkbox" && JSON.stringify(element).includes("Enable encryption"))!.props.onChange(null, enabled);
+    modal = h.render("ConversationManager", h.props.manager);
+    modal.props.actions[0].onClick();
+    await setImmediate();
+    assert.equal((await h.native.getConversation()).status, enabled ? "enabled" : "disabled");
+    assert.equal(h.calls.closed, 1);
+    assert.equal(h.calls.refreshes, 1);
+    assert.equal(h.calls.warnings.length, 1);
+    modal = h.render("ConversationManager", h.props.manager);
+    assert.doesNotMatch(JSON.stringify(modal), /refused to save/u);
+});
+
+for (const rejected of [true, false]) test(`${rejected ? "rejected" : "structured"} save failures keep the dialog open and report the failure`, async () => {
+    const h = harness();
+    h.native.configureConversation = async () => {
+        if (rejected) throw new Error("IPC unavailable");
+        return { status: "failed" } as any;
+    };
+    h.render("ConversationManager", h.props.manager);
+    await setImmediate();
+    let modal = h.render("ConversationManager", h.props.manager);
+    modal.props.actions[0].onClick();
+    await setImmediate();
+    modal = h.render("ConversationManager", h.props.manager);
+    assert.equal(h.calls.closed, 0);
+    assert.equal(h.calls.toasts.length, 0);
+    assert.equal(modal.props.actions[0].disabled, !rejected);
+    assert.match(JSON.stringify(modal), rejected ? /refused to save/u : /synthetic native failure/u);
 });
 
 test("unrelated store notifications and pending access checks do not refetch conversation status", async () => {

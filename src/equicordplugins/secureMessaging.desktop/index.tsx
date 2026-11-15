@@ -2317,7 +2317,11 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
             updateMessageLengthBypass(context, result);
             await refreshChatAccessState(context.localUserId);
             if (result.status === "enabled" || result.status === "disabled") {
-                showToast(result.status === "enabled" ? "Encrypted sending enabled." : "Encrypted sending disabled.", Toasts.Type.SUCCESS);
+                try {
+                    showToast(result.status === "enabled" ? "Encrypted sending enabled." : "Encrypted sending disabled.", Toasts.Type.SUCCESS);
+                } catch (error) {
+                    console.warn("[SecureMessaging] Configuration saved, but the success notification failed.", error);
+                }
                 modalProps.onClose();
             } else if (isNativeFailure(result)) setError(failureMessage(result));
             else setError(conversationStatusMessage(result));
