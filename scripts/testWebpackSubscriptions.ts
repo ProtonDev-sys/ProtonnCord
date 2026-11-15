@@ -13,6 +13,40 @@ import ts from "typescript";
 import { dispatchSubscriptions, type SubscriptionErrorHandler } from "../src/webpack/subscriptions";
 import type { CallbackFn, FilterFn } from "../src/webpack/webpack";
 
+test("toast discovery resolves show and pop on both Discord toast implementations", () => {
+    const read = (path: string) => ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest);
+    const webpack = read("src/webpack/webpack.ts");
+    const common = read("src/webpack/common/utils.ts");
+    const declarations = (source: ts.SourceFile, names: string[]) => source.statements.filter(statement =>
+        ts.isVariableStatement(statement) && statement.declarationList.declarations.some(declaration => names.includes(declaration.name.getText(source)))
+    ).map(statement => statement.getText(source)).join("\n");
+    const code = ts.transpileModule(
+        declarations(webpack, ["stringMatches", "filters"]) + "\n" + declarations(common, ["ToastsExports"]) + "\nexports.toasts = ToastsExports;",
+        { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }
+    ).outputText;
+    for (const lookup of ["has", "get"]) {
+        const state = { currentToastMap: new Map<string, unknown>() };
+        // Discord switched from checking occupancy to reading the current toast for key replacement.
+        const show = new Function("state", `return function(toast) { if (!state.currentToastMap.${lookup}("app")) state.currentToastMap.set("app", toast); };`)(state);
+        const pop = () => { state.currentToastMap.delete("app"); };
+        const module = { a: pop, b: () => state.currentToastMap.size, c: show };
+        const result = runInNewContext(code + "\nexports.toasts;", {
+            exports: {}, canonicalizeMatch: (value: unknown) => value,
+            mapMangledModuleLazy(marker: RegExp, mappers: Record<string, FilterFn>) {
+                assert.ok(marker.test(Object.values(module).map(String).join("\n")), `${lookup}: toast module must be discoverable`);
+                return Object.fromEntries(Object.entries(mappers).map(([name, filter]) => [name, Object.values(module).find(filter)]));
+            },
+        });
+        assert.equal(result.showToast, show);
+        assert.equal(result.popToast, pop);
+        const toast = { message: "Encrypted sending enabled.", id: "fixture", type: "success" };
+        result.showToast(toast);
+        assert.equal(state.currentToastMap.get("app"), toast);
+        result.popToast();
+        assert.equal(state.currentToastMap.size, 0);
+    }
+});
+
 function fixture() {
     const subscriptions = new Map<FilterFn, CallbackFn>();
     const failures: Parameters<SubscriptionErrorHandler>[] = [];
