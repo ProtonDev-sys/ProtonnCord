@@ -111,8 +111,8 @@ interface ToastsExports {
     popToast(): void;
 }
 
-const ToastsExports = mapMangledModuleLazy(".currentToastMap.has(", {
-    showToast: filters.byCode(".currentToastMap.has("),
+const ToastsExports = mapMangledModuleLazy(/\.currentToastMap\.(?:has|get)\(/, {
+    showToast: filters.byCode(/\.currentToastMap\.(?:has|get)\(/),
     popToast: filters.byCode(".delete(")
 });
 
