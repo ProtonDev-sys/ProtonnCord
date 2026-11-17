@@ -82,9 +82,9 @@ export const settings = definePluginSettings({
         type: OptionType.SELECT,
         description: "OpenAI model. Sol is recommended for translation quality; Luna costs less. Selected messages are sent to OpenAI using your API credits.",
         options: [
-            { label: "GPT-6.1 Sol (recommended)", value: "gpt-6.1-sol", default: true },
             { label: "GPT-6 Luna (lowest cost)", value: "gpt-6-luna" },
-            { label: "GPT-6 Astra (highest capability)", value: "gpt-6-astra" }
+            { label: "GPT-6.2 Sol (recommended)", value: "gpt-6.2-sol", default: true },
+            { label: "GPT-6.2 Astra (highest capability)", value: "gpt-6.2-astra" }
         ] as const
     },
     autoTranslate: {
@@ -121,6 +121,13 @@ export const settings = definePluginSettings({
 }).withPrivateSettings<{
     dismissedAutoTranslateAlert?: boolean;
 }>();
+
+export function upgradeOpenAIModel() {
+    // Saved model IDs can predate the current dropdown options.
+    const savedModel: string | undefined = settings.store.openaiModel;
+    if (savedModel === "gpt-6.1-sol") settings.store.openaiModel = "gpt-6.2-sol";
+    else if (savedModel === "gpt-6-astra") settings.store.openaiModel = "gpt-6.2-astra";
+}
 
 export function resetLanguageDefaults() {
     if (!IS_WEB && settings.store.service === "kagi") {

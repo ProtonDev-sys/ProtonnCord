@@ -115,7 +115,7 @@ async function openaiTranslate(text: string, sourceLang: string, targetLang: str
         throw "Set your OpenAI API key in Translate settings first.";
 
     const result = await Native.makeOpenAITranslateRequest(
-        settings.store.openaiApiKey, settings.store.openaiModel ?? "gpt-6.1-sol", text, sourceLang, targetLang
+        settings.store.openaiApiKey, settings.store.openaiModel ?? "gpt-6.2-sol", text, sourceLang, targetLang
     );
     if (result.error) throw result.error;
     if (!result.translation) throw "OpenAI returned an invalid translation. Please retry.";
