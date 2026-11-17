@@ -58,6 +58,7 @@ export const getLanguages = () => {
     }
     switch (settings.store.service) {
         case "google":
+        case "openai":
             return GoogleLanguages;
         case "kagi":
             return KagiLanguages;
@@ -73,6 +74,8 @@ export async function translateText(text: string, sourceLang: string, targetLang
                 return googleTranslate;
             case "kagi":
                 return kagiTranslate;
+            case "openai":
+                return openaiTranslate;
             default:
                 return deeplTranslate;
         }
@@ -105,6 +108,20 @@ export function translate(kind: "received" | "sent", text: string): Promise<Tran
         settings.store[`${kind}Input`],
         settings.store[`${kind}Output`]
     );
+}
+
+async function openaiTranslate(text: string, sourceLang: string, targetLang: string): Promise<TranslationValue> {
+    if (!settings.store.openaiApiKey.trim())
+        throw "Set your OpenAI API key in Translate settings first.";
+
+    const result = await Native.makeOpenAITranslateRequest(
+        settings.store.openaiApiKey, settings.store.openaiModel ?? "gpt-6.1-sol", text, sourceLang, targetLang
+    );
+    if (result.error) throw result.error;
+    if (!result.translation) throw "OpenAI returned an invalid translation. Please retry.";
+
+    const { sourceLanguage, text: translated } = result.translation;
+    return { sourceLanguage: GoogleLanguages[sourceLanguage] ?? sourceLanguage, text: translated };
 }
 
 async function googleTranslate(text: string, sourceLang: string, targetLang: string): Promise<TranslationValue> {

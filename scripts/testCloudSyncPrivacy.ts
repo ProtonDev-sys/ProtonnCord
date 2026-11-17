@@ -97,7 +97,7 @@ const pluginDefinitions = {
             },
         },
     },
-    Translate: { settings: { def: { deeplApiKey: {} } } },
+    Translate: { settings: { def: { deeplApiKey: {}, openaiApiKey: {} } } },
     TriviaAI: { settings: { def: { apiKey: {} } } },
 } satisfies CloudPluginRegistry;
 
@@ -136,7 +136,7 @@ function settingsFixture(origin = ORIGIN_A): Record<string, any> {
                 safeSlider: 50,
                 structuredCredential: { token: SECRET_SENTINEL },
             },
-            Translate: { deeplApiKey: SECRET_SENTINEL, enabled: true },
+            Translate: { deeplApiKey: SECRET_SENTINEL, openaiApiKey: SECRET_SENTINEL, enabled: true },
             TriviaAI: { apiKey: SECRET_SENTINEL, enabled: true },
             UnknownFuturePlugin: { enabled: true, tokenAddedLater: SECRET_SENTINEL },
         },
