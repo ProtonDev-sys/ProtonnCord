@@ -55,7 +55,8 @@ export const settings = definePluginSettings({
             { label: "Google Translate", value: "google", default: true },
             { label: "DeepL Free - API key required", value: "deepl" },
             { label: "DeepL Pro - API key required", value: "deepl-pro" },
-            { label: "Kagi Translate - API key required", value: "kagi" }
+            { label: "Kagi Translate - API key required", value: "kagi" },
+            { label: "OpenAI - API key required", value: "openai" }
         ] as const,
         onChange: resetLanguageDefaults
     },
@@ -69,6 +70,22 @@ export const settings = definePluginSettings({
         type: OptionType.STRING,
         description: "Your Kagi session token (from kagi.com/settings?p=user_details)",
         default: ""
+    },
+    openaiApiKey: {
+        type: OptionType.STRING,
+        displayName: "OpenAI API key",
+        description: "Your OpenAI API key (from platform.openai.com/api-keys). Stored locally and excluded from cloud sync.",
+        default: "",
+        componentProps: { type: "password", autoComplete: "off" }
+    },
+    openaiModel: {
+        type: OptionType.SELECT,
+        description: "OpenAI model. Sol is recommended for translation quality; Luna costs less. Selected messages are sent to OpenAI using your API credits.",
+        options: [
+            { label: "GPT-6.1 Sol (recommended)", value: "gpt-6.1-sol", default: true },
+            { label: "GPT-6 Luna (lowest cost)", value: "gpt-6-luna" },
+            { label: "GPT-6 Astra (highest capability)", value: "gpt-6-astra" }
+        ] as const
     },
     autoTranslate: {
         type: OptionType.BOOLEAN,
@@ -94,6 +111,12 @@ export const settings = definePluginSettings({
     },
     kagiSession: {
         hidden() { return this.store.service !== "kagi"; }
+    },
+    openaiApiKey: {
+        hidden() { return IS_WEB || this.store.service !== "openai"; }
+    },
+    openaiModel: {
+        hidden() { return IS_WEB || this.store.service !== "openai"; }
     }
 }).withPrivateSettings<{
     dismissedAutoTranslateAlert?: boolean;
@@ -105,7 +128,7 @@ export function resetLanguageDefaults() {
         settings.store.receivedOutput = "en_us";
         settings.store.sentInput = "auto";
         settings.store.sentOutput = "en_us";
-    } else if (IS_WEB || settings.store.service === "google") {
+    } else if (IS_WEB || settings.store.service === "google" || settings.store.service === "openai") {
         settings.store.receivedInput = "auto";
         settings.store.receivedOutput = "en";
         settings.store.sentInput = "auto";

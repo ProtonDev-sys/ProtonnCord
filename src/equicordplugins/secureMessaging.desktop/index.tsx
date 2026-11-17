@@ -3402,7 +3402,8 @@ export default definePlugin({
             find: "renderAttachments",
             replacement: [
                 {
-                    match: /renderAttachments\((\i)\)\{(?=let\{channel:)/,
+                    // Discord can insert compiler temporaries before the channel destructuring.
+                    match: /renderAttachments\((\i)\)\{/,
                     replace: "$&$1=$self.patchEncryptedAttachments($1,this);",
                 },
                 {

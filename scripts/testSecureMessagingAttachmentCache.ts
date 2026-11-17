@@ -4,18 +4,73 @@ import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { runInNewContext } from "node:vm";
 import type { Message } from "@vencord/discord-types";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { createSourceFile, isObjectLiteralExpression, isPropertyAssignment, isRegularExpressionLiteral, isStringLiteral, ModuleKind, type Node, ScriptTarget, transpileModule } from "typescript";
 
 import { isPreviewableAttachmentMimeType } from "../src/equicordplugins/secureMessaging.desktop/attachments";
 import { exactArrayBuffer } from "../src/equicordplugins/secureMessaging.desktop/exactArrayBuffer";
 import { discordEditedTimestamp, discordMessageNonce } from "../src/equicordplugins/secureMessaging.desktop/messageMetadata";
 import type { DecryptIncomingAttachmentsInput, DecryptIncomingAttachmentsResult, DecryptIncomingResult, DownloadIncomingAttachmentResult } from "../src/equicordplugins/secureMessaging.desktop/native";
 import { createTaskQueue } from "../src/equicordplugins/secureMessaging.desktop/taskQueue";
+import { canonicalizeMatch } from "../src/utils/patches";
+import { discordAttachmentRenderers } from "./fixtures/discordAttachmentRenderers";
 
 type AttachmentCache = typeof import("../src/equicordplugins/secureMessaging.desktop/attachmentCache");
 type AttachmentSelection = NonNullable<Parameters<AttachmentCache["decryptIncomingAttachmentsCached"]>[2]>;
 const source = readFileSync(new URL("../src/equicordplugins/secureMessaging.desktop/attachmentCache.ts", import.meta.url), "utf8");
 const userId = "100000000000000001";
+
+test("Discord attachment renderers replace ciphertext files with decrypted media across compiler prologues", async t => {
+    const plugin = createSourceFile("index.tsx", readFileSync("src/equicordplugins/secureMessaging.desktop/index.tsx", "utf8"), ScriptTarget.Latest, true);
+    const patches: { match: RegExp; replace: string; }[] = [];
+    function visit(node: Node) {
+        if (isObjectLiteralExpression(node)) {
+            const property = (name: string) => node.properties.find(value => isPropertyAssignment(value) && value.name.getText(plugin) === name);
+            const replacement = property("replace");
+            if (replacement && isPropertyAssignment(replacement) && isStringLiteral(replacement.initializer)
+                && replacement.initializer.text.includes("$self.patchEncryptedAttachments")) {
+                const match = property("match");
+                assert.ok(match && isPropertyAssignment(match) && isRegularExpressionLiteral(match.initializer));
+                const literal = match.initializer.getText(plugin);
+                const end = literal.lastIndexOf("/");
+                patches.push({ match: canonicalizeMatch(new RegExp(literal.slice(1, end), literal.slice(end + 1))), replace: replacement.initializer.text });
+            }
+        }
+        node.forEachChild(visit);
+    }
+    visit(plugin);
+    assert.equal(patches.length, 1);
+    for (const renderer of discordAttachmentRenderers) {
+        const h = fixture();
+        t.after(h.api.clearEncryptedAttachmentCache);
+        Object.assign(h.message, { isPoll: () => false });
+        let canDecrypt = true;
+        let updates = 0;
+        const source = renderer.replace(patches[0].match, patches[0].replace);
+        const host = runInNewContext(`({ props: { channel: {}, inlineAttachmentMedia: true }, forceUpdate() { updated(); }, ${source} })`, {
+            $self: { patchEncryptedAttachments: (message: Message, owner: { forceUpdate(): void; }) => h.api.patchEncryptedMessageAttachments(message, owner, canDecrypt) },
+            updated: () => updates++,
+            s: { jsx: (type: string, props: object) => ({ type, props }) },
+            c: { Lt: (flags: number, flag: number) => (flags & flag) !== 0 },
+            er: { sbO: { IS_THUMBNAIL: 1, IS_ANIMATED: 32 }, pr7: { IS_VOICE_MESSAGE: 8192 } },
+            aE: { _c: () => false }, aI: { _c: () => false },
+            lJ: { Rr: () => ({ type: "IMAGE" }), aG: () => "fixture" },
+            sc: { o: () => ({ srcToOnClickOverride: {} }) }, cT: { o: () => ({ srcToOnClickOverride: {} }) },
+            c_: { rC: (attachment: object) => attachment }, cC: { A: "mosaic", rC: (attachment: object) => attachment }, cv: { A: "mosaic" },
+            cg: {}, ch: {}, cO() {}, aC: { E: () => "fixture" }, av: { E: () => "fixture" },
+        });
+        assert.equal(host.renderAttachments(h.message), null, "pending decryption must not display ciphertext files");
+        await setImmediate();
+        assert.ok(updates > 0, "native decryption wakes the mounted Discord renderer");
+        const items = host.renderAttachments(h.message).props.items;
+        const image = items.find(({ item }) => item.content_type === "image/png").item;
+        assert.match(image.url, /^blob:https:\/\/discord\.com\//);
+        assert.equal(image.filename, "image.png");
+        assert.ok(items.every(({ item }) => !item.url.includes(".pcaf")));
+        canDecrypt = false;
+        assert.equal(host.renderAttachments(h.message), null, "screenshot protection still hides decrypted media");
+        h.api.clearEncryptedAttachmentCache();
+    }
+});
 
 test("native image metadata is limited to registered media in the current account", async t => {
     const h = fixture();
