@@ -24,7 +24,7 @@ import definePlugin from "@utils/types";
 import { Message } from "@vencord/discord-types";
 import { ChannelStore, Menu, UserStore } from "@webpack/common";
 
-import { settings } from "./settings";
+import { settings, upgradeOpenAIModel } from "./settings";
 import { setShouldShowTranslateEnabledTooltip, TranslateChatBarIcon, TranslateIcon } from "./TranslateIcon";
 import { handleTranslate, TranslationAccessory } from "./TranslationAccessory";
 import { translate } from "./utils";
@@ -94,6 +94,7 @@ export default definePlugin({
     translate,
 
     start() {
+        upgradeOpenAIModel();
         active = true;
         generation++;
     },

@@ -42,7 +42,7 @@ test("translation completion cannot alter a stopped session or another account's
         const plugin = load("index.tsx", {
             "@utils/constants": { Devs: {} }, "@utils/types": { __esModule: true, default: (value: unknown) => value },
             "@webpack/common": { UserStore: { getCurrentUser: () => ({ id: account }) } },
-            "./settings": { settings: { store: { autoTranslate: true } } },
+            "./settings": { settings: { store: { autoTranslate: true } }, upgradeOpenAIModel() {} },
             "./utils": { translate: () => new Promise(resolve => finish = resolve) }
         }, { setTimeout: () => 1, clearTimeout() {} }).default;
         plugin.start();
@@ -99,6 +99,16 @@ test("translation language defaults use an offered Kagi output code", () => {
     api.resetLanguageDefaults();
     assert.equal(store.sentInput, "auto");
     assert.equal(store.sentOutput, "en");
+    for (const [before, after] of [
+        ["gpt-6.1-sol", "gpt-6.2-sol"], ["gpt-6-astra", "gpt-6.2-astra"], ["gpt-6-luna", "gpt-6-luna"],
+        ["custom-model", "custom-model"]
+    ]) {
+        store.openaiModel = before;
+        api.upgradeOpenAIModel();
+        assert.equal(store.openaiModel, after);
+        api.upgradeOpenAIModel();
+        assert.equal(store.openaiModel, after);
+    }
 });
 
 test("OpenAI uses the Responses API with separated instructions, strict output and no storage", async () => {
