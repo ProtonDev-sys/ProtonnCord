@@ -14,8 +14,9 @@ import { createSourceFile, isFunctionDeclaration, isVariableStatement, JsxEmit, 
 import { encryptedUploadLimitsDescription, readDiscordUploadLimit } from "../src/equicordplugins/secureMessaging.desktop/uploadLimits";
 
 const source = readFileSync(new URL("../src/equicordplugins/secureMessaging.desktop/index.tsx", import.meta.url), "utf8");
-const parsed = createSourceFile("index.tsx", source, ScriptTarget.Latest, true);
-const names = new Set(["ConversationManager", "KeyReviewModal", "SecureMessagingButton", "sendKeyAnnouncement", "discordUploadLimitBytes", "showToast", "copyKeyText", "KeyAnnouncementAccessory"]);
+const toastSource = readFileSync(new URL("../src/equicordplugins/secureMessaging.desktop/notifications.ts", import.meta.url), "utf8");
+const parsed = createSourceFile("index.tsx", source + "\n" + toastSource, ScriptTarget.Latest, true);
+const names = new Set(["useModalAccount", "ConversationManager", "KeyReviewModal", "SecureMessagingButton", "sendKeyAnnouncement", "discordUploadLimitBytes", "showToast", "copyKeyText", "KeyAnnouncementAccessory"]);
 const selected = parsed.statements.filter(statement => isFunctionDeclaration(statement)
     ? statement.name && names.has(statement.name.text)
     : isVariableStatement(statement) && statement.declarationList.declarations.some(declaration => names.has(declaration.name.getText(parsed))));
@@ -60,7 +61,7 @@ function harness() {
         createAnnouncement: async () => { calls.announcements++; return { status: "created", content: "synthetic announcement" }; },
     };
     const context = {
-        console: { warn: (...args: unknown[]) => calls.warnings.push(args) },
+        exports: {}, console: { warn: (...args: unknown[]) => calls.warnings.push(args) },
         UploadLimits: { getUserMaxFileSize: (_user: unknown): unknown => 1024 * 1024 * 1024 },
         encryptedUploadLimitsDescription, readDiscordUploadLimit,
         settings: { store: { externalLinkPreviews: false }, use: () => context.settings.store },
@@ -264,6 +265,37 @@ test("a rejected clipboard write reports only the failure", async () => {
     h.context.copyToClipboard = async () => { throw new Error("unavailable"); };
     await h.runtime.copyKeyText("fixture", "Fingerprint copied.");
     assert.deepEqual(h.calls.toasts, [["Discord could not copy to the clipboard.", "failure"]]);
+});
+
+test("a stale configuration read cannot overwrite a newer channel snapshot", async () => {
+    const h = harness();
+    const first = Promise.withResolvers<any>();
+    h.native.getConversation = () => first.promise;
+    h.render("ConversationManager", h.props.manager);
+    await setImmediate();
+    const next = { ...h.props.manager, channel: { ...h.props.manager.channel, recipients: ["other-peer"] } };
+    h.native.getConversation = async () => ({ status: "failed" });
+    h.render("ConversationManager", next);
+    await setImmediate();
+    first.resolve({ status: "disabled", participants: [], selectedRecipientIds: [] });
+    await setImmediate();
+    const modal = h.render("ConversationManager", next);
+    assert.equal(modal.props.actions[0].disabled, true);
+    assert.match(JSON.stringify(modal), /Retry loading/);
+});
+
+test("changing accounts dismisses a configuration dialog with a pending read", async () => {
+    const h = harness();
+    const initial = Promise.withResolvers<any>();
+    h.native.getConversation = () => initial.promise;
+    h.render("ConversationManager", h.props.manager);
+    await setImmediate();
+    h.switchAccount();
+    assert.equal(h.render("ConversationManager", h.props.manager), null);
+    assert.equal(h.calls.closed, 1);
+    initial.resolve({ status: "disabled", participants: [], selectedRecipientIds: [] });
+    await setImmediate();
+    assert.equal(h.render("ConversationManager", h.props.manager), null);
 });
 
 for (const rejected of [true, false]) test(`configuration ${rejected ? "rejected" : "structured"} load failures offer retry instead of indefinite Loading text`, async () => {

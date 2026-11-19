@@ -1,6 +1,6 @@
 import { exactArrayBuffer as cryptoBytes } from "./exactArrayBuffer";
 import { parseSecureForwardText, type SecureForwardMetadata } from "./forwarding";
-import { decodeBase64Url, encodeBase64Url, isSnowflake } from "./protocol";
+import { decodeBase64Url, encodeBase64Url, hasExactKeys, isRecord, isSnowflake } from "./protocol";
 
 export const LEGACY_ATTACHMENT_PAYLOAD_PREFIX = "PCEA1:";
 export const LEGACY_RICH_CONTENT_PAYLOAD_PREFIX = "PCER1:";
@@ -104,16 +104,6 @@ interface SerializedRichSecurePlaintext extends SerializedSecurePlaintext {
         n: string;
         f: number;
     }>;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-    const actual = Object.keys(value).sort();
-    const sortedExpected = [...expected].sort();
-    return actual.length === sortedExpected.length && actual.every((key, index) => key === sortedExpected[index]);
 }
 
 function validateSticker(sticker: SecureStickerItem): void {

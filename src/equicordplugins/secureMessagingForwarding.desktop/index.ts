@@ -1,7 +1,7 @@
 import { plugins } from "@api/PluginManager";
 import { EquicordDevs } from "@utils/constants";
 import definePlugin, { type PluginNative } from "@utils/types";
-import type { Channel, CloudUpload, Message, MessageAttachment } from "@vencord/discord-types";
+import type { CloudUpload, Message, MessageAttachment } from "@vencord/discord-types";
 import { CloudUploadPlatform } from "@vencord/discord-types/enums";
 import {
     ChannelStore,
@@ -10,7 +10,6 @@ import {
     GuildRoleStore,
     MessageStore,
     RestAPI,
-    showToast,
     Toasts,
     UserStore,
 } from "@webpack/common";
@@ -22,7 +21,9 @@ import {
     MAX_ATTACHMENT_COUNT,
     type SecureStickerItem,
 } from "../secureMessaging.desktop/attachments";
+import { snapshotForChannel } from "../secureMessaging.desktop/conversationSelection";
 import { decryptCachedMessage } from "../secureMessaging.desktop/decryptCache";
+import { exactArrayBuffer } from "../secureMessaging.desktop/exactArrayBuffer";
 import {
     composeSecureForwardText,
     type ForwardEmbed,
@@ -35,9 +36,9 @@ import {
 import type {
     ChannelProtectionResult,
     ConversationResult,
-    ConversationSnapshot,
-    NativeFailure,
 } from "../secureMessaging.desktop/native";
+import { failureMessage, isNativeFailure } from "../secureMessaging.desktop/nativeResult";
+import { showToast } from "../secureMessaging.desktop/notifications";
 import { isEncryptedMessage } from "../secureMessaging.desktop/protocol";
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("../secureMessaging.desktop/native")>;
@@ -80,33 +81,6 @@ function secureMessagingPlugin(): SecureMessagingPluginState | undefined {
     return (plugins as unknown as Record<string, SecureMessagingPluginState>).SecureMessaging;
 }
 
-function isNativeFailure(result: { status: string; }): result is NativeFailure {
-    return result.status === "invalid_input" || result.status === "unavailable" || result.status === "failed";
-}
-
-function failureReason(result: NativeFailure): string {
-    if (result.status === "invalid_input") return result.error;
-    if (result.status === "unavailable") return "Secure key storage is unavailable.";
-    if (result.error === "attachment_download_failed") return "An encrypted attachment could not be loaded from Discord.";
-    if (result.error === "attachment_too_large") return "An encrypted attachment exceeds Secure Messaging's safety limit.";
-    return "Secure Messaging could not authenticate the forwarded message.";
-}
-
-function snapshotForChannel(channel: Channel | undefined, localUserId: string): ConversationSnapshot | null {
-    if (!channel) return null;
-    const isGroup = Boolean(channel.isGroupDM?.() || channel.isMultiUserDM?.());
-    if (!isGroup && !channel.isDM?.()) return null;
-    const participantUserIds = [...new Set((channel.recipients ?? [])
-        .filter((value): value is string => typeof value === "string" && value !== localUserId))]
-        .sort((left, right) => left.localeCompare(right));
-    if (participantUserIds.length === 0 || (!isGroup && participantUserIds.length !== 1)) return null;
-    return {
-        channelId: channel.id,
-        kind: isGroup ? "GROUP_DM" : "DM",
-        participantUserIds,
-    };
-}
-
 function secureMessagingRuntimeReady(): boolean {
     const plugin = secureMessagingPlugin();
     return plugin?.started === true && plugin.getScreenCaptureProtectionStatus?.() === "ready";
@@ -119,7 +93,7 @@ function assertForwardStillActive(expectedGeneration: number, localUserId: strin
 }
 
 function conversationProtection(result: ConversationResult): ForwardProtection {
-    if (isNativeFailure(result)) return { protected: true, ready: false, reason: failureReason(result) };
+    if (isNativeFailure(result)) return { protected: true, ready: false, reason: failureMessage(result) };
     if (result.status === "enabled") {
         return secureMessagingRuntimeReady()
             ? { protected: true, ready: true }
@@ -171,7 +145,7 @@ async function inspectProtection(channelId: string, knownEncryptedMessage = fals
         return { protected: false, ready: false };
 
     const persisted: ChannelProtectionResult = await Native.getChannelProtection(localUserId, channelId);
-    if (isNativeFailure(persisted)) return { protected: true, ready: false, reason: failureReason(persisted) };
+    if (isNativeFailure(persisted)) return { protected: true, ready: false, reason: failureMessage(persisted) };
     if (persisted.status !== "protected") return { protected: false, ready: false };
     if (snapshot) return conversationProtection(await Native.getConversation(localUserId, snapshot));
     return {
@@ -279,40 +253,31 @@ function selectedAttachments(message: Message, selection: Set<string> | null): M
 }
 
 async function readBoundedResponse(response: Response, expectedSize: number): Promise<Uint8Array> {
-    const declared = Number(response.headers.get("content-length"));
-    if (Number.isFinite(declared) && declared > expectedSize)
+    const declared = response.headers.get("content-length");
+    if (declared !== null && Number(declared) > expectedSize)
         throw new Error("Discord returned more attachment data than expected.");
-    if (!response.body) {
-        const data = new Uint8Array(await response.arrayBuffer());
-        if (data.byteLength !== expectedSize) throw new Error("Discord returned an incomplete attachment.");
-        return data;
-    }
+    if (!response.body) throw new Error("Discord returned an incomplete attachment.");
 
+    const data = new Uint8Array(expectedSize);
     const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
+    let offset = 0;
     try {
         while (true) {
-            const next = await reader.read();
-            if (next.done) break;
-            total += next.value.byteLength;
-            if (total > expectedSize) throw new Error("Discord returned more attachment data than expected.");
-            chunks.push(next.value);
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            if (chunk.value.byteLength > data.length - offset)
+                throw new Error("Discord returned more attachment data than expected.");
+            data.set(chunk.value, offset);
+            offset += chunk.value.byteLength;
         }
+        if (offset !== expectedSize) throw new Error("Discord returned an incomplete attachment.");
+        return data;
     } catch (error) {
-        await reader.cancel().catch(() => undefined);
+        data.fill(0);
         throw error;
     } finally {
         reader.releaseLock();
     }
-    if (total !== expectedSize) throw new Error("Discord returned an incomplete attachment.");
-    const data = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-        data.set(chunk, offset);
-        offset += chunk.byteLength;
-    }
-    return data;
 }
 
 async function fetchCandidate(url: URL, attachment: MessageAttachment, channelId: string): Promise<Uint8Array> {
@@ -330,6 +295,7 @@ async function fetchCandidate(url: URL, attachment: MessageAttachment, channelId
         return await readBoundedResponse(response, attachment.size);
     } finally {
         clearTimeout(timeout);
+        controller.abort();
     }
 }
 
@@ -377,7 +343,7 @@ async function downloadPlainAttachment(attachment: MessageAttachment, channelId:
     if (!bytes) throw lastError instanceof Error ? lastError : new Error("The forwarded attachment could not be downloaded.");
 
     try {
-        const file = new File([Uint8Array.from(bytes).buffer], safeFilename(attachment.filename, attachment.id), {
+        const file = new File([exactArrayBuffer(bytes)], safeFilename(attachment.filename, attachment.id), {
             lastModified: Date.now(),
             type: safeMimeType(attachment.content_type),
         });
@@ -401,21 +367,16 @@ async function downloadPlainAttachment(attachment: MessageAttachment, channelId:
 function decryptedUpload(
     attachment: { data: Uint8Array; id: string; metadata: AttachmentMetadata; },
 ): ForwardUpload {
-    const copy = Uint8Array.from(attachment.data);
-    try {
-        return {
-            description: attachment.metadata.description,
-            duration: attachment.metadata.duration,
-            file: new File([copy.buffer], attachment.metadata.name, {
-                lastModified: Date.now(),
-                type: attachment.metadata.mimeType || "application/octet-stream",
-            }),
-            spoiler: attachment.metadata.spoiler,
-            waveform: attachment.metadata.waveform,
-        };
-    } finally {
-        copy.fill(0);
-    }
+    return {
+        description: attachment.metadata.description,
+        duration: attachment.metadata.duration,
+        file: new File([exactArrayBuffer(attachment.data)], attachment.metadata.name, {
+            lastModified: Date.now(),
+            type: attachment.metadata.mimeType || "application/octet-stream",
+        }),
+        spoiler: attachment.metadata.spoiler,
+        waveform: attachment.metadata.waveform,
+    };
 }
 
 async function prepareEncryptedSource(
@@ -427,7 +388,7 @@ async function prepareEncryptedSource(
     if (!localUserId) throw new Error("Discord has no authenticated user.");
     const decrypted = await decryptCachedMessage(localUserId, message);
     if (decrypted.status !== "decrypted") {
-        if (isNativeFailure(decrypted)) throw new Error(failureReason(decrypted));
+        if (isNativeFailure(decrypted)) throw new Error(failureMessage(decrypted));
         throw new Error("The encrypted message could not be authenticated for forwarding.");
     }
 
@@ -436,7 +397,7 @@ async function prepareEncryptedSource(
     if (message.attachments.length > 0) {
         const attachmentResult = await Native.decryptIncomingAttachments(localUserId, await encryptedAttachmentInput(message));
         if (attachmentResult.status !== "decrypted") {
-            if (isNativeFailure(attachmentResult)) throw new Error(failureReason(attachmentResult));
+            if (isNativeFailure(attachmentResult)) throw new Error(failureMessage(attachmentResult));
             throw new Error("The encrypted attachments could not be authenticated for forwarding.");
         }
         plaintext = attachmentResult.plaintext;

@@ -14,32 +14,32 @@ const parsed = createSourceFile("index.tsx", source, ScriptTarget.ES2022, true);
 
 test("upload reservations keep scoped counts atomic, isolated and time bounded", () => {
     const file = { filename: "opaque.pcaf", size: 123 };
-    for (const scope of [undefined, ""] as const) {
-        wire.clearWirePayloadAuthorizations();
-        const consume = (files: typeof file[], now = 1_001) => scope === undefined
-            ? wire.consumeAttachmentUploadReservations(channelId, files, now)
-            : wire.consumeScopedAttachmentUploadReservations(channelId, files, scope, now);
-        if (scope === undefined) wire.authorizeAttachmentUploadReservations(channelId, [file, file], 1_000);
-        else wire.authorizeScopedAttachmentUploadReservations(channelId, [file, file], scope, 1_000);
-        assert.equal(wire.consumeScopedAttachmentUploadReservations(channelId, [file], "other", 1_001), false);
-        assert.equal(consume([file, file, file]), false);
-        assert.equal(consume([file, { ...file, size: 124 }]), false);
-        assert.equal(consume([file]), true);
-        assert.equal(consume([file, file]), false);
-        assert.equal(consume([file], 3_601_000), false);
-    }
+    const scope = "current fingerprint";
+    wire.clearWirePayloadAuthorizations();
+    const consume = (files: typeof file[], now = 1_001) => wire.consumeScopedAttachmentUploadReservations(channelId, files, scope, now);
+    wire.authorizeScopedAttachmentUploadReservations(channelId, [file, file], scope, 1_000);
+    assert.equal(wire.consumeScopedAttachmentUploadReservations(channelId, [file], "other", 1_001), false);
+    assert.equal(consume([file, file, file]), false);
+    assert.equal(consume([file, { ...file, size: 124 }]), false);
+    assert.equal(consume([file]), true);
+    assert.equal(consume([file, file]), false);
+    assert.equal(consume([file], 3_601_000), false);
+    wire.authorizeScopedAttachmentUploadReservations(channelId, [file, file], scope, 4_000_000);
+    assert.equal(wire.revokeAnyAttachmentUploadReservations(channelId, [file, file], 4_000_001), true);
+    assert.equal(consume([file], 4_000_002), false);
     wire.clearWirePayloadAuthorizations();
 });
 
-test("an undefined runtime scoped argument cannot consume an unscoped reservation", () => {
+test("checking a full reservation cache preserves valid entries and new batches respect capacity", () => {
     wire.clearWirePayloadAuthorizations();
-    const files = [{ filename: "opaque.pcaf", size: 123 }];
-    wire.authorizeAttachmentUploadReservations(channelId, files, 1_000);
-    assert.equal(wire.consumeScopedAttachmentUploadReservations(channelId, files, undefined as unknown as string, 1_001), false);
-    assert.equal(wire.consumeAttachmentUploadReservations(channelId, files, 1_001), true);
-    wire.authorizeScopedAttachmentUploadReservations(channelId, files, undefined as unknown as string, 1_000);
-    assert.equal(wire.consumeAttachmentUploadReservations(channelId, files, 1_001), false);
-    assert.equal(wire.consumeScopedAttachmentUploadReservations(channelId, files, undefined as unknown as string, 1_001), true);
+    const files = Array.from({ length: 512 }, (_, i) => ({ filename: String(i), size: 1 }));
+    for (const file of files) wire.authorizeScopedAttachmentUploadReservations(channelId, [file], "scope", 1000);
+    const additions = [{ filename: "new-1", size: 1 }, { filename: "new-2", size: 1 }];
+    assert.equal(wire.revokeAnyAttachmentUploadReservations(channelId, additions, 1001), false);
+    assert.equal(wire.consumeScopedAttachmentUploadReservations(channelId, [files[0]], "scope", 1001), true);
+    wire.authorizeScopedAttachmentUploadReservations(channelId, additions, "scope", 1002);
+    assert.equal(wire.consumeScopedAttachmentUploadReservations(channelId, [files[1]], "scope", 1003), false);
+    assert.equal(wire.consumeScopedAttachmentUploadReservations(channelId, additions, "scope", 1003), true);
     wire.clearWirePayloadAuthorizations();
 });
 

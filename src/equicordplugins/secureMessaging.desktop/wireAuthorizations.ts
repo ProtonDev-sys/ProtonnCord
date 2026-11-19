@@ -39,19 +39,17 @@ function editAuthorizationKey(channelId: string, messageId: string, content: str
     return `${channelId}\0${messageId}\0${content}`;
 }
 
-function pruneAuthorizationMap(values: Map<string, WireAuthorization>, now: number): void {
+function expireAuthorizations(values: Map<string, WireAuthorization>, now: number): void {
     for (const [key, authorization] of values) {
         if (authorization.expiresAt <= now) values.delete(key);
-    }
-    while (values.size >= MAX_AUTHORIZATIONS) {
-        const oldestKey = values.keys().next().value;
-        if (oldestKey == null) break;
-        values.delete(oldestKey);
     }
 }
 
 function authorize(values: Map<string, WireAuthorization>, key: string, expiresAt: number): void {
-    values.set(key, { count: (values.get(key)?.count ?? 0) + 1, expiresAt });
+    const count = (values.get(key)?.count ?? 0) + 1;
+    values.delete(key);
+    values.set(key, { count, expiresAt });
+    if (values.size > MAX_AUTHORIZATIONS) values.delete(values.keys().next().value!);
 }
 
 function consumeAuthorization(values: Map<string, WireAuthorization>, key: string, now: number): boolean {
@@ -73,7 +71,7 @@ export function authorizeWirePayload(
 ): void {
     const attachmentFilenames = typeof attachmentFilenamesOrNow === "number" ? [] : attachmentFilenamesOrNow;
     if (typeof attachmentFilenamesOrNow === "number") now = attachmentFilenamesOrNow;
-    pruneAuthorizationMap(authorizations, now);
+    expireAuthorizations(authorizations, now);
     authorize(authorizations, authorizationKey(channelId, content, attachmentFilenames),
         now + (attachmentFilenames.length > 0 ? ATTACHMENT_MESSAGE_AUTHORIZATION_LIFETIME_MS : AUTHORIZATION_LIFETIME_MS));
 }
@@ -96,7 +94,7 @@ export function authorizeScopedWirePayload(
     scope: string,
     now = Date.now(),
 ): void {
-    pruneAuthorizationMap(authorizations, now);
+    expireAuthorizations(authorizations, now);
     authorize(authorizations, scopedKey(authorizationKey(channelId, content, attachmentFilenames), scope),
         now + (attachmentFilenames.length > 0 ? ATTACHMENT_MESSAGE_AUTHORIZATION_LIFETIME_MS : AUTHORIZATION_LIFETIME_MS));
 }
@@ -111,20 +109,6 @@ export function consumeScopedWirePayloadAuthorization(
     return consumeAuthorization(authorizations, scopedKey(authorizationKey(channelId, content, attachmentFilenames), scope), now);
 }
 
-export function authorizeWireEdit(channelId: string, messageId: string, content: string, now = Date.now()): void {
-    pruneAuthorizationMap(editAuthorizations, now);
-    authorize(editAuthorizations, editAuthorizationKey(channelId, messageId, content), now + AUTHORIZATION_LIFETIME_MS);
-}
-
-export function consumeWireEditAuthorization(
-    channelId: string,
-    messageId: string,
-    content: string,
-    now = Date.now(),
-): boolean {
-    return consumeAuthorization(editAuthorizations, editAuthorizationKey(channelId, messageId, content), now);
-}
-
 export function authorizeScopedWireEdit(
     channelId: string,
     messageId: string,
@@ -132,7 +116,7 @@ export function authorizeScopedWireEdit(
     scope: string,
     now = Date.now(),
 ): void {
-    pruneAuthorizationMap(editAuthorizations, now);
+    expireAuthorizations(editAuthorizations, now);
     authorize(editAuthorizations, scopedKey(editAuthorizationKey(channelId, messageId, content), scope), now + AUTHORIZATION_LIFETIME_MS);
 }
 
@@ -146,37 +130,29 @@ export function consumeScopedWireEditAuthorization(
     return consumeAuthorization(editAuthorizations, scopedKey(editAuthorizationKey(channelId, messageId, content), scope), now);
 }
 
-export function authorizeAttachmentUploadReservations(
+export function authorizeScopedAttachmentUploadReservations(
     channelId: string,
     files: readonly AuthorizedAttachmentFile[],
+    scope: string,
     now = Date.now(),
 ): void {
-    pruneAuthorizationMap(uploadAuthorizations, now);
+    expireAuthorizations(uploadAuthorizations, now);
     for (const file of files) {
-        const key = uploadAuthorizationKey(channelId, file);
+        const key = scopedKey(uploadAuthorizationKey(channelId, file), scope);
         authorize(uploadAuthorizations, key, now + ATTACHMENT_UPLOAD_AUTHORIZATION_LIFETIME_MS);
     }
 }
 
-export function consumeAttachmentUploadReservations(
+export function consumeScopedAttachmentUploadReservations(
     channelId: string,
     files: readonly AuthorizedAttachmentFile[],
-    now = Date.now(),
-): boolean {
-    return consumeUploadReservations(channelId, files, now, "", false);
-}
-
-function consumeUploadReservations(
-    channelId: string,
-    files: readonly AuthorizedAttachmentFile[],
-    now: number,
     scope: string,
-    scoped: boolean,
+    now = Date.now(),
 ): boolean {
     const required = new Map<string, number>();
     for (const file of files) {
         const base = uploadAuthorizationKey(channelId, file);
-        const key = scoped ? scopedKey(base, scope) : base;
+        const key = scopedKey(base, scope);
         required.set(key, (required.get(key) ?? 0) + 1);
     }
     for (const [key, count] of required) {
@@ -196,45 +172,28 @@ function consumeUploadReservations(
     return true;
 }
 
-export function authorizeScopedAttachmentUploadReservations(
-    channelId: string,
-    files: readonly AuthorizedAttachmentFile[],
-    scope: string,
-    now = Date.now(),
-): void {
-    pruneAuthorizationMap(uploadAuthorizations, now);
-    for (const file of files) {
-        const key = scopedKey(uploadAuthorizationKey(channelId, file), scope);
-        authorize(uploadAuthorizations, key, now + ATTACHMENT_UPLOAD_AUTHORIZATION_LIFETIME_MS);
-    }
-}
-
-export function consumeScopedAttachmentUploadReservations(
-    channelId: string,
-    files: readonly AuthorizedAttachmentFile[],
-    scope: string,
-    now = Date.now(),
-): boolean {
-    return consumeUploadReservations(channelId, files, now, scope, true);
-}
-
 export function revokeAnyAttachmentUploadReservations(
     channelId: string,
     files: readonly AuthorizedAttachmentFile[],
     now = Date.now(),
 ): boolean {
-    pruneAuthorizationMap(uploadAuthorizations, now);
-    const candidates = [...uploadAuthorizations.keys()];
-    const matchedKeys = new Set<string>();
+    expireAuthorizations(uploadAuthorizations, now);
+    if (!files.length) return false;
+    const remaining = new Map<string, number>();
     for (const file of files) {
-        const base = uploadAuthorizationKey(channelId, file);
-        const key = candidates.find(candidate =>
-            !matchedKeys.has(candidate) &&
-            (candidate === base || candidate.startsWith(`${base}\0scope:`)));
-        if (!key) return false;
-        matchedKeys.add(key);
+        const prefix = uploadAuthorizationKey(channelId, file) + "\0scope:";
+        let matched = false;
+        for (const [key, authorization] of uploadAuthorizations) {
+            if (!key.startsWith(prefix)) continue;
+            const count = remaining.get(key) ?? authorization.count;
+            if (count === 0) continue;
+            remaining.set(key, count - 1);
+            matched = true;
+            break;
+        }
+        if (!matched) return false;
     }
-    for (const key of matchedKeys) uploadAuthorizations.delete(key);
+    for (const key of remaining.keys()) uploadAuthorizations.delete(key);
     return true;
 }
 

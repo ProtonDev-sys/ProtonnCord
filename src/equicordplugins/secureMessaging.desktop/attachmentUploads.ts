@@ -189,8 +189,12 @@ async function mediaMetadata(file: File, mimeType: string): Promise<UploadMediaM
         media.addEventListener("seeked", onMetadataAvailable);
         media.addEventListener("error", onError, { once: true });
         timer = setTimeout(() => finish(captureMetadata()), MEDIA_METADATA_TIMEOUT_MS);
-        media.src = url;
-        media.load();
+        try {
+            media.src = url;
+            media.load();
+        } catch {
+            finish(latest);
+        }
     });
 }
 
