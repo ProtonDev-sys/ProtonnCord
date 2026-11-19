@@ -103,7 +103,7 @@ export type AnnouncementResult = { status: "created"; content: string; identity:
 export type AnnouncementReviewResult =
     | { status: "trust_required"; identity: IdentitySummary; reviewToken: string; }
     | { status: "trusted"; identity: IdentitySummary; }
-    | { status: "key_changed"; identity: IdentitySummary; trustedIdentity: IdentitySummary; }
+    | { status: "key_changed"; identity: IdentitySummary; trustedIdentity: IdentitySummary; reviewToken?: string; }
     | { status: "stale_announcement"; identity: IdentitySummary; trustedIdentity: IdentitySummary; }
     | { status: "invalid_announcement"; }
     | NativeFailure;
@@ -300,6 +300,7 @@ interface QuarantineJournal {
 }
 
 interface PendingReview {
+    replacing?: { fingerprint: string; trustedAt: number; };
     announcedAt: number;
     expiresAt: number;
     identity: PublicIdentity;
@@ -2327,19 +2328,20 @@ export async function reviewAnnouncement(
                 disablePeerConversations(context.account, peerId.value);
                 await saveVault(context.vault);
             }
-            return { status: "key_changed", identity: summary, trustedIdentity: peerSummary(trusted) };
         }
 
         expirePendingReviews();
         makePendingReviewCapacity();
         const reviewToken = randomUUID();
         pendingReviews.set(reviewToken, {
+            replacing: trusted && { fingerprint: trusted.identity.fingerprint, trustedAt: trusted.trustedAt },
             announcedAt,
             expiresAt: Date.now() + REVIEW_LIFETIME_MS,
             identity,
             localUserId: user.value,
             publishedAt,
         });
+        if (trusted) return { status: "key_changed", identity: summary, trustedIdentity: peerSummary(trusted), reviewToken };
         return { status: "trust_required", identity: summary, reviewToken };
     });
 }
@@ -2349,7 +2351,8 @@ export async function trustReviewedKey(
     localUserId: string,
     peerUserId: string,
     reviewToken: string,
-    expectedFingerprint: string
+    expectedFingerprint: string,
+    previousFingerprint?: string,
 ): Promise<TrustResult> {
     const callerFailure = validateIpcCaller(event);
     if (callerFailure) return callerFailure;
@@ -2380,7 +2383,19 @@ export async function trustReviewedKey(
             formattedFingerprint: formatFingerprint(review.identity.fingerprint),
             userId: review.identity.userId,
         };
-        if (existing) {
+        if (previousFingerprint !== review.replacing?.fingerprint) return complete({ status: "fingerprint_mismatch" });
+        if (review.replacing) {
+            if (!existing?.keyChanged || existing.identity.fingerprint !== review.replacing.fingerprint ||
+                existing.trustedAt !== review.replacing.trustedAt)
+                return complete({ status: "review_expired" });
+
+            // Persist the blocked old identity before clearing its separate quarantine journal.
+            // If the final vault write fails, the old key and disabled conversations survive retry.
+            disablePeerConversations(context.account, peerId.value);
+            await saveVault(context.vault);
+            await clearPeerQuarantine(user.value, peerId.value);
+            retainPeerIdentity(context.account, peerId.value, existing);
+        } else if (existing) {
             const sameIdentity = existing.identity.fingerprint === review.identity.fingerprint;
             if (sameIdentity && !existing.keyChanged)
                 return complete({ status: "already_trusted", identity });
@@ -2409,7 +2424,7 @@ export async function trustReviewedKey(
             return complete({ status: "key_changed", identity, trustedIdentity: peerSummary(existing) });
         }
         const completingInterruptedForget = isPeerQuarantined(user.value, peerId.value);
-        if (Object.keys(context.account.trustedPeers).length >= MAX_TRUSTED_PEERS)
+        if (!existing && Object.keys(context.account.trustedPeers).length >= MAX_TRUSTED_PEERS)
             throw new VaultOperationError("capacity_exceeded");
 
         context.account.trustedPeers[peerId.value] = {

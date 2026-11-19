@@ -2102,9 +2102,32 @@ async function testNativeLifecycle(bundlePath: string, dataDir: string): Promise
     });
     expectStatus(keyChangedSend, "not_enabled", "key quarantine blocks a second module with a stale warm cache");
     assert.equal(keyChangedSend.reason, "unverified_recipients");
-    const forgotten = await native.forgetPeer(DISCORD_EVENT, ALICE_ID, BOB_ID);
-    expectStatus(forgotten, "forgotten", "Alice explicitly forgets Bob old key");
-    await trustAnnouncement(native, ALICE_ID, BOB_ID, bobChangedAnnouncement, peerReplacementPublishedAt);
+    assert.ok(changedReview.reviewToken);
+    const secondReview = await freshlyLoaded.reviewAnnouncement(DISCORD_EVENT, ALICE_ID, BOB_ID,
+        bobChangedAnnouncement, messageIdAt(peerReplacementPublishedAt), null);
+    expectStatus(secondReview, "key_changed", "a second window reviews the same change");
+    assert.ok(secondReview.reviewToken);
+    const replace = () => native.trustReviewedKey(DISCORD_EVENT, ALICE_ID, BOB_ID, changedReview.reviewToken!,
+        changedReview.identity.fingerprint, changedReview.trustedIdentity.fingerprint);
+    const encryptString = protector.encryptString.bind(protector);
+    protector.encryptString = plaintext => {
+        if (JSON.parse(plaintext).accounts?.[ALICE_ID]?.trustedPeers[BOB_ID]?.identity.fingerprint === changedReview.identity.fingerprint)
+            throw new Error("Injected final replacement write failure");
+        return encryptString(plaintext);
+    };
+    try {
+        expectStatus(await replace(), "failed", "final replacement write fails after the journal is cleared");
+    } finally {
+        protector.encryptString = encryptString;
+    }
+    const interrupted = await freshlyLoaded.getConversation(DISCORD_EVENT, ALICE_ID, aliceDm);
+    expectStatus(interrupted, "unverified_recipients", "the old key stays blocked after an interrupted replacement");
+    const [oldPeer] = interrupted.participants;
+    assert.ok(oldPeer?.status === "key_changed");
+    assert.equal(oldPeer.identity.fingerprint, changedReview.trustedIdentity.fingerprint);
+    expectStatus(await replace(), "trusted", "the same review can retry the final write");
+    expectStatus(await freshlyLoaded.trustReviewedKey(DISCORD_EVENT, ALICE_ID, BOB_ID, secondReview.reviewToken,
+        secondReview.identity.fingerprint, secondReview.trustedIdentity.fingerprint), "review_expired", "stale replacement cannot retire the newly trusted key");
     conversation = await native.configureConversation(DISCORD_EVENT, ALICE_ID, {
         enabled: true,
         selectedRecipientIds: [BOB_ID],

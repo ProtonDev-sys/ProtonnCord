@@ -53,7 +53,7 @@ import {
     ReactDOM,
     RestAPI,
     SelectedChannelStore,
-    showToast,
+    showToast as showDiscordToast,
     SnowflakeUtils,
     StickersStore,
     TextArea,
@@ -797,6 +797,24 @@ function failureMessage(failure: NativeFailure): string {
     if (failure.error === "security_key_mismatch") return "The wrong security key answered, or its profile no longer matches this vault.";
     if (failure.error === "security_key_storage_failed") return "The security key could not store the encrypted vault seed. Check its resident-key and large-blob capacity, then retry.";
     return "The encrypted vault could not be saved.";
+}
+
+function showToast(message: string, type: string): void {
+    try {
+        showDiscordToast(message, type);
+    } catch {
+        // Host notifications are optional. Never include chat or identity data in the fallback log.
+        console.warn("[SecureMessaging] Discord could not display a notification.");
+    }
+}
+
+async function copyKeyText(text: string, successMessage: string): Promise<void> {
+    try {
+        await copyToClipboard(text);
+        showToast(successMessage, Toasts.Type.SUCCESS);
+    } catch {
+        showToast("Discord could not copy to the clipboard.", Toasts.Type.FAILURE);
+    }
 }
 
 function showFailure(failure: NativeFailure): void {
@@ -2146,10 +2164,7 @@ function IdentityBlock({ identity }: { identity: IdentitySummary; }) {
                 <Button
                     size="small"
                     variant="secondary"
-                    onClick={() => {
-                        copyToClipboard(identity.formattedFingerprint);
-                        showToast("Fingerprint copied.", Toasts.Type.SUCCESS);
-                    }}
+                    onClick={() => void copyKeyText(identity.formattedFingerprint, "Fingerprint copied.")}
                 >
                     Copy fingerprint
                 </Button>
@@ -2305,6 +2320,7 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
         }
         setBusy(true);
         setError(null);
+        let saved = false;
         try {
             const result = await Native.configureConversation(context.localUserId, {
                 enabled: enableEncryption,
@@ -2312,21 +2328,19 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                 snapshot: context.snapshot,
             });
             if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
+            saved = result.status === "enabled" || result.status === "disabled";
             revokePreparedSecureOperations();
-            setConversation(result);
+            if (!isNativeFailure(result)) setConversation(result);
             updateMessageLengthBypass(context, result);
             await refreshChatAccessState(context.localUserId);
             if (result.status === "enabled" || result.status === "disabled") {
-                try {
-                    showToast(result.status === "enabled" ? "Encrypted sending enabled." : "Encrypted sending disabled.", Toasts.Type.SUCCESS);
-                } catch (error) {
-                    console.warn("[SecureMessaging] Configuration saved, but the success notification failed.", error);
-                }
+                showToast(result.status === "enabled" ? "Encrypted sending enabled." : "Encrypted sending disabled.", Toasts.Type.SUCCESS);
                 modalProps.onClose();
             } else if (isNativeFailure(result)) setError(failureMessage(result));
             else setError(conversationStatusMessage(result));
         } catch {
-            setError("Secure Messaging refused to save this configuration.");
+            setError(saved ? "Configuration saved. Reopen this dialog to refresh its status." :
+                "Secure Messaging could not confirm the save. Reopen this dialog to check the current configuration.");
         } finally {
             setBusy(false);
         }
@@ -2455,10 +2469,7 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                                 ) : (
                                     <>
                                         {keyState.profile.provider !== "onekey" && (
-                                            <Button size="small" disabled={busy} onClick={() => {
-                                                copyToClipboard(keyState.profile.exportText);
-                                                showToast("Security-key profile copied.", Toasts.Type.SUCCESS);
-                                            }}>
+                                            <Button size="small" disabled={busy} onClick={() => void copyKeyText(keyState.profile.exportText, "Security-key profile copied.")}>
                                                 Copy profile
                                             </Button>
                                         )}
@@ -2472,8 +2483,7 @@ function ConversationManager({ channel, modalProps, onUnlocked, unlockOnly = fal
                                                     if (UserStore.getCurrentUser()?.id !== context.localUserId) return;
                                                     if (isNativeFailure(result)) setError(failureMessage(result));
                                                     else {
-                                                        await copyToClipboard(result.token);
-                                                        showToast("OneKey-encrypted phone pairing copied. Import it in the mobile Secure Messaging settings.", Toasts.Type.SUCCESS);
+                                                        await copyKeyText(result.token, "OneKey-encrypted phone pairing copied. Import it in the mobile Secure Messaging settings.");
                                                     }
                                                 } catch {
                                                     setError("Phone pairing could not be created. Unlock your OneKey vault and try again.");
@@ -2953,6 +2963,8 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
         ? review.identity
         : null;
 
+    const reviewToken = review.status === "trust_required" || review.status === "key_changed" ? review.reviewToken : undefined;
+
     const refreshReview = async () => {
         if (busy) return;
         if (UserStore.getCurrentUser()?.id !== localUserId) {
@@ -2986,45 +2998,23 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
             modalProps.onClose();
             return;
         }
-        if (busy || !confirmed || !identity) return;
+        if (busy || !confirmed || !identity || !reviewToken) return;
         setBusy(true);
         setError(null);
+        let verified = false;
         try {
-            let reviewed = review;
-            if (reviewed.status === "key_changed") {
-                const forgotten = await Native.forgetPeer(localUserId, peerUserId);
-                if (UserStore.getCurrentUser()?.id !== localUserId) return;
-                if (forgotten.status !== "forgotten" && forgotten.status !== "not_found") {
-                    setError(failureMessage(forgotten));
-                    return;
-                }
-                if (forgotten.status === "forgotten") {
-                    resetAnnouncementReviewState();
-                    invalidateSecureRenderCaches();
-                }
-                reviewed = await Native.reviewAnnouncement(
-                    localUserId,
-                    peerUserId,
-                    content,
-                    discordMessageId,
-                    discordEditedTimestamp,
-                );
-                if (UserStore.getCurrentUser()?.id !== localUserId) return;
-                setReview(reviewed);
-            }
-            if (reviewed.status !== "trust_required") {
-                setError(reviewed.status === "trusted" ? "This key is already trusted." :
-                    isNativeFailure(reviewed) ? failureMessage(reviewed) : "The reviewed key changed before it could be trusted.");
-                return;
-            }
             const trusted = await Native.trustReviewedKey(
                 localUserId,
                 peerUserId,
-                reviewed.reviewToken,
+                reviewToken,
                 identity.fingerprint,
+                review.status === "key_changed" ? review.trustedIdentity.fingerprint : undefined,
             );
             if (UserStore.getCurrentUser()?.id !== localUserId) return;
             if (trusted.status === "trusted" || trusted.status === "already_trusted") {
+                verified = true;
+                setConfirmed(false);
+                setReview({ status: "trusted", identity: trusted.identity });
                 resetAnnouncementReviewState();
                 invalidateSecureRenderCaches();
                 void refreshMessageLengthBypassState();
@@ -3040,7 +3030,8 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
                         "A different key is already trusted. Review the change again.");
             }
         } catch {
-            setError("The key was not trusted because verification failed unexpectedly.");
+            setError(verified ? "Key verified. Reopen this dialog to refresh its status." :
+                "Secure Messaging could not confirm verification. Refresh the review to check the key.");
         } finally {
             setBusy(false);
         }
@@ -3056,7 +3047,7 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
                     text: review.status === "key_changed" ? "Replace verified key" : "Trust key",
                     variant: review.status === "key_changed" ? "danger" : "primary",
                     onClick: () => void trust(),
-                    disabled: !confirmed || busy || !identity || review.status === "trusted",
+                    disabled: !confirmed || busy || !reviewToken,
                 },
                 { text: "Refresh review", variant: "secondary", onClick: () => void refreshReview(), disabled: busy },
                 { text: "Cancel", variant: "secondary", onClick: modalProps.onClose, disabled: busy },
@@ -3066,6 +3057,7 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
                 {review.status === "key_changed" && (
                     <BaseText size="sm" className="pc-secure-status-danger">
                         The sender's key changed. This can be a legitimate reset or an impersonation attempt. Replacing it disables affected protected conversations.
+                        {!reviewToken && " Open the newer key announcement to review the replacement."}
                     </BaseText>
                 )}
                 {identity && <IdentityBlock identity={identity} />}
@@ -3077,7 +3069,7 @@ function KeyReviewModal({ content, discordEditedTimestamp, discordMessageId, ini
                 )}
                 <Checkbox
                     value={confirmed}
-                    disabled={busy || !identity || review.status === "trusted"}
+                    disabled={busy || !reviewToken}
                     onChange={(_event, checked) => setConfirmed(checked)}
                     size={20}
                 >
@@ -3109,32 +3101,32 @@ function openKeyReviewModal(message: Message, review: AnnouncementReviewResult, 
 }
 
 function KeyAnnouncementAccessory({ message }: { message: Message; }) {
-    const localUserId = UserStore.getCurrentUser()?.id;
+    const localUserId = useStateFromStores([UserStore], () => UserStore.getCurrentUser()?.id);
+    const generation = useStateFromStores([MessageStore, ChannelStore], () => announcementReviewGeneration);
     const peerUserId = message.author?.id;
     const reviewKey = localUserId && peerUserId && peerUserId !== localUserId
         ? announcementReviewCacheKey(localUserId, message)
         : null;
-    const [state, setState] = useState<{ key: string; result: AnnouncementReviewResult; } | null>(null);
-    const review = state?.key === reviewKey ? state.result : null;
+    const [state, setState] = useState<{ key: string; generation: number; result: AnnouncementReviewResult; } | null>(null);
+    const review = state?.key === reviewKey && state.generation === generation ? state.result : null;
 
     useEffect(() => {
         let active = true;
         setState(null);
         if (!reviewKey || !localUserId || !peerUserId || peerUserId === localUserId) return () => { active = false; };
-        const generation = announcementReviewGeneration;
         keyReviewGate.begin(localUserId, peerUserId, reviewKey, announcementReviewOrder(message));
         void reviewAnnouncementCached(localUserId, message)
             .then(result => {
                 if (generation !== announcementReviewGeneration || UserStore.getCurrentUser()?.id !== localUserId) return;
                 if (isNativeFailure(result)) keyReviewGate.fail(localUserId, peerUserId, reviewKey);
                 else keyReviewGate.succeed(localUserId, peerUserId, reviewKey);
-                if (active) setState({ key: reviewKey, result });
+                if (active) setState({ key: reviewKey, generation, result });
             })
             .catch(() => {
                 if (generation !== announcementReviewGeneration || UserStore.getCurrentUser()?.id !== localUserId) return;
                 keyReviewGate.fail(localUserId, peerUserId, reviewKey);
                 if (active) setState({
-                    key: reviewKey,
+                    key: reviewKey, generation,
                     result: { status: "failed", error: "cryptographic_operation_failed" },
                 });
             })
@@ -3142,7 +3134,7 @@ function KeyAnnouncementAccessory({ message }: { message: Message; }) {
                 if (generation === announcementReviewGeneration) keyReviewGate.finish(localUserId, peerUserId, reviewKey);
             });
         return () => { active = false; };
-    }, [localUserId, peerUserId, reviewKey]);
+    }, [generation, localUserId, peerUserId, reviewKey]);
 
     if (peerUserId === localUserId && localUserId) {
         return (

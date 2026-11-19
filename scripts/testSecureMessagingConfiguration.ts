@@ -15,7 +15,7 @@ import { encryptedUploadLimitsDescription, readDiscordUploadLimit } from "../src
 
 const source = readFileSync(new URL("../src/equicordplugins/secureMessaging.desktop/index.tsx", import.meta.url), "utf8");
 const parsed = createSourceFile("index.tsx", source, ScriptTarget.Latest, true);
-const names = new Set(["ConversationManager", "KeyReviewModal", "SecureMessagingButton", "sendKeyAnnouncement", "discordUploadLimitBytes"]);
+const names = new Set(["ConversationManager", "KeyReviewModal", "SecureMessagingButton", "sendKeyAnnouncement", "discordUploadLimitBytes", "showToast", "copyKeyText", "KeyAnnouncementAccessory"]);
 const selected = parsed.statements.filter(statement => isFunctionDeclaration(statement)
     ? statement.name && names.has(statement.name.text)
     : isVariableStatement(statement) && statement.declarationList.declarations.some(declaration => names.has(declaration.name.getText(parsed))));
@@ -65,6 +65,11 @@ function harness() {
         encryptedUploadLimitsDescription, readDiscordUploadLimit,
         settings: { store: { externalLinkPreviews: false }, use: () => context.settings.store },
         Native: native, channel, chatAccessCache: { status: "ready", localUserId: "self" } as any,
+        MessageStore: {}, announcementReviewGeneration: 0,
+        announcementReviewCacheKey: () => "key", announcementReviewOrder: () => 1,
+        keyReviewGate: { begin() {}, succeed() {}, finish() {} }, classes: () => "",
+        reviewAnnouncementCached: () => native.reviewAnnouncement(),
+        copyToClipboard: async (_text: string) => {},
         UserStore: { getCurrentUser: () => ({ id: userId }) }, ChannelStore: {},
         currentSnapshot: () => ({ localUserId: "self", snapshot }),
         useState(initial: unknown) {
@@ -104,7 +109,7 @@ function harness() {
         refreshMessageLengthBypassState: () => Promise.resolve(true),
         chatGateReason: () => null, revokePreparedSecureOperations: () => undefined,
         invalidateSecureRenderCaches: () => undefined, resetAnnouncementReviewState: () => undefined,
-        userLabel: (id: string) => id, showToast: (...args: unknown[]) => calls.toasts.push(args), Toasts: { Type: { FAILURE: "failure", SUCCESS: "success" } },
+        userLabel: (id: string) => id, showDiscordToast: (...args: unknown[]) => calls.toasts.push(args), Toasts: { Type: { FAILURE: "failure", SUCCESS: "success" } },
         showFailure: () => calls.toasts.push("failure"), permitAnnouncement: () => undefined, authorizeWirePayload: () => undefined, revokeAnnouncement: () => undefined,
         sendMessage: async () => { calls.sent++; },
         Modal: "Modal", BaseText: "BaseText", Heading: "Heading", Checkbox: "Checkbox", Button: "Button", TextArea: "TextArea", Span: "Span",
@@ -188,6 +193,79 @@ test("expired trust reviews can refresh in place and require a new explicit comp
     assert.equal(h.calls.trusted[1][3], "new-fingerprint", "confirmation belongs to the fingerprint displayed after refresh");
 });
 
+test("trust and public key sharing finish once when Discord cannot show a notification", async () => {
+    const h = harness();
+    h.context.showDiscordToast = () => { throw new Error("Missing toast export"); };
+    h.native.trustReviewedKey = async (...args) => { h.calls.trusted.push(args); return { status: "trusted", identity: h.props.review.initialReview.identity }; };
+    let modal = h.render("KeyReviewModal", h.props.review);
+    elements(modal).find(element => element.type === "Checkbox")!.props.onChange(null, true);
+    modal = h.render("KeyReviewModal", h.props.review);
+    modal.props.actions[0].onClick();
+    await setImmediate();
+    assert.equal(h.calls.trusted.length, 1);
+    assert.equal(h.calls.closed, 1);
+    await h.runtime.sendKeyAnnouncement("channel", "self");
+    assert.equal(h.calls.sent, 1);
+    assert.equal(h.calls.warnings.length, 2);
+});
+
+test("replacement confirms both displayed keys and requires an eligible announcement", async () => {
+    const h = harness();
+    const { identity } = h.props.review.initialReview;
+    const review = { ...h.props.review, initialReview: {
+        status: "key_changed", identity, trustedIdentity: { ...identity, fingerprint: "previous" }, reviewToken: "replace",
+    } };
+    const modal = h.render("KeyReviewModal", review);
+    elements(modal).find(element => element.type === "Checkbox")!.props.onChange(null, true);
+    h.render("KeyReviewModal", review).props.actions[0].onClick();
+    await setImmediate();
+    assert.deepEqual(h.calls.trusted, [["self", "peer", "replace", identity.fingerprint, "previous"]]);
+    const stale = harness();
+    const oldAnnouncement = { ...review, initialReview: { ...review.initialReview, reviewToken: undefined } };
+    assert.equal(stale.render("KeyReviewModal", oldAnnouncement).props.actions[0].disabled, true);
+    assert.equal(elements(stale.render("KeyReviewModal", oldAnnouncement)).find(element => element.type === "Checkbox")!.props.disabled, true);
+});
+
+test("renderer refresh errors preserve confirmed save and trust results", async () => {
+    const h = harness();
+    h.render("ConversationManager", h.props.manager);
+    await setImmediate();
+    h.context.refreshChatAccessState = async () => { throw new Error("store unavailable"); };
+    h.render("ConversationManager", h.props.manager).props.actions[0].onClick();
+    await setImmediate();
+    assert.match(JSON.stringify(h.render("ConversationManager", h.props.manager)), /Configuration saved/);
+
+    h.native.trustReviewedKey = async () => ({ status: "trusted", identity: h.props.review.initialReview.identity });
+    h.context.invalidateSecureRenderCaches = () => { throw new Error("store unavailable"); };
+    let modal = h.render("KeyReviewModal", h.props.review);
+    elements(modal).find(element => element.type === "Checkbox")!.props.onChange(null, true);
+    h.render("KeyReviewModal", h.props.review).props.actions[0].onClick();
+    await setImmediate();
+    modal = h.render("KeyReviewModal", h.props.review);
+    assert.match(JSON.stringify(modal), /Key verified/);
+    assert.equal(modal.props.actions[0].disabled, true);
+});
+
+test("a mounted announcement refreshes after its key is trusted", async () => {
+    const h = harness();
+    const props = { message: { author: { id: "peer" } } };
+    h.render("KeyAnnouncementAccessory", props);
+    await setImmediate();
+    assert.match(JSON.stringify(h.render("KeyAnnouncementAccessory", props)), /Review & verify/);
+    h.context.announcementReviewGeneration++;
+    h.native.reviewAnnouncement = async () => ({ status: "trusted", identity: h.props.review.initialReview.identity });
+    assert.doesNotMatch(JSON.stringify(h.render("KeyAnnouncementAccessory", props)), /Review & verify/);
+    await setImmediate();
+    assert.match(JSON.stringify(h.render("KeyAnnouncementAccessory", props)), /Verified Secure Messaging key/);
+});
+
+test("a rejected clipboard write reports only the failure", async () => {
+    const h = harness();
+    h.context.copyToClipboard = async () => { throw new Error("unavailable"); };
+    await h.runtime.copyKeyText("fixture", "Fingerprint copied.");
+    assert.deepEqual(h.calls.toasts, [["Discord could not copy to the clipboard.", "failure"]]);
+});
+
 for (const rejected of [true, false]) test(`configuration ${rejected ? "rejected" : "structured"} load failures offer retry instead of indefinite Loading text`, async () => {
     const h = harness();
     h.native.getSecurityKeyVaultState = async () => {
@@ -243,7 +321,7 @@ test("same-chat saves update the chatbar status through settled access state", a
 
 for (const enabled of [true, false]) test(`saving encryption ${enabled ? "enabled" : "disabled"} succeeds when the notification throws`, async () => {
     const h = harness();
-    h.context.showToast = () => { throw new Error("Toast module unavailable"); };
+    h.context.showDiscordToast = () => { throw new Error("Toast module unavailable"); };
     h.render("ConversationManager", h.props.manager);
     await setImmediate();
     let modal = h.render("ConversationManager", h.props.manager);
@@ -273,8 +351,12 @@ for (const rejected of [true, false]) test(`${rejected ? "rejected" : "structure
     modal = h.render("ConversationManager", h.props.manager);
     assert.equal(h.calls.closed, 0);
     assert.equal(h.calls.toasts.length, 0);
-    assert.equal(modal.props.actions[0].disabled, !rejected);
-    assert.match(JSON.stringify(modal), rejected ? /refused to save/u : /synthetic native failure/u);
+    assert.equal(modal.props.actions[0].disabled, false);
+    assert.match(JSON.stringify(modal), rejected ? /could not confirm the save/u : /synthetic native failure/u);
+    h.native.configureConversation = async () => h.native.getConversation();
+    modal.props.actions[0].onClick();
+    await setImmediate();
+    assert.equal(h.calls.closed, 1, "retry succeeds in the same dialog");
 });
 
 test("unrelated store notifications and pending access checks do not refetch conversation status", async () => {
