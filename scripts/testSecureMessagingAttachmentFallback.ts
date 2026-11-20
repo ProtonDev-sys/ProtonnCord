@@ -62,7 +62,7 @@ function fixture(options: {
         generation: 1, context, conversation: {}, plaintext: text, channelId,
         uploads: Array.from({ length: bundle.count }, () => ({})), stickers: [], uploadLimitBytes: 500 * 1024 * 1024,
         discordUploadLimitBytes: () => 500 * 1024 * 1024,
-        detachedTextIndex: null, generatedDetachedUpload: null,
+        detachedTextIndex: null, generatedDetachedUpload: null, uploadAbort: new AbortController(),
         preparedAttachments: { plaintext: serializeSecurePlaintext(text, bundle) },
         parseSecurePlaintext, serializeSecurePlaintext,
         setAttachmentStatus(stage: string) {

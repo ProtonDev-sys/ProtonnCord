@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
+import { snapshotForChannel } from "../src/equicordplugins/secureMessaging.desktop/conversationSelection";
+import { exactArrayBuffer } from "../src/equicordplugins/secureMessaging.desktop/exactArrayBuffer";
+import { failureMessage, isNativeFailure } from "../src/equicordplugins/secureMessaging.desktop/nativeResult";
 import { composeSecureForwardText, secureForwardEmbedText, secureForwardImageEmbeds, secureForwardRoute } from "../src/equicordplugins/secureMessaging.desktop/forwarding";
 import { canonicalizeMatch, canonicalizeReplace } from "../src/utils/patches";
 import { discordForwardingSource } from "./fixtures/discordForwarding";
@@ -97,7 +100,7 @@ function forwardingFixture() {
     const state = {
         userId: USER, ready: true, protection: "enabled", sourceProtected: false,
         sourceProtection: "enabled", delayDecrypt: false, delayProtection: false,
-        protectionByChannel: {} as Record<string, string>, sendFailure: false,
+        protectionByChannel: {} as Record<string, string>, sendFailure: false, toastFailure: false,
     };
     const pendingDecrypt: Array<(value: unknown) => void> = [];
     const pendingProtection: Array<(value: unknown) => void> = [];
@@ -126,8 +129,17 @@ function forwardingFixture() {
             ChannelStore: { getChannel },
             UserStore: { getCurrentUser: () => ({ id: state.userId }), getUser: () => undefined },
             GuildRoleStore: {}, Constants: {}, RestAPI: {},
-            showToast: (text: string) => toasts.push(text), Toasts: { Type: {} }
+            Toasts: { Type: {} }
         },
+        "../secureMessaging.desktop/conversationSelection": { snapshotForChannel },
+        "../secureMessaging.desktop/exactArrayBuffer": { exactArrayBuffer },
+        "../secureMessaging.desktop/nativeResult": { failureMessage, isNativeFailure },
+        "../secureMessaging.desktop/notifications": load("src/equicordplugins/secureMessaging.desktop/notifications.ts", {
+            "@webpack/common": { showToast(text: string) {
+                if (state.toastFailure) throw new Error("Discord toast unavailable");
+                toasts.push(text);
+            } },
+        }),
         "../secureMessaging.desktop/attachmentCache": {},
         "../secureMessaging.desktop/attachments": { MAX_ATTACHMENT_BYTES: 500 * 1024 * 1024, MAX_ATTACHMENT_COUNT: 10 },
         "../secureMessaging.desktop/decryptCache": { decryptCachedMessage: async () => state.delayDecrypt ? new Promise(resolve => { pendingDecrypt.push(resolve); }) : { status: "decrypted", plaintext: "private fixture text", stickers: [] } },
@@ -261,6 +273,15 @@ test("mixed destinations keep ordinary native references and report blocked dest
     assert.equal(result.hasError, true);
     assert.deepEqual(Array.from(result.failedDestinations), [SECOND_DESTINATION]);
     assert.equal(fixture.sends.length, 2);
+    assert.equal(fixture.nativeSends.length, 0);
+    fixture.plugin.stop();
+});
+
+test("notification failures still complete an encrypted forward exactly once", async () => {
+    const fixture = forwardingFixture();
+    fixture.state.toastFailure = true;
+    assert.equal(await fixture.plugin.tryForward(fixture.message, DESTINATION), true);
+    assert.equal(fixture.sends.length, 1);
     assert.equal(fixture.nativeSends.length, 0);
     fixture.plugin.stop();
 });

@@ -43,8 +43,10 @@ import {
     decodeBase64Url,
     type EncryptedEnvelope,
     extractMentionedUserIds,
+    hasExactKeys,
     isEnvelopeId,
     isProtocolTimestamp,
+    isRecord,
     isSnowflake,
     MAX_DISCORD_MESSAGE_LENGTH,
     MAX_SELECTED_RECIPIENTS,
@@ -103,7 +105,7 @@ export type AnnouncementResult = { status: "created"; content: string; identity:
 export type AnnouncementReviewResult =
     | { status: "trust_required"; identity: IdentitySummary; reviewToken: string; }
     | { status: "trusted"; identity: IdentitySummary; }
-    | { status: "key_changed"; identity: IdentitySummary; trustedIdentity: IdentitySummary; }
+    | { status: "key_changed"; identity: IdentitySummary; trustedIdentity: IdentitySummary; reviewToken?: string; }
     | { status: "stale_announcement"; identity: IdentitySummary; trustedIdentity: IdentitySummary; }
     | { status: "invalid_announcement"; }
     | NativeFailure;
@@ -300,6 +302,7 @@ interface QuarantineJournal {
 }
 
 interface PendingReview {
+    replacing?: { fingerprint: string; trustedAt: number; };
     announcedAt: number;
     expiresAt: number;
     identity: PublicIdentity;
@@ -393,20 +396,6 @@ class VaultOperationError extends Error {
     }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-    const actual = Object.keys(value).sort();
-    const sortedExpected = [...expected].sort();
-    return actual.length === sortedExpected.length && actual.every((key, index) => key === sortedExpected[index]);
-}
-
-function isTimestamp(value: unknown): value is number {
-    return Number.isSafeInteger(value) && (value as number) >= 1_700_000_000_000 && (value as number) <= 9_999_999_999_999;
-}
-
 function isOrderedSnowflakeList(value: unknown, allowEmpty: boolean): value is string[] {
     if (!Array.isArray(value) || value.length > MAX_SELECTED_RECIPIENTS || (!allowEmpty && value.length === 0)) return false;
     let previous = "";
@@ -430,7 +419,7 @@ function isEncodedKey(value: unknown, bytes: number): value is string {
 
 function parsePrivateIdentity(value: unknown): PrivateIdentity | null {
     if (!isRecord(value) || !hasExactKeys(value, ["createdAt", "hpkePrivateKey", "hpkePublicKey", "signingPrivateKey", "signingPublicKey"]) ||
-        !isTimestamp(value.createdAt) || !isEncodedKey(value.hpkePrivateKey, 32) || !isEncodedKey(value.hpkePublicKey, 32) ||
+        !isProtocolTimestamp(value.createdAt) || !isEncodedKey(value.hpkePrivateKey, 32) || !isEncodedKey(value.hpkePublicKey, 32) ||
         !isEncodedKey(value.signingPrivateKey, 48) || !isEncodedKey(value.signingPublicKey, 32))
         return null;
     return {
@@ -461,12 +450,12 @@ function parseTrustedPeer(value: unknown, userId: string): TrustedPeerRecord | n
             !hasExactKeys(value, ["announcedAt", "identity", "keyChanged", "keyChangedAt", "trustedAt"]) &&
             !hasExactKeys(value, ["announcedAt", "identity", "keyChanged", "trustedAt"]) &&
             !hasExactKeys(value, ["announcedAt", "identity", "trustedAt"])) ||
-        !isTimestamp(value.announcedAt) ||
+        !isProtocolTimestamp(value.announcedAt) ||
         (value.keyChanged !== undefined && typeof value.keyChanged !== "boolean") ||
         (value.keyChangedAt !== undefined && value.keyChangedAt !== null &&
             (!Number.isSafeInteger(value.keyChangedAt) || (value.keyChangedAt as number) < 0)) ||
-        (value.publishedAt !== undefined && value.publishedAt !== null && !isTimestamp(value.publishedAt)) ||
-        value.keyChangedAt != null && value.keyChanged !== true || !isTimestamp(value.trustedAt))
+        (value.publishedAt !== undefined && value.publishedAt !== null && !isProtocolTimestamp(value.publishedAt)) ||
+        value.keyChangedAt != null && value.keyChanged !== true || !isProtocolTimestamp(value.trustedAt))
         return null;
     const identity = parsePublicIdentity(value.identity);
     if (!identity || identity.userId !== userId) return null;
@@ -482,7 +471,7 @@ function parseTrustedPeer(value: unknown, userId: string): TrustedPeerRecord | n
 
 function parseHistoricalPeerIdentity(value: unknown, userId: string, fingerprint: string): HistoricalPeerIdentityRecord | null {
     if (!isRecord(value) || !hasExactKeys(value, ["announcedAt", "identity", "retiredAt"]) ||
-        !isTimestamp(value.announcedAt) || !Number.isSafeInteger(value.retiredAt) || (value.retiredAt as number) < 0)
+        !isProtocolTimestamp(value.announcedAt) || !Number.isSafeInteger(value.retiredAt) || (value.retiredAt as number) < 0)
         return null;
     const identity = parsePublicIdentity(value.identity);
     if (!identity || identity.userId !== userId || identity.fingerprint !== fingerprint) return null;
@@ -512,7 +501,7 @@ function parseConversation(value: unknown): ConversationRecord | null {
         (value.reviewRequired !== undefined && value.reviewRequired !== null &&
             value.reviewRequired !== "local_identity_changed" && value.reviewRequired !== "participant_changed" &&
             value.reviewRequired !== "unverified_recipients") ||
-        !isOrderedSnowflakeList(value.participantUserIds, false) || !isTimestamp(value.updatedAt) || !Array.isArray(value.selectedRecipients) ||
+        !isOrderedSnowflakeList(value.participantUserIds, false) || !isProtocolTimestamp(value.updatedAt) || !Array.isArray(value.selectedRecipients) ||
         value.selectedRecipients.length > MAX_SELECTED_RECIPIENTS || (value.enabled && value.selectedRecipients.length === 0) ||
         (value.kind === "DM" && value.participantUserIds.length !== 1))
         return null;
@@ -545,7 +534,7 @@ function parseReplayRecord(value: unknown): ReplayRecord | null {
     ])) || !isSnowflake(value.channelId) || !isEncodedKey(value.contentDigest, 32) ||
         !Number.isSafeInteger(value.counter) || (value.counter as number) < 1 || !isSnowflake(value.discordMessageId) ||
         (value.discordMessageIdReplacementUsed !== undefined && typeof value.discordMessageIdReplacementUsed !== "boolean") ||
-        !isEnvelopeId(value.envelopeId) || !isTimestamp(value.seenAt) ||
+        !isEnvelopeId(value.envelopeId) || !isProtocolTimestamp(value.seenAt) ||
         !isEncodedKey(value.senderFingerprint, 32) || !isSnowflake(value.senderUserId))
         return null;
     return {
@@ -2327,19 +2316,20 @@ export async function reviewAnnouncement(
                 disablePeerConversations(context.account, peerId.value);
                 await saveVault(context.vault);
             }
-            return { status: "key_changed", identity: summary, trustedIdentity: peerSummary(trusted) };
         }
 
         expirePendingReviews();
         makePendingReviewCapacity();
         const reviewToken = randomUUID();
         pendingReviews.set(reviewToken, {
+            replacing: trusted && { fingerprint: trusted.identity.fingerprint, trustedAt: trusted.trustedAt },
             announcedAt,
             expiresAt: Date.now() + REVIEW_LIFETIME_MS,
             identity,
             localUserId: user.value,
             publishedAt,
         });
+        if (trusted) return { status: "key_changed", identity: summary, trustedIdentity: peerSummary(trusted), reviewToken };
         return { status: "trust_required", identity: summary, reviewToken };
     });
 }
@@ -2349,7 +2339,8 @@ export async function trustReviewedKey(
     localUserId: string,
     peerUserId: string,
     reviewToken: string,
-    expectedFingerprint: string
+    expectedFingerprint: string,
+    previousFingerprint?: string,
 ): Promise<TrustResult> {
     const callerFailure = validateIpcCaller(event);
     if (callerFailure) return callerFailure;
@@ -2380,7 +2371,19 @@ export async function trustReviewedKey(
             formattedFingerprint: formatFingerprint(review.identity.fingerprint),
             userId: review.identity.userId,
         };
-        if (existing) {
+        if (previousFingerprint !== review.replacing?.fingerprint) return complete({ status: "fingerprint_mismatch" });
+        if (review.replacing) {
+            if (!existing?.keyChanged || existing.identity.fingerprint !== review.replacing.fingerprint ||
+                existing.trustedAt !== review.replacing.trustedAt)
+                return complete({ status: "review_expired" });
+
+            // Persist the blocked old identity before clearing its separate quarantine journal.
+            // If the final vault write fails, the old key and disabled conversations survive retry.
+            disablePeerConversations(context.account, peerId.value);
+            await saveVault(context.vault);
+            await clearPeerQuarantine(user.value, peerId.value);
+            retainPeerIdentity(context.account, peerId.value, existing);
+        } else if (existing) {
             const sameIdentity = existing.identity.fingerprint === review.identity.fingerprint;
             if (sameIdentity && !existing.keyChanged)
                 return complete({ status: "already_trusted", identity });
@@ -2409,7 +2412,7 @@ export async function trustReviewedKey(
             return complete({ status: "key_changed", identity, trustedIdentity: peerSummary(existing) });
         }
         const completingInterruptedForget = isPeerQuarantined(user.value, peerId.value);
-        if (Object.keys(context.account.trustedPeers).length >= MAX_TRUSTED_PEERS)
+        if (!existing && Object.keys(context.account.trustedPeers).length >= MAX_TRUSTED_PEERS)
             throw new VaultOperationError("capacity_exceeded");
 
         context.account.trustedPeers[peerId.value] = {

@@ -61,7 +61,7 @@ const declaration = source.statements.flatMap(statement => isVariableStatement(s
 assert.ok(declaration?.initializer);
 const compiled = transpileModule(`(${declaration.initializer.getText(source)});`, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText;
 const forwardCompiled = transpileModule([
-    "sendEncryptedForward", "appendDetachedTextUpload", "selectedOutgoingStickerIds", "secureStickerItem", "resolveSelectedStickers",
+    "revokePreparedSecureOperations", "sendEncryptedForward", "appendDetachedTextUpload", "selectedOutgoingStickerIds", "secureStickerItem", "resolveSelectedStickers",
 ].map(name => {
     const helper = source.statements.find(statement => isFunctionDeclaration(statement) && statement.name?.text === name);
     assert.ok(helper, name);
@@ -132,11 +132,12 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
         }
     }
     const context = {
-        AbortController, CloudUploader: Shadow, CloudUploadPlatform: { WEB: CloudUploadPlatform.WEB }, createEncryptedUploadDraft, prepareEncryptedAttachments, uploadEncryptedAttachment,
+        clearWirePayloadAuthorizations() {}, clearOptimisticOutgoingPlaintexts() {}, resetAnnouncementReviewState() {},
+        permittedAnnouncements: new Map(), requestAuthorizationScopes: new WeakMap(), pendingSendControllers: new Set<AbortController>(), AbortController, CloudUploader: Shadow, CloudUploadPlatform: { WEB: CloudUploadPlatform.WEB }, createEncryptedUploadDraft, prepareEncryptedAttachments, uploadEncryptedAttachment,
         DraftType: { ChannelMessage: 0 }, UploadAttachmentStore: { getUploads: () => storedDrafts },
         EncryptedAttachmentUploadLimitError, EncryptedAttachmentTotalLimitError, DiscordUploadLimitUnavailableError, assertEncryptedUploadSizes, serializeSecurePlaintext, parseSecurePlaintext,
         applicationGuardsBlocked: false,
-        secureOperationGeneration: 1, secureOperationIsCurrent: (_generation: number, userId?: string) => current && (userId === undefined || userId === runtime.accountId), currentSnapshot: () => ({ localUserId: "100000000000000001", snapshot: { channelId: originals[0]?.channelId ?? "200000000000000001" } }),
+        secureOperationGeneration: 1, secureOperationIsCurrent: (_generation: number, userId?: string, signal?: AbortSignal) => !signal?.aborted && current && (userId === undefined || userId === runtime.accountId), currentSnapshot: () => ({ localUserId: "100000000000000001", snapshot: { channelId: originals[0]?.channelId ?? "200000000000000001" } }),
         takePermittedAnnouncement: () => false, resolveConversationProtection: async () => {
             protectionStarted.resolve();
             await protectionGate;
@@ -171,7 +172,8 @@ function fixture(behavior: (upload: Upload, index: number) => void | Promise<voi
     };
     const send = runInNewContext(compiled, context) as (...args: any[]) => Promise<{ cancel?: boolean; stop?: boolean; }>;
     return {
-        originals, shadows, wires, options, approvals, nativeCalls: () => nativeCalls, sentBytes: () => sentBytes,
+        revoke: () => runInNewContext(forwardCompiled + "\nrevokePreparedSecureOperations()", context),
+        pendingSendControllers: context.pendingSendControllers, originals, shadows, wires, options, approvals, nativeCalls: () => nativeCalls, sentBytes: () => sentBytes,
         toasts, limitReads: () => limitReads, setUploadLimit: (value: number | null) => { uploadLimit = value; },
         uploadStarted: uploadStarted.promise, protectionStarted: protectionStarted.promise, stickersStarted: stickersStarted.promise, encryptionStarted: encryptionStarted.promise,
         runtime, preparedPlaintexts, forwards,
@@ -529,4 +531,17 @@ test("rejection and cancellation release every upload listener", async () => {
         upload.removeListener("fixture", unrelated);
         assert.equal(upload.eventNames().length, 0);
     }
+});
+
+
+test("revoking an in-flight upload releases the draft without waiting for a Discord event", async () => {
+    const h = fixture(() => {});
+    const pending = h.send();
+    await h.uploadStarted;
+    assert.equal(h.pendingSendControllers.size, 1);
+    h.revoke();
+    assert.equal((await pending).cancel, true);
+    assert.equal(h.pendingSendControllers.size, 0);
+    assert.equal(h.wires.length, 0);
+    h.assertDraft();
 });

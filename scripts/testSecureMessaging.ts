@@ -60,18 +60,14 @@ import type {
     UnsignedEncryptedEnvelope,
 } from "../src/equicordplugins/secureMessaging.desktop/protocol";
 import {
-    authorizeAttachmentUploadReservations,
     authorizeScopedAttachmentUploadReservations,
     authorizeScopedWireEdit,
     authorizeScopedWirePayload,
-    authorizeWireEdit,
     authorizeWirePayload,
     clearWirePayloadAuthorizations,
-    consumeAttachmentUploadReservations,
     consumeScopedAttachmentUploadReservations,
     consumeScopedWireEditAuthorization,
     consumeScopedWirePayloadAuthorization,
-    consumeWireEditAuthorization,
     consumeWirePayloadAuthorization,
     revokeAnyAttachmentUploadReservations,
 } from "../src/equicordplugins/secureMessaging.desktop/wireAuthorizations";
@@ -480,27 +476,27 @@ async function main(): Promise<void> {
         true,
         "an exact encrypted attachment message authorization is one-use",
     );
-    authorizeAttachmentUploadReservations(CHANNEL_ID, protectedFiles, 6_000);
+    authorizeScopedAttachmentUploadReservations(CHANNEL_ID, protectedFiles, "scope", 6_000);
     assert.equal(
-        consumeAttachmentUploadReservations(CHANNEL_ID, [{ ...protectedFiles[0], size: 124 }], 6_001),
+        consumeScopedAttachmentUploadReservations(CHANNEL_ID, [{ ...protectedFiles[0], size: 124 }], "scope", 6_001),
         false,
         "an incorrect upload size does not consume the encrypted attachment reservation",
     );
-    assert.equal(consumeAttachmentUploadReservations(CHANNEL_ID, protectedFiles, 6_002), true);
-    assert.equal(consumeAttachmentUploadReservations(CHANNEL_ID, protectedFiles, 6_003), false, "upload reservation is one-use");
-    authorizeWireEdit(CHANNEL_ID, "100000000000000001", "PCEM2:edited", 7_000);
+    assert.equal(consumeScopedAttachmentUploadReservations(CHANNEL_ID, protectedFiles, "scope", 6_002), true);
+    assert.equal(consumeScopedAttachmentUploadReservations(CHANNEL_ID, protectedFiles, "scope", 6_003), false, "upload reservation is one-use");
+    authorizeScopedWireEdit(CHANNEL_ID, "100000000000000001", "PCEM2:edited", "scope", 7_000);
     assert.equal(
-        consumeWireEditAuthorization(CHANNEL_ID, "100000000000000002", "PCEM2:edited", 7_001),
+        consumeScopedWireEditAuthorization(CHANNEL_ID, "100000000000000002", "PCEM2:edited", "scope", 7_001),
         false,
         "an encrypted edit authorization is message-bound",
     );
     assert.equal(
-        consumeWireEditAuthorization(CHANNEL_ID, "100000000000000001", "PCEM2:edited", 7_002),
+        consumeScopedWireEditAuthorization(CHANNEL_ID, "100000000000000001", "PCEM2:edited", "scope", 7_002),
         true,
         "an exact encrypted edit authorization is one-use",
     );
     assert.equal(
-        consumeWireEditAuthorization(CHANNEL_ID, "100000000000000001", "PCEM2:edited", 7_003),
+        consumeScopedWireEditAuthorization(CHANNEL_ID, "100000000000000001", "PCEM2:edited", "scope", 7_003),
         false,
         "an encrypted edit authorization cannot be replayed",
     );
@@ -533,7 +529,7 @@ async function main(): Promise<void> {
         "a disabled conversation can revoke its stale scoped attachment reservation",
     );
     assert.equal(consumeScopedAttachmentUploadReservations(CHANNEL_ID, protectedFiles, originalScope, 10_003), false);
-    authorizeAttachmentUploadReservations(CHANNEL_ID, protectedFiles, 10_004);
+    authorizeScopedAttachmentUploadReservations(CHANNEL_ID, protectedFiles, "scope", 10_004);
     assert.equal(
         revokeAnyAttachmentUploadReservations(CHANNEL_ID, [protectedFiles[0], protectedFiles[0]], 10_005),
         false,

@@ -368,6 +368,8 @@ test("media teardown exceptions do not leak URLs or leave metadata unresolved", 
     media.dispatchEvent(new Event("loadedmetadata"));
     assert.equal((await pending).duration, 12);
     assert.equal(revoked, 1);
+    assert.equal((await metadata({}, "audio/ogg")).duration, null, "a synchronous load failure keeps the file usable without duration");
+    assert.equal(revoked, 2);
 });
 
 test("windows created during screenshot transitions hide before final reconciliation", async () => {
@@ -503,6 +505,20 @@ test("image selections from BetterForwards preserve one chosen image inside a gr
     assert.doesNotMatch(mainPayload.content, /second\.png/u);
     await assert.rejects(fixture.forward(message, "destination", { onlyEmbedIndices: [2], embedIndicesAreImages: true }), /selected embeds/u);
     assert.equal(fixture.sends.length, 2);
+});
+
+test("forwarded attachment reads enforce the expected size across chunks", async () => {
+    const read = extracted("../secureMessagingForwarding.desktop/index.ts", "readBoundedResponse", { Uint8Array });
+    const response = () => new Response(new ReadableStream({
+        start(controller) {
+            controller.enqueue(Uint8Array.of(1, 2));
+            controller.enqueue(Uint8Array.of(3));
+            controller.close();
+        },
+    }));
+    assert.deepEqual(await read(response(), 3), Uint8Array.of(1, 2, 3));
+    await assert.rejects(read(response(), 2), /more attachment data/);
+    await assert.rejects(read(response(), 4), /incomplete attachment/);
 });
 
 test("forwarded snapshots use their content and original attachment channel while encrypted snapshots require original provenance", () => {

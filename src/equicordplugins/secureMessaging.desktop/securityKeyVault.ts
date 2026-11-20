@@ -35,7 +35,7 @@ import {
     oneKeyDeterministicProfileInput,
 } from "./oneKeyVault";
 import { runOneKeyWindowsVaultCipher } from "./oneKeyWindowsVault";
-import type { PrivateIdentity } from "./protocol";
+import { hasExactKeys, isProtocolTimestamp, isRecord, type PrivateIdentity } from "./protocol";
 
 const LEGACY_PROFILE_PREFIX = "PCSKV1:";
 const PROFILE_PREFIX = "PCSKV2:";
@@ -174,16 +174,6 @@ interface AssertionResult {
 let activeKey: Buffer | null = null;
 let activeProfile: SecurityKeyVaultProfile | null = null;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-    const actual = Object.keys(value).sort();
-    const canonical = [...expected].sort();
-    return actual.length === canonical.length && actual.every((key, index) => key === canonical[index]);
-}
-
 function decodeBase64Url(value: unknown, minimumBytes = 1, maximumBytes = Number.POSITIVE_INFINITY): Buffer {
     if (typeof value !== "string" || value.length < 1 || !/^[A-Za-z0-9_-]+$/u.test(value))
         throw new SecurityKeyVaultError("invalid_profile");
@@ -196,11 +186,6 @@ function decodeBase64Url(value: unknown, minimumBytes = 1, maximumBytes = Number
     if (bytes.byteLength < minimumBytes || bytes.byteLength > maximumBytes || bytes.toString("base64url") !== value)
         throw new SecurityKeyVaultError("invalid_profile");
     return bytes;
-}
-
-function validTimestamp(value: unknown): value is number {
-    return Number.isSafeInteger(value) && (value as number) >= 1_700_000_000_000 &&
-        (value as number) <= 9_999_999_999_999;
 }
 
 function validAlgorithm(value: unknown): value is SecurityKeyAlgorithm {
@@ -242,7 +227,7 @@ function rootFingerprint(algorithm: SecurityKeyAlgorithm, publicKeySpki: string)
 }
 
 function validateProfile(profile: SecurityKeyVaultProfile): void {
-    if (!profile || !validAlgorithm(profile.algorithm) || !validTimestamp(profile.createdAt) ||
+    if (!profile || !validAlgorithm(profile.algorithm) || !isProtocolTimestamp(profile.createdAt) ||
         !validProvider(profile.provider) || !Array.isArray(profile.transports) || profile.transports.length > 6 ||
         profile.transports.some(transport => !validTransport(transport)))
         throw new SecurityKeyVaultError("invalid_profile");

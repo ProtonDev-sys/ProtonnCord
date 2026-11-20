@@ -80,22 +80,18 @@ export interface EncryptedEnvelopeContext {
     discordAuthorId: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+export function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
     const actual = Object.keys(value).sort();
     const sortedExpected = [...expected].sort();
     return actual.length === sortedExpected.length && actual.every((key, index) => key === sortedExpected[index]);
 }
 
-function isTimestamp(value: unknown): value is number {
-    return Number.isSafeInteger(value) && (value as number) >= 1_700_000_000_000 && (value as number) <= 9_999_999_999_999;
-}
-
 export function isProtocolTimestamp(value: unknown): value is number {
-    return isTimestamp(value);
+    return Number.isSafeInteger(value) && (value as number) >= 1_700_000_000_000 && (value as number) <= 9_999_999_999_999;
 }
 
 export function isEnvelopeId(value: unknown): value is string {
@@ -191,7 +187,7 @@ export function parseKeyAnnouncement(content: string): KeyAnnouncement {
     const value = parseJsonAfterPrefix(content, KEY_ANNOUNCEMENT_PREFIX);
     if (!isRecord(value) || !hasExactKeys(value, ["v", "t", "u", "d", "s", "e", "z"]))
         throw new Error("Malformed key announcement");
-    if (value.v !== PROTOCOL_VERSION || value.t !== "k" || !isSnowflake(value.u) || !isTimestamp(value.d) ||
+    if (value.v !== PROTOCOL_VERSION || value.t !== "k" || !isSnowflake(value.u) || !isProtocolTimestamp(value.d) ||
         typeof value.s !== "string" || !BASE64URL_32.test(value.s) || !isCanonicalBase64Url(value.s, 32) ||
         typeof value.e !== "string" || !BASE64URL_32.test(value.e) || !isCanonicalBase64Url(value.e, 32) ||
         typeof value.z !== "string" || !BASE64URL_64.test(value.z) || !isCanonicalBase64Url(value.z, 64))
@@ -214,7 +210,7 @@ function validateEnvelopeFields(value: Record<string, unknown>): EncryptedEnvelo
         : (value.v === PREVIOUS_ENCRYPTED_MESSAGE_VERSION || value.v === ENCRYPTED_MESSAGE_VERSION) &&
             typeof value.i === "string" && BASE64URL_16.test(value.i) && isCanonicalBase64Url(value.i, 16);
     if (!validId || value.t !== "m" ||
-        !isSnowflake(value.c) || !isSnowflake(value.s) || !isTimestamp(value.d) ||
+        !isSnowflake(value.c) || !isSnowflake(value.s) || !isProtocolTimestamp(value.d) ||
         !Number.isSafeInteger(value.q) || (value.q as number) < 1 ||
         typeof value.k !== "string" || !BASE64URL_32.test(value.k) || !isCanonicalBase64Url(value.k, 32) ||
         !isCanonicalBase64Url(value.n, 12) || !isCanonicalVariableBase64Url(value.x, 17, MAX_DISCORD_MESSAGE_LENGTH) ||

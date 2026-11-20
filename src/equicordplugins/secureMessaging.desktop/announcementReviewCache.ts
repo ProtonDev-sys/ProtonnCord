@@ -8,7 +8,8 @@ import type { PluginNative } from "@utils/types";
 import type { Message } from "@vencord/discord-types";
 
 import { discordEditedTimestamp } from "./messageMetadata";
-import type { AnnouncementReviewResult, NativeFailure } from "./native";
+import type { AnnouncementReviewResult } from "./native";
+import { isNativeFailure } from "./nativeResult";
 import { createTaskQueue } from "./taskQueue";
 
 const Native = VencordNative.pluginHelpers.SecureMessaging as PluginNative<typeof import("./native")>;
@@ -25,10 +26,6 @@ interface ReviewCacheEntry {
 
 const cache = new Map<string, ReviewCacheEntry>();
 let cacheGeneration = 0;
-
-function isNativeFailure(result: AnnouncementReviewResult): result is NativeFailure {
-    return result.status === "invalid_input" || result.status === "unavailable" || result.status === "failed";
-}
 
 function cancelledReview(): AnnouncementReviewResult {
     return { status: "failed", error: "cryptographic_operation_failed" };

@@ -438,7 +438,7 @@ test("receive prefetch preserves detached-text-only expansion", async () => {
 });
 
 test("only same-account reconnects retain unfurls while every reconnect reauthenticates messages", async () => {
-    const functions = ["invalidateSecureRenderCaches", "handleSecureConnectionOpen"].map(name => {
+    const functions = ["requestAccountLock", "invalidateSecureRenderCaches", "handleSecureConnectionOpen"].map(name => {
         const declaration = parsed.statements.find(statement => isFunctionDeclaration(statement) && statement.name?.text === name);
         assert.ok(declaration);
         return declaration.getText(parsed);
@@ -451,6 +451,7 @@ test("only same-account reconnects retain unfurls while every reconnect reauthen
         [null, null, false],
     ] as const) {
         const clears: string[] = [];
+        let lockRequests = 0;
         const lock = Promise.withResolvers<void>();
         const context = {
             secureRuntimeUserId: previousAccount as string | null,
@@ -462,7 +463,12 @@ test("only same-account reconnects retain unfurls while every reconnect reauthen
             commitChatAccessCache: () => undefined,
             revokePreparedSecureOperations: () => undefined,
             cancelSuppressedChatLoads: () => undefined,
-            Native: { lockSecurityKeyVault: () => lock.promise },
+            accountLock: null,
+            Native: { async lockSecurityKeyVault() {
+                lockRequests++;
+                await lock.promise;
+                return { status: "locked" };
+            } },
             clearEncryptedAttachmentCache: () => clears.push("attachments"),
             clearEncryptedEmbedCache: (retain: boolean) => clears.push(`embeds:${retain}`),
             clearEncryptedMessageDecryptCache: () => clears.push("decryptions"),
@@ -477,9 +483,42 @@ test("only same-account reconnects retain unfurls while every reconnect reauthen
         assert.deepEqual(clears, ["attachments", `embeds:${preserve}`, "decryptions", "render"], "invalidate before a pending hardware-key lock can keep old URL work alive");
         lock.resolve(undefined);
         await reconnect;
+        assert.equal(lockRequests, previousAccount !== null && previousAccount !== currentAccount ? 1 : 0);
         assert.deepEqual(clears, ["attachments", `embeds:${preserve}`, "decryptions", "render"]);
         clears.length = 0;
         lifecycle.invalidateSecureRenderCaches();
         assert.deepEqual(clears, ["attachments", "embeds:false", "decryptions", "render"], "security invalidation remains a full clear");
     }
+});
+
+test("chat access waits for a confirmed account lock and retries a failed lock", async () => {
+    const functions = ["requestAccountLock", "refreshChatAccessState"].map(name => {
+        const declaration = parsed.statements.find(statement => isFunctionDeclaration(statement) && statement.name?.text === name);
+        assert.ok(declaration);
+        return declaration.getText(parsed);
+    }).join("\n");
+    const statuses: string[] = [];
+    let attempts = 0;
+    let reads = 0;
+    const first = Promise.withResolvers<{ status: string; }>();
+    const host = {
+        accountLock: null, chatAccessGateEnabled: true, chatAccessGeneration: 0,
+        UserStore: { getCurrentUser: () => ({ id: localUserId }) },
+        Native: {
+            lockSecurityKeyVault: () => ++attempts === 1 ? first.promise : Promise.resolve({ status: "locked" }),
+            getChatAccessState: async () => { reads++; return { status: "ready", protectedChannelIds: [], hardwareVaultLocked: true }; },
+        },
+        isNativeFailure: () => false, commitChatAccessCache: (state: { status: string; }) => statuses.push(state.status),
+    };
+    const api = runInNewContext(compile(functions) + "\n({requestAccountLock, refreshChatAccessState})", host);
+    api.requestAccountLock();
+    const pending = api.refreshChatAccessState();
+    assert.equal(reads, 0);
+    first.reject(new Error("IPC unavailable"));
+    assert.equal(await pending, false);
+    assert.equal(statuses.at(-1), "failed");
+    assert.equal(reads, 0);
+    assert.equal(await api.refreshChatAccessState(), true);
+    assert.equal(attempts, 2);
+    assert.equal(reads, 1);
 });
