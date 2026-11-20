@@ -667,10 +667,8 @@ async function main(): Promise<void> {
     assert.match(renderer, /Native\.setupSecurityKeyVault/u);
     assert.match(renderer, /Native\.unlockSecurityKeyVault\(context\.localUserId\)/u,
         "unlock must bind deterministic account reconciliation to the active Discord account");
-    assert.match(renderer, /await Native\.lockSecurityKeyVault\(\)/u,
-        "changing Discord accounts must clear the unlocked E2E vault key");
-    assert.match(renderer, /void Native\.lockSecurityKeyVault\(\)/u,
-        "stopping the plugin must clear the unlocked E2E vault key");
+    assert.match(renderer, /stop\(\)\s*\{\s*void requestAccountLock\(\)/u,
+        "stopping the plugin must request the vault lock before teardown");
     assert.doesNotMatch(renderer, /title="Secure Messaging \(PCEM3\)"/u);
     assert.doesNotMatch(renderer, /<Heading tag="h5">Important limitations<\/Heading>/u);
 

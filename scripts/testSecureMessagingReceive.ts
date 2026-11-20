@@ -451,6 +451,7 @@ test("only same-account reconnects retain unfurls while every reconnect reauthen
         [null, null, false],
     ] as const) {
         const clears: string[] = [];
+        let lockRequests = 0;
         const lock = Promise.withResolvers<void>();
         const context = {
             secureRuntimeUserId: previousAccount as string | null,
@@ -462,7 +463,12 @@ test("only same-account reconnects retain unfurls while every reconnect reauthen
             commitChatAccessCache: () => undefined,
             revokePreparedSecureOperations: () => undefined,
             cancelSuppressedChatLoads: () => undefined,
-            accountLock: null, Native: { lockSecurityKeyVault: () => lock.promise.then(() => ({ status: "locked" })) },
+            accountLock: null,
+            Native: { async lockSecurityKeyVault() {
+                lockRequests++;
+                await lock.promise;
+                return { status: "locked" };
+            } },
             clearEncryptedAttachmentCache: () => clears.push("attachments"),
             clearEncryptedEmbedCache: (retain: boolean) => clears.push(`embeds:${retain}`),
             clearEncryptedMessageDecryptCache: () => clears.push("decryptions"),
@@ -477,6 +483,7 @@ test("only same-account reconnects retain unfurls while every reconnect reauthen
         assert.deepEqual(clears, ["attachments", `embeds:${preserve}`, "decryptions", "render"], "invalidate before a pending hardware-key lock can keep old URL work alive");
         lock.resolve(undefined);
         await reconnect;
+        assert.equal(lockRequests, previousAccount !== null && previousAccount !== currentAccount ? 1 : 0);
         assert.deepEqual(clears, ["attachments", `embeds:${preserve}`, "decryptions", "render"]);
         clears.length = 0;
         lifecycle.invalidateSecureRenderCaches();
